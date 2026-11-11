@@ -77,9 +77,18 @@ pub struct KubeconfigOffer {
     /// The user's file a move writes to, the one kubectl writes new entries
     /// to, as a person reads it: `~/.kube/config`.
     pub target: String,
-    /// The names among these that the user's files hold already, which a
-    /// move leaves out.
-    pub taken: Vec<String>,
+    /// What a move leaves out: a name the user's files hold in its section,
+    /// a context whose cluster or user means another entry there, and a
+    /// cluster or user that only such contexts name.
+    pub left_out: KubeconfigNames,
+}
+
+/// Names of a kubeconfig's entries, by section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct KubeconfigNames {
+    pub contexts: Vec<String>,
+    pub clusters: Vec<String>,
+    pub users: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -90,7 +99,7 @@ pub struct KubeconfigOffer {
 )]
 pub enum KubeconfigOfferEvent {
     /// New, or in place of the offer of the same id, as more entries came.
-    Offered { offer: KubeconfigOffer },
+    Offered { offer: Box<KubeconfigOffer> },
     /// Answered, or gone with the app's window.
     Withdrawn { id: KubeconfigOfferId },
 }

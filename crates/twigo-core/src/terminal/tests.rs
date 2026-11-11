@@ -6,9 +6,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent,
-    Mode, NewTerminal, OpenShell, ProxyWhy, SetContextMode, ShellAck, ShellEnd, ShellEvent,
-    SubscriptionId, TerminalKind,
+    AnswerKubeconfigOffer, ErrorKind, KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer,
+    KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy, SetContextMode, ShellAck,
+    ShellEnd, ShellEvent, SubscriptionId, TerminalKind,
 };
 use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
@@ -211,7 +211,7 @@ async fn next(events: &mut mpsc::UnboundedReceiver<KubeconfigOfferEvent>) -> Kub
 
 async fn offered(events: &mut mpsc::UnboundedReceiver<KubeconfigOfferEvent>) -> KubeconfigOffer {
     match next(events).await {
-        KubeconfigOfferEvent::Offered { offer } => offer,
+        KubeconfigOfferEvent::Offered { offer } => *offer,
         event => panic!("{event:?}"),
     }
 }
@@ -553,7 +553,13 @@ async fn what_a_tool_writes_in_place_is_offered_once_and_more_comes_in_the_same_
         assert_eq!(first.users, [ARN]);
         assert_eq!(first.contexts, [ARN]);
         assert_eq!(first.target, "~/.kube/config");
-        assert_eq!(first.taken, ["cluster kind-a"]);
+        assert_eq!(
+            first.left_out,
+            KubeconfigNames {
+                clusters: vec!["kind-a".to_owned()],
+                ..KubeconfigNames::default()
+            }
+        );
         let second = offered(&mut events).await;
         assert_eq!(second.id, first.id);
         assert_eq!(second.users, [ARN, "second"]);
@@ -721,13 +727,12 @@ contexts:
     setup.run(session.id).await;
     let offer = offered(&mut events).await;
     assert_eq!(
-        offer.taken,
-        [
-            "context dangling",
-            "context kind-b-new",
-            "context ns",
-            "cluster kind-a"
-        ]
+        offer.left_out,
+        KubeconfigNames {
+            contexts: ["dangling", "kind-b-new", "ns"].map(str::to_owned).into(),
+            clusters: vec!["kind-a".to_owned()],
+            users: Vec::new(),
+        }
     );
     setup.answer(&offer, KubeconfigOfferAnswer::Move).await;
     let mine = kube::config::Kubeconfig::from_yaml(&std::fs::read_to_string(setup.mine()).unwrap())

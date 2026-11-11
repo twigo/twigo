@@ -27,6 +27,14 @@ pub struct Names {
 }
 
 impl Names {
+    fn section_mut(&mut self, section: &str) -> &mut BTreeSet<String> {
+        match section {
+            "clusters" => &mut self.clusters,
+            "users" => &mut self.users,
+            _ => &mut self.contexts,
+        }
+    }
+
     /// Those of a kubeconfig's text, refused where it does not parse.
     pub fn of(text: &str) -> Result<Self, KubeconfigError> {
         let config = Kubeconfig::from_yaml(text)?;
@@ -148,8 +156,8 @@ impl Written {
     }
 
     /// What a move would leave out against the person's `files` as they are
-    /// now, in words a person reads as they are: `context prod`.
-    pub fn left_out(&self, files: &[PathBuf]) -> Result<Vec<String>, WriteError> {
+    /// now, by section.
+    pub fn left_out(&self, files: &[PathBuf]) -> Result<Names, WriteError> {
         let read: Vec<(&Path, String)> = files
             .iter()
             .filter_map(|file| Some((file.as_path(), fs::read_to_string(file).ok()?)))
@@ -222,13 +230,10 @@ impl Written {
                 let entry = offered.contexts[context.name].clone();
                 plan.moving.push(("contexts", entry));
             } else {
-                plan.left.push(format!("context {}", context.name));
+                plan.left.contexts.insert(context.name.clone());
             }
         }
-        for (section, word, free) in [
-            ("clusters", "cluster", &free_clusters),
-            ("users", "user", &free_users),
-        ] {
+        for (section, free) in [("clusters", &free_clusters), ("users", &free_users)] {
             for (name, entry) in offered.section(section) {
                 let naming: Vec<bool> = contexts
                     .iter()
@@ -238,7 +243,7 @@ impl Written {
                 if free.contains(name) && (naming.is_empty() || naming.contains(&true)) {
                     plan.moving.push((section, entry.clone()));
                 } else {
-                    plan.left.push(format!("{word} {name}"));
+                    plan.left.section_mut(section).insert(name.clone());
                 }
             }
         }
@@ -305,11 +310,11 @@ impl Naming<'_> {
     }
 }
 
-/// What a move appends, and what it leaves out in words.
+/// What a move appends, and what it leaves out.
 #[derive(Default)]
 struct Plan {
     moving: Vec<(&'static str, Mapping)>,
-    left: Vec<String>,
+    left: Names,
 }
 
 /// Entries by section and name, each against its file's directory.
@@ -761,26 +766,16 @@ contexts:
         let written = offered(text, &terminal, true);
         assert_eq!(
             written.left_out(std::slice::from_ref(&mine)).unwrap(),
-            [
-                "context b",
-                "cluster elsewhere",
-                "cluster home-ca",
-                "cluster same",
-                "user only-b"
-            ]
+            names(&["elsewhere", "home-ca", "same"], &["only-b"], &["b"])
         );
         let proxied = offered(text, &terminal, false);
         assert_eq!(
             proxied.left_out(std::slice::from_ref(&mine)).unwrap(),
-            [
-                "context a",
-                "context b",
-                "context c",
-                "cluster elsewhere",
-                "cluster home-ca",
-                "cluster same",
-                "user only-b"
-            ]
+            names(
+                &["elsewhere", "home-ca", "same"],
+                &["only-b"],
+                &["a", "b", "c"]
+            )
         );
         append(&mine, std::slice::from_ref(&mine), &written).unwrap();
         assert_eq!(

@@ -63,7 +63,7 @@ pub use shell::{
 pub use space::{Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
 pub use terminal::{
-    AnswerKubeconfigOffer, KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent,
-    KubeconfigOfferId, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
+    AnswerKubeconfigOffer, KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer,
+    KubeconfigOfferEvent, KubeconfigOfferId, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
 };
 pub use typescript::typescript;

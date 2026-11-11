@@ -562,6 +562,11 @@ id: string,
 keys: { [key in string]: KeyMapping }, };
 
 /**
+ * Names of a kubeconfig's entries, by section.
+ */
+export type KubeconfigNames = { contexts: Array<string>, clusters: Array<string>, users: Array<string>, };
+
+/**
  * Entries a tool wrote into a terminal's own kubeconfig, such as `aws eks
  * update-kubeconfig` does, offered for moving into the user's kubeconfig.
  */
@@ -585,10 +590,11 @@ context: string, contexts: Array<string>, clusters: Array<string>, users: Array<
  */
 target: string, 
 /**
- * The names among these that the user's files hold already, which a
- * move leaves out.
+ * What a move leaves out: a name the user's files hold in its section,
+ * a context whose cluster or user means another entry there, and a
+ * cluster or user that only such contexts name.
  */
-taken: Array<string>, };
+left_out: KubeconfigNames, };
 
 export type KubeconfigOfferAnswer = "move" | "dismiss";
 

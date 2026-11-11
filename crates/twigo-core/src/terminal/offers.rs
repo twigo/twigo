@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use twigo_ipc::{
-    ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferEvent, KubeconfigOfferId, SubscriptionId,
+    ErrorKind, IpcError, KubeconfigNames, KubeconfigOffer, KubeconfigOfferEvent, KubeconfigOfferId,
+    SubscriptionId,
 };
 use twigo_kube::kubeconfig::{Names, Sources, WriteError, Written, append};
 
@@ -124,7 +125,7 @@ impl Offers {
                 Held {
                     source: Arc::clone(source),
                     written: Written::new(base.to_owned(), source.chained),
-                    offer: offer_of(source, id, &Names::default(), Vec::new()),
+                    offer: offer_of(source, id, &Names::default(), &Names::default()),
                     answering: false,
                 }
             }
@@ -242,15 +243,16 @@ impl State {
     /// its window.
     fn renew(&mut self, mut held: Held) {
         let names = held.written.names();
-        let taken = held
+        let left_out = held
             .written
             .left_out(held.source.sources.files())
             .unwrap_or_else(|error| {
                 eprintln!("could not tell what a move of an offer leaves out: {error}");
-                Vec::new()
+                Names::default()
             });
-        held.offer = offer_of(&held.source, held.offer.id, &names, taken);
+        held.offer = offer_of(&held.source, held.offer.id, &names, &left_out);
         let offer = held.offer.clone();
+        let offer = Box::new(offer);
         self.tell(&held.source.window, KubeconfigOfferEvent::Offered { offer });
         self.offers.insert(held.offer.id.0, held);
     }
@@ -268,7 +270,7 @@ fn offer_of(
     source: &Source,
     id: KubeconfigOfferId,
     names: &Names,
-    taken: Vec<String>,
+    left_out: &Names,
 ) -> KubeconfigOffer {
     KubeconfigOffer {
         id,
@@ -282,7 +284,11 @@ fn offer_of(
         clusters: names.clusters.iter().cloned().collect(),
         users: names.users.iter().cloned().collect(),
         target: source.sources.named(&source.target),
-        taken,
+        left_out: KubeconfigNames {
+            contexts: left_out.contexts.iter().cloned().collect(),
+            clusters: left_out.clusters.iter().cloned().collect(),
+            users: left_out.users.iter().cloned().collect(),
+        },
     }
 }
 

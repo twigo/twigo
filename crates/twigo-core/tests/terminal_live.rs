@@ -15,9 +15,9 @@ use tokio::sync::{mpsc, watch};
 use twigo_core::{Core, ShellFrame};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, KubeconfigOffer,
-    KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy,
-    SetContextMode, ShellAck, ShellEnd, ShellEvent, TerminalKind,
+    AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, KubeconfigNames,
+    KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell,
+    ProxyWhy, SetContextMode, ShellAck, ShellEnd, ShellEvent, TerminalKind,
 };
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -268,7 +268,7 @@ async fn offered(events: &mut mpsc::UnboundedReceiver<KubeconfigOfferEvent>) -> 
         .expect("an offer within 60 s")
         .unwrap();
     match event {
-        KubeconfigOfferEvent::Offered { offer } => offer,
+        KubeconfigOfferEvent::Offered { offer } => *offer,
         event => panic!("{event:?}"),
     }
 }
@@ -373,7 +373,7 @@ async fn what_a_cloud_cli_writes_is_offered_and_a_move_keeps_the_user_s_comments
     );
     assert_eq!(offer.target, "~/.kube/config");
     assert_eq!(offer.context, live.context);
-    assert!(offer.taken.is_empty(), "{:?}", offer.taken);
+    assert_eq!(offer.left_out, KubeconfigNames::default());
     let id = offer.id;
     live.core
         .answer_kubeconfig_offer(
