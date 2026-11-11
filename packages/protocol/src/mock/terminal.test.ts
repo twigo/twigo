@@ -121,14 +121,23 @@ test("a terminal of a read-write context goes by the person's credentials, any o
   });
 });
 
-test("a context under the policy file goes through the proxy for that, an unlocked one for its mode", async () => {
-  expect((await created("policyFile", "prod-eu")).kind).toEqual({
+test("the policy file sends the contexts it lists in terminal.usePolicyProxy through the proxy for that, and the others by their mode", async () => {
+  expect((await created("policyFile", "dev")).kind).toEqual({
     kind: "proxy",
     why: "policyFile",
   });
-  expect((await created("policyFile", "dev")).kind).toEqual({
-    kind: "kubeconfig",
+  expect((await created("policyFile", "prod-eu")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
   });
+  expect((await created("policyFile", "staging")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
+  });
+  expect((await created("live", "dev")).kind).toEqual({ kind: "kubeconfig" });
+});
+
+test("an unlocked context goes through the proxy for its mode", async () => {
   const backend = createMockBackend("live");
   await answered(backend.invoke("context_unlock", "prod-eu"));
   const unlocked = await answered(

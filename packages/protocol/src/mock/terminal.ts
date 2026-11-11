@@ -34,13 +34,23 @@ export function isTerminalScenario(
 export const OFFER_AFTER_MS = 3000;
 const START_MS = 100;
 
+const POLICY_FILE_PROXY: readonly string[] = ["dev"];
+
 /**
  * How a context's terminal reaches clusters: through the proxy when the
- * admin's file says so, or when the context was not read-write, an unlock
- * included, else with the user's own credentials.
+ * policy file lists the context in `terminal.usePolicyProxy`, whatever its
+ * mode, or when the context was not read-write, an unlock included, else with
+ * the user's own credentials. A mode the file sets makes the proxy's reason
+ * the mode, not the file.
  */
-export function terminalKind({ mode, source }: ContextAccess): TerminalKind {
-  if (source.kind === "policyFile") return { kind: "proxy", why: "policyFile" };
+export function terminalKind(
+  context: string,
+  { mode }: ContextAccess,
+  policyFile: boolean,
+): TerminalKind {
+  if (policyFile && POLICY_FILE_PROXY.includes(context)) {
+    return { kind: "proxy", why: "policyFile" };
+  }
   return mode === "read-write"
     ? { kind: "kubeconfig" }
     : { kind: "proxy", why: "mode" };

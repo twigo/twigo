@@ -98,7 +98,8 @@ type ListScenario = "live" | ViewState["state"];
 /**
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
- * file over `prod-*`, `viewer`: live lists for a person who may only read,
+ * file over `prod-*` that also sends `dev`'s terminal through the proxy,
+ * `viewer`: live lists for a person who may only read,
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
@@ -553,7 +554,11 @@ export function createMockBackend(
       return null;
     },
     terminal_create: ({ context, label }) => {
-      const kind = terminalKind(access.of(context));
+      const kind = terminalKind(
+        context,
+        access.of(context),
+        scenario === "policyFile",
+      );
       const id = nextId++;
       terminals.set(id, { context, label, kind });
       return { id, kind, shell: "zsh" };
