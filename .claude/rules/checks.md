@@ -18,7 +18,7 @@
 - What an OpenAPI document costs in resident memory: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run --release -p twigo-kube --example openapi_memory -- apps/v1 Deployment`, one document per process.
 - twigo-keyboard on Linux: `crates/twigo-keyboard/linux/run.sh` runs its tests in Docker, the live X11 test under Xvfb and the live Wayland test under a headless sway included; given a command, such as `cargo clippy -p twigo-keyboard --all-targets -- -D warnings`, it runs that instead.
 - twigo-netmon on Linux: `crates/twigo-netmon/linux.sh` runs its tests in Docker, the ignored ones included; CI runs the netlink one as root in a network namespace of its own.
-- twigo-sessions on Linux: `crates/twigo-sessions/linux.sh` runs its tests in Docker, with the vi and zsh its terminal's tests run; given a command, such as `cargo clippy -p twigo-sessions --all-targets -- -D warnings`, it runs that instead.
+- twigo-sessions on Linux: `crates/twigo-sessions/linux.sh` runs its tests in Docker, with the vi and zsh its terminal's tests run, and, in a privileged container, the ignored one that gives a dead shell's pid to another process group through `ns_last_pid`, which the live tests skip; given a command, such as `cargo clippy -p twigo-sessions --all-targets -- -D warnings`, it runs that instead.
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.

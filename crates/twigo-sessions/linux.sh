@@ -2,16 +2,18 @@
 # Usage: crates/twigo-sessions/linux.sh [command]
 #
 # Runs the crate's tests on Linux in twigo-keyboard's container, with the vi
-# and zsh the terminal's tests run; given a command, such as
+# and zsh the terminal's tests run, and, as the container is privileged, the
+# one that gives a dead shell's pid to another process through ns_last_pid;
+# given a command, such as
 # `cargo clippy -p twigo-sessions --all-targets -- -D warnings`, it runs that
 # instead.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
-command=${*:-cargo test -p twigo-sessions}
+command=${*:-cargo test -p twigo-sessions && cargo test -p twigo-sessions --lib -- --ignored a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now}
 
 docker build -q -t twigo-keyboard-linux "$root/crates/twigo-keyboard/linux" >/dev/null
-docker run --rm \
+docker run --rm --privileged \
   -v "$root:/src" \
   -v twigo-keyboard-rustup:/root/.rustup \
   -v twigo-keyboard-registry:/root/.cargo/registry \

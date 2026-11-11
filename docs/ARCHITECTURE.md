@@ -1016,6 +1016,7 @@ Extensions add commands, not prefixes.
   - **Closing** a terminal hangs up its shell's process group and the terminal's foreground group (`tcgetpgrp` on the master), closes the master and Twigo's slave, and 3 s later kills both groups if anything in them still runs; VS Code sends one `SIGHUP` to the shell's pid and nothing more.
     The pty's own hangup on close reaches only the shell, and the shell's end its foreground group, so a shell that ignores `SIGHUP` would leave its foreground job running without Twigo's.
     A job moved out of both groups, as `nohup … &` under job control moves it, survives, as in any terminal.
+    Only a shell nobody has reaped is signalled, since another process may have the pid of one reaped: the wait that reaps the shell ends the hangup under the hangup's own lock, so closing a terminal whose shell has ended sends nothing, and the kill keeps the shell unreaped through the 3 s, so its pid and its group's id stay its own.
     At quit, with the runtime gone, the hangup comes at once and nothing is killed later.
   - **Offers.** kubectl and most tools write new entries, as `aws eks update-kubeconfig` does, to the first file in `KUBECONFIG`: Twigo's, or a proxy terminal's own.
     Twigo watches the directory that holds it, since kubectl, aws and gcloud write in place, az replaces the file by a rename, gcloud may rename it to a backup and write a new one, and kubectl creates and removes `<file>.lock` beside it; a read that does not parse waits for the next event or 200 ms.

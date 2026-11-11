@@ -13,16 +13,13 @@ use std::ops::RangeInclusive;
 use std::os::fd::AsFd;
 
 use libc::c_int;
-use nix::unistd::Pid;
 use pty_process::{Pty, Size};
-use tokio::process::Child;
 
 use super::Spec;
 use super::hangup::Hangup;
 
 pub(super) struct Spawned {
     pub pty: Pty,
-    pub child: Child,
     pub hangup: Hangup,
 }
 
@@ -42,14 +39,9 @@ pub(super) fn spawn(spec: &Spec, size: Size) -> pty_process::Result<Spawned> {
     // SAFETY: `reset` makes only async-signal-safe calls and allocates
     // nothing, as the child of a process with threads must.
     let command = unsafe { command.pre_exec(move || reset(signals.clone())) };
-    let child = command.spawn(pts)?;
-    let id = child
-        .id()
-        .expect("a child is not reaped before it is waited for");
-    let shell = Pid::from_raw(i32::try_from(id).expect("a pid fits an i32"));
+    let shell = command.spawn(pts)?;
     Ok(Spawned {
         pty,
-        child,
         hangup: Hangup::new(shell, master, slave),
     })
 }

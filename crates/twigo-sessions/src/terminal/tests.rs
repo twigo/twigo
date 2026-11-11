@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
-use nix::sys::signal::kill;
+use nix::sys::signal::{Signal, kill};
 use nix::unistd::{Pid, getpgid};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
@@ -124,15 +124,43 @@ async fn wait_for_pid(file: &Path) -> Pid {
     panic!("no pid in {}", file.display());
 }
 
+/// Whether `pid` ends within `within`: it is gone, or a zombie, as the
+/// terminal keeps its shell unreaped through the kill's grace.
 async fn gone(pid: Pid, within: Duration) -> bool {
     let start = Instant::now();
     while start.elapsed() < within {
-        if kill(pid, None) == Err(Errno::ESRCH) {
+        if kill(pid, None) == Err(Errno::ESRCH) || zombie(pid) {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     false
+}
+
+#[cfg(target_os = "linux")]
+fn zombie(pid: Pid) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rsplit_once(") ")
+            .is_some_and(|(_, rest)| rest.starts_with('Z'))
+    })
+}
+
+/// macOS 27.2 gives no `PROC_PIDTBSDINFO` of a zombie, which `kill` still
+/// finds: `ESRCH`, as for a pid nobody has.
+#[cfg(target_os = "macos")]
+fn zombie(pid: Pid) -> bool {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = size_of::<libc::proc_bsdinfo>() as i32;
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid.as_raw(),
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&raw mut info).cast(),
+            size,
+        )
+    };
+    read <= 0 && Errno::last() == Errno::ESRCH
 }
 
 #[tokio::test]
@@ -263,6 +291,111 @@ async fn a_foreground_job_that_ignores_the_hangup_is_killed_3_s_later() {
     );
     assert!(gone(job, Duration::from_secs(2)).await, "alive after 3 s");
     assert!(closed.elapsed() >= Duration::from_secs(3));
+}
+
+#[tokio::test]
+async fn the_group_of_a_shell_that_ignores_the_hangup_is_killed_3_s_later() {
+    let dir = TempDir::new().unwrap();
+    let opened = Opened::new(script(
+        dir.path(),
+        "trap '' HUP; echo $$ > shell.pid; while :; do sleep 0.1; done",
+    ));
+    let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
+    drop(opened);
+    assert!(
+        !gone(shell, Duration::from_millis(2500)).await,
+        "killed before 3 s"
+    );
+    assert!(gone(shell, Duration::from_secs(2)).await, "alive after 3 s");
+}
+
+#[tokio::test]
+async fn a_terminal_closed_after_its_shell_ended_signals_nothing() {
+    let dir = TempDir::new().unwrap();
+    let mut opened = Opened::new(script(
+        dir.path(),
+        "trap '' HUP; echo $$ > shell.pid; sleep 1000 & echo $! > job.pid; exit 0",
+    ));
+    assert_eq!(opened.end().await, ShellEnd::Exited { code: 0 });
+    let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
+    let job = wait_for_pid(&dir.path().join("job.pid")).await;
+    assert_eq!(
+        getpgid(Some(job)),
+        Ok(shell),
+        "the job is in the group that bears the shell's pid"
+    );
+    drop(opened);
+    let spared = !gone(job, Duration::from_secs(4)).await;
+    let _ = kill(job, Signal::SIGKILL);
+    assert!(spared, "the group that bears the shell's pid was signalled");
+}
+
+/// Gives the ended shell's pid to an unrelated process group through
+/// `ns_last_pid`, as heavy forking would by chance.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "writes /proc/sys/kernel/ns_last_pid, which needs CAP_SYS_ADMIN: crates/twigo-sessions/linux.sh runs it privileged"]
+async fn a_terminal_closed_after_its_shell_ended_spares_whoever_has_its_pid_now() {
+    use std::os::unix::process::CommandExt;
+    let dir = TempDir::new().unwrap();
+    let mut opened = Opened::new(script(dir.path(), "echo $$ > shell.pid; exit 0"));
+    assert_eq!(opened.end().await, ShellEnd::Exited { code: 0 });
+    let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
+    assert_eq!(kill(shell, None), Err(Errno::ESRCH), "reaped");
+    let mut other = None;
+    for _ in 0..50 {
+        std::fs::write(
+            "/proc/sys/kernel/ns_last_pid",
+            (shell.as_raw() - 1).to_string(),
+        )
+        .unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("1000")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        if child.id() == shell.as_raw().unsigned_abs() {
+            other = Some(child);
+            break;
+        }
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    let mut other = other.expect("the shell's pid given to another process group");
+    drop(opened);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let ended = other.try_wait().unwrap();
+    other.kill().unwrap();
+    other.wait().unwrap();
+    assert_eq!(ended, None, "the process that has the shell's pid now");
+}
+
+#[test]
+fn a_terminal_dropped_with_its_runtime_gone_hangs_up_its_foreground_job_at_once() {
+    let dir = TempDir::new().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (opened, job) = runtime.block_on(async {
+        let opened = Opened::new(interactive(dir.path()));
+        opened
+            .typed(concat!(
+                "trap '' HUP; ",
+                r#"perl -e '$SIG{HUP} = "DEFAULT"; open my $f, ">", "job.pid"; print $f $$; close $f; exec "sleep", "1000"'"#,
+                "\n",
+            ))
+            .await;
+        let job = wait_for_pid(&dir.path().join("job.pid")).await;
+        (opened, job)
+    });
+    drop(runtime);
+    drop(opened);
+    let waiting = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    assert!(
+        waiting.block_on(gone(job, Duration::from_secs(2))),
+        "the job outlived its hangup"
+    );
 }
 
 #[test]

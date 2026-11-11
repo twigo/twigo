@@ -14,14 +14,13 @@ use std::os::fd::AsFd;
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::ExitStatus;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use nix::errno::Errno;
 use nix::sys::signal::Signal;
 use pty_process::{Pty, Size};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::Child;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
@@ -68,7 +67,7 @@ struct Commands {
 
 struct Running {
     task: JoinHandle<()>,
-    hangup: Hangup,
+    hangup: Arc<Hangup>,
 }
 
 impl Terminal {
@@ -122,10 +121,14 @@ impl Terminal {
                 return Ok(());
             }
         };
-        let spawn::Spawned { pty, child, hangup } = spawned;
-        let task = tokio::spawn(async move {
-            if send(Frame::Event(ShellEvent::Running)) {
-                run(pty, child, commands, send).await;
+        let spawn::Spawned { pty, hangup } = spawned;
+        let hangup = Arc::new(hangup);
+        let task = tokio::spawn({
+            let hangup = Arc::clone(&hangup);
+            async move {
+                if send(Frame::Event(ShellEvent::Running)) {
+                    run(pty, &hangup, commands, send).await;
+                }
             }
         });
         *self.running.lock().expect("terminal lock") = Some(Running { task, hangup });
@@ -168,7 +171,7 @@ impl Drop for Terminal {
 /// after the exit, and the end comes last.
 async fn run(
     mut pty: Pty,
-    mut child: Child,
+    hangup: &Hangup,
     commands: Commands,
     mut send: impl FnMut(Frame) -> bool,
 ) {
@@ -215,7 +218,7 @@ async fn run(
                     Ok(n) if n > 0 => out!(flow.read(&buffer[..n], Instant::now())),
                     _ => readable = false,
                 },
-                exited = child.wait() => break exited,
+                exited = hangup.exit() => break exited,
                 () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
                     out!(flow.flush(Instant::now()));
                 }
