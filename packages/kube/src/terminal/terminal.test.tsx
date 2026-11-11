@@ -738,18 +738,24 @@ async function later(ms: number) {
   await settle(2);
 }
 
-test("a proxy terminal whose file a tool wrote its own context into says so on its chip, offers no Restart for it, and the chip follows a delete-context", async () => {
+const EKS = "arn:aws:eks:eu-west-1:123456789012:cluster";
+
+test("a proxy terminal whose file a tool wrote its own contexts into says so on its chip, offers no Restart for it, and the chip follows a delete-context of one of them, not of the proxy's own", async () => {
   const { tabs, create } = await mounted("terminalOffer", "staging");
   await create();
   screen.getByText("Proxy · guarded");
   await later(OFFER_AFTER_MS);
-  screen.getByText("Proxy · guarded, staging direct");
+  screen.getByText("Proxy · guarded, 2 contexts direct");
   expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
 
-  await type(
-    tabOf(tabs, 1, "staging"),
-    "kubectl config delete-context staging\r",
-  );
+  const tab = tabOf(tabs, 1, "staging");
+  await type(tab, "kubectl config delete-context staging\r");
+  screen.getByText("Proxy · guarded, 2 contexts direct");
+
+  await type(tab, `kubectl config delete-context ${EKS}/prod-eu-2\r`);
+  screen.getByText("Proxy · guarded, arn:aws:eks:…/prod-eu-3 direct");
+
+  await type(tab, `kubectl config delete-context ${EKS}/prod-eu-3\r`);
   screen.getByText("Proxy · guarded");
   expect(screen.queryByText(/direct/)).toBeNull();
 });
@@ -758,12 +764,12 @@ test("a restarted terminal is a new session and starts without direct contexts, 
   const { tabs, workbench, create } = await mounted("terminalOffer", "staging");
   await create();
   await later(OFFER_AFTER_MS);
-  screen.getByText("Proxy · guarded, staging direct");
+  screen.getByText("Proxy · guarded, 2 contexts direct");
   const tab = tabOf(tabs, 1, "staging");
   const before = tab.session;
 
   await type(tab, "exit\r");
-  screen.getByText("Proxy · guarded, staging direct");
+  screen.getByText("Proxy · guarded, 2 contexts direct");
   fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));
   await settle(10);
   expect(tab.session).not.toBe(before);
@@ -787,7 +793,7 @@ test("direct contexts are of one terminal: another terminal of the space has non
     workbench.editors.open(uriOf(1, "staging"));
   });
   await settle(4);
-  screen.getByText("Proxy · guarded, staging direct");
+  screen.getByText("Proxy · guarded, 2 contexts direct");
 });
 
 test.each([

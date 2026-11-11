@@ -16,9 +16,9 @@ import { complete } from "./shell";
  * Pins what the terminals' offers do (ARCHITECTURE 4.6): `terminalOffer`
  * raises an offer to move what a tool wrote into a terminal's own kubeconfig
  * a while after the first terminal opens, and a second one a while after the
- * first is answered; for a proxy terminal the first comes with the context
- * the tool wrote into its file as a direct one. Any other scenario raises
- * none. `terminalShell` runs `sh` in the terminals, a shell that Twigo cannot
+ * first is answered; for a proxy terminal each comes with the contexts the
+ * tool wrote into its file as direct ones, the earlier ones' too. Any other
+ * scenario raises none. `terminalShell` runs `sh` in the terminals, a shell that Twigo cannot
  * keep `KUBECONFIG` in, where any other scenario runs `zsh`.
  */
 export type TerminalScenario = "terminalOffer" | "terminalShell";
@@ -346,6 +346,7 @@ export class MockOffers {
   #started = false;
   #source: Source | undefined;
   #proxy = false;
+  #file = new Set<string>();
   #direct: readonly string[] = [];
   #next = 1;
 
@@ -362,15 +363,18 @@ export class MockOffers {
     this.#started = true;
     this.#source = source;
     this.#proxy = kind.kind === "proxy";
+    this.#file = new Set([source.context]);
     this.#later();
   }
 
-  /** Removes a context a tool wrote into the source's proxy file, as a delete-context of kubectl does. */
-  deleteDirect(session: number, name: string): boolean {
-    if (this.#source?.session !== session || !this.#direct.includes(name)) {
+  /** Removes a context from the source's file, as a delete-context of kubectl does; a direct one leaves the set. */
+  deleteContext(session: number, name: string): boolean {
+    if (this.#source?.session !== session || !this.#file.delete(name)) {
       return false;
     }
-    this.#tell(this.#direct.filter((each) => each !== name));
+    if (this.#direct.includes(name)) {
+      this.#tell(this.#direct.filter((each) => each !== name));
+    }
     return true;
   }
 
@@ -392,7 +396,8 @@ export class MockOffers {
         ...this.#source,
         id: this.#next++,
       };
-      if (this.#proxy && offer.id === 1) this.#tell([this.#source.context]);
+      offer.contexts.forEach((name) => this.#file.add(name));
+      if (this.#proxy) this.#tell([...this.#direct, ...offer.contexts]);
       this.#waiting.set(offer.id, offer);
       this.#follower?.({ event: "offered", offer });
     }, OFFER_AFTER_MS);

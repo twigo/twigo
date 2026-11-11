@@ -759,7 +759,7 @@ export function createMockBackend(
             context: parked.context,
             kind: parked.kind,
             shell: parked.shell,
-            deleteContext: (name) => offers.deleteDirect(open.id, name),
+            deleteContext: (name) => offers.deleteContext(open.id, name),
           },
           onMessage,
         );

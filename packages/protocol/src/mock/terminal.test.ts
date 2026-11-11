@@ -385,7 +385,7 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
 const directs = (events: readonly KubeconfigOfferEvent[]) =>
   events.flatMap((event) => (event.event === "direct" ? [event] : []));
 
-test("a proxy terminal's first offer comes with the direct contexts of its own context, just before it, and a kubeconfig terminal's with none", async () => {
+test("a proxy terminal's offers come with the direct contexts the tool wrote, just before each, and a kubeconfig terminal's with none", async () => {
   const proxied = await followed("terminalOffer");
   const { session } = await opened(
     "staging",
@@ -398,9 +398,31 @@ test("a proxy terminal's first offer comes with the direct contexts of its own c
     "direct",
     "offered",
   ]);
+  const [first] = offers(proxied.events);
+  if (!first) throw new Error("no first offer");
+  expect(first.contexts).toHaveLength(2);
   expect(directs(proxied.events)).toEqual([
-    { event: "direct", session: session.id, contexts: ["staging"] },
+    { event: "direct", session: session.id, contexts: first.contexts },
   ]);
+
+  await answered(
+    proxied.backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      answer: "move",
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [, second] = offers(proxied.events);
+  if (!second) throw new Error("no second offer");
+  expect(proxied.events.slice(-2).map((event) => event.event)).toEqual([
+    "direct",
+    "offered",
+  ]);
+  expect(last(directs(proxied.events))).toEqual({
+    event: "direct",
+    session: session.id,
+    contexts: [...first.contexts, ...second.contexts],
+  });
 
   const own = await followed("terminalOffer");
   await opened("dev", "terminalOffer", "Terminal 1", own.backend);
@@ -408,7 +430,7 @@ test("a proxy terminal's first offer comes with the direct contexts of its own c
   expect(own.events.map((event) => event.event)).toEqual(["offered"]);
 });
 
-test("a move or a dismiss leaves the direct contexts, and the second offer brings none", async () => {
+test("a move or a dismiss leaves the direct contexts, since the entries stay in the terminal's file", async () => {
   const { backend, events } = await followed("terminalOffer");
   await opened("staging", "terminalOffer", "Terminal 1", backend);
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
@@ -420,34 +442,52 @@ test("a move or a dismiss leaves the direct contexts, and the second offer bring
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
   const [, second] = offers(events);
   if (!second) throw new Error("no second offer");
+  expect(directs(events)).toHaveLength(2);
   await answered(
     backend.invoke("kubeconfig_offer_answer", {
       id: second.id,
       answer: "dismiss",
     }),
   );
-  expect(directs(events)).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(directs(events)).toHaveLength(2);
 });
 
-test("kubectl config delete-context of a direct context removes it and sends the contexts left, empty when none is", async () => {
+test("kubectl config delete-context of a direct context removes it and sends the contexts left, and of the proxy's own context changes nothing", async () => {
   const { backend, events } = await followed("terminalOffer");
   const shell = await opened("staging", "terminalOffer", "Terminal 1", backend);
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [offer] = offers(events);
+  const [one, two] = offer?.contexts ?? [];
+  if (!one || !two) throw new Error("no contexts offered");
+  const file = `${APP_DATA}/proxy/process-${String(shell.session.id)}.kubeconfig`;
+
+  await shell.type(`kubectl config delete-context ${one}\r`);
+  expect(shell.text()).toContain(`\r\ndeleted context ${one} from ${file}\r\n`);
+  expect(last(events)).toEqual({
+    event: "direct",
+    session: shell.session.id,
+    contexts: [two],
+  });
+
   await shell.type("kubectl config delete-context staging\r");
   expect(shell.text()).toContain(
-    `\r\ndeleted context staging from ${APP_DATA}/proxy/process-${String(shell.session.id)}.kubeconfig\r\n`,
+    `\r\ndeleted context staging from ${file}\r\n`,
   );
+  expect(directs(events)).toHaveLength(2);
+
+  await shell.type(`kubectl config delete-context ${one}\r`);
+  expect(shell.text()).toContain(
+    `error: cannot delete context ${one}, not in ${file}`,
+  );
+  expect(directs(events)).toHaveLength(2);
+
+  await shell.type(`kubectl config delete-context ${two}\r`);
   expect(last(events)).toEqual({
     event: "direct",
     session: shell.session.id,
     contexts: [],
   });
-
-  await shell.type("kubectl config delete-context staging\r");
-  expect(shell.text()).toContain(
-    "error: cannot delete context staging, not in",
-  );
-  expect(directs(events)).toHaveLength(2);
 });
 
 test("kubectl config delete-context of a name the terminal's file lacks is refused as kubectl refuses it, and sends nothing", async () => {
