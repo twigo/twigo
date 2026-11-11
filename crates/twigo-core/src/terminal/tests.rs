@@ -172,7 +172,8 @@ impl Setup {
                     output.extend(bytes);
                 }
                 ShellFrame::Event(ShellEvent::Ended { end }) => {
-                    return (String::from_utf8_lossy(&output).into_owned(), end);
+                    let output = String::from_utf8_lossy(&output).replace("\r\n", "\n");
+                    return (output, end);
                 }
                 ShellFrame::Event(_) => {}
             }
@@ -336,7 +337,7 @@ async fn a_terminal_of_a_guarded_context_has_the_proxy_s_file_alone() {
         ),
         "{path}"
     );
-    let proxied = kube::config::Kubeconfig::from_yaml(&text.replace("\r\n", "\n")).unwrap();
+    let proxied = kube::config::Kubeconfig::from_yaml(text).unwrap();
     assert_eq!(proxied.current_context.as_deref(), Some("kind-b"));
     let server = proxied.clusters[0]
         .cluster
@@ -348,6 +349,41 @@ async fn a_terminal_of_a_guarded_context_has_the_proxy_s_file_alone() {
     assert!(server.starts_with("https://127.0.0.1:"), "{server}");
     setup.core.shell_close("main", session.id).unwrap();
     assert!(!Path::new(path).exists());
+}
+
+#[tokio::test]
+async fn a_proxy_terminal_s_file_and_tokens_go_when_its_shell_ends() {
+    let setup = Setup::new().await;
+    setup
+        .core
+        .set_context_mode(SetContextMode {
+            context: "kind-b".to_owned(),
+            mode: Some(Mode::Guarded),
+        })
+        .await
+        .unwrap();
+    let session = setup
+        .create(
+            "kind-b",
+            r#"printf '%s\n' "$KUBECONFIG"; cat "$KUBECONFIG""#,
+        )
+        .await;
+    let (output, end) = setup.run(session.id).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 });
+    let (path, text) = output.split_once('\n').unwrap();
+    assert!(!Path::new(path).exists(), "{path} outlived the shell");
+    let proxied = kube::config::Kubeconfig::from_yaml(text).unwrap();
+    let config = kube::Config::from_custom_kubeconfig(proxied, &Default::default())
+        .await
+        .unwrap();
+    let client = kube::Client::try_from(config).unwrap();
+    let answer = kube::Api::<k8s_openapi::api::core::v1::Namespace>::all(client)
+        .list(&Default::default())
+        .await;
+    assert!(
+        matches!(&answer, Err(kube::Error::Api(status)) if status.code == 401),
+        "{answer:?}"
+    );
 }
 
 #[tokio::test]

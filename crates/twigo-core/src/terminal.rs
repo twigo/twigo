@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use futures::future::Either;
 use twigo_ipc::{
     AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
-    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
+    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
 };
 use twigo_kube::client::Actor;
 use twigo_kube::kubeconfig::{Names, Sources};
@@ -28,6 +28,7 @@ use twigo_policy::Policy;
 use twigo_sessions::shell::Frame;
 use twigo_sessions::terminal::{Spec, Terminal};
 
+use crate::proxy::ProxyProcess;
 use crate::{ClientsError, Core};
 use directory::Directory;
 pub(crate) use offers::Offers;
@@ -45,8 +46,17 @@ pub(crate) struct Local {
     // the watch ends before its directory goes.
     session: Terminal,
     _watcher: Option<Watcher>,
-    /// Its proxy process, or its directory.
-    _reach: Box<dyn Send>,
+    reach: Reach,
+}
+
+/// How a terminal reaches clusters.
+enum Reach {
+    /// Its proxy process, which ends with its shell: a job the shell left,
+    /// as `kubectl port-forward … &` before `exit`, loses the proxy with it.
+    Proxy(Arc<Mutex<Option<ProxyProcess>>>),
+    /// Its directory, which lives as long as its tab: kubectl in a job the
+    /// shell left would take the person's current context without it.
+    Directory { _held: Directory },
 }
 
 impl Shell {
@@ -58,7 +68,20 @@ impl Shell {
     ) -> Result<(), IpcError> {
         match self {
             Self::Pod(session) => session.open(cols, rows, send),
-            Self::Local(local) => local.session.open(cols, rows, send),
+            Self::Local(local) => {
+                let proxy = match &local.reach {
+                    Reach::Proxy(process) => Some(Arc::clone(process)),
+                    Reach::Directory { .. } => None,
+                };
+                let mut send = send;
+                local.session.open(cols, rows, move |frame| {
+                    if let (Some(proxy), Frame::Event(ShellEvent::Ended { .. })) = (&proxy, &frame)
+                    {
+                        drop(proxy.lock().expect("proxy lock").take());
+                    }
+                    send(frame)
+                })
+            }
         }
     }
 
@@ -175,14 +198,15 @@ impl Core {
                 .collect();
             (shell, args)
         });
-        let (reach, file, kubeconfig): (Box<dyn Send>, _, _) = match kind {
+        let (reach, file, kubeconfig) = match kind {
             TerminalKind::Proxy { .. } => {
                 let process = self
                     .proxy_process(Actor::Terminal, &label, Some(window), &context)
                     .await?;
                 let file = process.kubeconfig().to_owned();
                 let kubeconfig = file.clone().into_os_string();
-                (Box::new(process), file, kubeconfig)
+                let reach = Reach::Proxy(Arc::new(Mutex::new(Some(process))));
+                (reach, file, kubeconfig)
             }
             TerminalKind::Kubeconfig => {
                 let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
@@ -200,7 +224,7 @@ impl Core {
                         format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
                     )
                 })?;
-                (Box::new(directory), file, kubeconfig)
+                (Reach::Directory { _held: directory }, file, kubeconfig)
             }
         };
         let (watcher, source) = self
@@ -223,7 +247,7 @@ impl Core {
         let local = Local {
             session,
             _watcher: watcher,
-            _reach: reach,
+            reach,
         };
         let id = self.shells.keep(ticket, Shell::Local(local))?;
         if let Some(source) = source {

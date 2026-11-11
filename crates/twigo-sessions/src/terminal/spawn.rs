@@ -10,7 +10,7 @@
 
 use std::io;
 use std::ops::RangeInclusive;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 
 use libc::c_int;
 use pty_process::{Pty, Size};
@@ -20,6 +20,9 @@ use super::hangup::Hangup;
 
 pub(super) struct Spawned {
     pub pty: Pty,
+    /// Twigo's own, taken before the spawn drops the crate's: macOS drops
+    /// what nobody has read from a pty once its last slave closes.
+    pub slave: OwnedFd,
     pub hangup: Hangup,
 }
 
@@ -27,8 +30,6 @@ pub(super) fn spawn(spec: &Spec, size: Size) -> pty_process::Result<Spawned> {
     let (pty, pts) = pty_process::open()?;
     pty.resize(size)?;
     let master = pty.as_fd().try_clone_to_owned()?;
-    // Twigo's own, taken before the spawn drops the crate's: macOS drops
-    // what nobody has read from a pty once its last slave closes.
     let slave = pts.as_fd().try_clone_to_owned()?;
     let signals = signals();
     let command = pty_process::Command::new(&spec.program)
@@ -42,7 +43,8 @@ pub(super) fn spawn(spec: &Spec, size: Size) -> pty_process::Result<Spawned> {
     let shell = command.spawn(pts)?;
     Ok(Spawned {
         pty,
-        hangup: Hangup::new(shell, master, slave),
+        slave,
+        hangup: Hangup::new(shell, master),
     })
 }
 

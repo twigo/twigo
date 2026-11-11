@@ -10,7 +10,7 @@ mod spawn;
 mod tests;
 
 use std::ffi::OsString;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::ExitStatus;
@@ -121,13 +121,13 @@ impl Terminal {
                 return Ok(());
             }
         };
-        let spawn::Spawned { pty, hangup } = spawned;
+        let spawn::Spawned { pty, slave, hangup } = spawned;
         let hangup = Arc::new(hangup);
         let task = tokio::spawn({
             let hangup = Arc::clone(&hangup);
             async move {
                 if send(Frame::Event(ShellEvent::Running)) {
-                    run(pty, &hangup, commands, send).await;
+                    run(pty, slave, &hangup, commands, send).await;
                 }
             }
         });
@@ -168,9 +168,11 @@ impl Drop for Terminal {
 /// Runs the program until it exits: output goes out by [`Flow`], and input
 /// and resizes stay live while output is stopped. Then what the pty still
 /// holds goes out, as flow allows, until a read would block or [`DRAIN`]
-/// after the exit, and the end comes last.
+/// after the exit; Twigo's side of the pty closes, so a job left writing
+/// meets a closed terminal, and the end comes last.
 async fn run(
     mut pty: Pty,
+    slave: OwnedFd,
     hangup: &Hangup,
     commands: Commands,
     mut send: impl FnMut(Frame) -> bool,
@@ -277,6 +279,7 @@ async fn run(
         }
     }
     out!(flow.flush(Instant::now()));
+    drop((pty, slave));
     send(Frame::Event(ShellEvent::Ended { end }));
 }
 

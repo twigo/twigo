@@ -26,46 +26,32 @@ use tokio::runtime::Handle;
 const GRACE: Duration = Duration::from_secs(3);
 
 pub(super) struct Hangup {
-    state: Mutex<State>,
+    /// None once the shell has been reaped, as another process may have its
+    /// pid by then, or hung up.
+    shell: Mutex<Option<Shell>>,
     /// The terminal's, for the kill after the grace.
     runtime: Handle,
 }
 
-enum State {
-    /// Unreaped: it runs, or it has ended unseen.
-    Running {
-        shell: Child,
-        /// The leader of its session and of its process group.
-        pid: Pid,
-        pty: Descriptors,
-    },
-    /// Reaped, so its pid may be another process's by now.
-    Ended {
-        _pty: Descriptors,
-    },
-    HungUp,
-}
-
-/// Twigo's copies of the pty's two sides.
-struct Descriptors {
+struct Shell {
+    child: Child,
+    /// The leader of its session and of its process group.
+    pid: Pid,
+    /// A copy of the pty's master, for its foreground group.
     master: OwnedFd,
-    _slave: OwnedFd,
 }
 
 impl Hangup {
-    pub(super) fn new(shell: Child, master: OwnedFd, slave: OwnedFd) -> Self {
-        let id = shell
+    pub(super) fn new(child: Child, master: OwnedFd) -> Self {
+        let id = child
             .id()
             .expect("a child is not reaped before it is waited for");
         Self {
-            state: Mutex::new(State::Running {
-                shell,
+            shell: Mutex::new(Some(Shell {
+                child,
                 pid: Pid::from_raw(i32::try_from(id).expect("a pid fits an i32")),
-                pty: Descriptors {
-                    master,
-                    _slave: slave,
-                },
-            }),
+                master,
+            })),
             runtime: Handle::current(),
         }
     }
@@ -74,17 +60,13 @@ impl Hangup {
     /// terminal has been hung up.
     pub(super) async fn exit(&self) -> io::Result<ExitStatus> {
         std::future::poll_fn(|cx| {
-            let mut state = self.state.lock().expect("hangup lock");
-            let State::Running { shell, .. } = &mut *state else {
+            let mut shell = self.shell.lock().expect("hangup lock");
+            let Some(running) = shell.as_mut() else {
                 return Poll::Pending;
             };
-            let polled = pin!(shell.wait()).poll(cx);
+            let polled = pin!(running.child.wait()).poll(cx);
             if polled.is_ready() {
-                let State::Running { pty, .. } = std::mem::replace(&mut *state, State::HungUp)
-                else {
-                    unreachable!("matched above");
-                };
-                *state = State::Ended { _pty: pty };
+                *shell = None;
             }
             polled
         })
@@ -94,12 +76,12 @@ impl Hangup {
     /// Never blocks: the kill is a task on the terminal's runtime, which a
     /// runtime shut down, as at quit, drops unrun.
     pub(super) fn hang_up(&self) {
-        let state = std::mem::replace(&mut *self.state.lock().expect("hangup lock"), State::HungUp);
-        let State::Running { shell, pid, pty } = state else {
+        let Some(Shell { child, pid, master }) = self.shell.lock().expect("hangup lock").take()
+        else {
             return;
         };
         let mut groups = vec![pid];
-        if let Ok(foreground) = tcgetpgrp(&pty.master)
+        if let Ok(foreground) = tcgetpgrp(&master)
             && foreground.as_raw() > 0
             && foreground != pid
         {
@@ -108,7 +90,7 @@ impl Hangup {
         for group in &groups {
             send(*group, Signal::SIGHUP);
         }
-        drop(pty);
+        drop(master);
         self.runtime.spawn(async move {
             tokio::time::sleep(GRACE).await;
             for group in groups {
@@ -116,7 +98,7 @@ impl Hangup {
                     send(group, Signal::SIGKILL);
                 }
             }
-            drop(shell);
+            drop(child);
         });
     }
 }

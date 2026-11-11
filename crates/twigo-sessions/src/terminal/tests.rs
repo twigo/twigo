@@ -330,6 +330,20 @@ async fn a_terminal_closed_after_its_shell_ended_signals_nothing() {
     assert!(spared, "the group that bears the shell's pid was signalled");
 }
 
+#[tokio::test]
+async fn a_job_left_writing_meets_a_closed_terminal_once_its_shell_ended() {
+    let dir = TempDir::new().unwrap();
+    let mut opened = Opened::new(script(
+        dir.path(),
+        "trap '' HUP; yes & echo $! > job.pid; exit 0",
+    ));
+    assert_eq!(opened.end().await, ShellEnd::Exited { code: 0 });
+    let job = wait_for_pid(&dir.path().join("job.pid")).await;
+    let ended = gone(job, Duration::from_secs(2)).await;
+    let _ = kill(job, Signal::SIGKILL);
+    assert!(ended, "the job still writes to the terminal");
+}
+
 /// Gives the ended shell's pid to an unrelated process group through
 /// `ns_last_pid`, as heavy forking would by chance.
 #[cfg(target_os = "linux")]
