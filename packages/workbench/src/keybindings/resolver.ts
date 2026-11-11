@@ -178,20 +178,26 @@ function overlaps(a: readonly string[], b: readonly string[]): boolean {
   return a.slice(0, b.length).every((id, at) => id === b[at]);
 }
 
-/** Whether `when` holds wherever `other` does, judged by the terms of its `&&` that `other` has: false where unsure. */
+/** Whether `other` holds wherever `when` does, judged by the terms of `when`'s `&&`: each of `other`'s `&&` terms is one of them, or one of its `||` terms is; false where unsure. */
 function implies(when: When | undefined, other: When | undefined): boolean {
-  const held = conjuncts(when);
-  return conjuncts(other).every((term) => held.includes(term));
+  const held = conjuncts(when).map(key);
+  const holds = (term: When): boolean =>
+    held.includes(key(term)) ||
+    (term.op === "&&" && term.terms.every(holds)) ||
+    (term.op === "||" && term.terms.some(holds));
+  return other === undefined || holds(other);
 }
 
-function conjuncts(when: When | undefined): string[] {
+function conjuncts(when: When | undefined): When[] {
   if (when === undefined) return [];
   if (when.op === "&&") return when.terms.flatMap(conjuncts);
-  return [
-    JSON.stringify(when, (_, value: unknown) =>
-      value instanceof RegExp ? String(value) : value,
-    ),
-  ];
+  return [when];
+}
+
+function key(when: When): string {
+  return JSON.stringify(when, (_, value: unknown) =>
+    value instanceof RegExp ? String(value) : value,
+  );
 }
 
 /** Bare keys fire in a focused list, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */

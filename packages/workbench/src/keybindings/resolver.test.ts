@@ -338,6 +338,29 @@ describe("shadowing", () => {
     expect(target.bindingsOf("third")).toEqual([]);
   });
 
+  test("a later rule whose when is a disjunction takes the key wherever one of its terms holds where the binding's when does", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "first", when: "listFocus" },
+        { key: "mod+k", command: "second", when: "listFocus || editorFocus" },
+        { key: "mod+o", command: "third", when: "listFocus && inputFocus" },
+        { key: "mod+o", command: "fourth", when: "editorFocus || inputFocus" },
+        { key: "mod+l", command: "fifth", when: "listFocus" },
+        { key: "mod+l", command: "sixth", when: "editorFocus || inputFocus" },
+        { key: "mod+j", command: "seventh", when: "listFocus || editorFocus" },
+        { key: "mod+j", command: "eighth", when: "listFocus || editorFocus" },
+        { key: "mod+u", command: "ninth", when: "listFocus || editorFocus" },
+        { key: "mod+u", command: "tenth", when: "listFocus" },
+      ),
+    );
+    expect(resolve(target, [K], LIST)).toBe("second");
+    expect(target.bindingsOf("first")).toEqual([]);
+    expect(target.bindingsOf("third")).toEqual([]);
+    expect(target.bindingsOf("fifth")).toHaveLength(1);
+    expect(target.bindingsOf("seventh")).toEqual([]);
+    expect(target.bindingsOf("ninth")).toHaveLength(1);
+  });
+
   test("a later single chord shadows the chords that start with it, and a later chord shadows the single one it starts", () => {
     const chord = resolver(
       core(
