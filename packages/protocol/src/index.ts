@@ -80,6 +80,7 @@ export type {
   Gvr,
   KeyboardLayout,
   KeyMapping,
+  KubeconfigNames,
   KubeconfigOffer,
   KubeconfigOfferAnswer,
   KubeconfigOfferEvent,

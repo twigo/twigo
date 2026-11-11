@@ -5,20 +5,22 @@ import { describeOffer } from "./offerWords";
 const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
   id: 1,
   terminal: "Terminal 3",
+  session: 7,
+  context: "dev",
   contexts: [],
   clusters: [],
   users: [],
   target: "~/.kube/config",
-  taken: [],
+  left_out: { contexts: [], clusters: [], users: [] },
   ...more,
 });
 
-test("an offer says how many entries of each kind came, and where a move writes them", () => {
+test("an offer says which terminal and context the entries came from, how many of each section came, and where a move writes them", () => {
   expect(
     describeOffer(offer({ contexts: ["a"], clusters: ["a"], users: ["a"] })),
   ).toMatchObject({
     title:
-      "Terminal 3 added a context, a cluster and a user to its own kubeconfig.",
+      "Terminal 3 in dev added a context, a cluster and a user to its own kubeconfig.",
     move: "Move to ~/.kube/config",
   });
   expect(
@@ -26,25 +28,88 @@ test("an offer says how many entries of each kind came, and where a move writes 
       offer({ contexts: ["a", "b"], clusters: ["a", "b"], users: ["a"] }),
     ).title,
   ).toBe(
-    "Terminal 3 added 2 contexts, 2 clusters and a user to its own kubeconfig.",
+    "Terminal 3 in dev added 2 contexts, 2 clusters and a user to its own kubeconfig.",
   );
   expect(describeOffer(offer({ clusters: ["a"], users: ["u"] })).title).toBe(
-    "Terminal 3 added a cluster and a user to its own kubeconfig.",
+    "Terminal 3 in dev added a cluster and a user to its own kubeconfig.",
   );
 });
 
-test("a name that several kinds of entry carry is listed once with its kinds, and what the person's files hold is left out of the move", () => {
+test("a move writes the names of each section that it does not leave out, and a section with none is not listed", () => {
   const words = describeOffer(
     offer({
       contexts: ["a", "b"],
       clusters: ["a", "b"],
       users: ["a", "u-b"],
-      taken: ["b"],
+      left_out: { contexts: ["b"], clusters: ["b"], users: [] },
     }),
   );
   expect(words.moves).toEqual([
-    { name: "a", kinds: ["context", "cluster", "user"] },
-    { name: "u-b", kinds: ["user"] },
+    { label: "Contexts", names: ["a"] },
+    { label: "Clusters", names: ["a"] },
+    { label: "Users", names: ["a", "u-b"] },
   ]);
-  expect(words.leaves).toEqual([{ name: "b", kinds: ["context", "cluster"] }]);
+  expect(
+    describeOffer(
+      offer({
+        contexts: ["a"],
+        clusters: ["a"],
+        users: ["a"],
+        left_out: { contexts: ["a"], clusters: ["a"], users: ["a"] },
+      }),
+    ).moves,
+  ).toEqual([]);
+});
+
+test("a move leaves out names by section, with what a person can look for in their files", () => {
+  const words = describeOffer(
+    offer({
+      contexts: ["a", "b"],
+      clusters: ["a", "b"],
+      users: ["a", "b"],
+      left_out: { contexts: ["b"], clusters: ["b"], users: ["b"] },
+    }),
+  );
+  expect(words.leaves).toEqual([
+    {
+      label: "Contexts",
+      names: ["b"],
+      reason:
+        "Your files have a context of that name, or the cluster or user it names is another one there.",
+    },
+    {
+      label: "Clusters",
+      names: ["b"],
+      reason:
+        "Your files have a cluster of that name, or only contexts left out name it.",
+    },
+    {
+      label: "Users",
+      names: ["b"],
+      reason:
+        "Your files have a user of that name, or only contexts left out name it.",
+    },
+  ]);
+});
+
+test("a cluster left out with no context left out is one that the person's files have, and an offer that leaves nothing out lists nothing", () => {
+  const words = describeOffer(
+    offer({
+      contexts: ["a"],
+      clusters: ["a", "b"],
+      users: ["a"],
+      left_out: { contexts: [], clusters: ["b"], users: [] },
+    }),
+  );
+  expect(words.leaves).toEqual([
+    {
+      label: "Clusters",
+      names: ["b"],
+      reason: "Your files have a cluster of that name.",
+    },
+  ]);
+  expect(
+    describeOffer(offer({ contexts: ["a"], clusters: ["a"], users: ["a"] }))
+      .leaves,
+  ).toEqual([]);
 });

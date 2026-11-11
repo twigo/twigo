@@ -1,42 +1,57 @@
-import type { OfferEntry, OfferWords } from "./offerWords";
+import { cn } from "@twigo/ui";
+import type { OfferSection, OfferWords } from "./offerWords";
 
-function Names({
-  label,
-  entries,
+function Sections({
+  title,
+  sections,
 }: {
-  label: string;
-  entries: readonly OfferEntry[];
+  title: string;
+  sections: readonly OfferSection[];
 }) {
   return (
-    <div className="grid gap-0.5">
-      <span className="text-muted-foreground">{label}</span>
-      {entries.map(({ name, kinds }) => (
-        <span key={name} className="grid">
-          <code className="font-mono text-[11px] wrap-anywhere select-text">
-            {name}
-          </code>
-          <span className="text-[11px] text-muted-foreground">
-            {kinds.join(", ")}
-          </span>
-        </span>
+    <div className="grid content-start gap-1">
+      <span className="text-muted-foreground">{title}</span>
+      {sections.map(({ label, names, reason }) => (
+        <div key={label} className="grid gap-x-2 @lg:grid-cols-[4.5rem_1fr]">
+          <span className="font-medium">{label}</span>
+          <div className="grid gap-0.5">
+            {names.map((name) => (
+              <code
+                key={name}
+                className="font-mono text-[11px] wrap-anywhere select-text"
+              >
+                {name}
+              </code>
+            ))}
+            {reason !== undefined && (
+              <span className="text-[11px] text-muted-foreground">
+                {reason}
+              </span>
+            )}
+          </div>
+        </div>
       ))}
     </div>
   );
 }
 
-/** What came and what a move leaves out, by name. */
-export function OfferDetail({ words }: { words: OfferWords }) {
+export function OfferDetail({
+  words,
+  className,
+}: {
+  words: OfferWords;
+  className: string;
+}) {
   return (
-    <div className="grid gap-1.5">
-      {words.moves.length > 0 && (
-        <Names label="A move writes" entries={words.moves} />
-      )}
-      {words.leaves.length > 0 && (
-        <Names
-          label="A move leaves out, since your files have them"
-          entries={words.leaves}
-        />
-      )}
+    <div className={cn("@container overflow-y-auto", className)}>
+      <div className="grid gap-1.5 @lg:grid-cols-2 @lg:gap-4">
+        {words.moves.length > 0 && (
+          <Sections title="A move writes" sections={words.moves} />
+        )}
+        {words.leaves.length > 0 && (
+          <Sections title="A move leaves out" sections={words.leaves} />
+        )}
+      </div>
     </div>
   );
 }

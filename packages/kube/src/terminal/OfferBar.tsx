@@ -3,7 +3,7 @@ import { Button } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { OfferDetail } from "./OfferDetail";
 import { describeOffer } from "./offerWords";
-import { hostOf, offersInBars, type KubeconfigOffers } from "./offers";
+import { offersInBars, type KubeconfigOffers } from "./offers";
 import type { TerminalTabs } from "./tabs";
 
 /** The offers that came from a terminal, in a bar over it, in `offer:bar`. */
@@ -20,7 +20,7 @@ export function OfferBar({
   useChanges(tabs.changes);
   if (!offersInBars()) return null;
   return offers.offers
-    .filter((offer) => hostOf(offer, tabs) === uri)
+    .filter((offer) => tabs.uriOf(offer.session) === uri)
     .map((offer) => {
       const words = describeOffer(offer);
       const busy = offers.answering(offer.id);
@@ -36,7 +36,7 @@ export function OfferBar({
           />
           <div className="grid min-w-0 flex-1 gap-1.5">
             <span className="font-medium">{words.title}</span>
-            <OfferDetail words={words} />
+            <OfferDetail words={words} className="max-h-40" />
           </div>
           <div className="flex shrink-0 gap-1.5">
             <Button

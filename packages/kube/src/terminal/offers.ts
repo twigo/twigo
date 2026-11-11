@@ -7,8 +7,6 @@ import type {
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 import { variant } from "../variants";
-import type { TerminalTabs } from "./tabs";
-import { terminalTitle } from "./words";
 
 /**
  * The offers this window's terminals make to move what a tool wrote into a
@@ -92,22 +90,6 @@ export class KubeconfigOffers {
     this.#offers = this.#offers.filter((offer) => offer.id !== id);
     this.changes.emit();
   }
-}
-
-/**
- * The tab an offer came from, if its label names one tab among all the
- * spaces' terminals: spaces number theirs alike, and the offer carries the
- * label only.
- */
-export function hostOf(
-  offer: KubeconfigOffer,
-  tabs: TerminalTabs,
-): string | undefined {
-  const named = tabs
-    .list()
-    .filter(([, tab]) => terminalTitle(tab.input) === offer.terminal);
-  const [only, ...more] = named;
-  return more.length === 0 ? only?.[0] : undefined;
 }
 
 /** Whether the offers show in a bar over their terminal, in `offer:bar`, rather than as toasts. */

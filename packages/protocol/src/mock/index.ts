@@ -755,7 +755,11 @@ export function createMockBackend(
           parked.kind,
           onMessage,
         );
-        offers.opened(parked.label);
+        offers.opened({
+          terminal: parked.label,
+          session: open.id,
+          context: parked.context,
+        });
         return null;
       }
       const found = shellOf(open.id);

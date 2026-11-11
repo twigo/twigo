@@ -3,6 +3,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  screen,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -19,6 +20,7 @@ import { withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
 import { KubeconfigOffers } from "./offers";
 import { createTerminalTabs, registerTerminals } from "./register";
+import type { TerminalTabs } from "./tabs";
 
 withScreenSize(1400);
 withTerminalLayout();
@@ -48,11 +50,13 @@ function offer(
   return {
     id,
     terminal: "Terminal 1",
+    session: 1,
+    context: "dev",
     contexts: [`${ARN}/a`],
     clusters: [`${ARN}/a`],
     users: [`${ARN}/a`],
     target: "~/.kube/config",
-    taken: [],
+    left_out: { contexts: [], clusters: [], users: [] },
     ...more,
   };
 }
@@ -182,6 +186,7 @@ test("an offer withdrawn while its answer is on its way is gone, and a refusal o
 
 interface Mounted {
   readonly workbench: Workbench;
+  readonly tabs: TerminalTabs;
   readonly backend: Backend;
 }
 
@@ -193,7 +198,8 @@ async function mounted(
   history.replaceState(null, "", query === "" ? "/" : `/?variant=${query}`);
   const scenario = "terminalOffer";
   const workbench = await testWorkbench(scenario, backend, "mac");
-  registerTerminals(workbench, createTerminalTabs(workbench));
+  const tabs = createTerminalTabs(workbench);
+  registerTerminals(workbench, tabs);
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);
@@ -202,6 +208,7 @@ async function mounted(
   await settle();
   return {
     workbench,
+    tabs,
     backend,
     create: async () => {
       const run = workbench.commands.execute(
@@ -241,9 +248,9 @@ const toastButton = (name: string) => {
 };
 
 const FIRST =
-  "Terminal 1 added 2 contexts, 2 clusters and 2 users to its own kubeconfig.";
+  "Terminal 1 in dev added 2 contexts, 2 clusters and 2 users to its own kubeconfig.";
 const SECOND =
-  "Terminal 1 added a context, a cluster and a user to its own kubeconfig.";
+  "Terminal 1 in dev added a context, a cluster and a user to its own kubeconfig.";
 
 async function later(ms: number) {
   await act(() => vi.advanceTimersByTimeAsync(ms));
@@ -260,9 +267,18 @@ test("an offer comes as a toast that says what came and what a move leaves out, 
   expect(more).toEqual([]);
   expect(toast).toContain(FIRST);
   expect(toast).toContain(`${ARN}/prod-eu-2`);
-  expect(toast).toContain("A move leaves out");
   expect(toast).toContain(`${ARN}/prod-eu-3`);
-  expect(toast).toContain("context, cluster, user");
+  expect(toast).toContain("A move writes");
+  expect(toast).toContain("A move leaves out");
+  expect(toast).toContain(
+    "Your files have a context of that name, or the cluster or user it names is another one there.",
+  );
+  expect(toast).toContain(
+    "Your files have a cluster of that name, or only contexts left out name it.",
+  );
+  expect(toast).toContain(
+    "Your files have a user of that name, or only contexts left out name it.",
+  );
   await later(10 * 60_000);
   expect(live()).toHaveLength(1);
 
@@ -334,7 +350,7 @@ test("an offer replaced by the core shows its new words in the same toast", asyn
   await settle(4);
   expect(live()).toHaveLength(1);
   expect(live()[0]).toContain(
-    "Terminal 1 added a context, a cluster and a user",
+    "Terminal 1 in dev added a context, a cluster and a user",
   );
   act(() => {
     core.send({
@@ -409,12 +425,10 @@ test("offer:bar answers from the bar, which goes with the offer", async () => {
   expect(live()).toEqual([]);
 });
 
-test("offer:bar falls back to a toast where two spaces have a terminal of that label", async () => {
-  const { workbench, backend, create } = await mounted("dev", "offer:bar");
-  await create();
-  await act(() => workbench.spaces.open("staging"));
+async function createIn(workbench: Workbench, space: string) {
+  await act(() => workbench.spaces.open(space));
   act(() => {
-    workbench.spaces.select("staging");
+    workbench.spaces.select(space);
   });
   await settle(6);
   const run = workbench.commands.execute(
@@ -423,10 +437,66 @@ test("offer:bar falls back to a toast where two spaces have a terminal of that l
   );
   await settle(10);
   await run;
+}
+
+const panelText = () =>
+  document.querySelector('[aria-label="Panel"]')?.textContent ?? "";
+
+test("offer:bar finds the tab by the session, so another space's terminal of the same label is not it", async () => {
+  const { workbench, backend, create } = await mounted("dev", "offer:bar");
+  await create();
+  await createIn(workbench, "staging");
   await later(OFFER_AFTER_MS);
+  expect(live()).toEqual([]);
+  expect(panelText()).not.toContain(FIRST);
+
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settle(6);
+  expect(live()).toEqual([]);
+  expect(panelText()).toContain(FIRST);
+  leave(backend);
+});
+
+test("offer:bar falls back to a toast once its terminal's tab is closed, and a later terminal of the same label in another space is not its tab", async () => {
+  const { workbench, backend, create } = await mounted("dev", "offer:bar");
+  await create();
+  await later(OFFER_AFTER_MS);
+  expect(panelText()).toContain(FIRST);
+
+  act(() => {
+    workbench.editors.close(terminalUri({ space: "dev", n: 1 }));
+  });
+  await settle(6);
   expect(live()).toHaveLength(1);
-  expect(
-    document.querySelector('[aria-label="Panel"]')?.textContent,
-  ).not.toContain(FIRST);
+  expect(live()[0]).toContain(FIRST);
+
+  await createIn(workbench, "staging");
+  expect(panelText()).toContain("Terminal 1");
+  expect(panelText()).not.toContain(FIRST);
+  expect(live()).toHaveLength(1);
+  leave(backend);
+});
+
+test("offer:bar falls back to a toast once its terminal is restarted, which is another session", async () => {
+  const { tabs, backend, create } = await mounted("dev", "offer:bar");
+  await create();
+  await later(OFFER_AFTER_MS);
+  expect(panelText()).toContain(FIRST);
+  expect(live()).toEqual([]);
+
+  const tab = tabs.get(terminalUri({ space: "dev", n: 1 }));
+  act(() => {
+    tab?.term.input("exit\r");
+  });
+  await settle(4);
+  expect(panelText()).toContain(FIRST);
+  fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));
+  await settle(10);
+  expect(tab?.getStatus().state).toBe("running");
+  expect(panelText()).not.toContain(FIRST);
+  expect(live()).toHaveLength(1);
+  expect(live()[0]).toContain(FIRST);
   leave(backend);
 });

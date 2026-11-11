@@ -1,19 +1,27 @@
-import type { KubeconfigOffer } from "@twigo/protocol";
+import type { KubeconfigNames, KubeconfigOffer } from "@twigo/protocol";
 
-/** One name that came, with the kinds of entry that carry it: EKS names a context, a cluster and a user alike. */
-export interface OfferEntry {
-  readonly name: string;
-  readonly kinds: readonly string[];
+export interface OfferSection {
+  readonly label: string;
+  readonly names: readonly string[];
+  readonly reason?: string;
 }
 
 export interface OfferWords {
   readonly title: string;
-  /** What a move writes. */
-  readonly moves: readonly OfferEntry[];
-  /** What a move leaves out, since the person's files hold the name already. */
-  readonly leaves: readonly OfferEntry[];
+  readonly moves: readonly OfferSection[];
+  readonly leaves: readonly OfferSection[];
   readonly move: string;
 }
+
+const SECTIONS: readonly {
+  readonly section: keyof KubeconfigNames;
+  readonly noun: string;
+  readonly label: string;
+}[] = [
+  { section: "contexts", noun: "context", label: "Contexts" },
+  { section: "clusters", noun: "cluster", label: "Clusters" },
+  { section: "users", noun: "user", label: "Users" },
+];
 
 const count = (n: number, noun: string) =>
   n === 1 ? `a ${noun}` : `${String(n)} ${noun}s`;
@@ -26,25 +34,40 @@ function joined(parts: readonly string[]): string {
     : `${parts.slice(0, -1).join(", ")} and ${last ?? ""}`;
 }
 
-export function describeOffer(offer: KubeconfigOffer): OfferWords {
-  const lists: readonly (readonly [string, readonly string[]])[] = [
-    ["context", offer.contexts],
-    ["cluster", offer.clusters],
-    ["user", offer.users],
-  ];
-  const kinds = new Map<string, string[]>();
-  for (const [kind, names] of lists) {
-    for (const name of names)
-      kinds.set(name, [...(kinds.get(name) ?? []), kind]);
+/** The offer names no reason per name, so a section says what the core's rule (ARCHITECTURE 4.6) may have left its names out for. */
+function reason(
+  section: keyof KubeconfigNames,
+  noun: string,
+  leftOut: KubeconfigNames,
+): string {
+  if (section === "contexts") {
+    return "Your files have a context of that name, or the cluster or user it names is another one there.";
   }
-  const entries = [...kinds].map(([name, of]) => ({ name, kinds: of }));
-  const came = lists
-    .filter(([, names]) => names.length > 0)
-    .map(([kind, names]) => count(names.length, kind));
+  const named =
+    leftOut.contexts.length > 0 ? ", or only contexts left out name it" : "";
+  return `Your files have a ${noun} of that name${named}.`;
+}
+
+export function describeOffer(offer: KubeconfigOffer): OfferWords {
+  const came = SECTIONS.filter(({ section }) => offer[section].length > 0).map(
+    ({ section, noun }) => count(offer[section].length, noun),
+  );
+  const moves = SECTIONS.flatMap(({ section, label }) => {
+    const names = offer[section].filter(
+      (name) => !offer.left_out[section].includes(name),
+    );
+    return names.length > 0 ? [{ label, names }] : [];
+  });
+  const leaves = SECTIONS.flatMap(({ section, noun, label }) => {
+    const names = offer.left_out[section];
+    return names.length > 0
+      ? [{ label, names, reason: reason(section, noun, offer.left_out) }]
+      : [];
+  });
   return {
-    title: `${offer.terminal} added ${joined(came)} to its own kubeconfig.`,
-    moves: entries.filter(({ name }) => !offer.taken.includes(name)),
-    leaves: entries.filter(({ name }) => offer.taken.includes(name)),
+    title: `${offer.terminal} in ${offer.context} added ${joined(came)} to its own kubeconfig.`,
+    moves,
+    leaves,
     move: `Move to ${offer.target}`,
   };
 }

@@ -1,4 +1,8 @@
-import type { TerminalKind, TerminalSession } from "@twigo/protocol";
+import type {
+  SubscriptionId,
+  TerminalKind,
+  TerminalSession,
+} from "@twigo/protocol";
 import type { TerminalInput } from "../uri";
 import { ShellTabs } from "../xterm/tabs";
 import {
@@ -17,6 +21,7 @@ export function started(session: TerminalSession): TerminalStart {
 /** One terminal tab: a shell on this machine (ARCHITECTURE 4.6). */
 export class TerminalTab extends ShellTerminal {
   #kind: TerminalKind | undefined;
+  #session: SubscriptionId | undefined;
 
   constructor(
     readonly input: TerminalInput,
@@ -26,6 +31,7 @@ export class TerminalTab extends ShellTerminal {
   ) {
     super(options, changed, session);
     this.#kind = session?.kind;
+    this.#session = session?.id;
   }
 
   #restoredView: HTMLElement | null = null;
@@ -33,6 +39,10 @@ export class TerminalTab extends ShellTerminal {
   /** How it reaches clusters; none for a tab restored from the saved layout. */
   get kind(): TerminalKind | undefined {
     return this.#kind;
+  }
+
+  get session(): SubscriptionId | undefined {
+    return this.#session;
   }
 
   /** The view of a tab nothing started, which takes the focus in place of a terminal, so that `terminalFocus` holds. */
@@ -47,6 +57,7 @@ export class TerminalTab extends ShellTerminal {
 
   override start(session: TerminalStart): void {
     this.#kind = session.kind;
+    this.#session = session.id;
     super.start(session);
   }
 }
@@ -81,6 +92,10 @@ export class TerminalTabs extends ShellTabs<
       [...this.#recent].reverse().find(inSpace) ??
       this.list().find(([, tab]) => tab.input.space === space)?.[0]
     );
+  }
+
+  uriOf(session: SubscriptionId): string | undefined {
+    return this.list().find(([, tab]) => tab.session === session)?.[0];
   }
 
   override closed(uri: string): void {

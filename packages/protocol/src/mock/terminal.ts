@@ -251,28 +251,38 @@ export class MockTerminal {
   }
 }
 
-type Draft = Omit<KubeconfigOffer, "id" | "terminal">;
+type Draft = Omit<KubeconfigOffer, "id" | "terminal" | "session" | "context">;
 
 const EKS = "arn:aws:eks:eu-west-1:123456789012:cluster";
 const TARGET = "~/.kube/config";
 
-/** What `aws eks update-kubeconfig` writes twice: the first cluster is new, and the user's file has the second already. */
+/**
+ * What `aws eks update-kubeconfig` writes twice: the user's files have a
+ * context named like the second of the first two, so a move leaves out that
+ * context and the cluster and the user only it names.
+ */
 const DRAFTS: readonly Draft[] = [
   {
     contexts: [`${EKS}/prod-eu-2`, `${EKS}/prod-eu-3`],
     clusters: [`${EKS}/prod-eu-2`, `${EKS}/prod-eu-3`],
     users: [`${EKS}/prod-eu-2`, `${EKS}/prod-eu-3`],
     target: TARGET,
-    taken: [`${EKS}/prod-eu-3`],
+    left_out: {
+      contexts: [`${EKS}/prod-eu-3`],
+      clusters: [`${EKS}/prod-eu-3`],
+      users: [`${EKS}/prod-eu-3`],
+    },
   },
   {
     contexts: [`${EKS}/staging-us`],
     clusters: [`${EKS}/staging-us`],
     users: [`${EKS}/staging-us`],
     target: TARGET,
-    taken: [],
+    left_out: { contexts: [], clusters: [], users: [] },
   },
 ];
+
+type Source = Pick<KubeconfigOffer, "terminal" | "session" | "context">;
 
 /**
  * The offers of a window's terminals as the window sees them: it hears those
@@ -284,7 +294,7 @@ export class MockOffers {
   #follower: ((event: KubeconfigOfferEvent) => void) | undefined;
   #coming: Draft[] = [...DRAFTS];
   #started = false;
-  #label = "";
+  #source: Source | undefined;
   #next = 1;
 
   constructor(private readonly scenario: TerminalScenario | undefined) {}
@@ -295,10 +305,10 @@ export class MockOffers {
   }
 
   /** The first terminal to open is the one the offers come from. */
-  opened(label: string): void {
+  opened(source: Source): void {
     if (this.scenario === undefined || this.#started) return;
     this.#started = true;
-    this.#label = label;
+    this.#source = source;
     this.#later();
   }
 
@@ -314,11 +324,11 @@ export class MockOffers {
   #later(): void {
     setTimeout(() => {
       const draft = this.#coming.shift();
-      if (draft === undefined) return;
+      if (draft === undefined || this.#source === undefined) return;
       const offer: KubeconfigOffer = {
         ...draft,
+        ...this.#source,
         id: this.#next++,
-        terminal: this.#label,
       };
       this.#waiting.set(offer.id, offer);
       this.#follower?.({ event: "offered", offer });

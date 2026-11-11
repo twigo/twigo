@@ -292,24 +292,36 @@ async function followed(scenario: MockScenario) {
 const offers = (events: readonly KubeconfigOfferEvent[]): KubeconfigOffer[] =>
   events.flatMap((event) => (event.event === "offered" ? [event.offer] : []));
 
-test("an offer comes 3 s after a terminal opens, from that terminal, with one name that the person's files hold", async () => {
+test("an offer comes 3 s after a terminal opens, from that terminal's session and context, and says by section what a move leaves out", async () => {
   const { backend, events } = await followed("terminalOffer");
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 2);
   expect(events).toEqual([]);
-  await opened("dev", "terminalOffer", "Terminal 4", backend);
+  const { session } = await opened(
+    "dev",
+    "terminalOffer",
+    "Terminal 4",
+    backend,
+  );
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS - 1);
   expect(events.length).toBe(0);
   await vi.advanceTimersByTimeAsync(1);
   const [offer, ...more] = offers(events);
   expect(more).toEqual([]);
   expect(offer?.terminal).toBe("Terminal 4");
+  expect(offer?.session).toBe(session.id);
+  expect(offer?.context).toBe("dev");
   expect(offer?.target).toBe("~/.kube/config");
   expect(offer?.contexts).toEqual(offer?.clusters);
+  expect(offer?.contexts).toEqual(offer?.users);
   expect(offer?.contexts[0]).toMatch(
     /^arn:aws:eks:[a-z0-9-]+:\d{12}:cluster\//,
   );
-  expect(offer?.taken).toHaveLength(1);
-  expect(offer?.contexts).toContain(offer?.taken[0]);
+  const second = offer?.contexts[1];
+  expect(offer?.left_out).toEqual({
+    contexts: [second],
+    clusters: [second],
+    users: [second],
+  });
 });
 
 test("the second offer comes 3 s after the first is answered, which withdraws the first, and nothing follows the second", async () => {
@@ -331,7 +343,7 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
   await vi.advanceTimersByTimeAsync(1);
   const [, second] = offers(events);
   expect(second?.id).not.toBe(first.id);
-  expect(second?.taken).toEqual([]);
+  expect(second?.left_out).toEqual({ contexts: [], clusters: [], users: [] });
 
   if (!second) throw new Error("no second offer");
   await answered(

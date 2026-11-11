@@ -36,7 +36,7 @@ export function presentOffers(
         {
           icon: FileInput,
           message: words.title,
-          detail: <OfferDetail words={words} />,
+          detail: <OfferDetail words={words} className="max-h-[50vh]" />,
           choices: [
             {
               label: words.move,

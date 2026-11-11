@@ -11,7 +11,7 @@ import { watchClose } from "../xterm/closed";
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
 import { KindTabIcon } from "./KindTabIcon";
-import { hostOf, KubeconfigOffers, offersInBars } from "./offers";
+import { KubeconfigOffers, offersInBars } from "./offers";
 import { presentOffers } from "./presentOffers";
 import { RESTART_TERMINAL, TerminalEditor } from "./TerminalEditor";
 import { TerminalActions } from "./TerminalActions";
@@ -46,7 +46,7 @@ export function registerTerminals(
   presentOffers(
     offers,
     tabs,
-    (offer) => offersInBars() && hostOf(offer, tabs) !== undefined,
+    (offer) => offersInBars() && tabs.uriOf(offer.session) !== undefined,
   );
   offers.watch().catch((error: unknown) => {
     workbench.report(error);
