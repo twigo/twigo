@@ -1,8 +1,14 @@
 import { expect, test } from "vitest";
+import type { TerminalKind } from "@twigo/protocol";
 import { describeKind } from "./kind";
 
+const zsh = (kind: TerminalKind) =>
+  ({ kind, shell: "zsh", kubeconfigKept: true }) as const;
+const sh = (kind: TerminalKind) =>
+  ({ kind, shell: "sh", kubeconfigKept: false }) as const;
+
 test("a terminal with the person's credentials says so, and warns once its context is not read-write", () => {
-  const own = { kind: "kubeconfig" } as const;
+  const own = zsh({ kind: "kubeconfig" });
   expect(describeKind(own, "dev", "read-write", [])).toMatchObject({
     credentials: "own",
     short: "Your credentials",
@@ -26,7 +32,7 @@ test("a terminal with the person's credentials says so, and warns once its conte
 
 test("a terminal through the proxy says the context's mode now, and what made it so", () => {
   const words = (why: "mode" | "provider" | "policyFile") =>
-    describeKind({ kind: "proxy", why }, "prod-eu", "read-only", []);
+    describeKind(zsh({ kind: "proxy", why }), "prod-eu", "read-only", []);
   expect(words("mode")).toMatchObject({
     credentials: "proxy",
     short: "Proxy · read-only",
@@ -40,7 +46,7 @@ test("a terminal through the proxy says the context's mode now, and what made it
     "Your administrator's policy file sends prod-eu through the proxy.",
   );
   expect(
-    describeKind({ kind: "proxy", why: "mode" }, "prod-eu", undefined, [])
+    describeKind(zsh({ kind: "proxy", why: "mode" }), "prod-eu", undefined, [])
       .short,
   ).toBe("Proxy");
 });
@@ -48,7 +54,7 @@ test("a terminal through the proxy says the context's mode now, and what made it
 test("a terminal through the proxy has no warning in any mode, and offers no Restart", () => {
   for (const mode of ["read-write", "guarded", "read-only"] as const) {
     const words = describeKind(
-      { kind: "proxy", why: "policyFile" },
+      zsh({ kind: "proxy", why: "policyFile" }),
       "dev",
       mode,
       [],
@@ -60,7 +66,7 @@ test("a terminal through the proxy has no warning in any mode, and offers no Res
 
 test("a proxy terminal whose file a tool wrote a context into names it in the chip, with a warning that says what it means", () => {
   const words = describeKind(
-    { kind: "proxy", why: "mode" },
+    zsh({ kind: "proxy", why: "mode" }),
     "staging",
     "guarded",
     ["prod-eu"],
@@ -80,7 +86,7 @@ test("a proxy terminal whose file a tool wrote a context into names it in the ch
 
 test("several direct contexts are counted in the chip and named in the warning", () => {
   const words = describeKind(
-    { kind: "proxy", why: "mode" },
+    zsh({ kind: "proxy", why: "mode" }),
     "staging",
     "read-only",
     ["a", "b", "c"],
@@ -92,4 +98,66 @@ test("several direct contexts are counted in the chip and named in the warning",
   expect(words.warnings[0]?.detail).toContain(
     "A tool wrote them into this terminal's own kubeconfig: a, b, c.",
   );
+});
+
+const NOT_KEPT = "A startup file of sh may replace this terminal's KUBECONFIG.";
+
+test("a proxy terminal in a shell Twigo cannot keep KUBECONFIG in warns that a startup file may replace it, and it could then reach clusters with the person's credentials", () => {
+  const words = describeKind(
+    sh({ kind: "proxy", why: "mode" }),
+    "staging",
+    "guarded",
+    [],
+  );
+  expect(words.short).toBe("Proxy · guarded, KUBECONFIG not kept");
+  expect(words.warnings).toEqual([
+    {
+      title: NOT_KEPT,
+      detail:
+        "Twigo sets KUBECONFIG again after the startup files of zsh, bash, fish and pwsh, not of sh. If one of them sets it, this terminal could reach clusters with your credentials, not through the proxy.",
+    },
+  ]);
+  expect(words.restartable).toBe(false);
+});
+
+test("a kubeconfig terminal in such a shell warns that it may no longer be pinned to its context", () => {
+  const words = describeKind(
+    sh({ kind: "kubeconfig" }),
+    "dev",
+    "read-write",
+    [],
+  );
+  expect(words.short).toBe("Your credentials, KUBECONFIG not kept");
+  expect(words.warnings).toEqual([
+    {
+      title: NOT_KEPT,
+      detail:
+        "Twigo sets KUBECONFIG again after the startup files of zsh, bash, fish and pwsh, not of sh. If one of them sets it, this terminal may no longer be pinned to dev.",
+    },
+  ]);
+  expect(words.restartable).toBe(false);
+});
+
+test("the shell's warning comes after the others, and only the mode's offers Restart", () => {
+  const own = describeKind(sh({ kind: "kubeconfig" }), "dev", "guarded", []);
+  expect(own.short).toBe(
+    "Your credentials · guarded context, KUBECONFIG not kept",
+  );
+  expect(own.warnings.map(({ title }) => title)).toEqual([
+    "Holds your real credentials, and dev is guarded now.",
+    NOT_KEPT,
+  ]);
+  expect(own.restartable).toBe(true);
+
+  const proxied = describeKind(
+    sh({ kind: "proxy", why: "mode" }),
+    "staging",
+    "guarded",
+    ["prod-eu"],
+  );
+  expect(proxied.short).toBe(
+    "Proxy · guarded, prod-eu direct, KUBECONFIG not kept",
+  );
+  expect(proxied.warnings).toHaveLength(2);
+  expect(proxied.restartable).toBe(false);
 });

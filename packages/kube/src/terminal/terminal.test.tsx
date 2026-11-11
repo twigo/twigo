@@ -790,6 +790,30 @@ test("direct contexts are of one terminal: another terminal of the space has non
   screen.getByText("Proxy · guarded, staging direct");
 });
 
+test.each([
+  ["dev", "Your credentials, KUBECONFIG not kept"],
+  ["staging", "Proxy · guarded, KUBECONFIG not kept"],
+])(
+  "a terminal in the shell Twigo cannot keep KUBECONFIG in says so on its chip: %s",
+  async (space, chip) => {
+    const { tabs, create } = await mounted("terminalShell", space);
+    await create();
+    screen.getByText(chip);
+    expect(tabOf(tabs, 1, space).getStatus().state).toBe("running");
+    expect(text(tabOf(tabs, 1, space))).toContain("sh-3.2$");
+    expect(
+      screen.queryByRole("button", { name: "Restart Terminal" }),
+    ).toBeNull();
+  },
+);
+
+test("a shell that keeps KUBECONFIG says nothing of it", async () => {
+  const { create } = await mounted("ready", "staging");
+  await create();
+  screen.getByText("Proxy · guarded");
+  expect(screen.queryByText(/KUBECONFIG/)).toBeNull();
+});
+
 test("a tab nothing started says no kind", async () => {
   const { workbench } = await mounted("ready", "dev");
   act(() => {

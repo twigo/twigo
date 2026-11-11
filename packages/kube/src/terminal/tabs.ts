@@ -3,6 +3,7 @@ import type {
   TerminalKind,
   TerminalSession,
 } from "@twigo/protocol";
+import type { TerminalKindFacts } from "./kind";
 import type { TerminalInput } from "../uri";
 import { ShellTabs } from "../xterm/tabs";
 import {
@@ -20,8 +21,7 @@ export function started(session: TerminalSession): TerminalStart {
 
 /** One terminal tab: a shell on this machine (ARCHITECTURE 4.6). */
 export class TerminalTab extends ShellTerminal {
-  #kind: TerminalKind | undefined;
-  #session: SubscriptionId | undefined;
+  #created: TerminalSession | undefined;
 
   constructor(
     readonly input: TerminalInput,
@@ -30,19 +30,23 @@ export class TerminalTab extends ShellTerminal {
     session: TerminalStart | undefined,
   ) {
     super(options, changed, session);
-    this.#kind = session?.kind;
-    this.#session = session?.id;
+    this.#created = session;
   }
 
   #restoredView: HTMLElement | null = null;
 
   /** How it reaches clusters; none for a tab restored from the saved layout. */
   get kind(): TerminalKind | undefined {
-    return this.#kind;
+    return this.#created?.kind;
   }
 
   get session(): SubscriptionId | undefined {
-    return this.#session;
+    return this.#created?.id;
+  }
+
+  /** What the core said of the terminal it created; none for a tab restored from the saved layout. */
+  get facts(): TerminalKindFacts | undefined {
+    return this.#created;
   }
 
   /** The view of a tab nothing started, which takes the focus in place of a terminal, so that `terminalFocus` holds. */
@@ -56,8 +60,7 @@ export class TerminalTab extends ShellTerminal {
   }
 
   override start(session: TerminalStart): void {
-    this.#kind = session.kind;
-    this.#session = session.id;
+    this.#created = session;
     super.start(session);
   }
 }

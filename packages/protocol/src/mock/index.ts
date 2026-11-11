@@ -55,7 +55,9 @@ import {
 } from "./shell";
 import {
   isTerminalScenario,
+  keepsKubeconfig,
   MockOffers,
+  type TerminalShell,
   MockTerminal,
   terminalKind,
   TERMINAL_SCENARIOS,
@@ -269,6 +271,7 @@ export function createMockBackend(
       context: string;
       label: string;
       kind: TerminalKind;
+      shell: TerminalShell;
       terminal?: MockTerminal;
     }
   >();
@@ -560,8 +563,9 @@ export function createMockBackend(
         scenario === "policyFile",
       );
       const id = nextId++;
-      terminals.set(id, { context, label, kind });
-      return { id, kind, shell: "zsh", kubeconfigKept: true };
+      const shell = scenario === "terminalShell" ? "sh" : "zsh";
+      terminals.set(id, { context, label, kind, shell });
+      return { id, kind, shell, kubeconfigKept: keepsKubeconfig(shell) };
     },
     kubeconfig_offer_answer: (request) => offers.answer(request),
     logs_set_source: ({ id, source }) => {
@@ -754,6 +758,7 @@ export function createMockBackend(
             id: open.id,
             context: parked.context,
             kind: parked.kind,
+            shell: parked.shell,
             deleteContext: (name) => offers.deleteDirect(open.id, name),
           },
           onMessage,

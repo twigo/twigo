@@ -15,14 +15,14 @@ export function useKind(
   useChanges(spaces.changes);
   useChanges(catalog.changes);
   useChanges(offers.changes);
-  const kind = tab?.kind;
-  if (!tab || !kind) return undefined;
+  const facts = tab?.facts;
+  if (!tab || !facts) return undefined;
   const [context] =
     spaces.list.find((space) => space.id === tab.input.space)?.contexts ?? [];
   if (context === undefined) return undefined;
   const direct = tab.session === undefined ? [] : offers.direct(tab.session);
   return describeKind(
-    kind,
+    facts,
     context,
     catalog.find(context)?.access.mode,
     direct,

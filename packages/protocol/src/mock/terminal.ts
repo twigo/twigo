@@ -18,12 +18,14 @@ import { complete } from "./shell";
  * a while after the first terminal opens, and a second one a while after the
  * first is answered; for a proxy terminal the first comes with the context
  * the tool wrote into its file as a direct one. Any other scenario raises
- * none.
+ * none. `terminalShell` runs `sh` in the terminals, a shell that Twigo cannot
+ * keep `KUBECONFIG` in, where any other scenario runs `zsh`.
  */
-export type TerminalScenario = "terminalOffer";
+export type TerminalScenario = "terminalOffer" | "terminalShell";
 
 export const TERMINAL_SCENARIOS: readonly TerminalScenario[] = [
   "terminalOffer",
+  "terminalShell",
 ];
 
 export function isTerminalScenario(
@@ -58,7 +60,26 @@ export function terminalKind(
     : { kind: "proxy", why: "mode" };
 }
 
-const PROMPT = "you@mac ~ % ";
+/** The shells Twigo sets `KUBECONFIG` again after (`TerminalSession.kubeconfigKept`). */
+const KEEPS_KUBECONFIG: readonly string[] = ["zsh", "bash", "fish", "pwsh"];
+
+export const keepsKubeconfig = (shell: string): boolean =>
+  KEEPS_KUBECONFIG.includes(shell);
+
+export type TerminalShell = "zsh" | "sh";
+
+const SHELLS: Readonly<
+  Record<TerminalShell, { prompt: string; notFound: (name: string) => string }>
+> = {
+  zsh: {
+    prompt: "you@mac ~ % ",
+    notFound: (name) => `zsh: command not found: ${name}`,
+  },
+  sh: {
+    prompt: "sh-3.2$ ",
+    notFound: (name) => `sh: ${name}: command not found`,
+  },
+};
 const HOME_CONFIG = "/Users/you/.kube/config";
 const APP_DATA = "/Users/you/Library/Application Support/io.twigo.ide";
 
@@ -77,6 +98,7 @@ export interface Spawned {
   readonly id: number;
   readonly context: string;
   readonly kind: TerminalKind;
+  readonly shell: TerminalShell;
   /** Removes a context from the terminal's file if a tool wrote it there, and says whether it was. */
   readonly deleteContext: (name: string) => boolean;
 }
@@ -89,6 +111,7 @@ export class MockTerminal {
   readonly #id: number;
   readonly #context: string;
   readonly #kind: TerminalKind;
+  readonly #shell: (typeof SHELLS)[TerminalShell];
   readonly #deleteContext: (name: string) => boolean;
   readonly #onMessage: (message: ShellMessage) => void;
   readonly #decoder = new TextDecoder();
@@ -99,12 +122,13 @@ export class MockTerminal {
   #escape = "";
 
   constructor(
-    { id, context, kind, deleteContext }: Spawned,
+    { id, context, kind, shell, deleteContext }: Spawned,
     onMessage: (message: ShellMessage) => void,
   ) {
     this.#id = id;
     this.#context = context;
     this.#kind = kind;
+    this.#shell = SHELLS[shell];
     this.#deleteContext = deleteContext;
     this.#onMessage = onMessage;
     this.#later(0, () => {
@@ -147,7 +171,7 @@ export class MockTerminal {
   }
 
   #prompt(): void {
-    this.#write(PROMPT);
+    this.#write(this.#shell.prompt);
   }
 
   #key(character: string): void {
@@ -239,7 +263,7 @@ export class MockTerminal {
         return;
       }
     }
-    this.#write(`zsh: command not found: ${name}\r\n`);
+    this.#write(`${this.#shell.notFound(name)}\r\n`);
   }
 
   #deleteFromFile(name: string): void {
@@ -334,7 +358,7 @@ export class MockOffers {
 
   /** The first terminal to open is the one the offers come from. */
   opened(source: Source, kind: TerminalKind): void {
-    if (this.scenario === undefined || this.#started) return;
+    if (this.scenario !== "terminalOffer" || this.#started) return;
     this.#started = true;
     this.#source = source;
     this.#proxy = kind.kind === "proxy";

@@ -1,4 +1,9 @@
-import type { Mode, ProxyWhy, TerminalKind } from "@twigo/protocol";
+import type {
+  Mode,
+  ProxyWhy,
+  TerminalKind,
+  TerminalSession,
+} from "@twigo/protocol";
 
 export interface KindWarning {
   readonly title: string;
@@ -17,6 +22,11 @@ export interface KindWords {
   /** Whether Restart answers a warning: real credentials held on a context that is not read-write now. */
   readonly restartable: boolean;
 }
+
+export type TerminalKindFacts = Pick<
+  TerminalSession,
+  "kind" | "shell" | "kubeconfigKept"
+>;
 
 const PROXY =
   "Through Twigo's proxy, which follows each context's mode: a write from a guarded context asks first, and a read-only one is refused.";
@@ -47,12 +57,22 @@ function directWarning(direct: readonly [string, ...string[]]): KindWarning {
       };
 }
 
-/**
- * `mode` is the terminal's context's now, if the catalog lists it, and
- * `direct` the contexts of a proxy terminal's file that reach their clusters
- * with the person's credentials.
- */
-export function describeKind(
+function unkeptWarning(
+  kind: TerminalKind,
+  shell: string,
+  context: string,
+): KindWarning {
+  const outcome =
+    kind.kind === "proxy"
+      ? "could reach clusters with your credentials, not through the proxy"
+      : `may no longer be pinned to ${context}`;
+  return {
+    title: `A startup file of ${shell} may replace this terminal's KUBECONFIG.`,
+    detail: `Twigo sets KUBECONFIG again after the startup files of zsh, bash, fish and pwsh, not of ${shell}. If one of them sets it, this terminal ${outcome}.`,
+  };
+}
+
+function kindWords(
   kind: TerminalKind,
   context: string,
   mode: Mode | undefined,
@@ -102,5 +122,25 @@ export function describeKind(
       },
     ],
     restartable: true,
+  };
+}
+
+/**
+ * `mode` is the terminal's context's now, if the catalog lists it, and
+ * `direct` the contexts of a proxy terminal's file that reach their clusters
+ * with the person's credentials.
+ */
+export function describeKind(
+  { kind, shell, kubeconfigKept }: TerminalKindFacts,
+  context: string,
+  mode: Mode | undefined,
+  direct: readonly string[],
+): KindWords {
+  const words = kindWords(kind, context, mode, direct);
+  if (kubeconfigKept) return words;
+  return {
+    ...words,
+    short: `${words.short}, KUBECONFIG not kept`,
+    warnings: [...words.warnings, unkeptWarning(kind, shell, context)],
   };
 }

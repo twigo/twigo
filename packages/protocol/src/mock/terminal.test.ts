@@ -202,6 +202,31 @@ test("kubectl config current-context prints the context of the terminal", async 
   }
 });
 
+test("zsh keeps KUBECONFIG, and terminalShell runs sh, which Twigo cannot keep it in, with sh's prompt and words", async () => {
+  expect(await created("live", "dev")).toMatchObject({
+    shell: "zsh",
+    kubeconfigKept: true,
+  });
+  for (const context of ["dev", "staging"]) {
+    expect(await created("terminalShell", context)).toMatchObject({
+      shell: "sh",
+      kubeconfigKept: false,
+    });
+  }
+  const shell = await opened("dev", "terminalShell");
+  expect(shell.text()).toBe("sh-3.2$ ");
+  await shell.type("helm list\r");
+  expect(shell.text()).toContain("\r\nsh: helm: command not found\r\nsh-3.2$ ");
+  expect(MOCK_SCENARIOS).toContain("terminalShell");
+});
+
+test("terminalShell raises no offer", async () => {
+  const { backend, events } = await followed("terminalShell");
+  await opened("staging", "terminalShell", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(events).toEqual([]);
+});
+
 const APP_DATA = "/Users/you/Library/Application Support/io.twigo.ide";
 
 test("$KUBECONFIG says the kind: Twigo's file and then the user's, or the proxy's alone", async () => {
