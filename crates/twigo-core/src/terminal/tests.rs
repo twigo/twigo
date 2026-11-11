@@ -8,7 +8,7 @@ use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerKubeconfigOffer, ErrorKind, KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer,
     KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy, SetContextMode, ShellAck,
-    ShellEnd, ShellEvent, SubscriptionId, TerminalKind,
+    ShellEnd, ShellEvent, ShellInput, SubscriptionId, TerminalKind,
 };
 use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
@@ -128,8 +128,18 @@ impl Setup {
     }
 
     async fn create(&self, context: &str, script: &str) -> twigo_ipc::TerminalSession {
-        self.core
-            .set_terminal_program(PathBuf::from("/bin/sh"), vec!["-c".into(), script.into()]);
+        self.create_running(context, "/bin/sh", &["-c", script])
+            .await
+    }
+
+    async fn create_running(
+        &self,
+        context: &str,
+        program: &str,
+        args: &[&str],
+    ) -> twigo_ipc::TerminalSession {
+        let args = args.iter().map(OsString::from).collect();
+        self.core.set_terminal_program(PathBuf::from(program), args);
         self.core
             .terminal_create(
                 "main",
@@ -143,6 +153,10 @@ impl Setup {
     }
 
     async fn run(&self, id: SubscriptionId) -> (String, ShellEnd) {
+        self.run_typed(id, "").await
+    }
+
+    async fn run_typed(&self, id: SubscriptionId, typed: &str) -> (String, ShellEnd) {
         let (frames, mut received) = mpsc::unbounded_channel();
         self.core
             .shell_open(
@@ -156,6 +170,13 @@ impl Setup {
             )
             .await
             .unwrap();
+        if !typed.is_empty() {
+            let data = typed.as_bytes().to_vec();
+            self.core
+                .shell_input("main", ShellInput { id, data })
+                .await
+                .unwrap();
+        }
         let mut output = Vec::new();
         loop {
             let frame = tokio::time::timeout(WAIT, received.recv())
@@ -384,6 +405,87 @@ async fn a_proxy_terminal_s_file_and_tokens_go_when_its_shell_ends() {
         matches!(&answer, Err(kube::Error::Api(status)) if status.code == 401),
         "{answer:?}"
     );
+}
+
+#[tokio::test]
+async fn only_zsh_bash_fish_and_pwsh_keep_the_terminal_s_kubeconfig() {
+    let setup = Setup::new().await;
+    for (program, kept) in [
+        ("/bin/zsh", true),
+        ("/bin/bash", true),
+        ("/usr/bin/fish", true),
+        ("/usr/bin/pwsh", true),
+        ("/bin/sh", false),
+        ("/usr/bin/nu", false),
+    ] {
+        let session = setup.create_running("kind-a", program, &[]).await;
+        assert_eq!(session.kubeconfig_kept, kept, "{program}");
+        setup.core.shell_close("main", session.id).unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_zsh_terminal_keeps_its_kubeconfig_over_a_zshrc_that_exports_one() {
+    let setup = Setup::new().await;
+    std::fs::write(setup.home().join(".zshrc"), "export KUBECONFIG=/theirs\n").unwrap();
+    let session = setup.create_running("kind-a", "/bin/zsh", &[]).await;
+    let dir = setup.terminals().join("0");
+    assert!(dir.join(".zshenv").is_file());
+    let out = setup.dir.path().join("out");
+    let typed = format!(
+        "print -r -- \"$KUBECONFIG|${{+ZDOTDIR}}\" > {}; exit\n",
+        quoted(&out)
+    );
+    let (output, end) = setup.run_typed(session.id, &typed).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    let kubeconfig = format!(
+        "{}:{}",
+        dir.join("kubeconfig").display(),
+        setup.mine().display()
+    );
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        format!("{kubeconfig}|0\n"),
+        "{output}"
+    );
+}
+
+#[tokio::test]
+async fn a_proxy_terminal_keeps_the_proxy_s_file_over_a_bashrc_and_its_directory_goes_with_its_tab()
+{
+    let setup = Setup::new().await;
+    setup
+        .core
+        .set_context_mode(SetContextMode {
+            context: "kind-b".to_owned(),
+            mode: Some(Mode::Guarded),
+        })
+        .await
+        .unwrap();
+    std::fs::write(setup.home().join(".bashrc"), "export KUBECONFIG=/theirs\n").unwrap();
+    let session = setup.create_running("kind-b", "/bin/bash", &[]).await;
+    let dir = setup.terminals().join("0");
+    assert!(dir.join("bashrc").is_file());
+    let out = setup.dir.path().join("out");
+    let typed = format!("printf '%s\\n' \"$KUBECONFIG\" > {}; exit\n", quoted(&out));
+    let (output, end) = setup.run_typed(session.id, &typed).await;
+    assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+    let kubeconfig = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        kubeconfig.starts_with(
+            &setup
+                .dir
+                .path()
+                .join("data")
+                .join("proxy")
+                .display()
+                .to_string()
+        ),
+        "{kubeconfig}: {output}"
+    );
+    assert!(dir.exists(), "gone with the shell");
+    setup.core.shell_close("main", session.id).unwrap();
+    assert!(!dir.exists());
 }
 
 #[tokio::test]

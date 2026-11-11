@@ -7,6 +7,7 @@
 mod environment;
 mod frame;
 mod shell;
+mod terminal;
 #[cfg(test)]
 mod tests;
 
@@ -25,6 +26,7 @@ use tokio::time::{Duration, Instant, timeout_at};
 pub use environment::{Environment, Status};
 use frame::Vars;
 use shell::Syntax;
+pub use terminal::Startup;
 
 /// The argument that makes Twigo print its environment and exit, followed
 /// by the two halves of the marker to frame it with; `main()` checks for it

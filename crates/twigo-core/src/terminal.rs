@@ -2,8 +2,9 @@
 //! login shell on a pty, run over the shell commands beside the shells in
 //! pods. How one reaches clusters is decided as it is created: through the
 //! policy proxy alone, or with the user's own kubeconfig behind Twigo's file
-//! of the context. What tools write into its first file is offered for
-//! moving into the user's.
+//! of the context. zsh, bash, fish and pwsh set the terminal's `KUBECONFIG`
+//! again after their own startup files. What tools write into its first
+//! file is offered for moving into the user's.
 
 mod directory;
 mod environment;
@@ -46,17 +47,14 @@ pub(crate) struct Local {
     // the watch ends before its directory goes.
     session: Terminal,
     _watcher: Option<Watcher>,
-    reach: Reach,
-}
-
-/// How a terminal reaches clusters.
-enum Reach {
-    /// Its proxy process, which ends with its shell: a job the shell left,
-    /// as `kubectl port-forward … &` before `exit`, loses the proxy with it.
-    Proxy(Arc<Mutex<Option<ProxyProcess>>>),
+    /// A proxy terminal's process, which ends with its shell: a job the
+    /// shell left, as `kubectl port-forward … &` before `exit`, loses the
+    /// proxy with it.
+    proxy: Option<Arc<Mutex<Option<ProxyProcess>>>>,
     /// Its directory, which lives as long as its tab: kubectl in a job the
-    /// shell left would take the person's current context without it.
-    Directory { _held: Directory },
+    /// shell left would take the person's current context without Twigo's
+    /// file in it.
+    _directory: Directory,
 }
 
 impl Shell {
@@ -69,10 +67,7 @@ impl Shell {
         match self {
             Self::Pod(session) => session.open(cols, rows, send),
             Self::Local(local) => {
-                let proxy = match &local.reach {
-                    Reach::Proxy(process) => Some(Arc::clone(process)),
-                    Reach::Directory { .. } => None,
-                };
+                let proxy = local.proxy.clone();
                 let mut send = send;
                 local.session.open(cols, rows, move |frame| {
                     if let (Some(proxy), Frame::Event(ShellEvent::Ended { .. })) = (&proxy, &frame)
@@ -216,20 +211,19 @@ impl Core {
                 .collect();
             (shell, args)
         });
-        let (reach, file, kubeconfig) = match kind {
+        let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
+        let root = &self.terminals.root;
+        let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
+        let (proxy, file, kubeconfig) = match kind {
             TerminalKind::Proxy { .. } => {
                 let process = self
                     .proxy_process(Actor::Terminal, &label, Some(window), &context)
                     .await?;
                 let file = process.kubeconfig().to_owned();
                 let kubeconfig = file.clone().into_os_string();
-                let reach = Reach::Proxy(Arc::new(Mutex::new(Some(process))));
-                (reach, file, kubeconfig)
+                (Some(Arc::new(Mutex::new(Some(process)))), file, kubeconfig)
             }
             TerminalKind::Kubeconfig => {
-                let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
-                let root = &self.terminals.root;
-                let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
                 let entry = &found.entries.kubeconfig().contexts[0];
                 let file = directory.kubeconfig(entry).map_err(|e| written(root, e))?;
                 let kubeconfig = std::env::join_paths(
@@ -242,14 +236,35 @@ impl Core {
                         format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
                     )
                 })?;
-                (Reach::Directory { _held: directory }, file, kubeconfig)
+                (None, file, kubeconfig)
             }
+        };
+        let startup = twigo_env::Startup::of(
+            &program,
+            &args,
+            &kubeconfig,
+            directory.path(),
+            login.get("ZDOTDIR"),
+        );
+        let kubeconfig_kept = startup.is_some();
+        let (args, startup_env) = match startup {
+            Some(startup) => {
+                for (name, contents) in &startup.files {
+                    let path = directory.path();
+                    directory
+                        .write(name, contents)
+                        .map_err(|e| written(path, e))?;
+                }
+                (startup.args, startup.env)
+            }
+            None => (args, Vec::new()),
         };
         let chained = kind == TerminalKind::Kubeconfig;
         let (watcher, source) = self
             .watch_offers(window, &label, &context, &file, sources, chained)
             .unzip();
-        let env = environment::environment(&login, &kubeconfig, twigo_env::utf8_locale);
+        let env =
+            environment::environment(&login, &kubeconfig, &startup_env, twigo_env::utf8_locale);
         let cwd = login
             .get("HOME")
             .map_or_else(|| PathBuf::from("/"), PathBuf::from);
@@ -266,7 +281,8 @@ impl Core {
         let local = Local {
             session,
             _watcher: watcher,
-            reach,
+            proxy,
+            _directory: directory,
         };
         let id = self.shells.keep(ticket, Shell::Local(local))?;
         if let Some(source) = source {
@@ -276,7 +292,7 @@ impl Core {
             id,
             kind,
             shell,
-            kubeconfig_kept: false,
+            kubeconfig_kept,
         })
     }
 

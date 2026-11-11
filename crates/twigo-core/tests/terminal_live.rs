@@ -17,7 +17,8 @@ use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, KubeconfigNames,
     KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell,
-    ProxyWhy, SetContextMode, ShellAck, ShellEnd, ShellEvent, TerminalKind,
+    ProxyWhy, SetContextMode, ShellAck, ShellEnd, ShellEvent, ShellInput, TerminalKind,
+    TerminalSession,
 };
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -190,8 +191,20 @@ echo "Added new context $name to $f"
     }
 
     async fn terminal(&self, context: &str, script: &str) -> (TerminalKind, String, ShellEnd) {
-        self.core
-            .set_terminal_program(PathBuf::from("/bin/sh"), vec!["-c".into(), script.into()]);
+        let (session, output, end) = self
+            .run(context, "/bin/sh", vec!["-c".into(), script.into()], "")
+            .await;
+        (session.kind, output, end)
+    }
+
+    async fn run(
+        &self,
+        context: &str,
+        program: &str,
+        args: Vec<OsString>,
+        typed: &str,
+    ) -> (TerminalSession, String, ShellEnd) {
+        self.core.set_terminal_program(PathBuf::from(program), args);
         let session = self
             .core
             .terminal_create(
@@ -217,6 +230,13 @@ echo "Added new context $name to $f"
             )
             .await
             .unwrap();
+        if !typed.is_empty() {
+            let data = typed.as_bytes().to_vec();
+            self.core
+                .shell_input("main", ShellInput { id, data })
+                .await
+                .unwrap();
+        }
         let mut output = Vec::new();
         let end = loop {
             let frame = tokio::time::timeout(WAIT, received.recv())
@@ -243,7 +263,7 @@ echo "Added new context $name to $f"
         };
         self.core.shell_close("main", id).unwrap();
         let output = String::from_utf8_lossy(&output).replace("\r\n", "\n");
-        (session.kind, output, end)
+        (session, output, end)
     }
 
     async fn admin(&self) -> kube::Client {
@@ -304,6 +324,37 @@ async fn each_kind_prints_its_context_and_a_kubeconfig_terminal_leaves_the_user_
     );
     assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
     assert_eq!(lines(&output), [live.context.as_str()]);
+}
+
+#[tokio::test]
+#[ignore = "needs a kind cluster: TWIGO_TEST_KUBECONFIG"]
+async fn a_zshrc_that_exports_kubeconfig_leaves_each_kind_its_space_s_context() {
+    let proxied = json!({"terminal": {"usePolicyProxy": ["kind-*"]}}).to_string();
+    for policy in ["{}", proxied.as_str()] {
+        let live = Live::new(policy).await;
+        let theirs = live.dir.path().join("theirs");
+        std::fs::copy(live.mine(), &theirs).unwrap();
+        let used = Command::new("kubectl")
+            .arg("--kubeconfig")
+            .arg(&theirs)
+            .args(["config", "use-context", &live.alias])
+            .output()
+            .unwrap();
+        assert!(used.status.success(), "{used:?}");
+        std::fs::write(
+            live.dir.path().join("home").join(".zshrc"),
+            format!("export KUBECONFIG='{}'\n", theirs.display()),
+        )
+        .unwrap();
+        let typed = "printf '<%s>\\n' \"$(kubectl config current-context)\"; exit\n";
+        let (session, output, end) = live.run(&live.context, "/bin/zsh", Vec::new(), typed).await;
+        assert!(session.kubeconfig_kept);
+        assert_eq!(end, ShellEnd::Exited { code: 0 }, "{output}");
+        assert!(
+            output.contains(&format!("<{}>", live.context)),
+            "{policy}: {output}"
+        );
+    }
 }
 
 #[tokio::test]

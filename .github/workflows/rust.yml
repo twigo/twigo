@@ -40,7 +40,8 @@ jobs:
             xvfb \
             sway \
             vim-tiny \
-            zsh
+            zsh \
+            fish
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:

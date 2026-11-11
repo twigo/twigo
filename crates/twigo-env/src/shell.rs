@@ -58,7 +58,8 @@ impl Syntax {
         }
     }
 
-    fn quote(self, word: &[u8]) -> Vec<u8> {
+    /// `word` as one word of the shell's language.
+    pub(crate) fn quote(self, word: &[u8]) -> Vec<u8> {
         match self {
             Self::Posix => single_quoted(word, b"'\\''"),
             Self::Pwsh => pwsh_quoted(word),

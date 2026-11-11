@@ -1,9 +1,11 @@
-//! A kubeconfig terminal's own directory, `terminals/<n>/` in the app's data
-//! directory, and Twigo's file in it: a whole kubeconfig that holds a copy of
-//! the context's own entry and makes it current. kubectl writes back to the
-//! first file that names an entry, so a namespace set for the current
-//! context lands here, not in the user's file; `az` refuses a file without
-//! the three lists, and `gcloud` moves one aside.
+//! A terminal's own directory, `terminals/<n>/` in the app's data directory,
+//! and what Twigo writes into it: the startup files that set the terminal's
+//! `KUBECONFIG` after the shell's own, and for a kubeconfig terminal Twigo's
+//! file, a whole kubeconfig that holds a copy of the context's own entry and
+//! makes it current. kubectl writes back to the first file that names an
+//! entry, so a namespace set for the current context lands here, not in the
+//! user's file; `az` refuses a file without the three lists, and `gcloud`
+//! moves one aside.
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Write};
@@ -28,10 +30,13 @@ impl Directory {
         Ok(Self(dir))
     }
 
+    pub(super) fn path(&self) -> &Path {
+        &self.0
+    }
+
     /// Twigo's file, written whole before anything gives out its path,
     /// which only the user may read.
     pub(super) fn kubeconfig(&self, context: &NamedContext) -> io::Result<PathBuf> {
-        let path = self.0.join("kubeconfig");
         let config = json!({
             "apiVersion": "v1",
             "kind": "Config",
@@ -40,12 +45,22 @@ impl Directory {
             "contexts": [context],
             "current-context": context.name,
         });
+        self.write(
+            "kubeconfig",
+            &serde_json::to_vec_pretty(&config).expect("JSON"),
+        )
+    }
+
+    /// `name` in the directory, written whole before the shell starts,
+    /// which only the user may read.
+    pub(super) fn write(&self, name: &str, contents: &[u8]) -> io::Result<PathBuf> {
+        let path = self.0.join(name);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(&path)?;
-        file.write_all(&serde_json::to_vec_pretty(&config).expect("JSON"))?;
+        file.write_all(contents)?;
         file.sync_all()?;
         Ok(path)
     }

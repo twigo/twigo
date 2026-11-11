@@ -1,7 +1,7 @@
 //! A terminal's environment: the login shell's, without Twigo's own
-//! `TWIGO_*`, with what a terminal says of itself, its `KUBECONFIG`, and a
-//! UTF-8 `LANG` where no locale variable names UTF-8; VS Code reads `LANG`
-//! alone ([`shouldSetLangEnvVariable`]).
+//! `TWIGO_*`, with what a terminal says of itself, its `KUBECONFIG`, what
+//! its shell's startup needs, and a UTF-8 `LANG` where no locale variable
+//! names UTF-8; VS Code reads `LANG` alone ([`shouldSetLangEnvVariable`]).
 //!
 //! [`shouldSetLangEnvVariable`]: https://github.com/microsoft/vscode/blob/1.145.2/src/vs/workbench/contrib/terminal/common/terminalEnvironment.ts#L98-L107
 
@@ -15,6 +15,7 @@ const LOCALE: [&str; 3] = ["LC_ALL", "LC_CTYPE", "LANG"];
 pub(super) fn environment(
     login: &ShellEnv,
     kubeconfig: &OsStr,
+    startup: &[(OsString, OsString)],
     utf8_locale: impl FnOnce() -> String,
 ) -> Vec<(OsString, OsString)> {
     let mut env: BTreeMap<OsString, OsString> = login
@@ -32,6 +33,7 @@ pub(super) fn environment(
         env.insert(name.into(), value.into());
     }
     env.insert("KUBECONFIG".into(), kubeconfig.to_owned());
+    env.extend(startup.iter().cloned());
     let utf8 = LOCALE.iter().any(|name| {
         env.get(OsStr::new(name))
             .is_some_and(|value| names_utf8(value))
@@ -73,8 +75,10 @@ mod tests {
                 ("TERM", "dumb"),
                 ("KUBECONFIG", "/home/me/.kube/config"),
                 ("LANG", "en_GB.UTF-8"),
+                ("ZDOTDIR", "/home/me/.config/zsh"),
             ]),
             OsStr::new("/data/terminals/1/kubeconfig:/home/me/.kube/config"),
+            &[("ZDOTDIR".into(), "/data/terminals/1".into())],
             || unreachable!("LANG names UTF-8"),
         );
         assert_eq!(get(&env, "PATH"), Some("/opt/homebrew/bin:/usr/bin"));
@@ -91,13 +95,14 @@ mod tests {
             Some("/data/terminals/1/kubeconfig:/home/me/.kube/config")
         );
         assert_eq!(get(&env, "LANG"), Some("en_GB.UTF-8"));
+        assert_eq!(get(&env, "ZDOTDIR"), Some("/data/terminals/1"));
     }
 
     #[test]
     fn lang_comes_in_utf_8_only_where_no_locale_variable_names_it() {
         let utf8 = || "uk_UA.UTF-8".to_owned();
         let lang = |vars: &[(&str, &str)]| {
-            let env = environment(&login(vars), OsStr::new("k"), utf8);
+            let env = environment(&login(vars), OsStr::new("k"), &[], utf8);
             get(&env, "LANG").map(str::to_owned)
         };
         assert_eq!(lang(&[]).as_deref(), Some("uk_UA.UTF-8"));
