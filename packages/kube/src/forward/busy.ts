@@ -77,8 +77,10 @@ export function tellFailure(forwards: Forwards): (forward: Forward) => void {
   return (forward) => {
     void forwards.settled(forward).then((settled) => {
       if (settled?.state.state !== "failed") return;
-      notify.error(
-        `${targetWords(settled)} → ${String(settled.local)} failed: ${settled.state.error.message}`,
+      const { error } = settled.state;
+      const tell = error.blocked ? notify.warning : notify.error;
+      tell(
+        `${targetWords(settled)} → ${String(settled.local)} failed: ${error.message}`,
         { key: `forward-failed:${String(settled.id)}` },
       );
     });

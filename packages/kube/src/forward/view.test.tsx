@@ -6,7 +6,12 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import {
+  BLOCKED_AFTER_MS,
+  createMockBackend,
+  READY_AFTER_MS,
+  type MockScenario,
+} from "@twigo/protocol/mock";
 import type { Workbench } from "@twigo/workbench";
 import { mountKube, settle, withScreenSize } from "../../test/workbench";
 import { pfUri } from "../uri";
@@ -308,4 +313,26 @@ test("a row's menu shows the keys that do the same", async () => {
   expect(
     screen.getByRole("menuitem", { name: /^Remove/ }).textContent,
   ).toContain("⌫");
+});
+
+test("a forward that the mode refuses is a row in the warning tone that says the mode", async () => {
+  const { backend } = await mounted("forwardBlocked");
+  await act(() =>
+    backend.invoke("forward_start", {
+      target: {
+        space: "prod-eu",
+        gvr: { group: "", version: "v1", resource: "services" },
+        namespace: "payments",
+        name: "payments-api",
+      },
+      port: 80,
+      local: null,
+    }),
+  );
+  await act(() =>
+    vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 100),
+  );
+  expect(cells(row(0))[0]).toBe("Read-only");
+  expect(row(0).className).toContain("--warn");
+  expect(row(0).className).not.toContain("--error");
 });

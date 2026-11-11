@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, Forward, ForwardTarget } from "@twigo/protocol";
 import {
+  BLOCKED_AFTER_MS,
   createMockBackend,
   FAILS_AFTER_MS,
   LOSES_POD_AFTER_MS,
@@ -521,4 +522,41 @@ test("a tab that opens before the core has answered shows no forward is gone", a
   await settle(6);
   expect(screen.queryByText("This port-forward is gone")).toBeNull();
   expect(document.querySelector("[aria-busy]")).not.toBeNull();
+});
+
+const BLOCKED =
+  "qa is read-only by qa in /Library/Application Support/Twigo/policy.json, so Twigo did not send create pods/";
+
+test("a forward that a policy file forbids says the mode's words, still listening, not that it failed", async () => {
+  const { start, open } = await mounted("forwardBlocked");
+  const forward = await start(API, 80);
+  await open(forward);
+  expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+  await later(BLOCKED_AFTER_MS);
+  expect(screen.getAllByText("Read-only").length).toBeGreaterThan(0);
+  expect(screen.queryByText("Failed")).toBeNull();
+  screen.getByText("qa is read-only");
+  screen.getByText(
+    new RegExp(`^${BLOCKED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
+  screen.getByText(
+    "It still listens on localhost:8080 and closes every connection at once, until the mode lets forwards through.",
+  );
+});
+
+test("a start that the mode refuses says so as a warning, not as the target's failure", async () => {
+  const { start, open } = await mounted("forwardBlocked");
+  const forward = await start(API, 80);
+  await open(forward);
+  await later(BLOCKED_AFTER_MS);
+  fireEvent.click(button("Start"));
+  await later(READY_AFTER_MS + 100);
+  const [toast] = live();
+  expect(toast).toMatch(
+    /^auth-api:http → 8080 failed: qa is read-only by qa in /,
+  );
+  const icon = document.querySelector(
+    '[data-sonner-toast] svg[class*="text-"]',
+  );
+  expect(icon?.getAttribute("class")).toContain("text-warn");
 });

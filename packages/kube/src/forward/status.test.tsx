@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  BLOCKED_AFTER_MS,
   createMockBackend,
   LOSES_POD_AFTER_MS,
   READY_AFTER_MS,
@@ -126,4 +127,20 @@ test("stopping the last running forward takes the entry away", async () => {
   await act(() => backend.invoke("forward_stop", 3));
   await settle(4);
   expect(entry()).toBeNull();
+});
+
+test("a forward the mode refuses makes the entry warn and names it by the mode", async () => {
+  const { backend } = await mounted("forwardBlocked");
+  await act(() =>
+    backend.invoke("forward_start", {
+      target: target("prod-eu", "payments-api"),
+      port: 80,
+      local: null,
+    }),
+  );
+  await act(() =>
+    vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 100),
+  );
+  expect(warns(entry())).toBe(true);
+  expect(tooltip()).toBe("Port forwards: payments-api:http → 8080 (read-only)");
 });

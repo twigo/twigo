@@ -122,6 +122,34 @@ test("a reason or a failure is the state's detail, and waiting connections turn 
   });
 });
 
+test("a forward that the context's mode refuses says the mode, as a warning, and not that it failed", () => {
+  const blocked = forward({
+    state: {
+      state: "failed",
+      error: {
+        kind: "permissions",
+        message:
+          "dev is read-only by dev in policy.json, so Twigo did not send create pods/x/portforward in ns",
+        blocked: {
+          context: "dev",
+          mode: "read-only",
+          source: { kind: "policyFile", file: "policy.json", pattern: "dev" },
+          class: "forward",
+          reason: "mode",
+          verb: "create",
+          target: "pods/x/portforward in ns",
+        },
+      },
+    },
+  });
+  expect(stateOf(blocked)).toEqual({
+    label: "Read-only",
+    tone: "warn",
+    detail:
+      "dev is read-only by dev in policy.json, so Twigo did not send create pods/x/portforward in ns",
+  });
+});
+
 test("what a state lets be done is what the forward's keys say", () => {
   const keys = (state: ForwardState) =>
     forwardKeys(forward({ state, portName: "grpc" }));

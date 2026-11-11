@@ -47,6 +47,7 @@ export {
   accessOfSpace,
   chipLabel,
   describeAccess,
+  modeLabel,
   setByPolicyFile,
 } from "./spaces/modes";
 export { WorkbenchView } from "./WorkbenchView";

@@ -220,6 +220,18 @@ function Problem({ forward }: { forward: Forward }) {
       </Callout>
     );
   }
+  if (state.state === "failed" && state.error.blocked) {
+    const { context, mode } = state.error.blocked;
+    return (
+      <Callout tone="warn" title={`${context} is ${mode}`}>
+        <p className="break-words">{state.error.message}</p>
+        <p className="text-muted-foreground">
+          It still listens on {addressOf(forward)} and closes every connection
+          at once, until the mode lets forwards through.
+        </p>
+      </Callout>
+    );
+  }
   if (state.state === "failed") {
     return (
       <Callout tone="error" title="Failed">

@@ -1,5 +1,6 @@
 import type { Forward } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
+import { modeLabel } from "@twigo/workbench";
 
 /** The target and its port as a person names them: `web:http`. */
 export function targetWords({ target, port, portName }: Forward): string {
@@ -49,7 +50,13 @@ export function stateOf({ state, queued }: Forward): Shown {
         detail: state.reason,
       };
     case "failed":
-      return { label: "Failed", tone: "error", detail: state.error.message };
+      return state.error.blocked
+        ? {
+            label: modeLabel(state.error.blocked.mode),
+            tone: "warn",
+            detail: state.error.message,
+          }
+        : { label: "Failed", tone: "error", detail: state.error.message };
     case "stopped":
       return { label: "Stopped", tone: "idle" };
   }
