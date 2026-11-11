@@ -301,7 +301,10 @@ export class MockTerminal {
   }
 }
 
-type Draft = Omit<KubeconfigOffer, "id" | "terminal" | "session" | "context">;
+type Draft = Omit<
+  KubeconfigOffer,
+  "id" | "revision" | "terminal" | "session" | "context"
+>;
 
 const EKS = "arn:aws:eks:eu-west-1:123456789012:cluster";
 const TARGET = "~/.kube/config";
@@ -378,10 +381,18 @@ export class MockOffers {
     return true;
   }
 
-  answer({ id }: AnswerKubeconfigOffer): null {
-    if (!this.#waiting.delete(id)) {
+  answer({ id, revision }: AnswerKubeconfigOffer): null {
+    const offer = this.#waiting.get(id);
+    if (offer === undefined) {
       throw new IpcError("notFound", `the offer ${String(id)} is gone`);
     }
+    if (offer.revision !== revision) {
+      throw new IpcError(
+        "conflict",
+        `Nothing was moved into ${offer.target}: the offer changed after it was shown to you, and now says what a move does.`,
+      );
+    }
+    this.#waiting.delete(id);
     this.#follower?.({ event: "withdrawn", id });
     this.#later();
     return null;
@@ -395,6 +406,7 @@ export class MockOffers {
         ...draft,
         ...this.#source,
         id: this.#next++,
+        revision: 0,
       };
       offer.contexts.forEach((name) => this.#file.add(name));
       if (this.#proxy) this.#tell([...this.#direct, ...offer.contexts]);

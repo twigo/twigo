@@ -67,13 +67,16 @@ export class KubeconfigOffers {
     id: KubeconfigOfferId,
     answer: KubeconfigOfferAnswer,
   ): Promise<void> {
-    if (this.#answering.has(id) || !this.#offers.some((o) => o.id === id)) {
-      return;
-    }
+    const offer = this.#offers.find((o) => o.id === id);
+    if (this.#answering.has(id) || offer === undefined) return;
     this.#answering.add(id);
     this.changes.emit();
     try {
-      await this.backend.invoke("kubeconfig_offer_answer", { id, answer });
+      await this.backend.invoke("kubeconfig_offer_answer", {
+        id,
+        revision: offer.revision,
+        answer,
+      });
       this.#remove(id);
     } catch (error) {
       // The core withdraws an offer that would now move nothing, and only the conflict says why.

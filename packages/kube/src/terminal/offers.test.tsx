@@ -50,6 +50,7 @@ function offer(
 ): KubeconfigOffer {
   return {
     id,
+    revision: 0,
     terminal: "Terminal 1",
     session: 1,
     context: "dev",
@@ -184,7 +185,7 @@ test("an answer goes to the core with the offer's id, takes the offer away once 
   expect(core.calls).toEqual([
     {
       command: "kubeconfig_offer_answer",
-      request: { id: 1, answer: "move" },
+      request: { id: 1, revision: 0, answer: "move" },
     },
   ]);
   release();
@@ -193,6 +194,18 @@ test("an answer goes to the core with the offer's id, takes the offer away once 
   expect(ids(offers)).toEqual([2]);
   await offers.answer(1, "dismiss");
   expect(core.calls).toHaveLength(1);
+});
+
+test("an answer names the revision of the offer as the window last showed it", async () => {
+  const { core, offers } = await followed([offer(1)]);
+  core.send({ event: "offered", offer: offer(1, { revision: 3 }) });
+  await offers.answer(1, "move");
+  expect(core.calls).toEqual([
+    {
+      command: "kubeconfig_offer_answer",
+      request: { id: 1, revision: 3, answer: "move" },
+    },
+  ]);
 });
 
 test("an answer the core refuses is reported and leaves the offer to answer again", async () => {
@@ -268,7 +281,11 @@ function leave(backend: Backend) {
   withdrawals.push(async () => {
     for (const id of [1, 2]) {
       await backend
-        .invoke("kubeconfig_offer_answer", { id, answer: "dismiss" })
+        .invoke("kubeconfig_offer_answer", {
+          id,
+          revision: 0,
+          answer: "dismiss",
+        })
         .catch(() => undefined);
     }
     await settle(4);
@@ -332,7 +349,7 @@ test("an offer comes as a toast that says what came, one line per name with the 
     invoke.mock.calls.find(
       ([command]) => command === "kubeconfig_offer_answer",
     )?.[1],
-  ).toEqual({ id: 1, answer: "move" });
+  ).toEqual({ id: 1, revision: 0, answer: "move" });
   expect(live()).toEqual([]);
 });
 
@@ -422,8 +439,8 @@ test("the second offer comes once the first is answered, and Dismiss answers it 
       .filter(([command]) => command === "kubeconfig_offer_answer")
       .map(([, request]) => request),
   ).toEqual([
-    { id: 1, answer: "dismiss" },
-    { id: 2, answer: "dismiss" },
+    { id: 1, revision: 0, answer: "dismiss" },
+    { id: 2, revision: 0, answer: "dismiss" },
   ]);
   expect(live()).toEqual([]);
 });
@@ -434,7 +451,11 @@ test("an offer withdrawn by the core takes its toast down", async () => {
   await later(OFFER_AFTER_MS);
   expect(live()).toHaveLength(1);
   await act(() =>
-    backend.invoke("kubeconfig_offer_answer", { id: 1, answer: "dismiss" }),
+    backend.invoke("kubeconfig_offer_answer", {
+      id: 1,
+      revision: 0,
+      answer: "dismiss",
+    }),
   );
   await settle(4);
   expect(live()).toEqual([]);
@@ -495,7 +516,7 @@ test("an offer outlives the tab it came from, and still moves", async () => {
     invoke.mock.calls.find(
       ([command]) => command === "kubeconfig_offer_answer",
     )?.[1],
-  ).toEqual({ id: 1, answer: "move" });
+  ).toEqual({ id: 1, revision: 0, answer: "move" });
 });
 
 test("an offer is a toast only, with no bar over its terminal, whatever the address asks for", async () => {

@@ -4,6 +4,7 @@ import { describeOffer, nameParts } from "./offerWords";
 
 const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
   id: 1,
+  revision: 0,
   terminal: "Terminal 3",
   session: 7,
   context: "dev",

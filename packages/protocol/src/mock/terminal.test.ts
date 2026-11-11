@@ -361,7 +361,11 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
   expect(offers(events)).toHaveLength(1);
 
   await answered(
-    backend.invoke("kubeconfig_offer_answer", { id: first.id, answer: "move" }),
+    backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      revision: first.revision,
+      answer: "move",
+    }),
   );
   expect(last(events)).toEqual({ event: "withdrawn", id: first.id });
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - 1);
@@ -375,6 +379,7 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
   await answered(
     backend.invoke("kubeconfig_offer_answer", {
       id: second.id,
+      revision: second.revision,
       answer: "dismiss",
     }),
   );
@@ -408,6 +413,7 @@ test("a proxy terminal's offers come with the direct contexts the tool wrote, ju
   await answered(
     proxied.backend.invoke("kubeconfig_offer_answer", {
       id: first.id,
+      revision: first.revision,
       answer: "move",
     }),
   );
@@ -437,7 +443,11 @@ test("a move or a dismiss leaves the direct contexts, since the entries stay in 
   const [first] = offers(events);
   if (!first) throw new Error("no first offer");
   await answered(
-    backend.invoke("kubeconfig_offer_answer", { id: first.id, answer: "move" }),
+    backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      revision: first.revision,
+      answer: "move",
+    }),
   );
   await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
   const [, second] = offers(events);
@@ -446,6 +456,7 @@ test("a move or a dismiss leaves the direct contexts, since the entries stay in 
   await answered(
     backend.invoke("kubeconfig_offer_answer", {
       id: second.id,
+      revision: second.revision,
       answer: "dismiss",
     }),
   );
@@ -511,12 +522,45 @@ test("a window that follows later is told the offers that wait, and answering on
   const [offer] = waiting;
   if (!offer) throw new Error("no offer");
   await answered(
-    backend.invoke("kubeconfig_offer_answer", { id: offer.id, answer: "move" }),
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
   );
   const error = await refused(
-    backend.invoke("kubeconfig_offer_answer", { id: offer.id, answer: "move" }),
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
   );
   expect(error.kind).toBe("notFound");
+});
+
+test("an answer to another revision than the offer's is refused as a conflict, and the offer waits on", async () => {
+  const backend = createMockBackend("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [offer] = await answered(
+    backend.subscribe("kubeconfig_offers_watch", null, () => undefined),
+  );
+  if (!offer) throw new Error("no offer");
+  const error = await refused(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision + 1,
+      answer: "move",
+    }),
+  );
+  expect(error.kind).toBe("conflict");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
+  );
 });
 
 test("any other scenario raises no offer, and the scenario is one the page can pin", async () => {
