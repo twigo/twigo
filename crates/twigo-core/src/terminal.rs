@@ -333,18 +333,19 @@ impl Core {
         answer: AnswerKubeconfigOffer,
     ) -> Result<(), IpcError> {
         let offers = &self.terminals.offers;
-        let held = offers.take(window, answer.id)?;
+        let answering = offers.take(window, answer.id)?;
         if answer.answer == KubeconfigOfferAnswer::Move {
-            let (moved, held) = tokio::task::spawn_blocking(move || (held.move_entries(), held))
-                .await
-                .expect("a move does not panic");
+            let (moved, answering) =
+                tokio::task::spawn_blocking(move || (answering.move_entries(), answering))
+                    .await
+                    .expect("a move does not panic");
             if let Err(error) = moved {
-                offers.put_back(held);
+                offers.put_back(answering);
                 return Err(error);
             }
-            offers.withdraw(&held);
+            offers.withdraw(answering);
         } else {
-            offers.withdraw(&held);
+            offers.withdraw(answering);
         }
         Ok(())
     }

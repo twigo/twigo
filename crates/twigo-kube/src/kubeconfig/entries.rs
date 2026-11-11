@@ -131,6 +131,13 @@ impl Written {
         self.last = text;
     }
 
+    /// Drops `names`, as a move or a dismiss answered them.
+    pub fn forget(&mut self, names: &Names) {
+        for ((_, entries), (_, gone)) in self.sections_mut().into_iter().zip(names.sections()) {
+            entries.retain(|name, _| !gone.contains(name));
+        }
+    }
+
     pub fn names(&self) -> Names {
         let names = |entries: &BTreeMap<String, Arc<str>>| entries.keys().cloned().collect();
         Names {
