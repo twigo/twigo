@@ -955,7 +955,7 @@ Extensions add commands, not prefixes.
     An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
-    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has really parsed: a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
+    The bytes are written to xterm as `Uint8Array`, which is stream-aware across frames, and Rust is told how many the terminal has parsed from the callback of `write`, so flow control follows what xterm has parsed, but for the bytes a resize parses twice (`TODO.md`): a frame of 64 KiB at most, nothing more read at 256 KiB unacknowledged, reading again below 64 KiB.
     A terminal keeps 5000 lines.
     What is typed goes one `shell_input` at a time, and what is typed while a call is in flight goes in the next, so keystrokes keep their order whatever the transport does.
     What is typed while the shell connects goes to Rust's queue and reaches the process once it runs, as a terminal keeps type-ahead.
@@ -1075,8 +1075,9 @@ Extensions add commands, not prefixes.
     A stack taller than the window under the title bar sits at the status bar's edge, so the front toast, the newest, stays in the window, and the top of the spread stack goes past the title bar.
     It sits so closed too, since moving it as the pointer arrives would move the toasts from under it.
     While the stack is closed a toast behind the front one is clipped to its box and the card's content hidden, as sonner does its styled toasts: it caps a back toast's box to the front toast's height but hides the children only of toasts it styles (2.0.8), so a taller custom card would hang below the front toast, over the panel, and a pointer there would open and close the stack; a hover shows it.
-    The card itself stays, so its top edge shows above the front toast as a styled toast's does: a countdown or an offer behind a newer toast shows that it waits, not what it says, until a hover.
-    The content is `visibility: hidden` as well, so the buttons of such a toast are out of the tab order and the accessibility tree while the stack is closed, and a hover gives them back; the box itself stays a tab stop, as sonner gives every toast `tabindex=0`, and focusing it shows its focus ring and nothing to press.
+    The card itself stays, so its top edge shows above the front toast as a styled toast's does: a toast behind a newer one, a countdown or an offer among them, shows that it is there, not what it says, until a hover.
+    The content is `visibility: hidden` as well, so the buttons of such a toast are out of the tab order and the accessibility tree while the stack is closed, and a hover gives them back; the box itself stays a tab stop, as sonner gives every toast `tabindex=0`, and focusing it shows the app's focus ring and nothing to press.
+    A toast past the three that show, which sonner draws at no opacity even while the stack is open, is `visibility: hidden` whole, so neither it nor its buttons take the focus.
     A window of 600 px or less, where sonner reads other offsets and spreads the list across the window from its left offset, gets the same offsets and the same place, the toaster's own width at the right, so no list box reaches across the window.
     A card is 288 px wide at 12 px from the right edge and the window has no minimum width, so in a narrow one it covers what is at the right: below 518 px the Explorer's right edge, 38 px of it at 480 px, and below 348 px the space rail's (Chrome on the mock, 2026-11-11, with the Explorer at its minimum of 170 px).
     An offer sent again with its id changes the words of its toast, and a withdrawn one takes its toast down.

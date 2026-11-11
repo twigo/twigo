@@ -42,7 +42,7 @@ Findings that belong to no step yet.
   - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's: the settings files of M3 can say which is which.
   - The accepted mockup also shows the type in the context picker and on the cluster's home; so far only the title bar shows it.
   - A CronJob's resume asks even when it missed no run while suspended: telling which needs its schedule read in its time zone, as its next run does.
-- A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`), so only ⌘Z cancels it until they go: keep a waiting countdown in front.
+- A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`) and takes no focus, so only ⌘Z cancels it until they go: keep a waiting countdown in front.
 - The audit log (`twigo_policy::Audit`) grows without bound: a person's writes add a few lines each, so rotate it once actors other than the UI write (M3).
 - The policy proxy and its broker (`twigo_core::proxy`, `twigo_core::approvals`, ARCHITECTURE 6.4):
   - No token is pre-approved yet: a process started by a confirmed command, as Helm's release actions will be (7.2), should get one for exactly what the person confirmed.
