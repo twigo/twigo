@@ -75,7 +75,6 @@ fn follow(
 ) {
     let name = source.file.file_name().expect("a file name").to_owned();
     let mut offered = Names::default();
-    let mut live = None;
     while let Ok(result) = received.recv() {
         if !touches(&result, &name) {
             continue;
@@ -97,12 +96,11 @@ fn follow(
         let names = Names::of(&text).expect("parsed above");
         let fresh = names.without(written).without(&offered);
         if fresh.is_empty() {
-            offers.read(source, live, &text, &names);
+            offers.read(source, &text, &names);
             continue;
         }
         offered.extend(fresh.clone());
-        live = offers.offer(source, live, &text, &names, &fresh);
-        if live.is_none() {
+        if offers.offer(source, &text, &names, &fresh).is_none() {
             return;
         }
     }

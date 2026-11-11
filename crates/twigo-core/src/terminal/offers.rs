@@ -170,13 +170,12 @@ impl Offers {
     }
 
     /// Offers `fresh` names of `text`, a read of the terminal's file whose
-    /// names are `holds`: in `live`, the terminal's offer, while it waits,
-    /// else in a new one, shown once a move would move something. None once
-    /// the terminal has gone.
+    /// names are `holds`: in the terminal's offer, while one waits, else in
+    /// a new one, shown once a move would move something. None once the
+    /// terminal has gone.
     pub(crate) fn offer(
         &self,
         source: &Arc<Source>,
-        live: Option<KubeconfigOfferId>,
         text: &str,
         holds: &Names,
         fresh: &Names,
@@ -185,44 +184,26 @@ impl Offers {
         if source.stopped.load(Ordering::Acquire) {
             return None;
         }
-        let waiting = live.filter(|id| state.live(source, *id).is_some());
-        let id = match waiting {
+        let id = match state.live(source) {
             Some(id) => id,
             None => {
-                state.next += 1;
-                KubeconfigOfferId(state.next)
+                let base = source.file.parent().expect("a file in a directory");
+                state.hold(source, Written::new(base.to_owned(), source.chained))
             }
         };
-        let held = state.offers.entry(id.0).or_insert_with(|| {
-            let base = source.file.parent().expect("a file in a directory");
-            Held {
-                source: Arc::clone(source),
-                written: Written::new(base.to_owned(), source.chained),
-                offer: offer_of(source, id, &Names::default(), &Names::default()),
-                left_out: Names::default(),
-                shown: false,
-                answering: false,
-            }
-        });
+        let held = state.offers.get_mut(&id.0).expect("found or held above");
         held.written.read(text, holds, fresh);
         state.renew(id);
         Some(id)
     }
 
     /// Takes `text`, a read of the terminal's file whose names are `holds`,
-    /// into `live`, the terminal's offer, while it waits: a move takes the
-    /// offered entries from it from now on.
-    pub(crate) fn read(
-        &self,
-        source: &Arc<Source>,
-        live: Option<KubeconfigOfferId>,
-        text: &str,
-        holds: &Names,
-    ) {
+    /// into the terminal's offer, while one waits: a move takes the offered
+    /// entries from it from now on.
+    pub(crate) fn read(&self, source: &Arc<Source>, text: &str, holds: &Names) {
         let mut state = self.state();
-        if let Some(id) = live
-            && let Some(held) = state.live(source, id)
-        {
+        if let Some(id) = state.live(source) {
+            let held = state.offers.get_mut(&id.0).expect("found above");
             held.written.read(text, holds, &Names::default());
             state.renew(id);
         }
@@ -266,24 +247,22 @@ impl Offers {
         })
     }
 
-    /// An offer answered: withdrawn, unless entries came while it was
-    /// answered, which it goes on offering. Nothing once the window's offers
-    /// have ended.
+    /// An offer answered: withdrawn, and the entries that came while it was
+    /// answered offered under a new id, as the window drops the answered id
+    /// once its answer is done. Nothing once the window's offers have ended.
     pub(crate) fn withdraw(&self, answering: Answering) {
         let mut state = self.state();
         let id = answering.id;
-        let Some(held) = state.offers.get_mut(&id.0) else {
+        let Some(mut held) = state.offers.remove(&id.0) else {
             return;
         };
-        held.written.forget(&answering.written.names());
-        held.answering = false;
-        if !held.written.names().is_empty() {
-            state.renew(id);
-            return;
-        }
-        let held = state.offers.remove(&id.0).expect("got above");
         if held.shown {
             state.tell(&held.source.window, KubeconfigOfferEvent::Withdrawn { id });
+        }
+        held.written.forget(&answering.written.names());
+        if !held.written.names().is_empty() {
+            let rest = state.hold(&held.source, held.written);
+            state.renew(rest);
         }
     }
 
@@ -365,11 +344,28 @@ impl Offers {
 }
 
 impl State {
-    /// The offer `id`, while it waits, if it is `source`'s.
-    fn live(&mut self, source: &Arc<Source>, id: KubeconfigOfferId) -> Option<&mut Held> {
+    /// `source`'s offer, while one waits.
+    fn live(&self, source: &Arc<Source>) -> Option<KubeconfigOfferId> {
         self.offers
-            .get_mut(&id.0)
-            .filter(|held| Arc::ptr_eq(&held.source, source))
+            .iter()
+            .find(|(_, held)| Arc::ptr_eq(&held.source, source))
+            .map(|(id, _)| KubeconfigOfferId(*id))
+    }
+
+    /// A new offer of `source` holding `written`, not shown until renewed.
+    fn hold(&mut self, source: &Arc<Source>, written: Written) -> KubeconfigOfferId {
+        self.next += 1;
+        let id = KubeconfigOfferId(self.next);
+        let held = Held {
+            source: Arc::clone(source),
+            written,
+            offer: offer_of(source, id, &Names::default(), &Names::default()),
+            left_out: Names::default(),
+            shown: false,
+            answering: false,
+        };
+        self.offers.insert(id.0, held);
+        id
     }
 
     /// Makes the offer `id` anew from what it holds and the user's files
@@ -514,27 +510,22 @@ mod tests {
         })
     }
 
-    fn offer(
-        offers: &Offers,
-        source: &Arc<Source>,
-        live: Option<KubeconfigOfferId>,
-        text: &str,
-    ) -> KubeconfigOfferId {
+    fn offer(offers: &Offers, source: &Arc<Source>, text: &str) -> KubeconfigOfferId {
         let names = Names::of(text).unwrap();
-        offers.offer(source, live, text, &names, &names).unwrap()
+        offers.offer(source, text, &names, &names).unwrap()
     }
 
     #[test]
     fn what_comes_while_a_move_runs_joins_its_offer_which_a_failed_move_leaves_waiting() {
         let dir = tempfile::tempdir().unwrap();
         let (offers, source) = (Offers::new(), source(dir.path()));
-        let first = offer(&offers, &source, None, FIRST);
+        let first = offer(&offers, &source, FIRST);
         let moving = offers.take("main", first).unwrap();
         let Err(again) = offers.take("main", first) else {
             panic!("taken twice");
         };
         assert_eq!(again.kind, ErrorKind::Conflict);
-        assert_eq!(offer(&offers, &source, Some(first), MORE), first);
+        assert_eq!(offer(&offers, &source, MORE), first);
         offers.put_back(moving);
         let waiting = offers.follow("main", |_| true);
         assert_eq!(waiting.len(), 1, "{waiting:?}");
@@ -545,10 +536,48 @@ mod tests {
     }
 
     #[test]
+    fn what_came_while_a_move_ran_is_offered_under_a_new_id_once_the_answered_one_is_withdrawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (offers, source) = (Offers::new(), source(dir.path()));
+        let (told, events) = std::sync::mpsc::channel();
+        offers.follow("main", move |event| told.send(event).is_ok());
+        let first = offer(&offers, &source, FIRST);
+        let moving = offers.take("main", first).unwrap();
+        assert_eq!(offer(&offers, &source, MORE), first);
+        let moved = moving.move_entries();
+        offers.moved(moving, moved).unwrap();
+        let told: Vec<KubeconfigOfferEvent> = events.try_iter().collect();
+        let [
+            ..,
+            KubeconfigOfferEvent::Withdrawn { id },
+            KubeconfigOfferEvent::Offered { offer: rest },
+        ] = &told[..]
+        else {
+            panic!("{told:#?}");
+        };
+        assert_eq!(*id, first);
+        assert_ne!(rest.id, first);
+        assert_eq!(
+            (&rest.clusters, &rest.users),
+            (&Vec::<String>::new(), &vec!["b".to_owned()])
+        );
+        let context = "contexts:\n- name: c\n  context:\n    cluster: a\n    user: b\n";
+        let still = format!("{MORE}{context}");
+        let holds = Names::of(&still).unwrap();
+        let joined = offers.offer(&source, &still, &holds, &Names::of(context).unwrap());
+        assert_eq!(joined, Some(rest.id));
+        let joined = offered(&events);
+        assert_eq!(
+            (joined.id, &joined.users, &joined.contexts),
+            (rest.id, &vec!["b".to_owned()], &vec!["c".to_owned()])
+        );
+    }
+
+    #[test]
     fn nothing_is_put_back_once_the_window_s_offers_stopped() {
         let dir = tempfile::tempdir().unwrap();
         let (offers, source) = (Offers::new(), source(dir.path()));
-        let first = offer(&offers, &source, None, FIRST);
+        let first = offer(&offers, &source, FIRST);
         let moving = offers.take("main", first).unwrap();
         offers.drop_window("main");
         offers.put_back(moving);
@@ -582,7 +611,7 @@ mod tests {
         let (offers, source) = (Offers::new(), source(dir.path()));
         let (told, events) = std::sync::mpsc::channel();
         offers.follow("main", move |event| told.send(event).is_ok());
-        let id = offer(&offers, &source, None, BOTH);
+        let id = offer(&offers, &source, BOTH);
         assert!(offered(&events).left_out == KubeconfigNames::default());
         std::fs::write(dir.path().join("config"), THEIR_PROD).unwrap();
         let refused = moved(&offers, id).unwrap_err();
@@ -632,7 +661,7 @@ mod tests {
         let (offers, source) = (Offers::new(), source(dir.path()));
         let (told, events) = std::sync::mpsc::channel();
         offers.follow("main", move |event| told.send(event).is_ok());
-        let id = offer(&offers, &source, None, PROD);
+        let id = offer(&offers, &source, PROD);
         offered(&events);
         std::fs::write(dir.path().join("config"), THEIR_PROD).unwrap();
         let refused = moved(&offers, id).unwrap_err();
@@ -671,15 +700,15 @@ mod tests {
         let (told, events) = std::sync::mpsc::channel();
         offers.follow("main", move |event| told.send(event).is_ok());
         let first = "clusters:\n- name: own\n  cluster:\n    server: https://own\nusers:\n- name: me\n  user:\n    token: t\ncontexts:\n- name: c\n  context:\n    cluster: own\n    user: me\n";
-        let id = offer(&offers, &source, None, first);
+        let id = offer(&offers, &source, first);
         assert_eq!(offered(&events).contexts, ["c"]);
         let second = first.replace("token: t", "token: t2");
-        offers.read(&source, Some(id), &second, &Names::of(&second).unwrap());
+        offers.read(&source, &second, &Names::of(&second).unwrap());
         assert_eq!(
             events.try_recv().unwrap(),
             KubeconfigOfferEvent::Withdrawn { id }
         );
-        offers.read(&source, Some(id), first, &Names::of(first).unwrap());
+        offers.read(&source, first, &Names::of(first).unwrap());
         assert_eq!(offered(&events).id, id);
     }
 }
