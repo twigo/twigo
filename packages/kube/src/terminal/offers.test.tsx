@@ -3,7 +3,6 @@ import {
   cleanup,
   fireEvent,
   render,
-  screen,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -213,10 +212,8 @@ interface Mounted {
 
 async function mounted(
   space = "dev",
-  query = "",
   backend: Backend = createMockBackend("terminalOffer"),
 ): Promise<Mounted & { create: () => Promise<void> }> {
-  history.replaceState(null, "", query === "" ? "/" : `/?variant=${query}`);
   const scenario = "terminalOffer";
   const workbench = await testWorkbench(scenario, backend, "mac");
   const tabs = createTerminalTabs(workbench);
@@ -353,7 +350,7 @@ test("an offer withdrawn by the core takes its toast down", async () => {
 test("an offer replaced by the core shows its new words in the same toast", async () => {
   const core = fakeCore();
   const mock = createMockBackend("terminalOffer");
-  await mounted("dev", "", {
+  await mounted("dev", {
     invoke: (command, request) =>
       command === "kubeconfig_offer_answer"
         ? core.backend.invoke(command, request)
@@ -407,117 +404,19 @@ test("an offer outlives the tab it came from, and still moves", async () => {
   ).toEqual({ id: 1, answer: "move" });
 });
 
-test("offer:bar shows the offer in a bar over its terminal, no toast, and a toast once the tab is closed", async () => {
-  const { workbench, backend, create } = await mounted("dev", "offer:bar");
+test("an offer is a toast only, with no bar over its terminal, whatever the address asks for", async () => {
+  history.replaceState(null, "", "/?variant=offer:bar");
+  const { backend, create } = await mounted();
   await create();
   await later(OFFER_AFTER_MS);
-  expect(live()).toEqual([]);
+  expect(live()).toHaveLength(1);
+  expect(live()[0]).toContain(FIRST);
   const panel = document.querySelector('[aria-label="Panel"]');
-  expect(panel?.textContent).toContain(FIRST);
-  expect(panel?.textContent).toContain("Move to ~/.kube/config");
-
-  act(() => {
-    workbench.editors.close(terminalUri({ space: "dev", n: 1 }));
-  });
-  await settle(6);
+  expect(panel?.textContent).not.toContain(FIRST);
   expect(
-    document.querySelector('[aria-label="Panel"]')?.textContent,
-  ).not.toContain(FIRST);
-  expect(live()).toHaveLength(1);
-  expect(live()[0]).toContain(FIRST);
-  leave(backend);
-});
-
-test("offer:bar answers from the bar, which goes with the offer", async () => {
-  const { backend, create } = await mounted("dev", "offer:bar");
-  const invoke = vi.spyOn(backend, "invoke");
-  await create();
-  await later(OFFER_AFTER_MS);
-  const panel = document.querySelector<HTMLElement>('[aria-label="Panel"]');
-  if (!panel) throw new Error("no panel");
-  fireEvent.click(within(panel).getByRole("button", { name: "Dismiss" }));
-  await settle(4);
-  expect(
-    invoke.mock.calls.find(
-      ([command]) => command === "kubeconfig_offer_answer",
-    )?.[1],
-  ).toEqual({ id: 1, answer: "dismiss" });
-  expect(panel.textContent).not.toContain(FIRST);
-  expect(live()).toEqual([]);
-});
-
-async function createIn(workbench: Workbench, space: string) {
-  await act(() => workbench.spaces.open(space));
-  act(() => {
-    workbench.spaces.select(space);
-  });
-  await settle(6);
-  const run = workbench.commands.execute(
-    "k8s.terminal.new",
-    workbench.keys.lookup(null),
-  );
-  await settle(10);
-  await run;
-}
-
-const panelText = () =>
-  document.querySelector('[aria-label="Panel"]')?.textContent ?? "";
-
-test("offer:bar finds the tab by the session, so another space's terminal of the same label is not it", async () => {
-  const { workbench, backend, create } = await mounted("dev", "offer:bar");
-  await create();
-  await createIn(workbench, "staging");
-  await later(OFFER_AFTER_MS);
-  expect(live()).toEqual([]);
-  expect(panelText()).not.toContain(FIRST);
-
-  act(() => {
-    workbench.spaces.select("dev");
-  });
-  await settle(6);
-  expect(live()).toEqual([]);
-  expect(panelText()).toContain(FIRST);
-  leave(backend);
-});
-
-test("offer:bar falls back to a toast once its terminal's tab is closed, and a later terminal of the same label in another space is not its tab", async () => {
-  const { workbench, backend, create } = await mounted("dev", "offer:bar");
-  await create();
-  await later(OFFER_AFTER_MS);
-  expect(panelText()).toContain(FIRST);
-
-  act(() => {
-    workbench.editors.close(terminalUri({ space: "dev", n: 1 }));
-  });
-  await settle(6);
-  expect(live()).toHaveLength(1);
-  expect(live()[0]).toContain(FIRST);
-
-  await createIn(workbench, "staging");
-  expect(panelText()).toContain("Terminal 1");
-  expect(panelText()).not.toContain(FIRST);
-  expect(live()).toHaveLength(1);
-  leave(backend);
-});
-
-test("offer:bar falls back to a toast once its terminal is restarted, which is another session", async () => {
-  const { tabs, backend, create } = await mounted("dev", "offer:bar");
-  await create();
-  await later(OFFER_AFTER_MS);
-  expect(panelText()).toContain(FIRST);
-  expect(live()).toEqual([]);
-
-  const tab = tabs.get(terminalUri({ space: "dev", n: 1 }));
-  act(() => {
-    tab?.term.input("exit\r");
-  });
-  await settle(4);
-  expect(panelText()).toContain(FIRST);
-  fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));
-  await settle(10);
-  expect(tab?.getStatus().state).toBe("running");
-  expect(panelText()).not.toContain(FIRST);
-  expect(live()).toHaveLength(1);
-  expect(live()[0]).toContain(FIRST);
+    within(panel as HTMLElement).queryByRole("button", {
+      name: "Move to ~/.kube/config",
+    }),
+  ).toBeNull();
   leave(backend);
 });

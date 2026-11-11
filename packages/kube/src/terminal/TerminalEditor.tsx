@@ -10,9 +10,6 @@ import {
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
 import { useTerminalHost } from "../xterm/useTerminalHost";
-import { KindBar } from "./KindBar";
-import { OfferBar } from "./OfferBar";
-import type { KubeconfigOffers } from "./offers";
 import type { TerminalTabs } from "./tabs";
 import { useKind } from "./useKind";
 import { terminalTitle } from "./words";
@@ -28,8 +25,7 @@ export const RESTART_TERMINAL = "k8s.terminal.restart";
 export function TerminalEditor({
   uri,
   tabs,
-  offers,
-}: EditorProps & { tabs: TerminalTabs; offers: KubeconfigOffers }) {
+}: EditorProps & { tabs: TerminalTabs }) {
   const { keys, commands } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseTerminalUri(uri), [uri]);
@@ -101,8 +97,6 @@ export function TerminalEditor({
 
   return (
     <div ref={setRoot} className="flex h-full min-h-0 flex-col bg-editor">
-      <OfferBar uri={uri} tabs={tabs} offers={offers} />
-      {words && <KindBar words={words} restart={restart} />}
       <div ref={setContainer} className="min-h-0 flex-1 pt-1 pl-2" />
     </div>
   );

@@ -677,10 +677,6 @@ test("after a restart the terminals restored behind another panel tab are in the
   expect(tabs.has(uriOf(1))).toBe(false);
 });
 
-function withVariant(choice: string) {
-  history.replaceState(null, "", `/?variant=${choice}`);
-}
-
 const tabStrip = () => {
   const panel = document.querySelector('[aria-label="Panel"]');
   if (!panel) throw new Error("no panel");
@@ -690,8 +686,7 @@ const tabStrip = () => {
 const tabIcon = (uri: string) =>
   tabStrip().querySelector(`[data-tab-panel-id="${uri}"] svg`)?.classList;
 
-test("kind:chip puts the kind in a chip beside the state, and the warning turns it to warn with Restart beside it", async () => {
-  withVariant("kind:chip");
+test("the kind is a chip beside the state, and the warning turns it to warn with Restart beside it", async () => {
   const { workbench, backend, create } = await mounted("ready", "dev");
   await create();
   screen.getByText("Your credentials");
@@ -707,8 +702,7 @@ test("kind:chip puts the kind in a chip beside the state, and the warning turns 
   expect(workbench.editors.activeIn("panel")).toBe(uriOf(1, "dev"));
 });
 
-test("kind:chip says the proxy and the mode of a guarded context, and follows the mode", async () => {
-  withVariant("kind:chip");
+test("the chip says the proxy and the mode of a guarded context, and follows the mode", async () => {
   const { backend, create } = await mounted("ready", "staging");
   await create();
   screen.getByText("Proxy · guarded");
@@ -717,49 +711,25 @@ test("kind:chip says the proxy and the mode of a guarded context, and follows th
   expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
 });
 
-test("kind:icon says the kind by the tab's icon only, and the warning in a bar with Restart", async () => {
-  withVariant("kind:icon");
+test("the kind is the chip and nothing else, whatever the address asks for", async () => {
+  history.replaceState(null, "", "/?variant=kind:line");
   const { backend, create } = await mounted("ready", "dev");
   await create();
   const uri = uriOf(1, "dev");
-  expect(tabIcon(uri)).toContain("lucide-key-round");
-  expect(screen.queryByText("Your credentials")).toBeNull();
+  screen.getByText("Your credentials");
+  expect(screen.queryByText("Your credentials.")).toBeNull();
+  expect(tabIcon(uri)).toContain("lucide-terminal");
 
+  history.replaceState(null, "", "/?variant=kind:icon");
   await setMode(backend, "dev", "guarded");
-  expect(tabIcon(uri)).toContain("lucide-triangle-alert");
-  screen.getByText("Holds your real credentials, and dev is guarded now.");
-  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-  await settle(10);
-  expect(tabIcon(uri)).toContain("lucide-shield-check");
+  screen.getByText("Your credentials · guarded context");
   expect(
     screen.queryByText("Holds your real credentials, and dev is guarded now."),
   ).toBeNull();
-});
-
-test("kind:line says the kind and why in words above the terminal", async () => {
-  withVariant("kind:line");
-  const { create } = await mounted("ready", "staging");
-  await create();
-  screen.getByText("Proxy · guarded.");
-  screen.getByText(/staging was not read-write when this terminal started/);
-  expect(tabIcon(uriOf(1, "staging"))).toContain("lucide-terminal");
-});
-
-test("kind:line puts the warning in the line's place, with Restart", async () => {
-  withVariant("kind:line");
-  const { backend, create } = await mounted("ready", "dev");
-  await create();
-  screen.getByText("Your credentials.");
-  await setMode(backend, "dev", "read-only");
-  screen.getByText("Holds your real credentials, and dev is read-only now.");
-  expect(screen.queryByText("Your credentials.")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-  await settle(10);
-  screen.getByText("Proxy · read-only.");
+  expect(tabIcon(uri)).toContain("lucide-terminal");
 });
 
 test("a tab nothing started says no kind", async () => {
-  withVariant("kind:line");
   const { workbench } = await mounted("ready", "dev");
   act(() => {
     workbench.editors.open(uriOf(1, "dev"));

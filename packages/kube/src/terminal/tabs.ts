@@ -94,10 +94,6 @@ export class TerminalTabs extends ShellTabs<
     );
   }
 
-  uriOf(session: SubscriptionId): string | undefined {
-    return this.list().find(([, tab]) => tab.session === session)?.[0];
-  }
-
   override closed(uri: string): void {
     this.#recent = this.#recent.filter((each) => each !== uri);
     super.closed(uri);

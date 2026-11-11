@@ -10,8 +10,7 @@ import {
 import { watchClose } from "../xterm/closed";
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
-import { KindTabIcon } from "./KindTabIcon";
-import { KubeconfigOffers, offersInBars } from "./offers";
+import { KubeconfigOffers } from "./offers";
 import { presentOffers } from "./presentOffers";
 import { RESTART_TERMINAL, TerminalEditor } from "./TerminalEditor";
 import { TerminalActions } from "./TerminalActions";
@@ -43,11 +42,7 @@ export function registerTerminals(
   const offers = new KubeconfigOffers(backend, (error) => {
     workbench.report(error);
   });
-  presentOffers(
-    offers,
-    tabs,
-    (offer) => offersInBars() && tabs.uriOf(offer.session) !== undefined,
-  );
+  presentOffers(offers);
   offers.watch().catch((error: unknown) => {
     workbench.report(error);
   });
@@ -60,12 +55,8 @@ export function registerTerminals(
       const input = parseTerminalUri(uri.href);
       return input ? terminalTitle(input) : uri.href;
     },
-    icon: ({ uri, className }) => (
-      <KindTabIcon uri={uri} tabs={tabs} className={className} />
-    ),
-    component: ({ uri }) => (
-      <TerminalEditor uri={uri} tabs={tabs} offers={offers} />
-    ),
+    icon: ({ className }) => <Terminal className={className} />,
+    component: ({ uri }) => <TerminalEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <TerminalActions uri={uri} tabs={tabs} />,
     focus: (uri) => {
       tabs.get(uri)?.focus();

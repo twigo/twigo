@@ -6,7 +6,6 @@ import {
   type Lookup,
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
-import { variant } from "../variants";
 import { stateOf } from "../xterm/words";
 import { KindChip } from "./KindChip";
 import type { TerminalTabs } from "./tabs";
@@ -38,9 +37,7 @@ export function TerminalActions({
   const { label, tone, pulse } = stateOf(status);
   return (
     <div className="flex items-center gap-2">
-      {words && variant("kind", ["chip", "icon", "line"]) === "chip" && (
-        <KindChip words={words} />
-      )}
+      {words && <KindChip words={words} />}
       <StatusLabel tone={tone} {...(pulse && { pulse })} className="text-xs">
         {label}
       </StatusLabel>

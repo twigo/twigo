@@ -7,7 +7,6 @@ import {
   type KubeconfigOfferId,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
-import { variant } from "../variants";
 
 /**
  * The offers this window's terminals make to move what a tool wrote into a
@@ -95,6 +94,3 @@ export class KubeconfigOffers {
     this.changes.emit();
   }
 }
-
-/** Whether the offers show in a bar over their terminal, in `offer:bar`, rather than as toasts. */
-export const offersInBars = () => variant("offer", ["toast", "bar"]) === "bar";

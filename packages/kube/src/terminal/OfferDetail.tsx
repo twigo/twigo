@@ -1,4 +1,3 @@
-import { cn } from "@twigo/ui";
 import type { OfferSection, OfferWords } from "./offerWords";
 
 function Sections({
@@ -12,7 +11,7 @@ function Sections({
     <div className="grid content-start gap-1">
       <span className="text-muted-foreground">{title}</span>
       {sections.map(({ label, names, reason }) => (
-        <div key={label} className="grid gap-x-2 @lg:grid-cols-[4.5rem_1fr]">
+        <div key={label} className="grid gap-x-2">
           <span className="font-medium">{label}</span>
           <div className="grid gap-0.5">
             {names.map((name) => (
@@ -35,16 +34,10 @@ function Sections({
   );
 }
 
-export function OfferDetail({
-  words,
-  className,
-}: {
-  words: OfferWords;
-  className: string;
-}) {
+export function OfferDetail({ words }: { words: OfferWords }) {
   return (
-    <div className={cn("@container overflow-y-auto", className)}>
-      <div className="grid gap-1.5 @lg:grid-cols-2 @lg:gap-4">
+    <div className="max-h-[50vh] overflow-y-auto">
+      <div className="grid gap-1.5">
         {words.moves.length > 0 && (
           <Sections title="A move writes" sections={words.moves} />
         )}
