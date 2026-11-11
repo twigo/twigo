@@ -6,8 +6,11 @@ import {
   type Lookup,
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
+import { variant } from "../variants";
 import { stateOf } from "../xterm/words";
+import { KindChip } from "./KindChip";
 import type { TerminalTabs } from "./tabs";
+import { useKind } from "./useKind";
 
 /**
  * What the group shows of the active terminal tab at the right of its tab
@@ -23,15 +26,21 @@ export function TerminalActions({
   useChanges(workbench.menus.changes);
   useChanges(workbench.keys.changes);
   const input = parseTerminalUri(uri);
-  const status = input && tabs.tab(uri, input).getStatus();
+  const tab = input && tabs.tab(uri, input);
+  const words = useKind(tab);
+  const status = tab?.getStatus();
   if (!status) return null;
   const ended = status.state === "ended" || status.state === "restored";
+  const restartable = ended || words?.warning !== undefined;
   const base = workbench.keys.lookup(null);
   const lookup: Lookup = (key) =>
-    key === "terminalRestartable" ? ended : base(key);
+    key === "terminalRestartable" ? restartable : base(key);
   const { label, tone, pulse } = stateOf(status);
   return (
     <div className="flex items-center gap-2">
+      {words && variant("kind", ["chip", "icon", "line"]) === "chip" && (
+        <KindChip words={words} />
+      )}
       <StatusLabel tone={tone} {...(pulse && { pulse })} className="text-xs">
         {label}
       </StatusLabel>

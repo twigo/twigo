@@ -10,7 +10,9 @@ import {
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
 import { useTerminalHost } from "../xterm/useTerminalHost";
+import { KindBar } from "./KindBar";
 import type { TerminalTabs } from "./tabs";
+import { useKind } from "./useKind";
 import { terminalTitle } from "./words";
 
 /** The command that starts a terminal again; its button asks it of a tab that has ended or never started. */
@@ -35,17 +37,21 @@ export function TerminalEditor({
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const setContainer = useTerminalHost(tab, uri, input?.space);
   const status = tab?.getStatus();
-  const ended = status?.state === "ended" || status?.state === "restored";
+  const words = useKind(tab);
+  const restartable =
+    status?.state === "ended" ||
+    status?.state === "restored" ||
+    words?.warning !== undefined;
 
   useEffect(() => {
     if (!root) return;
     const scope = keys.scope(root);
     scope.set("terminalFocus", true);
-    scope.set("terminalRestartable", ended);
+    scope.set("terminalRestartable", restartable);
     return () => {
       scope.dispose();
     };
-  }, [root, keys, ended]);
+  }, [root, keys, restartable]);
 
   if (!input || !tab || !status) {
     return (
@@ -79,6 +85,7 @@ export function TerminalEditor({
 
   return (
     <div ref={setRoot} className="flex h-full min-h-0 flex-col bg-editor">
+      {words && <KindBar words={words} restart={restart} />}
       <div ref={setContainer} className="min-h-0 flex-1 pt-1 pl-2" />
     </div>
   );

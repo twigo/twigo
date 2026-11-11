@@ -6,7 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend } from "@twigo/protocol";
+import type { Backend, Mode } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
@@ -25,6 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
@@ -92,6 +93,11 @@ function tabOf(tabs: TerminalTabs, n = 1, space = "qa"): TerminalTab {
   const tab = tabs.get(uriOf(n, space));
   if (!tab) throw new Error(`no terminal ${String(n)}`);
   return tab;
+}
+
+async function setMode(backend: Backend, context: string, mode: Mode) {
+  await act(() => backend.invoke("context_mode_set", { context, mode }));
+  await settle(4);
 }
 
 async function type(tab: TerminalTab, input: string): Promise<void> {
@@ -218,7 +224,7 @@ test("a running terminal offers no Restart", async () => {
   expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
 });
 
-test("Restart Terminal is enabled where the focus is in a terminal that ended, and nowhere else", async () => {
+test("Restart Terminal is enabled where the focus is in a terminal that ended or that holds real credentials on a context that is not read-write, and nowhere else", async () => {
   const { workbench, tabs, backend, create } = await mounted();
   await create();
   const tab = tabOf(tabs);
@@ -233,8 +239,12 @@ test("Restart Terminal is enabled where the focus is in a terminal that ended, a
     return invoke.mock.calls.filter(([c]) => c === "terminal_create").length;
   };
   expect(await restart()).toBe(0);
-  await type(tab, "exit\r");
+  await setMode(backend, "qa", "guarded");
   expect(await restart()).toBe(1);
+  expect(tab.kind).toEqual({ kind: "proxy", why: "mode" });
+  expect(await restart()).toBe(1);
+  await type(tab, "exit\r");
+  expect(await restart()).toBe(2);
 });
 
 test("the terminal of a space is the space's own: a staging terminal asks the core for staging", async () => {
@@ -434,4 +444,96 @@ test("the picks list only the terminals of the space that shows, and wait for a 
   ).toEqual([uriOf(1, "staging")]);
   await pick(workbench);
   await go;
+});
+
+function withVariant(choice: string) {
+  history.replaceState(null, "", `/?variant=${choice}`);
+}
+
+const tabStrip = () => {
+  const panel = document.querySelector('[aria-label="Panel"]');
+  if (!panel) throw new Error("no panel");
+  return panel;
+};
+
+const tabIcon = (uri: string) =>
+  tabStrip().querySelector(`[data-tab-panel-id="${uri}"] svg`)?.classList;
+
+test("kind:chip puts the kind in a chip beside the state, and the warning turns it to warn with Restart beside it", async () => {
+  withVariant("kind:chip");
+  const { workbench, backend, create } = await mounted("ready", "dev");
+  await create();
+  screen.getByText("Your credentials");
+  expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
+  expect(tabIcon(uriOf(1, "dev"))).toContain("lucide-terminal");
+
+  await setMode(backend, "dev", "read-only");
+  screen.getByText("Your credentials · read-only context");
+  fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));
+  await settle(10);
+  screen.getByText("Proxy · read-only");
+  expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1, "dev"));
+});
+
+test("kind:chip says the proxy and the mode of a guarded context, and follows the mode", async () => {
+  withVariant("kind:chip");
+  const { backend, create } = await mounted("ready", "staging");
+  await create();
+  screen.getByText("Proxy · guarded");
+  await setMode(backend, "staging", "read-only");
+  screen.getByText("Proxy · read-only");
+  expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
+});
+
+test("kind:icon says the kind by the tab's icon only, and the warning in a bar with Restart", async () => {
+  withVariant("kind:icon");
+  const { backend, create } = await mounted("ready", "dev");
+  await create();
+  const uri = uriOf(1, "dev");
+  expect(tabIcon(uri)).toContain("lucide-key-round");
+  expect(screen.queryByText("Your credentials")).toBeNull();
+
+  await setMode(backend, "dev", "guarded");
+  expect(tabIcon(uri)).toContain("lucide-triangle-alert");
+  screen.getByText("Holds your real credentials, and dev is guarded now.");
+  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+  await settle(10);
+  expect(tabIcon(uri)).toContain("lucide-shield-check");
+  expect(
+    screen.queryByText("Holds your real credentials, and dev is guarded now."),
+  ).toBeNull();
+});
+
+test("kind:line says the kind and why in words above the terminal", async () => {
+  withVariant("kind:line");
+  const { create } = await mounted("ready", "staging");
+  await create();
+  screen.getByText("Proxy · guarded");
+  screen.getByText(/staging was not read-write when this terminal started/);
+  expect(tabIcon(uriOf(1, "staging"))).toContain("lucide-terminal");
+});
+
+test("kind:line puts the warning in the line's place, with Restart", async () => {
+  withVariant("kind:line");
+  const { backend, create } = await mounted("ready", "dev");
+  await create();
+  screen.getByText("Your credentials");
+  await setMode(backend, "dev", "read-only");
+  screen.getByText("Holds your real credentials, and dev is read-only now.");
+  expect(screen.queryByText("Your credentials")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+  await settle(10);
+  screen.getByText("Proxy · read-only");
+});
+
+test("a tab nothing started says no kind", async () => {
+  withVariant("kind:line");
+  const { workbench } = await mounted("ready", "dev");
+  act(() => {
+    workbench.editors.open(uriOf(1, "dev"));
+  });
+  await settle(10);
+  screen.getByText("This terminal ended when Twigo closed");
+  expect(screen.queryByText("Your credentials")).toBeNull();
 });

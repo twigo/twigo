@@ -9,6 +9,7 @@ import {
 } from "../uri";
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
+import { KindTabIcon } from "./KindTabIcon";
 import { RESTART_TERMINAL, TerminalEditor } from "./TerminalEditor";
 import { TerminalActions } from "./TerminalActions";
 import { started, TerminalTabs } from "./tabs";
@@ -45,7 +46,9 @@ export function registerTerminals(
       const input = parseTerminalUri(uri.href);
       return input ? terminalTitle(input) : uri.href;
     },
-    icon: ({ className }) => <Terminal className={className} />,
+    icon: ({ uri, className }) => (
+      <KindTabIcon uri={uri} tabs={tabs} className={className} />
+    ),
     component: ({ uri }) => <TerminalEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <TerminalActions uri={uri} tabs={tabs} />,
     focus: (uri) => {
