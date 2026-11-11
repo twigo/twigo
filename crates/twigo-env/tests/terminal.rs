@@ -246,6 +246,40 @@ fn zsh_keeps_the_terminal_s_kubeconfig_after_each_startup_file_that_exports_one(
 }
 
 #[test]
+fn zsh_keeps_the_terminal_s_kubeconfig_with_nounset_and_no_histfile_from_any_file_before_its_line()
+{
+    let zsh = required("zsh");
+    for login in [false, true] {
+        let read = if login {
+            &[".zshenv", ".zprofile", ".zshrc", ".zlogin"][..]
+        } else {
+            &[".zshenv", ".zshrc"][..]
+        };
+        for strict in read {
+            let fixture = Fixture::new();
+            for name in read {
+                let mut text = fixture.record(name);
+                if name == strict {
+                    text.push_str("setopt nounset no_global_rcs\n");
+                }
+                text.push_str(&format!("export KUBECONFIG=/theirs/{name}\n"));
+                if *name == ".zshrc" {
+                    text.push_str(THEIR_DEFINITIONS);
+                }
+                fixture.write(name, &text);
+            }
+            let output = fixture.run(&zsh, login, &[], &posix_typed(&fixture));
+            assert_eq!(
+                fixture.ran(),
+                read,
+                "nounset in {strict}, login {login}: {output}"
+            );
+            assert_kept_and_theirs_ran(&fixture, &output);
+        }
+    }
+}
+
+#[test]
 fn bash_keeps_the_terminal_s_kubeconfig_after_the_startup_files_it_reads() {
     let bash = required("bash");
     for login in [false, true] {

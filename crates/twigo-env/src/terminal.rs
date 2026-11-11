@@ -137,7 +137,8 @@ fn with_line(flags: &[&str], line: Vec<u8>) -> Vec<OsString> {
 /// was, sources theirs from there or `$HOME`, as zsh would
 /// ([`sourcehome`]), and sets `KUBECONFIG`; then points `ZDOTDIR` at Twigo's
 /// again where zsh reads another, remembering where the person's file left
-/// theirs, as a `.zshenv` that sets it moves the rest.
+/// theirs, as a `.zshenv` that sets it moves the rest. Every expansion holds
+/// under `nounset`, which a file read before may set.
 ///
 /// [`sourcehome`]: https://github.com/zsh-users/zsh/blob/zsh-5.9/Src/init.c#L1531-L1553
 fn zsh(kubeconfig: &[u8], dir: &Path, zdotdir: Option<&OsStr>) -> Vec<(&'static str, Vec<u8>)> {
@@ -151,9 +152,9 @@ fn zsh(kubeconfig: &[u8], dir: &Path, zdotdir: Option<&OsStr>) -> Vec<(&'static 
     // A global zshrc read while ZDOTDIR is Twigo's, as macOS's /etc/zshrc,
     // puts the history there.
     let history = [
-        b"if [[ $HISTFILE == ",
+        b"if [[ ${HISTFILE-} == ",
         &posix(dir.join(".zsh_history").as_os_str().as_bytes())[..],
-        b" ]]; then HISTFILE=\"${ZDOTDIR:-$HOME}/.zsh_history\"; fi\n",
+        b" ]]; then HISTFILE=\"${ZDOTDIR:-${HOME-}}/.zsh_history\"; fi\n",
     ]
     .concat();
     ZSH.iter()
@@ -170,7 +171,7 @@ fn zsh(kubeconfig: &[u8], dir: &Path, zdotdir: Option<&OsStr>) -> Vec<(&'static 
             }
             file.extend_from_slice(
                 format!(
-                    "if [[ -r \"${{ZDOTDIR-$HOME}}/{name}\" ]]; then builtin . \"${{ZDOTDIR-$HOME}}/{name}\"; fi\n"
+                    "if [[ -r \"${{ZDOTDIR-${{HOME-}}}}/{name}\" ]]; then builtin . \"${{ZDOTDIR-${{HOME-}}}}/{name}\"; fi\n"
                 )
                 .as_bytes(),
             );
