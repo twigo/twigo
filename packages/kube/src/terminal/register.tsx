@@ -7,6 +7,7 @@ import {
   terminalUri,
   type TerminalInput,
 } from "../uri";
+import { watchClose } from "../xterm/closed";
 import { terminalOptions } from "../xterm/options";
 import { registerPicks } from "../xterm/picks";
 import { KindTabIcon } from "./KindTabIcon";
@@ -76,6 +77,8 @@ export function registerTerminals(
     const [context] =
       spaces.list.find((space) => space.id === input.space)?.contexts ?? [];
     if (context === undefined) return;
+    const uri = terminalUri(input);
+    const watch = watchClose(editors, uri);
     let created;
     try {
       created = await backend.invoke("terminal_create", {
@@ -85,8 +88,15 @@ export function registerTerminals(
     } catch (error) {
       workbench.report(error);
       return;
+    } finally {
+      watch.stop();
     }
-    const uri = terminalUri(input);
+    if (watch.closed) {
+      backend.invoke("shell_close", created.id).catch((error: unknown) => {
+        workbench.report(error);
+      });
+      return;
+    }
     tabs.start(uri, input, started(created));
     tabs.touch(uri);
     editors.open(uri);

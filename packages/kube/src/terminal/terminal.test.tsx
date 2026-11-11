@@ -179,6 +179,47 @@ test("a tab the layout restored says its terminal ended when Twigo closed, runs 
   expect(tabs.get(uri)?.getStatus().state).toBe("running");
 });
 
+test("a tab closed while Restart waits for the core stays closed, and the session the core answers with is closed", async () => {
+  const { workbench, tabs, backend } = await mounted();
+  const original = backend.invoke.bind(backend);
+  let answer: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  const created: number[] = [];
+  const closed: unknown[] = [];
+  vi.spyOn(backend, "invoke").mockImplementation(
+    async (command: string, request: unknown) => {
+      if (command === "shell_close") closed.push(request);
+      if (command !== "terminal_create") {
+        return original(command as never, request as never);
+      }
+      await gate;
+      const session = await original(command, request as never);
+      created.push(session.id);
+      return session;
+    },
+  );
+  const uri = uriOf(3);
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle(10);
+  fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+  await settle(4);
+  act(() => {
+    workbench.editors.close(uri);
+  });
+  await settle(4);
+  answer();
+  await settle(10);
+
+  expect(panelTabs()).toEqual([]);
+  expect(tabs.has(uri)).toBe(false);
+  expect(created).toHaveLength(1);
+  expect(closed).toEqual(created);
+});
+
 test("Restart on an ended terminal starts a new session in the same tab, keeping what it showed, and the core decides its kind again", async () => {
   const { tabs, backend, create } = await mounted();
   await create();
