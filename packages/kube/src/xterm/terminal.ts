@@ -196,19 +196,24 @@ export class ShellTerminal {
 
   /**
    * Starts, or starts again, with the session a plan's run answered with. A
-   * terminal whose cursor is not at the start of a line, as when a running
-   * session is replaced, gives the new session a line of its own: zsh marks
-   * a prompt that does not start one with an inverse `%`.
+   * running session replaced while a program holds the alternate screen
+   * leaves it, as an ending does; and a terminal whose cursor is not at the
+   * start of a line gives the new session a line of its own: zsh marks a
+   * prompt that does not start one with an inverse `%`.
    */
   start(session: SessionStart): void {
     this.#release();
     this.#pending = session.id;
     this.#status = { state: "connecting" };
-    // The cursor is known once the output so far is parsed, and the session opens after the line feed, so that none of its output comes before.
+    // The screen and the cursor are known once the output so far is parsed, and the session opens after them, so that none of its output comes before.
     this.term.write(SESSION_STARTS, () => {
       if (this.#pending !== session.id) return;
-      if (this.term.buffer.active.cursorX > 0) this.term.write("\r\n");
-      this.#begin();
+      const alternate = this.term.buffer.active.type === "alternate";
+      this.term.write(alternate ? LEAVE_ALTERNATE : "", () => {
+        if (this.#pending !== session.id) return;
+        if (this.term.buffer.active.cursorX > 0) this.term.write("\r\n");
+        this.#begin();
+      });
     });
     this.#join(session);
     this.#changed();

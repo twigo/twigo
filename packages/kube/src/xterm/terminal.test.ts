@@ -128,6 +128,18 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     expect(lines(tab)).toEqual(["first", "second"]);
   });
 
+  test("a restart while a program holds the alternate screen starts the new shell on the main screen", async () => {
+    const { start, output } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % vi\r\n\x1b[?1049h\x1b[Hfile");
+    expect(tab.term.buffer.active.type).toBe("alternate");
+
+    await start(8);
+    await output(1, "you@mac ~ % ");
+    expect(tab.term.buffer.active.type).toBe("normal");
+    expect(lines(tab)).toEqual(["you@mac ~ % vi", "you@mac ~ %"]);
+  });
+
   test("a first session starts at the top of an empty terminal", async () => {
     const { start, output } = setup();
     const tab = await start(7);
