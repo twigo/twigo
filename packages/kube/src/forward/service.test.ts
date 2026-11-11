@@ -114,7 +114,7 @@ test("an event that comes before the list is newer than the list and is kept", a
   expect(forwards.get(2)).toBeDefined();
 });
 
-test("it watches the window's forwards once, with no request", async () => {
+test("it watches the window's forwards once, with no request", () => {
   const { subscribe } = watched();
   expect(subscribe).toHaveBeenCalledOnce();
   expect(subscribe.mock.calls[0]?.slice(0, 2)).toEqual([

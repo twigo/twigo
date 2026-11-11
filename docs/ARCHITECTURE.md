@@ -684,7 +684,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                          |
 | `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                               |
 | `terminal://<space>/<n>`                                            | Terminal tab in the panel (4.6): xterm over a pty on this machine, pinned to the space's context, numbered within its space                                  |
-| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, a quick HTTP request tester                                |
+| `pf://<space>/<forward-id>`                                         | Port-forward tab: state, target and resolved pod, local address, open connections, bytes, errors, and later a quick HTTP request tester                      |
 | `diff://edit/apply?editor=<uri>`, `diff://<space>/objects?…`        | Monaco diff: the apply dry-run of an editor's edit, its opened object against the server's now (`edit/server`), Compare with…, any two objects               |
 | `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                         |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                               |
@@ -999,7 +999,7 @@ Extensions add commands, not prefixes.
   - The local port is remembered per target.
     When it is busy, the next free port is offered.
   - Forwards persist per space.
-    Each one has its own tab (`pf://`) and a status-bar item.
+    Each one has its own tab (`pf://`), and one status-bar entry counts them.
   - Each TCP connection is its own WebSocket and counts against the session budget.
     If browsers or connection pools exhaust it, Twigo implements the SPDY-over-WebSocket tunnel that kubectl has used since 1.31 to multiplex connections.
   - Later: defaults from annotations (k9s `k9scli.io/port-forwards`), and a `kubectl port-forward` fallback, run through the policy proxy, for proxies that refuse WebSocket upgrades.

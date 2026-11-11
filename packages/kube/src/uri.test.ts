@@ -3,9 +3,11 @@ import {
   execUri,
   listUri,
   objectUri,
+  pfUri,
   parseExecUri,
   parseListUri,
   parseObjectUri,
+  parsePfUri,
   parseTerminalUri,
   parseUntitledUri,
   terminalUri,
@@ -168,4 +170,23 @@ test.each([
   "exec://dev/1",
 ])("%s is no terminal", (uri) => {
   expect(parseTerminalUri(uri)).toBeUndefined();
+});
+
+test.each([
+  [{ space: "prod-eu", id: 7 }, "pf://prod-eu/7"],
+  [{ space: "dev+qa", id: 12 }, "pf://dev%2Bqa/12"],
+])("%o round-trips through %s", (input, uri) => {
+  expect(pfUri(input)).toBe(uri);
+  expect(parsePfUri(uri)).toEqual(input);
+});
+
+test.each([
+  "pf://prod-eu/",
+  "pf://prod-eu/web",
+  "pf://prod-eu/07",
+  "pf://prod-eu/7/8",
+  "pf:///7",
+  "k8s://prod-eu/7",
+])("%s is not a port-forward's URI", (uri) => {
+  expect(parsePfUri(uri)).toBeUndefined();
 });
