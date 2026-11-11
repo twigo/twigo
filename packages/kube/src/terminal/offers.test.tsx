@@ -210,43 +210,52 @@ test("an answer names the revision it is given, not the one the window holds", a
   ]);
 });
 
-test("a click on a toast that still shows an older revision answers that revision", async () => {
-  const core = fakeCore();
-  render(<Toaster />);
-  const offers = new KubeconfigOffers(core.backend, vi.fn());
-  presentOffers(offers);
-  const watching = offers.watch();
-  core.answerWatch([]);
-  await watching;
-  act(() => {
-    core.send({ event: "offered", offer: offer(1, { contexts: ["shown-a"] }) });
-  });
-  await later(50);
-  const move = toastButton("Move to ~/.kube/config");
-  expect(live()[0]).toContain("shown-a");
-  withdrawals.push(async () => {
-    core.send({ event: "withdrawn", id: 1 });
-    await settle(4);
-  });
-
-  act(() => {
-    core.send({
-      event: "offered",
-      offer: offer(1, {
-        revision: 1,
-        contexts: ["shown-a", "never-shown-b"],
-      }),
+test.each([
+  ["Move to ~/.kube/config", "move"],
+  ["Dismiss", "dismiss"],
+] as const)(
+  "a click on %s of a toast that still shows an older revision answers that revision",
+  async (label, answer) => {
+    const core = fakeCore();
+    render(<Toaster />);
+    const offers = new KubeconfigOffers(core.backend, vi.fn());
+    presentOffers(offers);
+    const watching = offers.watch();
+    core.answerWatch([]);
+    await watching;
+    act(() => {
+      core.send({
+        event: "offered",
+        offer: offer(1, { contexts: ["shown-a"] }),
+      });
     });
-  });
-  expect(live()[0]).not.toContain("never-shown-b");
-  fireEvent.click(move);
-  expect(core.calls).toEqual([
-    {
-      command: "kubeconfig_offer_answer",
-      request: { id: 1, revision: 0, answer: "move" },
-    },
-  ]);
-});
+    await later(50);
+    const button = toastButton(label);
+    expect(live()[0]).toContain("shown-a");
+    withdrawals.push(async () => {
+      core.send({ event: "withdrawn", id: 1 });
+      await settle(4);
+    });
+
+    act(() => {
+      core.send({
+        event: "offered",
+        offer: offer(1, {
+          revision: 1,
+          contexts: ["shown-a", "never-shown-b"],
+        }),
+      });
+    });
+    expect(live()[0]).not.toContain("never-shown-b");
+    fireEvent.click(button);
+    expect(core.calls).toEqual([
+      {
+        command: "kubeconfig_offer_answer",
+        request: { id: 1, revision: 0, answer },
+      },
+    ]);
+  },
+);
 
 test("an answer the core refuses is reported and leaves the offer to answer again", async () => {
   const { core, offers, report } = await followed([offer(1)]);
