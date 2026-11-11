@@ -387,6 +387,62 @@ async fn a_proxy_terminal_s_file_and_tokens_go_when_its_shell_ends() {
 }
 
 #[tokio::test]
+async fn a_terminal_waits_for_the_login_environment_and_takes_its_kind_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let mine = dir.path().join("config");
+    std::fs::write(&mine, MINE).unwrap();
+    let core = Core::new(
+        &dir.path().join("data"),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (status, followed) = watch::channel(Status::Resolving);
+    tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.run(followed, Some(mine)).await }
+    });
+    core.catalog.contexts().await;
+    core.set_terminal_program(PathBuf::from("/bin/sh"), vec!["-c".into(), "exit".into()]);
+    let creating = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            core.terminal_create(
+                "main",
+                NewTerminal {
+                    context: "kind-a".to_owned(),
+                    label: "Terminal 1".to_owned(),
+                },
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!creating.is_finished(), "made before the login environment");
+    core.set_context_mode(SetContextMode {
+        context: "kind-a".to_owned(),
+        mode: Some(Mode::Guarded),
+    })
+    .await
+    .unwrap();
+    let home = dir.path().join("home");
+    let env: ShellEnv = [(OsString::from("HOME"), home.into_os_string())]
+        .into_iter()
+        .collect();
+    status.send(Status::Resolved(Arc::new(env))).unwrap();
+    let session = tokio::time::timeout(WAIT, creating)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.kind,
+        TerminalKind::Proxy {
+            why: ProxyWhy::Mode
+        }
+    );
+}
+
+#[tokio::test]
 async fn a_context_no_source_lists_has_no_terminal() {
     let setup = Setup::new().await;
     let refused = setup

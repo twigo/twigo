@@ -990,7 +990,7 @@ Extensions add commands, not prefixes.
 - **Integrated terminal.**
   A local pty with the login-shell environment, in a tab of the panel run over the shell commands: `terminal_create` parks it for the space's context, and `shell_open` starts it with the terminal's size.
   - The terminal is pinned to the space's context without touching the user's kubeconfig.
-  - Its kind is decided when it is created, and the tab shows it; a later change of mode changes nothing in a running terminal, whose proxy follows the mode by itself.
+  - Its kind is decided when it is created, once the login shell's environment is known, which at startup can take seconds, and the tab shows it; a later change of mode changes nothing in a running terminal, whose proxy follows the mode by itself.
   - **Terminals of `read-write` contexts from the user's kubeconfig** use the user's real credentials.
     `KUBECONFIG` is Twigo's file of the context, then the catalog's kubeconfig files in their order.
     Twigo's file is a whole kubeconfig, `apiVersion`, `kind`, `clusters: []`, `users: []`, a copy of the context's own entry and `current-context`, in `terminals/<n>/` under the app-data directory (0700, the file 0600), deleted with the terminal's tab, not when its shell ends, as a job the shell left would take the person's current context without it, and, should the app end first, at the next start.

@@ -172,11 +172,6 @@ impl Core {
     ) -> Result<TerminalSession, IpcError> {
         let ticket = self.shells.ticket(window);
         let NewTerminal { context, label } = request;
-        let contexts = self.catalog.contexts().await;
-        let Some(found) = contexts.find(&context) else {
-            return Err(IpcError::from(&ClientsError::NoContext(context)));
-        };
-        let kind = kind(&self.policy, &context);
         let login = self
             .shell_env
             .subscribe()
@@ -185,6 +180,14 @@ impl Core {
             .expect("the core outlives its subscribers")
             .clone()
             .expect("waited for");
+        // After the wait, which can take seconds at startup, with none
+        // before a kubeconfig terminal parks; a proxy terminal waits for its
+        // process, whose proxy follows the mode by itself.
+        let contexts = self.catalog.contexts().await;
+        let Some(found) = contexts.find(&context) else {
+            return Err(IpcError::from(&ClientsError::NoContext(context)));
+        };
+        let kind = kind(&self.policy, &context);
         let sources = self
             .catalog
             .sources()
