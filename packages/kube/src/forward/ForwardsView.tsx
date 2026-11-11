@@ -14,6 +14,7 @@ import {
   useListRegistration,
   useWorkbench,
 } from "@twigo/workbench";
+import { KindIcon } from "../KindIcon";
 import { pfUri } from "../uri";
 import { FORWARDS_VIEW } from "./actions";
 import { forwardKeys, withForward } from "./keys";
@@ -166,11 +167,11 @@ function SpaceForwards({
           preserveFocus: true,
         });
       }}
-      menu={
-        selected && lookup
-          ? workbench.actions("view/item", lookup, { id: selected.id })
-          : []
-      }
+      menu={workbench.actions(
+        "view/item",
+        lookup ?? keys.lookup(null),
+        selected && { id: selected.id },
+      )}
       loading={!forwards.loaded}
       empty={
         <EmptyState
@@ -201,10 +202,16 @@ function Cell({ forward, column }: { forward: Forward; column: string }) {
     }
     case "target":
       return (
-        <>
-          <span className="text-muted-foreground">{forward.kind}</span>{" "}
-          {forward.target.name}
-        </>
+        <span
+          title={`${forward.kind} ${forward.target.name}`}
+          className="inline-flex max-w-full items-center gap-1.5"
+        >
+          <KindIcon
+            gvr={forward.target.gvr}
+            className="size-3.5 shrink-0 text-muted-foreground"
+          />
+          <span className="truncate">{forward.target.name}</span>
+        </span>
       );
     case "ports":
       return `${portWords(forward)} → ${String(forward.local)}`;

@@ -188,7 +188,11 @@ export function registerForwardActions(
     // It acts on the forward its caller names, so the palette has nothing to give it.
     menus.append("commandPalette", { command: id, when: "false" });
     for (const [menu, group] of placed) {
-      menus.append(menu, { command: id, group, order, when });
+      // An item that needs only a forward shows disabled while none is
+      // selected, so the first right click on a row has a menu to open, as
+      // the resource lists' has.
+      const shown = menu === "view/item" && when === "forward" ? {} : { when };
+      menus.append(menu, { command: id, group, order, ...shown });
     }
   });
 

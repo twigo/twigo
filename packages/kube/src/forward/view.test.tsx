@@ -89,10 +89,17 @@ test("the Port forwards container joins the Explorer in the side bar's header, a
   expect(
     screen.getByRole("tab", { name: "Port forwards", selected: true }),
   ).toBeTruthy();
+  expect(
+    rows().map((row) => row.querySelector("[title]")?.getAttribute("title")),
+  ).toEqual([
+    "Deployment payments-api",
+    "Service payments-gateway",
+    "Deployment payments-legacy",
+  ]);
   expect(rows().map(cells)).toEqual([
-    ["Restored", "Deployment payments-api", "http 8080 → 8081", "–"],
-    ["Stopped", "Service payments-gateway", "metrics 9090 → 9090", "–"],
-    ["Failed", "Deployment payments-legacy", "http 8080 → 8082", "–"],
+    ["Restored", "payments-api", "http 8080 → 8081", "–"],
+    ["Stopped", "payments-gateway", "metrics 9090 → 9090", "–"],
+    ["Failed", "payments-legacy", "http 8080 → 8082", "–"],
   ]);
 });
 
@@ -174,10 +181,9 @@ test("the keys of the list do nothing without a selected row, or once the focus 
   expect(calls("forward_remove")).toEqual([]);
 });
 
-test("a row's menu carries the tab's actions for its state", async () => {
+test("the first right click on a row opens its menu, which carries the tab's actions for its state", async () => {
   await mounted();
   const menuOf = async (n: number) => {
-    await select(n);
     fireEvent.contextMenu(row(n));
     await settle(4);
     const items = within(screen.getByRole("menu"))
