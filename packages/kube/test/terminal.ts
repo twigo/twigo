@@ -1,6 +1,6 @@
 import { afterAll, beforeAll } from "vitest";
 import type { Backend, OpenShell, ShellMessage } from "@twigo/protocol";
-import type { ExecTab } from "../src/exec/tabs";
+import type { ShellTerminal } from "../src/xterm/terminal";
 
 /** jsdom lays nothing out, so xterm measures a cell as 0 by 0 and never fits: every element is 256 by 16, which makes a cell 8 by 16. */
 export function withTerminalLayout() {
@@ -20,7 +20,11 @@ export function withTerminalLayout() {
   });
 }
 
-export function sized(tab: ExecTab, width = 640, height = 320): void {
+export function sized(
+  tab: Pick<ShellTerminal, "host">,
+  width = 640,
+  height = 320,
+): void {
   tab.host.style.width = `${String(width)}px`;
   tab.host.style.height = `${String(height)}px`;
 }

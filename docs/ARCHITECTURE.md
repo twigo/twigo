@@ -947,6 +947,7 @@ Extensions add commands, not prefixes.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
     A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
     A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
+    It starts on a line of its own when the cursor is not at the start of one, as when Restart replaces a session that still runs, since zsh marks a prompt that does not start a line with an inverse `%`; the session opens once the output so far is parsed and that line feed is queued, so none of its output comes before.
     An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.
