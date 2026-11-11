@@ -13,6 +13,7 @@ pub mod objects;
 mod proxy;
 pub mod state;
 pub mod subscriptions;
+mod terminal;
 pub mod trust;
 
 use std::collections::HashSet;
@@ -78,7 +79,8 @@ pub struct Core {
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
-    shells: Subscriptions<twigo_sessions::shell::Session>,
+    shells: Subscriptions<terminal::Shell>,
+    terminals: terminal::Terminals,
     bus: Arc<Bus>,
     undos: Arc<Undos>,
     discovery: Arc<Cache>,
@@ -109,10 +111,10 @@ pub enum ClientsError {
 }
 
 impl Core {
-    /// The core whose state, trusted plugins, audit log and processes'
-    /// kubeconfigs live in `data`, the app's data directory, its clusters'
-    /// discovery in `cache`, its cache directory, and whose admin's policy is
-    /// the file at `policy_file`.
+    /// The core whose state, trusted plugins, audit log, processes'
+    /// kubeconfigs and terminals' directories live in `data`, the app's data
+    /// directory, its clusters' discovery in `cache`, its cache directory,
+    /// and whose admin's policy is the file at `policy_file`.
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
@@ -136,6 +138,7 @@ impl Core {
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             shells: Subscriptions::new("shell"),
+            terminals: terminal::Terminals::new(data.join("terminals")),
             bus: Arc::default(),
             undos: Arc::default(),
             discovery: Arc::new(Cache::new(cache.join("discovery"))),
@@ -159,9 +162,11 @@ impl Core {
         self.focused.send_replace(focused);
     }
 
-    /// Kills the plugins under way, as the app quits.
+    /// Kills the plugins under way and hangs up every terminal at once, as
+    /// the app quits: nothing drops them then.
     pub fn shutdown(&self) {
         self.credentials.shutdown();
+        self.shells.each(terminal::Shell::quit);
     }
 
     /// The context's clients, once the catalog and the login shell's
@@ -846,8 +851,9 @@ impl Core {
         self.approvals.answer(window, answer)
     }
 
-    /// Ends the lists, open objects, logs sessions, shells, plans and asks of
-    /// a window that reloads or closes: its asks are denied.
+    /// Ends the lists, open objects, logs sessions, shells and terminals,
+    /// plans, asks and offers of a window that reloads or closes: its asks
+    /// are denied.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
@@ -855,6 +861,7 @@ impl Core {
         self.shells.drop_window(window);
         self.bus.drop_window(window);
         self.approvals.drop_window(window);
+        self.terminals.drop_window(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a
@@ -874,8 +881,9 @@ impl Core {
     }
 
     /// Follows the catalog's sources and the login shell's proxy variables,
-    /// and tells the state store and the connections which contexts the
-    /// sources list; never returns. In the explicit mode (ARCHITECTURE 5.5)
+    /// tells the state store and the connections which contexts the sources
+    /// list, and makes the terminals' offers anew as the files change; never
+    /// returns. In the explicit mode (ARCHITECTURE 5.5)
     /// `explicit` is the only source; otherwise the sources come from the
     /// login shell's environment, as `status` follows it, read again
     /// whenever it is resolved.
@@ -923,7 +931,13 @@ impl Core {
                 }
             }
         };
-        tokio::join!(sources, seen, self.policy.follow_unlocks());
+        let offered = async {
+            let mut written = self.catalog.written();
+            while written.changed().await.is_ok() {
+                self.terminals.refresh_offers().await;
+            }
+        };
+        tokio::join!(sources, seen, offered, self.policy.follow_unlocks());
     }
 }
 

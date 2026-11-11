@@ -6,7 +6,6 @@
 
 mod connect;
 mod ending;
-mod flow;
 
 use std::sync::{Arc, Mutex};
 
@@ -21,11 +20,11 @@ use tokio_util::io::ReaderStream;
 use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Clients, Waiting};
 
+use crate::flow::{FRAME_MAX, Flow};
 use connect::{Connect, Kube};
 use ending::ending;
-use flow::{FRAME_MAX, Flow};
 
-const INPUT_QUEUE: usize = 32;
+pub(crate) const INPUT_QUEUE: usize = 32;
 
 /// `sh` exists wherever a shell can run at all; a person's `exit 1` can never
 /// start a second shell, as it would after a retry on failure, because `exec`

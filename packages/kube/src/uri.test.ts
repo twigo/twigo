@@ -6,7 +6,9 @@ import {
   parseExecUri,
   parseListUri,
   parseObjectUri,
+  parseTerminalUri,
   parseUntitledUri,
+  terminalUri,
   untitledUri,
 } from "./uri";
 
@@ -146,4 +148,24 @@ test("a shell's number is 2 or more, and anything else is the first", () => {
   expect(parseExecUri(`${base}?n=x`)?.n).toBeUndefined();
   expect(parseExecUri(`${base}?n=7`)?.n).toBe(7);
   expect(parseExecUri(`${base}?attach=0`)?.attach).toBeUndefined();
+});
+
+test.each([
+  [{ space: "dev", n: 1 }, "terminal://dev/1"],
+  [{ space: "dev+qa", n: 12 }, "terminal://dev%2Bqa/12"],
+])("%o round-trips through %s", (input, uri) => {
+  expect(terminalUri(input)).toBe(uri);
+  expect(parseTerminalUri(uri)).toEqual(input);
+});
+
+test.each([
+  "terminal://1",
+  "terminal:///1",
+  "terminal://dev/0",
+  "terminal://dev/01",
+  "terminal://dev/1/2",
+  "terminal://dev/one",
+  "exec://dev/1",
+])("%s is no terminal", (uri) => {
+  expect(parseTerminalUri(uri)).toBeUndefined();
 });

@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
-pub(super) const FRAME_MAX: usize = 64 * 1024;
+pub(crate) const FRAME_MAX: usize = 64 * 1024;
 /// The least time between frames, since a webview pays for a frame far more than for its bytes.
-pub(super) const GATHER: Duration = Duration::from_millis(16);
+pub(crate) const GATHER: Duration = Duration::from_millis(16);
 const HIGH_WATER: u64 = 256 * 1024;
 const LOW_WATER: u64 = 64 * 1024;
 
 #[derive(Default)]
-pub(super) struct Flow {
+pub(crate) struct Flow {
     gathered: Vec<u8>,
     /// Sent and not yet acknowledged.
     unacked: u64,
@@ -25,7 +25,7 @@ pub(super) struct Flow {
 
 impl Flow {
     /// Takes what was read and answers the frames to send now.
-    pub(super) fn read(&mut self, mut bytes: &[u8], now: Instant) -> Vec<Vec<u8>> {
+    pub(crate) fn read(&mut self, mut bytes: &[u8], now: Instant) -> Vec<Vec<u8>> {
         let mut frames = Vec::new();
         while !bytes.is_empty() {
             let room = FRAME_MAX - self.gathered.len();
@@ -46,7 +46,7 @@ impl Flow {
     }
 
     /// What has gathered, as a frame.
-    pub(super) fn flush(&mut self, now: Instant) -> Option<Vec<u8>> {
+    pub(crate) fn flush(&mut self, now: Instant) -> Option<Vec<u8>> {
         self.due = None;
         if self.gathered.is_empty() {
             return None;
@@ -57,16 +57,16 @@ impl Flow {
     }
 
     /// Counts bytes the terminal parsed, no more than were sent.
-    pub(super) fn ack(&mut self, bytes: u64) {
+    pub(crate) fn ack(&mut self, bytes: u64) {
         self.unacked -= bytes.min(self.unacked);
     }
 
-    pub(super) fn due(&self) -> Option<Instant> {
+    pub(crate) fn due(&self) -> Option<Instant> {
         self.due
     }
 
     /// Whether the session may read more.
-    pub(super) fn reading(&mut self) -> bool {
+    pub(crate) fn reading(&mut self) -> bool {
         let held = self.unacked + self.gathered.len() as u64;
         if self.stopped {
             self.stopped = held >= LOW_WATER;

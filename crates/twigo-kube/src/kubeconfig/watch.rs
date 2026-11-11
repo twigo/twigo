@@ -39,10 +39,13 @@ struct Watched {
 
 impl Watch {
     /// Calls `on_change` with the catalog before it returns, then on a
-    /// thread of its own with every new one, until the watch is dropped.
+    /// thread of its own with every new one, and `on_write` after every
+    /// change to the files, whether or not it changed the catalog, until the
+    /// watch is dropped.
     pub fn start(
         sources: Sources,
         mut on_change: impl FnMut(Catalog) + Send + 'static,
+        mut on_write: impl FnMut() + Send + 'static,
     ) -> Result<Self, notify::Error> {
         let (events, received) = mpsc::channel::<DebounceEventResult>();
         let mut watched = Watched {
@@ -83,6 +86,7 @@ impl Watch {
                         last = next.clone();
                         on_change(next);
                     }
+                    on_write();
                 }
             })?;
         Ok(Self { _watched: shared })

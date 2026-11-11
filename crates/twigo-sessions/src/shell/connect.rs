@@ -10,8 +10,8 @@ use kube::Api;
 use kube::api::{AttachParams, TerminalSize};
 use tokio::io::{ReadHalf, SimplexStream, WriteHalf};
 
-use super::flow::FRAME_MAX;
 use super::{Join, Spec};
+use crate::flow::FRAME_MAX;
 
 pub(super) struct Connected {
     pub stdout: ReadHalf<SimplexStream>,

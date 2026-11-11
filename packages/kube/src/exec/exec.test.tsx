@@ -10,9 +10,15 @@ import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
-import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import {
+  click,
+  stripOf,
+  tabOf as tabElement,
+  tabsIn,
+  testWorkbench,
+} from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
-import { withTerminalLayout } from "../../test/terminal";
+import { ctrlC, withTerminalLayout } from "../../test/terminal";
 import { execUri, objectUri, type ExecInput } from "../uri";
 import { registerKube } from "../register";
 import { createExecTabs, registerExec } from "./register";
@@ -455,6 +461,47 @@ test("Restart asks again and starts a new session in the same tab", async () => 
   expect(panelTabs()).toEqual([uri]);
 });
 
+test("a tab closed while Restart waits for its plan stays closed, and the session the plan ends with is closed", async () => {
+  const { workbench, tabs, backend, open } = await mounted("shellNoShell");
+  await open("qa", ONE);
+  const uri = execUri(RUNNING);
+  const original = workbench.operations.run.bind(workbench.operations);
+  let answer: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  const sessions: number[] = [];
+  vi.spyOn(workbench.operations, "run").mockImplementation(
+    async (plan, options) => {
+      await gate;
+      const outcome = await original(plan, options);
+      if (outcome.state === "session") sessions.push(outcome.id);
+      return outcome;
+    },
+  );
+  const closed: unknown[] = [];
+  const invoke = backend.invoke.bind(backend);
+  vi.spyOn(backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command === "shell_close") closed.push(request);
+      return invoke(command as never, request as never);
+    },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Restart Shell" }));
+  await settle(4);
+  act(() => {
+    workbench.editors.close(uri);
+  });
+  await settle(4);
+  answer();
+  await settle(10);
+
+  expect(panelTabs()).toEqual([]);
+  expect(tabs.has(uri)).toBe(false);
+  expect(sessions).toHaveLength(1);
+  expect(closed).toContain(sessions[0]);
+});
+
 test("a shell that waits says so in the tab, with the cluster's sessions", async () => {
   const { open } = await mounted("shellQueued");
   await open("qa", ONE);
@@ -721,6 +768,56 @@ test("on Linux and Windows quick access, the command palette and the panel's tog
   await settle(4);
   expect(panelShown(workbench)).toBe(false);
   expect(inputs()).toEqual([[2]]);
+});
+
+test("a click on a shell's tab gives its terminal the focus, so the keys reach its session", async () => {
+  const { workbench, tabs, backend, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  await open("qa", ONE);
+  const uris = [execUri(RUNNING), execUri({ ...RUNNING, n: 2 })] as const;
+  const invoke = vi.spyOn(backend, "invoke");
+  const inputs = () =>
+    invoke.mock.calls
+      .filter(([command]) => command === "shell_input")
+      .map(([, request]) => request as { id: number; data: number[] });
+  for (const uri of uris) {
+    act(() => {
+      tabs.get(uri)?.term.input("x");
+    });
+    await settle(2);
+  }
+  const [one, two] = inputs().map(({ id }) => id);
+  expect(one).not.toBe(two);
+  expect(workbench.editors.activeIn("panel")).toBe(uris[1]);
+  invoke.mockClear();
+
+  click(tabElement(uris[0]));
+  await settle(4);
+  expect(workbench.editors.activeIn("panel")).toBe(uris[0]);
+  expect(document.activeElement).toBe(tabs.get(uris[0])?.term.textarea);
+  ctrlC(document.activeElement ?? document.body);
+  await settle(2);
+  expect(inputs()).toEqual([{ id: one, data: [3] }]);
+});
+
+test("a click on the empty part of the tab strip leaves the shell that has the focus with it", async () => {
+  const { tabs, backend, open } = await mounted("shellOneContainer");
+  await open("qa", ONE);
+  await open("qa", ONE);
+  const textarea = tabs.get(execUri({ ...RUNNING, n: 2 }))?.term.textarea;
+  expect(document.activeElement).toBe(textarea);
+  const invoke = vi.spyOn(backend, "invoke");
+
+  click(stripOf("panel"));
+  await settle(4);
+  expect(document.activeElement).toBe(textarea);
+  ctrlC(document.activeElement ?? document.body);
+  await settle(2);
+  expect(
+    invoke.mock.calls
+      .filter(([command]) => command === "shell_input")
+      .map(([, request]) => (request as { data: number[] }).data),
+  ).toEqual([[3]]);
 });
 
 test("a tab that moves to another view keeps its terminal and its session", async () => {

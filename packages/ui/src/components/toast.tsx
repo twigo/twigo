@@ -1,4 +1,11 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   CircleAlert,
   CircleCheck,
@@ -9,6 +16,7 @@ import {
 } from "lucide-react";
 import { Toaster as SonnerToaster, toast } from "sonner";
 import { cn } from "../lib/cn";
+import { Button } from "./button";
 import { Kbd } from "./kbd";
 
 export type Tone = "success" | "error" | "warning" | "info";
@@ -153,20 +161,174 @@ export function CountdownToast({
   );
 }
 
+export interface ChoiceToastProps {
+  icon: LucideIcon;
+  message: ReactNode;
+  detail?: ReactNode;
+  /** The choices as buttons, the first of them the one to take. */
+  choices: readonly { label: string; run: () => void }[];
+  /** While an answer is on its way, which the buttons wait for. */
+  busy?: boolean;
+}
+
+/**
+ * Something that waits for an answer: what came and the buttons to answer
+ * it with. It has no close of its own, since closing it would answer
+ * nothing.
+ */
+export function ChoiceToast({
+  icon: Icon,
+  message,
+  detail,
+  choices,
+  busy = false,
+}: ChoiceToastProps) {
+  return (
+    <div
+      role="status"
+      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
+    >
+      <span className="flex h-5 shrink-0 items-center">
+        <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+      </span>
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-1.5 leading-5">
+        <span className="break-words text-foreground">{message}</span>
+        {detail}
+        <span className="flex flex-wrap gap-1.5">
+          {choices.map(({ label, run }, index) => (
+            <Button
+              key={label}
+              size="sm"
+              variant={index === 0 ? "brand" : "outline"}
+              disabled={busy}
+              onClick={run}
+              className="h-auto min-h-6.5 max-w-full py-1 text-left whitespace-normal wrap-anywhere"
+            >
+              {label}
+            </Button>
+          ))}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function secondsLeft(until: number): number {
   return Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 
-const WIDTH = { "--width": "288px" } as CSSProperties;
+/**
+ * Sonner's CSS for a window of 600 px or less spreads the list across it from
+ * `--mobile-offset-left` and gives each toast the rest of its width, which
+ * puts a card over the activity bar and the Explorer. An inline style wins
+ * over it, so the list keeps its own width at its right offset, as in a wider
+ * window.
+ */
+const LIST = {
+  "--width": "288px",
+  width: "var(--width)",
+  left: "auto",
+} as CSSProperties;
+const TOAST = { width: "var(--width)" };
+const GAP = 6;
+/** The status bar's 24 px and 8 px of air: the lowest the front toast sits. */
+const FLOOR = 32;
+/**
+ * While the stack is closed sonner caps a toast behind the front one to the
+ * front's height, and hides the children of its own styled toasts only
+ * (`data-styled`, which a custom toast is not), so a taller card would hang
+ * out of the cap over what is under the stack, and a pointer there would
+ * open and close the stack. The box is clipped and the content of the card
+ * is hidden, `visibility` too, which takes its buttons out of the tab order
+ * and the accessibility tree; the card's own edge stays above the front
+ * toast, as a styled toast's does. A toast past the ones that show, which
+ * sonner draws at no opacity even while the stack is open, is hidden whole,
+ * so neither it nor its buttons take the focus. A toast that takes the
+ * focus shows the app's focus ring, as sonner's own barely shows in dark.
+ */
+const BEHIND = [
+  "data-[front=false]:data-[expanded=false]:overflow-hidden",
+  "data-[front=false]:data-[expanded=false]:[&_[data-title]>*>*]:opacity-0",
+  "data-[front=false]:data-[expanded=false]:[&_[data-title]>*>*]:invisible",
+  "data-[visible=false]:invisible",
+  "focus-visible:outline-none focus-visible:shadow-[var(--focus-ring)]",
+].join(" ");
 
-export function Toaster() {
+/**
+ * The height of the toasts that show, spread as sonner spreads them while
+ * the pointer is over them: each at its own height, a gap between. Sonner
+ * keeps a toast's own height in `--initial-height`; a toast behind the
+ * front one is shorter while the stack is closed.
+ */
+function spreadHeight(section: HTMLElement): number {
+  const heights = [
+    ...section.querySelectorAll<HTMLElement>(
+      '[data-sonner-toast][data-visible="true"][data-removed="false"]',
+    ),
+  ].map(
+    (toast) =>
+      Number.parseFloat(toast.style.getPropertyValue("--initial-height")) || 0,
+  );
+  return (
+    heights.reduce((sum, height) => sum + height, 0) +
+    GAP * Math.max(0, heights.length - 1)
+  );
+}
+
+function useSpreadHeight() {
+  const section = useRef<HTMLElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const element = section.current;
+    if (!element) return;
+    const measure = () => {
+      setHeight(spreadHeight(element));
+    };
+    measure();
+    const observer = new MutationObserver(measure);
+    observer.observe(element, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["style", "data-visible", "data-removed"],
+    });
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  return { section, height };
+}
+
+/**
+ * `clearance` is the height of what the window shows above its status bar
+ * that the toasts must not cover, and `ceiling` the height of what it shows
+ * under its top that they must not reach. The toasts sit above the
+ * clearance while they fit there, spread by a hover, else as low as it takes
+ * to keep them whole under the ceiling, but never below the status bar's
+ * edge: a stack taller than the window lets its top go past the title bar,
+ * and the front toast stays in the window. A window of 600 px or less, where
+ * sonner takes other offsets, gets the same ones.
+ */
+export function Toaster({
+  clearance = 0,
+  ceiling = 0,
+}: {
+  clearance?: number;
+  ceiling?: number;
+}) {
+  const { section, height } = useSpreadHeight();
+  const bottom = `max(${String(FLOOR)}px, min(${String(FLOOR + clearance)}px, calc(100dvh - ${String(ceiling + 8 + height)}px)))`;
+  const offset = { bottom, right: 12 };
   return (
     <SonnerToaster
+      ref={section}
       position="bottom-right"
       visibleToasts={3}
-      gap={6}
-      offset={{ bottom: 32, right: 12 }}
-      style={WIDTH}
+      gap={GAP}
+      offset={offset}
+      mobileOffset={offset}
+      style={LIST}
+      toastOptions={{ className: BEHIND, style: TOAST }}
       containerAriaLabel="Notifications"
     />
   );

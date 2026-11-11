@@ -10,13 +10,15 @@ const TINT: Readonly<Record<Tone, string>> = {
   idle: "bg-row-active text-muted-foreground",
 };
 
-/** A state in words on its tone's tint, with its dot: an object's status. */
+/** A state in words on its tone's tint, with its dot or an icon in its place: an object's status. */
 export function Pill({
   tone,
+  icon,
   children,
   className,
 }: {
   tone: Tone;
+  icon?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -28,7 +30,7 @@ export function Pill({
         className,
       )}
     >
-      <StatusDot tone={tone} />
+      {icon ?? <StatusDot tone={tone} />}
       {children}
     </span>
   );

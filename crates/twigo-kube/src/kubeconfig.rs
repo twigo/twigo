@@ -2,10 +2,13 @@
 //! reads, merged by its rules, with each context's `twigo` extension and
 //! fingerprint.
 
+mod entries;
 mod fingerprint;
+mod reach;
 #[cfg(test)]
 mod tests;
 mod watch;
+pub(crate) mod write;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -19,8 +22,11 @@ use twigo_ipc::{ContextColor, Environment};
 
 use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
+pub use entries::{Appended, Names, Outcome, Written, append};
 pub use fingerprint::Fingerprint;
+pub use reach::Reach;
 pub use watch::Watch;
+pub use write::WriteError;
 
 /// The name of the kubeconfig extension Twigo reads and never writes.
 const EXTENSION: &str = "twigo";
@@ -82,6 +88,19 @@ impl Sources {
         &self.files
     }
 
+    /// The file kubectl writes new entries to: the only one, else the first
+    /// that exists, else the last ([`GetDefaultFilename`]).
+    ///
+    /// [`GetDefaultFilename`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/config.go#L112-L134
+    pub fn target(&self) -> Option<&Path> {
+        match self.files.as_slice() {
+            [] => None,
+            [only] => Some(only),
+            files => files.iter().find(|file| file.exists()).or(files.last()),
+        }
+        .map(PathBuf::as_path)
+    }
+
     /// Reads and merges the files. A missing file is skipped, as kubectl
     /// skips it; one that cannot be read or parsed is skipped and reported.
     pub fn load(&self) -> Catalog {
@@ -136,7 +155,7 @@ impl Sources {
     }
 
     /// A file as a person names it: under the home directory, from `~`.
-    fn named(&self, file: &Path) -> String {
+    pub fn named(&self, file: &Path) -> String {
         match self.home.as_deref().map(|home| file.strip_prefix(home)) {
             Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
             Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),

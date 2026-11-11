@@ -224,3 +224,36 @@ async fn an_exported_shellopts_does_not_trace_into_the_fallback_frame() {
     assert!(mangled.is_empty(), "{mangled:?}");
     assert!(env.get("PATH").is_some());
 }
+
+#[test]
+fn a_terminal_starts_a_login_shell_on_macos_only() {
+    let zsh = terminal_args(Path::new("/bin/zsh"));
+    let pwsh = terminal_args(Path::new("/usr/local/bin/pwsh"));
+    if cfg!(target_os = "macos") {
+        assert_eq!((zsh, pwsh), (&["-l"][..], &["-Login"][..]));
+    } else {
+        assert_eq!((zsh, pwsh), (&[][..], &[][..]));
+    }
+}
+
+#[test]
+fn a_locale_in_utf_8_is_the_system_s_without_keywords_where_the_system_has_it() {
+    let has = |name: &str| ["uk_UA.UTF-8", "en_GB.UTF-8"].contains(&name);
+    assert_eq!(in_utf8(Some("uk_UA"), has), "uk_UA.UTF-8");
+    assert_eq!(in_utf8(Some("en_GB@rg=uszzzz"), has), "en_GB.UTF-8");
+    assert_eq!(in_utf8(Some("zh-Hans_CN"), has), "en_US.UTF-8");
+    assert_eq!(in_utf8(None, has), "en_US.UTF-8");
+}
+
+#[test]
+fn a_terminal_s_utf_8_locale_is_one_the_system_has() {
+    let locale = utf8_locale();
+    if cfg!(target_os = "macos") {
+        assert!(
+            Path::new("/usr/share/locale").join(&locale).is_dir(),
+            "{locale}"
+        );
+    } else {
+        assert_eq!(locale, "C.UTF-8");
+    }
+}

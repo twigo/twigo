@@ -193,6 +193,27 @@ export function parseExecUri(uri: string): ExecInput | undefined {
   };
 }
 
+export const TERMINAL_SCHEME = "terminal";
+
+/** A terminal on this machine, a tab of the panel (ARCHITECTURE 4.3, 4.6): `terminal://<space>/<n>`, numbered within its space. */
+export interface TerminalInput {
+  readonly space: string;
+  readonly n: number;
+}
+
+export function terminalUri({ space, n }: TerminalInput): string {
+  return `${TERMINAL_SCHEME}://${encodeURIComponent(space)}/${String(n)}`;
+}
+
+export function parseTerminalUri(uri: string): TerminalInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${TERMINAL_SCHEME}:`) return undefined;
+  const found = /^\/([1-9]\d*)$/.exec(url.pathname);
+  return found?.[1] === undefined || url.host === ""
+    ? undefined
+    : { space: decodeURIComponent(url.host), n: Number(found[1]) };
+}
+
 export const UNTITLED_SCHEME = "untitled";
 
 /** A new manifest and the space it was written in (ARCHITECTURE 4.3): `untitled://<space>/manifest-<n>`, the space encoded as an object's is. */

@@ -17,6 +17,8 @@ async function withEveryEnablement() {
   workbench.keys.set("execEnded", true);
   workbench.keys.set("execTab", true);
   workbench.keys.set("execOpen", true);
+  workbench.keys.set("terminalRestartable", true);
+  workbench.keys.set("terminalOpen", true);
   workbench.keys.set("logsFocus", true);
   workbench.keys.set("logLines", true);
   workbench.keys.set("panelVisible", true);

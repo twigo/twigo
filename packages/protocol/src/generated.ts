@@ -40,6 +40,13 @@ export type AnswerApproval = { id: ApprovalId, answer: ApprovalAnswer,
  */
 typed: string | null, };
 
+export type AnswerKubeconfigOffer = { id: KubeconfigOfferId, 
+/**
+ * The revision of the offer the person answered: an answer to another
+ * than the offer's now changes nothing and is refused as a conflict.
+ */
+revision: number, answer: KubeconfigOfferAnswer, };
+
 /**
  * A field another manager owns that an apply would change.
  */
@@ -559,6 +566,52 @@ id: string,
  */
 keys: { [key in string]: KeyMapping }, };
 
+/**
+ * Names of a kubeconfig's entries, by section.
+ */
+export type KubeconfigNames = { contexts: Array<string>, clusters: Array<string>, users: Array<string>, };
+
+/**
+ * Entries a tool wrote into a terminal's own kubeconfig, such as `aws eks
+ * update-kubeconfig` does, offered for moving into the user's kubeconfig.
+ */
+export type KubeconfigOffer = { id: KubeconfigOfferId, 
+/**
+ * How many times the offer of this id was sent again with a change;
+ * an answer names the revision it answers.
+ */
+revision: number, 
+/**
+ * The terminal's label.
+ */
+terminal: string, 
+/**
+ * The id `terminal_create` answered for the terminal, which finds its
+ * tab where labels repeat: every space has its own `Terminal 1`.
+ */
+session: SubscriptionId, 
+/**
+ * The context the terminal was pinned to.
+ */
+context: string, contexts: Array<string>, clusters: Array<string>, users: Array<string>, 
+/**
+ * The user's file a move writes to, the one kubectl writes new entries
+ * to, as a person reads it: `~/.kube/config`.
+ */
+target: string, 
+/**
+ * What a move leaves out: a name the user's files hold in its section,
+ * a context whose cluster or user means another entry there, and a
+ * cluster or user that only such contexts name.
+ */
+leftOut: KubeconfigNames, };
+
+export type KubeconfigOfferAnswer = "move" | "dismiss";
+
+export type KubeconfigOfferEvent = { "event": "offered", offer: KubeconfigOffer, } | { "event": "withdrawn", id: KubeconfigOfferId, } | { "event": "direct", session: SubscriptionId, contexts: Array<string>, };
+
+export type KubeconfigOfferId = number;
+
 export type Label = { key: string, value: string, };
 
 export type Level = "trace" | "debug" | "info" | "warn" | "error";
@@ -866,6 +919,15 @@ export type Mode = "read-write" | "guarded" | "read-only";
 export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user" } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "default" };
 
 /**
+ * A terminal to start for `context`.
+ */
+export type NewTerminal = { context: string, 
+/**
+ * What its asks and its offers call it, as its tab does: `Terminal 2`.
+ */
+label: string, };
+
+/**
  * Why a write has no diff.
  */
 export type NoDiff = { "reason": "subresource" } | { "reason": "aggregated" } | { "reason": "unverified" } | { "reason": "refused", message: string, } | { "reason": "notAResource" };
@@ -1095,6 +1157,11 @@ installHint: string | null, };
  */
 export type PreviewId = number;
 
+/**
+ * Why a terminal goes through the policy proxy.
+ */
+export type ProxyWhy = "mode" | "provider" | "policyFile";
+
 export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject>, 
 /**
  * Why some owned objects cannot be listed.
@@ -1239,7 +1306,7 @@ default: string, };
 /**
  * Why a session ended; none can resume, as an exec cannot.
  */
-export type ShellEnd = { "reason": "exited", code: number, } | { "reason": "detached" } | { "reason": "noShell", message: string, } | { "reason": "failed", error: IpcError, } | { "reason": "connectionLost" } | { "reason": "relocked" };
+export type ShellEnd = { "reason": "exited", code: number, } | { "reason": "signaled", signal: string, } | { "reason": "detached" } | { "reason": "noShell", message: string, } | { "reason": "failed", error: IpcError, } | { "reason": "connectionLost" } | { "reason": "relocked" };
 
 /**
  * Where the login shell's environment stands (ARCHITECTURE 6.1).
@@ -1337,6 +1404,26 @@ export type StreamState = { "state": "off" } | { "state": "overLimit" } | { "sta
 export type SubscriptionId = number;
 
 /**
+ * How a terminal reaches clusters, which its tab shows.
+ */
+export type TerminalKind = { "kind": "kubeconfig" } | { "kind": "proxy", why: ProxyWhy, };
+
+/**
+ * A parked terminal, which starts once `shell_open` names it.
+ */
+export type TerminalSession = { id: SubscriptionId, kind: TerminalKind, 
+/**
+ * The shell's file name: `zsh`.
+ */
+shell: string, 
+/**
+ * Whether Twigo sets `KUBECONFIG` again after the shell's startup
+ * files, as it does for zsh, bash, fish and pwsh; for another shell a
+ * startup file that sets it replaces the terminal's.
+ */
+kubeconfigKept: boolean, };
+
+/**
  * Indexes a line's text in UTF-16 units; `end` is exclusive.
  */
 export type TextRange = { start: number, end: number, };
@@ -1414,6 +1501,9 @@ export type Commands = {
   shell_resize: { request: ShellResize; response: null; message: null };
   shell_ack: { request: ShellAck; response: null; message: null };
   shell_close: { request: SubscriptionId; response: null; message: null };
+  terminal_create: { request: NewTerminal; response: TerminalSession; message: null };
+  kubeconfig_offers_watch: { request: null; response: Array<KubeconfigOffer>; message: KubeconfigOfferEvent };
+  kubeconfig_offer_answer: { request: AnswerKubeconfigOffer; response: null; message: null };
   logs_open: { request: OpenLogs; response: SubscriptionId; message: LogBatch };
   logs_set_source: { request: SetLogSource; response: null; message: null };
   logs_set_view: { request: SetLogView; response: null; message: null };

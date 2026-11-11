@@ -111,6 +111,13 @@ impl<T> Subscriptions<T> {
         Ok(act(held))
     }
 
+    /// Acts on every subscription of every window.
+    pub fn each(&self, mut act: impl FnMut(&T)) {
+        for window in self.inner().windows.values() {
+            window.held.values().for_each(&mut act);
+        }
+    }
+
     pub fn remove(&self, window: &str, id: SubscriptionId) -> Result<(), IpcError> {
         let removed = self
             .inner()

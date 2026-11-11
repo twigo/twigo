@@ -151,12 +151,53 @@ export class Resolver {
     return { kind: "none" };
   }
 
-  /** The bindings of a command, the one that wins first. */
+  /** The bindings of a command that resolve to it where their `when` holds, the one that wins first. */
   bindingsOf(command: string): Binding[] {
     return this.#bindings
-      .filter((binding) => binding.command === command)
+      .filter(
+        (binding) => binding.command === command && !this.#shadowed(binding),
+      )
       .reverse();
   }
+
+  /** Whether a later rule of another command, on the same presses or on chords that start or continue the binding's, wins wherever the binding's `when` holds; whether that command is enabled is not weighed. */
+  #shadowed(binding: Binding): boolean {
+    const sharing = this.#byFirst.get(pressId(binding.presses[0])) ?? [];
+    return sharing
+      .slice(sharing.indexOf(binding) + 1)
+      .some(
+        (later) =>
+          later.command !== binding.command &&
+          overlaps(later.ids, binding.ids) &&
+          implies(binding.when, later.when),
+      );
+  }
+}
+
+function overlaps(a: readonly string[], b: readonly string[]): boolean {
+  return a.slice(0, b.length).every((id, at) => id === b[at]);
+}
+
+/** Whether `other` holds wherever `when` does, judged by the terms of `when`'s `&&`: each of `other`'s `&&` terms is one of them, or one of its `||` terms is; false where unsure. */
+function implies(when: When | undefined, other: When | undefined): boolean {
+  const held = conjuncts(when).map(key);
+  const holds = (term: When): boolean =>
+    held.includes(key(term)) ||
+    (term.op === "&&" && term.terms.every(holds)) ||
+    (term.op === "||" && term.terms.some(holds));
+  return other === undefined || holds(other);
+}
+
+function conjuncts(when: When | undefined): When[] {
+  if (when === undefined) return [];
+  if (when.op === "&&") return when.terms.flatMap(conjuncts);
+  return [when];
+}
+
+function key(when: When): string {
+  return JSON.stringify(when, (_, value: unknown) =>
+    value instanceof RegExp ? String(value) : value,
+  );
 }
 
 /** Bare keys fire in a focused list, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */

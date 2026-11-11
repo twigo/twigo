@@ -22,7 +22,7 @@ const bright = (name: string) =>
  * @todo: pass the tokens as they are, not in sRGB hex, once xterm's WebGL
  * addon reads a pattern glyph's colour from any CSS colour: it parses only
  * hex and `rgba()` when it draws one such as ░, and throws on `oklch`, which
- * leaves the rows below undrawn ([`drawPatternChar`](https://github.com/xtermjs/xterm.js/blob/c58ea3637f3968e0e6e79cd92cf9aace7ef89ee2/addons/addon-webgl/src/customGlyphs/CustomGlyphRasterizer.ts#L495-L504)).
+ * leaves the rows below undrawn ([`drawPatternChar`](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/addons/addon-webgl/src/customGlyphs/CustomGlyphRasterizer.ts#L495-L504)).
  */
 export function terminalTheme(
   root: Element = document.documentElement,

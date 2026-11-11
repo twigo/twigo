@@ -1,0 +1,573 @@
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { IpcError } from "../error";
+import type {
+  KubeconfigOffer,
+  KubeconfigOfferEvent,
+  ShellMessage,
+  TerminalSession,
+} from "../generated";
+import {
+  createMockBackend,
+  MOCK_SCENARIOS,
+  OFFER_AFTER_MS,
+  type MockScenario,
+} from "./index";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+async function answered<T>(promise: Promise<T>): Promise<T> {
+  await vi.advanceTimersByTimeAsync(0);
+  return promise;
+}
+
+async function refused(promise: Promise<unknown>): Promise<IpcError> {
+  const caught = promise.then(
+    () => {
+      throw new Error("it was not refused");
+    },
+    (error: unknown) => error,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const error = await caught;
+  expect(error).toBeInstanceOf(IpcError);
+  return error as IpcError;
+}
+
+async function created(
+  scenario: MockScenario,
+  context: string,
+): Promise<TerminalSession> {
+  const backend = createMockBackend(scenario);
+  return answered(
+    backend.invoke("terminal_create", { context, label: "Terminal 1" }),
+  );
+}
+
+interface Opened {
+  readonly backend: ReturnType<typeof createMockBackend>;
+  readonly session: TerminalSession;
+  readonly messages: ShellMessage[];
+  readonly text: () => string;
+  readonly type: (text: string) => Promise<void>;
+}
+
+/** How long `opened` lets the shell run before it returns. */
+const SETTLE_MS = 200;
+
+async function opened(
+  context: string,
+  scenario: MockScenario = "live",
+  label = "Terminal 1",
+  backend = createMockBackend(scenario),
+): Promise<Opened> {
+  const session = await answered(
+    backend.invoke("terminal_create", { context, label }),
+  );
+  const messages: ShellMessage[] = [];
+  await answered(
+    backend.subscribe(
+      "shell_open",
+      { id: session.id, cols: 80, rows: 24 },
+      (message) => {
+        messages.push(message);
+      },
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(SETTLE_MS);
+  return {
+    backend,
+    session,
+    messages,
+    text: () =>
+      messages
+        .filter((message): message is ArrayBuffer => "byteLength" in message)
+        .map((frame) => new TextDecoder().decode(frame))
+        .join(""),
+    type: async (text) => {
+      await answered(
+        backend.invoke("shell_input", {
+          id: session.id,
+          data: Array.from(new TextEncoder().encode(text)),
+        }),
+      );
+    },
+  };
+}
+
+const last = <T>(items: readonly T[]): T | undefined => items[items.length - 1];
+
+const events = (messages: readonly ShellMessage[]) =>
+  messages.flatMap((message) => ("state" in message ? [message] : []));
+
+test("a terminal of a read-write context goes by the person's credentials, any other through the proxy by its mode", async () => {
+  expect(await created("live", "dev")).toEqual({
+    id: expect.any(Number) as number,
+    kind: { kind: "kubeconfig" },
+    shell: "zsh",
+    kubeconfigKept: true,
+  });
+  expect((await created("live", "staging")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
+  });
+  expect((await created("live", "prod-eu")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
+  });
+});
+
+test("the policy file sends the contexts it lists in terminal.usePolicyProxy through the proxy for that, and the others by their mode", async () => {
+  expect((await created("policyFile", "dev")).kind).toEqual({
+    kind: "proxy",
+    why: "policyFile",
+  });
+  expect((await created("policyFile", "prod-eu")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
+  });
+  expect((await created("policyFile", "staging")).kind).toEqual({
+    kind: "proxy",
+    why: "mode",
+  });
+  expect((await created("live", "dev")).kind).toEqual({ kind: "kubeconfig" });
+});
+
+test("an unlocked context goes through the proxy for its mode", async () => {
+  const backend = createMockBackend("live");
+  await answered(backend.invoke("context_unlock", "prod-eu"));
+  const unlocked = await answered(
+    backend.invoke("terminal_create", { context: "prod-eu", label: "T" }),
+  );
+  expect(unlocked.kind).toEqual({ kind: "proxy", why: "mode" });
+});
+
+test("a terminal of a context the catalog does not list is not found", async () => {
+  const backend = createMockBackend("live");
+  const error = await refused(
+    backend.invoke("terminal_create", { context: "nowhere", label: "T" }),
+  );
+  expect(error.kind).toBe("notFound");
+});
+
+test("a terminal connects, shows its prompt, and keeps what was typed while it connected", async () => {
+  const backend = createMockBackend("live");
+  const session = await answered(
+    backend.invoke("terminal_create", { context: "dev", label: "Terminal 1" }),
+  );
+  const messages: ShellMessage[] = [];
+  await answered(
+    backend.subscribe(
+      "shell_open",
+      { id: session.id, cols: 80, rows: 24 },
+      (message) => {
+        messages.push(message);
+      },
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  await answered(
+    backend.invoke("shell_input", {
+      id: session.id,
+      data: Array.from(new TextEncoder().encode("exit 3\r")),
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(200);
+  expect(events(messages)).toEqual([
+    { state: "connecting" },
+    { state: "running" },
+    { state: "ended", end: { reason: "exited", code: 3 } },
+  ]);
+});
+
+test("the prompt echoes what is typed and Backspace takes a character back", async () => {
+  const shell = await opened("dev");
+  expect(shell.text()).toBe("you@mac ~ % ");
+  await shell.type("kubx");
+  await shell.type("\x7f");
+  await shell.type("ctl");
+  expect(shell.text()).toBe("you@mac ~ % kubx\b \bctl");
+});
+
+test("kubectl config current-context prints the context of the terminal", async () => {
+  for (const context of ["dev", "staging"]) {
+    const shell = await opened(context);
+    await shell.type("kubectl config current-context\r");
+    expect(shell.text()).toContain(`\r\n${context}\r\nyou@mac ~ % `);
+  }
+});
+
+test("zsh keeps KUBECONFIG, and terminalShell runs sh, which Twigo cannot keep it in, with sh's prompt and words", async () => {
+  expect(await created("live", "dev")).toMatchObject({
+    shell: "zsh",
+    kubeconfigKept: true,
+  });
+  for (const context of ["dev", "staging"]) {
+    expect(await created("terminalShell", context)).toMatchObject({
+      shell: "sh",
+      kubeconfigKept: false,
+    });
+  }
+  const shell = await opened("dev", "terminalShell");
+  expect(shell.text()).toBe("sh-3.2$ ");
+  await shell.type("helm list\r");
+  expect(shell.text()).toContain("\r\nsh: helm: command not found\r\nsh-3.2$ ");
+  expect(MOCK_SCENARIOS).toContain("terminalShell");
+});
+
+test("terminalShell raises no offer", async () => {
+  const { backend, events } = await followed("terminalShell");
+  await opened("staging", "terminalShell", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(events).toEqual([]);
+});
+
+const APP_DATA = "/Users/you/Library/Application Support/io.twigo.ide";
+
+test("$KUBECONFIG says the kind: Twigo's file and then the user's, or the proxy's alone", async () => {
+  const own = await opened("dev");
+  await own.type("echo $KUBECONFIG\r");
+  const [first, second, ...more] =
+    own.text().split("\r\n")[1]?.split(":") ?? [];
+  expect(first).toBe(
+    `${APP_DATA}/terminals/${String(own.session.id)}/kubeconfig`,
+  );
+  expect(second).toBe("/Users/you/.kube/config");
+  expect(more).toEqual([]);
+
+  const proxied = await opened("staging");
+  await proxied.type("echo $KUBECONFIG\r");
+  const line = proxied.text().split("\r\n")[1] ?? "";
+  expect(line).toBe(
+    `${APP_DATA}/proxy/process-${String(proxied.session.id)}.kubeconfig`,
+  );
+});
+
+test("exit ends the session as exited with its code, and exit alone with 0", async () => {
+  const failing = await opened("dev");
+  await failing.type("exit 2\r");
+  expect(last(events(failing.messages))).toEqual({
+    state: "ended",
+    end: { reason: "exited", code: 2 },
+  });
+  const quiet = await opened("dev");
+  await quiet.type("exit\r");
+  expect(last(events(quiet.messages))).toEqual({
+    state: "ended",
+    end: { reason: "exited", code: 0 },
+  });
+  const typed = await opened("dev");
+  await typed.type("exit now\r");
+  expect(last(events(typed.messages))).toEqual({ state: "running" });
+});
+
+test("kill -9 $$ ends the session as signaled with KILL", async () => {
+  const shell = await opened("dev");
+  await shell.type("kill -9 $$\r");
+  expect(last(events(shell.messages))).toEqual({
+    state: "ended",
+    end: { reason: "signaled", signal: "KILL" },
+  });
+});
+
+test("clear clears the screen and shows a prompt once", async () => {
+  const shell = await opened("dev");
+  await shell.type("clear\r");
+  const after = shell.text().split("\r\n")[1] ?? "";
+  expect(after).toBe("\x1b[H\x1b[2J\x1b[3Jyou@mac ~ % ");
+});
+
+test("any other command is not found, by its first word", async () => {
+  const shell = await opened("dev");
+  await shell.type("helm list -A\r");
+  expect(shell.text()).toContain("\r\nzsh: command not found: helm\r\n");
+  await shell.type("kubectl get pods\r");
+  expect(shell.text()).toContain("\r\nzsh: command not found: kubectl\r\n");
+});
+
+test("a session that closed takes no more, and an ended one refuses input as the shells do", async () => {
+  const shell = await opened("dev");
+  await shell.type("exit\r");
+  const error = await refused(
+    shell.backend.invoke("shell_input", { id: shell.session.id, data: [97] }),
+  );
+  expect(error.kind).toBe("conflict");
+  await answered(shell.backend.invoke("shell_close", shell.session.id));
+  const gone = await refused(
+    shell.backend.invoke("shell_input", { id: shell.session.id, data: [97] }),
+  );
+  expect(gone.kind).toBe("notFound");
+});
+
+async function followed(scenario: MockScenario) {
+  const backend = createMockBackend(scenario);
+  const events: KubeconfigOfferEvent[] = [];
+  const first = await answered(
+    backend.subscribe("kubeconfig_offers_watch", null, (event) => {
+      events.push(event);
+    }),
+  );
+  return { backend, events, first };
+}
+
+const offers = (events: readonly KubeconfigOfferEvent[]): KubeconfigOffer[] =>
+  events.flatMap((event) => (event.event === "offered" ? [event.offer] : []));
+
+test("an offer comes 3 s after a terminal opens, from that terminal's session and context, and says by section what a move leaves out", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 2);
+  expect(events).toEqual([]);
+  const { session } = await opened(
+    "dev",
+    "terminalOffer",
+    "Terminal 4",
+    backend,
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS - 1);
+  expect(events.length).toBe(0);
+  await vi.advanceTimersByTimeAsync(1);
+  const [offer, ...more] = offers(events);
+  expect(more).toEqual([]);
+  expect(offer?.terminal).toBe("Terminal 4");
+  expect(offer?.session).toBe(session.id);
+  expect(offer?.context).toBe("dev");
+  expect(offer?.target).toBe("~/.kube/config");
+  expect(offer?.contexts).toEqual(offer?.clusters);
+  expect(offer?.contexts).toEqual(offer?.users);
+  expect(offer?.contexts[0]).toMatch(
+    /^arn:aws:eks:[a-z0-9-]+:\d{12}:cluster\//,
+  );
+  const second = offer?.contexts[1];
+  expect(offer?.leftOut).toEqual({
+    contexts: [second],
+    clusters: [second],
+    users: [second],
+  });
+});
+
+test("the second offer comes 3 s after the first is answered, which withdraws the first, and nothing follows the second", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
+  const [first] = offers(events);
+  if (!first) throw new Error("no first offer");
+  await opened("staging", "terminalOffer", "Terminal 2", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(offers(events)).toHaveLength(1);
+
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      revision: first.revision,
+      answer: "move",
+    }),
+  );
+  expect(last(events)).toEqual({ event: "withdrawn", id: first.id });
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - 1);
+  expect(offers(events)).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  const [, second] = offers(events);
+  expect(second?.id).not.toBe(first.id);
+  expect(second?.leftOut).toEqual({ contexts: [], clusters: [], users: [] });
+
+  if (!second) throw new Error("no second offer");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: second.id,
+      revision: second.revision,
+      answer: "dismiss",
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(offers(events)).toHaveLength(2);
+});
+
+const directs = (events: readonly KubeconfigOfferEvent[]) =>
+  events.flatMap((event) => (event.event === "direct" ? [event] : []));
+
+test("a proxy terminal's offers come with the direct contexts the tool wrote, just before each, and a kubeconfig terminal's with none", async () => {
+  const proxied = await followed("terminalOffer");
+  const { session } = await opened(
+    "staging",
+    "terminalOffer",
+    "Terminal 1",
+    proxied.backend,
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
+  expect(proxied.events.map((event) => event.event)).toEqual([
+    "direct",
+    "offered",
+  ]);
+  const [first] = offers(proxied.events);
+  if (!first) throw new Error("no first offer");
+  expect(first.contexts).toHaveLength(2);
+  expect(directs(proxied.events)).toEqual([
+    { event: "direct", session: session.id, contexts: first.contexts },
+  ]);
+
+  await answered(
+    proxied.backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      revision: first.revision,
+      answer: "move",
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [, second] = offers(proxied.events);
+  if (!second) throw new Error("no second offer");
+  expect(proxied.events.slice(-2).map((event) => event.event)).toEqual([
+    "direct",
+    "offered",
+  ]);
+  expect(last(directs(proxied.events))).toEqual({
+    event: "direct",
+    session: session.id,
+    contexts: [...first.contexts, ...second.contexts],
+  });
+
+  const own = await followed("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", own.backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(own.events.map((event) => event.event)).toEqual(["offered"]);
+});
+
+test("a move or a dismiss leaves the direct contexts, since the entries stay in the terminal's file", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  await opened("staging", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS - SETTLE_MS);
+  const [first] = offers(events);
+  if (!first) throw new Error("no first offer");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: first.id,
+      revision: first.revision,
+      answer: "move",
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [, second] = offers(events);
+  if (!second) throw new Error("no second offer");
+  expect(directs(events)).toHaveLength(2);
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: second.id,
+      revision: second.revision,
+      answer: "dismiss",
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(directs(events)).toHaveLength(2);
+});
+
+test("kubectl config delete-context of a direct context removes it and sends the contexts left, and of the proxy's own context changes nothing", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  const shell = await opened("staging", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [offer] = offers(events);
+  const [one, two] = offer?.contexts ?? [];
+  if (!one || !two) throw new Error("no contexts offered");
+  const file = `${APP_DATA}/proxy/process-${String(shell.session.id)}.kubeconfig`;
+
+  await shell.type(`kubectl config delete-context ${one}\r`);
+  expect(shell.text()).toContain(`\r\ndeleted context ${one} from ${file}\r\n`);
+  expect(last(events)).toEqual({
+    event: "direct",
+    session: shell.session.id,
+    contexts: [two],
+  });
+
+  await shell.type("kubectl config delete-context staging\r");
+  expect(shell.text()).toContain(
+    `\r\ndeleted context staging from ${file}\r\n`,
+  );
+  expect(directs(events)).toHaveLength(2);
+
+  await shell.type(`kubectl config delete-context ${one}\r`);
+  expect(shell.text()).toContain(
+    `error: cannot delete context ${one}, not in ${file}`,
+  );
+  expect(directs(events)).toHaveLength(2);
+
+  await shell.type(`kubectl config delete-context ${two}\r`);
+  expect(last(events)).toEqual({
+    event: "direct",
+    session: shell.session.id,
+    contexts: [],
+  });
+});
+
+test("kubectl config delete-context of a name the terminal's file lacks is refused as kubectl refuses it, and sends nothing", async () => {
+  const { backend, events } = await followed("terminalOffer");
+  const shell = await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await shell.type("kubectl config delete-context staging\r");
+  expect(shell.text()).toContain(
+    `\r\nerror: cannot delete context staging, not in ${APP_DATA}/terminals/${String(shell.session.id)}/kubeconfig\r\n`,
+  );
+  expect(directs(events)).toEqual([]);
+});
+
+test("a window that follows later is told the offers that wait, and answering one that is gone is refused", async () => {
+  const backend = createMockBackend("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const waiting = await answered(
+    backend.subscribe("kubeconfig_offers_watch", null, () => undefined),
+  );
+  expect(waiting).toHaveLength(1);
+  const [offer] = waiting;
+  if (!offer) throw new Error("no offer");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
+  );
+  const error = await refused(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
+  );
+  expect(error.kind).toBe("notFound");
+});
+
+test("an answer to another revision than the offer's is refused as a conflict, and the offer waits on", async () => {
+  const backend = createMockBackend("terminalOffer");
+  await opened("dev", "terminalOffer", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS);
+  const [offer] = await answered(
+    backend.subscribe("kubeconfig_offers_watch", null, () => undefined),
+  );
+  if (!offer) throw new Error("no offer");
+  const error = await refused(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision + 1,
+      answer: "move",
+    }),
+  );
+  expect(error.kind).toBe("conflict");
+  await answered(
+    backend.invoke("kubeconfig_offer_answer", {
+      id: offer.id,
+      revision: offer.revision,
+      answer: "move",
+    }),
+  );
+});
+
+test("any other scenario raises no offer, and the scenario is one the page can pin", async () => {
+  const { backend, events, first } = await followed("live");
+  await opened("dev", "live", "Terminal 1", backend);
+  await vi.advanceTimersByTimeAsync(OFFER_AFTER_MS * 3);
+  expect(first).toEqual([]);
+  expect(events).toEqual([]);
+  expect(MOCK_SCENARIOS).toContain("terminalOffer");
+});

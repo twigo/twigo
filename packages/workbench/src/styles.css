@@ -81,6 +81,11 @@
 .twigo-dockview .dv-tabs-and-actions-container {
   box-shadow: inset 0 -1px 0 var(--border);
 }
+/* A group's actions give way before its tabs, down to what they cannot
+   lose: only what has no minimum width shrinks, such as a terminal's chip. */
+.twigo-dockview .dv-right-actions-container {
+  flex-shrink: 100000;
+}
 /* Centred above the strip's bottom line, a little high, since lowercase
    titles read low when their capitals are centred. */
 .twigo-dockview .dv-tabs-container > .dv-tab {

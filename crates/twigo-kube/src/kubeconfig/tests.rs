@@ -88,6 +88,24 @@ fn the_first_file_to_define_a_name_wins() {
 }
 
 #[test]
+fn new_entries_go_where_kubectl_puts_them_the_only_file_or_the_first_that_exists_or_the_last() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    assert_eq!(kubectl(&[&a]).target(), Some(a.as_path()));
+    assert_eq!(kubectl(&[&a, &b]).target(), Some(b.as_path()));
+    write(dir.path(), "b", "");
+    write(dir.path(), "a", "");
+    assert_eq!(kubectl(&[&a, &b]).target(), Some(a.as_path()));
+    let home = dir.path().join("home");
+    let only = Sources::kubectl(None, Some(&home));
+    assert_eq!(
+        only.target(),
+        Some(home.join(".kube").join("config").as_path())
+    );
+    assert_eq!(Sources::kubectl(None, None).target(), None);
+}
+
+#[test]
 fn a_context_names_the_file_that_defines_it_from_home() {
     let dir = tempfile::tempdir().unwrap();
     let kube = dir.path().join(".kube");
@@ -418,9 +436,13 @@ fn a_kubeconfig_replaced_by_rename_changes_the_catalog_once() {
     let dir = tempfile::tempdir().unwrap();
     let file = write(dir.path(), "config", FIRST);
     let (sender, changes) = mpsc::channel();
-    let watch = Watch::start(kubectl(&[&file]), move |catalog| {
-        sender.send(catalog).unwrap();
-    })
+    let watch = Watch::start(
+        kubectl(&[&file]),
+        move |catalog| {
+            sender.send(catalog).unwrap();
+        },
+        || {},
+    )
     .unwrap();
     assert_eq!(names(&changes.try_recv().unwrap()), ["kind-a"]);
 
@@ -447,13 +469,44 @@ fn a_kubeconfig_replaced_by_rename_changes_the_catalog_once() {
 }
 
 #[test]
+fn a_write_that_leaves_the_catalog_as_it_was_is_still_told() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(dir.path(), "config", FIRST);
+    let (changed, changes) = mpsc::channel();
+    let (wrote, writes) = mpsc::channel();
+    let _watch = Watch::start(
+        kubectl(&[&file]),
+        move |catalog| changed.send(catalog).unwrap(),
+        move || wrote.send(()).unwrap(),
+    )
+    .unwrap();
+    changes.try_recv().unwrap();
+    let alone = "- name: alone\n  cluster: { server: 'https://alone:6443' }\nusers:";
+    write(dir.path(), "config", &FIRST.replace("users:", alone));
+    writes.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        changes.recv_timeout(Duration::from_secs(1)).is_err(),
+        "a cluster no context names"
+    );
+    write(dir.path(), "notes", "not a kubeconfig");
+    assert!(
+        writes.recv_timeout(Duration::from_secs(1)).is_err(),
+        "an unrelated file"
+    );
+}
+
+#[test]
 fn a_directory_created_later_is_watched() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join(".kube").join("config");
     let (sender, changes) = mpsc::channel();
-    let _watch = Watch::start(kubectl(&[&file]), move |catalog| {
-        sender.send(catalog).unwrap();
-    })
+    let _watch = Watch::start(
+        kubectl(&[&file]),
+        move |catalog| {
+            sender.send(catalog).unwrap();
+        },
+        || {},
+    )
     .unwrap();
     assert!(changes.try_recv().unwrap().contexts.is_empty());
 
@@ -474,9 +527,13 @@ fn a_watched_directory_deleted_and_made_again_is_watched_again() {
     fs::create_dir(&kube).unwrap();
     let file = write(&kube, "config", FIRST);
     let (sender, changes) = mpsc::channel();
-    let _watch = Watch::start(kubectl(&[&file]), move |catalog| {
-        sender.send(catalog).unwrap();
-    })
+    let _watch = Watch::start(
+        kubectl(&[&file]),
+        move |catalog| {
+            sender.send(catalog).unwrap();
+        },
+        || {},
+    )
     .unwrap();
     assert_eq!(names(&changes.try_recv().unwrap()), ["kind-a"]);
 
@@ -509,9 +566,13 @@ fn a_write_through_a_symlink_is_seen() {
     let link = kube.join("config");
     std::os::unix::fs::symlink(&target, &link).unwrap();
     let (sender, changes) = mpsc::channel();
-    let _watch = Watch::start(kubectl(&[&link]), move |catalog| {
-        sender.send(catalog).unwrap();
-    })
+    let _watch = Watch::start(
+        kubectl(&[&link]),
+        move |catalog| {
+            sender.send(catalog).unwrap();
+        },
+        || {},
+    )
     .unwrap();
     assert_eq!(names(&changes.try_recv().unwrap()), ["kind-a"]);
 

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Allotment, LayoutPriority } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
@@ -16,6 +16,9 @@ import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
 import { UnlockBanner } from "./UnlockBanner";
 
+// TitleBar's h-9, which Shell.test.tsx holds it to.
+const TITLE_BAR = 36;
+
 const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
   sidebar: 260,
   panel: 340,
@@ -31,6 +34,7 @@ export function Shell() {
   useChanges(spaces.changes);
   useChanges(sizes.changes);
   useChanges(views.changes);
+  const [panelHeight, setPanelHeight] = useState(0);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -107,6 +111,9 @@ export function Shell() {
             <Allotment
               vertical
               proportionalLayout={false}
+              onChange={([, measured]) => {
+                setPanelHeight(Math.round(measured ?? 0));
+              }}
               onDragEnd={remember([undefined, "panel"])}
             >
               <Allotment.Pane
@@ -152,7 +159,7 @@ export function Shell() {
       <TrustDialog />
       <ConfirmHost />
       <ApprovalHost />
-      <Toaster />
+      <Toaster clearance={maximized ? 0 : panelHeight} ceiling={TITLE_BAR} />
     </div>
   );
 }

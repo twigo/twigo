@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import german from "../../../protocol/src/mock/layouts/german.json";
 import type { ContextValue } from "../contextkey/when";
 import { KeySyntaxError } from "./chord";
 import { KeyboardMapper, type Press } from "./mapper";
@@ -278,6 +279,136 @@ test("bindingsOf lists the winning binding first", () => {
   expect(
     target.bindingsOf("x").map((binding) => binding.presses[0].code),
   ).toEqual(["KeyB", "KeyA"]);
+});
+
+describe("shadowing", () => {
+  const core = (...rules: Source["rules"][number][]): Source => ({
+    weight: "core",
+    rules,
+  });
+
+  test("a later rule of another command on the same press leaves the earlier command no binding", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "first" },
+        { key: "mod+k", command: "second" },
+      ),
+    );
+    expect(resolve(target, [K])).toBe("second");
+    expect(target.bindingsOf("first")).toEqual([]);
+    expect(target.bindingsOf("second")).toHaveLength(1);
+  });
+
+  test("a later rule of the same command does not, and the later binding comes first", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "x", when: "listFocus" },
+        { key: "mod+k", command: "x" },
+      ),
+    );
+    expect(target.bindingsOf("x").map(({ whenSource }) => whenSource)).toEqual([
+      undefined,
+      "listFocus",
+    ]);
+  });
+
+  test("a binding that a later rule shadows only where its own when holds keeps its place", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "first", when: "listFocus" },
+        { key: "mod+k", command: "second", when: "listFocus && inputFocus" },
+        { key: "mod+o", command: "third", when: "listFocus" },
+        { key: "mod+o", command: "fourth", when: "editorFocus" },
+      ),
+    );
+    expect(target.bindingsOf("first")).toHaveLength(1);
+    expect(target.bindingsOf("third")).toHaveLength(1);
+  });
+
+  test("a binding whose when implies the later rule's has none, since the later rule wins wherever it holds", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "first", when: "listFocus && !inputFocus" },
+        { key: "mod+k", command: "second", when: "listFocus" },
+        { key: "mod+o", command: "third", when: "listFocus" },
+        { key: "mod+o", command: "fourth", when: "listFocus" },
+      ),
+    );
+    expect(target.bindingsOf("first")).toEqual([]);
+    expect(target.bindingsOf("third")).toEqual([]);
+  });
+
+  test("a later rule whose when is a disjunction takes the key wherever one of its terms holds where the binding's when does", () => {
+    const target = resolver(
+      core(
+        { key: "mod+k", command: "first", when: "listFocus" },
+        { key: "mod+k", command: "second", when: "listFocus || editorFocus" },
+        { key: "mod+o", command: "third", when: "listFocus && inputFocus" },
+        { key: "mod+o", command: "fourth", when: "editorFocus || inputFocus" },
+        { key: "mod+l", command: "fifth", when: "listFocus" },
+        { key: "mod+l", command: "sixth", when: "editorFocus || inputFocus" },
+        { key: "mod+j", command: "seventh", when: "listFocus || editorFocus" },
+        { key: "mod+j", command: "eighth", when: "listFocus || editorFocus" },
+        { key: "mod+u", command: "ninth", when: "listFocus || editorFocus" },
+        { key: "mod+u", command: "tenth", when: "listFocus" },
+      ),
+    );
+    expect(resolve(target, [K], LIST)).toBe("second");
+    expect(target.bindingsOf("first")).toEqual([]);
+    expect(target.bindingsOf("third")).toEqual([]);
+    expect(target.bindingsOf("fifth")).toHaveLength(1);
+    expect(target.bindingsOf("seventh")).toEqual([]);
+    expect(target.bindingsOf("ninth")).toHaveLength(1);
+  });
+
+  test("a later single chord shadows the chords that start with it, and a later chord shadows the single one it starts", () => {
+    const chord = resolver(
+      core(
+        { key: "mod+k mod+s", command: "chord" },
+        { key: "mod+k", command: "single" },
+      ),
+    );
+    expect(chord.bindingsOf("chord")).toEqual([]);
+    const single = resolver(
+      core(
+        { key: "mod+k", command: "single" },
+        { key: "mod+k mod+s", command: "chord" },
+      ),
+    );
+    expect(single.bindingsOf("single")).toEqual([]);
+    const apart = resolver(
+      core(
+        { key: "mod+k mod+s", command: "chord" },
+        { key: "mod+k mod+t", command: "other" },
+      ),
+    );
+    expect(apart.bindingsOf("chord")).toHaveLength(1);
+  });
+
+  test("on the recorded German layout, where ` needs Shift, Ctrl+Shift+` and Ctrl+` are one press that the later rule takes", () => {
+    const target = new Resolver(
+      [
+        core(
+          { key: "ctrl+shift+`", command: "new" },
+          { key: "ctrl+`", command: "toggle" },
+        ),
+      ],
+      new KeyboardMapper(german, "mac"),
+    );
+    expect(target.bindingsOf("new")).toEqual([]);
+    expect(target.bindingsOf("toggle")).toHaveLength(1);
+    const us = new Resolver(
+      [
+        core(
+          { key: "ctrl+shift+`", command: "new" },
+          { key: "ctrl+`", command: "toggle" },
+        ),
+      ],
+      US_BY_DEFAULT,
+    );
+    expect(us.bindingsOf("new")).toHaveLength(1);
+    expect(us.bindingsOf("toggle")).toHaveLength(1);
+  });
 });
 
 test("validate rejects bad keys and bad whens", () => {

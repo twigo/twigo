@@ -6,8 +6,8 @@ import {
   type Lookup,
 } from "@twigo/workbench";
 import { parseExecUri } from "../uri";
+import { stateOf } from "../xterm/words";
 import type { ExecTabs } from "./tabs";
-import { stateOf } from "./words";
 
 /**
  * What the group shows of the active shell tab at the right of its tab

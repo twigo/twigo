@@ -5,6 +5,7 @@ import {
   useState,
   useSyncExternalStore,
   type FunctionComponent,
+  type MouseEvent,
 } from "react";
 import {
   DockviewReact,
@@ -24,6 +25,7 @@ import {
   EDITOR_TAB,
   readParams,
   type Area,
+  type Editors,
 } from "../editors/registry";
 import { EditorShownContext, useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
@@ -152,7 +154,18 @@ export function SpaceDock({
   };
 
   return (
-    <div ref={setHost} className="h-full">
+    <div
+      ref={setHost}
+      className="h-full"
+      onMouseDown={(event) => {
+        const { target } = event;
+        if (!api || !isPlainPress(event) || !(target instanceof Element)) {
+          return;
+        }
+        const uri = pressedEditor(api, target);
+        if (uri !== undefined) focusLater(workbench.editors, uri);
+      }}
+    >
       <DockviewReact
         theme={theme}
         components={COMPONENTS}
@@ -164,6 +177,36 @@ export function SpaceDock({
       />
     </div>
   );
+}
+
+/** A left press that no button takes, such as a tab's X. */
+function isPlainPress(event: MouseEvent): boolean {
+  return (
+    event.button === 0 &&
+    !(event.target instanceof Element && event.target.closest("button"))
+  );
+}
+
+/**
+ * The editor a press on a group's tab strip is for: a tab's own, or the
+ * group's active one where the strip is empty, as VS Code's title control
+ * gives the focus to its group's active editor.
+ */
+function pressedEditor(api: DockviewApi, target: Element): string | undefined {
+  const tab = target.closest<HTMLElement>("[role=tab][data-tab-panel-id]");
+  if (tab) {
+    return readParams(api.getPanel(tab.dataset.tabPanelId ?? "")?.params)?.uri;
+  }
+  if (!target.closest(".dv-void-container")) return undefined;
+  const group = api.groups.find((each) => each.element.contains(target));
+  return readParams(group?.activePanel?.params)?.uri;
+}
+
+/** The browser moves the focus after a press's listeners ran, so the editor takes it a task later. */
+function focusLater(editors: Editors, uri: string): void {
+  setTimeout(() => {
+    editors.activate(uri);
+  });
 }
 
 function EditorPanel({ params: raw, api }: IDockviewPanelProps) {

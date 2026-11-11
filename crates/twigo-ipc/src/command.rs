@@ -5,13 +5,14 @@
 use ts_rs::TS;
 
 use crate::{
-    AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
-    Context, ContextAuth, Discovered, DownloadLogs, ExecReview, Execute, GetValues, KeyboardLayout,
-    ListBatch, ListQuery, LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
+    AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
+    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
+    Execute, GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch,
+    ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent,
     Plan, PlanId, PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource,
     SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
     ShellInput, ShellMessage, ShellPod, ShellResize, Space, StateEntry, StateSnapshot,
-    SubscriptionId,
+    SubscriptionId, TerminalSession,
 };
 
 pub trait Command {
@@ -542,6 +543,44 @@ pub struct ShellAcknowledge;
 impl Command for ShellAcknowledge {
     const NAME: &'static str = "shell_ack";
     type Request = ShellAck;
+    type Response = ();
+    type Message = ();
+}
+
+/// Parks a terminal on this machine pinned to a context (ARCHITECTURE 4.6),
+/// which starts once `shell_open` names it and runs over the shell commands.
+pub struct TerminalCreate;
+
+impl Command for TerminalCreate {
+    const NAME: &'static str = "terminal_create";
+    type Request = NewTerminal;
+    type Response = TerminalSession;
+    type Message = ();
+}
+
+/// Follows the offers of this window's terminals to move what a tool wrote
+/// into a terminal's own kubeconfig into the user's: answers with those
+/// waiting, then sends each new, changed and withdrawn one. It also sends
+/// the contexts each proxy terminal of the window reaches past the proxy:
+/// at once those of each that has any, then each change. A later follower
+/// of the same window replaces an earlier one.
+pub struct KubeconfigOffersWatch;
+
+impl Command for KubeconfigOffersWatch {
+    const NAME: &'static str = "kubeconfig_offers_watch";
+    type Request = ();
+    type Response = Vec<KubeconfigOffer>;
+    type Message = KubeconfigOfferEvent;
+}
+
+/// Moves an offer's entries into the user's kubeconfig, or dismisses it;
+/// refused for one that is gone, another window's, or of another revision
+/// than the one answered.
+pub struct KubeconfigOfferAnswerSend;
+
+impl Command for KubeconfigOfferAnswerSend {
+    const NAME: &'static str = "kubeconfig_offer_answer";
+    type Request = AnswerKubeconfigOffer;
     type Response = ();
     type Message = ();
 }

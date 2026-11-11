@@ -317,6 +317,18 @@ test("an attach to a process with no terminal and no stdin draws its lines from 
   expect(sent("shell_input")).toEqual([]);
 });
 
+test("a restart of an attach with no stdin keeps the cursor hidden", async () => {
+  const { mounted, tabs } = setup();
+  const tab = await mounted(
+    { id: 7, tty: false, stdin: false },
+    ATTACH,
+    ATTACH_URI,
+  );
+  tabs.start(ATTACH_URI, ATTACH, { id: 8, tty: false, stdin: false });
+  await vi.advanceTimersByTimeAsync(50);
+  expect(tab.term.modes.showCursor).toBe(false);
+});
+
 test("an attach to a process with a terminal and stdin says that what is typed reaches it", async () => {
   const { mounted, opens, sent } = setup();
   const tab = await mounted(

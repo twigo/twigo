@@ -1,6 +1,6 @@
 import { afterAll, beforeAll } from "vitest";
 import type { Backend, OpenShell, ShellMessage } from "@twigo/protocol";
-import type { ExecTab } from "../src/exec/tabs";
+import type { ShellTerminal } from "../src/xterm/terminal";
 
 /** jsdom lays nothing out, so xterm measures a cell as 0 by 0 and never fits: every element is 256 by 16, which makes a cell 8 by 16. */
 export function withTerminalLayout() {
@@ -20,15 +20,23 @@ export function withTerminalLayout() {
   });
 }
 
-export function sized(tab: ExecTab, width = 640, height = 320): void {
+export function sized(
+  tab: Pick<ShellTerminal, "host">,
+  width = 640,
+  height = 320,
+): void {
   tab.host.style.width = `${String(width)}px`;
   tab.host.style.height = `${String(height)}px`;
 }
 
-export function fakeShells() {
+interface Open {
+  request: OpenShell;
+  send: (message: ShellMessage) => void;
+}
+
+export function fakeShells(onOpen?: (open: Open) => void) {
   const calls: { command: string; request: unknown }[] = [];
-  const opens: { request: OpenShell; send: (message: ShellMessage) => void }[] =
-    [];
+  const opens: Open[] = [];
   const backend: Backend = {
     invoke(command, request) {
       calls.push({ command, request });
@@ -37,10 +45,9 @@ export function fakeShells() {
     subscribe(command, request, onMessage) {
       calls.push({ command, request });
       if (command === "shell_open") {
-        opens.push({
-          request: request as OpenShell,
-          send: onMessage,
-        });
+        const open = { request: request as OpenShell, send: onMessage };
+        opens.push(open);
+        onOpen?.(open);
       }
       return Promise.resolve(null as never);
     },
@@ -64,4 +71,17 @@ export function enter(init: KeyboardEventInit = {}): KeyboardEvent {
   });
   Object.defineProperty(event, "keyCode", { value: 13 });
   return event;
+}
+
+/** xterm reads `keyCode`, which jsdom does not take from a keyboard event's init. */
+export function ctrlC(target: Element): void {
+  const event = new KeyboardEvent("keydown", {
+    key: "c",
+    code: "KeyC",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "keyCode", { value: 67 });
+  target.dispatchEvent(event);
 }

@@ -1,16 +1,16 @@
 import "@xterm/xterm/css/xterm.css";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Hourglass, SquareTerminal } from "lucide-react";
 import { CLUSTER_SESSIONS } from "@twigo/protocol";
 import { Banner, EmptyState } from "@twigo/ui";
 import {
   useChanges,
-  useEditorShown,
   useWorkbench,
   type EditorProps,
   type Lookup,
 } from "@twigo/workbench";
 import { parseExecUri } from "../uri";
+import { useTerminalHost } from "../xterm/useTerminalHost";
 import type { ExecTabs } from "./tabs";
 import { execTitle } from "./words";
 
@@ -24,57 +24,17 @@ export const RESTART_SHELL = "k8s.shell.restart";
  * ended, that nothing started it.
  */
 export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
-  const { keys, spaces, commands, editors, quickAccess } = useWorkbench();
+  const { keys, commands } = useWorkbench();
   useChanges(tabs.changes);
-  useChanges(spaces.changes);
   const input = useMemo(() => parseExecUri(uri), [uri]);
   const tab = useMemo(
     () => (input ? tabs.tab(uri, input) : undefined),
     [input, tabs, uri],
   );
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
-  const [container, setContainer] = useState<HTMLDivElement | null>(null);
-  const editorShown = useEditorShown();
-  const panelVisible = input
-    ? spaces.state(input.space).parts.panel.visible
-    : false;
-  const shown = editorShown && panelVisible;
+  const setContainer = useTerminalHost(tab, uri, input?.space);
   const status = tab?.getStatus();
   const ended = status?.state === "ended" || status?.state === "restored";
-
-  useLayoutEffect(() => {
-    if (!tab || !container) return;
-    tab.attach(container);
-    const observer = new ResizeObserver(() => {
-      tab.layout();
-    });
-    observer.observe(container);
-    return () => {
-      observer.disconnect();
-    };
-  }, [tab, container]);
-
-  useEffect(() => {
-    if (!tab || !container) return;
-    tab.setShown(shown);
-    return () => {
-      tab.setShown(false);
-    };
-  }, [tab, container, shown]);
-
-  const wasVisible = useRef(panelVisible);
-  useEffect(() => {
-    const shownNow = panelVisible && !wasVisible.current;
-    wasVisible.current = panelVisible;
-    if (
-      shownNow &&
-      shown &&
-      editors.activeIn("panel") === uri &&
-      quickAccess.session === undefined
-    ) {
-      tab?.focus();
-    }
-  }, [editors, panelVisible, quickAccess, shown, tab, uri]);
 
   useEffect(() => {
     if (!root) return;

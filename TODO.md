@@ -42,11 +42,12 @@ Findings that belong to no step yet.
   - A type a person marks stays over the kubeconfig's, with no way back to it but marking the same type, which hides a later change of the kubeconfig's: the settings files of M3 can say which is which.
   - The accepted mockup also shows the type in the context picker and on the cluster's home; so far only the title bar shows it.
   - A CronJob's resume asks even when it missed no run while suspended: telling which needs its schedule read in its time zone, as its next run does.
-- A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`), so only ⌘Z cancels it until they go: keep a waiting countdown in front.
+- A countdown's toast behind three newer ones is hidden by sonner (`visibleToasts`) and takes no focus, so only ⌘Z cancels it until they go: keep a waiting countdown in front.
 - The audit log (`twigo_policy::Audit`) grows without bound: a person's writes add a few lines each, so rotate it once actors other than the UI write (M3).
 - The policy proxy and its broker (`twigo_core::proxy`, `twigo_core::approvals`, ARCHITECTURE 6.4):
   - No token is pre-approved yet: a process started by a confirmed command, as Helm's release actions will be (7.2), should get one for exactly what the person confirmed.
   - Agents have neither the scope "this process" nor the Rule of Two (6.6) yet; both come with them in M3.
+  - The approval dialog's diff of a create shows a removed empty line 1 and an added empty last line, as `RequestDetail` (`packages/kube/src/approvals/RequestDetail.tsx`) diffs `""` against the dry run's YAML.
 - The bench:
   - Core RSS, against its budget of 150 MB: kube 5 did not move the typical value, but spikes over the budget came only on kube 5, and their cause is not known.
     `bench/harness.sh` five times each, in turn, on `b6043b6` and on it with only kube, k8s-openapi and serde-saphyr set back to 4.2, 0.28 and 0.0.29, on fresh clusters on 2026-11-07, read 145, 144, 144, 144 and 143 MB on kube 4.2, and 152, 144, 141, 143 and 142 MB on kube 5.
@@ -64,7 +65,15 @@ Findings that belong to no step yet.
   - Closing a dirty editor keeps its copy and Discard Changes asks nothing.
   - Compare with… offers the objects of the kind in the space and those opened lately, not another space's.
   - In the dev server a diff editor logs "no diff result available" as it mounts, under StrictMode's second mount; the production build served by `vite preview` logged none (2026-11-08).
+- The integrated terminal (`twigo_core::terminal`, ARCHITECTURE 4.6):
+  - The person's `terminal.usePolicyProxy`, which turns the proxy on for `read-write` contexts too, waits for the settings files of M3; so far only the admin's policy file sets it.
+  - No source lists contexts from a provider yet, so no terminal goes through the proxy for that reason (`ProxyWhy::Provider`); it comes with the providers' source.
+  - On Ubuntu the global zshrc runs `compinit` while `ZDOTDIR` is still Twigo's (`crates/twigo-env/src/terminal.rs`), so `.zcompdump` is written into the terminal's directory and goes with its tab: each terminal builds its completion dump anew; not measured how long that takes.
 - The terminal (`packages/kube/src/exec`, ARCHITECTURE 4.6):
-  - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
-  - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.
+  - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.330); xterm.js had no issue for it on 2026-11-10.
+  - xterm is on 6.1.0-beta.337, past the 6.1.0-beta.304 VS Code 1.145.2 locks, for [#6201](https://github.com/xtermjs/xterm.js/pull/6201) (a resize parsed again what the write queue had parsed), until a 6.1.0 release.
   - WebGL draws an emoji with a skin tone, or a flag, a cell per code point; xterm's `unicode-graphemes` addon was not tried.
+  - New Terminal has no key on layouts where the backtick needs Shift, as the German one: ⌃\` and ⌃⇧\` are one chord there, and Toggle Terminal, registered last, takes it (`packages/kube/src/terminal/register.tsx`).
+    Move Editor into New Group to the Right (`mod+\`) loses its key to Toggle Terminal the same way on Linux with the recorded French layout, a Mac's, where the backtick sits on the `Backslash` key; not verified with a French layout of Linux.
+    Both stay in the palette until the keybindings editor lets a person rebind them.
+  - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).

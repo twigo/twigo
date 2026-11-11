@@ -104,6 +104,11 @@ pub enum ShellEnd {
     Exited {
         code: i32,
     },
+    /// A terminal's shell was ended by a signal, named as `kill -l` names
+    /// it: `KILL`.
+    Signaled {
+        signal: String,
+    },
     /// An attach ended with no exit code: the kubelet answers `Success` to
     /// any attach that did not fail, whatever the process did.
     Detached,

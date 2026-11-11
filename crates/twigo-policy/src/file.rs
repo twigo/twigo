@@ -1,11 +1,13 @@
 //! The admin's policy file (ARCHITECTURE 4.8, 6.4), which the UI cannot
-//! change: modes by context glob, and whether `read-only` allows
-//! port-forwarding.
+//! change: modes by context glob, whether `read-only` allows
+//! port-forwarding, and the contexts whose terminals go through the policy
+//! proxy whatever their mode.
 //!
 //! ```json
 //! {
 //!   "contexts": { "prod-*": "read-only", "staging-*": "guarded" },
-//!   "readOnly": { "allowPortForward": false }
+//!   "readOnly": { "allowPortForward": false },
+//!   "terminal": { "usePolicyProxy": ["prod-*"] }
 //! }
 //! ```
 
@@ -26,6 +28,15 @@ struct Shape {
     contexts: BTreeMap<String, Mode>,
     #[serde(default, rename = "readOnly")]
     read_only: ReadOnly,
+    #[serde(default)]
+    terminal: Terminal,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct Terminal {
+    #[serde(default)]
+    use_policy_proxy: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +70,7 @@ enum State {
     Read {
         entries: Vec<(Pattern, Mode)>,
         allow_port_forward: bool,
+        proxied: Vec<Pattern>,
     },
     /// The admin meant something the file does not say, so every context is
     /// `read-only` until it reads again.
@@ -70,6 +82,7 @@ impl Default for State {
         State::Read {
             entries: Vec::new(),
             allow_port_forward: allowed(),
+            proxied: Vec::new(),
         }
     }
 }
@@ -117,14 +130,22 @@ impl PolicyFile {
 
     fn parse(text: &str) -> Result<State, String> {
         let shape: Shape = serde_json::from_str(text).map_err(|error| error.to_string())?;
+        let glob =
+            |pattern: &str| Pattern::new(pattern).map_err(|error| format!("{pattern}: {error}"));
         let mut entries = Vec::with_capacity(shape.contexts.len());
         for (pattern, mode) in shape.contexts {
-            let glob = Pattern::new(&pattern).map_err(|error| format!("{pattern}: {error}"))?;
-            entries.push((glob, mode));
+            entries.push((glob(&pattern)?, mode));
         }
+        let proxied = shape
+            .terminal
+            .use_policy_proxy
+            .iter()
+            .map(|pattern| glob(pattern))
+            .collect::<Result<_, _>>()?;
         Ok(State::Read {
             entries,
             allow_port_forward: shape.read_only.allow_port_forward,
+            proxied,
         })
     }
 
@@ -143,15 +164,9 @@ impl PolicyFile {
                 ));
             }
         };
-        // A context's name may hold slashes: an EKS ARN's does.
-        let options = MatchOptions {
-            case_sensitive: true,
-            require_literal_separator: false,
-            require_literal_leading_dot: false,
-        };
         entries
             .iter()
-            .filter(|(pattern, _)| pattern.matches_with(context, options))
+            .filter(|(pattern, _)| matches(pattern, context))
             .max_by_key(|(_, mode)| *mode)
             .map(|(pattern, mode)| {
                 (
@@ -172,4 +187,23 @@ impl PolicyFile {
             State::Unreadable => false,
         }
     }
+
+    /// Whether the file has `context`'s terminals go through the policy
+    /// proxy; one that cannot be read has every terminal do so.
+    pub(crate) fn uses_policy_proxy(&self, context: &str) -> bool {
+        match &self.state {
+            State::Read { proxied, .. } => proxied.iter().any(|pattern| matches(pattern, context)),
+            State::Unreadable => true,
+        }
+    }
+}
+
+fn matches(pattern: &Pattern, context: &str) -> bool {
+    // A context's name may hold slashes: an EKS ARN's does.
+    let options = MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: false,
+        require_literal_leading_dot: false,
+    };
+    pattern.matches_with(context, options)
 }
