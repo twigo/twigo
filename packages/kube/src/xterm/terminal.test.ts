@@ -63,6 +63,8 @@ const SHELLS: readonly {
   },
 ];
 
+const LOST = "The connection was lost. A shell cannot be resumed.";
+
 const bytes = (output: string) => new TextEncoder().encode(output).buffer;
 
 function lines(tab: ShellTerminal): string[] {
@@ -85,16 +87,22 @@ describe.each(SHELLS)("$name", ({ starter }) => {
       openUrl: vi.fn(),
       binds: () => false,
     });
+    const begin = (id: number) => {
+      const tab = start(id);
+      if (!tab.host.isConnected) {
+        sized(tab);
+        const container = document.createElement("div");
+        document.body.append(container);
+        tab.attach(container);
+        tab.setShown(true);
+      }
+      return tab;
+    };
     return {
+      fake,
+      begin,
       start: async (id: number) => {
-        const tab = start(id);
-        if (!tab.host.isConnected) {
-          sized(tab);
-          const container = document.createElement("div");
-          document.body.append(container);
-          tab.attach(container);
-          tab.setShown(true);
-        }
+        const tab = begin(id);
         await vi.advanceTimersByTimeAsync(10);
         return tab;
       },
@@ -102,6 +110,12 @@ describe.each(SHELLS)("$name", ({ starter }) => {
         fake.opens[session]?.send({ state: "running" });
         fake.opens[session]?.send(bytes(text));
         await vi.advanceTimersByTimeAsync(10);
+      },
+      end: (session: number) => {
+        fake.opens[session]?.send({
+          state: "ended",
+          end: { reason: "connectionLost" },
+        });
       },
     };
   }
@@ -138,6 +152,55 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     await output(1, "you@mac ~ % ");
     expect(tab.term.buffer.active.type).toBe("normal");
     expect(lines(tab)).toEqual(["you@mac ~ % vi", "you@mac ~ %"]);
+  });
+
+  test("a start straight after an ending on the alternate screen leaves the ending's words above the new prompt, with the cursor shown", async () => {
+    const { start, begin, output, end } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % vi\r\n\x1b[?1049h\x1b[Hfile");
+    end(0);
+    begin(8);
+    await vi.advanceTimersByTimeAsync(10);
+    await output(1, "you@mac ~ % ");
+    expect(tab.term.buffer.active.type).toBe("normal");
+    expect(lines(tab)).toEqual(["you@mac ~ % vi", "", LOST, "you@mac ~ %"]);
+    expect(tab.term.modes.showCursor).toBe(true);
+  });
+
+  test("a start straight after an ending on the main screen leaves the ending's words above the new prompt, with the cursor shown", async () => {
+    const { start, begin, output, end } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % ");
+    end(0);
+    begin(8);
+    await vi.advanceTimersByTimeAsync(10);
+    await output(1, "you@mac ~ % ");
+    expect(lines(tab)).toEqual(["you@mac ~ %", LOST, "you@mac ~ %"]);
+    expect(tab.term.modes.showCursor).toBe(true);
+  });
+
+  test("a restart after a program set a colour and took the alternate screen draws the new session in the default colour", async () => {
+    const { start, output } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % \x1b[31m\x1b[?1049h\x1b[Hfile");
+    await start(8);
+    await output(1, "P");
+    const { active } = tab.term.buffer;
+    const cell = active.getLine(active.baseY + active.cursorY)?.getCell(0);
+    expect(cell?.getChars()).toBe("P");
+    expect(cell?.isFgDefault()).toBe(true);
+  });
+
+  test("two starts at once open only the last session", async () => {
+    const { start, begin, output, fake } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % ");
+    begin(8);
+    begin(9);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fake.opens.map(({ request }) => request.id)).toEqual([7, 9]);
+    await output(1, "you@mac ~ % ");
+    expect(lines(tab)).toEqual(["you@mac ~ %", "you@mac ~ %"]);
   });
 
   test("a first session starts at the top of an empty terminal", async () => {

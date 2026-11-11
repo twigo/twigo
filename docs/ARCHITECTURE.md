@@ -947,7 +947,9 @@ Extensions add commands, not prefixes.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
     A tab restored after a restart has no session: it says its shell ended when Twigo closed and offers Start, and never runs anything on its own.
     A new session in a tab, Restart's or Start's, keeps the scrollback and resets the modes the old program left: the mouse, bracketed paste, focus reporting, the cursor and keypad keys, and wrapping, insert and origin.
-    It starts on a line of its own when the cursor is not at the start of one, as when Restart replaces a session that still runs, since zsh marks a prompt that does not start a line with an inverse `%`; the session opens once the output so far is parsed and that line feed is queued, so none of its output comes before.
+    It starts on a line of its own when the cursor is not at the start of one, as when Restart replaces a session that still runs, since zsh marks a prompt that does not start a line with an inverse `%`.
+    What a start and an ending decide from the screen, they decide in one queue, each step once the output so far and what the step before wrote are parsed: a start that comes straight after an ending reads the screen the ending left, and writes its leave of the alternate screen, its reset and its line feed after the ending's words, not among them.
+    A start leaves the alternate screen first and only then resets, since a leave restores the colours that were set before the screen was entered and would undo a reset parsed on it; the session opens last, once the line feed is parsed, so none of its output comes before.
     An ending turns the mouse, bracketed paste and focus reporting off as well, since xterm parses the new session's reset after the task that restarts, and a terminal focused in that task would report the focus to the new shell.
   - **Output.**
     Rust sends the bytes of the process's output and its events over one channel, in order.

@@ -98,6 +98,7 @@ export class ShellTerminal {
   #webgl: WebglRenderer | undefined;
   #unload: ReturnType<typeof setTimeout> | undefined;
   #fitTimer: ReturnType<typeof setTimeout> | undefined;
+  #steps: Promise<void> = Promise.resolve();
 
   constructor(
     options: TerminalOptions,
@@ -140,7 +141,10 @@ export class ShellTerminal {
     this.term.attachCustomKeyEventHandler(
       (event) => !(event.type === "keydown" && options.binds(event)),
     );
-    if (session) this.#join(session);
+    if (session) {
+      this.#join(session);
+      if (!session.stdin) this.term.write(CURSOR_OFF);
+    }
   }
 
   getStatus(): SessionStatus {
@@ -197,38 +201,52 @@ export class ShellTerminal {
   /**
    * Starts, or starts again, with the session a plan's run answered with. A
    * running session replaced while a program holds the alternate screen
-   * leaves it, as an ending does; and a terminal whose cursor is not at the
-   * start of a line gives the new session a line of its own: zsh marks a
-   * prompt that does not start one with an inverse `%`.
+   * leaves it, as an ending does, and only then resets; and a terminal whose
+   * cursor is not at the start of a line gives the new session a line of its
+   * own: zsh marks a prompt that does not start one with an inverse `%`.
    */
   start(session: SessionStart): void {
     this.#release();
     this.#pending = session.id;
     this.#status = { state: "connecting" };
-    // The screen and the cursor are known once the output so far is parsed, and the session opens after them, so that none of its output comes before.
-    this.term.write(SESSION_STARTS, () => {
-      if (this.#pending !== session.id) return;
-      const alternate = this.term.buffer.active.type === "alternate";
-      this.term.write(alternate ? LEAVE_ALTERNATE : "", () => {
-        if (this.#pending !== session.id) return;
-        if (this.term.buffer.active.cursorX > 0) this.term.write("\r\n");
-        this.#begin();
-      });
-    });
     this.#join(session);
+    this.#enqueue(async () => {
+      await this.#parsed();
+      if (this.term.buffer.active.type === "alternate") {
+        await this.#parsed(LEAVE_ALTERNATE);
+      }
+      await this.#parsed(`${SESSION_STARTS}${session.stdin ? "" : CURSOR_OFF}`);
+      if (this.term.buffer.active.cursorX > 0) await this.#parsed("\r\n");
+      if (this.#pending === session.id) this.#begin();
+    });
     this.#changed();
+  }
+
+  /**
+   * Runs a step that reads the screen after the steps before it: each waits
+   * for the output so far to be parsed, and the next for what it wrote. A
+   * start that follows an ending at once reads the screen the ending left,
+   * and its session opens after both.
+   */
+  #enqueue(step: () => Promise<void>): void {
+    this.#steps = this.#steps.then(step).catch(this.#options.report);
+  }
+
+  #parsed(data = ""): Promise<void> {
+    return new Promise((resolve) => {
+      this.term.write(data, resolve);
+    });
   }
 
   /**
    * A process with no terminal writes bare line feeds, which a terminal
    * would draw as a staircase, so they come with carriage returns; one
-   * that keeps no stdin takes no input, and its cursor is hidden.
+   * that keeps no stdin takes no input.
    */
   #join({ tty, stdin }: SessionStart): void {
     this.#stdin = stdin;
     this.term.options.convertEol = !tty;
     this.term.options.disableStdin = !stdin;
-    if (!stdin) this.term.write(CURSOR_OFF);
   }
 
   dispose(): void {
@@ -313,11 +331,11 @@ export class ShellTerminal {
       const { title, detail } = ending(next.end);
       const lines = [title, ...(detail?.split(/\r?\n/) ?? [])];
       this.term.options.disableStdin = true;
-      // Once the output is parsed, so that it is known whether a program is on the alternate screen.
-      this.term.write("", () => {
+      this.#enqueue(async () => {
+        await this.#parsed();
         const leave =
           this.term.buffer.active.type === "alternate" ? LEAVE_ALTERNATE : "";
-        this.term.write(
+        await this.#parsed(
           `${leave}${MODES_OFF}\r\n${QUIET}${lines.join("\r\n")}${PLAIN}\r\n`,
         );
       });
