@@ -15,6 +15,7 @@ import type {
   ShellEnvironment,
   ShellKind,
   ShellTarget,
+  TerminalKind,
   ViewState,
 } from "../generated";
 import { MockAccess } from "./access";
@@ -52,6 +53,14 @@ import {
   SHELL_SCENARIOS,
   type ShellScenario,
 } from "./shell";
+import {
+  isTerminalScenario,
+  MockOffers,
+  MockTerminal,
+  terminalKind,
+  TERMINAL_SCENARIOS,
+  type TerminalScenario,
+} from "./terminal";
 import { recordedSchema } from "./schemas";
 import {
   CONTEXTS,
@@ -76,6 +85,7 @@ import {
 } from "./query";
 
 export { FIRST_ASK_MS, NEXT_ASK_MS, WITHDRAWN_AFTER_MS } from "./approvals";
+export { OFFER_AFTER_MS } from "./terminal";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
 
@@ -97,7 +107,8 @@ type ListScenario = "live" | ViewState["state"];
  * and one of any other namespace are forbidden, or live lists for a shell
  * that waits, finds no shell, loses its connection or its write mode, or
  * runs one container (`shellQueued` and the like), or live lists while
- * processes ask the window to allow what they do (`approval` and the like).
+ * processes ask the window to allow what they do (`approval` and the like),
+ * or while a tool writes into a terminal's own kubeconfig (`terminalOffer`).
  */
 export type MockScenario =
   | ListScenario
@@ -108,7 +119,8 @@ export type MockScenario =
   | AuthScenario
   | EditScenario
   | ShellScenario
-  | ApprovalScenario;
+  | ApprovalScenario
+  | TerminalScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -120,6 +132,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
   ...APPROVAL_SCENARIOS,
+  ...TERMINAL_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -188,13 +201,17 @@ export function createMockBackend(
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
-    isApprovalScenario(scenario)
+    isApprovalScenario(scenario) ||
+    isTerminalScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
   const access = new MockAccess(scenario === "policyFile");
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
+  );
+  const offers = new MockOffers(
+    isTerminalScenario(scenario) ? scenario : undefined,
   );
   // The delete of a Pod in prod-eu asks only because its lock was lifted.
   if (isApprovalScenario(scenario)) access.unlock("prod-eu");
@@ -245,7 +262,23 @@ export function createMockBackend(
     if (!found) throw new IpcError("notFound", `no session ${id}`);
     return found;
   };
+  const terminals = new Map<
+    number,
+    {
+      context: string;
+      label: string;
+      kind: TerminalKind;
+      terminal?: MockTerminal;
+    }
+  >();
   const running = (id: number) => {
+    const parked = terminals.get(id);
+    if (parked) {
+      if (!parked.terminal) {
+        throw new IpcError("conflict", `session ${id} has not opened`);
+      }
+      return parked.terminal;
+    }
     const { shell } = shellOf(id);
     if (!shell) throw new IpcError("conflict", `session ${id} has not opened`);
     return shell;
@@ -509,10 +542,23 @@ export function createMockBackend(
       return null;
     },
     shell_close: (id) => {
+      const parked = terminals.get(id);
+      if (parked) {
+        parked.terminal?.close();
+        terminals.delete(id);
+        return null;
+      }
       shellOf(id).shell?.close();
       shells.delete(id);
       return null;
     },
+    terminal_create: ({ context, label }) => {
+      const kind = terminalKind(access.of(context));
+      const id = nextId++;
+      terminals.set(id, { context, label, kind });
+      return { id, kind, shell: "zsh" };
+    },
+    kubeconfig_offer_answer: (request) => offers.answer(request),
     logs_set_source: ({ id, source }) => {
       log(id).setSource(source);
       return null;
@@ -693,6 +739,20 @@ export function createMockBackend(
       return id;
     },
     shell_open: (open, onMessage) => {
+      const parked = terminals.get(open.id);
+      if (parked) {
+        if (parked.terminal) {
+          throw new IpcError("conflict", `session ${open.id} opened already`);
+        }
+        parked.terminal = new MockTerminal(
+          open.id,
+          parked.context,
+          parked.kind,
+          onMessage,
+        );
+        offers.opened(parked.label);
+        return null;
+      }
       const found = shellOf(open.id);
       if (found.shell) {
         throw new IpcError("conflict", `session ${open.id} opened already`);
@@ -711,6 +771,7 @@ export function createMockBackend(
       return null;
     },
     approvals_watch: (_request, onMessage) => approvals.watch(onMessage),
+    kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
     resources_watch: (id, onMessage) => {

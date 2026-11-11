@@ -23,6 +23,12 @@ export function ending(end: ShellEnd): Ending {
             label: `Exit ${String(end.code)}`,
             tone: "warn",
           };
+    case "signaled":
+      return {
+        title: `Session ended by SIG${end.signal}.`,
+        label: `SIG${end.signal}`,
+        tone: "warn",
+      };
     case "detached":
       return { title: "The attach ended.", label: "Ended", tone: "idle" };
     case "noShell":

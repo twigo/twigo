@@ -105,7 +105,7 @@ const FLOOD = encoder.encode("y\r\n".repeat(Math.floor(SHELL_FRAME_BYTES / 3)));
 const BRACKETED_PASTE = "\x1b[?2004h";
 
 /** Whether an escape sequence, started by ESC, is complete. */
-function complete(sequence: string): boolean {
+export function complete(sequence: string): boolean {
   const kind = sequence[1];
   if (kind === undefined) return false;
   if (kind === "[") {
