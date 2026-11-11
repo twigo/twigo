@@ -1240,6 +1240,9 @@ interface CommandDescriptor {
 - **Resolution as in VS Code's `keybindingResolver`.**
   - Rules carry a weight: core < built-in extension < extension < user.
     The last matching rule whose `when` holds wins.
+  - A command's key hint, in menus, tooltips and the palette, is its winning binding that no later rule of another command takes: one on the same presses, or on chords that start or continue its own, whose `when` holds wherever the binding's does.
+    Where the layout maps two rules to one press, as Ctrl+\` and Ctrl+Shift+\` on a layout that types the backtick with Shift, the earlier command has no hint.
+    Whether the later command is enabled is not weighed.
   - In the user's `keybindings.json`, `"-command"` removes a binding.
   - Chords are supported (⌘K ⌘S), as are per-platform variants (`mac`, `linux`, `win`).
 - **Dispatch** happens on `KeyboardEvent.code`, mapped through the active keyboard layout.

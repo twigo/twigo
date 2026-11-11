@@ -478,7 +478,7 @@ test.each<Platform>(["mac", "linux"])(
   },
 );
 
-test("where ` needs Shift, as on the recorded German layout, the two terminal keys are one chord that Toggle takes, and New Terminal stays in the palette", async () => {
+test("where ` needs Shift, as on the recorded German layout, the two terminal keys are one chord that Toggle takes, and New Terminal stays in the palette with no key beside it", async () => {
   const { workbench, tabs } = await mounted();
   workbench.keybindings.setLayout(
     await createMockBackend("ready", "german").subscribe(
@@ -488,11 +488,10 @@ test("where ` needs Shift, as on the recorded German layout, the two terminal ke
     ),
   );
   const chord = { key: "`", code: "Equal", ctrlKey: true, shiftKey: true };
-  const shared = workbench.keybindings.primary("k8s.terminal.new")?.ids;
-  expect(shared).toHaveLength(1);
-  expect(workbench.keybindings.primary("k8s.terminal.toggle")?.ids).toEqual(
-    shared,
-  );
+  expect(workbench.keybindings.primary("k8s.terminal.new")).toBeUndefined();
+  expect(
+    workbench.keybindings.primary("k8s.terminal.toggle")?.ids,
+  ).toHaveLength(1);
 
   await press(document.body, chord);
   expect(panelTabs()).toEqual([uriOf(1)]);
@@ -504,7 +503,11 @@ test("where ` needs Shift, as on the recorded German layout, the two terminal ke
   const items = await workbench.quickAccess
     .resolve(">")
     ?.provider.items("", { lookup: workbench.keys.lookup(document.body) });
+  const keyOf = (id: string) =>
+    items?.find((item) => item.id === id)?.keybinding;
   expect(items?.map(({ id }) => id)).toContain("k8s.terminal.new");
+  expect(keyOf("k8s.terminal.new")).toBeUndefined();
+  expect(keyOf("k8s.terminal.toggle")).toBeDefined();
 });
 
 test.each<[Platform, boolean]>([
