@@ -28,6 +28,20 @@ export type TerminalKindFacts = Pick<
   "kind" | "shell" | "kubeconfigKept"
 >;
 
+const NAME_MAX = 24;
+
+function middle(name: string): string {
+  if (name.length <= NAME_MAX) return name;
+  const room = NAME_MAX - 1;
+  const headRoom = Math.ceil(room / 2);
+  const stops = [...name.matchAll(/[:/]/g)].map(({ index }) => index);
+  const headStop = stops.filter((at) => at < headRoom).pop();
+  const head = name.slice(0, headStop === undefined ? headRoom : headStop + 1);
+  const tailRoom = room - head.length;
+  const tailStop = stops.find((at) => name.length - at <= tailRoom);
+  return `${head}…${name.slice(tailStop ?? name.length - tailRoom)}`;
+}
+
 const PROXY =
   "Through Twigo's proxy, which follows each context's mode: a write from a guarded context asks first, and a read-only one is refused.";
 
@@ -93,7 +107,7 @@ function kindWords(
     }
     return {
       credentials: "proxy",
-      short: `${base}, ${rest.length === 0 ? first : `${String(direct.length)} contexts`} direct`,
+      short: `${base}, ${rest.length === 0 ? middle(first) : `${String(direct.length)} contexts`} direct`,
       why,
       warnings: [directWarning([first, ...rest])],
       restartable: false,

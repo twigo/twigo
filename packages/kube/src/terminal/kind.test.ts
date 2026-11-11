@@ -100,6 +100,54 @@ test("several direct contexts are counted in the chip and named in the warning",
   );
 });
 
+const ARN = "arn:aws:eks:eu-west-1:123456789012:cluster/prod-eu-2";
+
+test("a long direct name is cut in the middle at its own colons and slashes, and the tooltip holds it whole", () => {
+  const words = describeKind(
+    zsh({ kind: "proxy", why: "mode" }),
+    "staging",
+    "guarded",
+    [ARN],
+  );
+  expect(words.short).toBe("Proxy · guarded, arn:aws:eks:…/prod-eu-2 direct");
+  expect(words.warnings[0]?.title).toBe(
+    `${ARN} reaches its cluster with your credentials, not through the proxy.`,
+  );
+  expect(words.credentials).toBe("proxy");
+});
+
+test("a direct name that fits is shown whole, and one with no colon or slash near the middle is cut by its characters", () => {
+  const short = (name: string) =>
+    describeKind(zsh({ kind: "proxy", why: "mode" }), "staging", "guarded", [
+      name,
+    ]).short;
+  expect(short("prod-eu")).toBe("Proxy · guarded, prod-eu direct");
+  expect(short("a".repeat(24))).toBe(
+    `Proxy · guarded, ${"a".repeat(24)} direct`,
+  );
+  const gke = "gke_my-long-project-name-123456_europe-west1-b_production-eu-1";
+  expect(short(gke)).toBe("Proxy · guarded, gke_my-long-…uction-eu-1 direct");
+  expect(short(`a:${"b".repeat(40)}`)).toBe(
+    `Proxy · guarded, a:…${"b".repeat(21)} direct`,
+  );
+});
+
+test("the name is cut before the not-kept suffix is added, and several contexts still count", () => {
+  expect(
+    describeKind(sh({ kind: "proxy", why: "mode" }), "staging", "guarded", [
+      ARN,
+    ]).short,
+  ).toBe(
+    "Proxy · guarded, arn:aws:eks:…/prod-eu-2 direct, KUBECONFIG not kept",
+  );
+  expect(
+    describeKind(zsh({ kind: "proxy", why: "mode" }), "staging", "guarded", [
+      ARN,
+      `${ARN}-b`,
+    ]).short,
+  ).toBe("Proxy · guarded, 2 contexts direct");
+});
+
 const NOT_KEPT = "A startup file of sh may replace this terminal's KUBECONFIG.";
 
 test("a proxy terminal in a shell Twigo cannot keep KUBECONFIG in warns that a startup file may replace it, and it could then reach clusters with the person's credentials", () => {
