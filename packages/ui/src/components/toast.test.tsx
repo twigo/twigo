@@ -373,6 +373,27 @@ test("a window of 600 px or less places the toasts as the wider ones", async () 
   vi.useRealTimers();
 });
 
+test("a window of 600 px or less keeps the list at the toaster's own width, at the right, and each toast at that width, as sonner's CSS for it would spread them across the window", async () => {
+  vi.useFakeTimers();
+  render(<Toaster />);
+  act(() => {
+    notify.error("Held");
+  });
+  await settled();
+  const list = document.querySelector<HTMLElement>("[data-sonner-toaster]");
+  const shown = document.querySelector<HTMLElement>("[data-sonner-toast]");
+  expect(list?.style.getPropertyValue("--width")).toBe("288px");
+  expect(list?.style.width).toBe("var(--width)");
+  expect(list?.style.left).toBe("auto");
+  expect(list?.style.getPropertyValue("--offset-right")).toBe("12px");
+  expect(shown?.style.width).toBe("var(--width)");
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});
+
 test("a choice's button takes a label as long as an absolute path inside the toast, wrapped, beside a column that cannot outgrow it", () => {
   const path =
     "/Users/someone/Library/Application Support/io.twigo.ide/proxy/process-0.kubeconfig";

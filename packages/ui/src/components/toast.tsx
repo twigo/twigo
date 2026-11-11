@@ -217,7 +217,19 @@ function secondsLeft(until: number): number {
   return Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 
-const WIDTH = { "--width": "288px" } as CSSProperties;
+/**
+ * Sonner's CSS for a window of 600 px or less spreads the list across it from
+ * `--mobile-offset-left` and gives each toast the rest of its width, which
+ * puts a card over the activity bar and the Explorer. An inline style wins
+ * over it, so the list keeps its own width at its right offset, as in a wider
+ * window.
+ */
+const LIST = {
+  "--width": "288px",
+  width: "var(--width)",
+  left: "auto",
+} as CSSProperties;
+const TOAST = { width: "var(--width)" };
 const GAP = 6;
 /** The status bar's 24 px and 8 px of air: the lowest the front toast sits. */
 const FLOOR = 32;
@@ -304,8 +316,8 @@ export function Toaster({
       gap={GAP}
       offset={offset}
       mobileOffset={offset}
-      style={WIDTH}
-      toastOptions={{ className: BEHIND }}
+      style={LIST}
+      toastOptions={{ className: BEHIND, style: TOAST }}
       containerAriaLabel="Notifications"
     />
   );
