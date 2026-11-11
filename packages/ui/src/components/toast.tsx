@@ -238,10 +238,14 @@ const FLOOR = 32;
  * front's height, and hides the children of its own styled toasts only
  * (`data-styled`, which a custom toast is not), so a taller card would hang
  * out of the cap over what is under the stack, and a pointer there would
- * open and close the stack. Clipped and hidden, as the styled ones are.
+ * open and close the stack. The box is clipped and the content of the card,
+ * the one child of the box, is hidden; the card's own edge stays above the
+ * front toast, as a styled toast's does.
  */
-const BEHIND =
-  "data-[front=false]:data-[expanded=false]:overflow-hidden data-[front=false]:data-[expanded=false]:*:opacity-0";
+const BEHIND = [
+  "data-[front=false]:data-[expanded=false]:overflow-hidden",
+  "data-[front=false]:data-[expanded=false]:[&_[data-title]>*>*]:opacity-0",
+].join(" ");
 
 /**
  * The height of the toasts that show, spread as sonner spreads them while

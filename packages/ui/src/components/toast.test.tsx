@@ -6,6 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { toast } from "sonner";
+import { compile } from "tailwindcss";
 import { afterEach, expect, test, vi } from "vitest";
 import { CircleCheck, Trash2 } from "lucide-react";
 import { notify } from "./notify";
@@ -14,6 +15,7 @@ import { ChoiceToast, CountdownToast, Toast, Toaster } from "./toast";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  document.querySelector("style[data-utilities]")?.remove();
 });
 
 test("errors and warnings are announced assertively, the rest politely", () => {
@@ -297,21 +299,21 @@ test("a stack taller than the window under the title bar keeps the front toast a
   vi.useRealTimers();
 });
 
-function applied(element: Element): string[] {
-  return Array.from(element.classList).flatMap((name) => {
-    const [utility = "", ...variants] = name.split(":").reverse();
-    const holds = variants.every((variant) => {
-      const [, key, value] = /^data-\[(.+)=(.+)\]$/.exec(variant) ?? [];
-      return (
-        variant === "*" ||
-        (key !== undefined && element.getAttribute(`data-${key}`) === value)
-      );
-    });
-    return holds ? [`${variants.includes("*") ? "*:" : ""}${utility}`] : [];
-  });
+async function withUtilities() {
+  const classes = new Set(
+    Array.from(document.body.querySelectorAll("[class]")).flatMap((element) =>
+      Array.from(element.classList),
+    ),
+  );
+  const style = document.createElement("style");
+  style.dataset.utilities = "";
+  style.textContent = (await compile("@tailwind utilities;")).build([
+    ...classes,
+  ]);
+  document.head.append(style);
 }
 
-test("while the stack is closed a toast behind the front one is clipped to its box with its children hidden, and a hover shows it whole", async () => {
+async function stackOfTwo() {
   vi.useFakeTimers();
   render(<Toaster />);
   act(() => {
@@ -329,28 +331,66 @@ test("while the stack is closed a toast behind the front one is clipped to its b
     notify.error("Held");
   });
   await settled();
+  await withUtilities();
   const toastAt = (front: boolean) => {
-    const found = document.querySelectorAll(
+    const found = document.querySelectorAll<HTMLElement>(
       `[data-sonner-toast][data-front="${String(front)}"]`,
     );
     if (found.length !== 1 || !found[0]) throw new Error("not one toast");
     return found[0];
   };
-  const clipped = ["overflow-hidden", "*:opacity-0"];
-  expect(applied(toastAt(false))).toEqual(clipped);
-  expect(applied(toastAt(true))).toEqual([]);
-
   const list = document.querySelector("[data-sonner-toaster]");
   if (!list) throw new Error("no toaster");
-  fireEvent.mouseEnter(list);
-  expect(applied(toastAt(false))).toEqual([]);
-  fireEvent.mouseLeave(list);
-  expect(applied(toastAt(false))).toEqual(clipped);
-  act(() => {
-    toast.dismiss();
-  });
-  await act(() => vi.advanceTimersByTimeAsync(1000));
-  vi.useRealTimers();
+  return {
+    toastAt,
+    open: () => fireEvent.mouseEnter(list),
+    close: () => fireEvent.mouseLeave(list),
+    finish: async () => {
+      act(() => {
+        toast.dismiss();
+      });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      vi.useRealTimers();
+    },
+  };
+}
+
+function card(li: HTMLElement): HTMLElement {
+  const found = li.querySelector("[data-title]")?.firstElementChild;
+  if (!(found instanceof HTMLElement)) throw new Error("no card");
+  return found;
+}
+
+function shows(element: Element): boolean {
+  const li = element.closest("[data-sonner-toast]");
+  for (
+    let at: Element | null = element;
+    at && at !== li;
+    at = at.parentElement
+  ) {
+    if (Number.parseFloat(getComputedStyle(at).opacity) === 0) return false;
+  }
+  return getComputedStyle(element).visibility !== "hidden";
+}
+
+test("while the stack is closed a toast behind the front one is clipped to its box and keeps its card, with only the card's content hidden, and a hover shows it whole", async () => {
+  const { toastAt, open, close, finish } = await stackOfTwo();
+  const behind = toastAt(false);
+  const content = Array.from(card(behind).children);
+  expect(content.length).toBeGreaterThan(0);
+  expect(getComputedStyle(behind).overflow).toBe("hidden");
+  expect(shows(card(behind))).toBe(true);
+  expect(content.map(shows)).toEqual(content.map(() => false));
+  expect(getComputedStyle(toastAt(true)).overflow).not.toBe("hidden");
+  expect(Array.from(card(toastAt(true)).children).every(shows)).toBe(true);
+
+  open();
+  expect(getComputedStyle(behind).overflow).not.toBe("hidden");
+  expect(content.every(shows)).toBe(true);
+  close();
+  expect(shows(card(behind))).toBe(true);
+  expect(content.map(shows)).toEqual(content.map(() => false));
+  await finish();
 });
 
 test("a window of 600 px or less places the toasts as the wider ones", async () => {
