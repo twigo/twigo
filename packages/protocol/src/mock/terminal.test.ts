@@ -201,22 +201,25 @@ test("kubectl config current-context prints the context of the terminal", async 
   }
 });
 
+const APP_DATA = "/Users/you/Library/Application Support/io.twigo.ide";
+
 test("$KUBECONFIG says the kind: Twigo's file and then the user's, or the proxy's alone", async () => {
   const own = await opened("dev");
   await own.type("echo $KUBECONFIG\r");
   const [first, second, ...more] =
     own.text().split("\r\n")[1]?.split(":") ?? [];
-  expect(first).toContain(`/terminals/${String(own.session.id)}/kubeconfig`);
+  expect(first).toBe(
+    `${APP_DATA}/terminals/${String(own.session.id)}/kubeconfig`,
+  );
   expect(second).toBe("/Users/you/.kube/config");
   expect(more).toEqual([]);
 
   const proxied = await opened("staging");
   await proxied.type("echo $KUBECONFIG\r");
   const line = proxied.text().split("\r\n")[1] ?? "";
-  expect(line).toContain(
-    `/terminals/${String(proxied.session.id)}/proxy-kubeconfig`,
+  expect(line).toBe(
+    `${APP_DATA}/proxy/process-${String(proxied.session.id)}.kubeconfig`,
   );
-  expect(line).not.toContain(".kube/config");
 });
 
 test("exit ends the session as exited with its code, and exit alone with 0", async () => {

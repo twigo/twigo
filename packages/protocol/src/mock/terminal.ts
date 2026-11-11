@@ -58,13 +58,13 @@ export function terminalKind(
 
 const PROMPT = "you@mac ~ % ";
 const HOME_CONFIG = "/Users/you/.kube/config";
+const APP_DATA = "/Users/you/Library/Application Support/io.twigo.ide";
 
 /** What `$KUBECONFIG` holds: Twigo's file and then the user's, or the proxy's alone. */
 function kubeconfigPath(id: number, kind: TerminalKind): string {
-  const own = `/Users/you/Library/Caches/io.twigo.ide/terminals/${String(id)}`;
   return kind.kind === "kubeconfig"
-    ? `${own}/kubeconfig:${HOME_CONFIG}`
-    : `${own}/proxy-kubeconfig`;
+    ? `${APP_DATA}/terminals/${String(id)}/kubeconfig:${HOME_CONFIG}`
+    : `${APP_DATA}/proxy/process-${String(id)}.kubeconfig`;
 }
 
 const CLEAR = "\x1b[H\x1b[2J\x1b[3J";

@@ -926,7 +926,8 @@ Extensions add commands, not prefixes.
   - **Flow control** is in bytes, counted by what the terminal has parsed (`shell_ack`, clamped to what was sent).
     A frame is at most 64 KiB, as `twigo-sessions` names its constants; output goes out at once when the last frame left 16 ms ago or more, so an echo after a quiet moment never waits, and otherwise gathers until 16 ms after the last frame, about a display frame, or 64 KiB, since the webview pays per frame, each one a Tauri `eval`; at 256 KiB unacknowledged it stops reading, until it falls below 64 KiB.
     Stopping the reader blocks kube's message loop, stdin and resizes included, until acks come; input and resizes therefore queue apart from the reader, and a Ctrl-C during `yes` reaches the process as the terminal catches up.
-  - **How a session ends** is `Exited { code }`, `Detached`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+  - **How a session ends** is `Exited { code }`, `Signaled { signal }`, `Detached`, `NoShell`, `Failed`, `ConnectionLost` or `Relocked`, and none can resume, since an exec cannot.
+    `Signaled` is a terminal's shell that a signal ended (4.6), named as `kill -l` names it: `KILL`.
     `ended` comes last, after all the output of a process that ended; a session cut short by `Relocked`, or by a wake, a moved route of a live api connection (3.2) or replaced clients, sends only the output it had gathered, not what its pipe still held.
     The status decides.
     `Success` is exit 0 for a shell and `Detached` for an attach: the kubelet's [`ServeAttach`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/attach.go#L46-L55) writes `Success` whenever the attach itself did not error, with no exit code.
@@ -971,7 +972,7 @@ Extensions add commands, not prefixes.
     Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
     A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
   - **Endings.**
-    A session's ending has its words, which stand once in the scrollback, in a quiet colour, with its state and Restart at the right of the tab strip: `Session ended.`, `Session ended with exit code N.`, `The attach ended.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
+    A session's ending has its words, which stand once in the scrollback, in a quiet colour, with its state and Restart at the right of the tab strip: `Session ended.`, `Session ended with exit code N.`, `Session ended by SIGKILL.` (`SIG` and the signal's name), `The attach ended.`, `This container has no shell.` with the runtime's message, the error's own message, `The connection was lost. A shell cannot be resumed.`, and `The context became read-only.`.
     A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
     A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
