@@ -119,6 +119,10 @@ impl Fixture {
             .env("TERM", "xterm-256color")
             .env("LANG", "en_US.UTF-8")
             .env("KUBECONFIG", KUBECONFIG)
+            // Ubuntu's /etc/zsh/zshrc runs compinit unless this is set, and on the CI
+            // runner compinit found insecure directories and took the first key typed
+            // as the answer to its question.
+            .env("skip_global_compinit", "1")
             .envs(extra.iter().copied())
             .envs(startup.env.iter().map(|(name, value)| (name, value)))
             .current_dir(self.home());

@@ -105,6 +105,9 @@ impl Live {
                 dir.path().join("kubectl-cache").into_os_string(),
             ),
             ("PATH", path),
+            // Ubuntu's /etc/zsh/zshrc runs compinit unless this is set, and on the CI
+            // runner compinit took the first key typed as the answer to its question.
+            ("skip_global_compinit", "1".into()),
         ]
         .into_iter()
         .map(|(name, value)| (OsString::from(name), value))
@@ -342,13 +345,6 @@ async fn a_zshrc_that_exports_kubeconfig_leaves_each_kind_its_space_s_context() 
             .output()
             .unwrap();
         assert!(used.status.success(), "{used:?}");
-        // Ubuntu's /etc/zsh/zshrc runs compinit unless .zshenv says not to, and on
-        // the CI runner compinit took the first key typed as the answer to its question.
-        std::fs::write(
-            live.dir.path().join("home").join(".zshenv"),
-            "skip_global_compinit=1\n",
-        )
-        .unwrap();
         std::fs::write(
             live.dir.path().join("home").join(".zshrc"),
             format!("export KUBECONFIG='{}'\n", theirs.display()),

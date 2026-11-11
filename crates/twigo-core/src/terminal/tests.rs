@@ -74,11 +74,6 @@ users:
 
 const ARN: &str = "arn:aws:eks:eu-west-1:1:cluster/new";
 
-/// Ubuntu's `/etc/zsh/zshrc` runs `compinit` unless a `.zshenv` sets this,
-/// and on the CI runner `compinit` found insecure directories and took the
-/// first key typed as the answer to its question.
-const SKIP_GLOBAL_COMPINIT: &str = "skip_global_compinit=1\n";
-
 struct Setup {
     dir: tempfile::TempDir,
     core: Arc<Core>,
@@ -107,6 +102,10 @@ impl Setup {
             ("PATH", "/usr/bin:/bin".into()),
             ("TWIGO_KUBECONFIG", "/elsewhere".into()),
             ("LANG", "C".into()),
+            // Ubuntu's /etc/zsh/zshrc runs compinit unless this is set, and on the CI
+            // runner compinit found insecure directories and took the first key typed
+            // as the answer to its question.
+            ("skip_global_compinit", "1".into()),
         ]
         .into_iter()
         .chain(login(&home))
@@ -445,7 +444,6 @@ async fn only_zsh_bash_fish_and_pwsh_keep_the_terminal_s_kubeconfig() {
 #[tokio::test]
 async fn a_zsh_terminal_keeps_its_kubeconfig_over_a_zshrc_that_exports_one() {
     let setup = Setup::new().await;
-    std::fs::write(setup.home().join(".zshenv"), SKIP_GLOBAL_COMPINIT).unwrap();
     std::fs::write(setup.home().join(".zshrc"), "export KUBECONFIG=/theirs\n").unwrap();
     let session = setup.create_running("kind-a", "/bin/zsh", &[]).await;
     let dir = setup.terminals().join("0");
@@ -482,7 +480,7 @@ async fn zsh_reads_the_zshenv_in_home_that_moves_zdotdir_though_the_login_enviro
     std::fs::write(
         setup.home().join(".zshenv"),
         format!(
-            "{SKIP_GLOBAL_COMPINIT}{}export ZDOTDIR=$HOME/.config/zsh\n",
+            "{}export ZDOTDIR=$HOME/.config/zsh\n",
             record("home/.zshenv")
         ),
     )
