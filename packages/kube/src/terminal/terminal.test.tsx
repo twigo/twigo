@@ -610,6 +610,73 @@ test("the picks list only the terminals of the space that shows, and wait for a 
   await go;
 });
 
+async function restarted(
+  layout: ReturnType<Workbench["spaces"]["state"]>["panelEditors"],
+) {
+  const backend = createMockBackend("ready");
+  const workbench = await testWorkbench("ready", backend, "mac");
+  const tabs = createTerminalTabs(workbench);
+  registerTerminals(workbench, tabs);
+  withNote(workbench);
+  await act(() => workbench.spaces.open("qa"));
+  act(() => {
+    workbench.spaces.select("qa");
+    workbench.spaces.update("qa", (state) => ({
+      ...state,
+      panelEditors: layout,
+    }));
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  await settle(10);
+  return { workbench, tabs };
+}
+
+test("after a restart the terminals restored behind another panel tab are in the tabs that Toggle, Go to and Close read, the hidden panel too", async () => {
+  const first = await mounted();
+  withNote(first.workbench);
+  act(() => {
+    first.workbench.editors.open(uriOf(1));
+    first.workbench.editors.open(uriOf(2));
+    first.workbench.editors.open("note://a");
+  });
+  await settle(6);
+  const layout = first.workbench.spaces.state("qa").panelEditors;
+  cleanup();
+
+  const { workbench, tabs } = await restarted(layout);
+  expect(panelShown(workbench)).toBe(false);
+  expect(workbench.editors.activeIn("panel")).toBe("note://a");
+  expect(tabs.list().map(([uri]) => uri)).toEqual([uriOf(1), uriOf(2)]);
+  expect(tabs.get(uriOf(1))?.getStatus().state).toBe("restored");
+
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  await press(document.body, TOGGLE);
+  expect(invoke.mock.calls.map(([command]) => command)).not.toContain(
+    "terminal_create",
+  );
+  expect(panelShown(workbench)).toBe(true);
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(1));
+
+  const lookup = workbench.keys.lookup(null);
+  const go = workbench.commands.execute("k8s.terminal.show", lookup);
+  await settle(4);
+  expect(
+    workbench.quickAccess.session?.pick?.items.map(({ id }) => id),
+  ).toEqual([uriOf(1), uriOf(2)]);
+  await pick(workbench, uriOf(2));
+  await go;
+  expect(workbench.editors.activeIn("panel")).toBe(uriOf(2));
+
+  const close = workbench.commands.execute("k8s.terminal.close", lookup);
+  await settle(4);
+  expect(
+    workbench.quickAccess.session?.pick?.items.map(({ id }) => id),
+  ).toEqual([uriOf(1), uriOf(2)]);
+  await pick(workbench, uriOf(1));
+  await close;
+  expect(tabs.has(uriOf(1))).toBe(false);
+});
+
 function withVariant(choice: string) {
   history.replaceState(null, "", `/?variant=${choice}`);
 }
