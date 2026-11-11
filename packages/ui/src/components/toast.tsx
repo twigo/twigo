@@ -1,4 +1,11 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   CircleAlert,
   CircleCheck,
@@ -210,13 +217,59 @@ function secondsLeft(until: number): number {
 }
 
 const WIDTH = { "--width": "288px" } as CSSProperties;
+const GAP = 6;
+
+/**
+ * The height of the toasts that show, spread as sonner spreads them while
+ * the pointer is over them: each at its own height, a gap between. Sonner
+ * keeps a toast's own height in `--initial-height`; a toast behind the
+ * front one is shorter while the stack is closed.
+ */
+function spreadHeight(section: HTMLElement): number {
+  const heights = [
+    ...section.querySelectorAll<HTMLElement>(
+      '[data-sonner-toast][data-visible="true"][data-removed="false"]',
+    ),
+  ].map(
+    (toast) =>
+      Number.parseFloat(toast.style.getPropertyValue("--initial-height")) || 0,
+  );
+  return (
+    heights.reduce((sum, height) => sum + height, 0) +
+    GAP * Math.max(0, heights.length - 1)
+  );
+}
+
+function useSpreadHeight() {
+  const section = useRef<HTMLElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const element = section.current;
+    if (!element) return;
+    const measure = () => {
+      setHeight(spreadHeight(element));
+    };
+    measure();
+    const observer = new MutationObserver(measure);
+    observer.observe(element, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["style", "data-visible", "data-removed"],
+    });
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  return { section, height };
+}
 
 /**
  * `clearance` is the height of what the window shows above its status bar
  * that the toasts must not cover, and `ceiling` the height of what it shows
- * under its top that they must not reach. The front toast sits above the
- * clearance while it fits there whole, else as low as it takes to stay under
- * the ceiling.
+ * under its top that they must not reach. The toasts sit above the
+ * clearance while they fit there, spread by a hover, else as low as it takes
+ * to keep them whole under the ceiling.
  */
 export function Toaster({
   clearance = 0,
@@ -225,13 +278,14 @@ export function Toaster({
   clearance?: number;
   ceiling?: number;
 }) {
-  // `--front-toast-height` is sonner's, set on its list from the front toast.
-  const bottom = `min(${String(32 + clearance)}px, calc(100dvh - ${String(ceiling + 8)}px - var(--front-toast-height)))`;
+  const { section, height } = useSpreadHeight();
+  const bottom = `min(${String(32 + clearance)}px, calc(100dvh - ${String(ceiling + 8 + height)}px))`;
   return (
     <SonnerToaster
+      ref={section}
       position="bottom-right"
       visibleToasts={3}
-      gap={6}
+      gap={GAP}
       offset={{ bottom, right: 12 }}
       style={WIDTH}
       containerAriaLabel="Notifications"

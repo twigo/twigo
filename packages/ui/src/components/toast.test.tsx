@@ -185,38 +185,99 @@ test("a choice's toast stays until its owner dismisses it, takes one answer, and
   vi.useRealTimers();
 });
 
-test("the toaster keeps its front toast whole: above the clearance while it fits there, else as low as it takes to stay under the ceiling", async () => {
+const VIEWPORT = 760;
+
+function measureToasts(heights: Readonly<Record<string, number>>) {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: Element) {
+      const entry = Object.entries(heights).find(([text]) =>
+        this.textContent.includes(text),
+      );
+      return { height: entry?.[1] ?? 0 } as DOMRect;
+    },
+  );
+}
+
+function bottomEdge(): number {
+  const list = document.querySelector<HTMLElement>("[data-sonner-toaster]");
+  const offset = list?.style.getPropertyValue("--offset-bottom") ?? "";
+  const resolved = offset.replace(
+    /var\((--[\w-]+)\)/g,
+    (_, name: string) => list?.style.getPropertyValue(name) ?? "",
+  );
+  const [limit, window, ...taken] = [
+    ...resolved
+      .replace("100dvh", `${String(VIEWPORT)}px`)
+      .matchAll(/\d+(?:\.\d+)?/g),
+  ].map(([number]) => Number(number));
+  if (limit === undefined || window === undefined) {
+    throw new Error(`not a clamped offset: ${offset}`);
+  }
+  return Math.min(limit, window - taken.reduce((sum, each) => sum + each, 0));
+}
+
+const spreadTop = (stack: number) => VIEWPORT - bottomEdge() - stack;
+
+async function settled() {
+  await act(() => vi.advanceTimersByTimeAsync(100));
+}
+
+test("the toaster keeps the stack that a hover spreads whole: above the clearance while it fits there, else as low as it takes to stay under the ceiling", async () => {
   vi.useFakeTimers();
+  measureToasts({ Held: 98, Waiting: 250 });
   const { rerender } = render(<Toaster ceiling={36} />);
   act(() => {
-    notify.warning("Held");
+    notify.choice(
+      {
+        icon: CircleCheck,
+        message: "Waiting",
+        choices: [{ label: "Move", run: () => undefined }],
+      },
+      "offer-1",
+    );
   });
-  await act(() => vi.advanceTimersByTimeAsync(100));
-  const offset = () =>
-    document
-      .querySelector<HTMLElement>("[data-sonner-toaster]")
-      ?.style.getPropertyValue("--offset-bottom") ?? "";
-  const bottomEdge = (viewport: number, front: number) => {
-    const match =
-      /^min\((\d+)px, calc\(100dvh - (\d+)px - var\(--front-toast-height\)\)\)$/.exec(
-        offset(),
-      );
-    if (!match) throw new Error(`not a clamped offset: ${offset()}`);
-    return Math.min(Number(match[1]), viewport - Number(match[2]) - front);
-  };
-  const topEdge = (viewport: number, front: number) =>
-    viewport - bottomEdge(viewport, front) - front;
+  await settled();
+  expect(bottomEdge()).toBe(32);
+  act(() => {
+    notify.error("Held");
+  });
+  await settled();
+  const stack = 98 + 6 + 250;
 
-  expect(bottomEdge(760, 234)).toBe(32);
   rerender(<Toaster clearance={284} ceiling={36} />);
-  expect(bottomEdge(760, 234)).toBe(316);
-  expect(topEdge(760, 234)).toBe(210);
+  expect(bottomEdge()).toBe(316);
+  expect(spreadTop(stack)).toBe(90);
   rerender(<Toaster clearance={580} ceiling={36} />);
-  expect(topEdge(760, 234)).toBe(44);
-  expect(bottomEdge(760, 234)).toBe(482);
-  expect(bottomEdge(760, 40)).toBe(612);
+  expect(spreadTop(stack)).toBe(44);
+  expect(bottomEdge()).toBe(362);
   rerender(<Toaster clearance={0} ceiling={36} />);
-  expect(bottomEdge(760, 234)).toBe(32);
+  expect(bottomEdge()).toBe(32);
+
+  rerender(<Toaster clearance={580} ceiling={36} />);
+  act(() => {
+    toast.dismiss("offer-1");
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(spreadTop(98)).toBe(50);
+  expect(bottomEdge()).toBe(612);
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});
+
+test("only the toasts that show are spread, three of them", async () => {
+  vi.useFakeTimers();
+  measureToasts({ Held: 98 });
+  render(<Toaster clearance={580} ceiling={36} />);
+  for (const n of [1, 2, 3, 4]) {
+    act(() => {
+      notify.error(`Held ${String(n)}`, { key: `held-${String(n)}` });
+    });
+    await settled();
+  }
+  expect(spreadTop(3 * 98 + 2 * 6)).toBe(44);
   act(() => {
     toast.dismiss();
   });

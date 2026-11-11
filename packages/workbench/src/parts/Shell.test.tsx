@@ -94,7 +94,7 @@ test("toasts stay above the panel's tab strip as far up as the panel measures wh
       document
         .querySelector<HTMLElement>("[data-sonner-toaster]")
         ?.style.getPropertyValue("--offset-bottom") ?? "";
-    const match = /^min\((\d+)px, calc\(100dvh - (\d+)px - /.exec(bottom);
+    const match = /^min\((\d+)px, calc\(100dvh - (\d+)px\)\)$/.exec(bottom);
     if (!match) throw new Error(`not a clamped offset: ${bottom}`);
     return { above: Number(match[1]), under: Number(match[2]) };
   };
