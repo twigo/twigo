@@ -44,6 +44,13 @@ const PLAIN = "\x1b[0m";
 
 const encoder = new TextEncoder();
 
+/**
+ * What a write carries to learn that the output so far is parsed. An empty
+ * string is falsy, which `flushSync`, run by every resize, takes for the end
+ * of the queue: it drops the marker, its callback and what follows.
+ */
+const MARKER = new Uint8Array();
+
 /** None for a tab restored from the saved layout. */
 export type SessionStatus = ShellEvent | { readonly state: "restored" };
 
@@ -232,7 +239,7 @@ export class ShellTerminal {
     this.#steps = this.#steps.then(step).catch(this.#options.report);
   }
 
-  #parsed(data = ""): Promise<void> {
+  #parsed(data: string | Uint8Array = MARKER): Promise<void> {
     return new Promise((resolve) => {
       this.term.write(data, resolve);
     });

@@ -12,6 +12,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   document.body.replaceChildren();
   document.documentElement.removeAttribute("style");
@@ -20,7 +21,10 @@ afterEach(() => {
 const EXEC = { space: "qa", namespace: "auth", pod: "api-0", container: "api" };
 const TERMINAL = { space: "qa", n: 1 };
 
-type Starter = (id: number) => ShellTerminal;
+interface Starter {
+  readonly start: (id: number) => ShellTerminal;
+  readonly restored: () => ShellTerminal;
+}
 
 const SHELLS: readonly {
   readonly name: string;
@@ -31,11 +35,14 @@ const SHELLS: readonly {
     starter: (options) => {
       const tabs = new ExecTabs(options);
       const uri = execUri(EXEC);
-      return (id) => {
-        tabs.start(uri, EXEC, { id, tty: true, stdin: true });
-        const tab = tabs.get(uri);
-        if (!tab) throw new Error("no tab");
-        return tab;
+      return {
+        start: (id) => {
+          tabs.start(uri, EXEC, { id, tty: true, stdin: true });
+          const tab = tabs.get(uri);
+          if (!tab) throw new Error("no tab");
+          return tab;
+        },
+        restored: () => tabs.tab(uri, EXEC),
       };
     },
   },
@@ -44,20 +51,23 @@ const SHELLS: readonly {
     starter: (options) => {
       const tabs = new TerminalTabs(options);
       const uri = terminalUri(TERMINAL);
-      return (id) => {
-        tabs.start(
-          uri,
-          TERMINAL,
-          started({
-            id,
-            kind: { kind: "kubeconfig" },
-            shell: "zsh",
-            kubeconfigKept: true,
-          }),
-        );
-        const tab = tabs.get(uri);
-        if (!tab) throw new Error("no tab");
-        return tab;
+      return {
+        start: (id) => {
+          tabs.start(
+            uri,
+            TERMINAL,
+            started({
+              id,
+              kind: { kind: "kubeconfig" },
+              shell: "zsh",
+              kubeconfigKept: true,
+            }),
+          );
+          const tab = tabs.get(uri);
+          if (!tab) throw new Error("no tab");
+          return tab;
+        },
+        restored: () => tabs.tab(uri, TERMINAL),
       };
     },
   },
@@ -80,15 +90,14 @@ function lines(tab: ShellTerminal): string[] {
 describe.each(SHELLS)("$name", ({ starter }) => {
   function setup(onOpen?: Parameters<typeof fakeShells>[0]) {
     const fake = fakeShells(onOpen);
-    const start = starter({
+    const tabs = starter({
       backend: fake.backend,
       platform: "mac",
       report: vi.fn(),
       openUrl: vi.fn(),
       binds: () => false,
     });
-    const begin = (id: number) => {
-      const tab = start(id);
+    const show = (tab: ShellTerminal) => {
       if (!tab.host.isConnected) {
         sized(tab);
         const container = document.createElement("div");
@@ -96,11 +105,18 @@ describe.each(SHELLS)("$name", ({ starter }) => {
         tab.attach(container);
         tab.setShown(true);
       }
+    };
+    const begin = (id: number) => {
+      const tab = tabs.start(id);
+      show(tab);
       return tab;
     };
     return {
       fake,
       begin,
+      show,
+      restored: tabs.restored,
+      restart: tabs.start,
       start: async (id: number) => {
         const tab = begin(id);
         await vi.advanceTimersByTimeAsync(10);
@@ -110,6 +126,11 @@ describe.each(SHELLS)("$name", ({ starter }) => {
         fake.opens[session]?.send({ state: "running" });
         fake.opens[session]?.send(bytes(text));
         await vi.advanceTimersByTimeAsync(10);
+      },
+      refit: (tab: ShellTerminal, width: number) => {
+        sized(tab, width);
+        tab.setShown(false);
+        tab.setShown(true);
       },
       end: (session: number) => {
         fake.opens[session]?.send({
@@ -222,4 +243,70 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     await output(0, "you@mac ~ % ");
     expect(lines(tab)).toEqual(["you@mac ~ %"]);
   });
+
+  test("a resize while an ending waits to be parsed leaves the ending's words, and a restart after it opens", async () => {
+    const { start, begin, refit, output, end, fake } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % ");
+    end(0);
+    await Promise.resolve();
+    refit(tab, 600);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(lines(tab)).toEqual(["you@mac ~ %", LOST]);
+    begin(8);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fake.opens.map(({ request }) => request.id)).toEqual([7, 8]);
+  });
+
+  test("a resize while a start waits to be parsed still opens its session", async () => {
+    const { start, begin, refit, output, fake } = setup();
+    const tab = await start(7);
+    await output(0, "you@mac ~ % ");
+    begin(8);
+    await Promise.resolve();
+    refit(tab, 600);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fake.opens.map(({ request }) => request.id)).toEqual([7, 8]);
+    await output(1, "you@mac ~ % ");
+    expect(lines(tab)).toEqual(["you@mac ~ %", "you@mac ~ %"]);
+  });
+
+  test("a restored tab restarted twice shows the ending's words and opens both sessions", async () => {
+    const { restored, restart, show, output, end, fake } = setup();
+    const tab = restored();
+    restart(8);
+    await Promise.resolve();
+    show(tab);
+    await vi.advanceTimersByTimeAsync(10);
+    await output(0, "you@mac ~ % ");
+    end(0);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(lines(tab)).toEqual(["you@mac ~ %", LOST]);
+    restart(9);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fake.opens.map(({ request }) => request.id)).toEqual([8, 9]);
+  });
+
+  test.fails(
+    "a resize between two slices of output parses none of it twice",
+    async () => {
+      const { start, fake } = setup();
+      const tab = await start(7);
+      fake.opens[0]?.send({ state: "running" });
+      let now = 0;
+      vi.spyOn(performance, "now").mockImplementation(() => (now += 13));
+      for (const text of ["A\r\n", "B\r\n", "C\r\n", "D\r\n"]) {
+        fake.opens[0]?.send(bytes(text));
+      }
+      await vi.advanceTimersToNextTimerAsync();
+      tab.term.resize(tab.term.cols - 1, tab.term.rows);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(lines(tab)).toEqual(["A", "B", "C", "D"]);
+      const acked = (fake.sent("shell_ack") as { bytes: number }[]).reduce(
+        (sum, ack) => sum + ack.bytes,
+        0,
+      );
+      expect(acked).toBe(12);
+    },
+  );
 });
