@@ -67,6 +67,7 @@ Findings that belong to no step yet.
 - The integrated terminal (`twigo_core::terminal`, ARCHITECTURE 4.6):
   - The person's `terminal.usePolicyProxy`, which turns the proxy on for `read-write` contexts too, waits for the settings files of M3; so far only the admin's policy file sets it.
   - No source lists contexts from a provider yet, so no terminal goes through the proxy for that reason (`ProxyWhy::Provider`); it comes with the providers' source.
+  - On Ubuntu the global zshrc runs `compinit` while `ZDOTDIR` is still Twigo's (`crates/twigo-env/src/terminal.rs`), so `.zcompdump` is written into the terminal's directory and goes with its tab: each terminal builds its completion dump anew; not measured how long that takes.
 - The terminal (`packages/kube/src/exec`, ARCHITECTURE 4.6):
   - `theme.ts` hands xterm the tokens in sRGB hex and carries an `@todo`: the WebGL addon's pattern glyphs, such as ░, throw on `oklch` (`drawPatternChar` in 0.20.0-beta.300); xterm.js had no issue for it on 2026-11-10.
   - xterm is on 6.1.0-beta.304, the betas VS Code 1.145.2 locks, until a 6.1.0 release.
