@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { afterEach, expect, test, vi } from "vitest";
 import { CircleCheck, Trash2 } from "lucide-react";
 import { notify } from "./notify";
-import { CountdownToast, Toast, Toaster } from "./toast";
+import { ChoiceToast, CountdownToast, Toast, Toaster } from "./toast";
 
 afterEach(() => {
   cleanup();
@@ -303,4 +303,27 @@ test("a window of 600 px or less places the toasts as the wider ones", async () 
   });
   await act(() => vi.advanceTimersByTimeAsync(1000));
   vi.useRealTimers();
+});
+
+test("a choice's button takes a label as long as an absolute path inside the toast, wrapped, beside a column that cannot outgrow it", () => {
+  const path =
+    "/Users/someone/Library/Application Support/io.twigo.ide/proxy/process-0.kubeconfig";
+  render(
+    <ChoiceToast
+      icon={CircleCheck}
+      message="Terminal 1 added a context"
+      choices={[
+        { label: `Move to ${path}`, run: () => undefined },
+        { label: "Dismiss", run: () => undefined },
+      ]}
+    />,
+  );
+  const move = screen.getByRole("button", { name: `Move to ${path}` });
+  for (const kept of ["max-w-full", "whitespace-normal", "wrap-anywhere"]) {
+    expect(move).toHaveClass(kept);
+  }
+  expect(move.parentElement?.parentElement).toHaveClass(
+    "grid-cols-[minmax(0,1fr)]",
+    "min-w-0",
+  );
 });

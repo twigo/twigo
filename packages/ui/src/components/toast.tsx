@@ -191,7 +191,7 @@ export function ChoiceToast({
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className="size-3.5 text-muted-foreground" />
       </span>
-      <span className="grid min-w-0 flex-1 gap-1.5 leading-5">
+      <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-1.5 leading-5">
         <span className="break-words text-foreground">{message}</span>
         {detail}
         <span className="flex flex-wrap gap-1.5">
@@ -202,6 +202,7 @@ export function ChoiceToast({
               variant={index === 0 ? "brand" : "outline"}
               disabled={busy}
               onClick={run}
+              className="h-auto min-h-6.5 max-w-full py-1 text-left whitespace-normal wrap-anywhere"
             >
               {label}
             </Button>
