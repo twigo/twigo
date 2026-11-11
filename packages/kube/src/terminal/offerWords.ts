@@ -41,7 +41,7 @@ function reason(
   leftOut: KubeconfigNames,
 ): string {
   if (section === "contexts") {
-    return "Your files have a context of that name, or the cluster or user it names is another one there.";
+    return "Your files have a context of that name, or the cluster or user it names is another one in your files, or your files lack it and it does not move with the context.";
   }
   const named =
     leftOut.contexts.length > 0 ? ", or only contexts left out name it" : "";

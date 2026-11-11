@@ -75,7 +75,7 @@ test("a move leaves out names by section, with what a person can look for in the
       label: "Contexts",
       names: ["b"],
       reason:
-        "Your files have a context of that name, or the cluster or user it names is another one there.",
+        "Your files have a context of that name, or the cluster or user it names is another one in your files, or your files lack it and it does not move with the context.",
     },
     {
       label: "Clusters",

@@ -286,7 +286,7 @@ test("an offer comes as a toast that says what came and what a move leaves out, 
   expect(toast).toContain("A move writes");
   expect(toast).toContain("A move leaves out");
   expect(toast).toContain(
-    "Your files have a context of that name, or the cluster or user it names is another one there.",
+    "Your files have a context of that name, or the cluster or user it names is another one in your files, or your files lack it and it does not move with the context.",
   );
   expect(toast).toContain(
     "Your files have a cluster of that name, or only contexts left out name it.",
