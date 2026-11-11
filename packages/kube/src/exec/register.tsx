@@ -6,10 +6,11 @@ import { useChanges } from "@twigo/workbench";
 import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
+import { workbenchKey } from "../xterm/keys";
+import { ending, stateOf } from "../xterm/words";
 import { canShell } from "./kinds";
-import { workbenchKey } from "./keys";
 import { ExecTabs } from "./tabs";
-import { ending, execTitle, stateOf } from "./words";
+import { execTitle } from "./words";
 
 export function createExecTabs(workbench: Workbench): ExecTabs {
   return new ExecTabs({
