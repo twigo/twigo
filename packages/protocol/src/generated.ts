@@ -489,7 +489,12 @@ kind: string,
 /**
  * The target's port, as the start named it.
  */
-port: number, portName: string | null, local: number, 
+port: number, portName: string | null, 
+/**
+ * The port's `appProtocol`, as the target declares it, so that the
+ * webview can tell an HTTP port without another call.
+ */
+appProtocol: string | null, local: number, 
 /**
  * The addresses it listens on: `127.0.0.1`, and `::1` where that bound.
  */
@@ -543,9 +548,10 @@ targetPort: string | null,
  */
 container: string | null, appProtocol: string | null, 
 /**
- * The local port a start takes when none is given: the one this port
- * of this target had last, else `port`, else, for a `port` below 1024,
- * `port` plus 8000.
+ * The local port of this port's forward where it has one; else the one
+ * a start takes when none is given: the one this port of this target
+ * had last, else `port`, else, for a `port` below 1024, `port` plus
+ * 8000.
  */
 local: number, 
 /**
@@ -563,7 +569,8 @@ export type ForwardPorts = {
 kind: string, ports: Array<ForwardPort>, 
 /**
  * The `port` a start without a choice takes: one whose name says HTTP
- * before the others, one that says metrics, health or debug last.
+ * or web first, then the others in the spec's order, named or not, and
+ * one whose name says metrics, health or debug last.
  */
 default: number, };
 
@@ -1302,8 +1309,9 @@ export type ResourceRef = { gvr: Gvr, namespaced: boolean,
 namespace: string | null, name: string, };
 
 /**
- * Starts a stopped forward again, on another local port when `local` names
- * one.
+ * Starts a stopped or failed forward again, and with a `local` moves a
+ * running one to that port. A forward that works, or waits for its first
+ * connection, stays as it is.
  */
 export type ResumeForward = { id: ForwardId, local: number | null, };
 

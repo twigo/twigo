@@ -161,6 +161,7 @@ impl Table {
                     kind: entry.base.kind.clone(),
                     port: entry.base.port,
                     port_name: entry.base.port_name.clone(),
+                    app_protocol: entry.base.app_protocol.clone(),
                     local: entry.base.local,
                     runs: entry.runs(),
                 })
@@ -479,6 +480,7 @@ impl Core {
             kind,
             port,
             port_name: found.name,
+            app_protocol: found.app_protocol,
             local,
             addresses: listeners.addresses(),
             state: ForwardState::Stopped,
@@ -684,6 +686,7 @@ impl Core {
             kind,
             port,
             port_name,
+            app_protocol,
             local,
             runs,
         } = saved;
@@ -694,6 +697,7 @@ impl Core {
                 kind,
                 port,
                 port_name,
+                app_protocol,
                 local,
                 addresses: Vec::new(),
                 state: ForwardState::Stopped,

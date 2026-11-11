@@ -180,6 +180,7 @@ fn forward(id: u32) -> crate::forward::SavedForward {
         kind: "Pod".to_owned(),
         port: 8080,
         port_name: None,
+        app_protocol: None,
         local: 8080,
         runs: true,
     }

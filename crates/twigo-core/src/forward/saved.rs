@@ -20,6 +20,7 @@ pub(crate) struct SavedForward {
     pub kind: String,
     pub port: u16,
     pub port_name: Option<String>,
+    pub app_protocol: Option<String>,
     pub local: u16,
     /// Whether it listens: a stopped forward is kept, not started again.
     pub runs: bool,

@@ -25,6 +25,7 @@ fn forward_of(id: u32, port: u16, local: u16, runs: bool) -> SavedForward {
         kind: "Pod".to_owned(),
         port,
         port_name: None,
+        app_protocol: None,
         local,
         runs,
     }
@@ -147,6 +148,33 @@ async fn forwards_that_ran_listen_again_at_a_start_and_wait_for_their_first_conn
         (now != ForwardState::Restored).then_some(now)
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_forward_keeps_its_ports_app_protocol_across_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut saved = forward_of(1, 8080, free(), false);
+    saved.app_protocol = Some("kubernetes.io/h2c".to_owned());
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![saved],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    forward_state(&core, 1).await;
+    assert_eq!(
+        listed(&core)[0].app_protocol.as_deref(),
+        Some("kubernetes.io/h2c")
+    );
+    core.forward_stop(ForwardId(1)).unwrap();
+    assert_eq!(
+        core.state.forwards("kind-plain").forwards[0]
+            .app_protocol
+            .as_deref(),
+        Some("kubernetes.io/h2c")
+    );
 }
 
 #[tokio::test]
@@ -500,6 +528,7 @@ fn shown() -> Forward {
         kind: "Pod".to_owned(),
         port: 8080,
         port_name: None,
+        app_protocol: None,
         local: 8080,
         addresses: vec!["127.0.0.1".to_owned()],
         state: ForwardState::Stopped,

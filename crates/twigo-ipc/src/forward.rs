@@ -29,7 +29,8 @@ pub struct ForwardPorts {
     pub kind: String,
     pub ports: Vec<ForwardPort>,
     /// The `port` a start without a choice takes: one whose name says HTTP
-    /// before the others, one that says metrics, health or debug last.
+    /// or web first, then the others in the spec's order, named or not, and
+    /// one whose name says metrics, health or debug last.
     pub default: u16,
 }
 
@@ -45,9 +46,10 @@ pub struct ForwardPort {
     /// The container that declares it, for a pod or a workload.
     pub container: Option<String>,
     pub app_protocol: Option<String>,
-    /// The local port a start takes when none is given: the one this port
-    /// of this target had last, else `port`, else, for a `port` below 1024,
-    /// `port` plus 8000.
+    /// The local port of this port's forward where it has one; else the one
+    /// a start takes when none is given: the one this port of this target
+    /// had last, else `port`, else, for a `port` below 1024, `port` plus
+    /// 8000.
     pub local: u16,
     /// The forward of this port, when the space has one, running or stopped.
     pub forward: Option<ForwardId>,
@@ -62,8 +64,9 @@ pub struct StartForward {
     pub local: Option<u16>,
 }
 
-/// Starts a stopped forward again, on another local port when `local` names
-/// one.
+/// Starts a stopped or failed forward again, and with a `local` moves a
+/// running one to that port. A forward that works, or waits for its first
+/// connection, stays as it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResumeForward {
     pub id: ForwardId,
@@ -109,6 +112,9 @@ pub struct Forward {
     /// The target's port, as the start named it.
     pub port: u16,
     pub port_name: Option<String>,
+    /// The port's `appProtocol`, as the target declares it, so that the
+    /// webview can tell an HTTP port without another call.
+    pub app_protocol: Option<String>,
     pub local: u16,
     /// The addresses it listens on: `127.0.0.1`, and `::1` where that bound.
     pub addresses: Vec<String>,
