@@ -1068,6 +1068,7 @@ Extensions add commands, not prefixes.
     The toaster keeps its toasts above the panel while it shows, as far up as the panel measures, so a toast covers neither the panel's tab strip nor the terminal's chip; with the panel hidden or maximized they sit at the status bar's edge.
     A toast stays in the window whole: where the front one does not fit above the panel, it sits as low as it takes to stay under the title bar, over the panel's strip.
     An offer sent again with its id changes the words of its toast, and a withdrawn one takes its toast down.
+    The buttons answer with the revision their toast was drawn with, not the one the window holds, since sonner shows a replacement one timer tick after the window has it (2.0.8), and a click in that gap answers what the person read.
     Offers belong to the window: they outlive the terminal's tab and end with the window.
   - **Direct contexts.** A proxy terminal's file is also read for the contexts that reach their clusters past the proxy: those whose cluster, or the user they name, is not, as parsed, an entry Twigo wrote, as a tool's new context, or a catalog context's entry it replaced, as `aws eks update-kubeconfig --alias` with that name does.
     A namespace set on one of Twigo's contexts, or a new name for its entries, still goes through the proxy.

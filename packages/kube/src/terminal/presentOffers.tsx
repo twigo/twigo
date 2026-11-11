@@ -34,13 +34,13 @@ export function presentOffers(offers: KubeconfigOffers): void {
             {
               label: words.move,
               run: () => {
-                void offers.answer(offer.id, "move");
+                void offers.answer(offer.id, offer.revision, "move");
               },
             },
             {
               label: "Dismiss",
               run: () => {
-                void offers.answer(offer.id, "dismiss");
+                void offers.answer(offer.id, offer.revision, "dismiss");
               },
             },
           ],

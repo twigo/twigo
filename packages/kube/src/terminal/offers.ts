@@ -63,18 +63,24 @@ export class KubeconfigOffers {
     }
   }
 
+  /** `revision` is the one the person was shown, which may be older than the one held here. */
   async answer(
     id: KubeconfigOfferId,
+    revision: number,
     answer: KubeconfigOfferAnswer,
   ): Promise<void> {
-    const offer = this.#offers.find((o) => o.id === id);
-    if (this.#answering.has(id) || offer === undefined) return;
+    if (
+      this.#answering.has(id) ||
+      !this.#offers.some((offer) => offer.id === id)
+    ) {
+      return;
+    }
     this.#answering.add(id);
     this.changes.emit();
     try {
       await this.backend.invoke("kubeconfig_offer_answer", {
         id,
-        revision: offer.revision,
+        revision,
         answer,
       });
       this.#remove(id);

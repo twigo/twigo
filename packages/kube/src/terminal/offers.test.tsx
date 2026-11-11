@@ -14,12 +14,14 @@ import {
   type KubeconfigOfferEvent,
 } from "@twigo/protocol";
 import { createMockBackend, OFFER_AFTER_MS } from "@twigo/protocol/mock";
+import { Toaster } from "@twigo/ui";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
 import { KubeconfigOffers } from "./offers";
+import { presentOffers } from "./presentOffers";
 import { createTerminalTabs, registerTerminals } from "./register";
 import type { TerminalTabs } from "./tabs";
 
@@ -179,8 +181,8 @@ test("what the core tells before it answers the watch is newer than the answer",
 test("an answer goes to the core with the offer's id, takes the offer away once it is taken, and is sent once", async () => {
   const { core, offers } = await followed([offer(1), offer(2)]);
   const release = core.holdAnswers();
-  const first = offers.answer(1, "move");
-  const second = offers.answer(1, "move");
+  const first = offers.answer(1, 0, "move");
+  const second = offers.answer(1, 0, "move");
   expect(offers.answering(1)).toBe(true);
   expect(core.calls).toEqual([
     {
@@ -192,18 +194,56 @@ test("an answer goes to the core with the offer's id, takes the offer away once 
   await Promise.all([first, second]);
   expect(offers.answering(1)).toBe(false);
   expect(ids(offers)).toEqual([2]);
-  await offers.answer(1, "dismiss");
+  await offers.answer(1, 0, "dismiss");
   expect(core.calls).toHaveLength(1);
 });
 
-test("an answer names the revision of the offer as the window last showed it", async () => {
+test("an answer names the revision it is given, not the one the window holds", async () => {
   const { core, offers } = await followed([offer(1)]);
   core.send({ event: "offered", offer: offer(1, { revision: 3 }) });
-  await offers.answer(1, "move");
+  await offers.answer(1, 2, "move");
   expect(core.calls).toEqual([
     {
       command: "kubeconfig_offer_answer",
-      request: { id: 1, revision: 3, answer: "move" },
+      request: { id: 1, revision: 2, answer: "move" },
+    },
+  ]);
+});
+
+test("a click on a toast that still shows an older revision answers that revision", async () => {
+  const core = fakeCore();
+  render(<Toaster />);
+  const offers = new KubeconfigOffers(core.backend, vi.fn());
+  presentOffers(offers);
+  const watching = offers.watch();
+  core.answerWatch([]);
+  await watching;
+  act(() => {
+    core.send({ event: "offered", offer: offer(1, { contexts: ["shown-a"] }) });
+  });
+  await later(50);
+  const move = toastButton("Move to ~/.kube/config");
+  expect(live()[0]).toContain("shown-a");
+  withdrawals.push(async () => {
+    core.send({ event: "withdrawn", id: 1 });
+    await settle(4);
+  });
+
+  act(() => {
+    core.send({
+      event: "offered",
+      offer: offer(1, {
+        revision: 1,
+        contexts: ["shown-a", "never-shown-b"],
+      }),
+    });
+  });
+  expect(live()[0]).not.toContain("never-shown-b");
+  fireEvent.click(move);
+  expect(core.calls).toEqual([
+    {
+      command: "kubeconfig_offer_answer",
+      request: { id: 1, revision: 0, answer: "move" },
     },
   ]);
 });
@@ -212,7 +252,7 @@ test("an answer the core refuses is reported and leaves the offer to answer agai
   const { core, offers, report } = await followed([offer(1)]);
   const error = new Error("~/.kube/config is read-only");
   core.refuseWith(error);
-  await offers.answer(1, "move");
+  await offers.answer(1, 0, "move");
   expect(report).toHaveBeenCalledWith(error);
   expect(ids(offers)).toEqual([1]);
   expect(offers.answering(1)).toBe(false);
@@ -221,7 +261,7 @@ test("an answer the core refuses is reported and leaves the offer to answer agai
 test("an offer withdrawn while its answer is on its way is gone, and a refusal of that answer is no news", async () => {
   const { core, offers, report } = await followed([offer(1)]);
   core.refuseWith(new Error("the offer 1 is gone"));
-  const answering = offers.answer(1, "move");
+  const answering = offers.answer(1, 0, "move");
   core.send({ event: "withdrawn", id: 1 });
   await answering;
   expect(ids(offers)).toEqual([]);
@@ -235,7 +275,7 @@ test("a move the core refuses as a conflict is reported though the core withdrew
     "Nothing was moved into ~/.kube/config: your kubeconfig files changed since the offer was made, and a move would now also leave out the context prod, so nothing in the offer would move now.",
   );
   core.refuseWith(conflict);
-  const answering = offers.answer(1, "move");
+  const answering = offers.answer(1, 0, "move");
   core.send({ event: "withdrawn", id: 1 });
   await answering;
   expect(ids(offers)).toEqual([]);
