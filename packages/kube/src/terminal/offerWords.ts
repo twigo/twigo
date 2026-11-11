@@ -27,7 +27,7 @@ const SECTIONS: readonly {
 const SHOWN = 4;
 
 const REASON =
-  "Left out: your files have that name already, or what the context names is another entry there or missing, and does not move with it.";
+  "Left out: your files have that name already, what the context names is another entry there or missing, or only contexts that stay out name it.";
 
 const count = (n: number, noun: string) =>
   n === 1 ? `a ${noun}` : `${String(n)} ${noun}s`;

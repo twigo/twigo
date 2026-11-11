@@ -318,7 +318,7 @@ test("an offer comes as a toast that says what came, one line per name with the 
   expect(toast).toContain(`${ARN}/prod-eu-3 · context, cluster, user left out`);
   expect(count(toast, "Left out:")).toBe(1);
   expect(toast).toContain(
-    "Left out: your files have that name already, or what the context names is another entry there or missing, and does not move with it.",
+    "Left out: your files have that name already, what the context names is another entry there or missing, or only contexts that stay out name it.",
   );
   for (const gone of ["A move writes", "A move leaves out", "Clusters"]) {
     expect(toast).not.toContain(gone);

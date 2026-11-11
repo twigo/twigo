@@ -18,7 +18,7 @@ const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
 const ARN = "arn:aws:eks:eu-west-1:123456789012:cluster";
 
 const REASON =
-  "Left out: your files have that name already, or what the context names is another entry there or missing, and does not move with it.";
+  "Left out: your files have that name already, what the context names is another entry there or missing, or only contexts that stay out name it.";
 
 test("an offer says which terminal and context the entries came from, how many of each section came, and where a move writes them", () => {
   expect(
@@ -121,6 +121,27 @@ test("the reason is one sentence below the names, the same for every section a n
     describeOffer(offer({ contexts: ["a"], clusters: ["a"], users: ["a"] }))
       .reason,
   ).toBeUndefined();
+});
+
+test("the reason holds for each way the core leaves a name out, a free name that only left-out contexts name among them", () => {
+  const words = describeOffer(
+    offer({
+      contexts: ["a", "b", "c"],
+      clusters: ["same", "elsewhere", "home-ca"],
+      users: ["only-b"],
+      leftOut: {
+        contexts: ["b"],
+        clusters: ["elsewhere", "home-ca", "same"],
+        users: ["only-b"],
+      },
+    }),
+  );
+  expect(
+    words.all.filter(({ leftOut }) => leftOut).map(({ name }) => name),
+  ).toEqual(["b", "same", "elsewhere", "home-ca", "only-b"]);
+  expect(words.reason).toMatch(/your files have that name already/);
+  expect(words.reason).toMatch(/another entry there or missing/);
+  expect(words.reason).toMatch(/only contexts that stay out name it/);
 });
 
 test("an offer of more than four names shows four and says how many more, with every name kept for a tooltip", () => {
