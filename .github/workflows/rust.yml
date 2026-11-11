@@ -39,6 +39,7 @@ jobs:
             x11-xkb-utils \
             xvfb \
             sway \
+            vim-tiny \
             zsh
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -57,6 +58,21 @@ jobs:
           cargo test -p twigo-netmon -- --ignored a_resume_from_sleep_is_a_wake
           test=$(cargo test -p twigo-netmon --lib --no-run --message-format=json | jq -r 'select(.profile.test and .executable != null) | .executable')
           sudo unshare --net "$test" --ignored an_address_added_is_a_network_change
+
+  # The local terminal's pty and the login shell differ by platform.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy -p twigo-sessions -p twigo-env --all-targets -- -D warnings
+      - run: cargo test -p twigo-sessions -p twigo-env
 
   # The app's build has a runner of its own: the workspace's test binaries
   # and node_modules no longer fit together on one runner's 14 GB.

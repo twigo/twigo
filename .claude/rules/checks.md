@@ -18,6 +18,7 @@
 - What an OpenAPI document costs in resident memory: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo run --release -p twigo-kube --example openapi_memory -- apps/v1 Deployment`, one document per process.
 - twigo-keyboard on Linux: `crates/twigo-keyboard/linux/run.sh` runs its tests in Docker, the live X11 test under Xvfb and the live Wayland test under a headless sway included; given a command, such as `cargo clippy -p twigo-keyboard --all-targets -- -D warnings`, it runs that instead.
 - twigo-netmon on Linux: `crates/twigo-netmon/linux.sh` runs its tests in Docker, the ignored ones included; CI runs the netlink one as root in a network namespace of its own.
+- twigo-sessions on Linux: `crates/twigo-sessions/linux.sh` runs its tests in Docker, with the vi and zsh its terminal's tests run; given a command, such as `cargo clippy -p twigo-sessions --all-targets -- -D warnings`, it runs that instead.
 - twigo-keyboard on Windows: after `rustup target add x86_64-pc-windows-msvc`, `cargo clippy -p twigo-keyboard --target x86_64-pc-windows-msvc --all-targets -- -D warnings` checks the code; nothing runs it yet (D2).
 - Live tests against kind, one release: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/test-matrix.sh 1.37`.
   Without an argument it runs every supported release.
@@ -94,6 +95,9 @@
   Headless sway has no input devices, so the test gives its seat a virtual keyboard of its own and sets the keymap and the group through it: sway 1.11, unlike 1.9, applies no input config to a virtual keyboard, `swaymsg input … xkb_layout` included (`sway/input/keyboard.c`, `sway_keyboard_configure`), and Ubuntu 26.04, which `ubuntu-latest` became on 2026-11-04, ships 1.11.
 - `crates/twigo-env/tests/live.rs` runs bash and zsh from `PATH` as login shells and fails if either is missing, so CI installs zsh.
   It runs without the test harness, because the shells re-run it with `--dump-env`.
+- The local terminal's tests in `crates/twigo-sessions/src/terminal/tests.rs` run `/bin/sh`, `/bin/zsh`, `vi` and `perl`, so CI installs zsh and vim-tiny on Linux.
+- On macOS a pty's unread output goes when its last slave closes: the close waits 0.6 s for a reader, then drops it, and while another slave stays open, as the terminal holds one, the exit of the session's leader waits until it is read; bash at its exit waits either way, so the test of unread output runs zsh (a probe with Python's `pty.openpty`, macOS 27.2, 2026-11-11).
+  Linux keeps it and ends the exit at once.
 - TIS must run on the main thread, so `crates/twigo-keyboard/tests/layouts.rs` runs without the test harness.
 - Tailwind scans `packages/` through `@source "../../../packages"` in `apps/desktop/src/index.css`.
   A glob such as `packages/*/src` there generated no utilities from the packages (Tailwind 4.3.3, 2026-10-31).

@@ -3953,6 +3953,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pty-process"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0cff49b5194f464ce14bfaef7d6dba180889934e9bfa37ca5f2528ea515c0b"
+dependencies = [
+ "rustix",
+ "tokio",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6112,9 +6122,13 @@ dependencies = [
  "jiff",
  "k8s-openapi",
  "kube",
+ "libc",
+ "nix",
+ "pty-process",
  "regex",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tower",

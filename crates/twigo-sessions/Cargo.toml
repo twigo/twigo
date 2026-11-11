@@ -19,6 +19,9 @@ futures.workspace = true
 jiff.workspace = true
 k8s-openapi.workspace = true
 kube = { workspace = true, features = ["ws"] }
+libc.workspace = true
+nix = { workspace = true, features = ["process", "term"] }
+pty-process.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -36,6 +39,7 @@ form_urlencoded.workspace = true
 http.workspace = true
 http-body.workspace = true
 http-body-util.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "time"] }
 tower.workspace = true
 twigo-kube = { workspace = true, features = ["test-util"] }

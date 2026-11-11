@@ -17,8 +17,8 @@ use twigo_ipc::{ErrorKind, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Budgets, Clients};
 
 use super::connect::{Connect, Connected};
-use super::flow::{FRAME_MAX, GATHER};
 use super::{Frame, Join, Session, Spec};
+use crate::flow::{FRAME_MAX, GATHER};
 
 const KIB: usize = 1024;
 
