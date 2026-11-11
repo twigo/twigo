@@ -11,7 +11,7 @@ const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
   clusters: [],
   users: [],
   target: "~/.kube/config",
-  left_out: { contexts: [], clusters: [], users: [] },
+  leftOut: { contexts: [], clusters: [], users: [] },
   ...more,
 });
 
@@ -41,7 +41,7 @@ test("a move writes the names of each section that it does not leave out, and a 
       contexts: ["a", "b"],
       clusters: ["a", "b"],
       users: ["a", "u-b"],
-      left_out: { contexts: ["b"], clusters: ["b"], users: [] },
+      leftOut: { contexts: ["b"], clusters: ["b"], users: [] },
     }),
   );
   expect(words.moves).toEqual([
@@ -55,7 +55,7 @@ test("a move writes the names of each section that it does not leave out, and a 
         contexts: ["a"],
         clusters: ["a"],
         users: ["a"],
-        left_out: { contexts: ["a"], clusters: ["a"], users: ["a"] },
+        leftOut: { contexts: ["a"], clusters: ["a"], users: ["a"] },
       }),
     ).moves,
   ).toEqual([]);
@@ -67,7 +67,7 @@ test("a move leaves out names by section, with what a person can look for in the
       contexts: ["a", "b"],
       clusters: ["a", "b"],
       users: ["a", "b"],
-      left_out: { contexts: ["b"], clusters: ["b"], users: ["b"] },
+      leftOut: { contexts: ["b"], clusters: ["b"], users: ["b"] },
     }),
   );
   expect(words.leaves).toEqual([
@@ -98,7 +98,7 @@ test("a cluster left out with no context left out is one that the person's files
       contexts: ["a"],
       clusters: ["a", "b"],
       users: ["a"],
-      left_out: { contexts: [], clusters: ["b"], users: [] },
+      leftOut: { contexts: [], clusters: ["b"], users: [] },
     }),
   );
   expect(words.leaves).toEqual([

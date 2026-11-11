@@ -56,7 +56,7 @@ function offer(
     clusters: [`${ARN}/a`],
     users: [`${ARN}/a`],
     target: "~/.kube/config",
-    left_out: { contexts: [], clusters: [], users: [] },
+    leftOut: { contexts: [], clusters: [], users: [] },
     ...more,
   };
 }

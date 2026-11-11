@@ -54,14 +54,14 @@ export function describeOffer(offer: KubeconfigOffer): OfferWords {
   );
   const moves = SECTIONS.flatMap(({ section, label }) => {
     const names = offer[section].filter(
-      (name) => !offer.left_out[section].includes(name),
+      (name) => !offer.leftOut[section].includes(name),
     );
     return names.length > 0 ? [{ label, names }] : [];
   });
   const leaves = SECTIONS.flatMap(({ section, noun, label }) => {
-    const names = offer.left_out[section];
+    const names = offer.leftOut[section];
     return names.length > 0
-      ? [{ label, names, reason: reason(section, noun, offer.left_out) }]
+      ? [{ label, names, reason: reason(section, noun, offer.leftOut) }]
       : [];
   });
   return {

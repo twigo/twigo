@@ -62,6 +62,7 @@ pub struct KubeconfigOfferId(pub u32);
 /// Entries a tool wrote into a terminal's own kubeconfig, such as `aws eks
 /// update-kubeconfig` does, offered for moving into the user's kubeconfig.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct KubeconfigOffer {
     pub id: KubeconfigOfferId,
     /// The terminal's label.

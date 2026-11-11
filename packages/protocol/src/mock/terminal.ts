@@ -267,7 +267,7 @@ const DRAFTS: readonly Draft[] = [
     clusters: [`${EKS}/prod-eu-2`, `${EKS}/prod-eu-3`],
     users: [`${EKS}/prod-eu-2`, `${EKS}/prod-eu-3`],
     target: TARGET,
-    left_out: {
+    leftOut: {
       contexts: [`${EKS}/prod-eu-3`],
       clusters: [`${EKS}/prod-eu-3`],
       users: [`${EKS}/prod-eu-3`],
@@ -278,7 +278,7 @@ const DRAFTS: readonly Draft[] = [
     clusters: [`${EKS}/staging-us`],
     users: [`${EKS}/staging-us`],
     target: TARGET,
-    left_out: { contexts: [], clusters: [], users: [] },
+    leftOut: { contexts: [], clusters: [], users: [] },
   },
 ];
 

@@ -317,7 +317,7 @@ test("an offer comes 3 s after a terminal opens, from that terminal's session an
     /^arn:aws:eks:[a-z0-9-]+:\d{12}:cluster\//,
   );
   const second = offer?.contexts[1];
-  expect(offer?.left_out).toEqual({
+  expect(offer?.leftOut).toEqual({
     contexts: [second],
     clusters: [second],
     users: [second],
@@ -343,7 +343,7 @@ test("the second offer comes 3 s after the first is answered, which withdraws th
   await vi.advanceTimersByTimeAsync(1);
   const [, second] = offers(events);
   expect(second?.id).not.toBe(first.id);
-  expect(second?.left_out).toEqual({ contexts: [], clusters: [], users: [] });
+  expect(second?.leftOut).toEqual({ contexts: [], clusters: [], users: [] });
 
   if (!second) throw new Error("no second offer");
   await answered(

@@ -594,7 +594,7 @@ target: string,
  * a context whose cluster or user means another entry there, and a
  * cluster or user that only such contexts name.
  */
-left_out: KubeconfigNames, };
+leftOut: KubeconfigNames, };
 
 export type KubeconfigOfferAnswer = "move" | "dismiss";
 
