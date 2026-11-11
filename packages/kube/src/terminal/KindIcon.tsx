@@ -19,12 +19,9 @@ export function KindIcon({
   );
 }
 
-/** What a hover over the kind says: its warnings, else the kind and why. */
+/** What a hover over the kind says: the kind and why, then its warnings. */
 export function KindTip({ words }: { words: KindWords }) {
-  const notes =
-    words.warnings.length > 0
-      ? words.warnings
-      : [{ title: words.short, detail: words.why }];
+  const notes = [{ title: words.short, detail: words.why }, ...words.warnings];
   return (
     <div className="grid gap-1.5">
       {notes.map(({ title, detail }) => (
