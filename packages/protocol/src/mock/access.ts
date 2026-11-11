@@ -25,6 +25,8 @@ export class MockAccess {
   readonly #modes = new Map<string, Mode>();
   readonly #environments = new Map<string, Environment | null>();
   readonly #unlocks = new Map<string, number>();
+  /** Contexts a policy file turned read-only after the app started. */
+  readonly #filed = new Set<string>();
 
   constructor(private readonly policyFile: boolean) {}
 
@@ -68,6 +70,14 @@ export class MockAccess {
 
   relock(name: string): void {
     if (this.#unlocks.delete(name)) this.#emit();
+  }
+
+  /** An admin's policy file makes a running context read-only, which nothing in the app can change or unlock. */
+  lockByFile(name: string): void {
+    fixture(name);
+    this.#filed.add(name);
+    this.#unlocks.delete(name);
+    this.#emit();
   }
 
   /** What a context lets through now. */
@@ -116,7 +126,7 @@ export class MockAccess {
         source: {
           kind: "policyFile",
           file: POLICY_FILE,
-          pattern: POLICY_PATTERN,
+          pattern: this.#pattern(name),
         },
       };
     }
@@ -132,16 +142,22 @@ export class MockAccess {
   }
 
   #policyFileSets(name: string): boolean {
-    return this.policyFile && name.startsWith("prod-");
+    return (
+      (this.policyFile && name.startsWith("prod-")) || this.#filed.has(name)
+    );
   }
 
   #refusePolicyFile(name: string): void {
     if (this.#policyFileSets(name)) {
       throw new IpcError(
         "permissions",
-        `${POLICY_PATTERN} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
+        `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
       );
     }
+  }
+
+  #pattern(name: string): string {
+    return this.#filed.has(name) ? name : POLICY_PATTERN;
   }
 }
 

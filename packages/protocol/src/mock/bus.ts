@@ -95,7 +95,7 @@ function covers(planned: Friction, now: Friction): boolean {
 }
 
 /** Where a mode comes from, as `Blocked`'s message in Rust says it. */
-function setBy(source: ModeSource): string {
+export function setBy(source: ModeSource): string {
   switch (source.kind) {
     case "policyFile":
       return source.pattern === null

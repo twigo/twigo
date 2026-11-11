@@ -34,6 +34,12 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import {
+  FORWARD_SCENARIOS,
+  isForwardScenario,
+  MockForwards,
+  type ForwardScenario,
+} from "./forward";
+import {
   APPLIED_LAG_MS,
   EDIT_SCENARIOS,
   isEditScenario,
@@ -87,6 +93,13 @@ import {
 } from "./query";
 
 export { FIRST_ASK_MS, NEXT_ASK_MS, WITHDRAWN_AFTER_MS } from "./approvals";
+export {
+  BLOCKED_AFTER_MS,
+  FAILS_AFTER_MS,
+  LOSES_POD_AFTER_MS,
+  READY_AFTER_MS,
+  RECONNECTS_FOR_MS,
+} from "./forward";
 export { OFFER_AFTER_MS } from "./terminal";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
@@ -111,7 +124,9 @@ type ListScenario = "live" | ViewState["state"];
  * that waits, finds no shell, loses its connection or its write mode, or
  * runs one container (`shellQueued` and the like), or live lists while
  * processes ask the window to allow what they do (`approval` and the like),
- * or while a tool writes into a terminal's own kubeconfig (`terminalOffer`).
+ * or while a tool writes into a terminal's own kubeconfig (`terminalOffer`),
+ * or while port-forwards are busy, lose their pod, fail, queue, come back
+ * from an earlier run or are forbidden (`forwardBusy` and the like).
  */
 export type MockScenario =
   | ListScenario
@@ -123,7 +138,8 @@ export type MockScenario =
   | EditScenario
   | ShellScenario
   | ApprovalScenario
-  | TerminalScenario;
+  | TerminalScenario
+  | ForwardScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -136,6 +152,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...SHELL_SCENARIOS,
   ...APPROVAL_SCENARIOS,
   ...TERMINAL_SCENARIOS,
+  ...FORWARD_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -205,7 +222,8 @@ export function createMockBackend(
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
     isApprovalScenario(scenario) ||
-    isTerminalScenario(scenario)
+    isTerminalScenario(scenario) ||
+    isForwardScenario(scenario)
       ? "live"
       : scenario;
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
@@ -248,6 +266,19 @@ export function createMockBackend(
     if (!found) throw new IpcError("notFound", `no space ${id}`);
     return found;
   };
+
+  const forwards = new MockForwards(
+    isForwardScenario(scenario) ? scenario : undefined,
+    {
+      context: (id) =>
+        spaces.find((candidate) => candidate.id === id)?.contexts[0],
+      cluster,
+      forbid: (context) => {
+        access.lockByFile(context);
+        return access.of(context);
+      },
+    },
+  );
 
   const subscription = (id: number) => {
     const found = subscriptions.get(id);
@@ -413,6 +444,11 @@ export function createMockBackend(
       return null;
     },
     approval_answer: (request) => approvals.answer(request),
+    forward_ports: (target) => forwards.ports(target),
+    forward_start: (request) => forwards.start(request),
+    forward_stop: (id) => forwards.stop(id),
+    forward_resume: (request) => forwards.resume(request),
+    forward_remove: (id) => forwards.remove(id),
     command_plan: (request) => bus.plan(request),
     apply_preview: (request) => bus.applyPreview(request),
     command_cancel: (id) => bus.cancel(id),
@@ -791,6 +827,7 @@ export function createMockBackend(
       return null;
     },
     approvals_watch: (_request, onMessage) => approvals.watch(onMessage),
+    forwards_watch: (_request, onMessage) => forwards.watch(onMessage),
     kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
