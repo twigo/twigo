@@ -21,7 +21,7 @@ use twigo_ipc::{ContextColor, Environment};
 
 use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
-pub use entries::{Names, Written, append};
+pub use entries::{Appended, Names, Outcome, Written, append};
 pub use fingerprint::Fingerprint;
 pub use watch::Watch;
 pub use write::WriteError;

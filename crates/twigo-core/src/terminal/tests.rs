@@ -844,3 +844,208 @@ async fn offers_outlive_their_terminal_and_end_with_their_window() {
         .unwrap_err();
     assert_eq!(gone.kind, ErrorKind::NotFound);
 }
+
+const TWO: &str = "apiVersion: v1
+kind: Config
+clusters:
+- name: b
+  cluster:
+    server: https://b.example
+- name: c
+  cluster:
+    server: https://c.example
+users:
+- name: b
+  user:
+    token: b
+- name: c
+  user:
+    token: c
+contexts:
+- name: prod
+  context:
+    cluster: b
+    user: b
+- name: other
+  context:
+    cluster: c
+    user: c
+";
+
+fn mine_with(contexts: &[&str]) -> String {
+    let added: String = contexts
+        .iter()
+        .map(|name| format!("- name: {name}\n  context:\n    cluster: kind-a\n    user: kind-a\n"))
+        .collect();
+    MINE.replace("current-context:", &format!("{added}current-context:"))
+}
+
+fn names(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+#[tokio::test]
+async fn an_offer_is_made_anew_as_the_person_s_files_change_and_goes_while_it_would_move_nothing() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let two = setup.dir.path().join("two.yaml");
+    std::fs::write(&two, TWO).unwrap();
+    let session = setup
+        .create(
+            "kind-a",
+            &format!(r#"cat {} > "${{KUBECONFIG%%:*}}""#, quoted(&two)),
+        )
+        .await;
+    setup.run(session.id).await;
+    let first = offered(&mut events).await;
+    assert_eq!(first.left_out, KubeconfigNames::default());
+    std::fs::write(setup.mine(), mine_with(&["prod"])).unwrap();
+    let renewed = offered(&mut events).await;
+    assert_eq!(renewed.id, first.id);
+    let prod = KubeconfigNames {
+        contexts: names(&["prod"]),
+        clusters: names(&["b"]),
+        users: names(&["b"]),
+    };
+    assert_eq!(renewed.left_out, prod);
+    std::fs::write(setup.mine(), mine_with(&["prod", "other"])).unwrap();
+    assert_eq!(
+        next(&mut events).await,
+        KubeconfigOfferEvent::Withdrawn { id: first.id }
+    );
+    let (waiting, mut events) = setup.follow();
+    assert!(waiting.is_empty());
+    std::fs::write(setup.mine(), mine_with(&["prod"])).unwrap();
+    let back = offered(&mut events).await;
+    assert_eq!((back.id, &back.left_out), (first.id, &prod));
+    setup.answer(&back, KubeconfigOfferAnswer::Move).await;
+    let mine = kube::config::Kubeconfig::from_yaml(&std::fs::read_to_string(setup.mine()).unwrap())
+        .unwrap();
+    let listed = |names: Vec<String>| names.join(" ");
+    assert_eq!(
+        listed(mine.clusters.iter().map(|c| c.name.clone()).collect()),
+        "kind-a c"
+    );
+    assert_eq!(
+        listed(mine.auth_infos.iter().map(|u| u.name.clone()).collect()),
+        "kind-a c"
+    );
+    assert_eq!(
+        listed(mine.contexts.iter().map(|c| c.name.clone()).collect()),
+        "kind-a kind-b prod other"
+    );
+}
+
+#[tokio::test]
+async fn an_offered_entry_rewritten_in_place_makes_the_offer_anew() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let text = "apiVersion: v1
+kind: Config
+clusters:
+- name: own
+  cluster:
+    server: https://own.example
+users:
+- name: kind-a
+  user:
+    token: secret
+- name: mine
+  user:
+    token: m
+contexts:
+- name: c
+  context:
+    cluster: own
+    user: kind-a
+- name: d
+  context:
+    cluster: own
+    user: mine
+";
+    let first = setup.dir.path().join("first.yaml");
+    std::fs::write(&first, text).unwrap();
+    let rotated = setup.dir.path().join("rotated.yaml");
+    std::fs::write(&rotated, text.replace("token: secret", "token: rotated")).unwrap();
+    let session = setup
+        .create(
+            "kind-a",
+            &format!(
+                r#"f="${{KUBECONFIG%%:*}}"; cat {} > "$f"; sleep 1.5; cat {} > "$f"; sleep 1.5"#,
+                quoted(&first),
+                quoted(&rotated)
+            ),
+        )
+        .await;
+    let running = setup.run(session.id);
+    let offers = async {
+        let first = offered(&mut events).await;
+        assert_eq!(
+            first.left_out,
+            KubeconfigNames {
+                users: names(&["kind-a"]),
+                ..KubeconfigNames::default()
+            }
+        );
+        let renewed = offered(&mut events).await;
+        assert_eq!(renewed.id, first.id);
+        assert_eq!(
+            renewed.left_out,
+            KubeconfigNames {
+                contexts: names(&["c"]),
+                clusters: Vec::new(),
+                users: names(&["kind-a"]),
+            }
+        );
+    };
+    tokio::join!(running, offers);
+    nothing_more(&mut events).await;
+}
+
+#[tokio::test]
+async fn names_the_person_s_files_all_hold_as_they_are_raise_no_offer() {
+    let setup = Setup::new().await;
+    let (_, mut events) = setup.follow();
+    let same = "apiVersion: v1
+kind: Config
+clusters:
+- name: kind-a
+  cluster:
+    server: https://127.0.0.1:6443
+contexts:
+- name: kind-b
+  context:
+    cluster: kind-a
+    user: kind-a
+current-context: kind-b
+users:
+- name: kind-a
+  user:
+    token: secret
+";
+    let rerun = setup.dir.path().join("rerun.yaml");
+    std::fs::write(&rerun, same).unwrap();
+    let more = setup.dir.path().join("more.yaml");
+    std::fs::write(&more, format!("{same}- name: new\n  user:\n    token: n\n")).unwrap();
+    let session = setup
+        .create(
+            "kind-a",
+            &format!(
+                r#"f="${{KUBECONFIG%%:*}}"; cat {} > "$f"; sleep 1.5; cat {} > "$f""#,
+                quoted(&rerun),
+                quoted(&more)
+            ),
+        )
+        .await;
+    setup.run(session.id).await;
+    let offer = offered(&mut events).await;
+    assert_eq!(offer.users, ["kind-a", "new"]);
+    assert_eq!(
+        offer.left_out,
+        KubeconfigNames {
+            contexts: names(&["kind-b"]),
+            clusters: names(&["kind-a"]),
+            users: names(&["kind-a"]),
+        }
+    );
+}

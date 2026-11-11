@@ -881,8 +881,9 @@ impl Core {
     }
 
     /// Follows the catalog's sources and the login shell's proxy variables,
-    /// and tells the state store and the connections which contexts the
-    /// sources list; never returns. In the explicit mode (ARCHITECTURE 5.5)
+    /// tells the state store and the connections which contexts the sources
+    /// list, and makes the terminals' offers anew as the files change; never
+    /// returns. In the explicit mode (ARCHITECTURE 5.5)
     /// `explicit` is the only source; otherwise the sources come from the
     /// login shell's environment, as `status` follows it, read again
     /// whenever it is resolved.
@@ -930,7 +931,13 @@ impl Core {
                 }
             }
         };
-        tokio::join!(sources, seen, self.policy.follow_unlocks());
+        let offered = async {
+            let mut written = self.catalog.written();
+            while written.changed().await.is_ok() {
+                self.terminals.refresh_offers().await;
+            }
+        };
+        tokio::join!(sources, seen, offered, self.policy.follow_unlocks());
     }
 }
 

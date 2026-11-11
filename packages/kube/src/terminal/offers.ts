@@ -1,9 +1,10 @@
-import type {
-  Backend,
-  KubeconfigOffer,
-  KubeconfigOfferAnswer,
-  KubeconfigOfferEvent,
-  KubeconfigOfferId,
+import {
+  toIpcError,
+  type Backend,
+  type KubeconfigOffer,
+  type KubeconfigOfferAnswer,
+  type KubeconfigOfferEvent,
+  type KubeconfigOfferId,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 import { variant } from "../variants";
@@ -66,7 +67,9 @@ export class KubeconfigOffers {
       await this.backend.invoke("kubeconfig_offer_answer", { id, answer });
       this.#remove(id);
     } catch (error) {
-      if (this.#offers.some((o) => o.id === id)) this.report(error);
+      // The core withdraws an offer that would now move nothing, and only the conflict says why.
+      const conflict = toIpcError(error).kind === "conflict";
+      if (conflict || this.#offers.some((o) => o.id === id)) this.report(error);
     }
     this.#answering.delete(id);
     this.changes.emit();

@@ -88,6 +88,23 @@ impl Names {
     }
 }
 
+/// What a move takes and what it leaves out, by section.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Outcome {
+    pub moves: Names,
+    pub left_out: Names,
+}
+
+/// What [`append`] did, as its plan under the target's lock had it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Appended {
+    /// It appended what moves, leaving out no more than was shown.
+    Moved,
+    /// It wrote nothing, as it would also leave out these, which were not
+    /// shown as left out.
+    LeavesOutMore(Names),
+}
+
 /// What tools wrote into a terminal's own kubeconfig, as a move takes it:
 /// each offered entry from the last read of the file that held it, so one
 /// that a later write dropped, as gcloud drops all when it moves the file
@@ -155,15 +172,15 @@ impl Written {
         }
     }
 
-    /// What a move would leave out against the person's `files` as they are
-    /// now, by section.
-    pub fn left_out(&self, files: &[PathBuf]) -> Result<Names, WriteError> {
+    /// What a move would take and leave out against the person's `files`
+    /// as they are now.
+    pub fn outcome(&self, files: &[PathBuf]) -> Result<Outcome, WriteError> {
         let read: Vec<(&Path, String)> = files
             .iter()
             .filter_map(|file| Some((file.as_path(), fs::read_to_string(file).ok()?)))
             .collect();
         let theirs = Entries::of_files(read.iter().map(|(file, text)| (*file, text.as_str())));
-        Ok(self.plan(&theirs)?.left)
+        Ok(self.plan(&theirs)?.outcome)
     }
 
     /// Names match by section, as kubectl's do. A context moves only where
@@ -229,8 +246,9 @@ impl Written {
             if context.moves {
                 let entry = offered.contexts[context.name].clone();
                 plan.moving.push(("contexts", entry));
+                plan.outcome.moves.contexts.insert(context.name.clone());
             } else {
-                plan.left.contexts.insert(context.name.clone());
+                plan.outcome.left_out.contexts.insert(context.name.clone());
             }
         }
         for (section, free) in [("clusters", &free_clusters), ("users", &free_users)] {
@@ -240,10 +258,12 @@ impl Written {
                     .filter(|context| context.names(section) == Some(name))
                     .map(|context| context.moves)
                     .collect();
+                let outcome = &mut plan.outcome;
                 if free.contains(name) && (naming.is_empty() || naming.contains(&true)) {
                     plan.moving.push((section, entry.clone()));
+                    outcome.moves.section_mut(section).insert(name.clone());
                 } else {
-                    plan.left.section_mut(section).insert(name.clone());
+                    outcome.left_out.section_mut(section).insert(name.clone());
                 }
             }
         }
@@ -310,11 +330,11 @@ impl Naming<'_> {
     }
 }
 
-/// What a move appends, and what it leaves out.
+/// What a move appends, and by name what it takes and leaves out.
 #[derive(Default)]
 struct Plan {
     moving: Vec<(&'static str, Mapping)>,
-    left: Names,
+    outcome: Outcome,
 }
 
 /// Entries by section and name, each against its file's directory.
@@ -385,9 +405,16 @@ fn named(context: &Mapping, key: &str) -> Option<String> {
 /// Appends to `target` what `written` offers and a move takes against the
 /// person's `files`, `target` among them, as they are under its lock, so a
 /// name written into it meanwhile is not written twice, which client-go
-/// refuses. A `target` that does not exist is created at 0600, as kubectl
-/// creates one, in a directory created as kubectl's lock creates it.
-pub fn append(target: &Path, files: &[PathBuf], written: &Written) -> Result<(), WriteError> {
+/// refuses; nothing, should that leave out a name `shown` does not hold, as
+/// the files changed since the person saw what a move leaves out. A
+/// `target` that does not exist is created at 0600, as kubectl creates one,
+/// in a directory created as kubectl's lock creates it.
+pub fn append(
+    target: &Path,
+    files: &[PathBuf],
+    written: &Written,
+    shown: &Names,
+) -> Result<Appended, WriteError> {
     if let Some(dir) = target.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -415,8 +442,12 @@ pub fn append(target: &Path, files: &[PathBuf], written: &Written) -> Result<(),
         .collect();
     let theirs = Entries::of_files(read.iter().map(|(file, text)| (*file, text.as_str())));
     let plan = written.plan(&theirs)?;
+    let more = plan.outcome.left_out.without(shown);
+    if !more.is_empty() {
+        return Ok(Appended::LeavesOutMore(more));
+    }
     if plan.moving.is_empty() {
-        return Ok(());
+        return Ok(Appended::Moved);
     }
     let mut file = parse(&text)?;
     if mapping(&file).is_none() && Names::of(&text).is_ok_and(|names| names.is_empty()) {
@@ -433,7 +464,8 @@ pub fn append(target: &Path, files: &[PathBuf], written: &Written) -> Result<(),
     for (section, entry) in plan.moving {
         sequence(&into, section).push(entry);
     }
-    replace(&resolved, &file.to_string())
+    replace(&resolved, &file.to_string())?;
+    Ok(Appended::Moved)
 }
 
 fn parse(text: &str) -> Result<YamlFile, WriteError> {
@@ -592,12 +624,13 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         fs::write(&target, mine).unwrap();
         let base = Path::new("/twigo/terminals/1");
         let moving = names(&[ARN], &[ARN, "plugin"], &[ARN]);
-        append(
+        let appended = append(
             &target,
             std::slice::from_ref(&target),
             &written(base, &moving),
-        )
-        .unwrap();
+            &Names::default(),
+        );
+        assert_eq!(appended.unwrap(), Appended::Moved);
         let written = fs::read_to_string(&target).unwrap();
         assert!(written.starts_with("# mine\napiVersion: v1\nclusters:\n# kind\n- cluster:\n    server: https://127.0.0.1:6443\n  name: kind-a\n- cluster:\n"), "{written}");
         assert!(written.contains("current-context: kind-a\n"), "{written}");
@@ -640,6 +673,7 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
             &target,
             std::slice::from_ref(&target),
             &written(dir.path(), &moving),
+            &Names::default(),
         )
         .unwrap();
         let written = fs::read_to_string(&target).unwrap();
@@ -662,6 +696,7 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
                 &target,
                 std::slice::from_ref(&target),
                 &written(dir.path(), &moving),
+                &Names::default(),
             )
             .unwrap();
             let written = fs::read_to_string(&target).unwrap();
@@ -690,11 +725,18 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         );
         assert!(
             written
-                .left_out(std::slice::from_ref(&mine))
+                .outcome(std::slice::from_ref(&mine))
                 .unwrap()
+                .left_out
                 .is_empty()
         );
-        append(&mine, std::slice::from_ref(&mine), &written).unwrap();
+        append(
+            &mine,
+            std::slice::from_ref(&mine),
+            &written,
+            &Names::default(),
+        )
+        .unwrap();
         assert_eq!(
             Names::of(&fs::read_to_string(&mine).unwrap()).unwrap(),
             names(&["eks", "prod"], &["eks"], &["prod"])
@@ -764,20 +806,27 @@ contexts:
             home.join("ca.pem").display()
         );
         let written = offered(text, &terminal, true);
+        let left_out = names(&["elsewhere", "home-ca", "same"], &["only-b"], &["b"]);
         assert_eq!(
-            written.left_out(std::slice::from_ref(&mine)).unwrap(),
-            names(&["elsewhere", "home-ca", "same"], &["only-b"], &["b"])
+            written.outcome(std::slice::from_ref(&mine)).unwrap(),
+            Outcome {
+                moves: names(&[], &[], &["a", "c"]),
+                left_out: left_out.clone(),
+            }
         );
         let proxied = offered(text, &terminal, false);
         assert_eq!(
-            proxied.left_out(std::slice::from_ref(&mine)).unwrap(),
-            names(
-                &["elsewhere", "home-ca", "same"],
-                &["only-b"],
-                &["a", "b", "c"]
-            )
+            proxied.outcome(std::slice::from_ref(&mine)).unwrap(),
+            Outcome {
+                moves: Names::default(),
+                left_out: names(
+                    &["elsewhere", "home-ca", "same"],
+                    &["only-b"],
+                    &["a", "b", "c"]
+                ),
+            }
         );
-        append(&mine, std::slice::from_ref(&mine), &written).unwrap();
+        append(&mine, std::slice::from_ref(&mine), &written, &left_out).unwrap();
         assert_eq!(
             Names::of(&fs::read_to_string(&mine).unwrap()).unwrap(),
             names(&["elsewhere", "home-ca", "same"], &["me"], &["a", "c"])
@@ -785,25 +834,38 @@ contexts:
     }
 
     #[test]
-    fn a_name_written_into_the_target_after_the_offer_is_not_appended_twice() {
+    fn a_name_written_into_the_target_after_the_offer_leaves_it_as_it_is() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("config");
-        let moving = names(&["other"], &[], &[]);
+        let moving = names(&["other"], &[ARN], &[]);
         let written = written(dir.path(), &moving);
-        assert!(
-            written
-                .left_out(std::slice::from_ref(&target))
-                .unwrap()
-                .is_empty()
-        );
-        fs::write(
+        let shown = written.outcome(std::slice::from_ref(&target)).unwrap();
+        assert!(shown.left_out.is_empty());
+        let meanwhile = "clusters:\n- name: other\n  cluster:\n    server: https://meanwhile\n";
+        fs::write(&target, meanwhile).unwrap();
+        let appended = append(
             &target,
-            "clusters:\n- name: other\n  cluster:\n    server: https://meanwhile\n",
-        )
-        .unwrap();
-        append(&target, std::slice::from_ref(&target), &written).unwrap();
+            std::slice::from_ref(&target),
+            &written,
+            &shown.left_out,
+        );
+        assert_eq!(
+            appended.unwrap(),
+            Appended::LeavesOutMore(names(&["other"], &[], &[]))
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), meanwhile);
+        let shown = written.outcome(std::slice::from_ref(&target)).unwrap();
+        assert_eq!(shown.left_out, names(&["other"], &[], &[]));
+        let appended = append(
+            &target,
+            std::slice::from_ref(&target),
+            &written,
+            &shown.left_out,
+        );
+        assert_eq!(appended.unwrap(), Appended::Moved);
         let text = fs::read_to_string(&target).unwrap();
         assert_eq!(text.matches("name: other").count(), 1, "{text}");
+        assert_eq!(Names::of(&text).unwrap(), names(&["other"], &[ARN], &[]));
     }
 
     #[test]
@@ -817,6 +879,7 @@ contexts:
             &target,
             std::slice::from_ref(&target),
             &written(dir.path(), &moving),
+            &Names::default(),
         );
         assert!(matches!(refused, Err(WriteError::Locked(_))), "{refused:?}");
         assert!(dir.path().join("config.lock").exists());

@@ -139,6 +139,14 @@ impl Terminals {
     pub(crate) fn drop_window(&self, window: &str) {
         self.offers.drop_window(window);
     }
+
+    /// Makes every offer anew, as the user's files have changed.
+    pub(crate) async fn refresh_offers(&self) {
+        let offers = Arc::clone(&self.offers);
+        tokio::task::spawn_blocking(move || offers.refresh())
+            .await
+            .expect("a refresh does not panic");
+    }
 }
 
 /// How a terminal of `context` reaches clusters: through the policy proxy
@@ -325,8 +333,10 @@ impl Core {
 
     /// Moves an offer's entries into the user's kubeconfig, or dismisses
     /// it, which withdraws it; refused for one that is gone or another
-    /// window's. A move that fails leaves the offer waiting. Async, as the
-    /// move waits for kubectl's lock.
+    /// window's. A move that fails leaves the offer waiting, and one that
+    /// would leave out more than the offer said moves nothing and makes the
+    /// offer anew, refused as a conflict. Async, as the move waits for
+    /// kubectl's lock.
     pub async fn answer_kubeconfig_offer(
         &self,
         window: &str,
@@ -334,20 +344,15 @@ impl Core {
     ) -> Result<(), IpcError> {
         let offers = &self.terminals.offers;
         let answering = offers.take(window, answer.id)?;
-        if answer.answer == KubeconfigOfferAnswer::Move {
-            let (moved, answering) =
-                tokio::task::spawn_blocking(move || (answering.move_entries(), answering))
-                    .await
-                    .expect("a move does not panic");
-            if let Err(error) = moved {
-                offers.put_back(answering);
-                return Err(error);
-            }
+        if answer.answer == KubeconfigOfferAnswer::Dismiss {
             offers.withdraw(answering);
-        } else {
-            offers.withdraw(answering);
+            return Ok(());
         }
-        Ok(())
+        let (moved, answering) =
+            tokio::task::spawn_blocking(move || (answering.move_entries(), answering))
+                .await
+                .expect("a move does not panic");
+        offers.moved(answering, moved)
     }
 
     /// Runs `program` with `args` in every terminal made from now on, in

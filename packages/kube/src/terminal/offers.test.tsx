@@ -7,10 +7,11 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type {
-  Backend,
-  KubeconfigOffer,
-  KubeconfigOfferEvent,
+import {
+  IpcError,
+  type Backend,
+  type KubeconfigOffer,
+  type KubeconfigOfferEvent,
 } from "@twigo/protocol";
 import { createMockBackend, OFFER_AFTER_MS } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
@@ -182,6 +183,20 @@ test("an offer withdrawn while its answer is on its way is gone, and a refusal o
   await answering;
   expect(ids(offers)).toEqual([]);
   expect(report).not.toHaveBeenCalled();
+});
+
+test("a move the core refuses as a conflict is reported though the core withdrew its offer meanwhile", async () => {
+  const { core, offers, report } = await followed([offer(1)]);
+  const conflict = new IpcError(
+    "conflict",
+    "Nothing was moved into ~/.kube/config: your kubeconfig files changed since the offer was made, and a move would now also leave out the context prod, so nothing in the offer would move now.",
+  );
+  core.refuseWith(conflict);
+  const answering = offers.answer(1, "move");
+  core.send({ event: "withdrawn", id: 1 });
+  await answering;
+  expect(ids(offers)).toEqual([]);
+  expect(report).toHaveBeenCalledWith(conflict);
 });
 
 interface Mounted {

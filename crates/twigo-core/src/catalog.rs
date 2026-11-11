@@ -126,6 +126,9 @@ pub fn sources(
 pub struct Catalog {
     /// None until the sources have been read once.
     contexts: watch::Sender<Option<Arc<Contexts>>>,
+    /// Counts the changes to the files it follows, those that leave the
+    /// contexts as they were included.
+    written: watch::Sender<u64>,
     /// What it follows: set before the first read is published.
     sources: Mutex<Option<Sources>>,
     followed: Mutex<Option<Watch>>,
@@ -138,6 +141,7 @@ impl Default for Catalog {
     fn default() -> Self {
         Self {
             contexts: watch::Sender::new(None),
+            written: watch::Sender::new(0),
             sources: Mutex::new(None),
             followed: Mutex::new(None),
             generation: Arc::new(AtomicU64::new(0)),
@@ -171,7 +175,9 @@ impl Catalog {
                 });
             }
         };
-        match Watch::start(sources.clone(), publish.clone()) {
+        let written = self.written.clone();
+        let wrote = move || written.send_modify(|count| *count += 1);
+        match Watch::start(sources.clone(), publish.clone(), wrote) {
             Ok(watch) => *followed = Some(watch),
             Err(error) => {
                 eprintln!(
@@ -184,6 +190,11 @@ impl Catalog {
 
     pub fn subscribe(&self) -> watch::Receiver<Option<Arc<Contexts>>> {
         self.contexts.subscribe()
+    }
+
+    /// Changes with every change to the files it follows.
+    pub fn written(&self) -> watch::Receiver<u64> {
+        self.written.subscribe()
     }
 
     /// The files it reads, once it follows any.

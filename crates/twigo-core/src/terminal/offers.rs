@@ -3,7 +3,9 @@
 //! the user's (ARCHITECTURE 4.6). An offer belongs to its window: it outlives
 //! the terminal's tab, until it is answered or the window goes. A move
 //! appends the entries to the file kubectl writes new ones to, leaving out
-//! those that would mean something else among the user's files.
+//! those that would mean something else among the user's files. An offer
+//! is made anew whenever what it holds or the user's files change, and is
+//! not shown while a move would move nothing.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -14,7 +16,7 @@ use twigo_ipc::{
     ErrorKind, IpcError, KubeconfigNames, KubeconfigOffer, KubeconfigOfferEvent, KubeconfigOfferId,
     SubscriptionId,
 };
-use twigo_kube::kubeconfig::{Names, Sources, WriteError, Written, append};
+use twigo_kube::kubeconfig::{Appended, Names, Outcome, Sources, WriteError, Written, append};
 
 type Follower = Box<dyn FnMut(KubeconfigOfferEvent) -> bool + Send>;
 
@@ -56,6 +58,10 @@ struct Held {
     source: Arc<Source>,
     written: Written,
     offer: KubeconfigOffer,
+    /// What `offer` says a move leaves out.
+    left_out: Names,
+    /// Whether its window has it: not while a move would move nothing.
+    shown: bool,
     /// Being answered: another answer is refused meanwhile, and what comes
     /// meanwhile joins it.
     answering: bool,
@@ -66,6 +72,8 @@ pub(crate) struct Answering {
     source: Arc<Source>,
     id: KubeconfigOfferId,
     written: Written,
+    /// What the offer said a move leaves out.
+    left_out: Names,
     /// Where a move writes, as a person reads it.
     target: String,
 }
@@ -88,7 +96,7 @@ impl Offers {
         let waiting = state
             .offers
             .values()
-            .filter(|held| *held.source.window == *window)
+            .filter(|held| held.shown && *held.source.window == *window)
             .map(|held| held.offer.clone())
             .collect();
         state.followers.insert(window.into(), Box::new(send));
@@ -97,7 +105,8 @@ impl Offers {
 
     /// Offers `fresh` names of `text`, a read of the terminal's file whose
     /// names are `holds`: in `live`, the terminal's offer, while it waits,
-    /// else in a new one. None once the terminal has gone.
+    /// else in a new one, shown once a move would move something. None once
+    /// the terminal has gone.
     pub(crate) fn offer(
         &self,
         source: &Arc<Source>,
@@ -118,20 +127,19 @@ impl Offers {
                 KubeconfigOfferId(state.next)
             }
         };
-        let mut held = match state.offers.remove(&id.0) {
-            Some(held) => held,
-            None => {
-                let base = source.file.parent().expect("a file in a directory");
-                Held {
-                    source: Arc::clone(source),
-                    written: Written::new(base.to_owned(), source.chained),
-                    offer: offer_of(source, id, &Names::default(), &Names::default()),
-                    answering: false,
-                }
+        let held = state.offers.entry(id.0).or_insert_with(|| {
+            let base = source.file.parent().expect("a file in a directory");
+            Held {
+                source: Arc::clone(source),
+                written: Written::new(base.to_owned(), source.chained),
+                offer: offer_of(source, id, &Names::default(), &Names::default()),
+                left_out: Names::default(),
+                shown: false,
+                answering: false,
             }
-        };
+        });
         held.written.read(text, holds, fresh);
-        state.renew(held);
+        state.renew(id);
         Some(id)
     }
 
@@ -146,8 +154,20 @@ impl Offers {
         holds: &Names,
     ) {
         let mut state = self.state();
-        if let Some(held) = live.and_then(|id| state.live(source, id)) {
+        if let Some(id) = live
+            && let Some(held) = state.live(source, id)
+        {
             held.written.read(text, holds, &Names::default());
+            state.renew(id);
+        }
+    }
+
+    /// Makes every offer anew, as the user's files have changed.
+    pub(crate) fn refresh(&self) {
+        let mut state = self.state();
+        let ids: Vec<u32> = state.offers.keys().copied().collect();
+        for id in ids {
+            state.renew(KubeconfigOfferId(id));
         }
     }
 
@@ -155,7 +175,7 @@ impl Offers {
     /// one that is gone, another window's, or answered already.
     pub(crate) fn take(&self, window: &str, id: KubeconfigOfferId) -> Result<Answering, IpcError> {
         let mut state = self.state();
-        let Some(held) = state.offers.get_mut(&id.0) else {
+        let Some(held) = state.offers.get_mut(&id.0).filter(|held| held.shown) else {
             return Err(IpcError::new(ErrorKind::NotFound, "this offer is gone"));
         };
         if *held.source.window != *window {
@@ -175,6 +195,7 @@ impl Offers {
             source: Arc::clone(&held.source),
             id,
             written: held.written.clone(),
+            left_out: held.left_out.clone(),
             target: held.offer.target.clone(),
         })
     }
@@ -184,17 +205,20 @@ impl Offers {
     /// have ended.
     pub(crate) fn withdraw(&self, answering: Answering) {
         let mut state = self.state();
-        let Some(mut held) = state.offers.remove(&answering.id.0) else {
+        let id = answering.id;
+        let Some(held) = state.offers.get_mut(&id.0) else {
             return;
         };
         held.written.forget(&answering.written.names());
-        if held.written.names().is_empty() {
-            let id = answering.id;
-            state.tell(&held.source.window, KubeconfigOfferEvent::Withdrawn { id });
+        held.answering = false;
+        if !held.written.names().is_empty() {
+            state.renew(id);
             return;
         }
-        held.answering = false;
-        state.renew(held);
+        let held = state.offers.remove(&id.0).expect("got above");
+        if held.shown {
+            state.tell(&held.source.window, KubeconfigOfferEvent::Withdrawn { id });
+        }
     }
 
     /// An offer whose move failed, to be answered again, with what came
@@ -202,6 +226,48 @@ impl Offers {
     pub(crate) fn put_back(&self, answering: Answering) {
         if let Some(held) = self.state().offers.get_mut(&answering.id.0) {
             held.answering = false;
+        }
+    }
+
+    /// What follows a move: the offer withdrawn once it moved, or, where it
+    /// would have left out more than the offer said, made anew as a move
+    /// would go now, with the refusal in words; put back where it failed.
+    pub(crate) fn moved(
+        &self,
+        answering: Answering,
+        moved: Result<Appended, IpcError>,
+    ) -> Result<(), IpcError> {
+        match moved {
+            Ok(Appended::Moved) => {
+                self.withdraw(answering);
+                Ok(())
+            }
+            Ok(Appended::LeavesOutMore(more)) => {
+                let (id, target) = (answering.id, &answering.target);
+                let mut state = self.state();
+                if let Some(held) = state.offers.get_mut(&id.0) {
+                    held.answering = false;
+                    state.renew(id);
+                }
+                let shown = state.offers.get(&id.0).is_some_and(|held| held.shown);
+                let then = if shown {
+                    ". The offer now says what a move does"
+                } else {
+                    ", so nothing in the offer would move now"
+                };
+                Err(IpcError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "Nothing was moved into {target}: your kubeconfig files changed since the \
+                         offer was made, and a move would now also leave out {}{then}.",
+                        listed(&more)
+                    ),
+                ))
+            }
+            Err(error) => {
+                self.put_back(answering);
+                Err(error)
+            }
         }
     }
 
@@ -215,8 +281,9 @@ impl Offers {
             .map(|(id, _)| *id)
             .collect();
         for id in gone {
-            state.offers.remove(&id);
-            if let Some(send) = &mut follower
+            let held = state.offers.remove(&id).expect("listed above");
+            if held.shown
+                && let Some(send) = &mut follower
                 && !send(KubeconfigOfferEvent::Withdrawn {
                     id: KubeconfigOfferId(id),
                 })
@@ -239,22 +306,42 @@ impl State {
             .filter(|held| Arc::ptr_eq(&held.source, source))
     }
 
-    /// Keeps `held` with its offer made anew from what it holds, and tells
-    /// its window.
-    fn renew(&mut self, mut held: Held) {
+    /// Makes the offer `id` anew from what it holds and the user's files
+    /// as they are, and tells its window of a change: shown while a move
+    /// would move something, withdrawn while it would not.
+    fn renew(&mut self, id: KubeconfigOfferId) {
+        let Some(held) = self.offers.get_mut(&id.0) else {
+            return;
+        };
         let names = held.written.names();
-        let left_out = held
+        let Outcome { moves, left_out } = held
             .written
-            .left_out(held.source.sources.files())
+            .outcome(held.source.sources.files())
             .unwrap_or_else(|error| {
                 eprintln!("could not tell what a move of an offer leaves out: {error}");
-                Names::default()
+                Outcome {
+                    moves: names.clone(),
+                    left_out: Names::default(),
+                }
             });
-        held.offer = offer_of(&held.source, held.offer.id, &names, &left_out);
-        let offer = held.offer.clone();
-        let offer = Box::new(offer);
-        self.tell(&held.source.window, KubeconfigOfferEvent::Offered { offer });
-        self.offers.insert(held.offer.id.0, held);
+        let offer = offer_of(&held.source, id, &names, &left_out);
+        let shows = !moves.is_empty();
+        let event = if shows && (!held.shown || offer != held.offer) {
+            Some(KubeconfigOfferEvent::Offered {
+                offer: Box::new(offer.clone()),
+            })
+        } else if held.shown && !shows {
+            Some(KubeconfigOfferEvent::Withdrawn { id })
+        } else {
+            None
+        };
+        held.offer = offer;
+        held.left_out = left_out;
+        held.shown = shows;
+        let window = Arc::clone(&held.source.window);
+        if let Some(event) = event {
+            self.tell(&window, event);
+        }
     }
 
     fn tell(&mut self, window: &str, event: KubeconfigOfferEvent) {
@@ -292,12 +379,40 @@ fn offer_of(
     }
 }
 
+/// `the context prod, the clusters a and b and the user b`.
+fn listed(names: &Names) -> String {
+    let parts: Vec<String> = [
+        ("context", &names.contexts),
+        ("cluster", &names.clusters),
+        ("user", &names.users),
+    ]
+    .into_iter()
+    .filter(|(_, names)| !names.is_empty())
+    .map(|(noun, names)| {
+        let names: Vec<String> = names.iter().cloned().collect();
+        let plural = if names.len() == 1 { "" } else { "s" };
+        format!("the {noun}{plural} {}", joined(&names))
+    })
+    .collect();
+    joined(&parts)
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn joined(parts: &[String]) -> String {
+    match parts.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => parts.concat(),
+    }
+}
+
 impl Answering {
     /// Appends to the target what the offer held as the answer came and a
-    /// move takes, each entry as it was last seen while offered.
-    pub(crate) fn move_entries(&self) -> Result<(), IpcError> {
+    /// move takes, each entry as it was last seen while offered; nothing,
+    /// should that leave out more than the offer said.
+    pub(crate) fn move_entries(&self) -> Result<Appended, IpcError> {
         let source = &self.source;
-        append(&source.target, source.sources.files(), &self.written).map_err(|error| {
+        let (target, files) = (&source.target, source.sources.files());
+        append(target, files, &self.written, &self.left_out).map_err(|error| {
             let kind = match error {
                 WriteError::Locked(_) => ErrorKind::Conflict,
                 WriteError::Io(_) | WriteError::Parse(_) => ErrorKind::Internal,
@@ -371,5 +486,133 @@ mod tests {
         offers.drop_window("main");
         offers.put_back(moving);
         assert!(offers.follow("main", |_| true).is_empty());
+    }
+
+    const PROD: &str = "clusters:\n- name: b\n  cluster:\n    server: https://b\nusers:\n- name: b\n  user:\n    token: b\ncontexts:\n- name: prod\n  context:\n    cluster: b\n    user: b\n";
+    const BOTH: &str = "clusters:\n- name: b\n  cluster:\n    server: https://b\n- name: c\n  cluster:\n    server: https://c\nusers:\n- name: b\n  user:\n    token: b\n- name: c\n  user:\n    token: c\ncontexts:\n- name: prod\n  context:\n    cluster: b\n    user: b\n- name: other\n  context:\n    cluster: c\n    user: c\n";
+    const THEIR_PROD: &str = "clusters:\n- name: a\n  cluster:\n    server: https://a\nusers:\n- name: a\n  user:\n    token: a\ncontexts:\n- name: prod\n  context:\n    cluster: a\n    user: a\n";
+
+    fn offered(events: &std::sync::mpsc::Receiver<KubeconfigOfferEvent>) -> KubeconfigOffer {
+        match events.try_recv() {
+            Ok(KubeconfigOfferEvent::Offered { offer }) => *offer,
+            event => panic!("{event:?}"),
+        }
+    }
+
+    fn listed<T: FromIterator<String>>(names: &[&str]) -> T {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    fn moved(offers: &Offers, id: KubeconfigOfferId) -> Result<(), IpcError> {
+        let answering = offers.take("main", id).unwrap();
+        let moved = answering.move_entries();
+        offers.moved(answering, moved)
+    }
+
+    #[test]
+    fn a_move_that_would_leave_out_more_than_its_offer_said_moves_nothing_and_comes_back_anew() {
+        let dir = tempfile::tempdir().unwrap();
+        let (offers, source) = (Offers::new(), source(dir.path()));
+        let (told, events) = std::sync::mpsc::channel();
+        offers.follow("main", move |event| told.send(event).is_ok());
+        let id = offer(&offers, &source, None, BOTH);
+        assert!(offered(&events).left_out == KubeconfigNames::default());
+        std::fs::write(dir.path().join("config"), THEIR_PROD).unwrap();
+        let refused = moved(&offers, id).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Conflict);
+        assert_eq!(
+            refused.message,
+            format!(
+                "Nothing was moved into {}: your kubeconfig files changed since the offer was \
+                 made, and a move would now also leave out the context prod, the cluster b and \
+                 the user b. The offer now says what a move does.",
+                dir.path().join("config").display()
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config")).unwrap(),
+            THEIR_PROD
+        );
+        let anew = offered(&events);
+        assert_eq!(anew.id, id);
+        assert_eq!(
+            anew.left_out,
+            KubeconfigNames {
+                contexts: listed(&["prod"]),
+                clusters: listed(&["b"]),
+                users: listed(&["b"]),
+            }
+        );
+        moved(&offers, id).unwrap();
+        assert_eq!(
+            events.try_recv().unwrap(),
+            KubeconfigOfferEvent::Withdrawn { id }
+        );
+        let mine = std::fs::read_to_string(dir.path().join("config")).unwrap();
+        assert_eq!(
+            Names::of(&mine).unwrap(),
+            Names {
+                clusters: listed(&["a", "c"]),
+                users: listed(&["a", "c"]),
+                contexts: listed(&["other", "prod"]),
+            }
+        );
+    }
+
+    #[test]
+    fn a_move_that_would_now_move_nothing_withdraws_its_offer_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let (offers, source) = (Offers::new(), source(dir.path()));
+        let (told, events) = std::sync::mpsc::channel();
+        offers.follow("main", move |event| told.send(event).is_ok());
+        let id = offer(&offers, &source, None, PROD);
+        offered(&events);
+        std::fs::write(dir.path().join("config"), THEIR_PROD).unwrap();
+        let refused = moved(&offers, id).unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Conflict);
+        assert!(
+            refused
+                .message
+                .ends_with("the cluster b and the user b, so nothing in the offer would move now."),
+            "{}",
+            refused.message
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            KubeconfigOfferEvent::Withdrawn { id }
+        );
+        assert!(offers.follow("main", |_| true).is_empty());
+        let Err(gone) = offers.take("main", id) else {
+            panic!("a withdrawn offer taken");
+        };
+        assert_eq!(gone.kind, ErrorKind::NotFound);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config")).unwrap(),
+            THEIR_PROD
+        );
+    }
+
+    #[test]
+    fn an_offered_entry_rewritten_so_that_nothing_would_move_withdraws_the_offer() {
+        let dir = tempfile::tempdir().unwrap();
+        let (offers, source) = (Offers::new(), source(dir.path()));
+        std::fs::write(
+            dir.path().join("config"),
+            "users:\n- name: me\n  user:\n    token: t\n",
+        )
+        .unwrap();
+        let (told, events) = std::sync::mpsc::channel();
+        offers.follow("main", move |event| told.send(event).is_ok());
+        let first = "clusters:\n- name: own\n  cluster:\n    server: https://own\nusers:\n- name: me\n  user:\n    token: t\ncontexts:\n- name: c\n  context:\n    cluster: own\n    user: me\n";
+        let id = offer(&offers, &source, None, first);
+        assert_eq!(offered(&events).contexts, ["c"]);
+        let second = first.replace("token: t", "token: t2");
+        offers.read(&source, Some(id), &second, &Names::of(&second).unwrap());
+        assert_eq!(
+            events.try_recv().unwrap(),
+            KubeconfigOfferEvent::Withdrawn { id }
+        );
+        offers.read(&source, Some(id), first, &Names::of(first).unwrap());
+        assert_eq!(offered(&events).id, id);
     }
 }
