@@ -211,13 +211,14 @@ function secondsLeft(until: number): number {
 
 const WIDTH = { "--width": "288px" } as CSSProperties;
 
-export function Toaster() {
+/** `clearance` is the height of what the window shows above its status bar that the toasts must not cover. */
+export function Toaster({ clearance = 0 }: { clearance?: number }) {
   return (
     <SonnerToaster
       position="bottom-right"
       visibleToasts={3}
       gap={6}
-      offset={{ bottom: 32, right: 12 }}
+      offset={{ bottom: 32 + clearance, right: 12 }}
       style={WIDTH}
       containerAriaLabel="Notifications"
     />

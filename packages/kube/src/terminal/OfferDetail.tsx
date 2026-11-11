@@ -1,50 +1,61 @@
-import type { OfferSection, OfferWords } from "./offerWords";
+import { Fragment } from "react";
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
+import { nameParts, type OfferName, type OfferWords } from "./offerWords";
 
-function Sections({
-  title,
-  sections,
-}: {
-  title: string;
-  sections: readonly OfferSection[];
-}) {
+function Name({ name }: { name: string }) {
   return (
-    <div className="grid content-start gap-1">
-      <span className="text-muted-foreground">{title}</span>
-      {sections.map(({ label, names, reason }) => (
-        <div key={label} className="grid gap-x-2">
-          <span className="font-medium">{label}</span>
-          <div className="grid gap-0.5">
-            {names.map((name) => (
-              <code
-                key={name}
-                className="font-mono text-[11px] wrap-anywhere select-text"
-              >
-                {name}
-              </code>
-            ))}
-            {reason !== undefined && (
-              <span className="text-[11px] text-muted-foreground">
-                {reason}
-              </span>
-            )}
-          </div>
-        </div>
+    <code className="font-mono select-text">
+      {nameParts(name).map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && <wbr />}
+          <span className="inline-block max-w-full wrap-anywhere">{part}</span>
+        </Fragment>
       ))}
+    </code>
+  );
+}
+
+function Line({ entry }: { entry: OfferName }) {
+  return (
+    <div className={cn("min-w-0", entry.leftOut && "text-muted-foreground")}>
+      <Name name={entry.name} />
+      <span className="text-muted-foreground"> · {entry.kinds}</span>
     </div>
   );
 }
 
+/** The tooltip is above sonner's toaster (z-index 999999999), which would hide the half of it that falls over the toast. */
 export function OfferDetail({ words }: { words: OfferWords }) {
   return (
-    <div className="max-h-[50vh] overflow-y-auto">
-      <div className="grid gap-1.5">
-        {words.moves.length > 0 && (
-          <Sections title="A move writes" sections={words.moves} />
-        )}
-        {words.leaves.length > 0 && (
-          <Sections title="A move leaves out" sections={words.leaves} />
+    <div className="grid gap-1 text-[11px] leading-4">
+      <div className="grid gap-0.5">
+        {words.names.map((entry) => (
+          <Line key={entry.name} entry={entry} />
+        ))}
+        {words.more !== undefined && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="justify-self-start rounded text-muted-foreground underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
+              >
+                {words.more}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="left"
+              className="z-[1000000000] grid gap-0.5 text-[11px]"
+            >
+              {words.all.map((entry) => (
+                <Line key={entry.name} entry={entry} />
+              ))}
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
+      {words.reason !== undefined && (
+        <span className="text-muted-foreground">{words.reason}</span>
+      )}
     </div>
   );
 }

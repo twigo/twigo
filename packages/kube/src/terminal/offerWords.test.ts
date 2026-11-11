@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { KubeconfigOffer } from "@twigo/protocol";
-import { describeOffer } from "./offerWords";
+import { describeOffer, nameParts } from "./offerWords";
 
 const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
   id: 1,
@@ -14,6 +14,11 @@ const offer = (more: Partial<KubeconfigOffer>): KubeconfigOffer => ({
   leftOut: { contexts: [], clusters: [], users: [] },
   ...more,
 });
+
+const ARN = "arn:aws:eks:eu-west-1:123456789012:cluster";
+
+const REASON =
+  "Left out: your files have that name already, or what the context names is another entry there or missing, and does not move with it.";
 
 test("an offer says which terminal and context the entries came from, how many of each section came, and where a move writes them", () => {
   expect(
@@ -35,81 +40,130 @@ test("an offer says which terminal and context the entries came from, how many o
   );
 });
 
-test("a move writes the names of each section that it does not leave out, and a section with none is not listed", () => {
+test("a name that a context, a cluster and a user share is one line with the kinds it names, as cloud CLIs name all three alike", () => {
   const words = describeOffer(
     offer({
-      contexts: ["a", "b"],
-      clusters: ["a", "b"],
-      users: ["a", "u-b"],
-      leftOut: { contexts: ["b"], clusters: ["b"], users: [] },
+      contexts: [`${ARN}/prod-eu-2`],
+      clusters: [`${ARN}/prod-eu-2`],
+      users: [`${ARN}/prod-eu-2`],
     }),
   );
-  expect(words.moves).toEqual([
-    { label: "Contexts", names: ["a"] },
-    { label: "Clusters", names: ["a"] },
-    { label: "Users", names: ["a", "u-b"] },
+  expect(words.names).toEqual([
+    {
+      name: `${ARN}/prod-eu-2`,
+      kinds: "context, cluster, user",
+      leftOut: false,
+    },
   ]);
-  expect(
+  expect(words.all).toEqual(words.names);
+  expect(words.more).toBeUndefined();
+  expect(words.reason).toBeUndefined();
+});
+
+test("names that differ by section are lines of their own, in the order the sections come", () => {
+  const words = describeOffer(
+    offer({
+      contexts: ["ctx", "shared"],
+      clusters: ["shared", "cl"],
+      users: ["usr"],
+    }),
+  );
+  expect(words.names.map(({ name, kinds }) => [name, kinds])).toEqual([
+    ["ctx", "context"],
+    ["shared", "context, cluster"],
+    ["cl", "cluster"],
+    ["usr", "user"],
+  ]);
+});
+
+test("a name that a move leaves out is marked on its line, the kinds it leaves out after the ones it writes", () => {
+  const words = describeOffer(
+    offer({
+      contexts: [`${ARN}/prod-eu-2`, `${ARN}/prod-eu-3`, "mixed"],
+      clusters: [`${ARN}/prod-eu-2`, `${ARN}/prod-eu-3`, "mixed"],
+      users: [`${ARN}/prod-eu-2`, `${ARN}/prod-eu-3`, "mixed"],
+      leftOut: {
+        contexts: [`${ARN}/prod-eu-3`],
+        clusters: [`${ARN}/prod-eu-3`],
+        users: [`${ARN}/prod-eu-3`, "mixed"],
+      },
+    }),
+  );
+  expect(words.names).toEqual([
+    {
+      name: `${ARN}/prod-eu-2`,
+      kinds: "context, cluster, user",
+      leftOut: false,
+    },
+    {
+      name: `${ARN}/prod-eu-3`,
+      kinds: "context, cluster, user left out",
+      leftOut: true,
+    },
+    { name: "mixed", kinds: "context, cluster · user left out", leftOut: true },
+  ]);
+});
+
+test("the reason is one sentence below the names, the same for every section a name is left out of, and none where nothing is", () => {
+  const leaving = (section: "contexts" | "clusters" | "users") =>
     describeOffer(
       offer({
-        contexts: ["a"],
-        clusters: ["a"],
-        users: ["a"],
-        leftOut: { contexts: ["a"], clusters: ["a"], users: ["a"] },
+        contexts: ["a", "b"],
+        clusters: ["a", "b"],
+        users: ["a", "b"],
+        leftOut: { contexts: [], clusters: [], users: [], [section]: ["b"] },
       }),
-    ).moves,
-  ).toEqual([]);
-});
-
-test("a move leaves out names by section, with what a person can look for in their files", () => {
-  const words = describeOffer(
-    offer({
-      contexts: ["a", "b"],
-      clusters: ["a", "b"],
-      users: ["a", "b"],
-      leftOut: { contexts: ["b"], clusters: ["b"], users: ["b"] },
-    }),
-  );
-  expect(words.leaves).toEqual([
-    {
-      label: "Contexts",
-      names: ["b"],
-      reason:
-        "Your files have a context of that name, or the cluster or user it names is another one in your files, or your files lack it and it does not move with the context.",
-    },
-    {
-      label: "Clusters",
-      names: ["b"],
-      reason:
-        "Your files have a cluster of that name, or only contexts left out name it.",
-    },
-    {
-      label: "Users",
-      names: ["b"],
-      reason:
-        "Your files have a user of that name, or only contexts left out name it.",
-    },
-  ]);
-});
-
-test("a cluster left out with no context left out is one that the person's files have, and an offer that leaves nothing out lists nothing", () => {
-  const words = describeOffer(
-    offer({
-      contexts: ["a"],
-      clusters: ["a", "b"],
-      users: ["a"],
-      leftOut: { contexts: [], clusters: ["b"], users: [] },
-    }),
-  );
-  expect(words.leaves).toEqual([
-    {
-      label: "Clusters",
-      names: ["b"],
-      reason: "Your files have a cluster of that name.",
-    },
-  ]);
+    ).reason;
+  expect(leaving("contexts")).toBe(REASON);
+  expect(leaving("clusters")).toBe(REASON);
+  expect(leaving("users")).toBe(REASON);
   expect(
     describeOffer(offer({ contexts: ["a"], clusters: ["a"], users: ["a"] }))
-      .leaves,
-  ).toEqual([]);
+      .reason,
+  ).toBeUndefined();
+});
+
+test("an offer of more than four names shows four and says how many more, with every name kept for a tooltip", () => {
+  const names = ["a", "b", "c", "d", "e", "f"].map((n) => `${ARN}/${n}`);
+  const words = describeOffer(
+    offer({
+      contexts: names,
+      clusters: names,
+      users: names,
+      leftOut: { contexts: [names[5] ?? ""], clusters: [], users: [] },
+    }),
+  );
+  expect(words.names.map(({ name }) => name)).toEqual(names.slice(0, 4));
+  expect(words.more).toBe("and 2 more");
+  expect(words.all.map(({ name }) => name)).toEqual(names);
+  expect(words.all[5]).toEqual({
+    name: `${ARN}/f`,
+    kinds: "cluster, user · context left out",
+    leftOut: true,
+  });
+});
+
+test("four names are shown whole, and one more is one more", () => {
+  const some = (n: number) =>
+    describeOffer(offer({ users: ["a", "b", "c", "d", "e"].slice(0, n) }));
+  expect(some(4).more).toBeUndefined();
+  expect(some(4).names).toHaveLength(4);
+  expect(some(5).more).toBe("and 1 more");
+  expect(some(5).names).toHaveLength(4);
+});
+
+test("a name breaks after its own colons and slashes, never inside a word", () => {
+  expect(nameParts(`${ARN}/prod-eu-2`)).toEqual([
+    "arn:",
+    "aws:",
+    "eks:",
+    "eu-west-1:",
+    "123456789012:",
+    "cluster/",
+    "prod-eu-2",
+  ]);
+  expect(nameParts("gke_proj_europe-west1-b_prod")).toEqual([
+    "gke_proj_europe-west1-b_prod",
+  ]);
+  expect(nameParts("a:")).toEqual(["a:"]);
 });

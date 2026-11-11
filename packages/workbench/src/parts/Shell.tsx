@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Allotment, LayoutPriority } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
@@ -31,6 +31,7 @@ export function Shell() {
   useChanges(spaces.changes);
   useChanges(sizes.changes);
   useChanges(views.changes);
+  const [panelHeight, setPanelHeight] = useState(0);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -107,6 +108,9 @@ export function Shell() {
             <Allotment
               vertical
               proportionalLayout={false}
+              onChange={([, measured]) => {
+                setPanelHeight(Math.round(measured ?? 0));
+              }}
               onDragEnd={remember([undefined, "panel"])}
             >
               <Allotment.Pane
@@ -152,7 +156,7 @@ export function Shell() {
       <TrustDialog />
       <ConfirmHost />
       <ApprovalHost />
-      <Toaster />
+      <Toaster clearance={maximized ? 0 : panelHeight} />
     </div>
   );
 }

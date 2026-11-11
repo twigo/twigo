@@ -184,3 +184,26 @@ test("a choice's toast stays until its owner dismisses it, takes one answer, and
   ).toBe("true");
   vi.useRealTimers();
 });
+
+test("the toaster keeps its toasts above the clearance it is given, and at the status bar's edge with none", async () => {
+  vi.useFakeTimers();
+  const { rerender } = render(<Toaster />);
+  act(() => {
+    notify.warning("Held");
+  });
+  await act(() => vi.advanceTimersByTimeAsync(100));
+  const bottom = () =>
+    document
+      .querySelector<HTMLElement>("[data-sonner-toaster]")
+      ?.style.getPropertyValue("--offset-bottom");
+  expect(bottom()).toBe("32px");
+  rerender(<Toaster clearance={284} />);
+  expect(bottom()).toBe("316px");
+  rerender(<Toaster clearance={0} />);
+  expect(bottom()).toBe("32px");
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});

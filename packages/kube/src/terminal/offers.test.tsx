@@ -3,6 +3,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  screen,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -289,6 +290,9 @@ const toastButton = (name: string) => {
   return within(toast).getByRole("button", { name });
 };
 
+const count = (text: string | null | undefined, part: string) =>
+  (text ?? "").split(part).length - 1;
+
 const FIRST =
   "Terminal 1 in dev added 2 contexts, 2 clusters and 2 users to its own kubeconfig.";
 const SECOND =
@@ -299,7 +303,7 @@ async function later(ms: number) {
   await settle(2);
 }
 
-test("an offer comes as a toast that says what came and what a move leaves out, and stays until it is answered", async () => {
+test("an offer comes as a toast that says what came, one line per name with the kinds it names, and the reason a move leaves one out once, and stays until it is answered", async () => {
   const { backend, create } = await mounted();
   const invoke = vi.spyOn(backend, "invoke");
   await create();
@@ -308,19 +312,17 @@ test("an offer comes as a toast that says what came and what a move leaves out, 
   const [toast, ...more] = live();
   expect(more).toEqual([]);
   expect(toast).toContain(FIRST);
-  expect(toast).toContain(`${ARN}/prod-eu-2`);
-  expect(toast).toContain(`${ARN}/prod-eu-3`);
-  expect(toast).toContain("A move writes");
-  expect(toast).toContain("A move leaves out");
+  expect(count(toast, `${ARN}/prod-eu-2`)).toBe(1);
+  expect(count(toast, `${ARN}/prod-eu-3`)).toBe(1);
+  expect(toast).toContain(`${ARN}/prod-eu-2 · context, cluster, user`);
+  expect(toast).toContain(`${ARN}/prod-eu-3 · context, cluster, user left out`);
+  expect(count(toast, "Left out:")).toBe(1);
   expect(toast).toContain(
-    "Your files have a context of that name, or the cluster or user it names is another one in your files, or your files lack it and it does not move with the context.",
+    "Left out: your files have that name already, or what the context names is another entry there or missing, and does not move with it.",
   );
-  expect(toast).toContain(
-    "Your files have a cluster of that name, or only contexts left out name it.",
-  );
-  expect(toast).toContain(
-    "Your files have a user of that name, or only contexts left out name it.",
-  );
+  for (const gone of ["A move writes", "A move leaves out", "Clusters"]) {
+    expect(toast).not.toContain(gone);
+  }
   await later(10 * 60_000);
   expect(live()).toHaveLength(1);
 
@@ -334,6 +336,74 @@ test("an offer comes as a toast that says what came and what a move leaves out, 
   expect(live()).toEqual([]);
 });
 
+test("an offer of more than four names shows four and a button that says how many more, whose tooltip holds every name", async () => {
+  const core = fakeCore();
+  const mock = createMockBackend("terminalOffer");
+  await mounted("dev", {
+    invoke: (command, request) =>
+      command === "kubeconfig_offer_answer"
+        ? core.backend.invoke(command, request)
+        : mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      command === "kubeconfig_offers_watch"
+        ? core.backend.subscribe(command, request, onMessage)
+        : mock.subscribe(command, request, onMessage),
+  });
+  core.answerWatch([]);
+  await settle(4);
+  const names = ["a", "b", "c", "d", "e", "f"].map((n) => `${ARN}/${n}`);
+  act(() => {
+    core.send({
+      event: "offered",
+      offer: offer(7, {
+        contexts: names,
+        clusters: names,
+        users: names,
+        leftOut: { contexts: [], clusters: [], users: [`${ARN}/f`] },
+      }),
+    });
+  });
+  await settle(4);
+  withdrawals.push(async () => {
+    core.send({ event: "withdrawn", id: 7 });
+    await settle(4);
+  });
+  const [toast] = live();
+  for (const shown of names.slice(0, 4)) expect(toast).toContain(shown);
+  for (const hidden of names.slice(4)) expect(toast).not.toContain(hidden);
+  expect(toast).toContain("and 2 more");
+  expect(screen.queryByRole("tooltip")).toBeNull();
+
+  fireEvent.focus(toastButton("and 2 more"));
+  await settle(4);
+  const tooltip = screen.getByRole("tooltip").textContent;
+  for (const name of names) expect(tooltip).toContain(name);
+  expect(tooltip).toContain(`${ARN}/f · context, cluster · user left out`);
+});
+
+test("a name is written whole, with a break point after each of its colons and slashes", async () => {
+  const { backend, create } = await mounted();
+  await create();
+  await later(OFFER_AFTER_MS);
+  const name = document.querySelector<HTMLElement>("[data-sonner-toast] code");
+  expect(name?.textContent).toBe(`${ARN}/prod-eu-2`);
+  expect(name?.querySelectorAll("wbr")).toHaveLength(6);
+  expect(
+    [...(name?.children ?? [])]
+      .filter((part) => part.tagName === "SPAN")
+      .map((part) => part.textContent),
+  ).toEqual([
+    "arn:",
+    "aws:",
+    "eks:",
+    "eu-west-1:",
+    "123456789012:",
+    "cluster/",
+    "prod-eu-2",
+  ]);
+  leave(backend);
+});
+
 test("the second offer comes once the first is answered, and Dismiss answers it so", async () => {
   const { backend, create } = await mounted();
   const invoke = vi.spyOn(backend, "invoke");
@@ -344,7 +414,7 @@ test("the second offer comes once the first is answered, and Dismiss answers it 
   const [toast, ...more] = live();
   expect(more).toEqual([]);
   expect(toast).toContain(SECOND);
-  expect(toast).not.toContain("A move leaves out");
+  expect(toast).not.toContain("Left out");
   fireEvent.click(toastButton("Dismiss"));
   await settle(4);
   expect(
