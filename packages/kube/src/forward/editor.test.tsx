@@ -148,9 +148,9 @@ test("a ready forward's tab is titled by its target and ports, and says where it
   screen.getByText("http 80");
   screen.getByText("localhost:8080");
   screen.getByText(/127\.0\.0\.1 and ::1/);
-  expect(screen.getByText("Pod").nextSibling?.textContent).toMatch(
-    /^auth-api-\S+ port 8080$/,
-  );
+  expect(
+    screen.getByText("Pod", { selector: "dt" }).nextSibling?.textContent,
+  ).toMatch(/^auth-api-\S+ port 8080$/);
   screen.getByText("Connections");
   screen.getByText("Last failure");
   screen.getByText("None");
@@ -195,16 +195,18 @@ test("a forward that loses its pod says it is reconnecting, why, and then shows 
   const { start, open } = await mounted("forwardReconnecting");
   const forward = await start(API, 80);
   await open(forward);
-  const first = screen.getByText("Pod").nextSibling?.textContent;
+  const first = screen.getByText("Pod", { selector: "dt" }).nextSibling
+    ?.textContent;
   await later(LOSES_POD_AFTER_MS - READY_AFTER_MS);
   expect(screen.getAllByText("Reconnecting").length).toBeGreaterThan(0);
   screen.getByText(/ is gone; waiting for another ready pod$/);
-  expect(screen.getByText("Pod").nextSibling?.textContent).toBe(
-    "Not chosen yet",
-  );
+  expect(
+    screen.getByText("Pod", { selector: "dt" }).nextSibling?.textContent,
+  ).toBe("Not chosen yet");
   await later(5500);
   expect(screen.queryByText("Reconnecting")).toBeNull();
-  const second = screen.getByText("Pod").nextSibling?.textContent;
+  const second = screen.getByText("Pod", { selector: "dt" }).nextSibling
+    ?.textContent;
   expect(second).not.toBe(first);
   expect(second).toMatch(/port 8080$/);
 });
