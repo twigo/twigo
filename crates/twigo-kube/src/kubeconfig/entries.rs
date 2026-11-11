@@ -13,7 +13,7 @@ use yaml_edit::{Mapping, Sequence, YamlFile};
 
 use super::write::{Lock, WriteError, replace};
 
-/// What a file that does not exist starts as.
+/// What a file that does not exist, or holds nothing, starts as.
 const EMPTY: &str = "apiVersion: v1\nkind: Config\nclusters: []\nusers: []\ncontexts: []\n";
 
 /// The names of a kubeconfig's clusters, users and contexts.
@@ -125,10 +125,8 @@ pub fn append(target: &Path, source: &str, base: &Path, names: &Names) -> Result
     let parse =
         |text: &str| YamlFile::from_str(text).map_err(|error| WriteError::Parse(error.to_string()));
     let source = parse(source)?;
-    let from = source
-        .document()
-        .and_then(|document| document.as_mapping())
-        .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+    let from =
+        mapping(&source).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
     if let Some(dir) = target.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -145,11 +143,18 @@ pub fn append(target: &Path, source: &str, base: &Path, names: &Names) -> Result
         }
         Err(error) => return Err(error.into()),
     };
-    let file = parse(&text)?;
-    let into = file
-        .document()
-        .and_then(|document| document.as_mapping())
-        .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+    let mut file = parse(&text)?;
+    if mapping(&file).is_none() && Names::of(&text).is_ok_and(|names| names.is_empty()) {
+        // Whitespace and comments alone, which kubectl reads as an empty
+        // config.
+        let separator = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        file = parse(&format!("{text}{separator}{EMPTY}"))?;
+    }
+    let into = mapping(&file).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
     for (section, wanted) in names.sections() {
         let entries: Vec<Mapping> = from
             .get_sequence(section)
@@ -168,6 +173,10 @@ pub fn append(target: &Path, source: &str, base: &Path, names: &Names) -> Result
         }
     }
     replace(&target, &file.to_string())
+}
+
+fn mapping(file: &YamlFile) -> Option<Mapping> {
+    file.document()?.as_mapping()
 }
 
 /// The section's list: a block one in place of an empty `[]`, as a new file
@@ -347,6 +356,23 @@ current-context: arn:aws:eks:eu-west-1:1:cluster/a
         );
         let mode = fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn a_target_kubectl_reads_as_empty_starts_as_the_empty_config_with_its_comments() {
+        for empty in ["", "\n", "# nothing yet\n", "# nothing yet", "---\n"] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("config");
+            fs::write(&target, empty).unwrap();
+            append(&target, WRITTEN, dir.path(), &names(&["other"], &[], &[])).unwrap();
+            let written = fs::read_to_string(&target).unwrap();
+            assert!(written.starts_with(empty.trim_end()), "{written:?}");
+            assert_eq!(
+                Names::of(&written).unwrap(),
+                names(&["other"], &[], &[]),
+                "{written:?}"
+            );
+        }
     }
 
     #[test]
