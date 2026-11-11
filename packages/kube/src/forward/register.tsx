@@ -13,6 +13,7 @@ import { ForwardsView } from "./ForwardsView";
 import { canForward } from "./kinds";
 import type { Forwards } from "./service";
 import { startForward } from "./start";
+import { forwardEntries } from "./statusEntries";
 import { forwardTitle } from "./words";
 
 /** A `k8s.forward.open` request: a target, and whether to pick its port whatever the number. */
@@ -96,6 +97,12 @@ export function registerForwards(
     title: "Port forwards",
     container: FORWARDS_CONTAINER,
     component: () => <ForwardsView forwards={forwards} />,
+  });
+  views.registerStatusBarItem({
+    id: "kube.forwards",
+    alignment: "left",
+    priority: 160,
+    useEntries: forwardEntries(workbench, forwards),
   });
   keybindings.register("core", [
     { key: "mod+c", command: "k8s.forward.copyAddress", when: "forwardsFocus" },
