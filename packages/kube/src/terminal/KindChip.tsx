@@ -9,13 +9,14 @@ export function KindChip({ words }: { words: KindWords }) {
       <TooltipTrigger asChild>
         <button
           type="button"
-          className="rounded-full outline-none focus-visible:shadow-[var(--focus-ring)]"
+          className="max-w-40 min-w-0 rounded-full outline-none focus-visible:shadow-[var(--focus-ring)]"
         >
           <Pill
             tone={words.warnings.length > 0 ? "warn" : "idle"}
             icon={<KindIcon words={words} className="size-3 shrink-0" />}
+            className="max-w-full"
           >
-            {words.short}
+            <span className="truncate">{words.short}</span>
           </Pill>
         </button>
       </TooltipTrigger>
