@@ -1068,6 +1068,7 @@ Extensions add commands, not prefixes.
     The toaster keeps its toasts above the panel while it shows, as far up as the panel measures, so a toast covers neither the panel's tab strip nor the terminal's chip; with the panel hidden or maximized they sit at the status bar's edge.
     The toasts stay in the window whole, spread by a hover as well as closed: the toaster measures the heights of the toasts that show and the gaps between them, which is what sonner spreads, and where that stack does not fit above the panel it sits as low as it takes to stay under the title bar, over the panel's strip.
     It sits so closed too, since moving it as the pointer arrives would move the toasts from under it.
+    A window of 600 px or less, where sonner reads other offsets, gets the same ones.
     An offer sent again with its id changes the words of its toast, and a withdrawn one takes its toast down.
     The buttons answer with the revision their toast was drawn with, not the one the window holds, since sonner shows a replacement one timer tick after the window has it (2.0.8), and a click in that gap answers what the person read.
     Offers belong to the window: they outlive the terminal's tab and end with the window.

@@ -284,3 +284,23 @@ test("only the toasts that show are spread, three of them", async () => {
   await act(() => vi.advanceTimersByTimeAsync(1000));
   vi.useRealTimers();
 });
+
+test("a window of 600 px or less places the toasts as the wider ones", async () => {
+  vi.useFakeTimers();
+  measureToasts({ Held: 98 });
+  render(<Toaster clearance={284} ceiling={36} />);
+  act(() => {
+    notify.error("Held");
+  });
+  await settled();
+  const list = document.querySelector<HTMLElement>("[data-sonner-toaster]");
+  const style = (name: string) => list?.style.getPropertyValue(name);
+  expect(style("--offset-bottom")).not.toBe("");
+  expect(style("--mobile-offset-bottom")).toBe(style("--offset-bottom"));
+  expect(style("--mobile-offset-right")).toBe(style("--offset-right"));
+  act(() => {
+    toast.dismiss();
+  });
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  vi.useRealTimers();
+});

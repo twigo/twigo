@@ -269,7 +269,8 @@ function useSpreadHeight() {
  * that the toasts must not cover, and `ceiling` the height of what it shows
  * under its top that they must not reach. The toasts sit above the
  * clearance while they fit there, spread by a hover, else as low as it takes
- * to keep them whole under the ceiling.
+ * to keep them whole under the ceiling. A window of 600 px or less, where
+ * sonner takes other offsets, gets the same ones.
  */
 export function Toaster({
   clearance = 0,
@@ -280,13 +281,15 @@ export function Toaster({
 }) {
   const { section, height } = useSpreadHeight();
   const bottom = `min(${String(32 + clearance)}px, calc(100dvh - ${String(ceiling + 8 + height)}px))`;
+  const offset = { bottom, right: 12 };
   return (
     <SonnerToaster
       ref={section}
       position="bottom-right"
       visibleToasts={3}
       gap={GAP}
-      offset={{ bottom, right: 12 }}
+      offset={offset}
+      mobileOffset={offset}
       style={WIDTH}
       containerAriaLabel="Notifications"
     />
