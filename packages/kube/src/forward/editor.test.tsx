@@ -332,6 +332,18 @@ test("a port that does not say HTTP has no Open in Browser", async () => {
   button("Copy Address");
 });
 
+test("Open in Browser reads the forward's own appProtocol: a port named metrics that declares http opens, with nothing asked of the core", async () => {
+  const { start, open, backend } = await mounted();
+  const forward = await start(GATEWAY, 9090);
+  await open(forward);
+  const calls = recording(backend);
+  vi.spyOn(globalThis, "open").mockReturnValue(null);
+  fireEvent.click(button("Open in Browser"));
+  await settle(4);
+  expect(calls("url_open")).toEqual(["http://localhost:9090"]);
+  expect(calls("forward_ports")).toEqual([]);
+});
+
 test("Open in Browser opens the local address through the workbench, Copy Address copies it", async () => {
   const { start, open, backend } = await mounted();
   const calls = recording(backend);

@@ -286,16 +286,34 @@ test("a forward carries the appProtocol its port declares", async () => {
   expect(grpc.appProtocol).toBe("grpc");
   const http = started(await start(GATEWAY, 80, 8081));
   expect(http.appProtocol).toBeNull();
+  expect(started(await start(GATEWAY, 9090)).appProtocol).toBe("http");
   await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
   expect(latest(grpc.id)?.appProtocol).toBe("grpc");
   const ports = await answered(backend.invoke("forward_ports", GATEWAY));
   expect(
     ports.ports.map(({ port, appProtocol }) => [port, appProtocol]),
   ).toEqual([
-    [9090, null],
+    [9090, "http"],
     [80, null],
     [9000, "grpc"],
   ]);
+});
+
+test("a workload's container ports declare no appProtocol, as Kubernetes has none for them", async () => {
+  const { backend, start } = await followed();
+  const deployment = {
+    ...GATEWAY,
+    gvr: DEPLOYMENTS,
+    name: "payments-gateway",
+    namespace: "payments",
+  };
+  const ports = await answered(backend.invoke("forward_ports", deployment));
+  expect(ports.ports.map(({ appProtocol }) => appProtocol)).toEqual([
+    null,
+    null,
+    null,
+  ]);
+  expect(started(await start(deployment, 50051)).appProtocol).toBeNull();
 });
 
 test("a pod target forwards to itself", async () => {

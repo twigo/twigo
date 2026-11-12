@@ -81,12 +81,39 @@ test.each<[number, "http" | "https" | undefined]>([
   expect(webOf(forward({ portName: null, port }))).toBe(scheme);
 });
 
+test.each<[string, string | null, number, "http" | "https" | undefined]>([
+  ["http", null, 9999, "http"],
+  ["https", null, 9999, "https"],
+  ["HTTP", null, 9999, "http"],
+  ["https", "web", 8080, "https"],
+  ["http", "grpc", 50051, "http"],
+  ["grpc", "http", 80, undefined],
+  ["kubernetes.io/ws", "http", 8080, undefined],
+  ["kubernetes.io/h2c", null, 8080, undefined],
+  ["mycompany.com/my-custom-protocol", "web", 8080, undefined],
+])(
+  "an appProtocol %s on a port named %s at %i decides: it opens as %s",
+  (appProtocol, portName, port, scheme) => {
+    expect(webOf(forward({ appProtocol, portName, port }))).toBe(scheme);
+  },
+);
+
 test("the link to a web port uses the local port and its scheme", () => {
   expect(webUrl(forward({ local: 8090 }))).toBe("http://localhost:8090");
   expect(webUrl(forward({ portName: "https", local: 8443 }))).toBe(
     "https://localhost:8443",
   );
   expect(webUrl(forward({ portName: "grpc" }))).toBeUndefined();
+  expect(
+    webUrl(
+      forward({
+        appProtocol: "https",
+        portName: null,
+        port: 9999,
+        local: 9443,
+      }),
+    ),
+  ).toBe("https://localhost:9443");
 });
 
 test.each<[ForwardState, string, string, boolean]>([
@@ -173,4 +200,12 @@ test("what a state lets be done is what the forward's keys say", () => {
     keys({ state: "failed", error: { kind: "internal", message: "x" } }),
   ).toMatchObject({ "forward.running": true, "forward.startable": true });
   expect(forwardKeys(forward())["forward.web"]).toBe(true);
+  expect(
+    forwardKeys(forward({ portName: null, port: 9999, appProtocol: "http" }))[
+      "forward.web"
+    ],
+  ).toBe(true);
+  expect(forwardKeys(forward({ appProtocol: "grpc" }))["forward.web"]).toBe(
+    false,
+  );
 });

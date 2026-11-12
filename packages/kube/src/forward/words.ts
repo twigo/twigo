@@ -78,14 +78,21 @@ const HTTP_PORTS: ReadonlySet<number> = new Set([80, 8000, 8008, 8080, 8888]);
 const HTTPS_PORTS: ReadonlySet<number> = new Set([443, 8443]);
 
 /**
- * The scheme a browser reaches the port with, where its name says HTTP, or
- * its number does when it has no name; a port named for another protocol
+ * The scheme a browser reaches the port with. Where the target declares an
+ * `appProtocol` it decides: `http` and `https` are web and any other
+ * protocol is not, whatever the port is named. Without one the name says it,
+ * or the number does when it has no name; a port named for another protocol
  * is none, whatever its number.
  */
 export function webOf({
   port,
   portName,
+  appProtocol,
 }: Forward): "http" | "https" | undefined {
+  if (appProtocol !== null) {
+    const declared = appProtocol.toLowerCase();
+    return declared === "http" || declared === "https" ? declared : undefined;
+  }
   if (portName !== null) {
     if (HTTPS_NAME.test(portName)) return "https";
     return HTTP_NAME.test(portName) ? "http" : undefined;

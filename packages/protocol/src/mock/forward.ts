@@ -88,7 +88,7 @@ const GATEWAY: readonly Declared[] = [
     name: "metrics",
     targetPort: "metrics",
     container: null,
-    appProtocol: null,
+    appProtocol: "http",
     podPort: 9090,
   },
   {
@@ -111,12 +111,12 @@ const GATEWAY: readonly Declared[] = [
 
 /** The containers of the Deployments that end in `gateway` declare three ports, those of the Services' targets. */
 const GATEWAY_CONTAINER: readonly Declared[] = GATEWAY.map(
-  ({ name, appProtocol, podPort }) => ({
+  ({ name, podPort }) => ({
     port: podPort,
     name,
     targetPort: null,
     container: "app",
-    appProtocol,
+    appProtocol: null,
     podPort,
   }),
 );
