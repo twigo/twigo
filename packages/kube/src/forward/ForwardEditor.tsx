@@ -187,14 +187,9 @@ function Notices({ forward }: { forward: Forward }) {
   return (
     <>
       {state.state === "restored" && (
-        <Banner
-          tone="info"
-          icon={Info}
-          title="Waiting for its first connection."
-        >
-          It listens on {addressOf(forward)} and has not asked its cluster since
-          Twigo started or the mode's refusal was lifted; a first connection, or
-          its space connecting, makes it ask.
+        <Banner tone="info" icon={Info} title="Restored.">
+          It listens on {addressOf(forward)} and asks its cluster at the first
+          connection, or when its space connects.
         </Banner>
       )}
       {state.state === "stopped" && (

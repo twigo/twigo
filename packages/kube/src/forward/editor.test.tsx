@@ -240,9 +240,9 @@ test("restored, stopped and failed forwards of an earlier run say so, each in it
   expect(forwards.ofSpace("prod-eu").map(({ id }) => id)).toEqual([1, 2, 3]);
 
   await tab(1);
-  screen.getByText("Waiting for its first connection.");
+  screen.getByText("Restored.");
   screen.getByText(
-    /has not asked its cluster since Twigo started or the mode's refusal was lifted; a first connection, or its space connecting, makes it ask\./,
+    /asks its cluster at the first connection, or when its space connects\./,
   );
   expect(screen.getAllByText("Restored").length).toBeGreaterThan(0);
 
@@ -587,7 +587,7 @@ test("a forward that waits after the mode's refusal was lifted does not say it w
   await open(forward);
   await later(BLOCKED_AFTER_MS + LIFTS_AFTER_MS);
   expect(screen.getAllByText("Restored").length).toBeGreaterThan(0);
-  screen.getByText("Waiting for its first connection.");
+  screen.getByText("Restored.");
   expect(screen.queryByText(/when Twigo started/)).toBeNull();
   expect(screen.queryByText("Read-only")).toBeNull();
   button("Remove");
