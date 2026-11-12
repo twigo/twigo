@@ -22,7 +22,6 @@ const FIRST_FREE: u16 = 1024;
 pub struct Listeners {
     pub(super) v4: TcpListener,
     pub(super) v6: Option<TcpListener>,
-    port: u16,
 }
 
 pub(super) type Socket = Box<dyn Duplex>;
@@ -57,10 +56,6 @@ pub enum BindError {
 }
 
 impl Listeners {
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-
     /// Accepts on every listener, from a task of its own each, into
     /// `sockets`.
     pub(super) fn accept(self, sockets: &mpsc::UnboundedSender<Socket>) -> Accepting {
@@ -132,7 +127,7 @@ pub async fn listen(port: u16) -> Result<Listeners, BindError> {
             None => None,
         },
     };
-    Ok(Listeners { v4, v6, port })
+    Ok(Listeners { v4, v6 })
 }
 
 /// Binds `address`. `SO_REUSEADDR` lets a port bind again while the

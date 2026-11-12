@@ -14,6 +14,7 @@ use twigo_cache::object::Object;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 
 use super::cause::Cause;
+use super::pick::Known;
 use super::{Config, Kind};
 use crate::pods::{Subscriptions, v1};
 
@@ -32,22 +33,6 @@ pub(super) struct Candidate {
     pub key: Box<str>,
     pub name: Box<str>,
     pub port: u16,
-}
-
-pub(super) enum Seen {
-    /// Not everything is listed yet; the cluster does not answer, when that
-    /// is why.
-    Unlisted(Option<String>),
-    /// What fails a forward whoever asked: a rejected credential, or the
-    /// target is gone.
-    Fault(Cause),
-    /// The cluster fails in a way that may pass, which the hub tries again.
-    Refused(IpcError),
-    Listed {
-        candidates: Vec<Candidate>,
-        /// Why there are none, when there are none.
-        why: String,
-    },
 }
 
 pub(super) enum Watching {
@@ -118,40 +103,40 @@ impl Watching {
     /// What the subscriptions say. The target is gone once its own
     /// subscription has listed it missing, whatever the others say, and
     /// their refusals count only once it has found it.
-    pub(super) fn look(&self, config: &Config) -> Seen {
+    pub(super) fn look(&self, config: &Config) -> Known {
         let label = &config.target.label;
         let name = &config.target.name;
         match self {
             Watching::Pod(pod) => {
                 let Ok(object) = listed(pod) else {
-                    return Seen::Fault(Cause::gone(label, name));
+                    return Known::Fault(Cause::gone(label, name));
                 };
                 let states = [pod.state()];
                 if let Some(seen) = refusal(&states) {
                     return seen;
                 }
                 let Some(object) = object else {
-                    return Seen::Unlisted(unanswered(&states));
+                    return Known::Unknown(unanswered(&states));
                 };
                 let Ok(doc) = serde_json::from_str::<PodDoc>(object.json.get()) else {
-                    return Seen::Listed {
+                    return Known::Listed {
                         candidates: Vec::new(),
                         why: format!("{label} {name} could not be read"),
                     };
                 };
                 if doc.status.finished() {
-                    return Seen::Listed {
+                    return Known::Listed {
                         candidates: Vec::new(),
                         why: format!("{label} {name} has finished"),
                     };
                 }
                 if !doc.status.running() {
-                    return Seen::Listed {
+                    return Known::Listed {
                         candidates: Vec::new(),
                         why: format!("{label} {name} is not running yet"),
                     };
                 }
-                Seen::Listed {
+                Known::Listed {
                     candidates: vec![Candidate {
                         key: name.as_str().into(),
                         name: name.as_str().into(),
@@ -162,29 +147,29 @@ impl Watching {
             }
             Watching::Service { service, slices } => {
                 let Ok(object) = listed(service) else {
-                    return Seen::Fault(Cause::gone(label, name));
+                    return Known::Fault(Cause::gone(label, name));
                 };
                 let states = [service.state(), slices.state()];
                 if let Some(seen) = refusal(counted(&states, object.is_some())) {
                     return seen;
                 }
                 let Some(object) = object.filter(|_| slices.listed()) else {
-                    return Seen::Unlisted(unanswered(&states));
+                    return Known::Unknown(unanswered(&states));
                 };
                 let (candidates, why) =
                     behind(&object, &slices.items(), name, config.port_name.as_deref());
-                Seen::Listed { candidates, why }
+                Known::Listed { candidates, why }
             }
             Watching::Workload(workload) => {
                 if workload.target_missing() {
-                    return Seen::Fault(Cause::gone(label, name));
+                    return Known::Fault(Cause::gone(label, name));
                 }
                 let states = workload.states();
                 if let Some(seen) = refusal(counted(&states, workload.target_listed())) {
                     return seen;
                 }
                 let Some(pods) = workload.pods() else {
-                    return Seen::Unlisted(unanswered(&states));
+                    return Known::Unknown(unanswered(&states));
                 };
                 let candidates = ready(&pods, config.port, config.port_name.as_deref());
                 let why = if candidates.is_empty() {
@@ -192,7 +177,7 @@ impl Watching {
                 } else {
                     String::new()
                 };
-                Seen::Listed { candidates, why }
+                Known::Listed { candidates, why }
             }
         }
     }
@@ -218,9 +203,9 @@ fn counted(states: &[ViewState], found: bool) -> &[ViewState] {
 /// credential is final, though the hub may try it again; any other refusal
 /// may pass, a 403 too, which an API server answers for a while after it
 /// restarts (ARCHITECTURE 3.2).
-fn refusal(states: &[ViewState]) -> Option<Seen> {
+fn refusal(states: &[ViewState]) -> Option<Known> {
     if states.contains(&ViewState::Unauthorized) {
-        return Some(Seen::Fault(
+        return Some(Known::Fault(
             IpcError::new(
                 ErrorKind::Unauthorized,
                 "no credentials for this context that the cluster accepts",
@@ -229,11 +214,11 @@ fn refusal(states: &[ViewState]) -> Option<Seen> {
         ));
     }
     states.iter().find_map(|state| match state {
-        ViewState::Forbidden { verb, resource } => Some(Seen::Refused(IpcError::new(
+        ViewState::Forbidden { verb, resource } => Some(Known::Refused(IpcError::new(
             ErrorKind::Forbidden,
             format!("you may not {verb} {resource}"),
         ))),
-        ViewState::Error { error } => Some(Seen::Refused(error.clone())),
+        ViewState::Error { error } => Some(Known::Refused(error.clone())),
         _ => None,
     })
 }

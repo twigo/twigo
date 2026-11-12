@@ -61,7 +61,6 @@ impl Fault {
 pub(super) enum Over {
     /// The forward ended it.
     Ended,
-    Lost,
     Fault(Fault),
 }
 
@@ -106,8 +105,8 @@ impl Link {
     async fn interrupted(&mut self) -> Over {
         tokio::select! {
             _ = self.end.changed() => Over::Ended,
-            () = abandoned(self.abandoned.clone()) => Over::Lost,
-            _ = self.network.changed() => Over::Lost,
+            () = abandoned(self.abandoned.clone()) => Over::Fault(Fault::Lost),
+            _ = self.network.changed() => Over::Fault(Fault::Lost),
         }
     }
 }
@@ -125,7 +124,6 @@ pub(super) async fn serve(
     drop(open);
     match over {
         Ok(()) | Err(Over::Ended) => {}
-        Err(Over::Lost) => shared.report(Report::Failed(number, Fault::Lost)),
         Err(Over::Fault(fault)) => shared.report(Report::Failed(number, fault)),
     }
 }

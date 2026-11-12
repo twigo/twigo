@@ -14,7 +14,7 @@ use tokio::time::Instant;
 use twigo_ipc::IpcError;
 
 use super::cause::Cause;
-use super::watching::{Candidate, Seen};
+use super::watching::Candidate;
 
 /// The backoff's longest delay, before its jitter.
 const LONGEST: Duration = Duration::from_secs(30);
@@ -23,23 +23,16 @@ pub(super) enum Known {
     /// Nothing is listed yet, or nothing is watched; why, when the cluster
     /// does not answer.
     Unknown(Option<String>),
+    /// What fails a forward whoever asked: a rejected credential, or the
+    /// target is gone.
     Fault(Cause),
+    /// The cluster fails in a way that may pass, which the hub tries again.
     Refused(IpcError),
     Listed {
         candidates: Vec<Candidate>,
+        /// Why there are none, when there are none.
         why: String,
     },
-}
-
-impl From<Seen> for Known {
-    fn from(seen: Seen) -> Self {
-        match seen {
-            Seen::Unlisted(why) => Known::Unknown(why),
-            Seen::Fault(error) => Known::Fault(error),
-            Seen::Refused(error) => Known::Refused(error),
-            Seen::Listed { candidates, why } => Known::Listed { candidates, why },
-        }
-    }
 }
 
 pub(super) enum Chosen {

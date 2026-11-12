@@ -149,24 +149,20 @@ impl Subscriptions {
     /// The least ready of its subscriptions' states, or an error once the
     /// target is gone.
     pub(crate) fn state(&self) -> ViewState {
-        match self.gone() {
-            Some(error) => ViewState::Error { error },
-            None => hub::combine(self.states().into_iter()),
-        }
-    }
-
-    pub(crate) fn gone(&self) -> Option<IpcError> {
-        let ready = hub::combine(self.states().into_iter()) == ViewState::Ready;
-        (ready && self.target_missing()).then(|| {
-            IpcError::new(
-                ErrorKind::NotFound,
-                format!(
-                    "{} {} is gone",
-                    resource_name(&self.target.resource.group, &self.target.resource.resource),
-                    self.target.name
+        let state = hub::combine(self.states().into_iter());
+        if state == ViewState::Ready && self.target_missing() {
+            return ViewState::Error {
+                error: IpcError::new(
+                    ErrorKind::NotFound,
+                    format!(
+                        "{} {} is gone",
+                        resource_name(&self.target.resource.group, &self.target.resource.resource),
+                        self.target.name
+                    ),
                 ),
-            )
-        })
+            };
+        }
+        state
     }
 
     /// Whether the target's own subscription has listed.

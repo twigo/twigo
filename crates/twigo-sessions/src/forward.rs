@@ -58,11 +58,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// the second containerd gives kubectl's clients
 /// ([`sandbox_portforward_linux.go`](https://github.com/containerd/containerd/blob/v2.3.4/internal/cri/server/sandbox_portforward_linux.go#L83-L126)).
 const QUIET: Duration = Duration::from_secs(1);
-/// How long the first stream is watched for the pod's refusal, from the
-/// upgrade's return: a port that nothing listens on answered on the error
-/// channel within 1.51 ms of it, over 60 tries (3 runs of 20, load average
-/// 73.8 to 75.0) on kind 1.37 with containerd 2.3.4 (2026-11-12,
-/// `forward::live`).
+/// How long the first stream is watched for the pod's refusal (ARCHITECTURE 4.6).
 const PROBE_WINDOW: Duration = Duration::from_millis(250);
 const ACCEPT_PAUSE: Duration = Duration::from_millis(100);
 const LISTENING_PROBE: Duration = Duration::from_secs(1);
@@ -220,7 +216,6 @@ pub struct Forward {
     control: mpsc::UnboundedSender<Control>,
     /// Where its listeners send what they accept.
     sockets: mpsc::UnboundedSender<Socket>,
-    addresses: Vec<String>,
     task: JoinHandle<()>,
     accepting: Option<Accepting>,
 }
@@ -228,26 +223,25 @@ pub struct Forward {
 impl Forward {
     /// Starts a forward on `listeners`, as `begin` says. Needs the runtime.
     pub fn spawn(hub: Hub, config: Config, listeners: Listeners, begin: Begin) -> Self {
-        let addresses = listeners.addresses();
         let (sender, sockets) = mpsc::unbounded_channel();
         let accepting = listeners.accept(&sender);
         Self::spawn_with(
             hub,
             config,
             (sender, sockets),
-            (addresses, Some(accepting)),
+            Some(accepting),
             begin,
             Arc::new(Kube),
         )
     }
 
-    /// A forward that serves the sockets that arrive on `sockets`, listening
-    /// on `listening`.
+    /// A forward that serves the sockets that arrive on `sockets`, which
+    /// `accepting` fills from its listeners when it has any.
     fn spawn_with(
         hub: Hub,
         config: Config,
         (sender, sockets): (mpsc::UnboundedSender<Socket>, Sockets),
-        (addresses, accepting): (Vec<String>, Option<Accepting>),
+        accepting: Option<Accepting>,
         begin: Begin,
         connect: Arc<dyn Connect>,
     ) -> Self {
@@ -296,7 +290,6 @@ impl Forward {
             status: status_rx,
             control,
             sockets: sender,
-            addresses,
             task: tokio::spawn(supervisor.run()),
             accepting,
         }
@@ -304,10 +297,6 @@ impl Forward {
 
     pub fn status(&self) -> watch::Receiver<Status> {
         self.status.clone()
-    }
-
-    pub fn addresses(&self) -> &[String] {
-        &self.addresses
     }
 
     /// The bytes to the pod and from it so far, which the status shows with
@@ -322,7 +311,6 @@ impl Forward {
     /// Listens on `listeners` in place of its own, which are closed when it
     /// returns. Its state, its connections and what it is doing stay.
     pub fn rebind(&mut self, listeners: Listeners) {
-        self.addresses = listeners.addresses();
         self.accepting = Some(listeners.accept(&self.sockets));
     }
 
@@ -793,8 +781,7 @@ impl Supervisor {
         let Some(watching) = &self.watching else {
             return;
         };
-        self.shared
-            .know(Known::from(watching.look(&self.shared.config)));
+        self.shared.know(watching.look(&self.shared.config));
         // The pod new connections go to may have changed.
         self.shared.choose(Instant::now());
     }
@@ -846,21 +833,21 @@ impl Supervisor {
         }
         match proved {
             Ok(()) => self.proven(),
-            Err(connection::Over::Fault(fault)) => match fault {
-                Fault::Fatal(error) => self.fail(error),
-                // That pod is avoided: the proof chooses again.
-                Fault::Left { words, .. } => self.failure(words),
-                Fault::Port(words) | Fault::NoPod(words) => {
-                    self.failure(words.clone());
-                    self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
+            Err(connection::Over::Fault(fault)) => {
+                if let Some(words) = fault.words() {
+                    self.failure(words);
                 }
-                Fault::Transient(cause) => {
-                    self.failure(cause.error().message.clone());
-                    self.unreachable(cause, true);
+                match fault {
+                    Fault::Fatal(error) => self.fail(error),
+                    // That pod is avoided: the proof chooses again.
+                    Fault::Left { .. } => {}
+                    Fault::Port(words) | Fault::NoPod(words) => {
+                        self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
+                    }
+                    Fault::Transient(cause) => self.unreachable(cause, true),
+                    Fault::Lost => self.pause(),
                 }
-                Fault::Lost => self.pause(),
-            },
-            Err(connection::Over::Lost) => self.pause(),
+            }
             // The forward is failing, and the probe goes with it.
             Err(connection::Over::Ended) => {}
         }

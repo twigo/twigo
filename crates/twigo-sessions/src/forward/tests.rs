@@ -21,7 +21,7 @@ use super::connect::{Connect, Connected};
 use super::fake::{Fake, NAMESPACE, Renew};
 use super::listen::Socket;
 use super::pick::{Chosen, Known, Pick};
-use super::watching::{Candidate, Seen, Watching};
+use super::watching::{Candidate, Watching};
 use super::{Begin, BindError, Config, Forward, Listeners, Status, Target, free_port, listen};
 
 async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
@@ -240,6 +240,10 @@ async fn listeners() -> Listeners {
     }
 }
 
+fn port_of(listeners: &Listeners) -> u16 {
+    listeners.v4.local_addr().unwrap().port()
+}
+
 struct Harness {
     pods: Pods,
     served: mpsc::UnboundedReceiver<Served>,
@@ -265,7 +269,7 @@ fn start_on(
         hub.clone(),
         config,
         (sockets.clone(), accepted),
-        (Vec::new(), None),
+        None,
         if restored {
             Begin::Restored
         } else {
@@ -562,17 +566,17 @@ async fn a_pod_that_fails_is_avoided_and_comes_back_after_its_backoff() {
     assert_eq!(forward.next().await.pod, "web-a");
 }
 
-async fn seen(fake: &Fake, config: &Config) -> Seen {
+async fn seen(fake: &Fake, config: &Config) -> Known {
     seen_with(fake, config, Budgets::default()).await
 }
 
-async fn seen_with(fake: &Fake, config: &Config, budgets: Budgets) -> Seen {
+async fn seen_with(fake: &Fake, config: &Config, budgets: Budgets) -> Known {
     let (hub, _clients) = fake.hub(budgets);
     let mut watching = Watching::new(&hub, config).await.unwrap();
     within("the objects are listed", async {
         loop {
             let seen = watching.look(config);
-            if !matches!(seen, Seen::Unlisted(_)) {
+            if !matches!(seen, Known::Unknown(_)) {
                 return seen;
             }
             watching.changed().await;
@@ -581,25 +585,25 @@ async fn seen_with(fake: &Fake, config: &Config, budgets: Budgets) -> Seen {
     .await
 }
 
-fn candidates(seen: Seen) -> Vec<(String, u16)> {
+fn candidates(seen: Known) -> Vec<(String, u16)> {
     match seen {
-        Seen::Listed { candidates, .. } => candidates
+        Known::Listed { candidates, .. } => candidates
             .into_iter()
             .map(|Candidate { name, port, .. }| (name.to_string(), port))
             .collect(),
-        Seen::Fault(error) => panic!("a fault: {error:?}"),
-        Seen::Unlisted(_) | Seen::Refused(_) => panic!("unlisted or refused"),
+        Known::Fault(error) => panic!("a fault: {error:?}"),
+        Known::Unknown(_) | Known::Refused(_) => panic!("unlisted or refused"),
     }
 }
 
-fn why(seen: Seen) -> String {
+fn why(seen: Known) -> String {
     match seen {
-        Seen::Listed { candidates, why } => {
+        Known::Listed { candidates, why } => {
             assert!(candidates.is_empty(), "{candidates:?}");
             why
         }
-        Seen::Fault(error) => panic!("a fault: {error:?}"),
-        Seen::Unlisted(_) | Seen::Refused(_) => panic!("unlisted or refused"),
+        Known::Fault(error) => panic!("a fault: {error:?}"),
+        Known::Unknown(_) | Known::Refused(_) => panic!("unlisted or refused"),
     }
 }
 
@@ -1607,7 +1611,7 @@ async fn a_forward_whose_probe_finds_every_session_taken_says_so_after_a_while()
         hub,
         pod_target("web-1"),
         mpsc::unbounded_channel(),
-        (Vec::new(), None),
+        None,
         Begin::Started,
         Arc::new(pods),
     );
@@ -2314,15 +2318,14 @@ async fn a_taken_port_answers_in_use_with_the_next_free_one_which_then_binds() {
     let free = free_port(port).await.unwrap();
     assert_eq!(free, port + 1);
     let bound = listen(free).await.unwrap();
-    assert_eq!(bound.port(), free);
+    assert_eq!(port_of(&bound), free);
 }
 
 #[tokio::test]
 async fn both_loopbacks_bind_one_port_and_a_port_held_on_either_is_busy() {
     let v6_here = std::net::TcpListener::bind(("::1", 0)).is_ok();
     let listeners = listeners().await;
-    let port = listeners.port();
-    assert_eq!(listeners.v4.local_addr().unwrap().port(), port);
+    let port = port_of(&listeners);
     assert_eq!(listeners.v6.is_some(), v6_here);
     if let Some(v6) = &listeners.v6 {
         assert_eq!(v6.local_addr().unwrap().port(), port);
@@ -2383,7 +2386,7 @@ async fn a_port_binds_again_straight_after_a_forward_that_served_connections_clo
         loopbacks.push(Ipv6Addr::LOCALHOST.into());
     }
     let listeners = listeners().await;
-    let port = listeners.port();
+    let port = port_of(&listeners);
     let (sender, mut sockets) = mpsc::unbounded_channel();
     let accepting = listeners.accept(&sender);
     let mut open = Vec::new();
@@ -2408,7 +2411,7 @@ async fn a_port_binds_again_straight_after_a_forward_that_served_connections_clo
     let again = listen(port)
         .await
         .unwrap_or_else(|error| panic!("port {port} binds again at once: {error:?}"));
-    assert_eq!(again.port(), port);
+    assert_eq!(port_of(&again), port);
     assert_eq!(again.addresses().len(), loopbacks.len());
 }
 
@@ -2419,14 +2422,14 @@ async fn a_dropped_forward_has_closed_its_port_when_the_drop_returns() {
     let (hub, _clients) = fake.hub(Budgets::default());
     let (pods, _served) = Pods::new();
     let listeners = listeners().await;
-    let (port, addresses) = (listeners.port(), listeners.addresses());
+    let port = port_of(&listeners);
     let (sender, sockets) = mpsc::unbounded_channel();
     let accepting = listeners.accept(&sender);
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
         (sender, sockets),
-        (addresses, Some(accepting)),
+        Some(accepting),
         Begin::Started,
         Arc::new(pods),
     );
@@ -2447,18 +2450,17 @@ async fn a_client_of_either_loopback_is_served_by_the_pod() {
     let (hub, _clients) = fake.hub(Budgets::default());
     let (pods, mut served) = Pods::new();
     let listeners = listeners().await;
-    let (port, addresses) = (listeners.port(), listeners.addresses());
+    let port = port_of(&listeners);
     let (sender, sockets) = mpsc::unbounded_channel();
     let accepting = listeners.accept(&sender);
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
         (sender, sockets),
-        (addresses, Some(accepting)),
+        Some(accepting),
         Begin::Started,
         Arc::new(pods),
     );
-    assert_eq!(forward.addresses().contains(&"::1".to_owned()), v6_here);
     let mut status = forward.status();
     within(
         "the forward is ready",
@@ -3156,7 +3158,8 @@ async fn an_existing_deployment_whose_pods_are_refused_says_so() {
     let fake = Fake::default();
     deployment(&fake);
     workload_pods_refused(&fake);
-    let Seen::Refused(error) = seen(&fake, &config("apps", "deployments", "api", 8080, None)).await
+    let Known::Refused(error) =
+        seen(&fake, &config("apps", "deployments", "api", 8080, None)).await
     else {
         panic!("its pods are refused");
     };
@@ -3232,7 +3235,7 @@ async fn a_forward_restored_under_a_refusal_is_failed_from_its_first_instant_and
         hub.clone(),
         pod_target("web-1"),
         (sockets, accepted),
-        (Vec::new(), None),
+        None,
         Begin::Refused(refusal.clone()),
         Arc::new(pods.clone()),
     );
