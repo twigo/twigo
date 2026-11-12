@@ -195,8 +195,8 @@ async fn a_port_nobody_listens_on_answers_within_the_probe_window_and_one_that_d
         .is_err();
     live.delete().await;
     assert!(
-        slowest < PROBE_WINDOW,
-        "the probe window {PROBE_WINDOW:?} covers the slowest refusal after the upgrade, {slowest:?}"
+        slowest < PROBE_WINDOW / 2,
+        "half the probe window {PROBE_WINDOW:?} covers the slowest refusal after the upgrade, {slowest:?}"
     );
     assert!(silent, "a port that listens sends nothing");
 }

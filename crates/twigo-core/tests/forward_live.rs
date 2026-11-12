@@ -31,12 +31,14 @@ use twigo_ipc::{
     BusyWhy, ErrorKind, Forward, ForwardId, ForwardStarted, ForwardState, ForwardTarget, Gvr, Mode,
     ResumeForward, SetContextMode, StartForward,
 };
+use twigo_kube::client::{Actor, ProxyEnv};
 
 const WAIT: Duration = Duration::from_secs(90);
 /// Longer than the data path waits for a pod (20 s) and then for an upgrade
 /// (15 s), so a client of the test never leaves while an upgrade of its
 /// connection is still under way.
 const PATIENCE: Duration = Duration::from_secs(45);
+const OBSERVED: Duration = Duration::from_secs(3);
 const COREDNS: &str = "registry.k8s.io/coredns/coredns:";
 const COREFILE: &str = ".:5353 {\n    health :8080\n    whoami\n}\n";
 
@@ -265,17 +267,27 @@ impl Cluster {
         self.target("apps", "deployments", "web")
     }
 
-    /// The `pods/portforward` requests the API server has ended and those it
-    /// has under way. It counts a request in `apiserver_request_total` once
-    /// its handler returns ([`MonitorRequest`] after the route function,
-    /// `InstrumentRouteFunc`), and in `apiserver_longrunning_requests` from
-    /// when a connect handler starts until it returns
-    /// ([`RecordLongRunning`], called by `ConnectResource`), so the two
-    /// together are the requests started, but for the instant between a
-    /// handler's return and its count.
+    /// The `pods/portforward` requests that reached the API server's route
+    /// function and have ended, and those under way. It counts a request in
+    /// `apiserver_request_total` once the route function returns
+    /// ([`InstrumentRouteFunc`], [`MonitorRequest`]), and in
+    /// `apiserver_longrunning_requests` while the connect handler runs,
+    /// after admission ([`ConnectResource`], [`RecordLongRunning`]), so the
+    /// two together count each such request, but for the instants before
+    /// the gauge and between the handler's return and the counter. A request
+    /// that the authentication, impersonation or authorization filter
+    /// refuses is answered before the route ([`DefaultBuildHandlerChain`])
+    /// and is in neither; the in-flight limits, which count what they drop,
+    /// let a long-running request such as `portforward` through
+    /// ([`LongRunningFunc`]). The kind admin these tests run as passes every
+    /// filter, so each request they send is counted.
     ///
+    /// [`InstrumentRouteFunc`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go#L611-L627
     /// [`MonitorRequest`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go#L569-L582
+    /// [`ConnectResource`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/rest.go#L217-L224
     /// [`RecordLongRunning`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go#L539-L559
+    /// [`DefaultBuildHandlerChain`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/server/config.go#L1036-L1076
+    /// [`LongRunningFunc`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/controlplane/apiserver/config.go#L198-L200
     async fn portforwards(&self) -> (u64, u64) {
         let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
         let metrics = self.admin.request_text(request).await.unwrap();
@@ -296,9 +308,9 @@ impl Cluster {
         )
     }
 
-    /// How many requests the API server has started, once `running` are
-    /// under way and the number has held over a pause, which takes in a
-    /// request that ended between the two counts.
+    /// How many `pods/portforward` requests have reached the route, once
+    /// `running` are under way and the number has held over a pause, which
+    /// takes in a request that ended between the two counts.
     async fn started_with(&self, running: u64) -> u64 {
         let waited = tokio::time::timeout(WAIT, async {
             let mut previous = None;
@@ -723,10 +735,28 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
         ForwardState::Restored,
         "a resume, which waits for the restore to end, leaves it waiting"
     );
+    tokio::time::sleep(OBSERVED).await;
+    assert_eq!(forward(&second, started.id).state, ForwardState::Restored);
     assert_eq!(
         connections.load(Ordering::SeqCst),
         0,
-        "nothing reached the API server for it"
+        "nothing reached the API server for it in the 3 s after the restore"
+    );
+    let contexts = second.catalog.contexts().await;
+    let context = contexts
+        .find(&cluster.context)
+        .expect("the catalog lists it");
+    let gate = second
+        .policy
+        .gate_for(&cluster.context, Actor::Ui, context.fingerprint.value());
+    let (_, built) = second
+        .connections
+        .clients(context, &ProxyEnv::default(), None, gate)
+        .await
+        .unwrap();
+    assert!(
+        built,
+        "no clients were made for the context, which every ask of its cluster needs"
     );
     assert!(
         TcpStream::connect(("127.0.0.1", started.local))
@@ -927,7 +957,7 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     assert_eq!(
         cluster.started_with(0).await,
         before,
-        "since the mode turned the API server started no request"
+        "since the mode turned no request reached the API server's route"
     );
 
     core.set_context_mode(SetContextMode {
@@ -936,11 +966,15 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     })
     .await
     .unwrap();
-    state(&core, started.id, "the forward is ready again", |state| {
-        *state == ForwardState::Ready
-    })
+    state(
+        &core,
+        started.id,
+        "the lifted refusal leaves it waiting",
+        |state| *state == ForwardState::Restored,
+    )
     .await;
     answered(started.local).await;
+    assert_eq!(forward(&core, started.id).state, ForwardState::Ready);
     let (ended, under_way) = cluster.portforwards().await;
     assert!(ended + under_way > before, "it sends again once allowed");
     cluster.delete().await;
