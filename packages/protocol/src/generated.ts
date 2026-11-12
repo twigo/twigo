@@ -496,9 +496,10 @@ port: number, portName: string | null,
  */
 appProtocol: string | null, local: number, 
 /**
- * The addresses it listens on: `127.0.0.1`, and `::1` where that bound;
- * none while it listens nowhere, as one that is stopped or whose local
- * port another process held when it was restored.
+ * The addresses its listeners were last bound on: `127.0.0.1`, and `::1`
+ * where that bound. None for one that has not bound since the app
+ * started: one restored stopped, or whose local port another process
+ * held then. One stopped later keeps them and listens on none.
  */
 addresses: Array<string>, state: ForwardState, 
 /**

@@ -127,9 +127,10 @@ pub struct Forward {
     /// webview can tell an HTTP port without another call.
     pub app_protocol: Option<String>,
     pub local: u16,
-    /// The addresses it listens on: `127.0.0.1`, and `::1` where that bound;
-    /// none while it listens nowhere, as one that is stopped or whose local
-    /// port another process held when it was restored.
+    /// The addresses its listeners were last bound on: `127.0.0.1`, and `::1`
+    /// where that bound. None for one that has not bound since the app
+    /// started: one restored stopped, or whose local port another process
+    /// held then. One stopped later keeps them and listens on none.
     pub addresses: Vec<String>,
     pub state: ForwardState,
     /// The pod new connections go to, once one is chosen.
