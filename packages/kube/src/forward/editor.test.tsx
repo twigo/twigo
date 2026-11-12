@@ -329,6 +329,20 @@ test("a tab a restored layout brings back for a forward the core lacks says so a
   expect(tabsIn("editor")).toEqual([uri]);
 });
 
+test("a tab a restored layout brings back with a stale title is retitled by its forward", async () => {
+  const { workbench, start, open } = await mounted();
+  const uri = await open(await start(API, 80));
+  cleanup();
+  const layout = structuredClone(workbench.spaces.state("qa").editors);
+  const panel = layout?.panels[uri];
+  if (!layout || !panel) throw new Error("the layout was not saved");
+  layout.panels[uri] = { ...panel, title: "Port forward" };
+  workbench.spaces.update("qa", (state) => ({ ...state, editors: layout }));
+  render(<WorkbenchView workbench={workbench} />);
+  await settle(6);
+  expect(workbench.editors.title(uri)).toBe("auth-api:http → 8080");
+});
+
 test("the actions follow the state: a ready http forward can be opened, copied, stopped, moved and removed, not started", async () => {
   const { start, open } = await mounted();
   await open(await start(API, 80));

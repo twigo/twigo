@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import {
   act,
   cleanup,
@@ -753,4 +753,30 @@ test("the editor commands work on a restored editor nothing opens", async () => 
     workbench.commands.execute("workbench.action.closeActiveEditor", lookup),
   );
   expect(tabs()).toEqual([]);
+});
+
+test("a title an editor sets as it mounts in a restored layout reaches its tab", async () => {
+  const workbench = await testWorkbench();
+  let renamed = false;
+  workbench.editors.register({
+    id: "test.late",
+    scheme: "late",
+    title: (uri) => uri.host,
+    component: function Late({ uri }) {
+      useEffect(() => {
+        if (renamed) workbench.editors.setTitle(uri, "Renamed");
+      }, [uri]);
+      return <p>body of {uri}</p>;
+    },
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    workbench.editors.open("late://a");
+  });
+  await act(() => Promise.resolve());
+  cleanup();
+  renamed = true;
+  render(<WorkbenchView workbench={workbench} />);
+  expect(workbench.editors.title("late://a")).toBe("Renamed");
+  expect(document.querySelector(".dv-tab")?.textContent).toBe("Renamed");
 });

@@ -97,6 +97,8 @@ export class Editors {
     string,
     { readonly space: string; readonly area: Area }
   >();
+  /** Titles editors set before their dock was attached, which a restored layout's panels do. */
+  readonly #titles = new Map<string, string>();
   #active: string | undefined;
 
   /**
@@ -177,6 +179,9 @@ export class Editors {
       this.#notifyClosed(panel.id);
       if (area === "panel") this.changes.emit();
     });
+    for (const [uri, title] of [...this.#titles]) {
+      if (api.getPanel(uri)) this.setTitle(uri, title);
+    }
     const added =
       area === "panel"
         ? api.onDidAddPanel(() => {
@@ -322,10 +327,19 @@ export class Editors {
     return this.#find(uri)?.panel.title;
   }
 
-  /** Renames an open editor's tab, once the editor knows a better title. */
+  /**
+   * Renames an open editor's tab, once the editor knows a better title. A
+   * restored layout's editors mount before their dock is attached, so a title
+   * set then waits for the attach.
+   */
   setTitle(uri: string, title: string): void {
     const panel = this.#find(uri)?.panel;
-    if (!panel || panel.title === title) return;
+    if (!panel) {
+      this.#titles.set(uri, title);
+      return;
+    }
+    this.#titles.delete(uri);
+    if (panel.title === title) return;
     panel.api.setTitle(title);
     this.changes.emit();
   }
@@ -500,6 +514,7 @@ export class Editors {
   }
 
   #notifyClosed(uri: string): void {
+    this.#titles.delete(uri);
     for (const closed of this.#closed) closed(uri);
   }
 
