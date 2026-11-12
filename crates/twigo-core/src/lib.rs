@@ -130,6 +130,7 @@ impl Core {
             Audit::open(&data.join("audit.jsonl")),
         );
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
+        let forwards = Forwards::new(Arc::clone(&policy), catalog.subscribe());
         Arc::new_cyclic(|core| Self {
             this: core.clone(),
             hub: Hub::new(connect(core.clone())),
@@ -141,7 +142,7 @@ impl Core {
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             shells: Subscriptions::new("shell"),
-            forwards: Forwards::default(),
+            forwards,
             terminals: terminal::Terminals::new(data.join("terminals")),
             bus: Arc::default(),
             undos: Arc::default(),

@@ -1154,6 +1154,36 @@ async fn a_lifted_refusal_returns_a_restored_forward_to_waiting_and_a_started_on
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_forward_says_whether_it_waits_for_its_first_connection_also_when_it_is_refused() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let refusal = IpcError::new(ErrorKind::Permissions, "the context is read-only");
+
+    let mut restored = start(&fake, pod_target("web-1"), true, Budgets::default());
+    assert!(restored.forward.waits());
+    restored.forward.refuse(refusal.clone());
+    restored.state("the forward fails", is_failed).await;
+    assert!(restored.forward.waits());
+    restored.forward.allow();
+    restored
+        .state("the forward waits", |state| {
+            *state == ForwardState::Restored
+        })
+        .await;
+    assert!(restored.forward.waits());
+    let _client = restored.client();
+    restored.ready().await;
+    assert!(!restored.forward.waits());
+
+    let mut started = start(&fake, pod_target("web-1"), false, Budgets::default());
+    assert!(!started.forward.waits());
+    started.ready().await;
+    started.forward.refuse(refusal);
+    started.state("the forward fails", is_failed).await;
+    assert!(!started.forward.waits());
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_bytes_a_forward_carried_are_known_before_its_status_publishes_them() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));

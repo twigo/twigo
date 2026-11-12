@@ -81,8 +81,9 @@ struct Entry {
     run: Option<Run>,
     /// It should run, and could not listen: why.
     unbound: Option<IpcError>,
-    /// Its context's mode refuses it, or the catalog lacks the context.
-    refused: bool,
+    /// Why its context's mode refuses it, or the catalog lacks the context,
+    /// while one does.
+    refused: Option<IpcError>,
     /// Its local port is the free one that was offered in place of a busy
     /// one, which is never remembered.
     detour: bool,
@@ -102,32 +103,24 @@ impl Entry {
         }
     }
 
-    fn check(&mut self, policy: &Policy, contexts: Option<&Contexts>) {
+    /// Tells its data path what changed: a refusal, other words for it, or
+    /// none any more.
+    fn check(&mut self, checks: &Checks) {
         let Some(run) = &self.run else {
             return;
         };
-        let refusal = match contexts {
-            Some(contexts) if contexts.find(&self.context).is_none() => Some(IpcError::from(
-                &ClientsError::NoContext(self.context.clone()),
-            )),
-            _ => blocked(
-                policy,
-                &self.context,
-                &attributes(&self.base.target),
-                Actor::Ui,
-            )
-            .map(|blocked| IpcError::from(*blocked)),
-        };
-        match refusal {
-            Some(error) if !self.refused => {
-                self.refused = true;
+        let refusal = checks.refusal(&self.context, &self.base.target);
+        match (refusal, &self.refused) {
+            (Some(error), Some(was)) if error == *was => {}
+            (Some(error), _) => {
+                self.refused = Some(error.clone());
                 run.data.refuse(error);
             }
-            None if self.refused => {
-                self.refused = false;
+            (None, Some(_)) => {
+                self.refused = None;
                 run.data.allow();
             }
-            _ => {}
+            (None, None) => {}
         }
     }
 
@@ -261,12 +254,49 @@ impl Table {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct Forwards(Arc<Mutex<Table>>);
+/// What decides whether a forward may run, read under the table's lock, so
+/// a check never lands with older answers than another.
+struct Checks {
+    policy: Arc<Policy>,
+    catalog: watch::Receiver<Option<Arc<Contexts>>>,
+}
+
+impl Checks {
+    /// Why `context` may not be forwarded to, if it may not: the catalog
+    /// lacks it, or its mode refuses the request a connection sends. A
+    /// catalog not loaded yet refuses nothing.
+    fn refusal(&self, context: &str, target: &ForwardTarget) -> Option<IpcError> {
+        let missing = self
+            .catalog
+            .borrow()
+            .as_deref()
+            .is_some_and(|contexts| contexts.find(context).is_none());
+        if missing {
+            return Some(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+        }
+        blocked(&self.policy, context, &attributes(target), Actor::Ui)
+            .map(|blocked| IpcError::from(*blocked))
+    }
+}
+
+pub(crate) struct Forwards {
+    table: Arc<Mutex<Table>>,
+    checks: Checks,
+}
 
 impl Forwards {
+    pub(crate) fn new(
+        policy: Arc<Policy>,
+        catalog: watch::Receiver<Option<Arc<Contexts>>>,
+    ) -> Self {
+        Self {
+            table: Arc::default(),
+            checks: Checks { policy, catalog },
+        }
+    }
+
     fn table(&self) -> MutexGuard<'_, Table> {
-        self.0.lock().expect("forwards lock")
+        self.table.lock().expect("forwards lock")
     }
 
     fn run(
@@ -286,7 +316,7 @@ impl Forwards {
         };
         let forward = data::Forward::spawn(hub, config, listeners, restored);
         let status = forward.status();
-        let table = Arc::downgrade(&self.0);
+        let table = Arc::downgrade(&self.table);
         let id = base.id;
         let pump = tokio::spawn(pump(status.clone(), base.clone(), move |_| {
             if let Some(table) = table.upgrade() {
@@ -328,11 +358,17 @@ impl Forwards {
     }
 
     /// The clients of `context` were made: a forward of it that waits for
-    /// its first connection starts over.
+    /// its first connection starts over, unless it is refused.
     pub(crate) fn connected(&self, context: &str) {
-        let table = self.table();
-        for entry in table.entries.values().filter(|e| e.context == context) {
-            if let Some(run) = &entry.run
+        let mut table = self.table();
+        for entry in table
+            .entries
+            .values_mut()
+            .filter(|entry| entry.context == context)
+        {
+            entry.check(&self.checks);
+            if entry.refused.is_none()
+                && let Some(run) = &entry.run
                 && run.status.borrow().state == ForwardState::Restored
             {
                 run.data.restart();
@@ -344,10 +380,10 @@ impl Forwards {
     /// context: a forward whose mode now refuses it, or whose context the
     /// catalog lacks, ends its connections and fails, and goes back to what
     /// it was once that passes.
-    pub(crate) fn recheck(&self, policy: &Policy, contexts: &Contexts) {
+    pub(crate) fn recheck(&self) {
         let mut table = self.table();
         for entry in table.entries.values_mut() {
-            entry.check(policy, Some(contexts));
+            entry.check(&self.checks);
         }
     }
 }
@@ -574,10 +610,10 @@ impl Core {
                         context,
                         run: run.take(),
                         unbound: None,
-                        refused: false,
+                        refused: None,
                         detour,
                     };
-                    entry.check(&self.policy, None);
+                    entry.check(&self.forwards.checks);
                     table.entries.insert(id.0, entry);
                     table.changed(id);
                     Ok(table.entries[&id.0].forward())
@@ -629,14 +665,16 @@ impl Core {
                     format!("forward {} was removed", id.0),
                 ));
             };
-            if wanted == base.local
-                && let Some(run) = &entry.run
-            {
-                if matches!(run.status.borrow().state, ForwardState::Failed { .. }) {
+            if wanted == base.local && entry.run.is_some() {
+                let refused = entry.refused.is_some();
+                entry.check(&self.forwards.checks);
+                if !refused
+                    && entry.refused.is_none()
+                    && let Some(run) = &entry.run
+                    && matches!(run.status.borrow().state, ForwardState::Failed { .. })
+                {
                     run.data.restart();
                 }
-                entry.refused = false;
-                entry.check(&self.policy, None);
                 let forward = Box::new(entry.forward());
                 return Ok(ForwardStarted::Started { forward });
             }
@@ -648,9 +686,6 @@ impl Core {
         let mut moved = base;
         moved.local = wanted;
         moved.addresses = listeners.addresses();
-        let run = self
-            .forwards
-            .run(&context, &moved, listeners, false, self.hub.clone())?;
         let started = {
             let mut table = self.forwards.table();
             let Some(was) = table
@@ -663,6 +698,13 @@ impl Core {
                     format!("forward {} was removed", id.0),
                 ));
             };
+            let waits = table.entries[&id.0]
+                .run
+                .as_ref()
+                .is_some_and(|run| run.data.waits());
+            let run = self
+                .forwards
+                .run(&context, &moved, listeners, waits, self.hub.clone())?;
             let detour = if was.0 == wanted {
                 was.1
             } else {
@@ -677,9 +719,9 @@ impl Core {
             entry.base.addresses = moved.addresses;
             entry.run = Some(run);
             entry.unbound = None;
-            entry.refused = false;
+            entry.refused = None;
             entry.detour = detour;
-            entry.check(&self.policy, None);
+            entry.check(&self.forwards.checks);
             let started = entry.forward();
             table.changed(id);
             started
@@ -699,7 +741,7 @@ impl Core {
             })?;
             entry.stop();
             entry.unbound = None;
-            entry.refused = false;
+            entry.refused = None;
             let space = entry.base.target.space.clone();
             table.changed(id);
             space
@@ -731,9 +773,12 @@ impl Core {
         self.forwards.follow_window(window, send)
     }
 
+    /// Stores the space's forwards as the table has them now. The table stays
+    /// locked until they are stored, so the order of writes is the order of
+    /// snapshots.
     fn save_forwards(&self, space: &str) {
-        let saved = self.forwards.table().saved(space);
-        if let Err(error) = self.state.set_forwards(space, &saved) {
+        let table = self.forwards.table();
+        if let Err(error) = self.state.set_forwards(space, &table.saved(space)) {
             eprintln!("could not keep the forwards of {space}: {error}");
         }
     }
@@ -796,7 +841,7 @@ impl Core {
             context: context.to_owned(),
             run: None,
             unbound: None,
-            refused: false,
+            refused: None,
             detour,
         };
         if runs {
@@ -824,6 +869,12 @@ impl Core {
             }
         }
         let mut table = self.forwards.table();
+        if table
+            .find(&Key::of(&entry.base.target, entry.base.port))
+            .is_some()
+        {
+            return;
+        }
         table.entries.insert(id.0, entry);
         table.changed(id);
     }
@@ -834,8 +885,7 @@ impl Core {
         let mut changes = Changes::new(&self.policy, &self.catalog.subscribe());
         self.restore_forwards().await;
         loop {
-            let contexts = self.catalog.contexts().await;
-            self.forwards.recheck(&self.policy, &contexts);
+            self.forwards.recheck();
             changes.next().await;
         }
     }

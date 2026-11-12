@@ -24,7 +24,7 @@ mod live;
 mod tests;
 
 use std::future::pending;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -251,6 +251,7 @@ impl Forward {
             reports,
             sent: AtomicU64::new(0),
             received: AtomicU64::new(0),
+            waits: AtomicBool::new(restored),
         });
         let supervisor = Supervisor {
             shared: Arc::clone(&shared),
@@ -292,6 +293,12 @@ impl Forward {
 
     pub fn addresses(&self) -> &[String] {
         &self.addresses
+    }
+
+    /// Whether it waits for its first connection, or did when it was
+    /// refused: it has asked no cluster yet.
+    pub fn waits(&self) -> bool {
+        self.shared.waits.load(Ordering::Relaxed)
     }
 
     /// The bytes to the pod and from it so far, which the status shows with
@@ -343,6 +350,7 @@ struct Shared {
     reports: mpsc::UnboundedSender<Report>,
     sent: AtomicU64,
     received: AtomicU64,
+    waits: AtomicBool,
 }
 
 impl Shared {
@@ -513,6 +521,11 @@ impl Supervisor {
         }
         loop {
             self.advance();
+            self.shared.waits.store(
+                self.phase == Phase::Restored
+                    || (self.phase == Phase::Failed && self.refused_from_restored),
+                Ordering::Relaxed,
+            );
             let deadline = earliest(self.no_pod_by, self.retry);
             tokio::select! {
                 Some(control) = self.control.recv() => self.control(control),
