@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 import type { Forward, ForwardState } from "@twigo/protocol";
 import { ForwardLine } from "./ForwardLine";
 
-/** What each state's words measure in Chrome at 12 px, and the 6 px that lead them. */
 const WORDS: Readonly<Record<string, number>> = {
   Restored: 50.7 + 6,
   Stopped: 47.9 + 6,
@@ -79,7 +78,6 @@ function line(words: string, at: number, name: string, state: ForwardState) {
   return screen.getByText(words);
 }
 
-/** The room the words are left in a side bar of each width, as Chrome measured it (side bar, the words, what the row leaves them). */
 test.each<[number, string, number, string, ForwardState, boolean]>([
   [260, "Restored", 46.5, "payments-api", RESTORED, false],
   [260, "Stopped", 0, "payments-gateway", STOPPED, false],

@@ -630,7 +630,6 @@ test("a busy port's field that is dismissed starts nothing on the free port", as
   expect(ports.ports.map(({ forward }) => forward)).toEqual([null, null, null]);
 });
 
-/** `mock`, with every `forward_start` rejected with `error`. */
 function startFailing(mock: Backend, error: IpcError): Backend {
   return {
     invoke: (name, request) =>

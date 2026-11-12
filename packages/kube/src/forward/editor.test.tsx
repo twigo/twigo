@@ -74,7 +74,6 @@ interface Mounted {
   readonly open: (forward: Forward) => Promise<string>;
 }
 
-/** `backend`, telling the window every forward as `patch` makes it, to give one a state the mock does not reach. */
 function patching(
   backend: Backend,
   patch: (forward: Forward) => Forward,
