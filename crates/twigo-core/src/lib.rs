@@ -39,7 +39,7 @@ use twigo_ipc::{
     ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
-use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
+use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
@@ -253,14 +253,45 @@ impl Core {
             .ok_or_else(|| ClientsError::NoPlugin(context.to_owned()))
     }
 
-    /// Runs the context's plugin now: how the person signs in.
+    /// Runs the context's plugin now: how the person signs in. Once the run
+    /// this starts gets a credential, the forwards of each context whose
+    /// plugin it is that failed for their credential prove once; a run that
+    /// a request started, which follows a 401, does not.
     pub async fn sign_in(&self, context: &str) -> Result<(), IpcError> {
         let plugin = self
             .trusted_plugin(context)
             .await
             .map_err(|e| IpcError::from(&e))?;
-        plugin.sign_in();
+        if let Some(run) = plugin.sign_in() {
+            let core = self.this.clone();
+            tokio::spawn(async move {
+                if run.await.is_ok()
+                    && let Some(core) = core.upgrade()
+                {
+                    core.signed_in(plugin.exec()).await;
+                }
+            });
+        }
         Ok(())
+    }
+
+    /// Tells the forwards of every context whose plugin is `exec` that a
+    /// sign-in got a credential.
+    async fn signed_in(&self, exec: &Exec) {
+        let contexts: Vec<String> = self
+            .catalog
+            .contexts()
+            .await
+            .iter()
+            .filter(|context| {
+                context
+                    .entries
+                    .exec()
+                    .is_ok_and(|found| found.as_ref() == Some(exec))
+            })
+            .map(|context| context.name.clone())
+            .collect();
+        self.forwards.signed_in(&contexts).await;
     }
 
     /// Ends the run of the context's plugin.

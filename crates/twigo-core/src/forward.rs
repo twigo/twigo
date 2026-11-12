@@ -167,6 +167,8 @@ struct Table {
     early: Option<HashSet<String>>,
     /// The ports of targets that a command changes now.
     claimed: HashSet<Key>,
+    /// Set by the shutdown, after which no command saves, binds or starts.
+    closed: bool,
 }
 
 impl Table {
@@ -370,7 +372,7 @@ impl Forwards {
         context: &str,
         base: &Forward,
         listeners: Listeners,
-        restored: bool,
+        begin: data::Begin,
         hub: twigo_cache::hub::Hub,
     ) -> Result<Run, IpcError> {
         let target = &base.target;
@@ -379,11 +381,6 @@ impl Forwards {
             target: data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?,
             port: base.port,
             port_name: base.port_name.clone(),
-        };
-        let begin = if restored {
-            data::Begin::Restored
-        } else {
-            data::Begin::Started
         };
         let forward = data::Forward::spawn(hub, config, listeners, begin);
         let status = forward.status();
@@ -402,29 +399,35 @@ impl Forwards {
         })
     }
 
-    /// Gives `entry` a person's start on `listeners`, or, where its
-    /// context's mode or the catalog refuses it, a forward refused before it
-    /// asks anything. Under the table's lock, as every check is.
+    /// Refuses a command whose forward may not run: its context's mode
+    /// refuses it, no source lists its context, or Twigo is quitting. A
+    /// command asks before it reads or binds, and again with the lock it
+    /// holds while it puts the forward in, so nothing lands in between.
+    fn admit(&self, table: &Table, context: &str, target: &ForwardTarget) -> Result<(), IpcError> {
+        if table.closed {
+            return Err(quitting());
+        }
+        self.checks.refusal(context, target).map_or(Ok(()), Err)
+    }
+
+    /// Gives `entry`, which a command admitted under the table's lock, a
+    /// person's start on `listeners`.
     fn start(
         &self,
         entry: &mut Entry,
         listeners: Listeners,
         hub: twigo_cache::hub::Hub,
     ) -> Result<(), IpcError> {
-        let refusal = self.checks.refusal(&entry.context, &entry.base.target);
         let run = self.run(
             &entry.context,
             &entry.base,
             listeners,
-            refusal.is_some(),
+            data::Begin::Started,
             hub,
         )?;
-        if let Some(error) = &refusal {
-            run.data.refuse(error.clone());
-        }
         entry.run = Some(run);
         entry.unbound = None;
-        entry.refused = refusal;
+        entry.refused = None;
         Ok(())
     }
 
@@ -456,17 +459,20 @@ impl Forwards {
         self.table().followers.remove(window);
     }
 
-    /// Closes every port and connection, and leaves what the state says ran.
+    /// Closes every port and connection, and the table: what the state says
+    /// ran stays, as no command saves, binds or starts after it.
     pub(crate) fn shutdown(&self) {
         let mut table = self.table();
+        table.closed = true;
         for entry in table.entries.values_mut() {
             entry.stop();
         }
     }
 
-    /// The clients of `context` were made: a forward of it that waits
-    /// proves that it can reach a pod, unless it is refused. While the
-    /// forwards are being restored it waits for them.
+    /// The clients of `context` were built: a forward of it that waits, or
+    /// that failed for its credential, proves that it can reach a pod,
+    /// unless it is refused. While the forwards are being restored it waits
+    /// for them.
     pub(crate) fn connected(&self, context: &str) {
         let mut table = self.table();
         match &mut table.early {
@@ -478,8 +484,8 @@ impl Forwards {
     }
 
     /// The data path decides what to do, in the order of the controls: a
-    /// refusal or its lifting comes first, and only a forward that waits
-    /// then proves.
+    /// refusal or its lifting comes first, and only a forward that waits or
+    /// that failed for its credential then proves.
     fn tell_connected(&self, table: &mut Table, context: &str) {
         for entry in table
             .entries
@@ -489,6 +495,24 @@ impl Forwards {
             entry.check(&self.checks);
             if let Some(run) = &entry.run {
                 run.data.connected();
+            }
+        }
+    }
+
+    /// A sign-in the person started got a credential for `contexts`: once
+    /// the forwards are restored, each of theirs that failed for its
+    /// credential proves once, after its own check.
+    pub(crate) async fn signed_in(&self, contexts: &[String]) {
+        self.after_restore().await;
+        let mut table = self.table();
+        for entry in table
+            .entries
+            .values_mut()
+            .filter(|entry| contexts.contains(&entry.context))
+        {
+            entry.check(&self.checks);
+            if let Some(run) = &entry.run {
+                run.data.signed_in();
             }
         }
     }
@@ -564,6 +588,10 @@ fn missing(id: ForwardId) -> IpcError {
     IpcError::new(ErrorKind::NotFound, format!("no forward {}", id.0))
 }
 
+fn quitting() -> IpcError {
+    IpcError::new(ErrorKind::Unavailable, "Twigo is quitting")
+}
+
 fn unbound(local: u16, why: BusyWhy, own: Option<(String, String)>) -> IpcError {
     let words = match (why, own) {
         (BusyWhy::InUse, Some((kind, name))) => {
@@ -626,6 +654,9 @@ impl Core {
     }
 
     async fn bind(&self, key: &Key, local: u16) -> Result<Bound, IpcError> {
+        if self.forwards.table().closed {
+            return Err(quitting());
+        }
         match listen(local).await {
             Ok(listeners) => Ok(Bound::Listening(listeners)),
             Err(BindError::Busy(why)) => {
@@ -646,9 +677,9 @@ impl Core {
     }
 
     /// Binds a local port and forwards it to a port of the target. A port of
-    /// a target that has a forward answers with that forward, started again
-    /// if it was stopped or failed, and moved if another `local` is asked;
-    /// so does one whose start binds meanwhile, once that has ended.
+    /// a target that has a forward answers as a resume of that forward does,
+    /// moved if another `local` is asked, also when that forward was made
+    /// while this start read the target.
     pub async fn forward_start(&self, request: StartForward) -> Result<ForwardStarted, IpcError> {
         let StartForward {
             target,
@@ -661,7 +692,8 @@ impl Core {
         let kind = data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?
             .label()
             .to_owned();
-        self.authorize(&context, &[attributes(&target)])?;
+        self.forwards
+            .admit(&self.forwards.table(), &context, &target)?;
         let key = Key::of(&target, port);
         // The target is read for a port with no forward, before the claim,
         // and again should its forward be removed while this waits for it.
@@ -717,6 +749,7 @@ impl Core {
         };
         let handled = {
             let mut table = self.forwards.table();
+            self.forwards.admit(&table, &context, &target)?;
             let mut entry = Entry {
                 base,
                 context,
@@ -768,9 +801,9 @@ impl Core {
 
     /// A resume of a forward whose port is claimed. A stopped one binds and
     /// starts; one that runs is asked to start again, which the data path
-    /// does only if it failed, and a move hands it its new port first. What
-    /// refuses it is asked before anything starts, and the answer waits for
-    /// the data path to have handled that.
+    /// does only if it failed, and a move hands it its new port first. One
+    /// that may not run answers why and changes nothing, and the answer
+    /// waits for the data path to have handled what was sent.
     async fn resume_claimed(
         &self,
         id: ForwardId,
@@ -781,6 +814,8 @@ impl Core {
             let entry = table.entries.get(&id.0).ok_or_else(|| {
                 IpcError::new(ErrorKind::NotFound, format!("forward {} was removed", id.0))
             })?;
+            let target = &entry.base.target;
+            self.forwards.admit(&table, &entry.context, target)?;
             (
                 entry.context.clone(),
                 entry.base.clone(),
@@ -788,7 +823,6 @@ impl Core {
             )
         };
         let target = &base.target;
-        self.authorize(&context, &[attributes(target)])?;
         let key = Key::of(target, base.port);
         let wanted = local.unwrap_or(base.local);
         let listeners = if runs && wanted == base.local {
@@ -802,6 +836,7 @@ impl Core {
         let bound = listeners.is_some();
         let handled = {
             let mut table = self.forwards.table();
+            self.forwards.admit(&table, &context, target)?;
             if let Some(listeners) = listeners {
                 let entry = &table.entries[&id.0];
                 let detour = if entry.base.local == wanted {
@@ -825,13 +860,15 @@ impl Core {
             let entry = table.entries.get_mut(&id.0).expect("claimed");
             if runs {
                 entry.check(&self.forwards.checks);
-                if entry.refused.is_none()
-                    && let Some(run) = &entry.run
-                {
-                    run.data.restart();
-                }
             }
-            entry.run.as_ref().expect("it runs").data.handled()
+            let run = entry
+                .run
+                .as_ref()
+                .expect("admitted while not closed, so it runs or was started");
+            if runs {
+                run.data.restart();
+            }
+            run.data.handled()
         };
         let started = self.forwards.answer(id, handled).await;
         if bound {
@@ -848,6 +885,9 @@ impl Core {
         let _claim = self.forwards.claim_of(id).await?;
         let space = {
             let mut table = self.forwards.table();
+            if table.closed {
+                return Err(quitting());
+            }
             let entry = table.entries.get_mut(&id.0).ok_or_else(|| missing(id))?;
             entry.stop();
             entry.unbound = None;
@@ -867,6 +907,9 @@ impl Core {
         let _claim = self.forwards.claim_of(id).await?;
         let space = {
             let mut table = self.forwards.table();
+            if table.closed {
+                return Err(quitting());
+            }
             let entry = table.entries.remove(&id.0).ok_or_else(|| missing(id))?;
             table.emit(&ForwardEvent::Removed { id });
             entry.base.target.space.clone()
@@ -883,11 +926,14 @@ impl Core {
         self.forwards.follow_window(window, send)
     }
 
-    /// Stores the space's forwards as the table has them now. The table stays
-    /// locked until they are stored, so the order of writes is the order of
-    /// snapshots.
+    /// Stores the space's forwards as the table has them now, unless it is
+    /// closed. The table stays locked until they are stored, so the order of
+    /// writes is the order of snapshots.
     fn save_forwards(&self, space: &str) {
         let table = self.forwards.table();
+        if table.closed {
+            return;
+        }
         if let Err(error) = self.state.set_forwards(space, &table.saved(space)) {
             eprintln!("could not keep the forwards of {space}: {error}");
         }
@@ -896,7 +942,8 @@ impl Core {
     /// Binds the port of each forward that ran when Twigo quit, and lets it
     /// wait for its first connection or its space's connecting: nothing asks
     /// a cluster. A forward whose port another process holds fails with
-    /// that; the policy and the catalog are asked about the rest once they
+    /// that, and one that the policy or the catalog refuses as it is put in
+    /// begins failed with the refusal; the rest are asked again once both
     /// are loaded. The commands wait for it, and the forwards of the spaces
     /// whose clients were made meanwhile are told so at its end.
     pub(crate) async fn restore_forwards(&self) {
@@ -960,18 +1007,10 @@ impl Core {
             refused: None,
             detour,
         };
-        if runs {
+        let mut listeners = None;
+        if runs && !self.forwards.table().closed {
             match listen(local).await {
-                Ok(listeners) => {
-                    entry.base.addresses = listeners.addresses();
-                    let run =
-                        self.forwards
-                            .run(context, &entry.base, listeners, true, self.hub.clone());
-                    match run {
-                        Ok(run) => entry.run = Some(run),
-                        Err(error) => entry.unbound = Some(error),
-                    }
-                }
+                Ok(bound) => listeners = Some(bound),
                 Err(BindError::Busy(why)) => {
                     let own = self.forwards.table().holder(local);
                     entry.unbound = Some(unbound(local, why, own));
@@ -985,11 +1024,30 @@ impl Core {
             }
         }
         let mut table = self.forwards.table();
-        if table
-            .find(&Key::of(&entry.base.target, entry.base.port))
-            .is_some()
+        if table.closed
+            || table
+                .find(&Key::of(&entry.base.target, entry.base.port))
+                .is_some()
         {
             return;
+        }
+        if let Some(listeners) = listeners {
+            entry.base.addresses = listeners.addresses();
+            let refusal = self.forwards.checks.refusal(context, &entry.base.target);
+            let begin = match &refusal {
+                Some(error) => data::Begin::Refused(error.clone()),
+                None => data::Begin::Restored,
+            };
+            match self
+                .forwards
+                .run(context, &entry.base, listeners, begin, self.hub.clone())
+            {
+                Ok(run) => {
+                    entry.run = Some(run);
+                    entry.refused = refusal;
+                }
+                Err(error) => entry.unbound = Some(error),
+            }
         }
         table.entries.insert(id.0, entry);
         table.changed(id);

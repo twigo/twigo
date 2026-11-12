@@ -960,3 +960,21 @@ async fn an_expiry_at_the_start_of_time_neither_panics_nor_is_kept() {
     }
     assert_eq!(plugins.runs(), 2);
 }
+
+#[tokio::test]
+async fn a_sign_in_tells_the_outcome_of_the_run_it_starts_and_of_no_other() {
+    let plugins = Plugins::new();
+    let script = unattended(&plugins, r#"sleep 1; printf '{"status":{"token":"t"}}'"#);
+    let source = registry().source(exec(&script, ""));
+    let asked = tokio::spawn({
+        let source = Arc::clone(&source);
+        async move { source.credential().await }
+    });
+    plugins.until_runs(1).await;
+    assert!(source.sign_in().is_none(), "a run that a request started");
+    assert_eq!(token(&asked.await.unwrap().unwrap()), "t");
+
+    let signed_in = source.sign_in().expect("the run it starts");
+    assert_eq!(token(&signed_in.await.unwrap()), "t");
+    assert_eq!(plugins.runs(), 2);
+}

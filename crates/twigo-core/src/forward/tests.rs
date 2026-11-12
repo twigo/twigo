@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -762,7 +762,7 @@ async fn a_later_follower_of_a_window_replaces_the_earlier() {
 }
 
 #[tokio::test]
-async fn a_mode_that_turns_while_a_start_is_under_way_fails_the_forward_it_ends_with() {
+async fn a_mode_that_turns_while_a_start_reads_its_target_refuses_the_start_and_makes_no_forward() {
     let api = Api::start(true).await;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -773,53 +773,17 @@ async fn a_mode_that_turns_while_a_start_is_under_way_fails_the_forward_it_ends_
     keep(dir.path(), &Saved::default());
     let core = running_over(dir.path(), &api);
     core.catalog.contexts().await;
-    let starting = tokio::spawn({
-        let core = Arc::clone(&core);
-        let local = free();
-        async move {
-            core.forward_start(StartForward {
-                target: target("kind-plain", "api"),
-                port: 8080,
-                local: Some(local),
-            })
-            .await
-        }
-    });
+    let local = free();
+    let starting = start_of(&core, Some(local));
     api.reached().await;
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    set_the_mode(&core, Mode::ReadOnly).await;
     api.release.notify_one();
-    let ForwardStarted::Started { forward } = starting.await.unwrap().unwrap() else {
-        panic!("a free port starts");
-    };
-    assert!(
-        matches!(&forward.state, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions),
-        "the answer is the forward the mode refused: {:?}",
-        forward.state
-    );
-    until("the mode fails the forward", || {
-        let now = listed(&core).first()?.state.clone();
-        matches!(&now, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions)
-            .then_some(now)
-    })
-    .await;
-
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadWrite),
-    })
-    .await
-    .unwrap();
-    until("the mode lets it go on", || {
-        let now = listed(&core)[0].state.clone();
-        (!matches!(&now, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions))
-            .then_some(now)
-    })
-    .await;
+    let refused = starting.await.unwrap().unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions);
+    assert!(refused.blocked.is_some());
+    assert!(listed(&core).is_empty());
+    assert!(core.state.forwards("kind-plain").forwards.is_empty());
+    assert!(std::net::TcpListener::bind(("127.0.0.1", local)).is_ok());
 }
 
 #[tokio::test]
@@ -973,22 +937,19 @@ async fn restored_without_its_context(dir: &Path) -> Arc<Core> {
 }
 
 #[tokio::test]
-async fn a_resume_while_the_catalog_lacks_the_context_keeps_the_refusal_and_the_forward_waits_after()
+async fn a_resume_while_the_catalog_lacks_the_context_answers_the_refusal_and_the_forward_waits_after()
  {
     let dir = tempfile::tempdir().unwrap();
     let core = restored_without_its_context(dir.path()).await;
 
-    let ForwardStarted::Started { forward } = core
+    let refused = core
         .forward_resume(ResumeForward {
             id: ForwardId(1),
             local: None,
         })
         .await
-        .unwrap()
-    else {
-        panic!("a resume answers with the forward");
-    };
-    assert!(matches!(forward.state, ForwardState::Failed { .. }));
+        .unwrap_err();
+    assert_eq!(refused.message, NO_SOURCE);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
 
@@ -997,21 +958,25 @@ async fn a_resume_while_the_catalog_lacks_the_context_keeps_the_refusal_and_the_
 }
 
 #[tokio::test]
-async fn a_move_while_the_catalog_lacks_the_context_keeps_the_refusal_and_the_forward_waits_after()
-{
+async fn a_move_while_the_catalog_lacks_the_context_answers_the_refusal_and_moves_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let core = restored_without_its_context(dir.path()).await;
     let (events, seen) = mpsc::channel();
     core.follow_forwards("main", move |event| events.send(event).is_ok());
+    let local = listed(&core)[0].local;
 
     let moved = free();
-    core.forward_resume(ResumeForward {
-        id: ForwardId(1),
-        local: Some(moved),
-    })
-    .await
-    .unwrap();
-    assert_eq!(listed(&core)[0].local, moved);
+    let refused = core
+        .forward_resume(ResumeForward {
+            id: ForwardId(1),
+            local: Some(moved),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(listed(&core)[0].local, local);
+    assert!(std::net::TcpListener::bind(("127.0.0.1", moved)).is_ok());
+    assert!(TcpStream::connect(("127.0.0.1", local)).await.is_ok());
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
     let states = states_of(&seen);
@@ -1058,33 +1023,33 @@ async fn a_resume_asks_the_catalog_itself_whether_the_forward_may_run() {
     let core = without_its_context_and_not_yet_checked(dir.path()).await;
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 
-    core.forward_resume(ResumeForward {
-        id: ForwardId(1),
-        local: None,
-    })
-    .await
-    .unwrap();
-    until("the resume fails the forward", || {
-        failed_with(&core, |error| error.message == NO_SOURCE)
-    })
-    .await;
+    let refused = core
+        .forward_resume(ResumeForward {
+            id: ForwardId(1),
+            local: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 }
 
 #[tokio::test]
 async fn a_move_asks_the_catalog_itself_whether_the_forward_may_run() {
     let dir = tempfile::tempdir().unwrap();
     let core = without_its_context_and_not_yet_checked(dir.path()).await;
+    let local = listed(&core)[0].local;
 
-    core.forward_resume(ResumeForward {
-        id: ForwardId(1),
-        local: Some(free()),
-    })
-    .await
-    .unwrap();
-    until("the move fails the forward", || {
-        failed_with(&core, |error| error.message == NO_SOURCE)
-    })
-    .await;
+    let refused = core
+        .forward_resume(ResumeForward {
+            id: ForwardId(1),
+            local: Some(free()),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(listed(&core)[0].local, local);
+    assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 }
 
 #[tokio::test]
@@ -1124,7 +1089,7 @@ async fn a_move_of_a_forward_that_waits_leaves_it_waiting_on_the_new_port_and_as
 }
 
 #[tokio::test]
-async fn a_forward_the_clients_come_for_between_its_refusal_and_the_data_path_handling_it_stays_refused()
+async fn a_forward_restored_under_a_refusal_is_failed_from_its_first_instant_and_the_clients_leave_it_so()
  {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -1145,7 +1110,19 @@ async fn a_forward_the_clients_come_for_between_its_refusal_and_the_data_path_ha
         &dir.path().join("policy.json"),
     );
     core.restore_forwards().await;
-    assert_eq!(listed(&core)[0].state, ForwardState::Restored);
+    assert!(
+        failed_with(&core, |error| error.kind == ErrorKind::Permissions).is_some(),
+        "{:?}",
+        listed(&core)[0].state
+    );
+    let mut client = TcpStream::connect(("127.0.0.1", listed(&core)[0].local))
+        .await
+        .unwrap();
+    let mut left = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), client.read_to_end(&mut left))
+        .await
+        .expect("what it accepts is closed")
+        .unwrap();
 
     core.forwards.recheck();
     core.forwards.connected("kind-plain");
@@ -1341,7 +1318,13 @@ fn a_run(core: &Core, id: u32, local: u16, listeners: Listeners) -> (Forward, Ru
     base.local = local;
     let run = core
         .forwards
-        .run("kind-plain", &base, listeners, true, core.hub.clone())
+        .run(
+            "kind-plain",
+            &base,
+            listeners,
+            data::Begin::Restored,
+            core.hub.clone(),
+        )
         .unwrap();
     (base, run)
 }
@@ -2201,13 +2184,14 @@ async fn a_move_of_a_failed_forward_answers_starting_and_starts_it_again() {
 }
 
 #[tokio::test]
-async fn a_resume_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_the_refusal_and_starts_nothing()
+async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_the_refusal_and_starts_nothing()
  {
     let dir = tempfile::tempdir().unwrap();
+    let local = free();
     keep(
         dir.path(),
         &Saved {
-            forwards: vec![forward_of(1, 8080, free(), false)],
+            forwards: vec![forward_of(1, 8080, local, false)],
             ports: Vec::new(),
         },
     );
@@ -2225,26 +2209,34 @@ async fn a_resume_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_t
     .await;
     let (events, seen) = mpsc::channel();
     core.follow_forwards("main", move |event| events.send(event).is_ok());
+    let _held = std::net::TcpListener::bind(("127.0.0.1", local)).unwrap();
 
-    let ForwardStarted::Started { forward } = core
+    let refused = core
         .forward_resume(ResumeForward {
             id: ForwardId(1),
             local: None,
         })
         .await
-        .unwrap()
-    else {
-        panic!("a resume answers with the forward");
-    };
-    assert!(
-        matches!(&forward.state, ForwardState::Failed { error } if error.message == NO_SOURCE),
-        "{:?}",
-        forward.state
-    );
+        .unwrap_err();
+    assert_eq!(refused.message, NO_SOURCE, "before it binds");
+    let moved = free();
+    for asked in [Some(local), Some(moved)] {
+        let refused = core
+            .forward_start(StartForward {
+                target: target("kind-plain", "api"),
+                port: 8080,
+                local: asked,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused.message, NO_SOURCE);
+    }
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let states = states_of(&seen);
-    assert!(!states.contains(&ForwardState::Starting), "{states:?}");
-    assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
+    assert!(states_of(&seen).is_empty());
+    assert_eq!(listed(&core)[0].state, ForwardState::Stopped);
+    assert_eq!(listed(&core)[0].local, local);
+    assert!(!core.state.forwards("kind-plain").forwards[0].runs);
+    assert!(std::net::TcpListener::bind(("127.0.0.1", moved)).is_ok());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -2326,4 +2318,348 @@ async fn a_stop_and_a_remove_wait_for_the_command_that_changes_the_forward() {
     let forwards = listed(&core);
     assert_eq!(forwards.len(), 1);
     assert_eq!(forwards[0].state, ForwardState::Stopped);
+}
+
+#[tokio::test]
+async fn a_start_and_a_resume_wait_for_the_claim_of_their_port_once_the_target_is_read() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![other_target(forward_of(1, 5432, free(), false), "db")],
+            ports: Vec::new(),
+        },
+    );
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+
+    let claim = core
+        .forwards
+        .claim(&Key::of(&target("kind-plain", "api"), 8080))
+        .await;
+    let starting = start_of(&core, Some(free()));
+    api.reached().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!starting.is_finished(), "the start waits for the claim");
+    drop(claim);
+    started(
+        tokio::time::timeout(Duration::from_secs(5), starting)
+            .await
+            .expect("the start ends"),
+    );
+
+    let claim = core
+        .forwards
+        .claim(&Key::of(&target("kind-plain", "db"), 5432))
+        .await;
+    let resuming = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            core.forward_resume(ResumeForward {
+                id: ForwardId(1),
+                local: None,
+            })
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!resuming.is_finished(), "the resume waits for the claim");
+    drop(claim);
+    started(
+        tokio::time::timeout(Duration::from_secs(5), resuming)
+            .await
+            .expect("the resume ends"),
+    );
+}
+
+#[tokio::test]
+async fn a_start_that_waited_for_a_remove_reads_the_target_and_makes_a_forward() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+    let key = Key::of(&target("kind-plain", "api"), 8080);
+    let claim = core.forwards.claim(&key).await;
+    let local = free();
+    let starting = start_of(&core, Some(local));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!starting.is_finished(), "it waits for the claim");
+    assert_eq!(api.reads.load(Ordering::SeqCst), 0, "and read nothing");
+    core.forwards.table().entries.remove(&1);
+    drop(claim);
+    let made = started(
+        tokio::time::timeout(Duration::from_secs(5), starting)
+            .await
+            .expect("the start ends"),
+    );
+    assert_eq!(made.local, local);
+    assert_eq!(api.reads.load(Ordering::SeqCst), 1);
+    let ids: Vec<_> = listed(&core).iter().map(|forward| forward.id).collect();
+    assert_eq!(ids, [made.id]);
+}
+
+#[tokio::test]
+async fn a_window_learns_of_a_forward_a_start_made_as_the_start_answered_it() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let (events, seen) = mpsc::channel();
+    core.follow_forwards("main", move |event| events.send(event).is_ok());
+
+    let made = started(start_of(&core, Some(free())).await);
+    assert_eq!(made.state, ForwardState::Starting);
+    let learned = until("the window learns of it", || {
+        seen.try_iter().find_map(|event| match event {
+            ForwardEvent::Changed { forward } if forward.id == made.id => Some(forward),
+            _ => None,
+        })
+    })
+    .await;
+    assert_eq!(*learned, made, "the first it learns is the answer");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_starts_whose_reads_return_together_make_one_forward() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    for round in 0..200 {
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let starts: Vec<_> = [free(), free()]
+            .into_iter()
+            .map(|local| {
+                let (core, barrier) = (Arc::clone(&core), Arc::clone(&barrier));
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    core.forward_start(StartForward {
+                        target: target("kind-plain", "api"),
+                        port: 8080,
+                        local: Some(local),
+                    })
+                    .await
+                })
+            })
+            .collect();
+        for start in starts {
+            let answer = start.await.unwrap().unwrap();
+            assert!(
+                matches!(answer, ForwardStarted::Started { .. }),
+                "round {round}: {answer:?}"
+            );
+        }
+        let forwards = listed(&core);
+        assert_eq!(forwards.len(), 1, "round {round}: {forwards:?}");
+        core.forward_remove(forwards[0].id).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn after_the_shutdown_no_command_saves_binds_or_starts() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (ran, stopped, other) = (free(), free(), free());
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![
+                forward_of(1, 8080, ran, true),
+                other_target(forward_of(2, 5432, stopped, false), "db"),
+            ],
+            ports: Vec::new(),
+        },
+    );
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
+    let claim = core
+        .forwards
+        .claim(&Key::of(&target("kind-plain", "api"), 8080))
+        .await;
+    let racing = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            core.forward_resume(ResumeForward {
+                id: ForwardId(1),
+                local: None,
+            })
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    core.shutdown();
+    drop(claim);
+    let quitting = |answer: Result<ForwardStarted, IpcError>| {
+        let error = answer.unwrap_err();
+        assert_eq!(error.message, "Twigo is quitting");
+    };
+    quitting(racing.await.unwrap());
+    let asked = api.requests.load(Ordering::SeqCst);
+    quitting(
+        core.forward_start(StartForward {
+            target: target("kind-plain", "cache"),
+            port: 6379,
+            local: Some(other),
+        })
+        .await,
+    );
+    for id in [1, 2] {
+        quitting(
+            core.forward_resume(ResumeForward {
+                id: ForwardId(id),
+                local: None,
+            })
+            .await,
+        );
+    }
+    assert_eq!(
+        api.requests.load(Ordering::SeqCst),
+        asked,
+        "nothing asked the cluster"
+    );
+    assert!(core.forward_stop(ForwardId(1)).await.is_err());
+    assert!(core.forward_remove(ForwardId(2)).await.is_err());
+    for port in [ran, stopped, other] {
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(),
+            "port {port} is free"
+        );
+    }
+    let kept: Vec<_> = core
+        .state
+        .forwards("kind-plain")
+        .forwards
+        .iter()
+        .map(|forward| (forward.id.0, forward.runs))
+        .collect();
+    assert_eq!(kept, [(1, true), (2, false)]);
+}
+
+fn signing_in(dir: &Path, api: &Api) -> PathBuf {
+    let script = dir.join("plugin");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho run >> '{}'\nprintf '{{\"status\":{{\"token\":\"t\"}}}}'\n",
+            dir.join("runs").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let kubeconfig = dir.join("config");
+    std::fs::write(
+        &kubeconfig,
+        format!(
+            "
+clusters: [{{ name: c, cluster: {{ server: 'http://127.0.0.1:{}' }} }}]
+users: [{{ name: u, user: {{ exec: {{ apiVersion: client.authentication.k8s.io/v1, interactiveMode: Never, command: '{}' }} }} }}]
+contexts:
+- name: kind-plain
+  context: {{ cluster: c, user: u }}
+",
+            api.port,
+            script.display()
+        ),
+    )
+    .unwrap();
+    kubeconfig
+}
+
+fn runs(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("runs"))
+        .map(|runs| runs.lines().count())
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn a_sign_in_that_gets_a_credential_proves_a_forward_failed_for_its_credential_once() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let kubeconfig = signing_in(dir.path(), &api);
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
+        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
+    )));
+    tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            let _status = _status;
+            core.run(followed, Some(kubeconfig)).await
+        }
+    });
+    core.catalog.contexts().await;
+    let review = core.review().await;
+    core.trust_plugins(vec![review.plugins[0].plugin.digest.clone()])
+        .unwrap();
+    core.set_focused(true);
+
+    api.refuse_upgrades(401);
+    started(start_of(&core, Some(free())).await);
+    until("the proof fails it", || {
+        failed_with(&core, |error| error.kind == ErrorKind::Unauthorized)
+    })
+    .await;
+    let before = runs(dir.path());
+    core.sign_in("kind-plain").await.unwrap();
+    until("the sign-in's run and one proof", || {
+        (runs(dir.path()) > before + 1).then_some(())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let after = runs(dir.path());
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        runs(dir.path()),
+        after,
+        "the 401 that failed the proof again"
+    );
+    assert!(failed_with(&core, |error| error.kind == ErrorKind::Unauthorized).is_some());
+
+    api.refuse_upgrades(0);
+    core.sign_in("kind-plain").await.unwrap();
+    until("the sign-in proves it", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_start_whose_read_outlasts_the_shutdown_binds_nothing() {
+    let api = Api::start(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let busy = held.local_addr().unwrap().port();
+
+    let starting = start_of(&core, Some(busy));
+    api.reached().await;
+    core.shutdown();
+    api.release.notify_one();
+    let refused = starting.await.unwrap().unwrap_err();
+    assert_eq!(
+        refused.message, "Twigo is quitting",
+        "not a busy port and a free one found by binding"
+    );
+    assert!(listed(&core).is_empty());
 }
