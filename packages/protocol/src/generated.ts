@@ -1310,9 +1310,13 @@ export type ResourceRef = { gvr: Gvr, namespaced: boolean,
 namespace: string | null, name: string, };
 
 /**
- * Starts a stopped or failed forward again, and with a `local` moves a
- * running one to that port. A forward that works, or waits for its first
- * connection, stays as it is.
+ * Starts a forward again, on `local` when that names another port. A
+ * stopped one binds its port and a failed one proves again, both
+ * `Starting`. One that waits, starts, is ready or reconnects keeps its state
+ * and its connections, and forgets the pods it avoided, so that its next
+ * choice may take one that answered 404. One that its context's mode
+ * refuses, or whose context no source lists, answers that error and stays as
+ * it was: stopped, or failed with the refusal, on its port.
  */
 export type ResumeForward = { id: ForwardId, local: number | null, };
 

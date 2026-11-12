@@ -64,9 +64,13 @@ pub struct StartForward {
     pub local: Option<u16>,
 }
 
-/// Starts a stopped or failed forward again, and with a `local` moves a
-/// running one to that port. A forward that works, or waits for its first
-/// connection, stays as it is.
+/// Starts a forward again, on `local` when that names another port. A
+/// stopped one binds its port and a failed one proves again, both
+/// `Starting`. One that waits, starts, is ready or reconnects keeps its state
+/// and its connections, and forgets the pods it avoided, so that its next
+/// choice may take one that answered 404. One that its context's mode
+/// refuses, or whose context no source lists, answers that error and stays as
+/// it was: stopped, or failed with the refusal, on its port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ResumeForward {
     pub id: ForwardId,
@@ -81,12 +85,16 @@ pub struct ResumeForward {
 )]
 pub enum ForwardStarted {
     /// Listening: the forward as the command left it, `Starting` for one
-    /// started again and `Failed` with the refusal for one its context's mode
-    /// or the catalog refuses, which has asked nothing. A port that has a
-    /// forward already, or whose start binds meanwhile, answers with that
-    /// one, started again if it was stopped or failed.
+    /// started again. A start of a port that has a forward answers as a
+    /// resume of that forward does, which moves it when the start names
+    /// another `local`. A start or a resume that the context's mode refuses,
+    /// or whose context no source lists, answers that error and changes
+    /// nothing.
     Started { forward: Box<Forward> },
-    /// The local port could not be bound, and nothing was started or kept.
+    /// The local port could not be bound, and nothing was started or kept. A
+    /// start of a port with no forward answers it once it has read the
+    /// target, so a cluster that does not answer gives the read's error
+    /// first.
     Busy {
         local: u16,
         why: BusyWhy,
@@ -161,20 +169,26 @@ pub enum ForwardState {
     Ready,
     /// No pod can be reached, for the reason given: none is ready, the
     /// cluster does not answer or refuses for now, or a stream to a pod
-    /// failed. It looks again while it has connections, and at the next one.
+    /// failed, which a 404 for one pod behind a Service or a workload is only
+    /// when no other is left. It looks again while it has connections, and
+    /// at the next one.
     Reconnecting {
         reason: String,
     },
-    /// Still listening, and every connection is closed at once. A start or
-    /// a resume fails it for anything, what may pass too: a cluster that does
-    /// not answer, no ready pod within the wait, a refused port, a 403. The
-    /// proofs its connections and its space's connecting ask for fail it
-    /// only for the gate's refusal, a context that no source lists, a
-    /// credential failure or a target that is gone, and its context's mode
-    /// and the catalog fail it too. A start or a resume starts it again, and a lifted refusal makes
-    /// it wait, `Restored`; one whose target is gone looks at it again at its
-    /// next connection, and one that failed for a credential is proven again
-    /// by its space's connecting.
+    /// Still listening. Its connections end and what it accepts is closed at
+    /// once, but for one whose target is gone, whose next connection is
+    /// served to look at the target again. A start or a resume fails it for
+    /// anything, what may pass too: a cluster that does not answer, no ready
+    /// pod within the wait, a refused port, a 403; only a first stream lost
+    /// to clients replaced or a network that moved is tried again after a
+    /// pause. The proofs its connections and its space's connecting ask for
+    /// fail it only for the gate's refusal, a context that no source lists,
+    /// a credential failure or a target that is gone, and its context's mode
+    /// and the catalog fail it too. A start or a resume starts it again, and
+    /// a lifted refusal makes it wait, `Restored`; one whose target is gone
+    /// looks at it again at its next connection, and one that failed for a
+    /// credential is proven again by its space's connecting or by a sign-in
+    /// the person started that gets a credential.
     Failed {
         error: IpcError,
     },
