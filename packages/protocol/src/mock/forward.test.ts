@@ -847,3 +847,170 @@ test("a stopped forward stays stopped through the refusal and its lifting", asyn
   expect(latest(forward.id)?.state.state).toBe("ready");
   expect(latest(stopped.id)).toMatchObject({ state: { state: "stopped" } });
 });
+
+const API: ForwardTarget = {
+  space: "prod-eu",
+  gvr: DEPLOYMENTS,
+  namespace: "payments",
+  name: "payments-api",
+};
+const LEGACY: ForwardTarget = { ...API, name: "payments-legacy" };
+const PAYMENTS_GATEWAY: ForwardTarget = {
+  ...API,
+  gvr: SERVICES,
+  name: "payments-gateway",
+};
+
+test("a port that has a forward answers that forward's local port, which a restored forward's seed remembers", async () => {
+  const { backend } = await followed("forwardRestored");
+  const api = await answered(backend.invoke("forward_ports", API));
+  expect(api.ports[0]).toMatchObject({ port: 8080, local: 8081, forward: 1 });
+  const gateway = await answered(
+    backend.invoke("forward_ports", PAYMENTS_GATEWAY),
+  );
+  expect(gateway.ports.find(({ port }) => port === 9090)).toMatchObject({
+    local: 9090,
+    forward: 2,
+  });
+
+  await answered(backend.invoke("forward_remove", 1));
+  const removed = await answered(backend.invoke("forward_ports", API));
+  expect(removed.ports[0]).toMatchObject({ local: 8081, forward: null });
+});
+
+test("a stopped forward of an earlier run listens nowhere until it starts, and one stopped now keeps its addresses, as the core has them", async () => {
+  const { backend, first, latest, start } = await followed("forwardRestored");
+  expect(first.map(({ addresses }) => addresses)).toEqual([
+    ["127.0.0.1", "::1"],
+    [],
+    ["127.0.0.1", "::1"],
+  ]);
+  await answered(backend.invoke("forward_resume", { id: 2, local: null }));
+  expect(latest(2)?.addresses).toEqual(["127.0.0.1", "::1"]);
+
+  await answered(backend.invoke("forward_stop", 2));
+  expect(latest(2)).toMatchObject({
+    state: { state: "stopped" },
+    addresses: ["127.0.0.1", "::1"],
+  });
+  const fresh = started(await start(SERVICE, 80));
+  expect(fresh.addresses).toEqual(["127.0.0.1", "::1"]);
+});
+
+test("a reconnecting pod target waits for that pod, and only a Service or a workload for another", async () => {
+  const { latest, start } = await followed("forwardReconnecting");
+  const forward = started(await start(POD, 8080));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + LOSES_POD_AFTER_MS);
+  const lost = latest(forward.id)?.state;
+  expect(lost).toEqual({
+    state: "reconnecting",
+    reason: `pod ${pod.name} is not ready; waiting for it`,
+  });
+  await vi.advanceTimersByTimeAsync(RECONNECTS_FOR_MS);
+  expect(latest(forward.id)).toMatchObject({
+    state: { state: "ready" },
+    pod: pod.name,
+  });
+
+  const service = started(await start(SERVICE, 80, 8099));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + LOSES_POD_AFTER_MS);
+  const behind = latest(service.id)?.state;
+  expect(behind).toMatchObject({ state: "reconnecting" });
+  expect(behind).toMatchObject({
+    reason: expect.stringContaining("waiting for another ready pod") as string,
+  });
+});
+
+test.each<[string, (backend: Backend) => Promise<unknown>, number[]]>([
+  [
+    "forward_ports",
+    async (backend) => {
+      const ports = await backend.invoke("forward_ports", API);
+      expect(ports.ports[0]?.forward).toBe(1);
+    },
+    [1, 2, 3],
+  ],
+  [
+    "forward_start",
+    (backend) =>
+      backend.invoke("forward_start", { target: API, port: 8080, local: null }),
+    [1, 2, 3],
+  ],
+  [
+    "forward_resume",
+    (backend) => backend.invoke("forward_resume", { id: 2, local: null }),
+    [1, 2, 3],
+  ],
+  ["forward_stop", (backend) => backend.invoke("forward_stop", 1), [1, 2, 3]],
+  ["forward_remove", (backend) => backend.invoke("forward_remove", 3), [1, 2]],
+])(
+  "%s before the window follows the forwards finds the restored ones, and makes no second for a seeded port",
+  async (_command, run, listed) => {
+    const backend = createMockBackend("forwardRestored");
+    await answered(backend.invoke("space_open", "prod-eu"));
+    await answered(run(backend));
+    const first = await answered(
+      backend.subscribe("forwards_watch", null, () => undefined),
+    );
+    expect(first.map(({ id }) => id)).toEqual(listed);
+  },
+);
+
+test("a start of a port whose forward's target is gone answers as a resume of it, and the forward fails again in words", async () => {
+  const { start, latest } = await followed("forwardRestored");
+  const answer = started(await start(LEGACY, 8080));
+  expect(answer).toMatchObject({ id: 3, state: { state: "starting" } });
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
+  expect(latest(3)?.state).toMatchObject({
+    state: "failed",
+    error: { message: 'deployments.apps "payments-legacy" not found' },
+  });
+});
+
+test("a start of a port with no forward, whose target is gone, is still refused", async () => {
+  const { backend } = await followed("forwardRestored");
+  const error = await refused(
+    backend.invoke("forward_start", {
+      target: LEGACY,
+      port: 9999,
+      local: null,
+    }),
+  );
+  expect(error.kind).toBe("notFound");
+});
+
+test("starting on the free port that was offered is not remembered, and taking another port is", async () => {
+  const { backend, start } = await followed("forwardBusy");
+  const busy = await start(SERVICE, 80);
+  expect(busy).toMatchObject({ outcome: "busy", free: 8081 });
+  const detour = started(await start(SERVICE, 80, 8081));
+  const held = await answered(backend.invoke("forward_ports", SERVICE));
+  expect(held.ports[0]).toMatchObject({ local: 8081, forward: detour.id });
+  await answered(backend.invoke("forward_remove", detour.id));
+  const removed = await answered(backend.invoke("forward_ports", SERVICE));
+  expect(removed.ports[0]).toMatchObject({ local: 80 + 8000, forward: null });
+
+  const chosen = started(await start(SERVICE, 80, 8090));
+  await answered(backend.invoke("forward_remove", chosen.id));
+  const kept = await answered(backend.invoke("forward_ports", SERVICE));
+  expect(kept.ports[0]).toMatchObject({ local: 8090 });
+});
+
+test("a move to the offered port is a detour too, and a stop and a resume keep it one", async () => {
+  const { backend, start } = await followed("forwardBusy");
+  const forward = started(await start(SERVICE, 80, 8085));
+  const busy = await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: 8080 }),
+  );
+  expect(busy).toMatchObject({ outcome: "busy", free: 8081 });
+  await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: 8081 }),
+  );
+  await answered(backend.invoke("forward_stop", forward.id));
+  await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: null }),
+  );
+  await answered(backend.invoke("forward_remove", forward.id));
+  const ports = await answered(backend.invoke("forward_ports", SERVICE));
+  expect(ports.ports[0]).toMatchObject({ local: 8085 });
+});
