@@ -6,7 +6,6 @@
 const VARIANTS = {
   start: ["pick", "once"],
   busy: ["offer", "input"],
-  open: ["tab", "list"],
 } as const;
 
 type Group = keyof typeof VARIANTS;

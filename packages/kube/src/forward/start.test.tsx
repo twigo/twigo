@@ -369,42 +369,6 @@ test("with start:once a pod's only port has no Change…, and ⇧F still asks", 
   expect(workbench.quickAccess.session?.pick).toBeDefined();
 });
 
-test("with open:list no tab opens: the side bar shows Port forwards with the new row selected", async () => {
-  const { workbench } = await listed("live", "open:list");
-  const run = forwardGateway(workbench);
-  await settle(6);
-  await pick(workbench, "9090");
-  await run;
-  await act(() => vi.advanceTimersByTimeAsync(READY_AFTER_MS + 100));
-  expect(workbench.editors.active).not.toMatch(/^pf:/);
-  expect(
-    screen.getByRole("tab", { name: "Port forwards", selected: true }),
-  ).toBeTruthy();
-  const row = within(
-    screen.getByRole("grid", { name: "Port forwards" }),
-  ).getAllByRole("row")[0];
-  expect(row?.getAttribute("aria-selected")).toBe("true");
-  expect(row?.textContent).toContain("payments-gateway:metrics");
-  expect(row?.textContent).toContain("→ 9090");
-});
-
-test("with open:list a port already forwarded selects its row", async () => {
-  const { workbench } = await listed("live", "open:list");
-  const first = forwardGateway(workbench);
-  await settle(6);
-  await pick(workbench, "80");
-  await first;
-  fireEvent.click(screen.getByRole("tab", { name: "Explorer" }));
-  await settle(4);
-  const again = forwardGateway(workbench);
-  await settle(6);
-  await pick(workbench, "80");
-  await again;
-  expect(
-    screen.getByRole("tab", { name: "Port forwards", selected: true }),
-  ).toBeTruthy();
-});
-
 test("a local port that is in use is not replaced: the toast offers the next, and a click takes it", async () => {
   const { workbench, calls } = await listed("forwardBusy");
   const run = forwardGateway(workbench);

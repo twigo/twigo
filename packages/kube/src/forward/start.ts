@@ -7,7 +7,6 @@ import type {
 import { notify } from "@twigo/ui";
 import type { QuickPickItem, Workbench } from "@twigo/workbench";
 import { pfUri } from "../uri";
-import { showForwards } from "./actions";
 import { tellBind, tellFailure } from "./busy";
 import type { Forwards } from "./service";
 import { variant } from "./variants";
@@ -55,12 +54,7 @@ export function startForward(
   const told = tellFailure(forwards);
 
   const reveal = (target: ForwardTarget, id: Forward["id"]) => {
-    if (variant("open") === "list") {
-      forwards.select(target.space, id);
-      showForwards(workbench);
-    } else {
-      editors.open(pfUri({ space: target.space, id }));
-    }
+    editors.open(pfUri({ space: target.space, id }));
   };
 
   const begin = async (
