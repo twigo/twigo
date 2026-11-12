@@ -1,7 +1,9 @@
 use std::ffi::OsString;
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
-use std::sync::mpsc;
+use std::sync::{OnceLock, mpsc};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -49,22 +51,82 @@ fn target(space: &str, name: &str) -> ForwardTarget {
     }
 }
 
-/// A port nothing listens on now, which no other test of this process gets.
-/// Not one the system hands out by itself (port 0): it hands those to other
-/// sockets too, on macOS in sequence, so another could take it before the
-/// test binds it, as could the search for a free port above the one next to
-/// it. One in four, so that the next free one above it is free too.
-fn free() -> u16 {
-    static NEXT: AtomicU16 = AtomicU16::new(0);
-    let base = 10_000 + 2_200 * u16::try_from(std::process::id() % 10).unwrap();
+const FIRST_STRETCH: u16 = 10_000;
+const SLOTS: u16 = 2_200;
+const STRETCH: u16 = SLOTS + 400;
+const STRETCHES: u16 = 8;
+
+/// The ports this process hands out: a stretch that no other run holds, which
+/// it claims by holding a listener on the stretch's first port for its life,
+/// the next stretch when that bind fails. Not ports the system hands out by
+/// itself (port 0): it hands those to other sockets too, on macOS in
+/// sequence, so another could take one before the test binds it.
+fn stretch() -> u16 {
+    static CLAIMED: OnceLock<(u16, std::net::TcpListener)> = OnceLock::new();
+    CLAIMED
+        .get_or_init(|| {
+            let first = u16::try_from(std::process::id() % u32::from(STRETCHES)).unwrap();
+            (0..STRETCHES)
+                .map(|step| FIRST_STRETCH + STRETCH * ((first + step) % STRETCHES))
+                .find_map(|base| {
+                    Some((base, std::net::TcpListener::bind(("127.0.0.1", base)).ok()?))
+                })
+                .expect("a stretch of ports that no other run holds")
+        })
+        .0
+}
+
+/// Whether something accepts connections on `port`, or would: a full backlog
+/// drops the connection silently. Found by connecting and never by binding:
+/// on macOS a child that another thread spawns holds a copy of every
+/// descriptor of this process until its program starts, so a port whose
+/// listener was just closed is in use for that moment.
+fn listening(port: u16) -> bool {
+    [
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(Ipv6Addr::LOCALHOST),
+    ]
+    .into_iter()
+    .any(|address| {
+        let connected = std::net::TcpStream::connect_timeout(
+            &SocketAddr::new(address, port),
+            Duration::from_millis(250),
+        );
+        match connected {
+            Ok(_) => true,
+            Err(error) => matches!(
+                error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ),
+        }
+    })
+}
+
+fn port_at(next: &AtomicU16, from: u16, step: u16, end: u16) -> u16 {
     loop {
-        let next = NEXT.fetch_add(1, Ordering::Relaxed);
-        assert!(next < 550, "the tests' ports are used up");
-        let port = base + 4 * next;
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        let offset = from + step * next.fetch_add(1, Ordering::Relaxed);
+        assert!(offset < end, "the tests' ports are used up");
+        let port = stretch() + offset;
+        if !listening(port) {
             return port;
         }
     }
+}
+
+/// A port nothing listens on, which no other test of this process gets: one
+/// in four, so that the next free one above it is free too.
+fn free() -> u16 {
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    port_at(&NEXT, 4, 4, SLOTS)
+}
+
+/// A port of the stretch's tail, for a test of many rounds that binds a new
+/// port in each: the ports of `free` are four apart so that a search for a
+/// free port above one of them ends at once, and no such search reaches the
+/// tail.
+fn fresh() -> u16 {
+    static NEXT: AtomicU16 = AtomicU16::new(0);
+    port_at(&NEXT, SLOTS, 1, STRETCH)
 }
 
 fn keep(dir: &Path, saved: &Saved) {
@@ -1493,48 +1555,6 @@ async fn a_forward_whose_port_another_forward_of_twigo_holds_says_so() {
     );
 }
 
-#[tokio::test]
-async fn a_stop_a_move_and_a_shutdown_leave_the_port_free_when_they_return() {
-    let dir = tempfile::tempdir().unwrap();
-    let (first, second, third) = (free(), free(), free());
-    keep(
-        dir.path(),
-        &Saved {
-            forwards: vec![
-                forward_of(1, 8080, first, true),
-                forward_of(2, 9090, second, true),
-            ],
-            ports: Vec::new(),
-        },
-    );
-    let core = running(dir.path());
-    core.catalog.contexts().await;
-    assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
-    assert_eq!(forward_state(&core, 2).await, ForwardState::Restored);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    core.forward_stop(ForwardId(1)).await.unwrap();
-    assert!(
-        std::net::TcpListener::bind(("127.0.0.1", first)).is_ok(),
-        "a stop leaves the port free"
-    );
-    core.forward_resume(ResumeForward {
-        id: ForwardId(2),
-        local: Some(third),
-    })
-    .await
-    .unwrap();
-    assert!(
-        std::net::TcpListener::bind(("127.0.0.1", second)).is_ok(),
-        "a move leaves the port it left free"
-    );
-    core.shutdown();
-    assert!(
-        std::net::TcpListener::bind(("127.0.0.1", third)).is_ok(),
-        "a shutdown leaves the port free"
-    );
-}
-
 #[test]
 fn a_forward_shows_the_bytes_of_its_earlier_runs_and_of_the_one_it_has() {
     let mut forward = shown();
@@ -2276,6 +2296,7 @@ async fn two_resumes_of_a_stopped_forward_at_once_never_answer_busy() {
     assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
     for round in 0..300 {
         let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let local = fresh();
         let resumes: Vec<_> = (0..2)
             .map(|_| {
                 let (core, barrier) = (Arc::clone(&core), Arc::clone(&barrier));
@@ -2283,7 +2304,7 @@ async fn two_resumes_of_a_stopped_forward_at_once_never_answer_busy() {
                     barrier.wait().await;
                     core.forward_resume(ResumeForward {
                         id: ForwardId(1),
-                        local: None,
+                        local: Some(local),
                     })
                     .await
                 })
