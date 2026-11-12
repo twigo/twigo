@@ -89,6 +89,15 @@ fn service_json(name: &str, spec: &Value) -> Value {
     })
 }
 
+fn gvr_resource(resource: &str) -> twigo_cache::hub::Resource {
+    twigo_cache::hub::Resource {
+        group: String::new(),
+        version: "v1".to_owned(),
+        resource: resource.to_owned(),
+        namespaced: true,
+    }
+}
+
 fn gvr(group: &str, resource: &str) -> Gvr {
     Gvr {
         group: group.to_owned(),
@@ -921,6 +930,7 @@ async fn a_forward_that_worked_reconnects_when_its_pod_is_not_found_and_fails_wh
         .unwrap();
 
     forward.pods.allow("web-1");
+    let _again = forward.client();
     forward.ready().await;
 
     forward.pods.refuse("web-1", 403);
@@ -1610,6 +1620,7 @@ async fn a_failure_goes_when_the_forward_is_ready_again_after_not_being_so() {
         .state("the forward reconnects", is_reconnecting)
         .await;
     forward.pods.allow("web-1");
+    let _again = forward.client();
     let status = forward.ready().await;
     assert_eq!(status.failure, None);
 }
@@ -1704,6 +1715,333 @@ async fn a_forward_that_waits_for_a_pod_with_no_connection_lets_its_subscription
             *state == ForwardState::Ready
         })
         .await;
+}
+
+fn not_running(name: &str) -> Value {
+    let mut pod = pod_json(name, false, &[("http", 8080)]);
+    pod["status"] = json!({ "phase": "Pending" });
+    pod
+}
+
+async fn gone_and_idle(forward: &mut Harness, fake: &Fake) {
+    let mut client = forward.client();
+    client.write_all(b"x").await.unwrap();
+    let served = forward.next().await;
+    fake.remove("pods", "web-1");
+    forward.state("the forward fails", is_failed).await;
+    drop((client, served));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+}
+
+async fn reaches_the_pod(forward: &mut Harness, sent: &[u8]) {
+    loop {
+        let mut served = forward.next().await;
+        let mut got = vec![0; sent.len()];
+        let read = served.io.read_exact(&mut got);
+        if tokio::time::timeout(Duration::from_millis(100), read)
+            .await
+            .is_ok_and(|read| read.is_ok())
+        {
+            assert_eq!(got, sent);
+            return;
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_made_again_and_not_running_yet_makes_a_forward_wait_and_the_connection_goes_on() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    gone_and_idle(&mut forward, &fake).await;
+    fake.put("pods", not_running("web-1"));
+
+    let mut client = forward.client();
+    client.write_all(b"hello").await.unwrap();
+    let status = forward.state("the forward waits", is_reconnecting).await;
+    assert_eq!(
+        status.state,
+        ForwardState::Reconnecting {
+            reason: "Pod web-1 is not running yet".to_owned()
+        }
+    );
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    forward
+        .state("the forward is ready", |state| {
+            *state == ForwardState::Ready
+        })
+        .await;
+    reaches_the_pod(&mut forward, b"hello").await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_made_again_that_refuses_makes_a_forward_wait_and_not_fail_for_good() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    gone_and_idle(&mut forward, &fake).await;
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    forward.pods.refuse("web-1", 500);
+
+    let mut client = forward.client();
+    forward.state("the forward waits", is_reconnecting).await;
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+
+    forward.pods.allow("web-1");
+    let mut again = forward.client();
+    again.write_all(b"hello").await.unwrap();
+    forward
+        .state("the forward is ready", |state| {
+            *state == ForwardState::Ready
+        })
+        .await;
+    reaches_the_pod(&mut forward, b"hello").await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_that_does_not_run_yet_is_no_candidate() {
+    let fake = Fake::default();
+    fake.put("pods", not_running("web-1"));
+    assert_eq!(
+        why(seen(&fake, &pod_target("web-1")).await),
+        "Pod web-1 is not running yet"
+    );
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    assert_eq!(
+        candidates(seen(&fake, &pod_target("web-1")).await),
+        [("web-1".to_owned(), 8080)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_client_that_arrives_while_the_cut_connections_close_does_not_lose_that_the_pod_is_gone()
+{
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    for round in 0..20 {
+        forward.ready().await;
+        let mut open = forward.client();
+        open.write_all(b"x").await.unwrap();
+        let _served = forward.next().await;
+        let arrives = tokio::spawn({
+            let (sockets, mut status) = (forward.sockets.clone(), forward.status.clone());
+            async move {
+                status
+                    .wait_for(|status| is_failed(&status.state))
+                    .await
+                    .unwrap();
+                let (client, accepted) = tokio::io::duplex(64 * 1024);
+                sockets.send(Box::new(accepted)).unwrap();
+                client
+            }
+        });
+        fake.remove("pods", "web-1");
+        let _arrives = within("the client arrives", arrives).await.unwrap();
+        fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let mut next = forward.client();
+        next.write_all(b"again").await.unwrap();
+        within(
+            &format!("round {round}: the forward is ready again"),
+            async {
+                forward
+                    .status
+                    .wait_for(|status| status.state == ForwardState::Ready)
+                    .await
+                    .unwrap();
+            },
+        )
+        .await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_forward_that_worked_tries_again_only_while_it_has_a_connection() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    let mut held = forward.client();
+    held.write_all(b"x").await.unwrap();
+    let held_pod = forward.next().await;
+
+    forward.pods.refuse("web-1", 500);
+    let mut client = forward.client();
+    let waiting = forward.state("the forward waits", is_reconnecting).await;
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let tries = forward.pods.connects().len();
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    assert!(
+        forward.pods.connects().len() > tries,
+        "it tries again while a connection is open"
+    );
+
+    drop((held, held_pod));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let tries = forward.pods.connects().len();
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    assert_eq!(forward.pods.connects().len(), tries, "it tried for nobody");
+    assert_eq!(forward.hub.subscribers("pods"), 0, "and watched for nobody");
+    assert_eq!(forward.status.borrow().state, waiting.state);
+
+    forward.pods.allow("web-1");
+    let mut again = forward.client();
+    again.write_all(b"hello").await.unwrap();
+    forward.ready().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_forward_that_never_worked_fails_in_the_words_of_a_hub_that_has_no_watch_to_give() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let budgets = Budgets {
+        watches: 1,
+        ..Budgets::default()
+    };
+    let (hub, _renew) = fake.renewing(budgets);
+    let _taken = hub
+        .object(
+            "kind-test",
+            gvr_resource("configmaps"),
+            Some(NAMESPACE.to_owned()),
+            "settings",
+        )
+        .unwrap();
+    let (pods, _served) = Pods::new();
+    let (_sockets, accepted) = mpsc::unbounded_channel();
+    let forward = Forward::spawn_with(
+        hub,
+        pod_target("web-1"),
+        accepted,
+        (Vec::new(), None),
+        false,
+        Arc::new(pods),
+    );
+    let mut status = forward.status();
+    let began = Instant::now();
+    let failed = within(
+        "the forward fails",
+        status.wait_for(|status| is_failed(&status.state)),
+    )
+    .await
+    .unwrap()
+    .clone();
+    assert_eq!(
+        failed.state,
+        ForwardState::Failed {
+            error: IpcError::new(
+                ErrorKind::Unavailable,
+                "every watch of this context is in use"
+            )
+        }
+    );
+    assert_eq!(began.elapsed(), Duration::from_secs(20));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_that_finds_every_watch_in_use_says_so() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let budgets = Budgets {
+        watches: 1,
+        ..Budgets::default()
+    };
+    let mut forward = start(&fake, pod_target("web-1"), false, budgets);
+    forward.ready().await;
+    tokio::task::yield_now().await;
+    tokio::time::sleep(LINGER + Duration::from_secs(1)).await;
+    let _taken = forward
+        .hub
+        .object(
+            "kind-test",
+            gvr_resource("configmaps"),
+            Some(NAMESPACE.to_owned()),
+            "settings",
+        )
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let _client = forward.client();
+    let status = forward
+        .until("the connection gave up", |status| status.failure.is_some())
+        .await;
+    assert_eq!(
+        status.failure.as_deref(),
+        Some("every watch of this context is in use")
+    );
+    assert_eq!(
+        status.state,
+        ForwardState::Reconnecting {
+            reason: "every watch of this context is in use".to_owned()
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_forward_that_never_worked_gives_up_on_a_cluster_that_is_still_connecting() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    fake.set_stalled(true);
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    let began = Instant::now();
+    let status = forward.state("the forward fails", is_failed).await;
+    assert_eq!(
+        status.state,
+        ForwardState::Failed {
+            error: IpcError::new(ErrorKind::Unavailable, "the cluster has not answered yet")
+        }
+    );
+    assert_eq!(began.elapsed(), Duration::from_secs(20));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_client_that_reads_slowly_after_its_fin_still_gets_what_the_pod_sends_after_the_read() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+
+    let mut client = forward.client();
+    client.write_all(b"request").await.unwrap();
+    client.shutdown().await.unwrap();
+    let mut pod = forward.next().await;
+    assert_eq!(read_exactly(&mut pod.io, 7).await, b"request");
+    let answer: Vec<u8> = (0..80 * 1024u32).map(|i| (i % 251) as u8).collect();
+    pod.io.write_all(&answer).await.unwrap();
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let first = read_exactly(&mut client, 64 * 1024).await;
+    assert!(first == answer[..64 * 1024], "the first 64 KiB, in order");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    pod.io.write_all(b"tail").await.unwrap();
+
+    let mut rest = Vec::new();
+    within("the connection ends", client.read_to_end(&mut rest))
+        .await
+        .unwrap();
+    let mut wanted = answer[64 * 1024..].to_vec();
+    wanted.extend_from_slice(b"tail");
+    assert_eq!(rest.len(), wanted.len());
+    assert!(rest == wanted, "the rest arrived, and the pod's last bytes");
 }
 
 #[tokio::test]

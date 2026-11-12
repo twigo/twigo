@@ -997,7 +997,7 @@ Extensions add commands, not prefixes.
     A port that either loopback cannot give is answered as data, in use or not permitted, with the next free port above it, from 1024 up, found by binding on those two addresses.
     A port that another process holds on `0.0.0.0` or `[::]` is in use too.
     `SO_REUSEADDR`, which [mio sets](https://github.com/tokio-rs/mio/blob/v1.2.4/src/net/tcp/listener.rs#L67-L82) and which a port needs to bind again while the connections it served wait out `TIME_WAIT`, makes macOS bind `127.0.0.1:P` beside such a listener and give the new socket that process's loopback clients, where Linux refuses with or without it (bind probes of macOS 27.2 and of Linux 6.12.54 in Docker Desktop, 2026-11-12).
-    So Linux binds with the option, and macOS binds without it first; when that finds the port in use, the port is busy unless nothing accepts a connection on it, which leaves only `TIME_WAIT` and then binds with the option.
+    So Linux binds with the option, Windows without it, as mio does, since there it lets a socket in use be bound over, and macOS binds without it first; when that finds the port in use, the port is busy unless nothing accepts a connection on it, which leaves only the connections of a closed listener that are still open or wait out `TIME_WAIT`, and then binds with the option.
     A forward's listeners close when the forward is dropped, so a stop, a move and a shutdown return with the port free.
     The local port of a start is the one that port of that target had last, else the same number, else for a port below 1024 that number plus 8000.
     A free port offered in place of a busy one is never taken silently, and starting on it is not remembered.

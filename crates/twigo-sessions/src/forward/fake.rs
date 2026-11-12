@@ -1,8 +1,8 @@
 //! A fake API server for the forward's tests on paused time: the objects of
 //! one namespace by resource, listed and watched whole as raw objects, as a
 //! server without Table sends them, picked by a `metadata.name` field
-//! selector or all of them. It can be unreachable, forbid a resource and
-//! end its watches.
+//! selector or all of them. It can be unreachable, never answer, forbid a
+//! resource and end its watches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -30,6 +30,7 @@ pub struct Fake(Arc<Mutex<State>>);
 #[derive(Default)]
 struct State {
     offline: bool,
+    stalled: bool,
     forbidden: BTreeSet<String>,
     version: u64,
     /// By resource, then name.
@@ -98,7 +99,12 @@ impl Fake {
         let fake = self.clone();
         let service = tower::service_fn(move |request: Request<kube::client::Body>| {
             let fake = fake.clone();
-            async move { fake.respond(&request) }
+            async move {
+                if fake.state().stalled {
+                    std::future::pending::<()>().await;
+                }
+                fake.respond(&request)
+            }
         });
         Arc::new(Clients::over(service, budgets))
     }
@@ -133,6 +139,10 @@ impl Fake {
 
     pub fn set_offline(&self, offline: bool) {
         self.state().offline = offline;
+    }
+
+    pub fn set_stalled(&self, stalled: bool) {
+        self.state().stalled = stalled;
     }
 
     pub fn forbid(&self, resource: &str, forbidden: bool) {

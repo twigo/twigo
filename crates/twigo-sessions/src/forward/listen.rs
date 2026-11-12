@@ -136,15 +136,18 @@ pub async fn listen(port: u16) -> Result<Listeners, BindError> {
 }
 
 /// Binds `address`. `SO_REUSEADDR` lets a port bind again while the
-/// connections it served wait out `TIME_WAIT`; on macOS it also lets
-/// `127.0.0.1:P` bind beside another process's listener on `0.0.0.0:P` or
-/// `[::]:P` and take its loopback clients, which Linux refuses whatever the
-/// options. So Linux binds with it, and elsewhere the bind goes without it
-/// first: when that finds the port in use, the port is busy unless nothing
-/// accepts a connection on it, which leaves only leftovers.
+/// connections it served wait out `TIME_WAIT`, which mio sets everywhere but
+/// on Windows, where it would let a socket in use be bound over
+/// ([`listener.rs`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/net/tcp/listener.rs#L74-L82)).
+/// On macOS it also lets `127.0.0.1:P` bind beside another process's
+/// listener on `0.0.0.0:P` or `[::]:P` and take its loopback clients, which
+/// Linux refuses whatever the options. So Linux binds with it, Windows
+/// without, and macOS without it first: when that finds the port in use, the
+/// port is busy unless nothing accepts a connection on it, which leaves only
+/// leftovers.
 async fn bind(address: SocketAddr) -> io::Result<TcpListener> {
-    if cfg!(target_os = "linux") {
-        return bound(address, true);
+    if !cfg!(target_os = "macos") {
+        return bound(address, cfg!(not(windows)));
     }
     match bound(address, false) {
         Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}

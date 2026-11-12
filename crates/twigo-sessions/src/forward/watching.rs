@@ -19,6 +19,8 @@ use crate::pods::{Subscriptions, v1};
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
 
 pub(super) const UNANSWERED: &str = "the cluster does not answer";
+pub(super) const UNANSWERED_YET: &str = "the cluster has not answered yet";
+const WATCHES_IN_USE: &str = "every watch of this context is in use";
 
 /// A pod a connection can go to, and the port it reaches there.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +141,12 @@ impl Watching {
                         why: format!("{label} {name} has finished"),
                     };
                 }
+                if !doc.status.running() {
+                    return Seen::Listed {
+                        candidates: Vec::new(),
+                        why: format!("{label} {name} is not running yet"),
+                    };
+                }
                 Seen::Listed {
                     candidates: vec![Candidate {
                         key: name.as_str().into(),
@@ -209,9 +217,13 @@ fn refusal(states: &[ViewState]) -> Option<Seen> {
     })
 }
 
-/// The cluster does not answer when a subscription that has listed nothing
-/// yet is reconnecting.
+/// Why nothing is listed yet, when it is known: every watch of the context
+/// is in use while a subscription is queued, and the cluster does not answer
+/// when one that has listed nothing yet is reconnecting.
 fn unanswered(states: &[ViewState]) -> Option<String> {
+    if states.contains(&ViewState::Queued) {
+        return Some(WATCHES_IN_USE.to_owned());
+    }
     states
         .contains(&ViewState::Stale)
         .then(|| UNANSWERED.to_owned())
@@ -290,6 +302,12 @@ struct Condition {
 impl PodStatus {
     fn finished(&self) -> bool {
         matches!(self.phase.as_deref(), Some("Succeeded" | "Failed"))
+    }
+
+    /// kubectl forwards only to a running pod
+    /// ([`portforward.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/kubectl/pkg/cmd/portforward/portforward.go#L427-L428)).
+    fn running(&self) -> bool {
+        self.phase.as_deref() == Some("Running")
     }
 
     fn ready(&self) -> bool {

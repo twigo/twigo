@@ -16,7 +16,7 @@ use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
-use super::watching::Candidate;
+use super::watching::{Candidate, UNANSWERED_YET};
 use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Open, PROBE_WINDOW, QUIET, Report, Shared};
 use crate::shell::abandoned;
 
@@ -24,8 +24,6 @@ const CHUNK: usize = 16 * 1024;
 /// How much a client may send while its connection waits, before the wait
 /// stops reading it.
 const EARLY: usize = 4 * CHUNK;
-
-const UNANSWERED_YET: &str = "the cluster has not answered yet";
 
 /// Why a connection or a try failed.
 pub(super) enum Fault {

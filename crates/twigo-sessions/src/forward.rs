@@ -41,7 +41,7 @@ use crate::pods::Reach;
 use connect::{Connect, Kube};
 use connection::Fault;
 use pick::{Chosen, Known, Pick};
-use watching::Watching;
+use watching::{UNANSWERED_YET, Watching};
 
 use listen::{Accepting, Socket, Sockets};
 
@@ -452,7 +452,8 @@ struct Supervisor {
     reports: mpsc::UnboundedReceiver<Report>,
     tasks: JoinSet<()>,
     phase: Phase,
-    /// It reached a pod since it started over.
+    /// It reached a pod since it started over, or started over because its
+    /// target was gone.
     worked: bool,
     /// It failed because its target is gone, which a connection looks at
     /// again.
@@ -537,14 +538,14 @@ impl Supervisor {
         match control {
             Control::Restart => {
                 if matches!(self.phase, Phase::Restored | Phase::Failed) {
-                    self.begin();
+                    self.begin(false);
                 }
             }
             Control::Refuse(error) => {
                 if self.phase != Phase::Failed {
                     self.refused_from_restored = self.phase == Phase::Restored;
                 }
-                self.fail(error);
+                self.end_with(error, false);
             }
             Control::Allow => {
                 if self.phase != Phase::Failed {
@@ -558,7 +559,7 @@ impl Supervisor {
                         true
                     });
                 } else {
-                    self.begin();
+                    self.begin(false);
                 }
             }
         }
@@ -566,10 +567,10 @@ impl Supervisor {
 
     fn accepted(&mut self, socket: Socket) {
         match self.phase {
-            Phase::Failed if self.gone => self.begin(),
+            Phase::Failed if self.gone => self.begin(true),
             // Closed at once: its socket drops here.
             Phase::Failed => return,
-            Phase::Restored => self.begin(),
+            Phase::Restored => self.begin(false),
             Phase::Proving | Phase::Ready | Phase::Waiting => {}
         }
         self.ensure_watching();
@@ -584,9 +585,9 @@ impl Supervisor {
         ));
     }
 
-    fn begin(&mut self) {
+    fn begin(&mut self, worked: bool) {
         self.phase = Phase::Proving;
-        self.worked = false;
+        self.worked = worked;
         self.gone = false;
         self.refused_from_restored = false;
         self.retry = None;
@@ -615,8 +616,18 @@ impl Supervisor {
         self.shared.know(Known::Unknown(None));
     }
 
-    fn release_if_idle(&mut self) {
-        if self.tasks.is_empty() && self.phase != Phase::Proving {
+    /// With no connection, a forward that worked and whose last try failed
+    /// waits as one that found no pod does, and one that is not proving lets
+    /// the subscriptions go; either looks again with its next connection.
+    fn settle(&mut self) {
+        if !self.tasks.is_empty() {
+            return;
+        }
+        if self.phase == Phase::Proving && self.worked && self.retry.is_some() {
+            self.phase = Phase::Waiting;
+            self.retry = None;
+        }
+        if self.phase != Phase::Proving {
             self.release();
         }
     }
@@ -654,18 +665,14 @@ impl Supervisor {
             return;
         }
         match reaction {
-            Reaction::Fault(error) => {
-                let gone = error.kind == ErrorKind::NotFound;
-                self.fail(error);
-                self.gone = gone;
-            }
+            Reaction::Fault(error) => self.fail(error),
             Reaction::Refused(error) => self.refused(error),
             // A forward that is proving finds it out when it is asked.
             Reaction::Empty(why) if self.phase != Phase::Proving => self.wait(why),
             Reaction::Found if self.phase == Phase::Waiting => self.phase = Phase::Proving,
             Reaction::Empty(_) | Reaction::Found | Reaction::Nothing => {}
         }
-        self.release_if_idle();
+        self.settle();
     }
 
     /// Starts the proof or the wait for a pod, whichever the forward is at.
@@ -675,7 +682,7 @@ impl Supervisor {
         }
         self.ensure_watching();
         match self.shared.choose() {
-            Chosen::Unknown(None) => {}
+            Chosen::Unknown(None) => self.unanswered(),
             Chosen::Unknown(Some(why)) | Chosen::None(why) => self.nothing_to_reach(why),
             Chosen::Refused(error) => self.refused(error),
             Chosen::Fault(error) => self.fail(error),
@@ -691,7 +698,21 @@ impl Supervisor {
     fn nothing_to_reach(&mut self, why: String) {
         if self.worked {
             self.wait(why);
-        } else if self.no_pod_by.is_none() {
+        } else {
+            self.give_up_by_the_wait();
+        }
+    }
+
+    /// The hub has listed nothing yet: a forward that never worked gives up
+    /// after the wait, as it does for a pod that is not there.
+    fn unanswered(&mut self) {
+        if !self.worked {
+            self.give_up_by_the_wait();
+        }
+    }
+
+    fn give_up_by_the_wait(&mut self) {
+        if self.no_pod_by.is_none() {
             self.no_pod_by = Some(Instant::now() + CANDIDATE_WAIT);
         }
     }
@@ -750,7 +771,7 @@ impl Supervisor {
             Chosen::Fault(error) => self.fail(error),
             Chosen::Unknown(None) => self.phase = Phase::Proving,
         }
-        self.release_if_idle();
+        self.settle();
     }
 
     fn set_ready(&mut self) {
@@ -778,7 +799,8 @@ impl Supervisor {
     }
 
     /// A try to prove the forward failed: it fails if it never worked, else
-    /// it tries again after a pause.
+    /// it tries again after a pause, or with its next connection if it has
+    /// none.
     fn unreachable(&mut self, error: IpcError) {
         if !self.worked {
             self.fail(error);
@@ -786,6 +808,7 @@ impl Supervisor {
         }
         self.pause();
         self.reconnecting(error.message);
+        self.settle();
     }
 
     fn reconnecting(&mut self, reason: String) {
@@ -797,9 +820,16 @@ impl Supervisor {
         });
     }
 
+    /// A forward whose target is gone looks at it again with its next
+    /// connection.
     fn fail(&mut self, error: IpcError) {
+        let gone = error.kind == ErrorKind::NotFound;
+        self.end_with(error, gone);
+    }
+
+    fn end_with(&mut self, error: IpcError, gone: bool) {
         self.phase = Phase::Failed;
-        self.gone = false;
+        self.gone = gone;
         self.probe = None;
         self.retry = None;
         self.no_pod_by = None;
@@ -810,7 +840,7 @@ impl Supervisor {
             status.state = state;
             changed
         });
-        self.release_if_idle();
+        self.settle();
     }
 
     fn report(&mut self, report: Report) {
@@ -843,7 +873,7 @@ impl Supervisor {
 
     fn closed(&mut self) {
         self.publish();
-        self.release_if_idle();
+        self.settle();
     }
 
     fn timed_out(&mut self) {
@@ -854,8 +884,14 @@ impl Supervisor {
         if self.no_pod_by.is_some_and(|by| by <= now) {
             self.no_pod_by = None;
             let chosen = self.shared.pick().choose(now);
-            if let Chosen::None(why) | Chosen::Unknown(Some(why)) = chosen {
-                self.fail(IpcError::new(ErrorKind::Unavailable, why));
+            match chosen {
+                Chosen::None(why) | Chosen::Unknown(Some(why)) => {
+                    self.fail(IpcError::new(ErrorKind::Unavailable, why));
+                }
+                Chosen::Unknown(None) => {
+                    self.fail(IpcError::new(ErrorKind::Unavailable, UNANSWERED_YET));
+                }
+                Chosen::Pod(_) | Chosen::Fault(_) | Chosen::Refused(_) => {}
             }
         }
     }
