@@ -1,6 +1,6 @@
 import { toIpcError, type Forward, type ForwardStarted } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
-import type { Workbench } from "@twigo/workbench";
+import { unlockAction, type Workbench } from "@twigo/workbench";
 import type { Forwards } from "./service";
 import { variant } from "./variants";
 import { targetWords } from "./words";
@@ -24,10 +24,12 @@ export function validPort(value: string): string | undefined {
 /**
  * Runs a start or a resume. One that the context's mode refuses answers the
  * gate's error and changes nothing (ARCHITECTURE 4.6), so it is told here as
- * a warning in the gate's words and nothing is returned; any other failure
- * goes on to be reported.
+ * a warning in the gate's words, with the unlock where the person may lift
+ * the lock, and nothing is returned; any other failure goes on to be
+ * reported.
  */
 export async function unlessRefused<T>(
+  workbench: Workbench,
   what: string,
   run: () => Promise<T>,
 ): Promise<T | undefined> {
@@ -36,8 +38,12 @@ export async function unlessRefused<T>(
   } catch (error) {
     const { blocked, message } = toIpcError(error);
     if (blocked === undefined) throw error;
+    const action = unlockAction(workbench.backend, error, (failure) => {
+      workbench.report(failure);
+    });
     notify.warning(`${what} is not forwarded: ${message}`, {
       key: `forward-refused:${what}`,
+      ...(action && { action }),
     });
     return undefined;
   }
@@ -63,7 +69,7 @@ export async function tellBind(
   }
   const retry = async (local: number): Promise<void> => {
     try {
-      const answer = await unlessRefused(what, () => again(local));
+      const answer = await unlessRefused(workbench, what, () => again(local));
       if (answer) await tellBind(workbench, answer, what, again, done);
     } catch (error) {
       workbench.report(error);

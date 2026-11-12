@@ -81,7 +81,7 @@ export function startForward(
     const port = chosen.port;
     const again = (local: number | null) =>
       backend.invoke("forward_start", { target, port, local });
-    const started = await unlessRefused(named(target, chosen), () =>
+    const started = await unlessRefused(workbench, named(target, chosen), () =>
       again(null),
     );
     if (!started) return;

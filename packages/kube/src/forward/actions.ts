@@ -59,7 +59,7 @@ export function registerForwardActions(
   const resume = async (forward: Forward, local: number | null) => {
     const again = (port: number) =>
       backend.invoke("forward_resume", { id: forward.id, local: port });
-    const started = await unlessRefused(targetWords(forward), () =>
+    const started = await unlessRefused(workbench, targetWords(forward), () =>
       backend.invoke("forward_resume", { id: forward.id, local }),
     );
     if (started) {

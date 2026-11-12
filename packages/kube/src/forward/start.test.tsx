@@ -6,6 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { IpcError, type Backend, type Blocked } from "@twigo/protocol";
 import {
   BLOCKED_AFTER_MS,
   createMockBackend,
@@ -463,4 +464,61 @@ test("a start that the mode refuses starts nothing and says so as a warning in t
   expect(workbench.editors.active).not.toMatch(/^pf:/);
   const ports = await backend.invoke("forward_ports", GATEWAY);
   expect(ports.ports.map(({ forward }) => forward)).toEqual([1, null, null]);
+});
+
+test("a start that a lock the person may lift refuses offers the unlock for 15 minutes, which a policy file's lock does not", async () => {
+  const mock = createMockBackend("live");
+  const unlock = vi.spyOn(mock, "invoke");
+  const refusal = (source: Blocked["source"]) =>
+    new IpcError(
+      "permissions",
+      "prod-eu is read-only, so Twigo did not send it",
+      {
+        context: "prod-eu",
+        mode: "read-only",
+        source,
+        class: "forward",
+        reason: "mode",
+        verb: "get",
+        target: "pods/portforward in payments",
+      },
+    );
+  let refused = refusal({ kind: "environment", environment: "production" });
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command === "forward_start"
+        ? Promise.reject(refused)
+        : mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, onMessage),
+  };
+  const workbench = await openList(backend);
+  await act(() => vi.advanceTimersByTimeAsync(1500));
+  const start = async () => {
+    const run = forwardGateway(workbench);
+    await settle(6);
+    await pick(workbench, "80");
+    await run;
+    await settle(6);
+  };
+  await start();
+  expect(live()).toEqual([
+    "payments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itUnlock for 15 minutes",
+  ]);
+  fireEvent.click(toastButton("Unlock for 15 minutes"));
+  await settle(6);
+  expect(unlock).toHaveBeenCalledWith("context_unlock", "prod-eu");
+  expect(
+    workbench.catalog.find("prod-eu")?.access.unlockedUntil,
+  ).not.toBeNull();
+
+  refused = refusal({
+    kind: "policyFile",
+    file: "/etc/twigo/policy.json",
+    pattern: "prod-*",
+  });
+  await start();
+  expect(live()).toEqual([
+    "payments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
+  ]);
 });

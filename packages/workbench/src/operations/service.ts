@@ -11,6 +11,7 @@ import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
+import { unlockAction } from "./unlock";
 
 /** The context key that holds while a countdown runs, which ⌘Z cancels. */
 export const COUNTING_DOWN = "operationCountingDown";
@@ -192,27 +193,13 @@ export class Operations {
    * lock or a context no source lists does not.
    */
   #refused(error: unknown): void {
-    const { message, blocked } = toIpcError(error);
-    const unlockable =
-      blocked?.reason === "mode" &&
-      blocked.mode === "read-only" &&
-      blocked.source.kind !== "policyFile" &&
-      blocked.source.kind !== "unlisted";
-    if (!unlockable) {
+    const action = unlockAction(this.backend, error, this.report);
+    if (!action) {
       this.report(error);
       return;
     }
-    notify.error(message, {
-      key: message,
-      action: {
-        label: "Unlock for 15 minutes",
-        run: () => {
-          this.backend
-            .invoke("context_unlock", blocked.context)
-            .catch(this.report);
-        },
-      },
-    });
+    const { message } = toIpcError(error);
+    notify.error(message, { key: message, action });
   }
 
   #ask(
