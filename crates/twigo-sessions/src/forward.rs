@@ -270,6 +270,8 @@ impl Forward {
             opening: None,
             probe: None,
             received_at_probe: 0,
+            accepted: 0,
+            failed_after: 0,
             retry: None,
             retries: retries(),
             no_pod_by: None,
@@ -383,26 +385,33 @@ impl Shared {
 }
 
 enum Report {
-    /// A pod sent bytes, so it works.
-    Served,
+    /// A pod sent bytes to the connection of this number, so it works.
+    Served(u64),
     Failed(Fault),
 }
 
-struct Open(Arc<Shared>);
+struct Open {
+    shared: Arc<Shared>,
+    /// Counts the connections in the order they were accepted, from 1.
+    number: u64,
+}
 
 impl Open {
-    fn new(shared: &Arc<Shared>) -> Self {
+    fn new(shared: &Arc<Shared>, number: u64) -> Self {
         shared.update(|status| {
             status.connections += 1;
             true
         });
-        Self(Arc::clone(shared))
+        Self {
+            shared: Arc::clone(shared),
+            number,
+        }
     }
 }
 
 impl Drop for Open {
     fn drop(&mut self) {
-        self.0.update(|status| {
+        self.shared.update(|status| {
             status.connections -= 1;
             true
         });
@@ -455,6 +464,10 @@ struct Supervisor {
     opening: Option<BoxFuture<'static, Result<Watching, IpcError>>>,
     probe: Option<BoxFuture<'static, Result<(), connection::Over>>>,
     received_at_probe: u64,
+    accepted: u64,
+    /// How many had been when the `failure` was set: a connection with a
+    /// greater number was opened after it.
+    failed_after: u64,
     /// The next try, when the last one failed.
     retry: Option<Instant>,
     retries: ExponentialBackoff,
@@ -560,7 +573,8 @@ impl Supervisor {
             Phase::Proving | Phase::Ready | Phase::Waiting => {}
         }
         self.ensure_watching();
-        let open = Open::new(&self.shared);
+        self.accepted += 1;
+        let open = Open::new(&self.shared, self.accepted);
         let end = self.shared.end.subscribe();
         self.tasks.spawn(connection::serve(
             Arc::clone(&self.shared),
@@ -743,16 +757,14 @@ impl Supervisor {
         self.phase = Phase::Ready;
         self.retry = None;
         self.shared.update(|status| {
-            if status.state == ForwardState::Ready {
-                return false;
-            }
             status.state = ForwardState::Ready;
             status.failure = None;
             true
         });
     }
 
-    fn failure(&self, words: String) {
+    fn failure(&mut self, words: String) {
+        self.failed_after = self.accepted;
         self.shared.update(|status| {
             status.failure = Some(words);
             true
@@ -803,7 +815,10 @@ impl Supervisor {
 
     fn report(&mut self, report: Report) {
         match report {
-            Report::Served => {
+            Report::Served(number) => {
+                if number > self.failed_after {
+                    self.shared.update(|status| status.failure.take().is_some());
+                }
                 if self.phase == Phase::Proving && self.probe.is_some() {
                     self.proven();
                 }

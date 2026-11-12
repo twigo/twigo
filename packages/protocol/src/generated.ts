@@ -521,8 +521,9 @@ queued: number,
  */
 sent: number, received: number, 
 /**
- * What the last connection that failed said, since the forward was
- * last ready: a pod's port that refused, a pod that went.
+ * What the last connection that failed said, until a connection opened
+ * after it carries bytes from the pod, or the forward is ready again
+ * after not being so: a pod's port that refused, a pod that went.
  */
 failure: string | null, };
 

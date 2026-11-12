@@ -1549,42 +1549,60 @@ async fn the_hub_s_errors_make_a_forward_that_worked_reconnect_and_fail_one_that
     never.state("the forward fails", is_failed).await;
 }
 
+async fn refuse_a_port(forward: &mut Harness) -> String {
+    let _client = forward.client();
+    let refused = forward.next().await;
+    let text = "error forwarding port 8080: connection refused";
+    refused.error.send(text.to_owned()).unwrap();
+    forward
+        .until("the refusal is the failure", |status| {
+            status.failure.as_deref() == Some(text)
+        })
+        .await;
+    text.to_owned()
+}
+
 #[tokio::test(start_paused = true)]
-async fn a_failure_stays_up_while_the_forward_stays_ready_and_goes_when_it_is_ready_again() {
+async fn a_failure_goes_when_a_connection_opened_after_it_carries_bytes_and_not_before() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
     let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
     forward.ready().await;
-    let mut serving = forward.client();
-    serving.write_all(b"x").await.unwrap();
-    let mut pod = forward.next().await;
+    let mut before = forward.client();
+    before.write_all(b"x").await.unwrap();
+    let mut before_pod = forward.next().await;
 
-    let _refused = forward.client();
-    let refused = forward.next().await;
-    refused
-        .error
-        .send("error forwarding port 8080: connection refused".to_owned())
-        .unwrap();
-    forward
-        .until("the refusal is the failure", |status| {
-            status.failure.is_some()
-        })
-        .await;
+    let text = refuse_a_port(&mut forward).await;
 
-    let mut another = forward.client();
-    another.write_all(b"y").await.unwrap();
-    let mut second = forward.next().await;
-    second.io.write_all(b"fine").await.unwrap();
-    assert_eq!(read_exactly(&mut another, 4).await, b"fine");
-    pod.io.write_all(b"fine").await.unwrap();
-    assert_eq!(read_exactly(&mut serving, 4).await, b"fine");
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    before_pod.io.write_all(b"late").await.unwrap();
+    assert_eq!(read_exactly(&mut before, 4).await, b"late");
+    let mut quiet = forward.client();
+    quiet.write_all(b"y").await.unwrap();
+    let mut quiet_pod = forward.next().await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
     let status = forward.status.borrow().clone();
     assert_eq!(status.state, ForwardState::Ready);
-    assert!(
-        status.failure.is_some(),
-        "it holds since the forward was last ready"
+    assert_eq!(
+        status.failure.as_deref(),
+        Some(text.as_str()),
+        "a connection opened before it, or one that carried nothing, leaves it"
     );
+
+    quiet_pod.io.write_all(b"fine").await.unwrap();
+    assert_eq!(read_exactly(&mut quiet, 4).await, b"fine");
+    let status = forward
+        .until("the failure goes", |status| status.failure.is_none())
+        .await;
+    assert_eq!(status.state, ForwardState::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_goes_when_the_forward_is_ready_again_after_not_being_so() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    refuse_a_port(&mut forward).await;
 
     forward.pods.refuse("web-1", 404);
     let _fails = forward.client();

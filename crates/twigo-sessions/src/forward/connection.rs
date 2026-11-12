@@ -111,10 +111,10 @@ impl Link {
 pub(super) async fn serve(
     shared: Arc<Shared>,
     socket: Socket,
-    _open: Open,
+    open: Open,
     end: watch::Receiver<u64>,
 ) {
-    match run(&shared, socket, end).await {
+    match run(&shared, socket, open.number, end).await {
         Ok(()) | Err(Over::Ended) => {}
         Err(Over::Lost) => shared.report(Report::Failed(Fault::Lost)),
         Err(Over::Fault(fault)) => shared.report(Report::Failed(fault)),
@@ -124,6 +124,7 @@ pub(super) async fn serve(
 async fn run(
     shared: &Arc<Shared>,
     mut socket: Socket,
+    number: u64,
     end: watch::Receiver<u64>,
 ) -> Result<(), Over> {
     let mut early = Vec::new();
@@ -137,7 +138,10 @@ async fn run(
         prepared = prepare(shared, end) => prepared?,
         () = leaves(&mut socket, &mut early) => return Ok(()),
     };
-    pump(shared, &mut link, socket, early, connected, &candidate).await
+    pump(
+        shared, &mut link, socket, number, early, connected, &candidate,
+    )
+    .await
 }
 
 struct Prepared {
@@ -277,6 +281,7 @@ async fn pump(
     shared: &Shared,
     link: &mut Link,
     socket: Socket,
+    number: u64,
     early: Vec<u8>,
     connected: Connected,
     candidate: &Candidate,
@@ -336,7 +341,7 @@ async fn pump(
                     if !served {
                         served = true;
                         shared.pick().served(&candidate.key);
-                        shared.report(Report::Served);
+                        shared.report(Report::Served(number));
                     }
                 }
                 () = ready(()), if told => break,
