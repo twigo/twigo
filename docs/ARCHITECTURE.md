@@ -1023,26 +1023,29 @@ Extensions add commands, not prefixes.
     - It ends when the forward stops or fails, when the context's mode refuses forwards, when its clients are abandoned, and on a wake or a moved route, as a shell does.
     - A session's permit is held by the connection's task, not by the upgraded stream.
   - **States.**
-    `Starting` while the first pod is found and one stream to it is opened and dropped, which proves the credentials, the rights, the upgrade and, by the pod's silence for 250 ms, that something listens: a port that nothing listens on answered on the error channel within 36 ms of the request (20 tries, kind 1.37, containerd 2.3.4, 2026-11-11).
+    `Starting` while the first pod is found and one stream to it is opened and dropped, which proves the credentials, the rights, the upgrade and, by the pod's silence for 250 ms, that something listens: the window starts when the upgrade returns, and a port that nothing listens on answered on the error channel within 1.7 ms of that (200 tries in 10 runs of `forward::live` at a load average of 3.9 to 4.2, kind 1.37, containerd 2.3.4, 2026-11-12; the connect itself took 5 to 21 ms).
     No access review comes first, since from 1.35 the upgrade needs `get` and `create` on `pods/portforward` and before that `get` (6.3).
     `Ready` once it worked, and only if a pod can still be reached when the stream proves it; a connection that carries bytes while the proof is waiting proves it as well.
     The first stream's place among the sessions is waited for 15 s.
     A forward that worked goes to `Reconnecting` with its reason when a pod or the cluster does not answer, and tries again with a backoff; the hub tries its own errors again, so a forward that worked waits on them, and one that never worked fails at once with the cluster's words.
     A cluster that does not answer is said so: `the cluster does not answer` is the reason of a forward that worked and of the failure of a connection that waited 20 s for a pod, and the words a forward that never worked fails with after the same 20 s.
-    A hub that has no watch to give is said so too, `every watch of this context is in use`, in the same places.
+    A hub that has no stream slot to give is said so too, `waiting for a stream slot of this context`, in the same places; its subscription is queued for a watch while all the context's watches are taken and for a paged list while all its requests are, and either is a slot.
     A forward that never worked waits no longer than 20 s for the hub to list anything, and fails with `the cluster has not answered yet` if the hub is still connecting.
     A forward whose credentials, rights or policy are refused (a `401`, a `403` on a stream, the gate's) goes to `Failed`.
     A failed forward ends its connections, keeps listening and closes what it accepts at once, until it is started again; one that failed because its target is gone looks at the target again at its next connection, as a forward that worked, so a pod made again under its name goes on, and one that is still Pending or refuses makes it `Reconnecting` with the reason and does not fail it for good.
+    Only two things say that a target is gone: a watch of the target itself that finds it missing, and a 404 on the upgrade.
+    Any other failure that fails a forward, `NotFound` included, stays until the forward is started again, since the hub answers `NotFound` for a context that no source lists and for a list the server does not have.
     A resume starts a failed forward again and leaves one that works, or waits for its first connection, as it is.
     `Restored` is a forward that listens since the app started and has not asked its cluster yet; `Stopped` is one that does not listen and is kept.
     A connection that fails after the forward was ready sets the forward's `failure` and changes nothing else.
     The `failure` holds until a connection opened after it carries bytes from the pod, or the forward is ready again after not being so.
     So one refused connection does not show for the whole life of a forward that stays ready, and a connection opened before the failure, or one that carried nothing, leaves it.
   - **Watching.**
-    A forward reads its target through the hub only while it has connections or proves that it can be reached: its subscriptions start with a connection and go when the last one closes, so a listening forward that nobody uses costs none of the context's 24 watches.
-    A forward that waits for a pod, with no connection, lets them go as well, keeps saying why it waits, and looks again when a connection comes.
-    So does a forward that worked and whose try to reach a pod failed, a pod whose container crash-loops or whose node does not answer: with connections it tries again with a backoff, and when the last one closes it keeps its reason and tries again at the next.
-    A forward that is proving holds them until the proof ends, which the 15 s and 20 s waits above bound.
+    A forward reads its target through the hub only while someone needs it: a connection, a try to reach a pod that is under way, or the first proof of a forward that never worked, which a person asked for and which ends in `Ready` or `Failed` within the 15 s and 20 s waits above.
+    After any step of the forward (a command, a report of a connection, a change the hub tells, a timer, the end of a connection), one that has none of these holds no subscription, opens no stream and has no timer armed, in any state and with the state's words kept; its next connection looks again.
+    So a listening forward that nobody uses costs none of the context's 24 watches, also when it waits for a pod, when the cluster does not answer, when its target was gone and a client came and left, and when its last connection closed during a try to reach a pod: that try ends and no other follows.
+    A forward that worked and whose try failed, a pod whose container crash-loops or whose node does not answer, tries again with a backoff while it has connections.
+    One that lost its last connection to such a failure keeps saying `Reconnecting` with its reason until a connection comes and proves it again.
   - **Keeping them.**
     A space keeps its forwards and the local port each target's port had last under a key that only Rust writes, as it does the modes, so the webview follows them and cannot overwrite them (4.8).
     Ids are unique in the app and never reused across restarts.
@@ -1051,13 +1054,17 @@ Extensions add commands, not prefixes.
     The bytes count since the app started, so a stop, a resume and a move keep them.
     A forward that ran listens on its port again at a start and waits, `Restored`, for its first connection or for its space to connect, which is when the core makes the clients of its context; no credential plugin runs at a start.
     A port that another process holds, or that another forward of Twigo holds, or a context the catalog does not list, makes it `Failed` with that; a target that is gone is found once the forward is asked, and fails with `NotFound` and its name.
-    A start that comes while the forwards are being restored wins: a port of a target has one forward, and the saved one for it is dropped.
+    Every command that reads or changes the table (a port list, a start, a resume, a stop, a remove) waits until the saved forwards and ports are in it, so a start sees the local port its port last had and the forwards of its space, and what it saves replaces nothing.
+    The clients of a context made meanwhile start that context's forwards over once the restore ends.
+    A window that follows the forwards does not wait for it, and learns of each forward as it is restored.
+    A port of a target has one forward: a saved forward for a port that has one is dropped, and of two starts of one port at once the one that finishes later asks for its own local port, which moves the forward the other made, as a start of a port that has a forward does.
     The state is written in the order of the table's snapshots.
     A stopped forward stays stopped.
   - **The mode.**
     A forward changes nothing in the cluster, so it does not go through the command bus: the gate decides each connection's upgrade, and the manager asks the policy and the catalog again for each running forward's context, reading both under the table's lock, whenever either changes, when a start, a resume or a move puts a forward in, and when the context's clients are made.
     When the mode comes to refuse forwards (`read-only` with `readOnly.allowPortForward: false`), or the catalog loses the context, its connections end and it is `Failed` with the gate's words or the missing context's, still listening, until that passes.
     A resume or a move computes the refusal before it restarts anything and keeps one that holds, and the refusal's words are those of its cause now, a missing context or the mode, as that changes.
+    What the manager decides after it sent the data path a control, it decides on what it knows and not on the status, which lags the control: the clients of a context lifting a refusal send the lifting and then the start, a resume restarts a failed forward only if it does not wait for its first connection, and a forward told to start does not count as waiting when it is moved.
     It then goes back to what it was: a forward that waited for its first connection waits again and asks no cluster, any other starts over.
     A move leaves a forward that waits for its first connection waiting, on its new port.
   - **No SPDY tunnel.**
