@@ -238,7 +238,7 @@ test("a forward that loses its pod says it is reconnecting, why, and then shows 
   );
   expect(
     screen.getByText("Pod", { selector: "dt" }).nextSibling?.textContent,
-  ).toBe("Not chosen yet");
+  ).toBe("None to go to");
   await later(5500);
   expect(screen.queryByText("Reconnecting")).toBeNull();
   const second = screen.getByText("Pod", { selector: "dt" }).nextSibling
@@ -267,6 +267,8 @@ test("restored, stopped and failed forwards of an earlier run say so, each in it
     });
     await settle(6);
   };
+  const pod = () =>
+    screen.getByText("Pod", { selector: "dt" }).nextSibling?.textContent;
   expect(forwards.ofSpace("prod-eu").map(({ id }) => id)).toEqual([1, 2, 3]);
 
   await tab(1);
@@ -275,13 +277,16 @@ test("restored, stopped and failed forwards of an earlier run say so, each in it
     /asks its cluster at the first connection, or when its space connects\./,
   );
   expect(screen.getAllByText("Restored").length).toBeGreaterThan(0);
+  expect(pod()).toBe("Not chosen yet");
 
   await tab(2);
   screen.getByText("Stopped.");
   screen.getByText(/Nothing listens on localhost:9090; Start brings it back\./);
+  expect(pod()).toBe("None while stopped");
 
   await tab(3);
   screen.getByText('deployments.apps "payments-legacy" not found');
+  expect(pod()).toBe("None");
 });
 
 test("connections that wait for a session say that the context's are all taken", async () => {

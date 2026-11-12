@@ -1022,6 +1022,7 @@ Extensions add commands, not prefixes.
       When there is none, a person's proof fails at the end of its 20 s, before the pod is back, the space's and a sign-in's say `Reconnecting` at once, and a connection waits within its own 20 s, so only one whose wait reaches the avoidance's end goes to the pod: nothing tries it again and again.
       A person's start or resume forgets what was avoided, a pod that carries a connection is no longer avoided, and what was avoided of a pod goes once it is no candidate; each wakes the connections that wait for a pod, and a wait that ends chooses once more before it gives up.
       Connections already open keep their pod.
+      The status names the pod and its port that the last choice took, and none while the pods listed leave no candidate to take; a cluster that does not answer leaves them as they were.
   - **A connection.**
     Each accepted TCP connection holds a place among the context's sessions (3.2) for its life, waiting in `queued` when the budget is full, then goes to the current pod, waiting 20 s at most for one to be a candidate.
     A pod behind a Service or a workload whose upgrade answers `404` has been sent nothing of the client's, so the connection chooses again while its 20 s last, and gives up when no pod is left by then.

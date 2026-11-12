@@ -1071,6 +1071,61 @@ async fn a_forward_that_worked_waits_for_a_pod_that_is_ready_again() {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_forward_names_no_pod_while_none_is_left_and_the_next_one_that_comes() {
+    let fake = Fake::default();
+    behind_web(&fake, &[("web-a", true)]);
+    let mut forward = start(&fake, service_target(), false, Budgets::default());
+    forward.ready().await;
+    let mut open = forward.client();
+    open.write_all(b"x").await.unwrap();
+    let _pod = forward.next().await;
+    let status = forward.status.borrow().clone();
+    assert_eq!(
+        (status.pod.as_deref(), status.pod_port),
+        (Some("web-a"), Some(8080))
+    );
+
+    fake.put(
+        "endpointslices",
+        slice("web-1", "web", &[], &[("http", 8080)]),
+    );
+    let status = forward
+        .until("it waits and names no pod", |status| {
+            is_reconnecting(&status.state) && status.pod.is_none()
+        })
+        .await;
+    assert_eq!(status.pod_port, None);
+
+    behind_web(&fake, &[("web-b", true)]);
+    let status = forward
+        .until("web-b is the pod", |status| {
+            status.pod.as_deref() == Some("web-b")
+        })
+        .await;
+    assert_eq!(status.pod_port, Some(8080));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_forward_that_waits_after_a_failed_stream_keeps_naming_a_pod_that_is_still_a_candidate() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    forward.pods.refuse("web-1", 500);
+
+    let mut client = forward.client();
+    let status = forward.state("the forward waits", is_reconnecting).await;
+    assert_eq!(
+        (status.pod.as_deref(), status.pod_port),
+        (Some("web-1"), Some(8080))
+    );
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+}
+
 async fn ends_the_connection_and_recovers(end: impl FnOnce(&Harness)) {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));

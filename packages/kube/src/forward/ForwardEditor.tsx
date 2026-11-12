@@ -20,6 +20,7 @@ import {
   addressOf,
   forwardTitle,
   listensOn,
+  noPodWords,
   portWords,
   stateOf,
 } from "./words";
@@ -134,7 +135,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
             label: "Pod",
             value:
               pod === null ? (
-                <Quiet>Not chosen yet</Quiet>
+                <Quiet>{noPodWords(forward)}</Quiet>
               ) : (
                 <>
                   <LinkButton

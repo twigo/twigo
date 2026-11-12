@@ -403,18 +403,23 @@ impl Shared {
         self.pick.lock().expect("pick lock")
     }
 
-    /// The pod to go to, which the status names once it is chosen.
+    /// The pod to go to, which the status names once it is chosen, and no
+    /// longer when a choice finds none.
     fn choose(&self, now: Instant) -> Chosen {
         let chosen = self.pick().choose(now);
-        if let Chosen::Pod(candidate) = &chosen {
-            self.update(|status| {
-                let changed = status.pod.as_deref() != Some(&*candidate.name)
-                    || status.pod_port != Some(candidate.port);
-                status.pod = Some(candidate.name.to_string());
-                status.pod_port = Some(candidate.port);
-                changed
-            });
-        }
+        let named = match &chosen {
+            Chosen::Pod(candidate) => Some(candidate),
+            Chosen::None(_) => None,
+            Chosen::Fault(_) | Chosen::Refused(_) | Chosen::Unknown(_) => return chosen,
+        };
+        self.update(|status| {
+            let pod = named.map(|candidate| candidate.name.to_string());
+            let pod_port = named.map(|candidate| candidate.port);
+            let changed = status.pod != pod || status.pod_port != pod_port;
+            status.pod = pod;
+            status.pod_port = pod_port;
+            changed
+        });
         chosen
     }
 

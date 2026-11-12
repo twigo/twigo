@@ -79,6 +79,21 @@ export function stateOf({ state, queued }: Forward): Shown {
   }
 }
 
+export function noPodWords({ state }: Forward): string {
+  switch (state.state) {
+    case "starting":
+    case "restored":
+    case "ready":
+      return "Not chosen yet";
+    case "reconnecting":
+      return "None to go to";
+    case "failed":
+      return "None";
+    case "stopped":
+      return "None while stopped";
+  }
+}
+
 const HTTPS_NAME = /^https([-_.].*)?$|[-_.]https$/i;
 const HTTP_NAME = /^(http|web)([-_.].*)?$|[-_.]http$/i;
 const HTTP_PORTS: ReadonlySet<number> = new Set([80, 8000, 8008, 8080, 8888]);
