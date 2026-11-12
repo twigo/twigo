@@ -144,7 +144,9 @@ pub struct Forward {
     pub received: u64,
     /// What the last connection that failed said, until a connection opened
     /// after it carries bytes from the pod, or the forward is ready again
-    /// after not being so: a pod's port that refused, a pod that went.
+    /// after not being so: a pod's port that refused, a pod whose upgrade
+    /// answered 404, no pod to go to within the wait, a cluster that did not
+    /// answer.
     pub failure: Option<String>,
 }
 
@@ -181,14 +183,17 @@ pub enum ForwardState {
     /// anything, what may pass too: a cluster that does not answer, no ready
     /// pod within the wait, a refused port, a 403; only a first stream lost
     /// to clients replaced or a network that moved is tried again after a
-    /// pause. The proofs its connections and its space's connecting ask for
-    /// fail it only for the gate's refusal, a context that no source lists,
-    /// a credential failure or a target that is gone, and its context's mode
-    /// and the catalog fail it too. A start or a resume starts it again, and
-    /// a lifted refusal makes it wait, `Restored`; one whose target is gone
-    /// looks at it again at its next connection, and one that failed for a
-    /// credential is proven again by its space's connecting or by a sign-in
-    /// the person started that gets a credential.
+    /// pause, and a 404 for one pod behind a Service or a workload takes
+    /// another while one is left. The proofs its connections, its space's
+    /// connecting and a sign-in ask for fail it only for the gate's refusal,
+    /// a context that no source lists, a credential failure or a target that
+    /// is gone, and its context's mode and the catalog fail it too. A start
+    /// or a resume starts it again, unless its context's mode or the catalog
+    /// refuses it, which answers that error; a lifted refusal makes it wait,
+    /// `Restored`; one whose target is gone looks at it again at its next
+    /// connection, and one that failed for a credential is proven again by
+    /// its space's connecting or by a sign-in the person started that gets a
+    /// credential.
     Failed {
         error: IpcError,
     },

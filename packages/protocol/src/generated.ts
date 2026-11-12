@@ -523,7 +523,9 @@ sent: number, received: number,
 /**
  * What the last connection that failed said, until a connection opened
  * after it carries bytes from the pod, or the forward is ready again
- * after not being so: a pod's port that refused, a pod that went.
+ * after not being so: a pod's port that refused, a pod whose upgrade
+ * answered 404, no pod to go to within the wait, a cluster that did not
+ * answer.
  */
 failure: string | null, };
 
