@@ -12,6 +12,7 @@ import {
   BLOCKED_AFTER_MS,
   createMockBackend,
   FAILS_AFTER_MS,
+  LIFTS_AFTER_MS,
   LOSES_POD_AFTER_MS,
   READY_AFTER_MS,
   type MockScenario,
@@ -201,6 +202,9 @@ test("a forward that loses its pod says it is reconnecting, why, and then shows 
   await later(LOSES_POD_AFTER_MS - READY_AFTER_MS);
   expect(screen.getAllByText("Reconnecting").length).toBeGreaterThan(0);
   screen.getByText(/ is gone; waiting for another ready pod$/);
+  screen.getByText(
+    "It looks again while it has connections, and at its next one.",
+  );
   expect(
     screen.getByText("Pod", { selector: "dt" }).nextSibling?.textContent,
   ).toBe("Not chosen yet");
@@ -236,8 +240,10 @@ test("restored, stopped and failed forwards of an earlier run say so, each in it
   expect(forwards.ofSpace("prod-eu").map(({ id }) => id)).toEqual([1, 2, 3]);
 
   await tab(1);
-  screen.getByText("Restored when Twigo started.");
-  screen.getByText(/its cluster is asked at the first connection/);
+  screen.getByText("Waiting for its first connection.");
+  screen.getByText(
+    /has not asked its cluster since Twigo started or the mode's refusal was lifted; a first connection, or its space connecting, makes it ask\./,
+  );
   expect(screen.getAllByText("Restored").length).toBeGreaterThan(0);
 
   await tab(2);
@@ -573,6 +579,20 @@ test("a forward that a policy file forbids says the mode's words, still listenin
   screen.getByText(
     "It still listens on localhost:8080 and closes every connection at once, until the mode lets forwards through.",
   );
+});
+
+test("a forward that waits after the mode's refusal was lifted does not say it was restored when Twigo started", async () => {
+  const { start, open } = await mounted("forwardBlocked");
+  const forward = await start(API, 80);
+  await open(forward);
+  await later(BLOCKED_AFTER_MS + LIFTS_AFTER_MS);
+  expect(screen.getAllByText("Restored").length).toBeGreaterThan(0);
+  screen.getByText("Waiting for its first connection.");
+  expect(screen.queryByText(/when Twigo started/)).toBeNull();
+  expect(screen.queryByText("Read-only")).toBeNull();
+  button("Remove");
+  button("Stop");
+  absent("Start");
 });
 
 test("a start that the mode refuses says so as a warning in the gate's words, and the forward stays as it was", async () => {

@@ -187,9 +187,14 @@ function Notices({ forward }: { forward: Forward }) {
   return (
     <>
       {state.state === "restored" && (
-        <Banner tone="info" icon={Info} title="Restored when Twigo started.">
-          It listens on {addressOf(forward)}; its cluster is asked at the first
-          connection, or when its space connects.
+        <Banner
+          tone="info"
+          icon={Info}
+          title="Waiting for its first connection."
+        >
+          It listens on {addressOf(forward)} and has not asked its cluster since
+          Twigo started or the mode's refusal was lifted; a first connection, or
+          its space connecting, makes it ask.
         </Banner>
       )}
       {state.state === "stopped" && (
@@ -217,6 +222,9 @@ function Problem({ forward }: { forward: Forward }) {
     return (
       <Callout tone="warn" title="Reconnecting">
         <p>{state.reason}</p>
+        <p className="text-muted-foreground">
+          It looks again while it has connections, and at its next one.
+        </p>
       </Callout>
     );
   }
