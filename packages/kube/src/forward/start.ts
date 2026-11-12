@@ -4,13 +4,11 @@ import type {
   ForwardPorts,
   ForwardTarget,
 } from "@twigo/protocol";
-import { notify } from "@twigo/ui";
 import type { QuickPickItem, Workbench } from "@twigo/workbench";
 import { pfUri } from "../uri";
 import { tellBind, tellFailure, unlessRefused } from "./busy";
 import type { Forwards } from "./service";
-import { variant } from "./variants";
-import { addressOf, stateOf } from "./words";
+import { stateOf } from "./words";
 
 /** The port as a person names the forward: `web:http`. */
 function named(target: ForwardTarget, { port, name }: ForwardPort): string {
@@ -57,14 +55,13 @@ export function startForward(
     editors.open(pfUri({ space: target.space, id }));
   };
 
-  const begin = async (
+  return async (
     target: ForwardTarget,
     { pick }: { pick: boolean },
   ): Promise<void> => {
     const ports = await backend.invoke("forward_ports", target);
-    const asks = pick || variant("start") === "pick";
     let chosen: ForwardPort | undefined;
-    if (asks && (pick || ports.ports.length > 1)) {
+    if (pick || ports.ports.length > 1) {
       const picked = await quickAccess.pick(
         `Port of ${ports.kind} ${target.name} to forward`,
         pickItems(ports, forwards),
@@ -85,7 +82,7 @@ export function startForward(
       again(null),
     );
     if (!started) return;
-    await tellBind(
+    tellBind(
       workbench,
       started,
       named(target, chosen),
@@ -93,28 +90,7 @@ export function startForward(
       (forward) => {
         told(forward);
         reveal(target, forward.id);
-        if (!asks) {
-          notify.success(
-            `Forwarding ${addressOf(forward)} → ${named(target, chosen)}`,
-            {
-              key: `forward-started:${String(forward.id)}`,
-              ...(ports.ports.length > 1 && {
-                action: {
-                  label: "Change…",
-                  run: () => {
-                    void begin(target, { pick: true }).catch(
-                      (error: unknown) => {
-                        workbench.report(error);
-                      },
-                    );
-                  },
-                },
-              }),
-            },
-          );
-        }
       },
     );
   };
-  return begin;
 }

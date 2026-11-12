@@ -64,14 +64,7 @@ export function registerForwardActions(
     );
     if (started) {
       const stays = listensOn(forward).length > 0 ? forward.local : undefined;
-      await tellBind(
-        workbench,
-        started,
-        targetWords(forward),
-        again,
-        told,
-        stays,
-      );
+      tellBind(workbench, started, targetWords(forward), again, told, stays);
     }
   };
 

@@ -55,7 +55,6 @@ afterEach(() => {
   )) {
     dismiss.click();
   }
-  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
@@ -541,56 +540,6 @@ test("a port below 1024 says that Twigo cannot listen on it, not that it is in u
   toastButton("Use 1024");
 });
 
-test("with the input variant a busy port asks again with the free port filled in and why", async () => {
-  history.replaceState(null, "", "/?variant=busy:input");
-  const { workbench, start, open, backend } = await mounted("forwardBusy");
-  const forward = await start(API, 80, 8081);
-  await open(forward);
-  const calls = recording(backend);
-  fireEvent.click(button("Change Local Port…"));
-  await settle(4);
-  act(() => {
-    workbench.quickAccess.setValue("8080");
-    workbench.quickAccess.submit();
-  });
-  await settle(6);
-  const ask = workbench.quickAccess.session?.ask;
-  expect(ask?.prompt).toBe(
-    "8080 is in use by another process or forward. Enter forwards auth-api:http on the port above.",
-  );
-  expect(ask?.value).toBe("8081");
-  expect(live()).toEqual([]);
-  expect(calls("forward_resume")).toHaveLength(1);
-
-  act(() => {
-    workbench.quickAccess.submit();
-  });
-  await settle(6);
-  expect(calls("forward_resume")).toEqual([
-    { id: forward.id, local: 8080 },
-    { id: forward.id, local: 8081 },
-  ]);
-});
-
-test("with the input variant a port below 1024 says why in the prompt, whole, under the field", async () => {
-  history.replaceState(null, "", "/?variant=busy:input");
-  const { workbench, start, open } = await mounted();
-  const forward = await start(API, 80, 8085);
-  await open(forward);
-  fireEvent.click(button("Change Local Port…"));
-  await settle(4);
-  act(() => {
-    workbench.quickAccess.setValue("80");
-    workbench.quickAccess.submit();
-  });
-  await settle(6);
-  const prompt =
-    "Twigo cannot listen on 80: ports below 1024 need privileges it does not have. Enter forwards auth-api:http on the port above.";
-  expect(workbench.quickAccess.session?.ask?.prompt).toBe(prompt);
-  expect(workbench.quickAccess.session?.ask?.value).toBe("1024");
-  expect(screen.getByText(prompt).className).not.toContain("truncate");
-});
-
 test("a start that fails says the target's own failure in a toast, which neither bind answer does", async () => {
   const { start, open } = await mounted("forwardFailed");
   const forward = await start(API, 80);
@@ -630,8 +579,7 @@ test("a tab that opens before the core has answered does not say the forward is 
   expect(document.querySelector("[aria-busy]")).not.toBeNull();
 });
 
-test("a busy port's field that is dismissed moves nothing: the forward stays where it was, and no port is taken", async () => {
-  history.replaceState(null, "", "/?variant=busy:input");
+test("a busy port's toast that is dismissed moves nothing: the forward stays where it was, and no port is taken", async () => {
   const { workbench, start, open, backend, forwards } =
     await mounted("forwardBusy");
   const forward = await start(API, 80, 8085);
@@ -644,10 +592,10 @@ test("a busy port's field that is dismissed moves nothing: the forward stays whe
     workbench.quickAccess.submit();
   });
   await settle(6);
-  expect(workbench.quickAccess.session?.ask?.value).toBe("8081");
-  act(() => {
-    workbench.quickAccess.hide();
-  });
+  expect(live()).toEqual([
+    "8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
+  ]);
+  fireEvent.click(toastButton("Dismiss"));
   await later(5000);
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: 8080 }]);
   expect(forwards.get(forward.id)?.local).toBe(8085);

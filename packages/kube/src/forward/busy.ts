@@ -2,7 +2,6 @@ import { toIpcError, type Forward, type ForwardStarted } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import { unlockAction, type Workbench } from "@twigo/workbench";
 import type { Forwards } from "./service";
-import { variant } from "./variants";
 import { targetWords } from "./words";
 
 type Busy = Extract<ForwardStarted, { outcome: "busy" }>;
@@ -55,20 +54,19 @@ export async function unlessRefused<T>(
 /**
  * What a start or a resume answered. A forward is handed to `done`; a port
  * that could not be bound starts nothing, and the next free one is offered
- * as data, never taken by itself: a toast to accept it, or a field with it
- * filled in. The person's choice goes through `again`, which asks the core
- * with that port, and its answer is told the same way. A forward that
- * listens on `stays` keeps that port, and is told so instead of not being
- * forwarded.
+ * as data, never taken by itself: a toast with a button to accept it. The
+ * person's choice goes through `again`, which asks the core with that port,
+ * and its answer is told the same way. A forward that listens on `stays`
+ * keeps that port, and is told so instead of not being forwarded.
  */
-export async function tellBind(
+export function tellBind(
   workbench: Workbench,
   started: ForwardStarted,
   what: string,
   again: (local: number) => Promise<ForwardStarted>,
   done: (forward: Forward) => void,
   stays?: number,
-): Promise<void> {
+): void {
   if (started.outcome === "started") {
     done(started.forward);
     return;
@@ -76,23 +74,12 @@ export async function tellBind(
   const retry = async (local: number): Promise<void> => {
     try {
       const answer = await unlessRefused(workbench, what, () => again(local));
-      if (answer) await tellBind(workbench, answer, what, again, done, stays);
+      if (answer) tellBind(workbench, answer, what, again, done, stays);
     } catch (error) {
       workbench.report(error);
     }
   };
   const words = whyBusy(started);
-  if (variant("busy") === "input") {
-    const typed = await workbench.quickAccess.input({
-      placeholder: "Local port",
-      prompt: `${words}. Enter forwards ${what} on the port above.`,
-      acceptLabel: "Forward",
-      value: String(started.free),
-      validate: validPort,
-    });
-    if (typed !== undefined) await retry(Number(typed.trim()));
-    return;
-  }
   const left =
     stays === undefined
       ? `${what} is not forwarded`

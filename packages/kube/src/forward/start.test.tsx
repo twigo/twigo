@@ -39,7 +39,6 @@ afterEach(() => {
   )) {
     dismiss.click();
   }
-  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
@@ -47,8 +46,7 @@ afterEach(() => {
 });
 
 /** The pods of prod-eu in a list, with every request to the backend recorded. */
-async function listed(scenario: MockScenario = "live", variant = "") {
-  if (variant) history.replaceState(null, "", `/?variant=${variant}`);
+async function listed(scenario: MockScenario = "live") {
   const backend = createMockBackend(scenario);
   const invoke = vi.spyOn(backend, "invoke");
   const workbench = await openList(backend);
@@ -433,50 +431,6 @@ test("Forward in an object editor's title starts the object's port", async () =>
   ]);
 });
 
-test("with start:once f starts the default port at once and says so, with Change… to pick another", async () => {
-  const { workbench, calls } = await listed("live", "start:once");
-  const run = forwardGateway(workbench);
-  await settle(8);
-  await run;
-  expect(workbench.quickAccess.session).toBeUndefined();
-  expect(calls("forward_start")).toEqual([
-    { target: GATEWAY, port: 80, local: null },
-  ]);
-  expect(live()).toEqual([
-    "Forwarding localhost:8080 → payments-gateway:httpChange…",
-  ]);
-
-  fireEvent.click(toastButton("Change…"));
-  await settle(8);
-  expect(labels(workbench)).toEqual([
-    ["http 80 → localhost:8080", "default"],
-    ["metrics 9090 → localhost:9090", undefined],
-    ["grpc 9000 → localhost:9000", undefined],
-  ]);
-  await pick(workbench, "9090");
-  expect(calls("forward_start")).toHaveLength(2);
-});
-
-test("with start:once a pod's only port has no Change…, and ⇧F still asks", async () => {
-  const { workbench, calls } = await listed("live", "start:once");
-  await selectFirst();
-  letter("f");
-  await settle(10);
-  expect(live()).toHaveLength(1);
-  expect(live()[0]).toMatch(/^Forwarding localhost:8080 → \S+:http$/);
-  expect(calls("forward_start")).toHaveLength(1);
-  act(() => {
-    workbench.editors.close(pfUri({ space: "prod-eu", id: 1 }));
-  });
-  await settle(4);
-  act(() => {
-    grid().focus();
-  });
-  letter("f", { shiftKey: true });
-  await settle(8);
-  expect(workbench.quickAccess.session?.pick).toBeDefined();
-});
-
 test("a local port that is in use is not replaced: the toast offers the next, and a click takes it", async () => {
   const { workbench, calls } = await listed("forwardBusy");
   const run = forwardGateway(workbench);
@@ -500,30 +454,6 @@ test("a local port that is in use is not replaced: the toast offers the next, an
     { target: GATEWAY, port: 80, local: 8081 },
   ]);
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
-});
-
-test("with busy:input the free port is asked for, filled in, with why", async () => {
-  const { workbench, calls } = await listed("forwardBusy", "busy:input");
-  const run = forwardGateway(workbench);
-  await settle(6);
-  await pick(workbench, "80");
-  await settle(6);
-  const ask = workbench.quickAccess.session?.ask;
-  expect(ask?.prompt).toBe(
-    "8080 is in use by another process or forward. Enter forwards payments-gateway:http on the port above.",
-  );
-  expect(ask?.value).toBe("8081");
-  expect(live()).toEqual([]);
-  expect(calls("forward_start")).toHaveLength(1);
-  act(() => {
-    workbench.quickAccess.submit();
-  });
-  await settle(8);
-  await run;
-  expect(calls("forward_start")).toEqual([
-    { target: GATEWAY, port: 80, local: null },
-    { target: GATEWAY, port: 80, local: 8081 },
-  ]);
 });
 
 test("a start that fails opens its tab and says the target's own failure", async () => {
@@ -629,21 +559,18 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   ]);
 });
 
-test("a busy port's field that is dismissed starts nothing on the free port", async () => {
-  const { workbench, calls, backend } = await listed(
-    "forwardBusy",
-    "busy:input",
-  );
+test("a busy port's toast that is dismissed starts nothing on the free port", async () => {
+  const { workbench, calls, backend } = await listed("forwardBusy");
   const run = forwardGateway(workbench);
   await settle(6);
   await pick(workbench, "80");
-  await settle(6);
-  expect(workbench.quickAccess.session?.ask?.value).toBe("8081");
-  act(() => {
-    workbench.quickAccess.hide();
-  });
-  await settle(8);
   await run;
+  await settle(6);
+  expect(live()).toEqual([
+    "8080 is in use by another process or forward, so payments-gateway:http is not forwarded.Use 8081",
+  ]);
+  fireEvent.click(toastButton("Dismiss"));
+  await settle(8);
   await act(() => vi.advanceTimersByTimeAsync(5000));
   expect(calls("forward_start")).toEqual([
     { target: GATEWAY, port: 80, local: null },
