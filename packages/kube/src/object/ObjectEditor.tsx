@@ -10,6 +10,7 @@ import {
 import type { EditServices } from "../edit/services";
 import { YamlTab } from "../edit/YamlTab";
 import { canShell } from "../exec/kinds";
+import { canForward } from "../forward/kinds";
 import { logsKind } from "../logs/entries";
 import { parseObjectUri } from "../uri";
 import { ObjectContent } from "./ObjectContent";
@@ -135,6 +136,9 @@ export function ObjectTabSwitch({
     }
     if (key === "resource.shell") {
       return input !== undefined && canShell(input.gvr);
+    }
+    if (key === "resource.forward") {
+      return input !== undefined && canForward(input.gvr);
     }
     return lookup(key);
   };

@@ -57,6 +57,9 @@ Findings that belong to no step yet.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
   - WebView2 may fire `focusout` when the window deactivates, which would unmount a focused menu button of a row without the cursor; not verified, matters once Windows ships (D2).
+  - The menu key and Shift+F10 on the focused grid open no row menu: the context-menu trigger wraps only the rows' container inside the grid (`ActionContextMenu` in `DataGrid.tsx`), and the key's `contextmenu` event is aimed at the focused element, the grid.
+    Tab to the cursor row's ⋯ and Enter open it.
+    A `contextmenu` event dispatched at the grid opened no menu and one dispatched at a row did, in headless Chrome on the mock (2026-11-12); the key itself was not pressed in any browser.
 - The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
   - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
   - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).
@@ -77,3 +80,32 @@ Findings that belong to no step yet.
     Move Editor into New Group to the Right (`mod+\`) loses its key to Toggle Terminal the same way on Linux with the recorded French layout, a Mac's, where the backtick sits on the `Backslash` key; not verified with a French layout of Linux.
     Both stay in the palette until the keybindings editor lets a person rebind them.
   - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).
+- Port-forwards (`twigo_sessions::forward`, `twigo_core::forward`, ARCHITECTURE 4.6):
+  - The HTTP request tester of 4.3 comes later: the `pf://` tab has Open in browser and Copy address only.
+  - A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd: no half-close reaches the pod over `v4.channel.k8s.io`, and kubectl's SPDY tunnel loses the answer after 1 s on containerd 2.3.4 (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
+    CRI-O was not read or run.
+  - What forwards do when the app starts is fixed: they come back as they were.
+    The settings files of M3 let a person choose: as they were, all stopped, or none.
+  - A forward's `failure` is the runtime's text as it comes, which on containerd names the sandbox's id and both loopback dials.
+  - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
+  - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
+  - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
+    Its claim is one guard held to the end of the command, and `a_stop_waits_for_the_resume_of_its_forward_until_the_resume_has_answered` and `a_start_and_a_resume_wait_for_the_claim_of_their_port_once_the_target_is_read` fail without it.
+  - On macOS a socket is made close-on-exec in a second call after `socket()` and `accept()`, so a child spawned between the two keeps a forward's listener or connection for as long as it runs, and the port stays listening after a stop.
+    The listeners come from tokio's [`TcpSocket::new`](https://github.com/tokio-rs/tokio/blob/tokio-1.54.1/tokio/src/net/tcp/socket.rs#L163-L191), which calls socket2's [`Socket::new`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L116-L118) and so [`set_common_flags`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L773-L805), and the accepted connections from mio's [`accept`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/tcp.rs#L110-L118) (tokio 1.54.1, socket2 0.6.5, mio 1.2.4).
+    A terminal's shell is not such a child: `crates/twigo-sessions/src/terminal/spawn.rs` marks every descriptor above 2 close-on-exec in `pre_exec`.
+    The children that can be are a credential plugin (`crates/twigo-kube/src/credentials/run.rs`; one the person signs in with is allowed 10 minutes, `source.rs`) and the login shell (`crates/twigo-env/src/lib.rs`).
+    Starting those with only their stdio (`POSIX_SPAWN_CLOEXEC_DEFAULT`, or closing the descriptors above 2 in `pre_exec` as terminals do) would end it; not done.
+  - A stop, a move or a shutdown followed at once by a bind of the same port can find it in use for a moment, since a child Twigo starts then holds a copy of the closed listeners until its program starts: a start or a resume answers `Busy` for that moment (ARCHITECTURE 4.6).
+    It was seen on macOS 27.2 (2026-11-12) and not run on Linux, where a forked child holds its parent's descriptors until it execs as well.
+    A probe process's children held the probe's closed listener for under 50 µs when they were started with `posix_spawn` and for up to about 1 ms when they were forked (macOS 27.2, 2026-11-12); Twigo's own children were not measured.
+    std 1.99.1 uses `posix_spawnp` on Apple only for a command with no `pre_exec` closure and no `setsid`, and, when its environment was cleared or sets `PATH`, only for a program given by a path ([`posix_spawn`](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L467-L474) and its [`setsid` branch](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L756-L765)); any other command forks.
+    Twigo's children fork: a terminal's shell and the login shell through `pre_exec`, and a credential plugin named without a path through its cleared environment; a plugin given by a path meets the conditions for `posix_spawnp`.
+    So the figure that applies to Twigo is the fork's, about 1 ms, not 50 µs, except for a plugin given by a path.
+  - Safari and Firefox were not measured against the session budget.
+    Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
+  - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
+    Not verified on Windows: whether a port just closed binds again at once there, after connections it served.
+- Tests that failed once in CI and passed on a rerun (2026-11-12, on a branch that touches neither):
+  - `apply::a_status_write_during_a_preview_does_not_answer_stale` (`crates/twigo-core/tests/bus_live/apply.rs`) answered `Stale` on Kubernetes 1.33 and passed on 1.34 to 1.37 in the same run; the cause was not looked for.
+  - `packages/kube/src/logs/logs.test.tsx` ended with an unhandled `requestAnimationFrame is not defined` from `FrameAcks` (`packages/protocol/src/acks.ts`): a timer of the mock's logs fired after the test's environment was gone, with every test passed.

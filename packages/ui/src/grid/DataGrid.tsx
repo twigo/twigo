@@ -32,11 +32,17 @@ const ACTIONS_WIDTH = 32;
 export interface DataGridProps<R, G> {
   readonly label: string;
   readonly columns: readonly GridColumn[];
+  /**
+   * Whether the column titles show, to sort and to size the columns; true
+   * unless a grid reads as one flowing line, as in a side bar, and has
+   * neither to do.
+   */
+  readonly header?: boolean;
   /** Widths the user dragged or fitted, by column id. */
-  readonly widths: Readonly<Record<string, number>>;
-  readonly onResize: (column: string, width: number) => void;
-  readonly sort: GridSort | null;
-  readonly onSort: (sort: GridSort) => void;
+  readonly widths?: Readonly<Record<string, number>>;
+  readonly onResize?: (column: string, width: number) => void;
+  readonly sort?: GridSort | null;
+  readonly onSort?: (sort: GridSort) => void;
   /** Items in the sequence: rows, and group headers when grouped. */
   readonly length: number;
   /**
@@ -64,6 +70,15 @@ export interface DataGridProps<R, G> {
   readonly onMark?: (ids: readonly string[], marked: boolean) => void;
   /** The selected row's menu: a right click and its ⋯ select the row first. */
   readonly menu?: ActionGroups;
+  /**
+   * Lays the ⋯ over the end of a row on hover and focus, instead of
+   * reserving a column of its own for it: for a grid so narrow that the
+   * column costs its rows more than the button is worth. Not with `inline`
+   * or `headerEnd`, which sit beside that column. The button lies over the
+   * surface the grid sits on, which is `--surface`: the editor's unless the
+   * part holding the grid sets its own.
+   */
+  readonly overlayMenu?: boolean;
   /** Actions with icons that show on a hovered row, run on that row. */
   readonly inline?: readonly Action[];
   /** At the head of the actions column, such as the choice of columns. */
@@ -99,9 +114,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const {
     label,
     columns,
-    widths,
+    header = true,
+    widths = {},
     onResize,
-    sort,
+    sort = null,
     onSort,
     length,
     query,
@@ -117,6 +133,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     marked,
     onMark,
     menu = [],
+    overlayMenu = false,
     inline = [],
     headerEnd,
     loading,
@@ -124,6 +141,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     flash,
     register,
   } = props;
+  const headerHeight = header ? HEADER_HEIGHT : 0;
   const ids = useId();
   const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -141,8 +159,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     overscan: 8,
     initialRect: { width: 0, height: 600 },
     // The header scrolls with the rows, ahead of them, and covers them once it sticks.
-    scrollMargin: HEADER_HEIGHT,
-    scrollPaddingStart: HEADER_HEIGHT,
+    scrollMargin: headerHeight,
+    scrollPaddingStart: headerHeight,
   });
   const virtual = virtualizer.getVirtualItems();
   const first = virtual[0]?.index ?? 0;
@@ -278,7 +296,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           return;
         }
         const top = virtualizer.getVirtualItemForOffset(
-          (virtualizer.scrollOffset ?? 0) + HEADER_HEIGHT,
+          (virtualizer.scrollOffset ?? 0) + headerHeight,
         );
         go(top?.index ?? 0, extend);
       },
@@ -322,7 +340,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           latest.current.onToggleGroup?.(target.id);
       },
     };
-  }, [virtualizer]);
+  }, [virtualizer, headerHeight]);
 
   useEffect(() => {
     if (!element || !register) return;
@@ -342,12 +360,12 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         : `${String(widthOf(column))}px`,
     ),
     ...(filler ? ["minmax(0, 1fr)"] : []),
-    `${String(ACTIONS_WIDTH)}px`,
+    ...(overlayMenu ? [] : [`${String(ACTIONS_WIDTH)}px`]),
   ].join(" ");
   const minWidth =
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
-    ACTIONS_WIDTH;
+    (overlayMenu ? 0 : ACTIONS_WIDTH);
   // The menu's trigger wraps every row, and opens the selected row's menu
   // unless a row prevents the event's default.
   const withoutMenu = (event: SyntheticEvent) => {
@@ -361,7 +379,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const rows = virtual.map((at) => {
     const target = item(at.index);
     const place = {
-      transform: `translateY(${String(at.start - HEADER_HEIGHT)}px)`,
+      transform: `translateY(${String(at.start - headerHeight)}px)`,
       height: ROW_HEIGHT,
     };
     if (!target) {
@@ -369,7 +387,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         <div
           key={`pending-${String(at.index)}`}
           role="row"
-          aria-rowindex={at.index + 2}
+          aria-rowindex={at.index + (header ? 2 : 1)}
           onContextMenu={withoutMenu}
           className="absolute inset-x-0 top-0 grid items-center border-b border-border-subtle"
           style={{ ...place, gridTemplateColumns: template }}
@@ -381,7 +399,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             </div>
           ))}
           {filler && <div role="gridcell" />}
-          <div role="gridcell" />
+          {!overlayMenu && <div role="gridcell" />}
         </div>
       );
     }
@@ -393,7 +411,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           key={target.id}
           id={rowId(at.index)}
           role="row"
-          aria-rowindex={at.index + 2}
+          aria-rowindex={at.index + (header ? 2 : 1)}
           aria-expanded={target.open}
           aria-selected={!anyMarked && isCursor}
           data-cursor={isCursor || undefined}
@@ -438,10 +456,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         key={target.id}
         id={rowId(at.index)}
         role="row"
-        aria-rowindex={at.index + 2}
+        aria-rowindex={at.index + (header ? 2 : 1)}
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
         keepActions={isCursor}
+        overlay={overlayMenu ? (tint ?? "bg-row-hover") : undefined}
         actions={
           <>
             {menu.length > 0 && (
@@ -456,8 +475,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     event.stopPropagation();
                   }}
                   className={cn(
-                    "flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none group-hover/row:opacity-100 hover:bg-row-hover hover:text-foreground focus-visible:opacity-100 focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover data-[state=open]:opacity-100",
-                    isCursor && "opacity-100",
+                    "flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
+                    !overlayMenu &&
+                      "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                    !overlayMenu && isCursor && "opacity-100",
                   )}
                 >
                   <Ellipsis aria-hidden className="size-4" />
@@ -563,55 +584,65 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       onPointerDown={() => {
         setWanted(undefined);
       }}
-      aria-rowcount={length + 1}
+      aria-rowcount={length + (header ? 1 : 0)}
       aria-multiselectable={marking || undefined}
       aria-activedescendant={active && rowId(active.index)}
       className="group/grid h-full min-h-0 overflow-auto outline-none"
     >
-      <div
-        role="row"
-        aria-rowindex={1}
-        className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-muted-foreground"
-        style={{
-          gridTemplateColumns: template,
-          minWidth,
-          height: HEADER_HEIGHT,
-        }}
-      >
-        {marking && (
-          <div role="columnheader" className="flex justify-center">
-            {marked.size > 0 && (
-              <MarkBox
-                checked={false}
-                partial
-                label="Clear marks"
-                onToggle={() => {
-                  onMark([...marked], false);
-                }}
-              />
-            )}
-          </div>
-        )}
-        {columns.map((column) => (
-          <HeaderCell
-            key={column.id}
-            column={column}
-            width={widthOf(column)}
-            sort={sort}
-            onSort={onSort}
-            onResize={(width) => {
-              onResize(column.id, width);
-            }}
-            onFit={() => {
-              if (element) onResize(column.id, fitWidth(element, column.id));
-            }}
-          />
-        ))}
-        {filler && <div role="columnheader" />}
-        <div role="columnheader" className="flex items-center justify-center">
-          {headerEnd}
+      {header && (
+        <div
+          role="row"
+          aria-rowindex={1}
+          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-muted-foreground"
+          style={{
+            gridTemplateColumns: template,
+            minWidth,
+            height: HEADER_HEIGHT,
+          }}
+        >
+          {marking && (
+            <div role="columnheader" className="flex justify-center">
+              {marked.size > 0 && (
+                <MarkBox
+                  checked={false}
+                  partial
+                  label="Clear marks"
+                  onToggle={() => {
+                    onMark([...marked], false);
+                  }}
+                />
+              )}
+            </div>
+          )}
+          {columns.map((column) => (
+            <HeaderCell
+              key={column.id}
+              column={column}
+              width={widthOf(column)}
+              sort={sort}
+              onSort={(next) => {
+                onSort?.(next);
+              }}
+              onResize={(width) => {
+                onResize?.(column.id, width);
+              }}
+              onFit={() => {
+                if (element)
+                  onResize?.(column.id, fitWidth(element, column.id));
+              }}
+            />
+          ))}
+          {filler && <div role="columnheader" />}
+          {!overlayMenu && (
+            <div
+              role="columnheader"
+              className="flex items-center justify-center"
+            >
+              {headerEnd}
+            </div>
+          )}
         </div>
-      </div>
+      )}
       {loading ? (
         <SkeletonRows
           template={template}
@@ -641,12 +672,19 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
  */
 function DataRow({
   keepActions,
+  overlay,
   actions,
   children,
   ...row
-}: ComponentProps<"div"> & { keepActions: boolean; actions: ReactNode }) {
+}: ComponentProps<"div"> & {
+  keepActions: boolean;
+  /** The row's tint, when the actions lie over its end rather than in a column. */
+  overlay: string | undefined;
+  actions: ReactNode;
+}) {
   const [pointed, setPointed] = useState(false);
   const [focused, setFocused] = useState(false);
+  const shown = keepActions || pointed || focused;
   return (
     <div
       {...row}
@@ -665,9 +703,22 @@ function DataRow({
       }}
     >
       {children}
-      <div role="gridcell" className="flex items-center justify-center">
-        {(keepActions || pointed || focused) && actions}
-      </div>
+      {overlay === undefined ? (
+        <div role="gridcell" className="flex items-center justify-center">
+          {shown && actions}
+        </div>
+      ) : (
+        shown && (
+          <div
+            role="gridcell"
+            className="absolute inset-y-0 right-0 flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+          >
+            <div className={cn("flex h-full items-center px-1", overlay)}>
+              {actions}
+            </div>
+          </div>
+        )
+      )}
     </div>
   );
 }

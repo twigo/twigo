@@ -32,6 +32,7 @@ export type {
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
 export type { Look, Outcome } from "./operations/service";
+export { canUnlock, unlockAction } from "./operations/unlock";
 export { StateStore } from "./state/store";
 export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
 export type {
@@ -47,6 +48,7 @@ export {
   accessOfSpace,
   chipLabel,
   describeAccess,
+  modeLabel,
   setByPolicyFile,
 } from "./spaces/modes";
 export { WorkbenchView } from "./WorkbenchView";

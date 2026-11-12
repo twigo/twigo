@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OnceCell, watch};
 use tokio_util::sync::CancellationToken;
-use twigo_ipc::{BlockReason, ErrorKind, IpcError, RequestClass};
+use twigo_ipc::{BlockReason, Blocked, ErrorKind, IpcError, RequestClass};
 use twigo_kube::client::{Actor, ActorClients, Clients};
 use twigo_policy::{Attributes, Policy};
 
@@ -278,6 +278,21 @@ impl Changes {
     }
 }
 
+/// What stops `actor` from sending `attributes` on `context` whatever any
+/// approval says: a mode that refuses its class. A request that only waits
+/// for an approval is not stopped.
+pub(crate) fn blocked(
+    policy: &Policy,
+    context: &str,
+    attributes: &Attributes,
+    actor: Actor,
+) -> Option<Box<Blocked>> {
+    policy
+        .authorize(context, attributes, actor)
+        .err()
+        .filter(|blocked| blocked.reason != BlockReason::NoApproval)
+}
+
 /// What ends an open answer or splice from outside: its context naming
 /// another cluster, or a mode that now refuses its class whatever any
 /// approval says, so a relock to `read-only` ends a terminal's exec, while
@@ -321,11 +336,7 @@ impl Ends {
             if self.policy.connection(&self.context) != Some(self.connection) {
                 return;
             }
-            if let Err(blocked) = self
-                .policy
-                .authorize(&self.context, &self.attributes, self.actor)
-                && blocked.reason != BlockReason::NoApproval
-            {
+            if blocked(&self.policy, &self.context, &self.attributes, self.actor).is_some() {
                 return;
             }
         }

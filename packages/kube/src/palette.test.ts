@@ -36,6 +36,16 @@ async function withEveryEnablement() {
   workbench.keys.set("space.id", "dev");
   workbench.keys.set("operationUndo", ["dev"]);
   workbench.keys.set("resource.scalable", true);
+  for (const key of [
+    "resource.forward",
+    "forward",
+    "forward.running",
+    "forward.startable",
+    "forward.movable",
+    "forward.web",
+  ])
+    workbench.keys.set(key, true);
+  workbench.keys.set("forwards.running", 1);
   for (const key of EDIT_KEYS) workbench.keys.set(key, true);
   for (const capability of [
     "resource.capability.delete",
@@ -78,7 +88,12 @@ test("every registered command appears in the palette", async () => {
   const ids = workbench.commands
     .all()
     .map((command) => command.id)
-    .filter((id) => id !== "k8s.logs.open" && id !== "k8s.shell.open");
+    .filter(
+      (id) =>
+        id !== "k8s.logs.open" &&
+        id !== "k8s.shell.open" &&
+        (!id.startsWith("k8s.forward.") || id === "k8s.forward.stopAll"),
+    );
   expect(ids.length).toBeGreaterThan(25);
   expect([...shown].sort()).toEqual([...ids].sort());
 });

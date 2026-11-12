@@ -154,6 +154,19 @@ test("group headers come before their rows, a failing row has an edge, and a hea
   expect(handlers.onToggleGroup).toHaveBeenCalledWith("g:edge");
 });
 
+test("without a header the rows start at the top and count from one", () => {
+  grid({ header: false, ...list(PODS) });
+  expect(screen.queryAllByRole("columnheader")).toEqual([]);
+  expect(screen.getByRole("grid").getAttribute("aria-rowcount")).toBe(
+    String(PODS.length),
+  );
+  const [first, second] = screen.getAllByRole("row");
+  expect(first?.getAttribute("aria-rowindex")).toBe("1");
+  expect(second?.getAttribute("aria-rowindex")).toBe("2");
+  expect(first?.style.transform).toBe("translateY(0px)");
+  expect(second?.style.transform).toBe("translateY(26px)");
+});
+
 test("a click selects and opens a row, its box marks it", () => {
   const { handlers } = grid();
   fireEvent.click(screen.getByText("api-1"));
@@ -528,6 +541,124 @@ test("a row's actions mount only while the pointer, the focus or the cursor is o
   expect(hasActions("gateway-1")).toBe(true);
   fireEvent.blur(rowNamed("gateway-1"));
   expect(hasActions("gateway-1")).toBe(false);
+});
+
+test("a row's menu has a column of its own, unless the grid lays it over the row's end", () => {
+  const menu = [[{ id: "copy", label: "Copy Name", run: vi.fn() }]];
+  const tracks = (name: string) =>
+    rowNamed(name).style.gridTemplateColumns.split(" ");
+  const actionsCell = (name: string) => {
+    fireEvent.pointerEnter(rowNamed(name));
+    return within(rowNamed(name))
+      .getByRole("button", { name: "Row actions" })
+      .closest<HTMLElement>('[role="gridcell"]');
+  };
+
+  const least = (name: string) => rowNamed(name).parentElement?.style.minWidth;
+
+  grid({ menu });
+  expect(tracks("gateway-1").pop()).toBe("32px");
+  expect(least("gateway-1")).toBe("260px");
+  expect(actionsCell("gateway-1")?.className).not.toContain("absolute");
+  cleanup();
+
+  grid({ menu, overlayMenu: true });
+  expect(tracks("gateway-1")).toEqual(["28px", "minmax(200px,", "1fr)"]);
+  expect(least("gateway-1")).toBe("228px");
+  const cell = actionsCell("gateway-1");
+  expect(rowNamed("gateway-1").children).toHaveLength(3);
+  expect(cell?.className).toContain("absolute");
+});
+
+test("a grid that lays its row menu over the rows has no column for it in the header, nor in a row still loading", () => {
+  const cells = (props: Props) => {
+    grid({ ...props, ...list([undefined, ...ITEMS]) });
+    const [header, pending] = screen.getAllByRole("row");
+    const counts = [header?.children.length, pending?.children.length];
+    cleanup();
+    return counts;
+  };
+  const beside = cells({});
+  expect(cells({ overlayMenu: true })).toEqual(beside.map((n) => (n ?? 0) - 1));
+});
+
+test("a menu laid over a row opens from its button and runs a choice without opening the row", async () => {
+  const run = vi.fn();
+  const { handlers } = grid({
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run }]],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Row actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy Name" }));
+  await act(() => new Promise((resolve) => setTimeout(resolve)));
+  expect(run).toHaveBeenCalledOnce();
+  expect(handlers.onActivate).not.toHaveBeenCalled();
+});
+
+test("a laid-over menu shows on hover, on focus and while its menu is open, also on the cursor's row, over the grid's surface in its row's tint", () => {
+  grid({
+    overlayMenu: true,
+    selected: "a1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  const cell = (name: string) =>
+    within(rowNamed(name))
+      .queryByRole("button", { name: "Row actions" })
+      ?.closest<HTMLElement>('[role="gridcell"]');
+  expect(cell("gateway-1")).toBeUndefined();
+  const cursor = cell("api-1");
+  for (const shown of [
+    "opacity-0",
+    "group-hover/row:opacity-100",
+    "focus-within:opacity-100",
+    "has-[[data-state=open]]:opacity-100",
+    "bg-[var(--surface,var(--editor))]",
+  ])
+    expect(cursor?.classList.contains(shown)).toBe(true);
+  expect(cursor?.firstElementChild?.className).toContain(
+    "bg-selected-unfocused",
+  );
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  expect(cell("gateway-1")?.firstElementChild?.className).toContain(
+    "bg-row-hover",
+  );
+  const button = within(rowNamed("gateway-1")).getByRole("button", {
+    name: "Row actions",
+  });
+  expect(button.className).not.toContain("opacity");
+  fireEvent.pointerDown(button, { button: 0, ctrlKey: false });
+  fireEvent.pointerLeave(rowNamed("gateway-1"));
+  expect(button.getAttribute("data-state")).toBe("open");
+  expect(screen.getByRole("menuitem", { name: "Copy Name" })).toBeTruthy();
+});
+
+test("without the overlay a row's button shows on its hover, on the cursor's row, on the keyboard's focus and while its menu is open", () => {
+  grid({
+    selected: "a1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  const buttonOf = (name: string) =>
+    within(rowNamed(name)).getByRole("button", { name: "Row actions" });
+  const shown = [
+    "group-hover/row:opacity-100",
+    "focus-visible:opacity-100",
+    "data-[state=open]:opacity-100",
+  ];
+
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  const other = buttonOf("gateway-1");
+  expect(other.classList.contains("opacity-0")).toBe(true);
+  expect(other.classList.contains("opacity-100")).toBe(false);
+  for (const name of shown) expect(other.classList.contains(name)).toBe(true);
+
+  const cursor = buttonOf("api-1");
+  expect(cursor.classList.contains("opacity-100")).toBe(true);
+  expect(cursor.classList.contains("opacity-0")).toBe(false);
+  for (const name of shown) expect(cursor.classList.contains(name)).toBe(true);
 });
 
 test("the focus moving within a row keeps its actions", () => {

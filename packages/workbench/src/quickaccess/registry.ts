@@ -31,6 +31,8 @@ export interface QuickPickItem {
     readonly label: string;
     /** While the state is in flight. */
     readonly pulse?: boolean;
+    /** An idle state that is off rather than waiting. */
+    readonly hollow?: boolean;
   };
   /** What sort of thing the row is, quieter at its end: `Pod`, `Deployment`. */
   readonly kind?: string;

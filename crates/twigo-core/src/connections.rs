@@ -70,25 +70,27 @@ pub enum Error {
 }
 
 impl Connections {
-    /// `provider` is where the context's credential comes from, which its
-    /// fingerprint covers, and `gate` is the UI's on the context.
+    /// The context's clients, and whether this call built them as its
+    /// current ones. `provider` is where the context's credential comes
+    /// from, which its fingerprint covers, and `gate` is the UI's on the
+    /// context.
     pub async fn clients(
         &self,
         context: &kubeconfig::Context,
         env: &ProxyEnv,
         provider: Option<Provider>,
         gate: Gate,
-    ) -> Result<Arc<Clients>, Error> {
+    ) -> Result<(Arc<Clients>, bool), Error> {
         let slot = {
             let mut contexts = self.contexts.lock().expect("connections lock");
             Arc::clone(contexts.entry(context.name.clone()).or_default())
         };
         if let Some(clients) = slot.current(context, env) {
-            return Ok(clients);
+            return Ok((clients, false));
         }
         let _building = slot.building.lock().await;
         if let Some(clients) = slot.current(context, env) {
-            return Ok(clients);
+            return Ok((clients, false));
         }
         let options = KubeConfigOptions {
             context: Some(context.name.clone()),
@@ -118,7 +120,7 @@ impl Connections {
             // moves to clients built from what holds now.
             drop(latest);
             clients.connections().abandon();
-            return Ok(clients);
+            return Ok((clients, false));
         }
         let replaced = slot.built.lock().expect("slot lock").replace(Built {
             fingerprint: context.fingerprint,
@@ -131,7 +133,7 @@ impl Connections {
             // another server.
             replaced.clients.connections().abandon();
         }
-        Ok(clients)
+        Ok((clients, true))
     }
 
     /// Follows what the sources list now, by context and fingerprint:
@@ -269,15 +271,18 @@ contexts:
         let a = connections
             .clients(find(&catalog, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let b = connections
             .clients(find(&catalog, "kind-b"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let again = connections
             .clients(find(&catalog, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(Arc::ptr_eq(&a, &again));
 
         ca(
@@ -289,7 +294,8 @@ contexts:
         let rebuilt = connections
             .clients(find(&catalog, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(!Arc::ptr_eq(&a, &rebuilt), "the CA file changed");
         assert!(
             retired.has_changed().unwrap(),
@@ -298,7 +304,8 @@ contexts:
         let same = connections
             .clients(find(&catalog, "kind-b"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(Arc::ptr_eq(&b, &same));
 
         let proxied = ProxyEnv::from_vars(|name| {
@@ -312,8 +319,97 @@ contexts:
                 Gate::unrestricted(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(!Arc::ptr_eq(&b, &through), "the proxy variables changed");
+    }
+
+    #[tokio::test]
+    async fn clients_say_whether_this_call_made_them_the_context_s_current_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let env = ProxyEnv::default();
+        let before = load(dir.path());
+        let built = |catalog: &kubeconfig::Catalog| {
+            let context = find(catalog, "kind-a").clone();
+            let connections = &connections;
+            let env = env.clone();
+            async move {
+                connections
+                    .clients(&context, &env, None, Gate::unrestricted())
+                    .await
+                    .unwrap()
+                    .1
+            }
+        };
+        assert!(built(&before).await, "the first");
+        assert!(!built(&before).await, "the ones it holds");
+
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let after = load(dir.path());
+        connections.keep(&after.contexts);
+        assert!(
+            !built(&before).await,
+            "built from what changed, and abandoned"
+        );
+        assert!(built(&after).await, "the context's new ones");
+        assert!(!built(&after).await);
+    }
+
+    #[tokio::test]
+    async fn of_two_calls_at_once_only_the_one_that_builds_the_clients_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Arc::new(Connections::default());
+        let catalog = load(dir.path());
+        let a = find(&catalog, "kind-a").clone();
+        let slot = Arc::clone(
+            connections
+                .contexts
+                .lock()
+                .unwrap()
+                .entry("kind-a".to_owned())
+                .or_default(),
+        );
+        let building = slot.building.lock().await;
+        let calls: Vec<_> = (0..2)
+            .map(|_| {
+                let (connections, a) = (Arc::clone(&connections), a.clone());
+                tokio::spawn(async move {
+                    connections
+                        .clients(&a, &ProxyEnv::default(), None, Gate::unrestricted())
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        drop(building);
+        let mut answers = Vec::new();
+        for call in calls {
+            answers.push(call.await.unwrap());
+        }
+        assert!(Arc::ptr_eq(&answers[0].0, &answers[1].0));
+        assert_eq!(
+            answers.iter().filter(|(_, built)| *built).count(),
+            1,
+            "{:?}",
+            answers.iter().map(|(_, built)| built).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
@@ -334,7 +430,8 @@ contexts:
                 Gate::unrestricted(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let retired = a.connections().retired();
         let network = a.connections().network();
 
@@ -363,7 +460,8 @@ contexts:
                 Gate::unrestricted(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let (retired, network) = (a.connections().retired(), a.connections().network());
 
         connections.retire_moved();
@@ -385,11 +483,13 @@ contexts:
         let a = connections
             .clients(find(&catalog, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let b = connections
             .clients(find(&catalog, "kind-b"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let (a_retired, b_retired) = (a.connections().retired(), b.connections().retired());
 
         ca(
@@ -435,7 +535,8 @@ contexts:
         let stale = connections
             .clients(find(&before, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(
             *stale.connections().abandoned().borrow(),
             "abandoned, which whoever holds them sees however late"
@@ -443,12 +544,14 @@ contexts:
         let current = connections
             .clients(find(&after, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(!*current.connections().abandoned().borrow());
         let again = connections
             .clients(find(&after, "kind-a"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(Arc::ptr_eq(&current, &again), "the current ones are kept");
     }
 
@@ -485,11 +588,13 @@ contexts:
         let first = connections
             .clients(twice[0], &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let again = connections
             .clients(twice[0], &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(Arc::ptr_eq(&first, &again), "kept, not rebuilt each time");
     }
 
@@ -520,6 +625,7 @@ contexts:
                     .clients(&a, &proxied, None, Gate::unrestricted())
                     .await
                     .unwrap()
+                    .0
             }
         });
         tokio::task::yield_now().await;
@@ -529,7 +635,8 @@ contexts:
         let fresh = connections
             .clients(&a, &proxied, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         drop(building);
 
         let orphaned = build.await.unwrap();
@@ -540,7 +647,8 @@ contexts:
         let current = connections
             .clients(&a, &proxied, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(Arc::ptr_eq(&fresh, &current));
         assert!(!*current.connections().abandoned().borrow());
     }
@@ -559,7 +667,8 @@ contexts:
         let b = connections
             .clients(find(&catalog, "kind-b"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
 
         let retired = b.connections().retired();
         connections.keep([find(&catalog, "kind-a")]);
@@ -570,7 +679,8 @@ contexts:
         let again = connections
             .clients(find(&catalog, "kind-b"), &env, None, Gate::unrestricted())
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert!(!Arc::ptr_eq(&b, &again));
     }
 }

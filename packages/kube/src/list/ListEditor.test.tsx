@@ -518,7 +518,11 @@ test("opening the object from the details keeps the list in a tab of its own", a
   await settle();
   fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
   await settle();
-  const tabs = screen.getAllByRole("tab").map((tab) => tab.textContent.trim());
+  const sidebar = screen.getByRole("region", { name: "Primary Side Bar" });
+  const tabs = screen
+    .getAllByRole("tab")
+    .filter((tab) => !sidebar.contains(tab))
+    .map((tab) => tab.textContent.trim());
   expect(tabs[0]).toBe("Pods");
   expect(tabs).toHaveLength(2);
   expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);

@@ -216,6 +216,8 @@ export type Bucket = {
  */
 lines: number, warnings: number, errors: number, };
 
+export type BusyWhy = "inUse" | "notPermitted";
+
 export type Cell = null | boolean | number | number | string;
 
 /**
@@ -478,6 +480,120 @@ previous: boolean,
  * wrote none.
  */
 lastLine: string | null, };
+
+export type Forward = { id: ForwardId, target: ForwardTarget, 
+/**
+ * The target's kind: `Service`.
+ */
+kind: string, 
+/**
+ * The target's port, as the start named it.
+ */
+port: number, portName: string | null, 
+/**
+ * The port's `appProtocol`, as the target declares it, so that the
+ * webview can tell an HTTP port without another call.
+ */
+appProtocol: string | null, local: number, 
+/**
+ * The addresses its listeners were last bound on: `127.0.0.1`, and `::1`
+ * where that bound. None for one that has not bound since the app
+ * started: one restored stopped, or whose local port another process
+ * held then. One stopped later keeps them and listens on none.
+ */
+addresses: Array<string>, state: ForwardState, 
+/**
+ * The pod new connections go to, once one is chosen.
+ */
+pod: string | null, 
+/**
+ * The pod's port they reach, once known.
+ */
+podPort: number | null, 
+/**
+ * Open TCP connections, those waiting for a session included.
+ */
+connections: number, 
+/**
+ * Of `connections`, those waiting for a place among the context's
+ * sessions (ARCHITECTURE 3.2).
+ */
+queued: number, 
+/**
+ * Bytes to the pod and from it, since the app started.
+ */
+sent: number, received: number, 
+/**
+ * What the last connection that failed said, until a connection opened
+ * after it carries bytes from the pod, or the forward is ready again
+ * after not being so: a pod's port that refused, a pod whose upgrade
+ * answered 404, no pod to go to within the wait, a cluster that did not
+ * answer.
+ */
+failure: string | null, };
+
+export type ForwardEvent = { "event": "changed", forward: Forward, } | { "event": "removed", id: ForwardId, };
+
+/**
+ * Unique in the app and kept across restarts, as a `pf://` tab names it.
+ */
+export type ForwardId = number;
+
+export type ForwardPort = { 
+/**
+ * What a start names: a Service's port, or a container's.
+ */
+port: number, name: string | null, 
+/**
+ * A Service's `targetPort` as written, a name or a number, when it is
+ * not `port`.
+ */
+targetPort: string | null, 
+/**
+ * The container that declares it, for a pod or a workload.
+ */
+container: string | null, appProtocol: string | null, 
+/**
+ * The local port of this port's forward where it has one; else the one
+ * a start takes when none is given: the one this port of this target
+ * had last, else `port`, else, for a `port` below 1024, `port` plus
+ * 8000.
+ */
+local: number, 
+/**
+ * The forward of this port, when the space has one, running or stopped.
+ */
+forward: ForwardId | null, };
+
+/**
+ * The TCP ports of a target, in the order of its spec.
+ */
+export type ForwardPorts = { 
+/**
+ * The target's kind, as its tab and its row say it: `Service`.
+ */
+kind: string, ports: Array<ForwardPort>, 
+/**
+ * The `port` a start without a choice takes: one whose name says HTTP
+ * or web first, then the others in the spec's order, named or not, and
+ * one whose name says metrics, health or debug last.
+ */
+default: number, };
+
+export type ForwardStarted = { "outcome": "started", forward: Forward, } | { "outcome": "busy", local: number, why: BusyWhy, 
+/**
+ * The next port above `local` that was free on both loopbacks when
+ * asked, from 1024 up.
+ */
+free: number, };
+
+export type ForwardState = { "state": "starting" } | { "state": "restored" } | { "state": "ready" } | { "state": "reconnecting", reason: string, } | { "state": "failed", error: IpcError, } | { "state": "stopped" };
+
+/**
+ * What a forward reaches: a pod, a Service, or a Deployment, ReplicaSet,
+ * StatefulSet or DaemonSet.
+ */
+export type ForwardTarget = { space: string, gvr: Gvr, namespace: string, name: string, };
 
 /**
  * What a person goes through before a plan runs, by what it risks and the
@@ -1198,6 +1314,17 @@ export type ResourceRef = { gvr: Gvr, namespaced: boolean,
  */
 namespace: string | null, name: string, };
 
+/**
+ * Starts a forward again, on `local` when that names another port. A
+ * stopped one binds its port and a failed one proves again, both
+ * `Starting`. One that waits, starts, is ready or reconnects keeps its state
+ * and its connections, and forgets the pods it avoided, so that its next
+ * choice may take one that answered 404. One that its context's mode
+ * refuses, or whose context no source lists, answers that error and stays as
+ * it was: stopped, or failed with the refusal, on its port.
+ */
+export type ResumeForward = { id: ForwardId, local: number | null, };
+
 export type ReviewedPlugin = { plugin: ExecPlugin, 
 /**
  * The contexts that use it.
@@ -1379,6 +1506,16 @@ contexts: Array<string>, };
 
 export type Span = { "type": "text", text: string, } | { "type": "ago", at: string, } | { "type": "until", at: string, };
 
+export type StartForward = { target: ForwardTarget, 
+/**
+ * A `port` of the target's [`ForwardPorts`].
+ */
+port: number, 
+/**
+ * None takes the port's `local`.
+ */
+local: number | null, };
+
 /**
  * UI state that is not settings (ARCHITECTURE 4.8), such as a space's
  * layout or the command history. The value is JSON that the webview writes
@@ -1504,6 +1641,12 @@ export type Commands = {
   terminal_create: { request: NewTerminal; response: TerminalSession; message: null };
   kubeconfig_offers_watch: { request: null; response: Array<KubeconfigOffer>; message: KubeconfigOfferEvent };
   kubeconfig_offer_answer: { request: AnswerKubeconfigOffer; response: null; message: null };
+  forward_ports: { request: ForwardTarget; response: ForwardPorts; message: null };
+  forward_start: { request: StartForward; response: ForwardStarted; message: null };
+  forward_stop: { request: ForwardId; response: null; message: null };
+  forward_resume: { request: ResumeForward; response: ForwardStarted; message: null };
+  forward_remove: { request: ForwardId; response: null; message: null };
+  forwards_watch: { request: null; response: Array<Forward>; message: ForwardEvent };
   logs_open: { request: OpenLogs; response: SubscriptionId; message: LogBatch };
   logs_set_source: { request: SetLogSource; response: null; message: null };
   logs_set_view: { request: SetLogView; response: null; message: null };

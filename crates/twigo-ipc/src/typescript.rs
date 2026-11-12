@@ -9,7 +9,8 @@ use crate::command::{
     AccessReview, ApplyPreview, ApprovalAnswerSend, ApprovalsWatch, ClusterVersionGet, Command,
     CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextEnvironmentSet,
     ContextModeSet, ContextRelock, ContextSignIn, ContextSignInCancel, ContextUnlock,
-    ContextsWatch, ExecReviewGet, ExecTrust, KeyboardLayoutWatch, KubeconfigOfferAnswerSend,
+    ContextsWatch, ExecReviewGet, ExecTrust, ForwardPortsGet, ForwardRemove, ForwardResume,
+    ForwardStart, ForwardStop, ForwardsWatch, KeyboardLayoutWatch, KubeconfigOfferAnswerSend,
     KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck,
     LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList,
     ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet,
@@ -62,6 +63,12 @@ pub fn typescript() -> String {
     module.command::<TerminalCreate>();
     module.command::<KubeconfigOffersWatch>();
     module.command::<KubeconfigOfferAnswerSend>();
+    module.command::<ForwardPortsGet>();
+    module.command::<ForwardStart>();
+    module.command::<ForwardStop>();
+    module.command::<ForwardResume>();
+    module.command::<ForwardRemove>();
+    module.command::<ForwardsWatch>();
     module.command::<LogsOpen>();
     module.command::<LogsSetSource>();
     module.command::<LogsSetView>();

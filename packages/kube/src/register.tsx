@@ -18,6 +18,8 @@ import {
   resourceProvider,
 } from "./quickaccess";
 import { createExecTabs, registerExec } from "./exec/register";
+import { registerForwards } from "./forward/register";
+import { Forwards } from "./forward/service";
 import { registerLogs } from "./logs/register";
 import { createTerminalTabs, registerTerminals } from "./terminal/register";
 import { LogsTabs } from "./logs/state";
@@ -204,6 +206,7 @@ export function registerKube(workbench: Workbench): void {
   registerLogs(workbench, new LogsTabs(workbench.backend));
   registerExec(workbench, createExecTabs(workbench));
   registerTerminals(workbench, createTerminalTabs(workbench));
+  registerForwards(workbench, new Forwards(workbench.backend));
   registerResourceActions(workbench, services);
   registerEdits(workbench, {
     discovery: services.discovery,

@@ -1,4 +1,4 @@
-import type { Gvr, LogTarget } from "@twigo/protocol";
+import type { ForwardId, Gvr, LogTarget } from "@twigo/protocol";
 import type { Health } from "./columns";
 
 /**
@@ -191,6 +191,27 @@ export function parseExecUri(uri: string): ExecInput | undefined {
     ...(n !== null && /^([2-9]|[1-9]\d+)$/.test(n) && { n: Number(n) }),
     ...(url.searchParams.get("attach") === "1" && { attach: true }),
   };
+}
+
+export const PF_SCHEME = "pf";
+
+/** A port-forward as an editor (ARCHITECTURE 4.3): `pf://<space>/<forward-id>`, the id the core gave it. */
+export interface PfInput {
+  readonly space: string;
+  readonly id: ForwardId;
+}
+
+export function pfUri({ space, id }: PfInput): string {
+  return `${PF_SCHEME}://${encodeURIComponent(space)}/${String(id)}`;
+}
+
+export function parsePfUri(uri: string): PfInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${PF_SCHEME}:`) return undefined;
+  const found = /^\/(0|[1-9]\d*)$/.exec(url.pathname);
+  return found?.[1] === undefined || url.host === ""
+    ? undefined
+    : { space: decodeURIComponent(url.host), id: Number(found[1]) };
 }
 
 export const TERMINAL_SCHEME = "terminal";

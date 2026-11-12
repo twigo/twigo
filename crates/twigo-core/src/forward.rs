@@ -1,0 +1,1042 @@
+//! The port-forward manager (ARCHITECTURE 4.6): the forwards of every space,
+//! kept in a table of their own that outlives the windows, which follow it.
+//! A forward's data path is `twigo_sessions::forward`; this holds its spaces,
+//! its policy and what is kept of it.
+
+mod ports;
+mod saved;
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
+
+use futures::future::BoxFuture;
+use serde_json::Value;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio::time::{Instant, sleep_until};
+use twigo_cache::hub::{Hub, Resource};
+use twigo_ipc::{
+    BusyWhy, ErrorKind, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts,
+    ForwardStarted, ForwardState, ForwardTarget, IpcError, ResumeForward, StartForward,
+};
+use twigo_kube::client::Actor;
+use twigo_policy::{Attributes, Policy};
+use twigo_sessions::forward as data;
+use twigo_sessions::forward::{BindError, Listeners, free_port, listen};
+
+use saved::Remembered;
+pub(crate) use saved::{Saved, SavedForward};
+
+use crate::catalog::Contexts;
+use crate::proxy::{Changes, blocked};
+use crate::{ClientsError, Core, actions};
+
+/// A forward's `Changed` goes out at most four times a second, unless its
+/// state changed.
+const BETWEEN: Duration = Duration::from_millis(250);
+
+type Follower = Box<dyn FnMut(ForwardEvent) -> bool + Send>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Key {
+    space: String,
+    group: String,
+    resource: String,
+    namespace: String,
+    name: String,
+    port: u16,
+}
+
+impl Key {
+    fn of(target: &ForwardTarget, port: u16) -> Self {
+        Self {
+            space: target.space.clone(),
+            group: target.gvr.group.clone(),
+            resource: target.gvr.resource.clone(),
+            namespace: target.namespace.clone(),
+            name: target.name.clone(),
+            port,
+        }
+    }
+}
+
+struct Run {
+    data: data::Forward,
+    status: watch::Receiver<data::Status>,
+    pump: JoinHandle<()>,
+}
+
+impl Drop for Run {
+    fn drop(&mut self) {
+        self.pump.abort();
+    }
+}
+
+struct Entry {
+    /// Everything of the forward that its data path does not tell, and the
+    /// bytes of the runs it had before.
+    base: Forward,
+    context: String,
+    /// None while it is stopped, or its port could not be bound.
+    run: Option<Run>,
+    /// It should run, and could not listen: why.
+    unbound: Option<IpcError>,
+    /// Why its context's mode refuses it, or the catalog lacks the context,
+    /// while one does.
+    refused: Option<IpcError>,
+    /// Its local port is the free one that was offered in place of a busy
+    /// one, which is never remembered.
+    detour: bool,
+}
+
+impl Entry {
+    fn runs(&self) -> bool {
+        self.run.is_some() || self.unbound.is_some()
+    }
+
+    /// Closes its port and connections, and keeps the bytes they carried.
+    fn stop(&mut self) {
+        if let Some(run) = self.run.take() {
+            let (sent, received) = run.data.bytes();
+            self.base.sent += sent;
+            self.base.received += received;
+        }
+    }
+
+    /// Tells its data path what changed: a refusal, other words for it, or
+    /// none any more.
+    fn check(&mut self, checks: &Checks) {
+        let Some(run) = &self.run else {
+            return;
+        };
+        let refusal = checks.refusal(&self.context, &self.base.target);
+        match (refusal, &self.refused) {
+            (Some(error), Some(was)) if error == *was => {}
+            (Some(error), _) => {
+                self.refused = Some(error.clone());
+                run.data.refuse(error);
+            }
+            (None, Some(_)) => {
+                self.refused = None;
+                run.data.allow();
+            }
+            (None, None) => {}
+        }
+    }
+
+    fn forward(&self) -> Forward {
+        let mut forward = self.base.clone();
+        match &self.run {
+            Some(run) => apply(&mut forward, &run.status.borrow()),
+            None => {
+                if let Some(error) = &self.unbound {
+                    forward.state = ForwardState::Failed {
+                        error: error.clone(),
+                    };
+                }
+            }
+        }
+        forward
+    }
+}
+
+fn apply(forward: &mut Forward, status: &data::Status) {
+    forward.state = status.state.clone();
+    forward.pod = status.pod.clone();
+    forward.pod_port = status.pod_port;
+    forward.connections = status.connections;
+    forward.queued = status.queued;
+    forward.sent += status.sent;
+    forward.received += status.received;
+    forward.failure = status.failure.clone();
+}
+
+#[derive(Default)]
+struct Table {
+    /// By the number in the forward's id.
+    entries: BTreeMap<u32, Entry>,
+    remembered: HashMap<Key, Remembered>,
+    /// The free port offered in place of one that was busy, by what was
+    /// asked: starting on it is a detour, which is not remembered.
+    detours: HashMap<Key, u16>,
+    /// One per window: a later follower replaces the earlier.
+    followers: HashMap<Arc<str>, Follower>,
+    /// Until the saved forwards are in, the contexts whose clients were
+    /// made, whose forwards are told so then.
+    early: Option<HashSet<String>>,
+    /// The ports of targets that a command changes now.
+    claimed: HashSet<Key>,
+    /// Set by the shutdown, after which no command saves, binds or starts.
+    closed: bool,
+}
+
+impl Table {
+    fn emit(&mut self, event: &ForwardEvent) {
+        self.followers.retain(|_, send| send(event.clone()));
+    }
+
+    fn changed(&mut self, id: ForwardId) {
+        if let Some(entry) = self.entries.get(&id.0) {
+            let forward = Box::new(entry.forward());
+            self.emit(&ForwardEvent::Changed { forward });
+        }
+    }
+
+    fn find(&self, key: &Key) -> Option<ForwardId> {
+        self.entries
+            .iter()
+            .find(|(_, entry)| {
+                let target = &entry.base.target;
+                Key::of(target, entry.base.port) == *key
+            })
+            .map(|(id, _)| ForwardId(*id))
+    }
+
+    /// Fills the `local` and the `forward` of the ports `target` declares:
+    /// a forward's own local port where the port has a forward, else the one
+    /// a start takes.
+    fn describe(&self, target: &ForwardTarget, declared: &mut [ForwardPort]) {
+        for port in declared {
+            let key = Key::of(target, port.port);
+            match self.find(&key) {
+                Some(id) => {
+                    port.forward = Some(id);
+                    port.local = self.entries[&id.0].base.local;
+                }
+                None => {
+                    port.local =
+                        ports::local(self.remembered.get(&key).map(|r| r.local), port.port);
+                }
+            }
+        }
+    }
+
+    fn saved(&self, space: &str) -> Saved {
+        Saved {
+            forwards: self
+                .entries
+                .values()
+                .filter(|entry| entry.base.target.space == space)
+                .map(|entry| SavedForward {
+                    id: entry.base.id,
+                    target: entry.base.target.clone(),
+                    kind: entry.base.kind.clone(),
+                    port: entry.base.port,
+                    port_name: entry.base.port_name.clone(),
+                    app_protocol: entry.base.app_protocol.clone(),
+                    local: entry.base.local,
+                    detour: entry.detour,
+                    runs: entry.runs(),
+                })
+                .collect(),
+            ports: self
+                .remembered
+                .iter()
+                .filter(|(key, _)| key.space == space)
+                .map(|(_, remembered)| remembered.clone())
+                .collect(),
+        }
+    }
+
+    fn holder(&self, local: u16) -> Option<(String, String)> {
+        self.entries
+            .values()
+            .find(|entry| entry.run.is_some() && entry.base.local == local)
+            .map(|entry| (entry.base.kind.clone(), entry.base.target.name.clone()))
+    }
+
+    fn detour(&mut self, key: &Key, local: u16) -> bool {
+        self.detours.remove(key) == Some(local)
+    }
+
+    fn remember(&mut self, key: &Key, target: &ForwardTarget, local: u16) {
+        self.remembered.insert(
+            key.clone(),
+            Remembered {
+                target: target.clone(),
+                port: key.port,
+                local,
+            },
+        );
+    }
+}
+
+/// What decides whether a forward may run, read under the table's lock, so
+/// a check never lands with older answers than another.
+struct Checks {
+    policy: Arc<Policy>,
+    catalog: watch::Receiver<Option<Arc<Contexts>>>,
+}
+
+impl Checks {
+    /// Why `context` may not be forwarded to, if it may not: the catalog
+    /// lacks it, or its mode refuses the request a connection sends. Before
+    /// the catalog has loaded it refuses nothing, since neither is known: the
+    /// mode of a context the catalog does not list reads as read-only.
+    fn refusal(&self, context: &str, target: &ForwardTarget) -> Option<IpcError> {
+        let contexts = self.catalog.borrow().clone()?;
+        if contexts.find(context).is_none() {
+            return Some(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+        }
+        blocked(&self.policy, context, &attributes(target), Actor::Ui)
+            .map(|blocked| IpcError::from(*blocked))
+    }
+}
+
+pub(crate) struct Forwards {
+    table: Arc<Mutex<Table>>,
+    checks: Checks,
+    hub: Hub,
+    /// True once the saved forwards are in the table, which every command
+    /// that reads or changes it waits for: a start before that would not
+    /// see the ports and forwards not restored yet, and its save would
+    /// replace what the space kept.
+    restored: watch::Sender<bool>,
+    /// Told whenever a claim on a port of a target ends.
+    released: watch::Sender<()>,
+}
+
+/// A port of a target that a start, a resume, a stop or a remove changes,
+/// held around its bind and its insert and never across a call to the
+/// cluster: another command of that port waits until it has ended, and then
+/// finds the forward as it left it.
+struct Claim<'a> {
+    forwards: &'a Forwards,
+    key: Key,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.forwards.table().claimed.remove(&self.key);
+        self.forwards.released.send_replace(());
+    }
+}
+
+impl Forwards {
+    pub(crate) fn new(
+        policy: Arc<Policy>,
+        catalog: watch::Receiver<Option<Arc<Contexts>>>,
+        hub: Hub,
+    ) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(Table {
+                early: Some(HashSet::new()),
+                ..Table::default()
+            })),
+            checks: Checks { policy, catalog },
+            hub,
+            restored: watch::Sender::new(false),
+            released: watch::Sender::new(()),
+        }
+    }
+
+    /// Claims the port of the forward `id`.
+    async fn claim_of(&self, id: ForwardId) -> Result<Claim<'_>, IpcError> {
+        let key = {
+            let table = self.table();
+            let entry = table.entries.get(&id.0).ok_or_else(|| missing(id))?;
+            Key::of(&entry.base.target, entry.base.port)
+        };
+        Ok(self.claim(&key).await)
+    }
+
+    async fn claim(&self, key: &Key) -> Claim<'_> {
+        let mut released = self.released.subscribe();
+        while !self.table().claimed.insert(key.clone()) {
+            released
+                .changed()
+                .await
+                .expect("the manager holds the sender");
+        }
+        Claim {
+            forwards: self,
+            key: key.clone(),
+        }
+    }
+
+    fn table(&self) -> MutexGuard<'_, Table> {
+        self.table.lock().expect("forwards lock")
+    }
+
+    async fn after_restore(&self) {
+        self.restored
+            .subscribe()
+            .wait_for(|restored| *restored)
+            .await
+            .expect("the manager holds the sender");
+    }
+
+    fn run(
+        &self,
+        context: &str,
+        base: &Forward,
+        listeners: Listeners,
+        begin: data::Begin,
+    ) -> Result<Run, IpcError> {
+        let target = &base.target;
+        let config = data::Config {
+            context: context.to_owned(),
+            target: data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?,
+            port: base.port,
+            port_name: base.port_name.clone(),
+        };
+        let forward = data::Forward::spawn(self.hub.clone(), config, listeners, begin);
+        let status = forward.status();
+        let table = Arc::downgrade(&self.table);
+        let id = base.id;
+        let pump = tokio::spawn(pump(status.clone(), base.clone(), move |_| {
+            if let Some(table) = table.upgrade() {
+                // What goes out is the forward as it is now, if it still is.
+                table.lock().expect("forwards lock").changed(id);
+            }
+        }));
+        Ok(Run {
+            data: forward,
+            status,
+            pump,
+        })
+    }
+
+    /// Refuses a command whose forward may not run: its context's mode
+    /// refuses it, no source lists its context, or Twigo is quitting. A
+    /// command asks once the catalog has loaded, before it reads or binds,
+    /// and again with the lock it holds while it puts the forward in, so
+    /// nothing lands in between.
+    fn admit(&self, table: &Table, context: &str, target: &ForwardTarget) -> Result<(), IpcError> {
+        if table.closed {
+            return Err(quitting());
+        }
+        self.checks.refusal(context, target).map_or(Ok(()), Err)
+    }
+
+    /// Gives `entry`, which a command admitted under the table's lock, a
+    /// person's start on `listeners`.
+    fn start(&self, entry: &mut Entry, listeners: Listeners) -> Result<(), IpcError> {
+        let run = self.run(&entry.context, &entry.base, listeners, data::Begin::Started)?;
+        entry.run = Some(run);
+        entry.unbound = None;
+        entry.refused = None;
+        Ok(())
+    }
+
+    /// The forward `id` as it is once its data path has handled what it was
+    /// sent, which every window is told. Its port is claimed, so it is in
+    /// the table.
+    async fn answer(&self, id: ForwardId, handled: BoxFuture<'static, ()>) -> Forward {
+        handled.await;
+        let mut table = self.table();
+        table.changed(id);
+        table.entries[&id.0].forward()
+    }
+
+    /// `send` gets the forwards of every space now, in the answer, and then
+    /// each change, until it says the window is gone; in place of what the
+    /// window followed before. It must not call back into the manager.
+    pub(crate) fn follow_window(
+        &self,
+        window: &str,
+        send: impl FnMut(ForwardEvent) -> bool + Send + 'static,
+    ) -> Vec<Forward> {
+        let mut table = self.table();
+        let forwards = table.entries.values().map(Entry::forward).collect();
+        table.followers.insert(window.into(), Box::new(send));
+        forwards
+    }
+
+    pub(crate) fn unfollow(&self, window: &str) {
+        self.table().followers.remove(window);
+    }
+
+    /// Closes every port and connection, and the table: what the state says
+    /// ran stays, as no command saves, binds or starts after it.
+    pub(crate) fn shutdown(&self) {
+        let mut table = self.table();
+        table.closed = true;
+        for entry in table.entries.values_mut() {
+            entry.stop();
+        }
+    }
+
+    /// The clients of `context` were built: a forward of it that waits, or
+    /// that failed for its credential, proves that it can reach a pod,
+    /// unless it is refused. While the forwards are being restored it waits
+    /// for them.
+    pub(crate) fn connected(&self, context: &str) {
+        let mut table = self.table();
+        match &mut table.early {
+            Some(early) => {
+                early.insert(context.to_owned());
+            }
+            None => self.tell_connected(&mut table, context),
+        }
+    }
+
+    /// The data path decides what to do, in the order of the controls: a
+    /// refusal or its lifting comes first, and only a forward that waits or
+    /// that failed for its credential then proves.
+    fn tell_connected(&self, table: &mut Table, context: &str) {
+        for entry in table
+            .entries
+            .values_mut()
+            .filter(|entry| entry.context == context)
+        {
+            entry.check(&self.checks);
+            if let Some(run) = &entry.run {
+                run.data.connected();
+            }
+        }
+    }
+
+    /// A sign-in the person started got a credential for `contexts`: once
+    /// the forwards are restored, each of theirs that failed for its
+    /// credential proves once, after its own check.
+    pub(crate) async fn signed_in(&self, contexts: &[String]) {
+        self.after_restore().await;
+        let mut table = self.table();
+        for entry in table
+            .entries
+            .values_mut()
+            .filter(|entry| contexts.contains(&entry.context))
+        {
+            entry.check(&self.checks);
+            if let Some(run) = &entry.run {
+                run.data.signed_in();
+            }
+        }
+    }
+
+    /// Asks the policy and the catalog again for each running forward's
+    /// context: a forward whose mode now refuses it, or whose context the
+    /// catalog lacks, ends its connections and fails, and waits, `Restored`,
+    /// once that passes.
+    pub(crate) fn recheck(&self) {
+        let mut table = self.table();
+        for entry in table.entries.values_mut() {
+            entry.check(&self.checks);
+        }
+    }
+}
+
+/// The request a connection sends, which the gate reads.
+fn attributes(target: &ForwardTarget) -> Attributes {
+    let pod = (target.gvr.group.is_empty() && target.gvr.resource == "pods")
+        .then_some(target.name.as_str());
+    Attributes::action(
+        "get",
+        "pods",
+        Some("portforward"),
+        Some(&target.namespace),
+        pod,
+    )
+}
+
+/// Sends a forward as it changes: a change of its state at once, any other
+/// no more than every [`BETWEEN`].
+async fn pump(
+    mut status: watch::Receiver<data::Status>,
+    base: Forward,
+    mut send: impl FnMut(Forward),
+) {
+    let shown = |status: &data::Status| {
+        let mut forward = base.clone();
+        apply(&mut forward, status);
+        forward
+    };
+    let mut last = shown(&status.borrow_and_update());
+    let mut sent = Instant::now();
+    loop {
+        if status.changed().await.is_err() {
+            return;
+        }
+        loop {
+            let current = shown(&status.borrow_and_update());
+            if current == last {
+                break;
+            }
+            let due = sent + BETWEEN;
+            if current.state != last.state || Instant::now() >= due {
+                send(current.clone());
+                last = current;
+                sent = Instant::now();
+                break;
+            }
+            tokio::select! {
+                () = sleep_until(due) => {}
+                changed = status.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn missing(id: ForwardId) -> IpcError {
+    IpcError::new(ErrorKind::NotFound, format!("no forward {}", id.0))
+}
+
+fn quitting() -> IpcError {
+    IpcError::new(ErrorKind::Unavailable, "Twigo is quitting")
+}
+
+fn unbound(local: u16, why: BusyWhy, own: Option<(String, String)>) -> IpcError {
+    let words = match (why, own) {
+        (BusyWhy::InUse, Some((kind, name))) => {
+            format!("port {local} is held by another forward of Twigo, to {kind} {name}")
+        }
+        (BusyWhy::InUse, None) => format!("port {local} is held by another process"),
+        (BusyWhy::NotPermitted, _) => {
+            format!("this system does not let Twigo listen on port {local}")
+        }
+    };
+    IpcError::new(ErrorKind::Conflict, words)
+}
+
+/// A local port a person names: 0 would ask the system for any port.
+fn named(local: Option<u16>) -> Result<(), IpcError> {
+    if local == Some(0) {
+        return Err(IpcError::new(
+            ErrorKind::InvalidInput,
+            "port 0 is not a local port to listen on",
+        ));
+    }
+    Ok(())
+}
+
+enum Bound {
+    Listening(Listeners),
+    Busy(ForwardStarted),
+}
+
+impl Core {
+    pub async fn forward_ports(&self, target: ForwardTarget) -> Result<ForwardPorts, IpcError> {
+        self.forwards.after_restore().await;
+        let context = self.context(&target.space)?;
+        let kind =
+            data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?.label();
+        let object = self.read_target(&context, &target).await?;
+        let mut declared = ports::declared(kind, &target.name, &object)?;
+        self.forwards.table().describe(&target, &mut declared);
+        let default = ports::default(&declared);
+        Ok(ForwardPorts {
+            kind: kind.to_owned(),
+            ports: declared,
+            default,
+        })
+    }
+
+    async fn read_target(&self, context: &str, target: &ForwardTarget) -> Result<Value, IpcError> {
+        let resource = Resource {
+            group: target.gvr.group.clone(),
+            version: target.gvr.version.clone(),
+            resource: target.gvr.resource.clone(),
+            namespaced: true,
+        };
+        let path = resource.object_path(Some(&target.namespace), &target.name)?;
+        let clients = self
+            .clients(context)
+            .await
+            .map_err(|error| IpcError::from(&error))?;
+        actions::get(&clients, &path).await
+    }
+
+    async fn bind(&self, key: &Key, local: u16) -> Result<Bound, IpcError> {
+        if self.forwards.table().closed {
+            return Err(quitting());
+        }
+        match listen(local).await {
+            Ok(listeners) => Ok(Bound::Listening(listeners)),
+            Err(BindError::Busy(why)) => {
+                let free = free_port(local).await.map_err(|error| {
+                    IpcError::new(
+                        ErrorKind::Conflict,
+                        format!("port {local} is busy, and no other is free: {error}"),
+                    )
+                })?;
+                self.forwards.table().detours.insert(key.clone(), free);
+                Ok(Bound::Busy(ForwardStarted::Busy { local, why, free }))
+            }
+            Err(BindError::Failed(error)) => Err(IpcError::new(
+                ErrorKind::Internal,
+                format!("could not listen on port {local}: {error}"),
+            )),
+        }
+    }
+
+    /// Binds a local port and forwards it to a port of the target. A port of
+    /// a target that has a forward answers as a resume of that forward does,
+    /// moved if another `local` is asked, also when that forward was made
+    /// while this start read the target.
+    pub async fn forward_start(&self, request: StartForward) -> Result<ForwardStarted, IpcError> {
+        let StartForward {
+            target,
+            port,
+            local: asked,
+        } = request;
+        named(asked)?;
+        self.forwards.after_restore().await;
+        self.catalog.contexts().await;
+        let context = self.context(&target.space)?;
+        let kind = data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?
+            .label()
+            .to_owned();
+        self.forwards
+            .admit(&self.forwards.table(), &context, &target)?;
+        let key = Key::of(&target, port);
+        // The target is read for a port with no forward, before the claim,
+        // and again should its forward be removed while this waits for it.
+        let mut found = None;
+        let _claim = loop {
+            if found.is_none() && self.forwards.table().find(&key).is_none() {
+                found = Some(self.declared(&target, port).await?);
+            }
+            let claim = self.forwards.claim(&key).await;
+            if found.is_some() || self.forwards.table().find(&key).is_some() {
+                break claim;
+            }
+        };
+        let existing = self.forwards.table().find(&key);
+        if let Some(id) = existing {
+            return self.resume_claimed(id, asked).await;
+        }
+        let found = found.expect("read for a port with no forward");
+        let local = asked.unwrap_or_else(|| {
+            let remembered = self.forwards.table().remembered.get(&key).map(|r| r.local);
+            ports::local(remembered, port)
+        });
+        let listeners = match self.bind(&key, local).await? {
+            Bound::Listening(listeners) => listeners,
+            Bound::Busy(busy) => return Ok(busy),
+        };
+        let (id, handled) = {
+            let mut table = self.forwards.table();
+            self.forwards.admit(&table, &context, &target)?;
+            let taken = table.entries.keys().copied().max().unwrap_or(0);
+            let id = self.state.next_forward_id(taken);
+            let base = Forward {
+                id,
+                target: target.clone(),
+                kind,
+                port,
+                port_name: found.name,
+                app_protocol: found.app_protocol,
+                local,
+                addresses: listeners.addresses(),
+                state: ForwardState::Stopped,
+                pod: None,
+                pod_port: None,
+                connections: 0,
+                queued: 0,
+                sent: 0,
+                received: 0,
+                failure: None,
+            };
+            let mut entry = Entry {
+                base,
+                context,
+                run: None,
+                unbound: None,
+                refused: None,
+                detour: table.detour(&key, local),
+            };
+            self.forwards.start(&mut entry, listeners)?;
+            if !entry.detour {
+                table.remember(&key, &target, local);
+            }
+            let handled = entry.run.as_ref().expect("started").data.handled();
+            table.entries.insert(id.0, entry);
+            (id, handled)
+        };
+        let started = self.forwards.answer(id, handled).await;
+        self.save_forwards(&target.space);
+        Ok(ForwardStarted::Started {
+            forward: Box::new(started),
+        })
+    }
+
+    /// The port `port` as the target declares it, read from the cluster.
+    async fn declared(&self, target: &ForwardTarget, port: u16) -> Result<ForwardPort, IpcError> {
+        self.forward_ports(target.clone())
+            .await?
+            .ports
+            .into_iter()
+            .find(|declared| declared.port == port)
+            .ok_or_else(|| {
+                IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!("{} declares no port {port}", target.name),
+                )
+            })
+    }
+
+    /// Starts a stopped or failed forward again, on another local port when
+    /// `local` names one, and moves a running one if another port is asked.
+    pub async fn forward_resume(&self, request: ResumeForward) -> Result<ForwardStarted, IpcError> {
+        let ResumeForward { id, local } = request;
+        named(local)?;
+        self.forwards.after_restore().await;
+        self.catalog.contexts().await;
+        let _claim = self.forwards.claim_of(id).await?;
+        self.resume_claimed(id, local).await
+    }
+
+    /// A resume of a forward whose port is claimed. A stopped one binds and
+    /// starts; one that runs is asked to start again, which the data path
+    /// does only if it failed, and a move hands it its new port first. One
+    /// that may not run answers why and changes nothing, and the answer
+    /// waits for the data path to have handled what was sent.
+    async fn resume_claimed(
+        &self,
+        id: ForwardId,
+        local: Option<u16>,
+    ) -> Result<ForwardStarted, IpcError> {
+        let (context, base, runs) = {
+            let table = self.forwards.table();
+            let entry = table.entries.get(&id.0).ok_or_else(|| {
+                IpcError::new(ErrorKind::NotFound, format!("forward {} was removed", id.0))
+            })?;
+            let target = &entry.base.target;
+            self.forwards.admit(&table, &entry.context, target)?;
+            (
+                entry.context.clone(),
+                entry.base.clone(),
+                entry.run.is_some(),
+            )
+        };
+        let target = &base.target;
+        let key = Key::of(target, base.port);
+        let wanted = local.unwrap_or(base.local);
+        let listeners = if runs && wanted == base.local {
+            None
+        } else {
+            match self.bind(&key, wanted).await? {
+                Bound::Listening(listeners) => Some(listeners),
+                Bound::Busy(busy) => return Ok(busy),
+            }
+        };
+        let bound = listeners.is_some();
+        let handled = {
+            let mut table = self.forwards.table();
+            self.forwards.admit(&table, &context, target)?;
+            if let Some(listeners) = listeners {
+                let entry = &table.entries[&id.0];
+                let detour = if entry.base.local == wanted {
+                    entry.detour
+                } else {
+                    table.detour(&key, wanted)
+                };
+                if !detour {
+                    table.remember(&key, target, wanted);
+                }
+                let entry = table.entries.get_mut(&id.0).expect("claimed");
+                entry.base.local = wanted;
+                entry.base.addresses = listeners.addresses();
+                entry.detour = detour;
+                if let Some(run) = &mut entry.run {
+                    run.data.rebind(listeners);
+                } else {
+                    self.forwards.start(entry, listeners)?;
+                }
+            }
+            let entry = table.entries.get_mut(&id.0).expect("claimed");
+            entry.check(&self.forwards.checks);
+            let run = entry
+                .run
+                .as_ref()
+                .expect("admitted while not closed, so it runs or was started");
+            run.data.restart();
+            run.data.handled()
+        };
+        let started = self.forwards.answer(id, handled).await;
+        if bound {
+            self.save_forwards(&target.space);
+        }
+        Ok(ForwardStarted::Started {
+            forward: Box::new(started),
+        })
+    }
+
+    /// Closes a forward's port and connections, and keeps it listed.
+    pub async fn forward_stop(&self, id: ForwardId) -> Result<(), IpcError> {
+        self.forwards.after_restore().await;
+        let _claim = self.forwards.claim_of(id).await?;
+        let space = {
+            let mut table = self.forwards.table();
+            if table.closed {
+                return Err(quitting());
+            }
+            let entry = table.entries.get_mut(&id.0).ok_or_else(|| missing(id))?;
+            entry.stop();
+            entry.unbound = None;
+            entry.refused = None;
+            let space = entry.base.target.space.clone();
+            table.changed(id);
+            space
+        };
+        self.save_forwards(&space);
+        Ok(())
+    }
+
+    /// Stops a forward and forgets it; the local port its target's port had
+    /// stays.
+    pub async fn forward_remove(&self, id: ForwardId) -> Result<(), IpcError> {
+        self.forwards.after_restore().await;
+        let _claim = self.forwards.claim_of(id).await?;
+        let space = {
+            let mut table = self.forwards.table();
+            if table.closed {
+                return Err(quitting());
+            }
+            let entry = table.entries.remove(&id.0).ok_or_else(|| missing(id))?;
+            table.emit(&ForwardEvent::Removed { id });
+            entry.base.target.space.clone()
+        };
+        self.save_forwards(&space);
+        Ok(())
+    }
+
+    pub fn follow_forwards(
+        &self,
+        window: &str,
+        send: impl FnMut(ForwardEvent) -> bool + Send + 'static,
+    ) -> Vec<Forward> {
+        self.forwards.follow_window(window, send)
+    }
+
+    /// Stores the space's forwards as the table has them now, unless it is
+    /// closed. The table stays locked until they are stored, so the order of
+    /// writes is the order of snapshots.
+    fn save_forwards(&self, space: &str) {
+        let table = self.forwards.table();
+        if table.closed {
+            return;
+        }
+        if let Err(error) = self.state.set_forwards(space, &table.saved(space)) {
+            eprintln!("could not keep the forwards of {space}: {error}");
+        }
+    }
+
+    /// Binds the port of each forward that ran when Twigo quit, and lets it
+    /// wait for its first connection or its space's connecting: nothing asks
+    /// a cluster. A forward whose port another process holds fails with
+    /// that, and one that the policy or the catalog refuses as it is put in,
+    /// once the catalog has loaded, begins failed with the refusal; the rest
+    /// are asked again once both are loaded. The commands wait for it, and
+    /// the forwards of the spaces whose clients were made meanwhile are told
+    /// so at its end.
+    pub(crate) async fn restore_forwards(&self) {
+        for space in self.state.spaces() {
+            let saved = self.state.forwards(&space.id);
+            let Some(context) = space.contexts.first() else {
+                continue;
+            };
+            {
+                let mut table = self.forwards.table();
+                for remembered in saved.ports {
+                    let key = Key::of(&remembered.target, remembered.port);
+                    table.remembered.insert(key, remembered);
+                }
+            }
+            for saved in saved.forwards {
+                self.restore_forward(context, saved).await;
+            }
+        }
+        let mut table = self.forwards.table();
+        for context in table.early.take().unwrap_or_default() {
+            self.forwards.tell_connected(&mut table, &context);
+        }
+        self.forwards.restored.send_replace(true);
+    }
+
+    async fn restore_forward(&self, context: &str, saved: SavedForward) {
+        let SavedForward {
+            id,
+            target,
+            kind,
+            port,
+            port_name,
+            app_protocol,
+            local,
+            detour,
+            runs,
+        } = saved;
+        let mut entry = Entry {
+            base: Forward {
+                id,
+                target,
+                kind,
+                port,
+                port_name,
+                app_protocol,
+                local,
+                addresses: Vec::new(),
+                state: ForwardState::Stopped,
+                pod: None,
+                pod_port: None,
+                connections: 0,
+                queued: 0,
+                sent: 0,
+                received: 0,
+                failure: None,
+            },
+            context: context.to_owned(),
+            run: None,
+            unbound: None,
+            refused: None,
+            detour,
+        };
+        let mut listeners = None;
+        if runs && !self.forwards.table().closed {
+            match listen(local).await {
+                Ok(bound) => listeners = Some(bound),
+                Err(BindError::Busy(why)) => {
+                    let own = self.forwards.table().holder(local);
+                    entry.unbound = Some(unbound(local, why, own));
+                }
+                Err(BindError::Failed(error)) => {
+                    entry.unbound = Some(IpcError::new(
+                        ErrorKind::Internal,
+                        format!("could not listen on port {local}: {error}"),
+                    ));
+                }
+            }
+        }
+        let mut table = self.forwards.table();
+        if table.closed {
+            return;
+        }
+        if let Some(listeners) = listeners {
+            entry.base.addresses = listeners.addresses();
+            let refusal = self.forwards.checks.refusal(context, &entry.base.target);
+            let begin = match &refusal {
+                Some(error) => data::Begin::Refused(error.clone()),
+                None => data::Begin::Restored,
+            };
+            match self.forwards.run(context, &entry.base, listeners, begin) {
+                Ok(run) => {
+                    entry.run = Some(run);
+                    entry.refused = refusal;
+                }
+                Err(error) => entry.unbound = Some(error),
+            }
+        }
+        table.entries.insert(id.0, entry);
+        table.changed(id);
+    }
+
+    /// Restores the forwards, then asks the policy and the catalog for each
+    /// again whenever either changes; never returns.
+    pub(crate) async fn follow_forward_modes(&self) {
+        let mut changes = Changes::new(&self.policy, &self.catalog.subscribe());
+        self.restore_forwards().await;
+        loop {
+            self.forwards.recheck();
+            changes.next().await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

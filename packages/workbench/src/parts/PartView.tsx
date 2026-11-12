@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { PanelsTopLeft } from "lucide-react";
 import { cn, EmptyState, InlineActions, Section } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
@@ -26,6 +26,7 @@ export function PartView({ location }: { location: SideBar }) {
   return (
     <section
       aria-label={LOCATION_TITLES[location]}
+      style={{ "--surface": "var(--sidebar)" } as CSSProperties}
       className="flex h-full min-h-0 flex-col bg-sidebar"
     >
       <header className="flex h-[34px] shrink-0 items-center gap-1 pr-2 pl-3">

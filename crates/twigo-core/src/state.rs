@@ -19,8 +19,10 @@ use atomic_write_file::AtomicWriteFile;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use twigo_ipc::{Space, StateEntry, StateSnapshot};
+use twigo_ipc::{ForwardId, Space, StateEntry, StateSnapshot};
 use twigo_policy::Choices;
+
+use crate::forward::Saved;
 
 /// A write waits this long after the change that starts it, so the changes
 /// that follow within it share the write.
@@ -41,6 +43,16 @@ const VERSION: u32 = 1;
 /// key no webview writes, as the webview only shows a mode.
 /// @todo: move the mode to settings.json once the settings files come in M3
 const CHOICES: &str = "policy/choices";
+
+/// A space's forwards and the local port each target's port had last
+/// (ARCHITECTURE 4.6), which only the port-forward manager writes.
+const FORWARDS: &str = "forwards";
+
+/// The id the last forward got, in the app's scope, so that no id is used
+/// twice across restarts.
+const LAST_FORWARD: &str = "forwards/last";
+
+const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -181,11 +193,62 @@ impl State {
         self.changed(&mut data);
     }
 
+    /// A space's forwards; none where it has none or they do not read back.
+    pub(crate) fn forwards(&self, space: &str) -> Saved {
+        let data = self.inner.lock();
+        let value = data
+            .file
+            .spaces
+            .iter()
+            .find(|record| record.id == space)
+            .and_then(|record| record.state.get(FORWARDS));
+        value
+            .map(|value| {
+                serde_json::from_str(value.get()).unwrap_or_else(|error| {
+                    eprintln!("could not read the forwards of {space} from the state: {error}");
+                    Saved::default()
+                })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Replaces a space's forwards, unless the space is gone.
+    pub(crate) fn set_forwards(&self, space: &str, saved: &Saved) -> Result<(), Error> {
+        let value = serde_json::value::to_raw_value(saved).expect("plain data serializes to JSON");
+        let mut data = self.inner.lock();
+        let record = data
+            .file
+            .spaces
+            .iter_mut()
+            .find(|record| record.id == space)
+            .ok_or_else(|| Error::NoSpace(space.to_owned()))?;
+        record.state.insert(FORWARDS.to_owned(), value);
+        self.changed(&mut data);
+        Ok(())
+    }
+
+    /// The next forward's id, which is greater than every one given before,
+    /// this run or earlier, and `taken` ones the store holds.
+    pub(crate) fn next_forward_id(&self, taken: u32) -> ForwardId {
+        let mut data = self.inner.lock();
+        let last = data
+            .file
+            .app
+            .get(LAST_FORWARD)
+            .and_then(|value| serde_json::from_str::<u32>(value.get()).ok())
+            .unwrap_or(0);
+        let next = last.max(taken) + 1;
+        let value = serde_json::value::to_raw_value(&next).expect("a number is JSON");
+        data.file.app.insert(LAST_FORWARD.to_owned(), value);
+        self.changed(&mut data);
+        ForwardId(next)
+    }
+
     /// Stores the entries, all or none.
     pub fn set(&self, entries: Vec<StateEntry>) -> Result<(), Error> {
         let mut parsed = Vec::with_capacity(entries.len());
         for StateEntry { space, key, value } in entries {
-            if key == CHOICES {
+            if RESERVED.contains(&key.as_str()) {
                 return Err(Error::Reserved(key));
             }
             let value = RawValue::from_string(value).map_err(|source| Error::NotJson {
