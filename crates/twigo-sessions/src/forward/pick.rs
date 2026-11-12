@@ -10,13 +10,14 @@ use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use tokio::time::Instant;
 use twigo_ipc::IpcError;
 
+use super::cause::Cause;
 use super::watching::{Candidate, Seen};
 
 pub(super) enum Known {
     /// Nothing is listed yet, or nothing is watched; why, when the cluster
     /// does not answer.
     Unknown(Option<String>),
-    Fault(IpcError),
+    Fault(Cause),
     Refused(IpcError),
     Listed {
         candidates: Vec<Candidate>,
@@ -39,7 +40,7 @@ pub(super) enum Chosen {
     Pod(Candidate),
     /// There is none, and why.
     None(String),
-    Fault(IpcError),
+    Fault(Cause),
     Refused(IpcError),
     Unknown(Option<String>),
 }

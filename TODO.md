@@ -88,4 +88,3 @@ Findings that belong to no step yet.
     Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
   - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
     Not verified on Windows: whether a port just closed binds again at once there, after connections it served.
-  - A forward says `every watch of this context is in use` when the hub's subscription is `queued`, though the paged list of a cluster that refuses streaming lists waits for the request budget, not the watches' (`crates/twigo-kube/src/client/counter.rs`, `Class::of`): the hub's state does not tell the two apart.

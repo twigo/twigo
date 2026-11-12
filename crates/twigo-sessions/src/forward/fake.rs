@@ -1,8 +1,8 @@
 //! A fake API server for the forward's tests on paused time: the objects of
 //! one namespace by resource, listed and watched whole as raw objects, as a
 //! server without Table sends them, picked by a `metadata.name` field
-//! selector or all of them. It can be unreachable, never answer, forbid a
-//! resource and end its watches.
+//! selector or all of them. It can be unreachable, never answer, fail every
+//! request after a timeout, forbid a resource and end its watches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -20,6 +20,7 @@ use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 
 pub const NAMESPACE: &str = "shop";
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(70);
 
 type Body = UnsyncBoxBody<Bytes, BoxError>;
 type Sender = mpsc::UnboundedSender<Result<Frame<Bytes>, BoxError>>;
@@ -31,8 +32,10 @@ pub struct Fake(Arc<Mutex<State>>);
 struct State {
     offline: bool,
     stalled: bool,
+    times_out: bool,
     no_context: bool,
     forbidden: BTreeSet<String>,
+    missing: BTreeSet<String>,
     version: u64,
     /// By resource, then name.
     objects: BTreeMap<(String, String), Value>,
@@ -114,6 +117,10 @@ impl Fake {
                 if fake.state().stalled {
                     std::future::pending::<()>().await;
                 }
+                if fake.state().times_out {
+                    tokio::time::sleep(REQUEST_TIMEOUT).await;
+                    return Err::<Response<Body>, BoxError>("request timed out".into());
+                }
                 fake.respond(&request)
             }
         });
@@ -156,6 +163,10 @@ impl Fake {
         self.state().stalled = stalled;
     }
 
+    pub fn set_times_out(&self, times_out: bool) {
+        self.state().times_out = times_out;
+    }
+
     pub fn set_no_context(&self, missing: bool) {
         self.state().no_context = missing;
     }
@@ -167,6 +178,12 @@ impl Fake {
         } else {
             state.forbidden.remove(resource);
         }
+    }
+
+    /// Answers 404 to a list of `resource`, as a server that does not serve
+    /// its group does.
+    pub fn miss(&self, resource: &str) {
+        self.state().missing.insert(resource.to_owned());
     }
 
     pub fn end_watches(&self) {
@@ -213,6 +230,19 @@ impl Fake {
                     "message": format!("{resource} is forbidden"),
                     "reason": "Forbidden",
                     "code": 403,
+                }),
+            ));
+        }
+        if state.missing.contains(&resource) {
+            return Ok(full(
+                StatusCode::NOT_FOUND,
+                &json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "status": "Failure",
+                    "message": format!("the server could not find the requested resource ({resource})"),
+                    "reason": "NotFound",
+                    "code": 404,
                 }),
             ));
         }

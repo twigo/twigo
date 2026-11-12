@@ -143,6 +143,17 @@ impl Live {
     }
 }
 
+fn load_average() -> f64 {
+    let mut load = [0.0; 3];
+    // SAFETY: `getloadavg` writes at most the three doubles it is given.
+    let read = unsafe { libc::getloadavg(load.as_mut_ptr(), 3) };
+    assert!(read > 0, "the load average");
+    load[0]
+}
+
+/// The window starts when the upgrade returns, so the refusal is timed from
+/// there: a refusal after the window makes a forward `Ready` on a port that
+/// nothing listens on.
 #[tokio::test]
 #[ignore = "needs a kind cluster: TWIGO_TEST_KUBECONFIG"]
 async fn a_port_nobody_listens_on_answers_within_the_probe_window_and_one_that_does_stays_silent() {
@@ -154,17 +165,24 @@ async fn a_port_nobody_listens_on_answers_within_the_probe_window_and_one_that_d
             .connect(&live.clients.sessions, &live.namespace, "serve", 9)
             .await
             .unwrap();
+        let upgraded = Instant::now();
         let text = tokio::time::timeout(Duration::from_secs(10), &mut connected.error)
             .await
             .expect("a port nobody listens on is answered")
             .expect("with text");
-        arrivals.push((started.elapsed(), text));
+        let refusal = upgraded.elapsed();
+        eprintln!(
+            "connect {:?}, refusal {refusal:?} after it",
+            upgraded - started
+        );
+        arrivals.push((refusal, text));
     }
     let slowest = arrivals.iter().map(|(time, _)| *time).max().unwrap();
     let fastest = arrivals.iter().map(|(time, _)| *time).min().unwrap();
     eprintln!(
-        "a refused port arrived in {fastest:?} to {slowest:?} over {} tries: {}",
+        "a refused port arrived {fastest:?} to {slowest:?} after the upgrade over {} tries, load average {:.2}: {}",
         arrivals.len(),
+        load_average(),
         arrivals[0].1
     );
 
@@ -178,7 +196,7 @@ async fn a_port_nobody_listens_on_answers_within_the_probe_window_and_one_that_d
     live.delete().await;
     assert!(
         slowest < PROBE_WINDOW,
-        "the probe window {PROBE_WINDOW:?} covers the slowest refusal, {slowest:?}"
+        "the probe window {PROBE_WINDOW:?} covers the slowest refusal after the upgrade, {slowest:?}"
     );
     assert!(silent, "a port that listens sends nothing");
 }

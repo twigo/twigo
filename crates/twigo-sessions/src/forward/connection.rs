@@ -13,6 +13,7 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 
+use super::cause::Cause;
 use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
@@ -31,7 +32,7 @@ pub(super) enum Fault {
     /// policy: the forward fails, and trying again would not help.
     Fatal(IpcError),
     /// The pod or the cluster did not answer.
-    Transient(IpcError),
+    Transient(Cause),
     /// The pod's side refused the port, in its own words, or none was found.
     Port(String),
     /// The clients were replaced, or the network changed under them.
@@ -49,19 +50,22 @@ pub(super) enum Over {
 fn clients_fault(error: IpcError) -> Fault {
     match error.kind {
         ErrorKind::Unavailable | ErrorKind::Timeout | ErrorKind::Internal => {
-            Fault::Transient(error)
+            Fault::Transient(error.into())
         }
         _ => Fault::Fatal(error),
     }
 }
 
 fn upgrade_fault(error: &kube::Error) -> Fault {
+    if let Some(gone) = Cause::upgrade(error) {
+        return Fault::Transient(gone);
+    }
     let error = twigo_kube::errors::request(error);
     match error.kind {
         ErrorKind::Unauthorized | ErrorKind::Forbidden | ErrorKind::Permissions => {
             Fault::Fatal(error)
         }
-        _ => Fault::Transient(error),
+        _ => Fault::Transient(error.into()),
     }
 }
 
@@ -241,10 +245,13 @@ async fn connect(
     let fault = match opened {
         Ok(Ok(connected)) => return Ok(connected),
         Ok(Err(error)) => upgrade_fault(&error),
-        Err(_) => Fault::Transient(IpcError::new(
-            ErrorKind::Timeout,
-            format!("timed out opening a stream to pod {}", candidate.name),
-        )),
+        Err(_) => Fault::Transient(
+            IpcError::new(
+                ErrorKind::Timeout,
+                format!("timed out opening a stream to pod {}", candidate.name),
+            )
+            .into(),
+        ),
     };
     if !matches!(fault, Fault::Fatal(_)) {
         shared.failed(&candidate.key);
@@ -395,10 +402,13 @@ pub(super) async fn probe(
         over = link.interrupted() => return Err(over),
         permit = timeout(CONNECT_TIMEOUT, clients.admit_session(Actor::Ui, None)) => {
             permit.map_err(|_| {
-                Over::Fault(Fault::Transient(IpcError::new(
-                    ErrorKind::Timeout,
-                    "every session of this context stayed in use",
-                )))
+                Over::Fault(Fault::Transient(
+                    IpcError::new(
+                        ErrorKind::Timeout,
+                        "every session of this context stayed in use",
+                    )
+                    .into(),
+                ))
             })?
         }
     };

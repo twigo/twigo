@@ -13,6 +13,7 @@ use twigo_cache::hub::{Hub, Resource, Subscription};
 use twigo_cache::object::Object;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 
+use super::cause::Cause;
 use super::{Config, Kind};
 use crate::pods::{Subscriptions, v1};
 
@@ -20,7 +21,7 @@ const SERVICE_NAME: &str = "kubernetes.io/service-name";
 
 pub(super) const UNANSWERED: &str = "the cluster does not answer";
 pub(super) const UNANSWERED_YET: &str = "the cluster has not answered yet";
-const WATCHES_IN_USE: &str = "every watch of this context is in use";
+const WAITING_FOR_A_SLOT: &str = "waiting for a stream slot of this context";
 
 /// A pod a connection can go to, and the port it reaches there.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,7 +40,7 @@ pub(super) enum Seen {
     Unlisted(Option<String>),
     /// The credentials are rejected, which the hub gives up on, or the
     /// target is gone.
-    Fault(IpcError),
+    Fault(Cause),
     /// The cluster refuses or fails in a way the hub tries again.
     Refused(IpcError),
     Listed {
@@ -127,7 +128,7 @@ impl Watching {
                     return Seen::Unlisted(unanswered(&states));
                 }
                 let Some(object) = pod.items().into_iter().next() else {
-                    return Seen::Fault(gone(label, name));
+                    return Seen::Fault(Cause::gone(label, name));
                 };
                 let Ok(doc) = serde_json::from_str::<PodDoc>(object.json.get()) else {
                     return Seen::Listed {
@@ -165,7 +166,7 @@ impl Watching {
                     return Seen::Unlisted(unanswered(&states));
                 }
                 let Some(object) = service.items().into_iter().next() else {
-                    return Seen::Fault(gone(label, name));
+                    return Seen::Fault(Cause::gone(label, name));
                 };
                 let (candidates, why) =
                     behind(&object, &slices.items(), name, config.port_name.as_deref());
@@ -176,8 +177,8 @@ impl Watching {
                 if let Some(seen) = refusal(&states) {
                     return seen;
                 }
-                if let Some(error) = workload.gone() {
-                    return Seen::Fault(error);
+                if workload.gone().is_some() {
+                    return Seen::Fault(Cause::gone(label, name));
                 }
                 let Some(pods) = workload.pods() else {
                     return Seen::Unlisted(unanswered(&states));
@@ -194,18 +195,17 @@ impl Watching {
     }
 }
 
-fn gone(label: &str, name: &str) -> IpcError {
-    IpcError::new(ErrorKind::NotFound, format!("{label} {name} is gone"))
-}
-
 /// What the hub's states say of the cluster's refusals: only a rejected
 /// credential is final, since the hub tries every other error again.
 fn refusal(states: &[ViewState]) -> Option<Seen> {
     if states.contains(&ViewState::Unauthorized) {
-        return Some(Seen::Fault(IpcError::new(
-            ErrorKind::Unauthorized,
-            "no credentials for this context that the cluster accepts",
-        )));
+        return Some(Seen::Fault(
+            IpcError::new(
+                ErrorKind::Unauthorized,
+                "no credentials for this context that the cluster accepts",
+            )
+            .into(),
+        ));
     }
     states.iter().find_map(|state| match state {
         ViewState::Forbidden { verb, resource } => Some(Seen::Refused(IpcError::new(
@@ -217,12 +217,14 @@ fn refusal(states: &[ViewState]) -> Option<Seen> {
     })
 }
 
-/// Why nothing is listed yet, when it is known: every watch of the context
-/// is in use while a subscription is queued, and the cluster does not answer
-/// when one that has listed nothing yet is reconnecting.
+/// Why nothing is listed yet, when it is known: a subscription is queued for
+/// a stream slot of the context, which a watch waits for while all its
+/// watches are taken and a paged list while all its requests are, and the
+/// cluster does not answer when one that has listed nothing yet is
+/// reconnecting.
 fn unanswered(states: &[ViewState]) -> Option<String> {
     if states.contains(&ViewState::Queued) {
-        return Some(WATCHES_IN_USE.to_owned());
+        return Some(WAITING_FOR_A_SLOT.to_owned());
     }
     states
         .contains(&ViewState::Stale)

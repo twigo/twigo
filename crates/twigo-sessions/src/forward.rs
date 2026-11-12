@@ -10,6 +10,7 @@
 //! subscriptions to the target exist only while the forward proves that it
 //! can be reached or has connections.
 
+mod cause;
 mod connect;
 mod connection;
 mod listen;
@@ -38,6 +39,7 @@ use twigo_cache::hub::{Hub, Resource};
 use twigo_ipc::{ErrorKind, ForwardState, Gvr, IpcError};
 
 use crate::pods::Reach;
+use cause::Cause;
 use connect::{Connect, Kube};
 use connection::Fault;
 use pick::{Chosen, Known, Pick};
@@ -56,9 +58,10 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// the second containerd gives kubectl's clients
 /// ([`sandbox_portforward_linux.go`](https://github.com/containerd/containerd/blob/v2.3.4/internal/cri/server/sandbox_portforward_linux.go#L83-L126)).
 const QUIET: Duration = Duration::from_secs(1);
-/// How long the first stream is watched for the pod's refusal: a port that
-/// nothing listens on answered on the error channel within 36 ms of the
-/// request, over 20 tries on kind 1.37 with containerd 2.3.4 (2026-11-11,
+/// How long the first stream is watched for the pod's refusal, from the
+/// upgrade's return: a port that nothing listens on answered on the error
+/// channel within 1.7 ms of it, over 200 tries (10 runs of 20, load average
+/// 3.9 to 4.2) on kind 1.37 with containerd 2.3.4 (2026-11-12,
 /// `forward::live`).
 const PROBE_WINDOW: Duration = Duration::from_millis(250);
 const ACCEPT_PAUSE: Duration = Duration::from_millis(100);
@@ -519,6 +522,7 @@ impl Supervisor {
             self.ensure_watching();
         }
         loop {
+            self.rest();
             self.advance();
             self.shared.waits.store(
                 self.phase == Phase::Restored
@@ -530,7 +534,7 @@ impl Supervisor {
                 Some(control) = self.control.recv() => self.control(control),
                 Some(socket) = self.sockets.recv() => self.accepted(socket),
                 Some(report) = self.reports.recv() => self.report(report),
-                Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.closed(),
+                Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.publish(),
                 () = changed(&mut self.watching) => self.look(),
                 opened = ready(&mut self.opening) => self.opened(opened),
                 proved = ready(&mut self.probe) => self.proved(proved),
@@ -557,7 +561,7 @@ impl Supervisor {
                 if self.phase != Phase::Failed {
                     self.refused_from_restored = self.phase == Phase::Restored;
                 }
-                self.end_with(error, false);
+                self.fail(error);
             }
             Control::Allow => {
                 if self.phase != Phase::Failed {
@@ -621,26 +625,34 @@ impl Supervisor {
             Some(async move { Watching::new(&shared.hub, &shared.config).await }.boxed());
     }
 
-    /// Lets the hub's subscriptions go.
-    fn release(&mut self) {
-        self.watching = None;
-        self.opening = None;
-        self.shared.know(Known::Unknown(None));
+    /// Whether anything needs the forward to know its pods: a connection, a
+    /// probe in flight, or the first proof of a forward that never worked,
+    /// which a person asked for and which ends within the waits' bounds in
+    /// `Ready` or `Failed`.
+    fn wanted(&self) -> bool {
+        !self.tasks.is_empty()
+            || self.probe.is_some()
+            || (self.phase == Phase::Proving && !self.worked)
     }
 
-    /// With no connection, a forward that worked and whose last try failed
-    /// waits as one that found no pod does, and one that is not proving lets
-    /// the subscriptions go; either looks again with its next connection.
-    fn settle(&mut self) {
-        if !self.tasks.is_empty() {
+    /// Run before the supervisor does anything else, so that after any event
+    /// (a control, a report, a change of the hub's, a timer, the end of a
+    /// connection) a forward that nothing wants holds no subscription, opens
+    /// no stream and has no timer armed, whatever its phase. It keeps its
+    /// state's words, and the next connection looks again.
+    fn rest(&mut self) {
+        if self.wanted() {
             return;
         }
-        if self.phase == Phase::Proving && self.worked && self.retry.is_some() {
+        if self.phase == Phase::Proving {
             self.phase = Phase::Waiting;
-            self.retry = None;
         }
-        if self.phase != Phase::Proving {
-            self.release();
+        self.retry = None;
+        self.no_pod_by = None;
+        if self.watching.is_some() || self.opening.is_some() {
+            self.watching = None;
+            self.opening = None;
+            self.shared.know(Known::Unknown(None));
         }
     }
 
@@ -661,7 +673,7 @@ impl Supervisor {
         };
         let known = Known::from(watching.look(&self.shared.config));
         let reaction = match &known {
-            Known::Fault(error) => Reaction::Fault(error.clone()),
+            Known::Fault(cause) => Reaction::Fault(cause.clone()),
             Known::Refused(error) => Reaction::Refused(error.clone()),
             Known::Listed { candidates, why } if candidates.is_empty() => {
                 Reaction::Empty(why.clone())
@@ -677,14 +689,13 @@ impl Supervisor {
             return;
         }
         match reaction {
-            Reaction::Fault(error) => self.fail(error),
+            Reaction::Fault(cause) => self.fail(cause),
             Reaction::Refused(error) => self.refused(error),
             // A forward that is proving finds it out when it is asked.
             Reaction::Empty(why) if self.phase != Phase::Proving => self.wait(why),
             Reaction::Found if self.phase == Phase::Waiting => self.phase = Phase::Proving,
             Reaction::Empty(_) | Reaction::Found | Reaction::Nothing => {}
         }
-        self.settle();
     }
 
     /// Starts the proof or the wait for a pod, whichever the forward is at.
@@ -697,7 +708,7 @@ impl Supervisor {
             Chosen::Unknown(None) => self.unanswered(),
             Chosen::Unknown(Some(why)) | Chosen::None(why) => self.nothing_to_reach(why),
             Chosen::Refused(error) => self.refused(error),
-            Chosen::Fault(error) => self.fail(error),
+            Chosen::Fault(cause) => self.fail(cause),
             Chosen::Pod(candidate) => {
                 self.no_pod_by = None;
                 self.received_at_probe = self.shared.received.load(Ordering::Relaxed);
@@ -751,14 +762,14 @@ impl Supervisor {
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => match fault {
-                Fault::Fatal(error) => self.end_with(error, false),
+                Fault::Fatal(error) => self.fail(error),
                 Fault::Port(words) => {
                     self.failure(words.clone());
-                    self.unreachable(IpcError::new(ErrorKind::Unavailable, words));
+                    self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into());
                 }
-                Fault::Transient(error) => {
-                    self.failure(error.message.clone());
-                    self.unreachable(error);
+                Fault::Transient(cause) => {
+                    self.failure(cause.error().message.clone());
+                    self.unreachable(cause);
                 }
                 Fault::Lost => self.pause(),
             },
@@ -780,10 +791,9 @@ impl Supervisor {
             Chosen::Pod(_) => self.set_ready(),
             Chosen::None(why) | Chosen::Unknown(Some(why)) => self.wait(why),
             Chosen::Refused(error) => self.wait(error.message),
-            Chosen::Fault(error) => self.fail(error),
+            Chosen::Fault(cause) => self.fail(cause),
             Chosen::Unknown(None) => self.phase = Phase::Proving,
         }
-        self.settle();
     }
 
     fn set_ready(&mut self) {
@@ -813,14 +823,13 @@ impl Supervisor {
     /// A try to prove the forward failed: it fails if it never worked, else
     /// it tries again after a pause, or with its next connection if it has
     /// none.
-    fn unreachable(&mut self, error: IpcError) {
+    fn unreachable(&mut self, cause: Cause) {
         if !self.worked {
-            self.fail(error);
+            self.fail(cause);
             return;
         }
         self.pause();
-        self.reconnecting(error.message);
-        self.settle();
+        self.reconnecting(cause.into_error().message);
     }
 
     fn reconnecting(&mut self, reason: String) {
@@ -832,27 +841,24 @@ impl Supervisor {
         });
     }
 
-    /// A forward whose target is gone looks at it again with its next
-    /// connection.
-    fn fail(&mut self, error: IpcError) {
-        let gone = error.kind == ErrorKind::NotFound;
-        self.end_with(error, gone);
-    }
-
-    fn end_with(&mut self, error: IpcError, gone: bool) {
+    /// Ends the connections. A forward whose target is gone looks at it
+    /// again with its next connection.
+    fn fail(&mut self, cause: impl Into<Cause>) {
+        let cause = cause.into();
+        self.gone = cause.is_gone();
         self.phase = Phase::Failed;
-        self.gone = gone;
         self.probe = None;
         self.retry = None;
         self.no_pod_by = None;
         self.shared.end.send_modify(|ends| *ends += 1);
         self.shared.update(|status| {
-            let state = ForwardState::Failed { error };
+            let state = ForwardState::Failed {
+                error: cause.into_error(),
+            };
             let changed = status.state != state;
             status.state = state;
             changed
         });
-        self.settle();
     }
 
     fn report(&mut self, report: Report) {
@@ -865,9 +871,10 @@ impl Supervisor {
                     self.proven();
                 }
             }
-            Report::Failed(Fault::Fatal(error)) => self.end_with(error, false),
+            Report::Failed(Fault::Fatal(error)) => self.fail(error),
             Report::Failed(Fault::Port(words)) => self.failure(words),
-            Report::Failed(Fault::Transient(error)) => {
+            Report::Failed(Fault::Transient(cause)) => {
+                let error = cause.into_error();
                 self.failure(error.message.clone());
                 if self.phase == Phase::Ready {
                     self.phase = Phase::Proving;
@@ -881,11 +888,6 @@ impl Supervisor {
                 }
             }
         }
-    }
-
-    fn closed(&mut self) {
-        self.publish();
-        self.settle();
     }
 
     fn timed_out(&mut self) {
@@ -927,7 +929,7 @@ impl Supervisor {
 }
 
 enum Reaction {
-    Fault(IpcError),
+    Fault(Cause),
     Refused(IpcError),
     Empty(String),
     Found,
