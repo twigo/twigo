@@ -1002,7 +1002,10 @@ Extensions add commands, not prefixes.
     A forward's listeners close when the forward is dropped or moved, so they are closed when a stop, a move or a shutdown returns.
     A child that Twigo starts at that moment (a credential plugin, a terminal's shell, the login shell) holds a copy of every descriptor until its program starts, so a bind straight after can find the port in use for that moment.
     On macOS a start or a resume that binds that fast gets `Busy` from the path of `bind` in `crates/twigo-sessions/src/forward/listen.rs` that tells a listener from leftovers.
-    A probe process, not Twigo, held a closed listener for under 50 µs when it was started with `posix_spawn` and for up to about 1 ms when it was a fork (macOS 27.2, 2026-11-12); std 1.99.1 uses `posix_spawnp` on Apple.
+    A probe process's children held the probe's closed listener for under 50 µs when they were started with `posix_spawn` and for up to about 1 ms when they were forked (macOS 27.2, 2026-11-12); Twigo's own children were not measured.
+    std 1.99.1 uses `posix_spawnp` on Apple only for a command with no `pre_exec` closure and no `setsid`, and, when its environment was cleared or sets `PATH`, only for a program given by a path ([`posix_spawn`](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L467-L474) and its [`setsid` branch](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L756-L765)); any other command forks.
+    The children above fork: a terminal's shell and the login shell through `pre_exec`, and a credential plugin named without a path through its cleared environment; a plugin given by a path meets the conditions for `posix_spawnp`.
+    So the figure that applies to Twigo is the fork's, about 1 ms, not 50 µs, except for a plugin given by a path.
     The local port of a start is the one that port of that target had last, else the same number, else for a port below 1024 that number plus 8000.
     A free port offered in place of a busy one is never taken silently, and starting on it is not remembered.
   - **The pod.**

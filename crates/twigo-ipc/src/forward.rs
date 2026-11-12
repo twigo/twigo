@@ -127,7 +127,9 @@ pub struct Forward {
     /// webview can tell an HTTP port without another call.
     pub app_protocol: Option<String>,
     pub local: u16,
-    /// The addresses it listens on: `127.0.0.1`, and `::1` where that bound.
+    /// The addresses it listens on: `127.0.0.1`, and `::1` where that bound;
+    /// none while it listens nowhere, as one that is stopped or whose local
+    /// port another process held when it was restored.
     pub addresses: Vec<String>,
     pub state: ForwardState,
     /// The pod new connections go to, once one is chosen.
@@ -177,8 +179,9 @@ pub enum ForwardState {
     Reconnecting {
         reason: String,
     },
-    /// Still listening. Its connections end and what it accepts is closed at
-    /// once, but for one whose target is gone, whose next connection is
+    /// Still listening, unless its local port was held when it was restored
+    /// (`addresses` is then empty). Its connections end and what it accepts is
+    /// closed at once, but for one whose target is gone, whose next connection is
     /// served to look at the target again. A start or a resume fails it for
     /// anything, what may pass too: a cluster that does not answer, no ready
     /// pod within the wait, a refused port, a 403; only a first stream lost

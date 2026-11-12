@@ -83,6 +83,7 @@
   CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
 - zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.
 - A test that counts connections with `lsof` gets a test binary of its own, because `lsof` counts the whole process.
+  `crates/twigo-core/tests/forward_release.rs` has one for the same kind of reason: it binds the port a forward has just closed, and on macOS a child that another test spawns at that moment holds a copy of the closed listener until its program starts, so nothing in it spawns.
 - On Linux a script this process wrote is busy (`ETXTBSY`) while a child forked meanwhile holds its descriptor until `exec`, and a spawn with `pre_exec` always forks, so twigo-env's tests have `cp` write their scripts.
   twigo-core's and twigo-kube's tests write theirs in-process; no such failure has been seen there.
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
