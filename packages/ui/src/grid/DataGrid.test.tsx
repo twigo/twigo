@@ -154,6 +154,19 @@ test("group headers come before their rows, a failing row has an edge, and a hea
   expect(handlers.onToggleGroup).toHaveBeenCalledWith("g:edge");
 });
 
+test("without a header the rows start at the top and count from one", () => {
+  grid({ header: false, ...list(PODS) });
+  expect(screen.queryAllByRole("columnheader")).toEqual([]);
+  expect(screen.getByRole("grid").getAttribute("aria-rowcount")).toBe(
+    String(PODS.length),
+  );
+  const [first, second] = screen.getAllByRole("row");
+  expect(first?.getAttribute("aria-rowindex")).toBe("1");
+  expect(second?.getAttribute("aria-rowindex")).toBe("2");
+  expect(first?.style.transform).toBe("translateY(0px)");
+  expect(second?.style.transform).toBe("translateY(26px)");
+});
+
 test("a click selects and opens a row, its box marks it", () => {
   const { handlers } = grid();
   fireEvent.click(screen.getByText("api-1"));

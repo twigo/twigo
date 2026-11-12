@@ -380,11 +380,12 @@ test("with open:list no tab opens: the side bar shows Port forwards with the new
   expect(
     screen.getByRole("tab", { name: "Port forwards", selected: true }),
   ).toBeTruthy();
-  const row = within(screen.getByRole("grid", { name: "Port forwards" }))
-    .getAllByRole("row")
-    .slice(1)[0];
+  const row = within(
+    screen.getByRole("grid", { name: "Port forwards" }),
+  ).getAllByRole("row")[0];
   expect(row?.getAttribute("aria-selected")).toBe("true");
-  expect(row?.textContent).toContain("metrics 9090 → 9090");
+  expect(row?.textContent).toContain("payments-gateway:metrics");
+  expect(row?.textContent).toContain("→ 9090");
 });
 
 test("with open:list a port already forwarded selects its row", async () => {

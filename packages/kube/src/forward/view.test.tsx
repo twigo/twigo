@@ -48,11 +48,33 @@ async function mounted(scenario: MockScenario = "forwardRestored") {
 }
 
 const grid = () => screen.getByRole("grid", { name: "Port forwards" });
-const rows = () => within(grid()).getAllByRole("row").slice(1);
-const cells = (row: HTMLElement | undefined) =>
-  [...(row?.querySelectorAll('[role="gridcell"]') ?? [])]
-    .map((cell) => cell.textContent)
-    .slice(0, 4);
+const rows = () => within(grid()).getAllByRole("row");
+const line = (row: HTMLElement | undefined) =>
+  row?.querySelector('[data-fit="forward"] > span') ?? undefined;
+const parts = (row: HTMLElement | undefined) =>
+  [...(line(row)?.children ?? [])].map((part) =>
+    part.tagName === "svg"
+      ? "icon"
+      : part.classList.contains("rounded-full")
+        ? "dot"
+        : part.textContent,
+  );
+const dot = (row: HTMLElement | undefined) =>
+  line(row)?.querySelector(".rounded-full");
+const stateWords = (row: HTMLElement | undefined) => {
+  const all = parts(row);
+  return all.length === 5 ? all[3] : undefined;
+};
+const tooltip = async (target: HTMLElement | undefined) => {
+  const trigger = line(target);
+  if (!trigger) throw new Error("no line");
+  fireEvent.focus(trigger);
+  await settle(2);
+  const text = screen.getByRole("tooltip").textContent;
+  fireEvent.blur(trigger);
+  await settle(2);
+  return text;
+};
 const press = (code: string, init: KeyboardEventInit = {}) => {
   fireEvent.keyDown(grid(), { code, key: code, ...init });
 };
@@ -83,35 +105,97 @@ async function select(n: number) {
 
 const panelTabs = (workbench: Workbench) => workbench.editors.active;
 
-test("the Port forwards container joins the Explorer in the side bar's header, and lists the space's forwards by state, target, ports and pod", async () => {
+test("the Port forwards container joins the Explorer in the side bar's header, and lists the space's forwards as one line each, without column headers", async () => {
   await mounted();
   screen.getByRole("tab", { name: "Explorer" });
   expect(
     screen.getByRole("tab", { name: "Port forwards", selected: true }),
   ).toBeTruthy();
-  expect(
-    rows().map((row) => row.querySelector("[title]")?.getAttribute("title")),
-  ).toEqual([
-    "Deployment payments-api",
-    "Service payments-gateway",
-    "Deployment payments-legacy",
-  ]);
-  expect(rows().map(cells)).toEqual([
-    ["Restored", "payments-api", "http 8080 → 8081", "–"],
-    ["Stopped", "payments-gateway", "metrics 9090 → 9090", "–"],
-    ["Failed", "payments-legacy", "http 8080 → 8082", "–"],
+  expect(within(grid()).queryAllByRole("columnheader")).toEqual([]);
+  expect(rows().map(parts)).toEqual([
+    ["dot", "icon", "payments-api:http", "Restored", "→ 8081"],
+    ["dot", "icon", "payments-gateway:metrics", "Stopped", "→ 9090"],
+    ["dot", "icon", "payments-legacy:http", "Failed", "→ 8082"],
   ]);
 });
 
-test("a ready forward shows its pod, and a failed or waiting row has an edge in its tone", async () => {
+test("the state's words show only while a forward is not ready, and a ready row's dot says its state instead", async () => {
+  const { backend } = await mounted();
+  expect(rows().map(stateWords)).toEqual(["Restored", "Stopped", "Failed"]);
+  expect(rows().map((row) => dot(row)?.getAttribute("aria-hidden"))).toEqual([
+    "true",
+    "true",
+    "true",
+  ]);
+
+  await act(() => backend.invoke("forward_resume", { id: 2, local: null }));
+  await act(() => vi.advanceTimersByTimeAsync(700));
+  expect(parts(row(1))).toEqual([
+    "dot",
+    "icon",
+    "payments-gateway:metrics",
+    "→ 9090",
+  ]);
+  expect(stateWords(row(1))).toBeUndefined();
+  expect(dot(row(1))?.getAttribute("role")).toBe("img");
+  expect(dot(row(1))?.getAttribute("aria-label")).toBe("Ready");
+});
+
+test("the dot keeps the state's tone, and pulses while the state is in flight", async () => {
+  const { backend } = await mounted();
+  const tones = () => rows().map((row) => dot(row)?.className ?? "");
+  expect(tones()[0]).toContain("bg-muted-foreground-2");
+  expect(tones()[2]).toContain("bg-error");
+  expect(tones()[2]).not.toContain("animate-pulse");
+
+  await act(() =>
+    backend.invoke("forward_start", {
+      target: {
+        space: "prod-eu",
+        gvr: { group: "", version: "v1", resource: "services" },
+        namespace: "payments",
+        name: "payments-gateway",
+      },
+      port: 80,
+      local: null,
+    }),
+  );
+  await settle(2);
+  expect(stateWords(row(3))).toBe("Starting");
+  expect(tones()[3]).toContain("animate-pulse");
+
+  await act(() => vi.advanceTimersByTimeAsync(READY_AFTER_MS + 100));
+  expect(stateWords(row(3))).toBeUndefined();
+  expect(tones()[3]).toContain("bg-ok");
+  expect(tones()[3]).not.toContain("animate-pulse");
+});
+
+test("a row's tooltip carries its kind, its ports, its state with the reason, and its pod", async () => {
+  const { backend } = await mounted();
+  const failed = await tooltip(row(2));
+  expect(failed).toContain("Deployment payments-legacy");
+  expect(failed).toContain("http 8080 → localhost:8082");
+  expect(failed).toContain(
+    'Failed · deployments.apps "payments-legacy" not found',
+  );
+  expect(failed).not.toContain("Pod ");
+
+  await act(() => backend.invoke("forward_resume", { id: 2, local: null }));
+  await act(() => vi.advanceTimersByTimeAsync(700));
+  const ready = await tooltip(row(1));
+  expect(ready).toContain("Service payments-gateway");
+  expect(ready).toContain("metrics 9090 → localhost:9090");
+  expect(ready).toContain("Ready");
+  expect(ready).toMatch(/Pod payments-gateway-\S+$/);
+});
+
+test("a failed row has an edge in its tone, and a ready one has none", async () => {
   const { backend } = await mounted();
   await act(() => backend.invoke("forward_resume", { id: 2, local: null }));
   await act(() => vi.advanceTimersByTimeAsync(700));
-  const [, stopped, failed] = rows();
-  expect(cells(stopped)[0]).toBe("Ready");
-  expect(cells(stopped)[3]).toMatch(/^payments-gateway-/);
+  const [, ready, failed] = rows();
   expect(failed?.className).toContain("--error");
-  expect(stopped?.className).not.toContain("--error");
+  expect(ready?.className).not.toContain("--error");
 });
 
 test("with no forwards the view says how to start one", async () => {
@@ -155,7 +239,7 @@ test("⌘C copies the selected forward's address, and ⌫ and Delete remove it",
   press("Backspace");
   await settle(6);
   expect(calls("forward_remove")).toEqual([1]);
-  expect(rows().map((row) => cells(row)[0])).toEqual(["Stopped", "Failed"]);
+  expect(rows().map(stateWords)).toEqual(["Stopped", "Failed"]);
 
   await select(0);
   press("Delete");
@@ -224,11 +308,7 @@ test("Stop all in the view's title stops the space's running forwards, not the s
   fireEvent.click(stopAll());
   await settle(6);
   expect(calls("forward_stop")).toEqual([1, 3]);
-  expect(rows().map((row) => cells(row)[0])).toEqual([
-    "Stopped",
-    "Stopped",
-    "Stopped",
-  ]);
+  expect(rows().map(stateWords)).toEqual(["Stopped", "Stopped", "Stopped"]);
   expect(stop()).toBeNull();
 });
 
@@ -253,27 +333,6 @@ test("Stop all leaves the forwards of other spaces running", async () => {
   expect(calls("forward_stop")).toEqual([1, 3]);
 });
 
-test("a header sorts the forwards, a second click reverses, and the choice is kept for the space", async () => {
-  const { workbench } = await mounted();
-  fireEvent.click(screen.getByRole("button", { name: "State" }));
-  await settle(4);
-  expect(rows().map((row) => cells(row)[0])).toEqual([
-    "Failed",
-    "Restored",
-    "Stopped",
-  ]);
-  fireEvent.click(screen.getByRole("button", { name: "State" }));
-  await settle(4);
-  expect(rows().map((row) => cells(row)[0])).toEqual([
-    "Stopped",
-    "Restored",
-    "Failed",
-  ]);
-  expect(workbench.spaces.view("prod-eu", "kube.forwards.list")).toMatchObject({
-    sort: { column: "state", descending: true },
-  });
-});
-
 test("forwards of other spaces are not listed", async () => {
   const { workbench } = await mounted();
   await act(() => workbench.spaces.open("qa"));
@@ -291,7 +350,7 @@ test("the list follows the core: a forward that is added or removed shows at onc
   expect(rows()).toHaveLength(3);
   await act(() => backend.invoke("forward_remove", 2));
   await settle(4);
-  expect(rows().map((row) => cells(row)[0])).toEqual(["Restored", "Failed"]);
+  expect(rows().map(stateWords)).toEqual(["Restored", "Failed"]);
   await act(() =>
     backend.invoke("forward_start", {
       target: {
@@ -338,7 +397,7 @@ test("a forward that the mode refuses is a row in the warning tone that says the
   await act(() =>
     vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 100),
   );
-  expect(cells(row(0))[0]).toBe("Read-only");
+  expect(stateWords(row(0))).toBe("Read-only");
   expect(row(0).className).toContain("--warn");
   expect(row(0).className).not.toContain("--error");
 });

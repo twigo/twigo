@@ -4,6 +4,8 @@ import { forwardKeys } from "./keys";
 import {
   addressOf,
   forwardTitle,
+  localWords,
+  portLabel,
   portWords,
   stateOf,
   targetWords,
@@ -39,11 +41,14 @@ function forward(more: Partial<Forward> = {}): Forward {
 
 test("a forward is named by its target and port, and reached on localhost", () => {
   const web = forward();
+  expect(portLabel(web)).toBe("http");
+  expect(localWords(web)).toBe("→ 8080");
   expect(targetWords(web)).toBe("web:http");
   expect(forwardTitle(web)).toBe("web:http → 8080");
   expect(portWords(web)).toBe("http 80");
   expect(addressOf(web)).toBe("localhost:8080");
   const unnamed = forward({ portName: null, port: 9000, local: 9001 });
+  expect(portLabel(unnamed)).toBe("9000");
   expect(targetWords(unnamed)).toBe("web:9000");
   expect(forwardTitle(unnamed)).toBe("web:9000 → 9001");
   expect(portWords(unnamed)).toBe("9000");

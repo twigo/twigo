@@ -32,11 +32,17 @@ const ACTIONS_WIDTH = 32;
 export interface DataGridProps<R, G> {
   readonly label: string;
   readonly columns: readonly GridColumn[];
+  /**
+   * Whether the column titles show, to sort and to size the columns; true
+   * unless a grid reads as one flowing line, as in a side bar, and has
+   * neither to do.
+   */
+  readonly header?: boolean;
   /** Widths the user dragged or fitted, by column id. */
-  readonly widths: Readonly<Record<string, number>>;
-  readonly onResize: (column: string, width: number) => void;
-  readonly sort: GridSort | null;
-  readonly onSort: (sort: GridSort) => void;
+  readonly widths?: Readonly<Record<string, number>>;
+  readonly onResize?: (column: string, width: number) => void;
+  readonly sort?: GridSort | null;
+  readonly onSort?: (sort: GridSort) => void;
   /** Items in the sequence: rows, and group headers when grouped. */
   readonly length: number;
   /**
@@ -99,9 +105,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const {
     label,
     columns,
-    widths,
+    header = true,
+    widths = {},
     onResize,
-    sort,
+    sort = null,
     onSort,
     length,
     query,
@@ -124,6 +131,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     flash,
     register,
   } = props;
+  const headerHeight = header ? HEADER_HEIGHT : 0;
   const ids = useId();
   const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
@@ -141,8 +149,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     overscan: 8,
     initialRect: { width: 0, height: 600 },
     // The header scrolls with the rows, ahead of them, and covers them once it sticks.
-    scrollMargin: HEADER_HEIGHT,
-    scrollPaddingStart: HEADER_HEIGHT,
+    scrollMargin: headerHeight,
+    scrollPaddingStart: headerHeight,
   });
   const virtual = virtualizer.getVirtualItems();
   const first = virtual[0]?.index ?? 0;
@@ -278,7 +286,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           return;
         }
         const top = virtualizer.getVirtualItemForOffset(
-          (virtualizer.scrollOffset ?? 0) + HEADER_HEIGHT,
+          (virtualizer.scrollOffset ?? 0) + headerHeight,
         );
         go(top?.index ?? 0, extend);
       },
@@ -322,7 +330,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           latest.current.onToggleGroup?.(target.id);
       },
     };
-  }, [virtualizer]);
+  }, [virtualizer, headerHeight]);
 
   useEffect(() => {
     if (!element || !register) return;
@@ -361,7 +369,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const rows = virtual.map((at) => {
     const target = item(at.index);
     const place = {
-      transform: `translateY(${String(at.start - HEADER_HEIGHT)}px)`,
+      transform: `translateY(${String(at.start - headerHeight)}px)`,
       height: ROW_HEIGHT,
     };
     if (!target) {
@@ -369,7 +377,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         <div
           key={`pending-${String(at.index)}`}
           role="row"
-          aria-rowindex={at.index + 2}
+          aria-rowindex={at.index + (header ? 2 : 1)}
           onContextMenu={withoutMenu}
           className="absolute inset-x-0 top-0 grid items-center border-b border-border-subtle"
           style={{ ...place, gridTemplateColumns: template }}
@@ -393,7 +401,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           key={target.id}
           id={rowId(at.index)}
           role="row"
-          aria-rowindex={at.index + 2}
+          aria-rowindex={at.index + (header ? 2 : 1)}
           aria-expanded={target.open}
           aria-selected={!anyMarked && isCursor}
           data-cursor={isCursor || undefined}
@@ -438,7 +446,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         key={target.id}
         id={rowId(at.index)}
         role="row"
-        aria-rowindex={at.index + 2}
+        aria-rowindex={at.index + (header ? 2 : 1)}
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
         keepActions={isCursor}
@@ -563,55 +571,60 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       onPointerDown={() => {
         setWanted(undefined);
       }}
-      aria-rowcount={length + 1}
+      aria-rowcount={length + (header ? 1 : 0)}
       aria-multiselectable={marking || undefined}
       aria-activedescendant={active && rowId(active.index)}
       className="group/grid h-full min-h-0 overflow-auto outline-none"
     >
-      <div
-        role="row"
-        aria-rowindex={1}
-        className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-muted-foreground"
-        style={{
-          gridTemplateColumns: template,
-          minWidth,
-          height: HEADER_HEIGHT,
-        }}
-      >
-        {marking && (
-          <div role="columnheader" className="flex justify-center">
-            {marked.size > 0 && (
-              <MarkBox
-                checked={false}
-                partial
-                label="Clear marks"
-                onToggle={() => {
-                  onMark([...marked], false);
-                }}
-              />
-            )}
+      {header && (
+        <div
+          role="row"
+          aria-rowindex={1}
+          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-muted-foreground"
+          style={{
+            gridTemplateColumns: template,
+            minWidth,
+            height: HEADER_HEIGHT,
+          }}
+        >
+          {marking && (
+            <div role="columnheader" className="flex justify-center">
+              {marked.size > 0 && (
+                <MarkBox
+                  checked={false}
+                  partial
+                  label="Clear marks"
+                  onToggle={() => {
+                    onMark([...marked], false);
+                  }}
+                />
+              )}
+            </div>
+          )}
+          {columns.map((column) => (
+            <HeaderCell
+              key={column.id}
+              column={column}
+              width={widthOf(column)}
+              sort={sort}
+              onSort={(next) => {
+                onSort?.(next);
+              }}
+              onResize={(width) => {
+                onResize?.(column.id, width);
+              }}
+              onFit={() => {
+                if (element)
+                  onResize?.(column.id, fitWidth(element, column.id));
+              }}
+            />
+          ))}
+          {filler && <div role="columnheader" />}
+          <div role="columnheader" className="flex items-center justify-center">
+            {headerEnd}
           </div>
-        )}
-        {columns.map((column) => (
-          <HeaderCell
-            key={column.id}
-            column={column}
-            width={widthOf(column)}
-            sort={sort}
-            onSort={onSort}
-            onResize={(width) => {
-              onResize(column.id, width);
-            }}
-            onFit={() => {
-              if (element) onResize(column.id, fitWidth(element, column.id));
-            }}
-          />
-        ))}
-        {filler && <div role="columnheader" />}
-        <div role="columnheader" className="flex items-center justify-center">
-          {headerEnd}
         </div>
-      </div>
+      )}
       {loading ? (
         <SkeletonRows
           template={template}

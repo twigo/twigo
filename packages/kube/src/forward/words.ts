@@ -2,14 +2,24 @@ import type { Forward } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { modeLabel } from "@twigo/workbench";
 
+/** The target's port as a person names it: `http`, or its number when it has no name. */
+export function portLabel({ port, portName }: Forward): string {
+  return portName ?? String(port);
+}
+
 /** The target and its port as a person names them: `web:http`. */
-export function targetWords({ target, port, portName }: Forward): string {
-  return `${target.name}:${portName ?? String(port)}`;
+export function targetWords(forward: Forward): string {
+  return `${forward.target.name}:${portLabel(forward)}`;
+}
+
+/** The local port a forward reaches: `→ 8080`. */
+export function localWords({ local }: Forward): string {
+  return `→ ${String(local)}`;
 }
 
 /** A tab's title: the target and the local port it reaches, `web:http → 8080`. */
 export function forwardTitle(forward: Forward): string {
-  return `${targetWords(forward)} → ${String(forward.local)}`;
+  return `${targetWords(forward)} ${localWords(forward)}`;
 }
 
 /** The port as its target declares it: `http 80`, or `80` when it has no name. */
