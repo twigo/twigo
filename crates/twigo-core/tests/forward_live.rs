@@ -24,6 +24,7 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
@@ -183,7 +184,12 @@ impl Cluster {
                     "metadata": { "name": "web" },
                     "spec": {
                         "selector": { "app": "web" },
-                        "ports": [{ "name": "http", "port": 80, "targetPort": "web" }],
+                        "ports": [{
+                            "name": "http",
+                            "port": 80,
+                            "targetPort": "web",
+                            "appProtocol": "http",
+                        }],
                     },
                 }))
                 .unwrap(),
@@ -285,19 +291,23 @@ impl Cluster {
 }
 
 async fn core(dir: &Path, cluster: &Cluster) -> Arc<Core> {
-    std::fs::copy(&cluster.path, dir.join("config")).unwrap();
-    let core = running(dir);
-    core.catalog.contexts().await;
-    core.state.open_space(&cluster.context);
-    core
+    core_task(dir, cluster).await.0
 }
 
-fn running(dir: &Path) -> Arc<Core> {
+async fn core_task(dir: &Path, cluster: &Cluster) -> (Arc<Core>, JoinHandle<()>) {
+    std::fs::copy(&cluster.path, dir.join("config")).unwrap();
+    let (core, task) = running(dir);
+    core.catalog.contexts().await;
+    core.state.open_space(&cluster.context);
+    (core, task)
+}
+
+fn running(dir: &Path) -> (Arc<Core>, JoinHandle<()>) {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
+    let task = tokio::spawn({
         let core = Arc::clone(&core);
         let kubeconfig = dir.join("config");
         async move {
@@ -305,7 +315,7 @@ fn running(dir: &Path) -> Arc<Core> {
             core.run(followed, Some(kubeconfig)).await;
         }
     });
-    core
+    (core, task)
 }
 
 fn forwards(core: &Core) -> Vec<Forward> {
@@ -392,10 +402,12 @@ async fn a_service_answers_and_the_next_connection_reaches_the_other_pod_on_the_
     assert_eq!(ports.default, 80);
     assert_eq!(ports.ports[0].local, 8080, "80 plus 8000");
     assert_eq!(ports.ports[0].target_port.as_deref(), Some("web"));
+    assert_eq!(ports.ports[0].app_protocol.as_deref(), Some("http"));
 
     let local = free();
     let started = start(&core, cluster.service(), 80, Some(local)).await;
     assert_eq!(started.local, local);
+    assert_eq!(started.app_protocol.as_deref(), Some("http"));
     assert_eq!(started.kind, "Service");
     state(&core, started.id, "the forward is ready", |state| {
         *state == ForwardState::Ready
@@ -535,6 +547,60 @@ async fn a_taken_local_port_answers_busy_with_a_free_one_and_a_start_on_it_works
     cluster.delete().await;
 }
 
+#[tokio::test]
+#[ignore = "needs a kind cluster: TWIGO_TEST_KUBECONFIG"]
+async fn the_bytes_count_since_the_app_started_and_a_stopped_port_binds_again_at_once() {
+    let _lock = LOCK.lock().await;
+    let cluster = Cluster::connect("bytes").await;
+    cluster.serve_solo().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &cluster).await;
+    let started = start(&core, cluster.pod(), 8080, Some(free())).await;
+    state(&core, started.id, "the forward is ready", |state| {
+        *state == ForwardState::Ready
+    })
+    .await;
+    for _ in 0..3 {
+        answered(started.local).await;
+    }
+    eventually("the bytes are shown", || async {
+        let now = forward(&core, started.id);
+        now.sent > 0 && now.received > 0
+    })
+    .await;
+    let counted = forward(&core, started.id);
+
+    core.forward_stop(started.id).unwrap();
+    let resumed = match core
+        .forward_resume(ResumeForward {
+            id: started.id,
+            local: None,
+        })
+        .await
+        .unwrap()
+    {
+        ForwardStarted::Started { forward } => *forward,
+        ForwardStarted::Busy { local, why, .. } => {
+            panic!("port {local} that just served connections is busy: {why:?}")
+        }
+    };
+    assert!(
+        resumed.sent >= counted.sent && resumed.received >= counted.received,
+        "{counted:?} then {resumed:?}"
+    );
+    state(&core, started.id, "the forward is ready again", |state| {
+        *state == ForwardState::Ready
+    })
+    .await;
+    answered(started.local).await;
+    eventually("more bytes are counted", || async {
+        let now = forward(&core, started.id);
+        now.sent > counted.sent && now.received > counted.received
+    })
+    .await;
+    cluster.delete().await;
+}
+
 async fn relay(to: String) -> (u16, Arc<AtomicU64>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -567,14 +633,22 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     cluster.serve_solo().await;
     let dir = tempfile::tempdir().unwrap();
     let kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
+    let named = kubeconfig
+        .contexts
+        .iter()
+        .find(|context| context.name == cluster.context)
+        .and_then(|context| context.context.as_ref())
+        .map(|context| context.cluster.clone())
+        .expect("the context names its cluster");
     let real = kubeconfig
         .clusters
         .into_iter()
-        .find_map(|cluster| cluster.cluster?.server)
-        .unwrap();
+        .find(|cluster| cluster.name == named)
+        .and_then(|cluster| cluster.cluster?.server)
+        .expect("the cluster has a server");
     let to = real.trim_start_matches("https://").to_owned();
 
-    let core = core(dir.path(), &cluster).await;
+    let (core, task) = core_task(dir.path(), &cluster).await;
     let started = start(&core, cluster.pod(), 8080, Some(free())).await;
     state(&core, started.id, "the forward is ready", |state| {
         *state == ForwardState::Ready
@@ -583,7 +657,13 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     answered(started.local).await;
     core.state.flush().unwrap();
     core.shutdown();
+    let first = Arc::downgrade(&core);
+    task.abort();
     drop(core);
+    eventually("the first core is gone", || async {
+        first.upgrade().is_none()
+    })
+    .await;
     eventually("the port is free again", || async {
         std::net::TcpListener::bind(("127.0.0.1", started.local)).is_ok()
     })
@@ -600,16 +680,17 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     let restored = forward(&second, started.id);
     assert_eq!(restored.state, ForwardState::Restored);
     assert_eq!(restored.local, started.local);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(
+        connections.load(Ordering::SeqCst),
+        0,
+        "nothing reached the API server for it"
+    );
     assert!(
         TcpStream::connect(("127.0.0.1", started.local))
             .await
             .is_ok(),
         "it listens"
-    );
-    assert_eq!(
-        connections.load(Ordering::SeqCst),
-        0,
-        "nothing reached the API server for it"
     );
 
     Api::<Pod>::namespaced(cluster.admin.clone(), &cluster.namespace)
@@ -655,7 +736,7 @@ async fn core_over(dir: &Path, real: &str, relay: u16) -> Arc<Core> {
         .unwrap()
         .replace(real, &format!("https://127.0.0.1:{relay}"));
     std::fs::write(dir.join("config"), text).unwrap();
-    let core = running(dir);
+    let (core, _task) = running(dir);
     core.catalog.contexts().await;
     core
 }
@@ -741,10 +822,18 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     open.write_all(b"GET /health HTTP/1.1\r\nHost: web\r\n\r\n")
         .await
         .unwrap();
-    eventually("the connection is placed", || async {
-        forward(&core, started.id).connections == 1
-    })
-    .await;
+    let mut reply = String::new();
+    let mut chunk = [0; 512];
+    while !reply.trim_end().ends_with("OK") {
+        let read = tokio::time::timeout(WAIT, open.read(&mut chunk))
+            .await
+            .expect("the open connection is answered")
+            .unwrap();
+        assert_ne!(read, 0, "{reply:?}");
+        reply.push_str(&String::from_utf8_lossy(&chunk[..read]));
+    }
+    assert_eq!(forward(&core, started.id).connections, 1);
+    let before = cluster.settled_upgrades().await;
 
     core.set_context_mode(SetContextMode {
         context: cluster.context.clone(),
@@ -762,7 +851,6 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     })
     .await
     .expect("its connection ends");
-    let before = cluster.settled_upgrades().await;
 
     let mut refused = TcpStream::connect(("127.0.0.1", started.local))
         .await
@@ -792,8 +880,8 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     assert_eq!(resumed.kind, ErrorKind::Permissions);
     assert_eq!(
         cluster.settled_upgrades().await,
-        before,
-        "the API server served no pods/portforward since the mode turned"
+        before + 1,
+        "since the mode turned the API server served only the open connection's own request"
     );
 
     core.set_context_mode(SetContextMode {
@@ -807,6 +895,6 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     })
     .await;
     answered(started.local).await;
-    assert!(cluster.upgrades().await > before);
+    assert!(cluster.upgrades().await > before + 1);
     cluster.delete().await;
 }
