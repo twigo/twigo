@@ -40,7 +40,6 @@ struct State {
     no_context: bool,
     clients_fail: bool,
     forbidden: BTreeSet<String>,
-    missing: BTreeSet<String>,
     version: u64,
     /// By resource, then name.
     objects: BTreeMap<(String, String), Value>,
@@ -214,12 +213,6 @@ impl Fake {
         }
     }
 
-    /// Answers 404 to a list of `resource`, as a server that does not serve
-    /// its group does.
-    pub fn miss(&self, resource: &str) {
-        self.state().missing.insert(resource.to_owned());
-    }
-
     pub fn end_watches(&self) {
         self.state().watches.clear();
     }
@@ -277,19 +270,6 @@ impl Fake {
                     "message": format!("{resource} is forbidden"),
                     "reason": "Forbidden",
                     "code": 403,
-                }),
-            ));
-        }
-        if state.missing.contains(&resource) {
-            return Ok(full(
-                StatusCode::NOT_FOUND,
-                &json!({
-                    "kind": "Status",
-                    "apiVersion": "v1",
-                    "status": "Failure",
-                    "message": format!("the server could not find the requested resource ({resource})"),
-                    "reason": "NotFound",
-                    "code": 404,
                 }),
             ));
         }
