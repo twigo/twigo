@@ -271,15 +271,12 @@ struct Checks {
 
 impl Checks {
     /// Why `context` may not be forwarded to, if it may not: the catalog
-    /// lacks it, or its mode refuses the request a connection sends. A
-    /// catalog not loaded yet refuses nothing.
+    /// lacks it, or its mode refuses the request a connection sends. Before
+    /// the catalog has loaded it refuses nothing, since neither is known: the
+    /// mode of a context the catalog does not list reads as read-only.
     fn refusal(&self, context: &str, target: &ForwardTarget) -> Option<IpcError> {
-        let missing = self
-            .catalog
-            .borrow()
-            .as_deref()
-            .is_some_and(|contexts| contexts.find(context).is_none());
-        if missing {
+        let contexts = self.catalog.borrow().clone()?;
+        if contexts.find(context).is_none() {
             return Some(IpcError::from(&ClientsError::NoContext(context.to_owned())));
         }
         blocked(&self.policy, context, &attributes(target), Actor::Ui)
@@ -401,8 +398,9 @@ impl Forwards {
 
     /// Refuses a command whose forward may not run: its context's mode
     /// refuses it, no source lists its context, or Twigo is quitting. A
-    /// command asks before it reads or binds, and again with the lock it
-    /// holds while it puts the forward in, so nothing lands in between.
+    /// command asks once the catalog has loaded, before it reads or binds,
+    /// and again with the lock it holds while it puts the forward in, so
+    /// nothing lands in between.
     fn admit(&self, table: &Table, context: &str, target: &ForwardTarget) -> Result<(), IpcError> {
         if table.closed {
             return Err(quitting());
@@ -688,6 +686,7 @@ impl Core {
         } = request;
         named(asked)?;
         self.forwards.after_restore().await;
+        self.catalog.contexts().await;
         let context = self.context(&target.space)?;
         let kind = data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?
             .label()
@@ -720,36 +719,29 @@ impl Core {
             Bound::Listening(listeners) => listeners,
             Bound::Busy(busy) => return Ok(busy),
         };
-        let taken = self
-            .forwards
-            .table()
-            .entries
-            .keys()
-            .copied()
-            .max()
-            .unwrap_or(0);
-        let id = self.state.next_forward_id(taken);
-        let base = Forward {
-            id,
-            target: target.clone(),
-            kind,
-            port,
-            port_name: found.name,
-            app_protocol: found.app_protocol,
-            local,
-            addresses: listeners.addresses(),
-            state: ForwardState::Stopped,
-            pod: None,
-            pod_port: None,
-            connections: 0,
-            queued: 0,
-            sent: 0,
-            received: 0,
-            failure: None,
-        };
-        let handled = {
+        let (id, handled) = {
             let mut table = self.forwards.table();
             self.forwards.admit(&table, &context, &target)?;
+            let taken = table.entries.keys().copied().max().unwrap_or(0);
+            let id = self.state.next_forward_id(taken);
+            let base = Forward {
+                id,
+                target: target.clone(),
+                kind,
+                port,
+                port_name: found.name,
+                app_protocol: found.app_protocol,
+                local,
+                addresses: listeners.addresses(),
+                state: ForwardState::Stopped,
+                pod: None,
+                pod_port: None,
+                connections: 0,
+                queued: 0,
+                sent: 0,
+                received: 0,
+                failure: None,
+            };
             let mut entry = Entry {
                 base,
                 context,
@@ -765,7 +757,7 @@ impl Core {
             }
             let handled = entry.run.as_ref().expect("started").data.handled();
             table.entries.insert(id.0, entry);
-            handled
+            (id, handled)
         };
         let started = self.forwards.answer(id, handled).await;
         self.save_forwards(&target.space);
@@ -795,6 +787,7 @@ impl Core {
         let ResumeForward { id, local } = request;
         named(local)?;
         self.forwards.after_restore().await;
+        self.catalog.contexts().await;
         let _claim = self.forwards.claim_of(id).await?;
         self.resume_claimed(id, local).await
     }
@@ -942,10 +935,11 @@ impl Core {
     /// Binds the port of each forward that ran when Twigo quit, and lets it
     /// wait for its first connection or its space's connecting: nothing asks
     /// a cluster. A forward whose port another process holds fails with
-    /// that, and one that the policy or the catalog refuses as it is put in
-    /// begins failed with the refusal; the rest are asked again once both
-    /// are loaded. The commands wait for it, and the forwards of the spaces
-    /// whose clients were made meanwhile are told so at its end.
+    /// that, and one that the policy or the catalog refuses as it is put in,
+    /// once the catalog has loaded, begins failed with the refusal; the rest
+    /// are asked again once both are loaded. The commands wait for it, and
+    /// the forwards of the spaces whose clients were made meanwhile are told
+    /// so at its end.
     pub(crate) async fn restore_forwards(&self) {
         for space in self.state.spaces() {
             let saved = self.state.forwards(&space.id);

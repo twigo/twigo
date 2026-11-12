@@ -813,7 +813,7 @@ echo 'run aws sso login' >&2; sleep 2; exit 1"#,
         async move { source.credential().await }
     });
     plugins.until_runs(3).await;
-    source.sign_in();
+    assert!(source.sign_in().is_none(), "a run that a request started");
     let mut status = source.status();
     let shown = status.wait_for(
         |status| matches!(status, Status::Running { output, .. } if output == "run aws sso login\n"),
