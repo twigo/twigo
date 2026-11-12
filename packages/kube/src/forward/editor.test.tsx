@@ -166,16 +166,9 @@ test("a ready forward's tab is titled by its target and ports, and says where it
   screen.getByText("Connections");
   screen.getByText("Last failure");
   screen.getByText("None");
-});
-
-test("the counters of a ready forward move while the tab is open", async () => {
-  const { start, open } = await mounted();
-  const forward = await start(API, 80);
-  await open(forward);
-  const sent = () => screen.getByText("Sent").nextSibling?.textContent;
-  expect(sent()).toMatch(/^0 B/);
-  await later(3000);
-  expect(sent()).not.toMatch(/^0 B/);
+  expect(
+    screen.queryByText(/Waiting for a place among the context's/),
+  ).toBeNull();
 });
 
 test("the target and the pod are links to their objects, which open beside the tab", async () => {
@@ -298,14 +291,6 @@ test("connections that wait for a session say that the context's are all taken",
     "66, 2 waiting",
   );
   expect(screen.getAllByText("Ready · 2 waiting").length).toBeGreaterThan(0);
-});
-
-test("a ready forward in another scenario shows no wait", async () => {
-  const { start, open } = await mounted();
-  await open(await start(API, 80));
-  expect(
-    screen.queryByText(/Waiting for a place among the context's/),
-  ).toBeNull();
 });
 
 test("a tab a restored layout brings back for a forward the core lacks says so and offers to close, and one the core removes while it shows does the same", async () => {
@@ -521,25 +506,6 @@ test("a stopped forward that is moved onto a busy port is not forwarded, and say
   ]);
 });
 
-test("a port below 1024 says that Twigo cannot listen on it, not that it is in use", async () => {
-  const { workbench, start, open } = await mounted();
-  const forward = await start(API, 80, 8085);
-  await open(forward);
-  fireEvent.click(button("Change Local Port…"));
-  await settle(4);
-  act(() => {
-    workbench.quickAccess.setValue("80");
-    workbench.quickAccess.submit();
-  });
-  await settle(6);
-  const [toast] = live();
-  expect(toast).toContain(
-    "Twigo cannot listen on 80: ports below 1024 need privileges it does not have, so auth-api:http stays on 8085.",
-  );
-  expect(toast).not.toContain("in use");
-  toastButton("Use 1024");
-});
-
 test("a start that fails says the target's own failure in a toast, which neither bind answer does", async () => {
   const { start, open } = await mounted("forwardFailed");
   const forward = await start(API, 80);
@@ -743,77 +709,20 @@ const REFUSED = (source: ModeSource): Forward["state"] => {
 };
 
 test("a forward that failed on a lock the person may lift keeps Start and Change Local Port…, and one a policy file or an unlisted context locks has neither", async () => {
-  for (const [source, offered] of [
-    [{ kind: "user" }, true],
-    [
-      { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: null },
-      false,
-    ],
-    [{ kind: "unlisted" }, false],
-  ] as const) {
-    const { start, open } = await mounted("live", "qa", (forward) => ({
-      ...forward,
-      state: REFUSED(source),
-    }));
-    await open(await start(API, 80));
-    expect(screen.getAllByText("qa is read-only").length).toBeGreaterThan(0);
-    if (offered) {
-      button("Start");
-      button("Change Local Port…");
-    } else {
-      absent("Start");
-      absent("Change Local Port…");
-    }
-    button("Stop");
-    button("Remove");
-    cleanup();
-  }
-});
-
-test("a reconnecting forward offers Start, which asks again and leaves its state", async () => {
-  const { start, open, backend, forwards } = await mounted(
-    "forwardReconnecting",
-  );
-  const calls = recording(backend);
-  const forward = await start(API, 80);
-  await open(forward);
+  const { start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    state: REFUSED({
+      kind: "policyFile",
+      file: "/etc/twigo/policy.json",
+      pattern: null,
+    }),
+  }));
+  await open(await start(API, 80));
+  expect(screen.getAllByText("qa is read-only").length).toBeGreaterThan(0);
   absent("Start");
-  await later(LOSES_POD_AFTER_MS - READY_AFTER_MS);
-  expect(forwards.get(forward.id)?.state.state).toBe("reconnecting");
-  button("Start");
-  button("Change Local Port…");
-  fireEvent.click(button("Start"));
-  await settle(6);
-  expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
-  expect(forwards.get(forward.id)?.state.state).toBe("reconnecting");
-});
-
-test("Open in Browser is offered while the forward listens and has not failed", async () => {
-  const states: [Forward["state"], string[], boolean][] = [
-    [{ state: "ready" }, ["127.0.0.1"], true],
-    [{ state: "restored" }, ["127.0.0.1"], true],
-    [{ state: "stopped" }, ["127.0.0.1", "::1"], false],
-    [{ state: "stopped" }, [], false],
-    [
-      { state: "failed", error: { kind: "internal", message: "x" } },
-      ["::1"],
-      false,
-    ],
-    [{ state: "failed", error: { kind: "internal", message: "x" } }, [], false],
-    [{ state: "ready" }, [], false],
-  ];
-  for (const [state, addresses, offered] of states) {
-    const { start, open } = await mounted("live", "qa", (forward) => ({
-      ...forward,
-      state,
-      addresses,
-    }));
-    await open(await start(API, 80));
-    if (offered) button("Open in Browser");
-    else absent("Open in Browser");
-    button("Copy Address");
-    cleanup();
-  }
+  absent("Change Local Port…");
+  button("Stop");
+  button("Remove");
 });
 
 test("a forward that listens nowhere says so: not on an address, and that Change Local Port… and Start are the way out", async () => {

@@ -112,13 +112,10 @@ export function registerForwards(
 
   const countRunning = () => {
     const space = spaces.active?.id;
-    const running =
-      space === undefined
-        ? 0
-        : forwards
-            .ofSpace(space)
-            .filter(({ state }) => state.state !== "stopped").length;
-    keys.set("forwards.running", running);
+    keys.set(
+      "forwards.running",
+      space === undefined ? 0 : forwards.running(space).length,
+    );
   };
   forwards.changes.subscribe(countRunning);
   spaces.changes.subscribe(countRunning);

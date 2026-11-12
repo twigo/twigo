@@ -54,6 +54,11 @@ export class Forwards {
     return found;
   }
 
+  /** A space's forwards that run: all but the stopped ones. */
+  running(space: string): readonly Forward[] {
+    return this.ofSpace(space).filter(({ state }) => state.state !== "stopped");
+  }
+
   /** The forward the space's list has selected, while it exists. */
   selected(space: string): ForwardId | undefined {
     const id = this.#selected.get(space);

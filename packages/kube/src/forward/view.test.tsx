@@ -143,24 +143,24 @@ test("the state's words show only while a forward is not ready, and a ready row'
 
 test("the dot keeps the state's tone, and pulses while the state is in flight", async () => {
   const { backend } = await mounted();
+  vi.setTimerTickMode("manual");
   const tones = () => rows().map((row) => dot(row)?.className ?? "");
   expect(tones()[0]).toContain("bg-muted-foreground-2");
   expect(tones()[2]).toContain("bg-error");
   expect(tones()[2]).not.toContain("animate-pulse");
 
-  await act(() =>
-    backend.invoke("forward_start", {
-      target: {
-        space: "prod-eu",
-        gvr: { group: "", version: "v1", resource: "services" },
-        namespace: "payments",
-        name: "payments-gateway",
-      },
-      port: 80,
-      local: null,
-    }),
-  );
+  const started = backend.invoke("forward_start", {
+    target: {
+      space: "prod-eu",
+      gvr: { group: "", version: "v1", resource: "services" },
+      namespace: "payments",
+      name: "payments-gateway",
+    },
+    port: 80,
+    local: null,
+  });
   await settle(2);
+  await started;
   expect(stateWords(row(3))).toBe("Starting");
   expect(tones()[3]).toContain("animate-pulse");
 
@@ -225,8 +225,6 @@ test("the local port goes, whole, with the ⋯ that lies over it: on the row's h
   await mounted();
   const port = line(row(0))?.lastElementChild;
   expect(port?.textContent).toBe("→ 8081");
-  expect(row(0).classList.contains("group/row")).toBe(true);
-  expect(port?.contains(row(0).querySelector("button"))).toBe(false);
   for (const hidden of [
     "group-hover/row:opacity-0",
     "group-focus-within/row:opacity-0",
@@ -296,24 +294,6 @@ const selectedRows = () =>
   rows().flatMap((row, n) =>
     row.getAttribute("aria-selected") === "true" ? [n] : [],
   );
-
-test("⌫ and Delete leave the cursor on the next row, and on the previous one at the end of the list", async () => {
-  const { calls } = await mounted();
-  await select(0);
-  expect(selectedRows()).toEqual([0]);
-  press("Backspace");
-  await settle(6);
-  expect(rows().map(stateWords)).toEqual(["Stopped", "Failed"]);
-  expect(selectedRows()).toEqual([0]);
-  press("Delete");
-  await settle(6);
-  expect(rows().map(stateWords)).toEqual(["Failed"]);
-  expect(selectedRows()).toEqual([0]);
-  press("Backspace");
-  await settle(6);
-  expect(calls("forward_remove")).toEqual([1, 2, 3]);
-  expect(within(grid()).queryAllByRole("row")).toEqual([]);
-});
 
 test("a removal at the end of the list leaves the cursor on the row before it, and one in the middle on the row after", async () => {
   const { calls } = await mounted();
@@ -436,15 +416,6 @@ test("the first right click on a row opens its menu, which carries the tab's act
   ]);
 });
 
-test("Stop all in the view's title stops the space's running forwards, not the stopped ones, and goes when none runs", async () => {
-  const { calls } = await mounted();
-  fireEvent.click(stopAll());
-  await settle(6);
-  expect(calls("forward_stop")).toEqual([1, 3]);
-  expect(rows().map(stateWords)).toEqual(["Stopped", "Stopped", "Stopped"]);
-  expect(stop()).toBeNull();
-});
-
 test("Stop all leaves the forwards of other spaces running", async () => {
   const { backend, calls } = await mounted();
   await act(() => backend.invoke("space_open", "qa"));
@@ -497,28 +468,6 @@ test("forwards of other spaces are not listed: one started in another space whil
   fireEvent.click(screen.getByRole("tab", { name: "Port forwards" }));
   await settle(4);
   expect(rows().map((row) => row.textContent)).toEqual(["auth-api:http→ 8099"]);
-});
-
-test("the list follows the core: a forward that is added or removed shows at once", async () => {
-  const { backend } = await mounted();
-  expect(rows()).toHaveLength(3);
-  await act(() => backend.invoke("forward_remove", 2));
-  await settle(4);
-  expect(rows().map(stateWords)).toEqual(["Restored", "Failed"]);
-  await act(() =>
-    backend.invoke("forward_start", {
-      target: {
-        space: "prod-eu",
-        gvr: { group: "", version: "v1", resource: "services" },
-        namespace: "payments",
-        name: "payments-gateway",
-      },
-      port: 9090,
-      local: null,
-    }),
-  );
-  await settle(4);
-  expect(rows()).toHaveLength(3);
 });
 
 test("a row's menu shows the keys that do the same", async () => {

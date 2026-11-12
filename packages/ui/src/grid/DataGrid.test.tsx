@@ -568,8 +568,6 @@ test("a row's menu has a column of its own, unless the grid lays it over the row
   const cell = actionsCell("gateway-1");
   expect(rowNamed("gateway-1").children).toHaveLength(3);
   expect(cell?.className).toContain("absolute");
-  expect(cell?.className).toContain("opacity-0");
-  expect(cell?.className).toContain("group-hover/row:opacity-100");
 });
 
 test("a grid that lays its row menu over the rows has no column for it in the header, nor in a row still loading", () => {
@@ -601,7 +599,7 @@ test("a menu laid over a row opens from its button and runs a choice without ope
   expect(handlers.onActivate).not.toHaveBeenCalled();
 });
 
-test("a laid-over menu shows only on hover or focus, also on the cursor's row, and takes that row's tint", () => {
+test("a laid-over menu shows on hover, on focus and while its menu is open, also on the cursor's row, over the grid's surface in its row's tint", () => {
   grid({
     overlayMenu: true,
     selected: "a1",
@@ -613,8 +611,14 @@ test("a laid-over menu shows only on hover or focus, also on the cursor's row, a
       ?.closest<HTMLElement>('[role="gridcell"]');
   expect(cell("gateway-1")).toBeUndefined();
   const cursor = cell("api-1");
-  expect(cursor?.className).toContain("opacity-0");
-  expect(cursor?.className).toContain("focus-within:opacity-100");
+  for (const shown of [
+    "opacity-0",
+    "group-hover/row:opacity-100",
+    "focus-within:opacity-100",
+    "has-[[data-state=open]]:opacity-100",
+    "bg-[var(--surface,var(--editor))]",
+  ])
+    expect(cursor?.classList.contains(shown)).toBe(true);
   expect(cursor?.firstElementChild?.className).toContain(
     "bg-selected-unfocused",
   );
@@ -622,39 +626,14 @@ test("a laid-over menu shows only on hover or focus, also on the cursor's row, a
   expect(cell("gateway-1")?.firstElementChild?.className).toContain(
     "bg-row-hover",
   );
-});
-
-test("a laid-over menu lies over the surface the grid sits on, the editor's unless a part sets --surface, and its button carries no visibility of its own", () => {
-  grid({
-    overlayMenu: true,
-    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  const button = within(rowNamed("gateway-1")).getByRole("button", {
+    name: "Row actions",
   });
-  fireEvent.pointerEnter(rowNamed("gateway-1"));
-  const button = screen.getByRole("button", { name: "Row actions" });
-  const cell = button.closest<HTMLElement>('[role="gridcell"]');
-  expect(cell?.classList.contains("bg-[var(--surface,var(--editor))]")).toBe(
-    true,
-  );
-  expect(cell?.classList.contains("bg-editor")).toBe(false);
   expect(button.className).not.toContain("opacity");
-});
-
-test("a laid-over menu stays while its menu is open, with the pointer in the menu", () => {
-  grid({
-    overlayMenu: true,
-    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
-  });
-  fireEvent.pointerEnter(rowNamed("gateway-1"));
-  const button = screen.getByRole("button", { name: "Row actions" });
   fireEvent.pointerDown(button, { button: 0, ctrlKey: false });
   fireEvent.pointerLeave(rowNamed("gateway-1"));
-  expect(screen.getByRole("menuitem", { name: "Copy Name" })).toBeTruthy();
   expect(button.getAttribute("data-state")).toBe("open");
-  expect(
-    button
-      .closest('[role="gridcell"]')
-      ?.classList.contains("has-[[data-state=open]]:opacity-100"),
-  ).toBe(true);
+  expect(screen.getByRole("menuitem", { name: "Copy Name" })).toBeTruthy();
 });
 
 test("without the overlay a row's button shows on its hover, on the cursor's row, on the keyboard's focus and while its menu is open", () => {
