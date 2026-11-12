@@ -1,5 +1,5 @@
-//! Why a forward fails, whether that says its target is gone, and which
-//! errors pass by themselves.
+//! Why a forward fails, what starts it again, and which errors fail it
+//! whoever asked for the proof.
 
 use twigo_ipc::{ErrorKind, IpcError};
 
@@ -15,6 +15,20 @@ pub(super) struct Cause {
     gone: bool,
 }
 
+/// What starts a failed forward again besides a person's start or resume
+/// and a lifted refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Lift {
+    /// Nothing else.
+    Asked,
+    /// Its target was gone: its next connection looks at it again.
+    Connection,
+    /// The cluster refused the credentials: its space connecting, which
+    /// builds the context's clients anew, proves it. Trying again at each
+    /// connection would run a credential plugin again and again.
+    Clients,
+}
+
 impl Cause {
     /// A watch of the target itself lists nothing.
     pub(super) fn gone(label: &str, name: &str) -> Self {
@@ -24,8 +38,7 @@ impl Cause {
         }
     }
 
-    /// The upgrade to the pod that is the target answered 404. Behind a
-    /// Service or a workload a 404 says only that pod is gone, which passes.
+    /// The upgrade to the pod answered 404: that pod is gone.
     pub(super) fn upgrade(error: &kube::Error) -> Option<Self> {
         match error {
             kube::Error::Api(status) if status.code == 404 => Some(Self {
@@ -38,6 +51,16 @@ impl Cause {
 
     pub(super) fn is_gone(&self) -> bool {
         self.gone
+    }
+
+    pub(super) fn lift(&self) -> Lift {
+        if self.gone {
+            Lift::Connection
+        } else if self.error.kind == ErrorKind::Unauthorized {
+            Lift::Clients
+        } else {
+            Lift::Asked
+        }
     }
 
     pub(super) fn error(&self) -> &IpcError {
@@ -55,13 +78,14 @@ impl From<IpcError> for Cause {
     }
 }
 
-/// Whether an error of the hub's or of the clients' may pass by itself: a
-/// cluster or a pod that does not answer, or a fault of ours. A rejected
-/// credential, a refusal, a missing context or an invalid kubeconfig does
-/// not.
-pub(super) fn passes(kind: ErrorKind) -> bool {
+/// Whether an error of the clients or of the upgrade fails a forward
+/// whoever asked for the proof: the gate's refusal, a context that no source
+/// lists, or a credential failure (a 401, a credential plugin that failed, a
+/// plugin not trusted yet). Any other may pass, a 403 too, which an API
+/// server answers for a while after it restarts (ARCHITECTURE 3.2).
+pub(super) fn lasts(error: &IpcError) -> bool {
     matches!(
-        kind,
-        ErrorKind::Unavailable | ErrorKind::Timeout | ErrorKind::Internal
+        error.kind,
+        ErrorKind::Permissions | ErrorKind::NotFound | ErrorKind::Unauthorized
     )
 }

@@ -13,7 +13,7 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 
-use super::cause::{Cause, passes};
+use super::cause::{Cause, lasts};
 use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
@@ -28,17 +28,31 @@ const EARLY: usize = 4 * CHUNK;
 
 /// Why a connection or a try failed.
 pub(super) enum Fault {
-    /// The cluster refused the credentials, the person's rights or the
-    /// policy: the forward fails, and trying again would not help.
+    /// What fails the forward whoever asked: the gate's refusal, a context
+    /// that no source lists, a credential failure.
     Fatal(IpcError),
-    /// The pod or the cluster did not answer.
+    /// The pod or the cluster did not answer, or refused for now.
     Transient(Cause),
     /// The pod's side refused the port, in its own words.
     Port(String),
     /// No pod was a candidate within the wait, and why.
     NoPod(String),
+    /// The upgrade to a pod behind a Service or a workload answered 404, in
+    /// these words: that pod is no candidate any more.
+    Left(String),
     /// The clients were replaced, or the network changed under them.
     Lost,
+}
+
+impl Fault {
+    /// What the forward's `failure` says of it.
+    pub(super) fn words(&self) -> Option<String> {
+        match self {
+            Fault::Port(words) | Fault::NoPod(words) | Fault::Left(words) => Some(words.clone()),
+            Fault::Transient(cause) => Some(cause.error().message.clone()),
+            Fault::Fatal(_) | Fault::Lost => None,
+        }
+    }
 }
 
 /// How a connection or a probe ends when it did not run its course.
@@ -49,24 +63,19 @@ pub(super) enum Over {
     Fault(Fault),
 }
 
-fn clients_fault(error: IpcError) -> Fault {
-    if passes(error.kind) {
-        Fault::Transient(error.into())
-    } else {
+fn fault(error: IpcError) -> Fault {
+    if lasts(&error) {
         Fault::Fatal(error)
+    } else {
+        Fault::Transient(error.into())
     }
 }
 
 fn upgrade_fault(error: &kube::Error, pod_is_target: bool) -> Fault {
-    if pod_is_target && let Some(gone) = Cause::upgrade(error) {
-        return Fault::Transient(gone);
-    }
-    let error = twigo_kube::errors::request(error);
-    match error.kind {
-        ErrorKind::Unauthorized | ErrorKind::Forbidden | ErrorKind::Permissions => {
-            Fault::Fatal(error)
-        }
-        _ => Fault::Transient(error.into()),
+    match Cause::upgrade(error) {
+        Some(gone) if pod_is_target => Fault::Transient(gone),
+        Some(gone) => Fault::Left(gone.into_error().message),
+        None => fault(twigo_kube::errors::request(error)),
     }
 }
 
@@ -86,7 +95,7 @@ impl Link {
             biased;
             _ = end.changed() => return Err(Over::Ended),
             clients = shared.hub.clients(&shared.config.context) => {
-                clients.map_err(|error| Over::Fault(clients_fault(error)))?
+                clients.map_err(|error| Over::Fault(fault(error)))?
             }
         };
         let mut network = clients.connections().network();
@@ -117,12 +126,13 @@ pub(super) async fn serve(
     open: Open,
     end: watch::Receiver<u64>,
 ) {
-    let over = run(&shared, socket, open.number, end).await;
+    let number = open.number;
+    let over = run(&shared, socket, number, end).await;
     drop(open);
     match over {
         Ok(()) | Err(Over::Ended) => {}
-        Err(Over::Lost) => shared.report(Report::Failed(Fault::Lost)),
-        Err(Over::Fault(fault)) => shared.report(Report::Failed(fault)),
+        Err(Over::Lost) => shared.report(Report::Failed(number, Fault::Lost)),
+        Err(Over::Fault(fault)) => shared.report(Report::Failed(number, fault)),
     }
 }
 
@@ -256,8 +266,10 @@ async fn connect(
             .into(),
         ),
     };
-    if !matches!(fault, Fault::Fatal(_)) {
-        shared.failed(&candidate.key);
+    match &fault {
+        Fault::Left(words) => shared.left(&candidate.key, words.clone()),
+        Fault::Fatal(_) => {}
+        _ => shared.failed(&candidate.key),
     }
     Err(Over::Fault(fault))
 }

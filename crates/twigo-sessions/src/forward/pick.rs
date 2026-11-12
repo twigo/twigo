@@ -1,7 +1,8 @@
 //! Which pod new connections go to (ARCHITECTURE 4.6): the forward's current
 //! one while it is a candidate, so a client's connections do not spread over
 //! the replicas; another when it leaves or fails, and a pod that failed is
-//! avoided for a backoff unless it is the only one.
+//! avoided for a backoff unless it is the only one. A pod whose upgrade
+//! answered 404 is no candidate any more: a uid never comes back.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -54,6 +55,8 @@ pub(super) struct Pick {
     known: Known,
     current: Option<Candidate>,
     avoided: HashMap<Box<str>, Avoided>,
+    /// The pods that answered 404, and what the server said.
+    gone: HashMap<Box<str>, String>,
 }
 
 /// Jitter adds up to the delay again: 0.5–5 s for a first failure of the
@@ -73,6 +76,7 @@ impl Pick {
             known: Known::Unknown(None),
             current: None,
             avoided: HashMap::new(),
+            gone: HashMap::new(),
         }
     }
 
@@ -84,7 +88,7 @@ impl Pick {
     /// avoided; else the first by name that is not avoided; else, with every
     /// candidate avoided, the one whose backoff ends first.
     pub(super) fn choose(&mut self, now: Instant) -> Chosen {
-        let candidates = match &self.known {
+        let listed = match &self.known {
             Known::Unknown(why) => return Chosen::Unknown(why.clone()),
             Known::Fault(error) => return Chosen::Fault(error.clone()),
             Known::Refused(error) => return Chosen::Refused(error.clone()),
@@ -93,6 +97,13 @@ impl Pick {
             }
             Known::Listed { candidates, .. } => candidates,
         };
+        let mut candidates = listed
+            .iter()
+            .filter(|candidate| !self.gone.contains_key(&candidate.key))
+            .peekable();
+        if candidates.peek().is_none() {
+            return Chosen::None(self.gone[&listed[0].key].clone());
+        }
         let avoided = |candidate: &Candidate| {
             self.avoided
                 .get(&candidate.key)
@@ -101,15 +112,11 @@ impl Pick {
         let kept = self
             .current
             .as_ref()
-            .and_then(|current| candidates.iter().find(|c| c.key == current.key))
+            .and_then(|current| candidates.clone().find(|c| c.key == current.key))
             .filter(|candidate| !avoided(candidate));
         let chosen = kept
-            .or_else(|| candidates.iter().find(|candidate| !avoided(candidate)))
-            .or_else(|| {
-                candidates
-                    .iter()
-                    .min_by_key(|candidate| self.avoided[&candidate.key].until)
-            })
+            .or_else(|| candidates.clone().find(|candidate| !avoided(candidate)))
+            .or_else(|| candidates.min_by_key(|candidate| self.avoided[&candidate.key].until))
             .expect("there is a candidate")
             .clone();
         self.current = Some(chosen.clone());
@@ -124,6 +131,18 @@ impl Pick {
         });
         let wait = avoided.backoff.next().expect("without a limit");
         avoided.until = now + wait;
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|current| &*current.key == key)
+        {
+            self.current = None;
+        }
+    }
+
+    /// The upgrade to the pod answered 404, in these words.
+    pub(super) fn left(&mut self, key: &str, words: String) {
+        self.gone.insert(key.into(), words);
         if self
             .current
             .as_ref()

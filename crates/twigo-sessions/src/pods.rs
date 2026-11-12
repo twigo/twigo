@@ -138,6 +138,7 @@ impl Subscriptions {
         select_all(waits).await;
     }
 
+    /// The target's own state first, then the others'.
     pub(crate) fn states(&self) -> Vec<ViewState> {
         let mut states = vec![self.object.state()];
         states.extend(self.controlled.as_ref().map(Subscription::state));
@@ -166,6 +167,11 @@ impl Subscriptions {
                 ),
             )
         })
+    }
+
+    /// Whether the target's own subscription has listed.
+    pub(crate) fn target_listed(&self) -> bool {
+        self.object.listed()
     }
 
     /// Whether the target's own subscription has listed it and found

@@ -1,12 +1,13 @@
 //! A fake API server for the forward's tests on paused time: the objects of
 //! one namespace by resource, listed and watched whole as raw objects, as a
 //! server without Table sends them, picked by a `metadata.name` field
-//! selector or all of them. It can be unreachable, never answer, fail every
-//! request after a timeout, reject the credential, forbid a resource, fail
-//! to make the clients and end its watches.
+//! selector or all of them. It can be unreachable, never answer, answer
+//! late, fail every request after a timeout, reject the credential, forbid
+//! a resource, fail to make the clients and end its watches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::channel::mpsc;
@@ -21,7 +22,7 @@ use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 
 pub const NAMESPACE: &str = "shop";
-const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(70);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(70);
 
 type Body = UnsyncBoxBody<Bytes, BoxError>;
 type Sender = mpsc::UnboundedSender<Result<Frame<Bytes>, BoxError>>;
@@ -33,6 +34,7 @@ pub struct Fake(Arc<Mutex<State>>);
 struct State {
     offline: bool,
     stalled: bool,
+    delay: Duration,
     times_out: bool,
     unauthorized: bool,
     no_context: bool,
@@ -129,6 +131,10 @@ impl Fake {
                 if fake.state().stalled {
                     std::future::pending::<()>().await;
                 }
+                let delay = fake.state().delay;
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 if fake.state().times_out {
                     tokio::time::sleep(REQUEST_TIMEOUT).await;
                     return Err::<Response<Body>, BoxError>("request timed out".into());
@@ -173,6 +179,11 @@ impl Fake {
 
     pub fn set_stalled(&self, stalled: bool) {
         self.state().stalled = stalled;
+    }
+
+    /// Answers every request `delay` after it arrives.
+    pub fn set_delay(&self, delay: Duration) {
+        self.state().delay = delay;
     }
 
     pub fn set_times_out(&self, times_out: bool) {

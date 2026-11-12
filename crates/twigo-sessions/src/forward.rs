@@ -32,14 +32,14 @@ use std::time::Duration;
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_cache::hub::{Hub, Resource};
 use twigo_ipc::{ErrorKind, ForwardState, Gvr, IpcError};
 
 use crate::pods::Reach;
-use cause::Cause;
+use cause::{Cause, Lift};
 use connect::{Connect, Kube};
 use connection::Fault;
 use pick::{Chosen, Known, Pick};
@@ -60,8 +60,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const QUIET: Duration = Duration::from_secs(1);
 /// How long the first stream is watched for the pod's refusal, from the
 /// upgrade's return: a port that nothing listens on answered on the error
-/// channel within 1.7 ms of it, over 200 tries (10 runs of 20, load average
-/// 3.9 to 4.2) on kind 1.37 with containerd 2.3.4 (2026-11-12,
+/// channel within 1.51 ms of it, over 60 tries (3 runs of 20, load average
+/// 73.8 to 75.0) on kind 1.37 with containerd 2.3.4 (2026-11-12,
 /// `forward::live`).
 const PROBE_WINDOW: Duration = Duration::from_millis(250);
 const ACCEPT_PAUSE: Duration = Duration::from_millis(100);
@@ -197,6 +197,7 @@ enum Control {
     Connected,
     Refuse(IpcError),
     Allow,
+    Handled(oneshot::Sender<()>),
 }
 
 /// A forward, which closes its port and its connections when dropped.
@@ -273,6 +274,7 @@ impl Forward {
             opening: None,
             accepted: 0,
             failed_after: 0,
+            cut: 0,
         };
         Self {
             shared,
@@ -316,9 +318,9 @@ impl Forward {
         let _ = self.control.send(Control::Restart);
     }
 
-    /// Its space's clients were made: a forward that waits proves that a pod
-    /// can be reached, which it does without a connection. Any other stays
-    /// as it is.
+    /// Its space's clients were made: a forward that waits, or that failed
+    /// for a credential, proves that a pod can be reached, which it does
+    /// without a connection. Any other stays as it is.
     pub fn connected(&self) {
         let _ = self.control.send(Control::Connected);
     }
@@ -334,6 +336,17 @@ impl Forward {
     /// asks nothing by itself.
     pub fn allow(&self) {
         let _ = self.control.send(Control::Allow);
+    }
+
+    /// Resolves once the forward has handled what was sent to it before, so
+    /// its status says what that did.
+    pub fn handled(&self) -> BoxFuture<'static, ()> {
+        let (done, handled) = oneshot::channel();
+        let _ = self.control.send(Control::Handled(done));
+        async move {
+            let _ = handled.await;
+        }
+        .boxed()
     }
 }
 
@@ -391,16 +404,21 @@ impl Shared {
         self.pick().failed(key, Instant::now());
     }
 
+    fn left(&self, key: &str, words: String) {
+        self.pick().left(key, words);
+    }
+
     fn report(&self, report: Report) {
         // The supervisor lives as long as the connections.
         let _ = self.reports.send(report);
     }
 }
 
+/// What the connection of a number says.
 enum Report {
-    /// A pod sent bytes to the connection of this number, so it works.
+    /// A pod sent it bytes, so the forward works.
     Served(u64),
-    Failed(Fault),
+    Failed(u64, Fault),
 }
 
 /// An open connection, which the status counts while it lives.
@@ -442,11 +460,10 @@ enum Phase {
     Ready,
     /// No pod can be reached now, for the reason the status gives.
     Reconnecting,
-    /// Listening, and closing what it accepts, unless its target is gone,
-    /// which the next connection looks at again.
-    Failed {
-        gone: bool,
-    },
+    /// Listening, and closing what it accepts unless its target is gone,
+    /// until a person starts it again, a refusal is lifted, or what `Lift`
+    /// names.
+    Failed(Lift),
 }
 
 /// Who asked for the proof under way: finding a pod and opening a first
@@ -458,8 +475,9 @@ enum Asker {
     /// `Ready` or `Failed` within the waits' bounds: any failure fails the
     /// forward.
     Person,
-    /// The space connecting, which proves a forward that waits with no
-    /// connection, within the same bounds. A system's proof, as below.
+    /// The space connecting, which proves a forward that waits, or that
+    /// failed for a credential, with no connection, within the same bounds.
+    /// A system's proof, as below.
     Space,
     /// A connection, or the forward's own tries while it has connections. A
     /// system's proof keeps the forward's words, says `Reconnecting` for
@@ -523,6 +541,9 @@ struct Supervisor {
     /// How many had been when the `failure` was set: a connection with a
     /// greater number was opened after it.
     failed_after: u64,
+    /// How many had been when the forward last failed: what a connection up
+    /// to that number reports changes no state.
+    cut: u64,
 }
 
 async fn changed(watching: &mut Option<Watching>) {
@@ -632,22 +653,29 @@ impl Supervisor {
 
     fn control(&mut self, control: Control) {
         match control {
-            Control::Restart if matches!(self.phase, Phase::Failed { .. }) => {
+            Control::Restart if matches!(self.phase, Phase::Failed(_)) => {
                 self.close_queued();
                 self.phase = Phase::Starting;
                 self.proof = Some(Proof::new(Asker::Person));
                 self.say(ForwardState::Starting);
             }
-            Control::Connected if self.phase == Phase::Restored && self.proof.is_none() => {
-                self.proof = Some(Proof::new(Asker::Space));
-            }
+            Control::Connected => match (self.phase, &mut self.proof) {
+                (Phase::Restored | Phase::Failed(Lift::Clients), None) => {
+                    self.proof = Some(Proof::new(Asker::Space));
+                }
+                (Phase::Restored, Some(proof)) => proof.by = Asker::Space,
+                _ => {}
+            },
             Control::Refuse(error) => self.fail(error),
-            Control::Allow if matches!(self.phase, Phase::Failed { .. }) => {
+            Control::Allow if matches!(self.phase, Phase::Failed(_)) => {
                 self.close_queued();
                 self.phase = Phase::Restored;
                 self.say(ForwardState::Restored);
             }
-            Control::Restart | Control::Connected | Control::Allow => {}
+            Control::Handled(done) => {
+                let _ = done.send(());
+            }
+            Control::Restart | Control::Allow => {}
         }
     }
 
@@ -662,8 +690,8 @@ impl Supervisor {
     fn accepted(&mut self, socket: Socket) {
         match self.phase {
             // Closed at once: its socket drops here.
-            Phase::Failed { gone: false } => return,
-            Phase::Restored | Phase::Failed { gone: true } if self.proof.is_none() => {
+            Phase::Failed(Lift::Asked | Lift::Clients) => return,
+            Phase::Restored | Phase::Failed(Lift::Connection) if self.proof.is_none() => {
                 self.proof = Some(Proof::new(Asker::Connection));
             }
             _ => {}
@@ -767,6 +795,8 @@ impl Supervisor {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => match fault {
                 Fault::Fatal(error) => self.fail(error),
+                // That pod is no candidate any more: the proof chooses again.
+                Fault::Left(words) => self.failure(words),
                 Fault::Port(words) | Fault::NoPod(words) => {
                     self.failure(words.clone());
                     self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
@@ -843,11 +873,11 @@ impl Supervisor {
     }
 
     /// What may pass keeps the forward from its pods, which it says, unless
-    /// a person's proof is under way, which ends by itself, or it failed for
-    /// good. The space's proof ends with this result, and the forward goes
-    /// on proving only while it has connections.
+    /// a person's proof is under way, which ends by itself. The space's
+    /// proof ends with this result, and the forward goes on proving only
+    /// while it has connections.
     fn reconnecting(&mut self, reason: String) {
-        if matches!(self.phase, Phase::Starting | Phase::Failed { gone: false }) {
+        if self.phase == Phase::Starting {
             return;
         }
         self.phase = Phase::Reconnecting;
@@ -868,45 +898,52 @@ impl Supervisor {
         });
     }
 
-    /// Ends the connections and the proof under way. A forward whose target
-    /// is gone looks at it again with its next connection.
+    /// Ends the connections and the proof under way, until what lifts it.
     fn fail(&mut self, cause: impl Into<Cause>) {
         let cause = cause.into();
-        self.phase = Phase::Failed {
-            gone: cause.is_gone(),
-        };
+        self.phase = Phase::Failed(cause.lift());
         self.proof = None;
+        self.cut = self.accepted;
         self.shared.end.send_modify(|ends| *ends += 1);
         self.say(ForwardState::Failed {
             error: cause.into_error(),
         });
     }
 
+    /// The `failure` follows every report, and the state only those of
+    /// connections opened after the forward last failed: bytes prove a
+    /// forward that is neither ready nor failed, with or without a proof
+    /// under way.
     fn report(&mut self, report: Report) {
         match report {
             Report::Served(number) => {
                 if number > self.failed_after {
                     self.shared.update(|status| status.failure.take().is_some());
                 }
-                if self.proof.is_some() {
+                if number > self.cut && !matches!(self.phase, Phase::Ready | Phase::Failed(_)) {
                     self.proven();
                 }
             }
-            Report::Failed(Fault::Fatal(error)) => self.fail(error),
-            Report::Failed(Fault::Port(words)) => self.failure(words),
-            Report::Failed(Fault::NoPod(why)) => {
-                self.failure(why.clone());
-                self.reconnecting(why);
-            }
-            Report::Failed(Fault::Transient(cause)) => {
-                self.failure(cause.error().message.clone());
-                if cause.is_gone() {
-                    self.fail(cause);
-                } else {
-                    self.reconnecting(cause.into_error().message);
+            Report::Failed(number, fault) => {
+                if let Some(words) = fault.words() {
+                    self.failure(words);
+                }
+                if number > self.cut {
+                    self.ended(fault);
                 }
             }
-            Report::Failed(Fault::Lost) => {
+        }
+    }
+
+    /// What a connection that failed tells of the forward.
+    fn ended(&mut self, fault: Fault) {
+        match fault {
+            Fault::Fatal(error) => self.fail(error),
+            Fault::Port(_) => {}
+            Fault::NoPod(why) | Fault::Left(why) => self.reconnecting(why),
+            Fault::Transient(cause) if cause.is_gone() => self.fail(cause),
+            Fault::Transient(cause) => self.reconnecting(cause.into_error().message),
+            Fault::Lost => {
                 self.reconnecting("the connection to the cluster was lost".to_owned());
             }
         }
