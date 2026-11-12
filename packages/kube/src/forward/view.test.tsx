@@ -215,6 +215,26 @@ test("a row's tooltip carries its kind, its ports, its state with the reason, an
   expect(ready).toMatch(/Pod payments-gateway-\S+$/);
 });
 
+test("a forward's row has no track of its own for the menu: the ⋯ lies over the row's end", async () => {
+  await mounted();
+  expect(row(0).style.gridTemplateColumns).not.toContain("32px");
+  expect(row(0).parentElement?.style.minWidth).toBe("120px");
+});
+
+test("the local port goes, whole, with the ⋯ that lies over it: on the row's hover, on the focus within it and while its menu is open", async () => {
+  await mounted();
+  const port = line(row(0))?.lastElementChild;
+  expect(port?.textContent).toBe("→ 8081");
+  expect(row(0).classList.contains("group/row")).toBe(true);
+  expect(port?.contains(row(0).querySelector("button"))).toBe(false);
+  for (const hidden of [
+    "group-hover/row:opacity-0",
+    "group-focus-within/row:opacity-0",
+    "group-has-[[data-state=open]]/row:opacity-0",
+  ])
+    expect(port?.classList.contains(hidden)).toBe(true);
+});
+
 test("a failed row has an edge in its tone, and a ready one has none", async () => {
   const { backend } = await mounted();
   await act(() => backend.invoke("forward_resume", { id: 2, local: null }));
@@ -340,6 +360,25 @@ test("Stop all leaves the focus in the list, where the keys of the list go on wo
   press("Backspace");
   await settle(6);
   expect(calls("forward_remove")).toEqual([1]);
+});
+
+test("Stop all run from the command palette leaves the focus where the palette gives it back", async () => {
+  const { workbench, calls } = await mounted();
+  const explorer = screen.getByRole("tab", { name: "Explorer" });
+  act(() => {
+    explorer.focus();
+  });
+  act(() => {
+    workbench.quickAccess.show(">Stop All Port");
+  });
+  await settle(4);
+  fireEvent.keyDown(screen.getByRole("combobox"), {
+    key: "Enter",
+    code: "Enter",
+  });
+  await settle(6);
+  expect(calls("forward_stop")).toEqual([1, 3]);
+  expect(document.activeElement).toBe(explorer);
 });
 
 test("the keys of the list do nothing without a selected row, or once the focus has left the list", async () => {

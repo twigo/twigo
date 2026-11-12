@@ -316,6 +316,7 @@ function Row({
           <StatusLabel
             tone={item.state.tone}
             pulse={item.state.pulse}
+            hollow={item.state.hollow}
             className="max-w-56"
           >
             {item.state.label}

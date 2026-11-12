@@ -54,7 +54,7 @@ export function ForwardEditor({
     return forwards.loaded ? (
       <EmptyState
         icon={Unplug}
-        title="This port-forward is gone"
+        title="Port-forward not found"
         action={{
           label: "Close",
           onClick: () => {

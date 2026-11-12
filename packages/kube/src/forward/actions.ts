@@ -211,11 +211,12 @@ export function registerForwardActions(
     category: "Port Forward",
     icon: Square,
     enablement: "forwards.running > 0",
-    run: async () => {
+    run: async (_args, lookup) => {
       const space = workbench.spaces.active?.id;
       const running = space === undefined ? [] : forwards.ofSpace(space);
-      // The button in the view's title goes once none runs, and takes the focus with it.
-      if (space !== undefined) forwards.focus(space);
+      // The view's title button goes once none runs and takes the focus with it; run from anywhere else the focus stays.
+      if (space !== undefined && lookup("view") === FORWARDS_VIEW)
+        forwards.focus(space);
       await Promise.all(
         running
           .filter(({ state }) => state.state !== "stopped")

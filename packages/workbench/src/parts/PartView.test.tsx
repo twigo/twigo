@@ -61,3 +61,21 @@ test("with one container the side bar shows its title", async () => {
   expect(screen.queryByRole("tab")).toBeNull();
   expect(screen.getByRole("heading", { name: "Explorer" })).toBeTruthy();
 });
+
+test("a side bar sets --surface to its own tone, which a grid's overlay menu lies over", async () => {
+  const workbench = await testWorkbench();
+  act(() => {
+    workbench.views.registerContainer({
+      id: "a",
+      title: "Explorer",
+      icon: FolderTree,
+      location: "sidebar",
+    });
+  });
+  const { container } = render(<PartView location="sidebar" />, {
+    wrapper: inWorkbench(workbench),
+  });
+  const bar = container.querySelector("section");
+  expect(bar?.style.getPropertyValue("--surface")).toBe("var(--sidebar)");
+  expect(bar?.classList.contains("bg-sidebar")).toBe(true);
+});

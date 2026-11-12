@@ -313,7 +313,7 @@ test("a tab a restored layout brings back for a forward the core lacks says so a
     workbench.editors.open(gone);
   });
   await settle(6);
-  screen.getByText("This port-forward is gone");
+  screen.getByText("Port-forward not found");
   screen.getByText("It was not found, so there is nothing to show.");
   expect(screen.queryByText(/removed/)).toBeNull();
   fireEvent.click(button("Close"));
@@ -325,7 +325,7 @@ test("a tab a restored layout brings back for a forward the core lacks says so a
   screen.getByText("auth-api:http → 8080", { selector: "h2" });
   await act(() => backend.invoke("forward_remove", forward.id));
   await settle(4);
-  screen.getByText("This port-forward is gone");
+  screen.getByText("Port-forward not found");
   expect(tabsIn("editor")).toEqual([uri]);
 });
 
@@ -588,7 +588,7 @@ test("a start that fails says the target's own failure in a toast, which neither
   expect(toast).not.toContain("below 1024");
 });
 
-test("a tab that opens before the core has answered shows no forward is gone", async () => {
+test("a tab that opens before the core has answered does not say the forward is not found", async () => {
   const backend = createMockBackend("live");
   const workbench = await testWorkbench("live", backend);
   const held: Backend = {
@@ -609,7 +609,7 @@ test("a tab that opens before the core has answered shows no forward is gone", a
     workbench.editors.open(pfUri({ space: "qa", id: 1 }));
   });
   await settle(6);
-  expect(screen.queryByText("This port-forward is gone")).toBeNull();
+  expect(screen.queryByText("Port-forward not found")).toBeNull();
   expect(document.querySelector("[aria-busy]")).not.toBeNull();
 });
 
@@ -919,7 +919,7 @@ test("a tab whose address names another space shows nothing of that space's forw
   });
   await settle(6);
   expect(tabsIn("editor")).toEqual([other]);
-  screen.getByText("This port-forward is gone");
+  screen.getByText("Port-forward not found");
   expect(
     screen.queryByText("auth-api:http → 8080", { selector: "h2" }),
   ).toBeNull();

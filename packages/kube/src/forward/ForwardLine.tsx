@@ -19,7 +19,8 @@ import { addressOf, localWords, portLabel, portWords, stateOf } from "./words";
  * where the room the row leaves is as wide as they are; the target's name
  * gives way next. The port's name and the local port stay whole. Where the
  * words are not shown, the dot says the state to a screen reader, and the
- * tooltip has what the line leaves out.
+ * tooltip has what the line leaves out. The row's ⋯ lies over the line's end,
+ * so the local port goes, whole, while the ⋯ shows.
  */
 export function ForwardLine({ forward }: { forward: Forward }) {
   const { label, tone, pulse, hollow, detail } = stateOf(forward);
@@ -63,7 +64,9 @@ export function ForwardLine({ forward }: { forward: Forward }) {
               </span>
             </span>
           )}
-          <span className="ml-auto shrink-0 pl-1.5">{localWords(forward)}</span>
+          <span className="ml-auto shrink-0 pl-1.5 group-hover/row:opacity-0 group-focus-within/row:opacity-0 group-has-[[data-state=open]]/row:opacity-0">
+            {localWords(forward)}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipContent side="right" className="grid gap-0.5 break-words">

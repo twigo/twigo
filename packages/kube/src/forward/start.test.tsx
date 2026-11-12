@@ -198,6 +198,30 @@ test("a port that is forwarded already goes to its forward, never to a second", 
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
 });
 
+test("a stopped forward's line in the pick has a ring for its dot, as in the list", async () => {
+  const { workbench, backend } = await listed();
+  const first = forwardGateway(workbench);
+  await settle(6);
+  await pick(workbench, "80");
+  await first;
+  await act(() => backend.invoke("forward_stop", 1));
+  await settle(4);
+  act(() => {
+    workbench.editors.close(pfUri({ space: "prod-eu", id: 1 }));
+  });
+  await settle(4);
+
+  const again = forwardGateway(workbench);
+  await settle(6);
+  const dot = screen.getByText("Stopped").previousElementSibling;
+  expect(dot?.className).toContain(
+    "inset_0_0_0_1.5px_var(--muted-foreground-2)",
+  );
+  expect(dot?.className).not.toContain("bg-muted-foreground-2");
+  await pick(workbench);
+  await again;
+});
+
 test("f on a pod whose port is forwarded goes to that forward without a pick or a start", async () => {
   const { workbench, calls } = await listed();
   await selectFirst();
