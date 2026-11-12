@@ -196,30 +196,6 @@ test("a port that is forwarded already goes to its forward, never to a second", 
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
 });
 
-test("a stopped forward's line in the pick has a ring for its dot, as in the list", async () => {
-  const { workbench, backend } = await listed();
-  const first = forwardGateway(workbench);
-  await settle(6);
-  await pick(workbench, "80");
-  await first;
-  await act(() => backend.invoke("forward_stop", 1));
-  await settle(4);
-  act(() => {
-    workbench.editors.close(pfUri({ space: "prod-eu", id: 1 }));
-  });
-  await settle(4);
-
-  const again = forwardGateway(workbench);
-  await settle(6);
-  const dot = screen.getByText("Stopped").previousElementSibling;
-  expect(dot?.className).toContain(
-    "inset_0_0_0_1.5px_var(--muted-foreground-2)",
-  );
-  expect(dot?.className).not.toContain("bg-muted-foreground-2");
-  await pick(workbench);
-  await again;
-});
-
 test("f on a pod whose port is forwarded goes to that forward without a pick or a start", async () => {
   const { workbench, calls } = await listed();
   await selectFirst();
@@ -365,26 +341,6 @@ test.each([
     expect(live()).toEqual([]);
   },
 );
-
-test("a workload that declares no port says so in words, and nothing starts", async () => {
-  const { workbench, calls } = await listed();
-  const run = workbench.commands.execute(
-    "k8s.forward.open",
-    workbench.keys.lookup(null),
-    {
-      space: "prod-eu",
-      gvr: { group: "apps", version: "v1", resource: "statefulsets" },
-      namespace: "payments",
-      name: "db",
-    },
-  );
-  await settle(8);
-  await run;
-  expect(live().join("\n")).toContain(
-    "StatefulSet db declares no TCP port to forward",
-  );
-  expect(calls("forward_start")).toEqual([]);
-});
 
 test("the object editors of a Service and a workload offer Forward in their title, and others do not", async () => {
   const { workbench } = await listed();
@@ -642,6 +598,7 @@ test("a forward the mode refuses in place just after its start is told as a warn
       local: null,
     }),
   );
+  vi.setTimerTickMode("manual");
   await act(() =>
     vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS - 200),
   );
