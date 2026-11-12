@@ -79,6 +79,8 @@ Findings that belong to no step yet.
   - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).
 - Port-forwards (`twigo_sessions::forward`, `twigo_core::forward`, ARCHITECTURE 4.6):
   - The HTTP request tester of 4.3 comes later: the `pf://` tab has Open in browser and Copy address only.
-  - A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd: no half-close reaches the pod over `v4.channel.k8s.io`, and kubectl's SPDY tunnel loses the answer after 1 s on containerd 2.3.4. CRI-O was not read or run.
+  - A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd: no half-close reaches the pod over `v4.channel.k8s.io`, and kubectl's SPDY tunnel loses the answer after 1 s on containerd 2.3.4 (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
+    CRI-O was not read or run.
   - A forward's `failure` is the runtime's text as it comes, which on containerd names the sandbox's id and both loopback dials.
-  - Safari and Firefox were not measured against the session budget; Chrome holds five to six connections to a forwarded port.
+  - Safari and Firefox were not measured against the session budget.
+    Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).

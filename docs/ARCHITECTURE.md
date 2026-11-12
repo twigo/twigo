@@ -995,6 +995,10 @@ Extensions add commands, not prefixes.
   - **The listener.**
     The manager binds `127.0.0.1`, which must bind, and `::1` on the same port where this machine has it, as kubectl's `localhost` does, and keeps both for the life of the forward, whatever happens to pods, so no other process can take the port between check and bind.
     A port that either loopback cannot give is answered as data, in use or not permitted, with the next free port above it, from 1024 up, found by binding on those two addresses.
+    A port that another process holds on `0.0.0.0` or `[::]` is in use too.
+    `SO_REUSEADDR`, which [mio sets](https://github.com/tokio-rs/mio/blob/v1.2.4/src/net/tcp/listener.rs#L67-L82) and which a port needs to bind again while the connections it served wait out `TIME_WAIT`, makes macOS bind `127.0.0.1:P` beside such a listener and give the new socket that process's loopback clients, where Linux refuses with or without it (bind probes of macOS 27.2 and of Linux 6.12.54 in Docker Desktop, 2026-11-12).
+    So Linux binds with the option, and macOS binds without it first; when that finds the port in use, the port is busy unless nothing accepts a connection on it, which leaves only `TIME_WAIT` and then binds with the option.
+    A forward's listeners close when the forward is dropped, so a stop, a move and a shutdown return with the port free.
     The local port of a start is the one that port of that target had last, else the same number, else for a port below 1024 that number plus 8000.
     A free port offered in place of a busy one is never taken silently, and starting on it is not remembered.
   - **The pod.**
@@ -1011,29 +1015,41 @@ Extensions add commands, not prefixes.
     It is its own kube-rs WebSocket on the sessions client, opened under a timeout of its own, since that stack has none.
     The text the pod's side gives on the error channel is the connection's failure, and a refused port closes that connection alone.
     - On the client's FIN the connection does not shut the stream down: kube-rs answers that by dropping what the pod still sends and closing the socket.
-      It keeps copying from the pod and ends once the pod has sent nothing for 1 s, the second containerd gives kubectl's clients ([`sandbox_portforward_linux.go`](https://github.com/containerd/containerd/blob/v2.3.4/internal/cri/server/sandbox_portforward_linux.go#L83-L126)); never ending would leak a session for each keep-alive connection a browser closes.
+      It keeps copying from the pod and ends once the pod has sent nothing for 1 s, counted from what was last written to the client and never while the pod has something to read, the second containerd gives kubectl's clients ([`sandbox_portforward_linux.go`](https://github.com/containerd/containerd/blob/v2.3.4/internal/cri/server/sandbox_portforward_linux.go#L83-L126)); never ending would leak a session for each keep-alive connection a browser closes.
       A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd, where a half-close reaches the runtime through kubectl 1.34.1's tunnel and stops there, the answer lost after 1 s (kind 1.37, containerd 2.3.4, 2026-11-11).
-    - It ends when the forward stops, when the context's mode refuses forwards, when its clients are abandoned, and on a wake or a moved route, as a shell does.
+    - A connection that waits for a place or a pod ends when its client leaves without having sent anything; what the client sends while it waits goes to the pod once the stream is open.
+    - When the pod gives its error on the error channel, the connection ends once what the pod sent before it is written.
+    - It ends when the forward stops or fails, when the context's mode refuses forwards, when its clients are abandoned, and on a wake or a moved route, as a shell does.
     - A session's permit is held by the connection's task, not by the upgraded stream.
   - **States.**
     `Starting` while the first pod is found and one stream to it is opened and dropped, which proves the credentials, the rights, the upgrade and, by the pod's silence for 250 ms, that something listens: a port that nothing listens on answered on the error channel within 36 ms of the request (20 tries, kind 1.37, containerd 2.3.4, 2026-11-11).
     No access review comes first, since from 1.35 the upgrade needs `get` and `create` on `pods/portforward` and before that `get` (6.3).
-    `Ready` once it worked; a forward that worked goes to `Reconnecting` with its reason when a pod or the cluster does not answer, and tries again with a backoff.
-    A forward that never worked fails at once with the cluster's words, and any forward whose credentials, rights or policy are refused (a `401`, a `403`, the gate's) goes to `Failed` too.
-    A failed forward keeps listening and closes what it accepts at once, until it is started again.
+    `Ready` once it worked, and only if a pod can still be reached when the stream proves it; a connection that carries bytes while the proof is waiting proves it as well.
+    The first stream's place among the sessions is waited for 15 s.
+    A forward that worked goes to `Reconnecting` with its reason when a pod or the cluster does not answer, and tries again with a backoff; the hub tries its own errors again, so a forward that worked waits on them, and one that never worked fails at once with the cluster's words.
+    A cluster that does not answer is said so: `the cluster does not answer` is the reason of a forward that worked and of the failure of a connection that waited 20 s for a pod, and the words a forward that never worked fails with after the same 20 s.
+    A forward whose credentials, rights or policy are refused (a `401`, a `403` on a stream, the gate's) goes to `Failed`.
+    A failed forward ends its connections, keeps listening and closes what it accepts at once, until it is started again; one that failed because its target is gone looks at the target again at its next connection, so a pod made again under its name goes on.
+    A resume starts a failed forward again and leaves one that works, or waits for its first connection, as it is.
     `Restored` is a forward that listens since the app started and has not asked its cluster yet; `Stopped` is one that does not listen and is kept.
     A connection that fails after the forward was ready sets the forward's `failure` and changes nothing else.
+    The `failure` holds since the forward was last ready, so it clears when the forward is ready again after not being so, and not when a later connection carries bytes.
   - **Watching.**
     A forward reads its target through the hub only while it has connections or proves that it can be reached: its subscriptions start with a connection and go when the last one closes, so a listening forward that nobody uses costs none of the context's 24 watches.
+    A forward that waits for a pod, with no connection, lets them go as well, keeps saying why it waits, and looks again when a connection comes.
   - **Keeping them.**
     A space keeps its forwards and the local port each target's port had last under a key that only Rust writes, as it does the modes, so the webview follows them and cannot overwrite them (4.8).
     Ids are unique in the app and never reused across restarts.
+    Whether a forward's local port is a detour is kept with the forward, and a detour is never remembered, not by a stop and a resume either; a port shows the local port of its forward where it has one.
+    A local port of 0 is refused.
+    The bytes count since the app started, so a stop, a resume and a move keep them.
     A forward that ran listens on its port again at a start and waits, `Restored`, for its first connection or for its space to connect, which is when the core makes the clients of its context; no credential plugin runs at a start.
-    A port that another process holds, or a context the catalog no longer lists, makes it `Failed` with that; a target that is gone is found once the forward is asked, and fails with `NotFound` and its name.
+    A port that another process holds, or that another forward of Twigo holds, or a context the catalog does not list, makes it `Failed` with that; a target that is gone is found once the forward is asked, and fails with `NotFound` and its name.
     A stopped forward stays stopped.
   - **The mode.**
-    A forward changes nothing in the cluster, so it does not go through the command bus: the gate decides each connection's upgrade, and the manager asks the policy again for each running forward's context whenever the policy or the catalog changes.
-    When the mode comes to refuse forwards (`read-only` with `readOnly.allowPortForward: false`), its connections end and it is `Failed` with the gate's words, still listening, until the mode allows it again.
+    A forward changes nothing in the cluster, so it does not go through the command bus: the gate decides each connection's upgrade, and the manager asks the policy again for each running forward's context whenever the policy or the catalog changes, and when a start or a resume puts a forward in, under the table's lock.
+    When the mode comes to refuse forwards (`read-only` with `readOnly.allowPortForward: false`), or the catalog loses the context, its connections end and it is `Failed` with the gate's words or the missing context's, still listening, until that passes.
+    It then goes back to what it was: a forward that waited for its first connection waits again and asks no cluster, any other starts over.
   - **No SPDY tunnel.**
     Each TCP connection is its own WebSocket, and counts against the session budget.
     A browser takes about six of the 64 sessions per forwarded port: Chrome 157.0.8103.39, headless, loaded a page of 100 images, each answered after 2 s, in 37 s over 12 connections through a kube-rs forwarder on kind 1.37 (2026-11-11), five to six at a time.
@@ -2000,19 +2016,19 @@ Their plans read the objects and what the garbage collector takes with them (eve
 
 ### 7.1 MVP: first public beta, macOS + Linux
 
-| Area          | In the MVP                                                                                                                                                                                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Catalog       | Kubeconfig source (several files, live reload), kubeconfig metadata, one-context spaces, per-context settings and policy                                                                                                                                |
-| Auth          | Login-shell environment, the credential runner with interactive sign-in panel, kubeconfig trust, OIDC, certificates, proxies                                                                                                                            |
-| Explorer      | Every built-in kind from Lens's list plus CRDs from discovery. Table watches, namespace scope (multi-select), label and text filters, wide columns                                                                                                      |
-| Editors       | Overview (core kinds plus generic), YAML with OpenAPI schemas, dry-run diff and SSA apply with conflicts, Events, Related (owners and children), Compare with…, new manifest                                                                            |
-| Actions       | Delete, scale, rollout restart, cordon, uncordon, drain, CronJob trigger, Job suspend                                                                                                                                                                   |
-| Sessions      | Pod logs, exec and attach, the policy proxy for child processes, the port-forward manager (Service and workload targets, re-resolution, port-forward tabs and status-bar items, persisted per space), integrated terminal pinned to the space's context |
-| Workbench     | Parts, spaces, quick access with every prefix, command/menu/context-key/keybinding services, keybindings editor, settings UI with layers and policy, notifications, light and dark themes                                                               |
-| Metrics, Helm | metrics-server CPU and memory in tables and the node/pod overview; Helm releases **read-only** (list, values, manifest, history, notes), decoded natively from release Secrets; values and Secret objects in manifests are secret-grade (3.6)           |
-| AI            | MCP server with read-only tools, grants, redaction, audit                                                                                                                                                                                               |
-| Extensions    | Tiers 0 and 1, the WIT API at `0.x` (unstable; release builds load allowlisted IDs only), cluster providers, the fixture extension. Private: the Segla extension is the first consumer; there is no public registry yet                                 |
-| Release       | Auto-update, signing, notarization, the performance budgets checked in CI                                                                                                                                                                               |
+| Area          | In the MVP                                                                                                                                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Catalog       | Kubeconfig source (several files, live reload), kubeconfig metadata, one-context spaces, per-context settings and policy                                                                                                                                                                                |
+| Auth          | Login-shell environment, the credential runner with interactive sign-in panel, kubeconfig trust, OIDC, certificates, proxies                                                                                                                                                                            |
+| Explorer      | Every built-in kind from Lens's list plus CRDs from discovery. Table watches, namespace scope (multi-select), label and text filters, wide columns                                                                                                                                                      |
+| Editors       | Overview (core kinds plus generic), YAML with OpenAPI schemas, dry-run diff and SSA apply with conflicts, Events, Related (owners and children), Compare with…, new manifest                                                                                                                            |
+| Actions       | Delete, scale, rollout restart, cordon, uncordon, drain, CronJob trigger, Job suspend                                                                                                                                                                                                                   |
+| Sessions      | Pod logs, exec and attach, the policy proxy for child processes, the port-forward manager (pod, Service and workload targets, whose pod is taken again when it leaves, port-forward tabs and one status-bar entry with a count, persisted per space), integrated terminal pinned to the space's context |
+| Workbench     | Parts, spaces, quick access with every prefix, command/menu/context-key/keybinding services, keybindings editor, settings UI with layers and policy, notifications, light and dark themes                                                                                                               |
+| Metrics, Helm | metrics-server CPU and memory in tables and the node/pod overview; Helm releases **read-only** (list, values, manifest, history, notes), decoded natively from release Secrets; values and Secret objects in manifests are secret-grade (3.6)                                                           |
+| AI            | MCP server with read-only tools, grants, redaction, audit                                                                                                                                                                                                                                               |
+| Extensions    | Tiers 0 and 1, the WIT API at `0.x` (unstable; release builds load allowlisted IDs only), cluster providers, the fixture extension. Private: the Segla extension is the first consumer; there is no public registry yet                                                                                 |
+| Release       | Auto-update, signing, notarization, the performance budgets checked in CI                                                                                                                                                                                                                               |
 
 ### 7.2 Later (rough order)
 
