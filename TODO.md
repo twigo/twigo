@@ -57,6 +57,9 @@ Findings that belong to no step yet.
 - The grid's row actions (`packages/ui/src/grid/DataGrid.tsx`):
   - Shift+Tab no longer stops on the menu button of a row without the cursor, which mounts once the focus is on that row.
   - WebView2 may fire `focusout` when the window deactivates, which would unmount a focused menu button of a row without the cursor; not verified, matters once Windows ships (D2).
+  - The menu key and Shift+F10 on the focused grid open no row menu: the context-menu trigger wraps only the rows' container inside the grid (`ActionContextMenu` in `DataGrid.tsx`), and the key's `contextmenu` event is aimed at the focused element, the grid.
+    Tab to the cursor row's ⋯ and Enter open it.
+    A `contextmenu` event dispatched at the grid opened no menu and one dispatched at a row did, in headless Chrome on the mock (2026-11-12); the key itself was not pressed in any browser.
 - The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
   - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
   - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).
