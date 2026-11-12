@@ -170,6 +170,32 @@ test("the dot keeps the state's tone, and pulses while the state is in flight", 
   expect(tones()[3]).not.toContain("animate-pulse");
 });
 
+test("a stopped forward's dot is a ring in the list and in its tab, and a restored one's is filled in both", async () => {
+  const { workbench } = await mounted();
+  const shape = (dot: Element | null | undefined) =>
+    dot?.className.includes("inset_0_0_0_1.5px_var(--muted-foreground-2)")
+      ? "ring"
+      : dot?.className.includes("bg-muted-foreground-2")
+        ? "filled"
+        : "other";
+  expect(rows().map((row) => shape(dot(row)))).toEqual([
+    "filled",
+    "ring",
+    "other",
+  ]);
+  const tabDots = async (id: number) => {
+    act(() => {
+      workbench.editors.open(pfUri({ space: "prod-eu", id }));
+    });
+    await settle(6);
+    return [
+      ...document.querySelectorAll(".inline-flex.gap-1\\.5 > .rounded-full"),
+    ].map(shape);
+  };
+  expect(await tabDots(1)).toEqual(["filled", "filled"]);
+  expect(await tabDots(2)).toEqual(["ring", "ring"]);
+});
+
 test("a row's tooltip carries its kind, its ports, its state with the reason, and its pod", async () => {
   const { backend } = await mounted();
   const failed = await tooltip(row(2));
@@ -241,10 +267,79 @@ test("⌘C copies the selected forward's address, and ⌫ and Delete remove it",
   expect(calls("forward_remove")).toEqual([1]);
   expect(rows().map(stateWords)).toEqual(["Stopped", "Failed"]);
 
-  await select(0);
   press("Delete");
   await settle(6);
   expect(calls("forward_remove")).toEqual([1, 2]);
+});
+
+const selectedRows = () =>
+  rows().flatMap((row, n) =>
+    row.getAttribute("aria-selected") === "true" ? [n] : [],
+  );
+
+test("⌫ and Delete leave the cursor on the next row, and on the previous one at the end of the list", async () => {
+  const { calls } = await mounted();
+  await select(0);
+  expect(selectedRows()).toEqual([0]);
+  press("Backspace");
+  await settle(6);
+  expect(rows().map(stateWords)).toEqual(["Stopped", "Failed"]);
+  expect(selectedRows()).toEqual([0]);
+  press("Delete");
+  await settle(6);
+  expect(rows().map(stateWords)).toEqual(["Failed"]);
+  expect(selectedRows()).toEqual([0]);
+  press("Backspace");
+  await settle(6);
+  expect(calls("forward_remove")).toEqual([1, 2, 3]);
+  expect(within(grid()).queryAllByRole("row")).toEqual([]);
+});
+
+test("a removal at the end of the list leaves the cursor on the row before it, and one in the middle on the row after", async () => {
+  const { calls } = await mounted();
+  await select(2);
+  press("Backspace");
+  await settle(6);
+  expect(rows().map(stateWords)).toEqual(["Restored", "Stopped"]);
+  expect(selectedRows()).toEqual([1]);
+  cleanup();
+
+  const middle = await mounted();
+  await select(1);
+  press("Backspace");
+  await settle(6);
+  expect(middle.calls("forward_remove")).toEqual([2]);
+  expect(rows().map(stateWords)).toEqual(["Restored", "Failed"]);
+  expect(selectedRows()).toEqual([1]);
+  expect(calls("forward_remove")).toEqual([3]);
+});
+
+test("a forward removed elsewhere that the list has not selected leaves the cursor on its row", async () => {
+  const { backend } = await mounted();
+  await select(2);
+  expect(selectedRows()).toEqual([2]);
+  await act(() => backend.invoke("forward_remove", 1));
+  await settle(4);
+  expect(rows().map(stateWords)).toEqual(["Stopped", "Failed"]);
+  expect(selectedRows()).toEqual([1]);
+});
+
+test("Stop all leaves the focus in the list, where the keys of the list go on working", async () => {
+  const { calls } = await mounted();
+  await select(0);
+  act(() => {
+    stopAll().focus();
+  });
+  expect(document.activeElement).toBe(stopAll());
+  fireEvent.click(stopAll());
+  await settle(6);
+  expect(stop()).toBeNull();
+  expect(document.activeElement).toBe(grid());
+  expect(selectedRows()).toEqual([0]);
+
+  press("Backspace");
+  await settle(6);
+  expect(calls("forward_remove")).toEqual([1]);
 });
 
 test("the keys of the list do nothing without a selected row, or once the focus has left the list", async () => {
@@ -332,8 +427,29 @@ test("Stop all leaves the forwards of other spaces running", async () => {
   expect(calls("forward_stop")).toEqual([1, 3]);
 });
 
-test("forwards of other spaces are not listed", async () => {
-  const { workbench } = await mounted();
+test("forwards of other spaces are not listed: one started in another space while this one is active adds no row, and shows alone in its own", async () => {
+  const { workbench, backend } = await mounted();
+  expect(rows().map(stateWords)).toEqual(["Restored", "Stopped", "Failed"]);
+  await act(() => backend.invoke("space_open", "qa"));
+  await act(() =>
+    backend.invoke("forward_start", {
+      target: {
+        space: "qa",
+        gvr: { group: "", version: "v1", resource: "services" },
+        namespace: "auth",
+        name: "auth-api",
+      },
+      port: 80,
+      local: 8099,
+    }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(700));
+  expect(rows().map((row) => row.textContent)).toEqual([
+    "payments-api:httpRestored→ 8081",
+    "payments-gateway:metricsStopped→ 9090",
+    "payments-legacy:httpFailed→ 8082",
+  ]);
+
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");
@@ -341,7 +457,7 @@ test("forwards of other spaces are not listed", async () => {
   await settle(6);
   fireEvent.click(screen.getByRole("tab", { name: "Port forwards" }));
   await settle(4);
-  screen.getByText("No port forwards");
+  expect(rows().map((row) => row.textContent)).toEqual(["auth-api:http→ 8099"]);
 });
 
 test("the list follows the core: a forward that is added or removed shows at once", async () => {

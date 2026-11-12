@@ -21,11 +21,16 @@ export function ForwardActions({
   const input = parsePfUri(uri);
   const forward = input && forwards.find(input);
   if (!forward) return null;
-  const { label, tone, pulse } = stateOf(forward);
+  const { label, tone, pulse, hollow } = stateOf(forward);
   const lookup = withForward(workbench.keys.lookup(null), forward);
   return (
     <div className="flex items-center gap-2">
-      <StatusLabel tone={tone} {...(pulse && { pulse })} className="text-xs">
+      <StatusLabel
+        tone={tone}
+        {...(pulse && { pulse })}
+        {...(hollow && { hollow })}
+        className="text-xs"
+      >
         {label}
       </StatusLabel>
       <InlineActions

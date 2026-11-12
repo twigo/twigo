@@ -6,6 +6,7 @@ import {
   EmptyState,
   type GridColumn,
   type GridItem,
+  type ListController,
 } from "@twigo/ui";
 import {
   useChanges,
@@ -52,10 +53,21 @@ function SpaceForwards({
   const selected =
     selectedId === undefined ? undefined : forwards.get(selectedId);
   const keysOfRow = JSON.stringify(selected ? forwardKeys(selected) : {});
-  const register = useListRegistration({
+  const registerList = useListRegistration({
     forwardsFocus: true,
     ...(JSON.parse(keysOfRow) as Record<string, boolean>),
   });
+  const register = useCallback(
+    (element: HTMLElement, controller: ListController) => {
+      const unregister = registerList(element, controller);
+      const detach = forwards.attach(space, element);
+      return () => {
+        detach();
+        unregister();
+      };
+    },
+    [registerList, forwards, space],
+  );
 
   const item = (index: number): GridItem<Forward, never> | undefined => {
     const forward = rows[index];
@@ -97,6 +109,7 @@ function SpaceForwards({
         lookup ?? keys.lookup(null),
         selected && { id: selected.id },
       )}
+      overlayMenu
       loading={!forwards.loaded}
       empty={
         <EmptyState

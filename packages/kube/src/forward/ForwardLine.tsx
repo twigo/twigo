@@ -17,12 +17,18 @@ import { addressOf, localWords, portLabel, portWords, stateOf } from "./words";
  * icon, the target and port, the state's words when it is not ready, and the
  * local port at the end. The state's words give way first, and show only
  * where the room the row leaves is as wide as they are; the target's name
- * gives way next. The port's name and the local port stay whole. The tooltip
- * has what the line leaves out.
+ * gives way next. The port's name and the local port stay whole. Where the
+ * words are not shown, the dot says the state to a screen reader, and the
+ * tooltip has what the line leaves out.
  */
 export function ForwardLine({ forward }: { forward: Forward }) {
-  const { label, tone, pulse, detail } = stateOf(forward);
+  const { label, tone, pulse, hollow, detail } = stateOf(forward);
   const ready = forward.state.state === "ready";
+  const [room, setRoom] = useState<HTMLElement | null>(null);
+  const [words, setWords] = useState<HTMLElement | null>(null);
+  const available = useWidth(room);
+  const needed = useWidth(words);
+  const spoken = !ready && needed > 0 && available >= needed;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -30,8 +36,9 @@ export function ForwardLine({ forward }: { forward: Forward }) {
           <StatusDot
             tone={tone}
             pulse={pulse === true}
+            hollow={hollow === true}
             className="mr-1.5"
-            {...(ready && { label })}
+            {...(!spoken && { label })}
           />
           <KindIcon
             gvr={forward.target.gvr}
@@ -41,7 +48,21 @@ export function ForwardLine({ forward }: { forward: Forward }) {
             <span className="truncate">{forward.target.name}</span>
             <span className="shrink-0">:{portLabel(forward)}</span>
           </span>
-          {!ready && <Words>{label}</Words>}
+          {!ready && (
+            <span ref={setRoom} className="min-w-0 flex-1 overflow-hidden">
+              <span
+                ref={setWords}
+                aria-hidden={!spoken || undefined}
+                className={cn(
+                  "block w-max text-xs text-muted-foreground",
+                  !spoken && "invisible",
+                )}
+              >
+                <span className="inline-block w-1.5" />
+                {label}
+              </span>
+            </span>
+          )}
           <span className="ml-auto shrink-0 pl-1.5">{localWords(forward)}</span>
         </span>
       </TooltipTrigger>
@@ -63,28 +84,5 @@ export function ForwardLine({ forward }: { forward: Forward }) {
         )}
       </TooltipContent>
     </Tooltip>
-  );
-}
-
-/** The state's words, whole or not at all: no part of a word is left where the row has no room for it. */
-function Words({ children }: { children: string }) {
-  const [room, setRoom] = useState<HTMLElement | null>(null);
-  const [words, setWords] = useState<HTMLElement | null>(null);
-  const available = useWidth(room);
-  const needed = useWidth(words);
-  const fits = needed > 0 && available >= needed;
-  return (
-    <span ref={setRoom} className="min-w-0 flex-1 overflow-hidden pl-1.5">
-      <span
-        ref={setWords}
-        aria-hidden={!fits || undefined}
-        className={cn(
-          "block w-max text-xs text-muted-foreground",
-          !fits && "invisible",
-        )}
-      >
-        {children}
-      </span>
-    </span>
   );
 }

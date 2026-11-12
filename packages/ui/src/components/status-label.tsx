@@ -17,12 +17,15 @@ const TEXT: Readonly<Record<Tone, string>> = {
 export function StatusLabel({
   tone,
   pulse = false,
+  hollow = false,
   className,
   children,
 }: {
   tone: Tone;
   /** While the state is in flight. */
   pulse?: boolean;
+  /** An idle state that is off rather than waiting. */
+  hollow?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -34,7 +37,7 @@ export function StatusLabel({
         className,
       )}
     >
-      <StatusDot tone={tone} pulse={pulse} />
+      <StatusDot tone={tone} pulse={pulse} hollow={hollow} />
       <span className="truncate">{children}</span>
     </span>
   );

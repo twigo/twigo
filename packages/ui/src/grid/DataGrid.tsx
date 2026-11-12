@@ -70,6 +70,13 @@ export interface DataGridProps<R, G> {
   readonly onMark?: (ids: readonly string[], marked: boolean) => void;
   /** The selected row's menu: a right click and its ⋯ select the row first. */
   readonly menu?: ActionGroups;
+  /**
+   * Lays the ⋯ over the end of a row on hover and focus, instead of
+   * reserving a column of its own for it: for a grid so narrow that the
+   * column costs its rows more than the button is worth. Not with `inline`
+   * or `headerEnd`, which sit beside that column.
+   */
+  readonly overlayMenu?: boolean;
   /** Actions with icons that show on a hovered row, run on that row. */
   readonly inline?: readonly Action[];
   /** At the head of the actions column, such as the choice of columns. */
@@ -124,6 +131,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     marked,
     onMark,
     menu = [],
+    overlayMenu = false,
     inline = [],
     headerEnd,
     loading,
@@ -350,12 +358,12 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         : `${String(widthOf(column))}px`,
     ),
     ...(filler ? ["minmax(0, 1fr)"] : []),
-    `${String(ACTIONS_WIDTH)}px`,
+    ...(overlayMenu ? [] : [`${String(ACTIONS_WIDTH)}px`]),
   ].join(" ");
   const minWidth =
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
-    ACTIONS_WIDTH;
+    (overlayMenu ? 0 : ACTIONS_WIDTH);
   // The menu's trigger wraps every row, and opens the selected row's menu
   // unless a row prevents the event's default.
   const withoutMenu = (event: SyntheticEvent) => {
@@ -389,7 +397,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             </div>
           ))}
           {filler && <div role="gridcell" />}
-          <div role="gridcell" />
+          {!overlayMenu && <div role="gridcell" />}
         </div>
       );
     }
@@ -450,6 +458,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
         keepActions={isCursor}
+        overlay={overlayMenu ? (tint ?? "bg-row-hover") : undefined}
         actions={
           <>
             {menu.length > 0 && (
@@ -464,8 +473,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     event.stopPropagation();
                   }}
                   className={cn(
-                    "flex size-6 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none group-hover/row:opacity-100 hover:bg-row-hover hover:text-foreground focus-visible:opacity-100 focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover data-[state=open]:opacity-100",
-                    isCursor && "opacity-100",
+                    "flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
+                    !overlayMenu &&
+                      "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
+                    !overlayMenu && isCursor && "opacity-100",
                   )}
                 >
                   <Ellipsis aria-hidden className="size-4" />
@@ -620,9 +631,14 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             />
           ))}
           {filler && <div role="columnheader" />}
-          <div role="columnheader" className="flex items-center justify-center">
-            {headerEnd}
-          </div>
+          {!overlayMenu && (
+            <div
+              role="columnheader"
+              className="flex items-center justify-center"
+            >
+              {headerEnd}
+            </div>
+          )}
         </div>
       )}
       {loading ? (
@@ -654,12 +670,19 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
  */
 function DataRow({
   keepActions,
+  overlay,
   actions,
   children,
   ...row
-}: ComponentProps<"div"> & { keepActions: boolean; actions: ReactNode }) {
+}: ComponentProps<"div"> & {
+  keepActions: boolean;
+  /** The row's tint, when the actions lie over its end rather than in a column. */
+  overlay: string | undefined;
+  actions: ReactNode;
+}) {
   const [pointed, setPointed] = useState(false);
   const [focused, setFocused] = useState(false);
+  const shown = keepActions || pointed || focused;
   return (
     <div
       {...row}
@@ -678,9 +701,22 @@ function DataRow({
       }}
     >
       {children}
-      <div role="gridcell" className="flex items-center justify-center">
-        {(keepActions || pointed || focused) && actions}
-      </div>
+      {overlay === undefined ? (
+        <div role="gridcell" className="flex items-center justify-center">
+          {shown && actions}
+        </div>
+      ) : (
+        shown && (
+          <div
+            role="gridcell"
+            className="absolute inset-y-0 right-0 flex items-center bg-editor opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+          >
+            <div className={cn("flex h-full items-center px-1", overlay)}>
+              {actions}
+            </div>
+          </div>
+        )
+      )}
     </div>
   );
 }

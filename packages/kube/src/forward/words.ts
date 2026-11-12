@@ -42,6 +42,8 @@ export interface Shown {
   readonly tone: Tone;
   /** While the state is in flight. */
   readonly pulse?: true;
+  /** Idle because it is off: nothing listens. */
+  readonly hollow?: true;
   /** More words about the state, such as why it waits. */
   readonly detail?: string;
 }
@@ -73,7 +75,7 @@ export function stateOf({ state, queued }: Forward): Shown {
           }
         : { label: "Failed", tone: "error", detail: state.error.message };
     case "stopped":
-      return { label: "Stopped", tone: "idle" };
+      return { label: "Stopped", tone: "idle", hollow: true };
   }
 }
 

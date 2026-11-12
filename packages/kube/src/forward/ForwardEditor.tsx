@@ -98,7 +98,11 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
       key: "state",
       label: "State",
       value: (
-        <StatusLabel tone={shown.tone} {...(shown.pulse && { pulse: true })}>
+        <StatusLabel
+          tone={shown.tone}
+          {...(shown.pulse && { pulse: true })}
+          {...(shown.hollow && { hollow: true })}
+        >
           {shown.label}
         </StatusLabel>
       ),

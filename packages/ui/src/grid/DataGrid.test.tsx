@@ -543,6 +543,87 @@ test("a row's actions mount only while the pointer, the focus or the cursor is o
   expect(hasActions("gateway-1")).toBe(false);
 });
 
+test("a row's menu has a column of its own, unless the grid lays it over the row's end", () => {
+  const menu = [[{ id: "copy", label: "Copy Name", run: vi.fn() }]];
+  const tracks = (name: string) =>
+    rowNamed(name).style.gridTemplateColumns.split(" ");
+  const actionsCell = (name: string) => {
+    fireEvent.pointerEnter(rowNamed(name));
+    return within(rowNamed(name))
+      .getByRole("button", { name: "Row actions" })
+      .closest<HTMLElement>('[role="gridcell"]');
+  };
+
+  const least = (name: string) => rowNamed(name).parentElement?.style.minWidth;
+
+  grid({ menu });
+  expect(tracks("gateway-1").pop()).toBe("32px");
+  expect(least("gateway-1")).toBe("260px");
+  expect(actionsCell("gateway-1")?.className).not.toContain("absolute");
+  cleanup();
+
+  grid({ menu, overlayMenu: true });
+  expect(tracks("gateway-1")).toEqual(["28px", "minmax(200px,", "1fr)"]);
+  expect(least("gateway-1")).toBe("228px");
+  const cell = actionsCell("gateway-1");
+  expect(rowNamed("gateway-1").children).toHaveLength(3);
+  expect(cell?.className).toContain("absolute");
+  expect(cell?.className).toContain("opacity-0");
+  expect(cell?.className).toContain("group-hover/row:opacity-100");
+});
+
+test("a grid that lays its row menu over the rows has no column for it in the header, nor in a row still loading", () => {
+  const cells = (props: Props) => {
+    grid({ ...props, ...list([undefined, ...ITEMS]) });
+    const [header, pending] = screen.getAllByRole("row");
+    const counts = [header?.children.length, pending?.children.length];
+    cleanup();
+    return counts;
+  };
+  const beside = cells({});
+  expect(cells({ overlayMenu: true })).toEqual(beside.map((n) => (n ?? 0) - 1));
+});
+
+test("a menu laid over a row opens from its button and runs a choice without opening the row", async () => {
+  const run = vi.fn();
+  const { handlers } = grid({
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run }]],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "Row actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Copy Name" }));
+  await act(() => new Promise((resolve) => setTimeout(resolve)));
+  expect(run).toHaveBeenCalledOnce();
+  expect(handlers.onActivate).not.toHaveBeenCalled();
+});
+
+test("a laid-over menu shows only on hover or focus, also on the cursor's row, and takes that row's tint", () => {
+  grid({
+    overlayMenu: true,
+    selected: "a1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  const cell = (name: string) =>
+    within(rowNamed(name))
+      .queryByRole("button", { name: "Row actions" })
+      ?.closest<HTMLElement>('[role="gridcell"]');
+  expect(cell("gateway-1")).toBeUndefined();
+  const cursor = cell("api-1");
+  expect(cursor?.className).toContain("opacity-0");
+  expect(cursor?.className).toContain("focus-within:opacity-100");
+  expect(cursor?.firstElementChild?.className).toContain(
+    "bg-selected-unfocused",
+  );
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  expect(cell("gateway-1")?.firstElementChild?.className).toContain(
+    "bg-row-hover",
+  );
+});
+
 test("the focus moving within a row keeps its actions", () => {
   grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
   const row = rowNamed("gateway-1");

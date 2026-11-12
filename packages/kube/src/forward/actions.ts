@@ -206,6 +206,8 @@ export function registerForwardActions(
     run: async () => {
       const space = workbench.spaces.active?.id;
       const running = space === undefined ? [] : forwards.ofSpace(space);
+      // The button in the view's title goes once none runs, and takes the focus with it.
+      if (space !== undefined) forwards.focus(space);
       await Promise.all(
         running
           .filter(({ state }) => state.state !== "stopped")

@@ -22,6 +22,7 @@ export class Forwards {
   >();
   readonly #bySpace = new Map<string, readonly Forward[]>();
   readonly #selected = new Map<string, ForwardId>();
+  readonly #lists = new Map<string, HTMLElement>();
   #loaded = false;
 
   constructor(private readonly backend: Backend) {}
@@ -67,6 +68,18 @@ export class Forwards {
     this.changes.emit();
   }
 
+  /** The mounted list of a space, which a command can hand the focus back to. */
+  attach(space: string, list: HTMLElement): () => void {
+    this.#lists.set(space, list);
+    return () => {
+      if (this.#lists.get(space) === list) this.#lists.delete(space);
+    };
+  }
+
+  focus(space: string): void {
+    this.#lists.get(space)?.focus();
+  }
+
   /** Follows the core's forwards; a later watch of the window replaces this one. */
   async watch(): Promise<void> {
     const first = await this.backend.subscribe(
@@ -106,9 +119,23 @@ export class Forwards {
     const id = event.event === "changed" ? event.forward.id : event.id;
     if (!this.#loaded) this.#told.add(id);
     if (event.event === "changed") this.#byId.set(id, event.forward);
-    else this.#byId.delete(id);
+    else {
+      this.#reselect(id);
+      this.#byId.delete(id);
+    }
     this.#changed();
     this.#settle(id);
+  }
+
+  /** A removed forward that the list had selected leaves the next row selected, the one before it at the end. */
+  #reselect(id: ForwardId): void {
+    const space = this.#byId.get(id)?.target.space;
+    if (space === undefined || this.#selected.get(space) !== id) return;
+    const rows = this.ofSpace(space);
+    const at = rows.findIndex((forward) => forward.id === id);
+    const next = rows[at + 1] ?? rows[at - 1];
+    if (next) this.#selected.set(space, next.id);
+    else this.#selected.delete(space);
   }
 
   #settle(id: ForwardId): void {
