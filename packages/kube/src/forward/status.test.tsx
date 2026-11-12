@@ -8,6 +8,7 @@ import {
   RECONNECTS_FOR_MS,
   type MockScenario,
 } from "@twigo/protocol/mock";
+import { patching } from "../../test/forward";
 import { mountKube, settle, withScreenSize } from "../../test/workbench";
 
 withScreenSize(1400);
@@ -59,6 +60,34 @@ test("one entry counts the space's running forwards, a stopped one not, a failed
   expect(
     document.querySelectorAll('button[title^="Port forwards:"]'),
   ).toHaveLength(1);
+});
+
+const holdsNothing = (name: string) =>
+  patching(createMockBackend("forwardRestored"), (forward) =>
+    forward.target.name === name && forward.state.state === "failed"
+      ? { ...forward, addresses: [] }
+      : forward,
+  );
+
+test("a failed forward that listens nowhere is not counted, and still warns and is named as not listening", async () => {
+  await mountKube(holdsNothing("payments-legacy"));
+  expect(entry()?.textContent).toBe("1 forward");
+  expect(warns(entry())).toBe(true);
+  expect(tooltip()).toBe(
+    "Port forwards: payments-api:http → 8081, payments-legacy:http → 8082 (failed, not listening)",
+  );
+});
+
+test("with nothing else listening the entry counts none, warns, and names the forward that listens nowhere", async () => {
+  const backend = holdsNothing("payments-legacy");
+  await mountKube(backend);
+  await act(() => backend.invoke("forward_stop", 1));
+  await settle(4);
+  expect(entry()?.textContent).toBe("0 forwards");
+  expect(warns(entry())).toBe(true);
+  expect(tooltip()).toBe(
+    "Port forwards: payments-legacy:http → 8082 (failed, not listening)",
+  );
 });
 
 test("the entry warns while a forward fails, and not once nothing does", async () => {

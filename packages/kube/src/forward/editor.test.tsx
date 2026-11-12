@@ -12,7 +12,6 @@ import {
   type Backend,
   type Blocked,
   type Forward,
-  type ForwardEvent,
   type ForwardTarget,
   type ModeSource,
 } from "@twigo/protocol";
@@ -27,6 +26,7 @@ import {
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import { patching } from "../../test/forward";
 import { settle, withScreenSize } from "../../test/workbench";
 import { objectUri, pfUri } from "../uri";
 import { registerForwards } from "./register";
@@ -72,29 +72,6 @@ interface Mounted {
     local?: number,
   ) => Promise<Forward>;
   readonly open: (forward: Forward) => Promise<string>;
-}
-
-function patching(
-  backend: Backend,
-  patch: (forward: Forward) => Forward,
-): Backend {
-  return {
-    invoke: (command, request) => backend.invoke(command, request),
-    subscribe: (async (
-      command: "forwards_watch",
-      request: null,
-      onMessage: (event: ForwardEvent) => void,
-    ) => {
-      const first = await backend.subscribe(command, request, (event) => {
-        onMessage(
-          event.event === "changed"
-            ? { event: "changed", forward: patch(event.forward) }
-            : event,
-        );
-      });
-      return first.map(patch);
-    }) as Backend["subscribe"],
-  };
 }
 
 async function mounted(
