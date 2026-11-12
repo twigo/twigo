@@ -162,7 +162,8 @@ struct Prepared {
 
 /// The connection's place among the sessions, then its pod and a stream to
 /// it. A pod that answers 404 has been sent nothing of the client's, so the
-/// connection tells it and chooses again within its wait for a pod.
+/// connection tells the forward and chooses again, until its wait for a pod
+/// has passed: a 404 after that ends it.
 async fn prepare(
     shared: &Arc<Shared>,
     number: u64,
@@ -205,7 +206,7 @@ async fn prepare(
                     permit,
                 });
             }
-            Err(Over::Fault(left @ Fault::Left { .. })) => {
+            Err(Over::Fault(left @ Fault::Left { .. })) if Instant::now() < deadline => {
                 shared.report(Report::Failed(number, left));
             }
             Err(over) => return Err(over),

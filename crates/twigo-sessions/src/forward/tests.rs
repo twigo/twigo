@@ -20,6 +20,7 @@ use twigo_kube::client::Budgets;
 use super::connect::{Connect, Connected};
 use super::fake::{Fake, NAMESPACE, Renew};
 use super::listen::Socket;
+use super::pick::{Chosen, Known, Pick};
 use super::watching::{Candidate, Seen, Watching};
 use super::{Begin, BindError, Config, Forward, Listeners, Status, Target, free_port, listen};
 
@@ -127,6 +128,7 @@ struct Pods(Arc<Mutex<PodsState>>);
 
 struct PodsState {
     refused: HashMap<String, u16>,
+    refusal_delay: Duration,
     blocked: Option<String>,
     connects: Vec<(String, u16)>,
     served: mpsc::UnboundedSender<Served>,
@@ -137,6 +139,7 @@ impl Pods {
         let (served, receiver) = mpsc::unbounded_channel();
         let pods = Self(Arc::new(Mutex::new(PodsState {
             refused: HashMap::new(),
+            refusal_delay: Duration::ZERO,
             blocked: None,
             connects: Vec::new(),
             served,
@@ -150,6 +153,10 @@ impl Pods {
 
     fn allow(&self, pod: &str) {
         self.0.lock().unwrap().refused.remove(pod);
+    }
+
+    fn answer_refusals_after(&self, delay: Duration) {
+        self.0.lock().unwrap().refusal_delay = delay;
     }
 
     fn block(&self, pod: &str) {
@@ -190,7 +197,13 @@ impl Connect for Pods {
                 "Refused",
             )
             .with_code(*code);
-            return ready(Err(kube::Error::Api(status.boxed()))).boxed();
+            let refusal = Err(kube::Error::Api(status.boxed()));
+            if state.refusal_delay.is_zero() {
+                return ready(refusal).boxed();
+            }
+            return tokio::time::sleep(state.refusal_delay)
+                .map(move |()| refusal)
+                .boxed();
         }
         let (stream, io) = tokio::io::duplex(64 * 1024);
         let (error, told) = oneshot::channel();
@@ -3729,6 +3742,107 @@ async fn a_failure_after_a_404_leaves_the_pod_avoided_until_the_404_s_avoidance_
     assert_eq!(forward.pods.connects().len(), tries, "web-a was tried");
     reaches_the_pod(&mut forward, b"hello").await;
     assert!(refused.elapsed() >= Duration::from_secs(30));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_whose_pods_answer_404_slowly_ends_with_the_first_404_after_its_wait() {
+    let fake = Fake::default();
+    let pods = ["web-a", "web-b", "web-c", "web-d", "web-e"];
+    behind_web(&fake, &pods.map(|pod| (pod, true)));
+    let mut forward = start(&fake, service_target(), false, Budgets::default());
+    forward.ready().await;
+    let tries = forward.pods.connects().len();
+    for pod in pods {
+        forward.pods.refuse(pod, 404);
+    }
+    forward.pods.answer_refusals_after(Duration::from_secs(9));
+    let began = Instant::now();
+    let mut client = forward.client();
+    client.write_all(b"x").await.unwrap();
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+    assert_eq!(began.elapsed(), Duration::from_secs(27));
+    assert_eq!(
+        forward.pods.connects()[tries..],
+        ["web-a", "web-b", "web-c"]
+    );
+    let status = forward
+        .until("it says why", |status| {
+            status.failure.as_deref() == Some("the upgrade to web-c was refused with 404")
+        })
+        .await;
+    assert_eq!(status.state, ForwardState::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_connection_s_wait_for_a_pod_counts_from_its_start_whatever_its_tries() {
+    let fake = Fake::default();
+    behind_web(&fake, &[("web-a", true)]);
+    let budgets = Budgets {
+        sessions: 1,
+        ..Budgets::default()
+    };
+    let mut forward = start(&fake, service_target(), false, budgets);
+    forward.ready().await;
+    behind_web(&fake, &[("web-a", false)]);
+    let began = Instant::now();
+    let mut client = forward.client();
+    client.write_all(b"hello").await.unwrap();
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    forward.pods.refuse("web-a", 404);
+    behind_web(&fake, &[("web-a", true)]);
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+    assert_eq!(began.elapsed(), Duration::from_secs(20));
+}
+
+fn listed_pods(pods: &[&str]) -> Known {
+    Known::Listed {
+        candidates: pods
+            .iter()
+            .map(|pod| Candidate {
+                key: (*pod).into(),
+                name: (*pod).into(),
+                port: 8080,
+            })
+            .collect(),
+        why: String::new(),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_404_s_avoidance_of_the_only_pod_ends_at_its_own_time_whatever_a_failure_asks_meanwhile()
+{
+    let mut pick = Pick::new();
+    pick.set(listed_pods(&["web-a"]));
+    let refused = Instant::now();
+    pick.left("web-a", LEFT_A.to_owned(), refused);
+    let waiting = refused + Duration::from_secs(12);
+    assert!(matches!(pick.choose(waiting), Chosen::None(words) if words == LEFT_A));
+    assert_eq!(pick.back(waiting), Some(refused + Duration::from_secs(30)));
+
+    pick.failed("web-a", refused + Duration::from_millis(29_900));
+    let back = refused + Duration::from_secs(30);
+    assert!(matches!(pick.choose(back), Chosen::Pod(pod) if &*pod.name == "web-a"));
+    assert_eq!(pick.back(back), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_404_does_not_shorten_the_avoidance_of_a_pod_that_failed_again_and_again() {
+    let mut pick = Pick::new();
+    pick.set(listed_pods(&["web-a", "web-b"]));
+    let now = Instant::now();
+    for _ in 0..7 {
+        pick.failed("web-a", now);
+    }
+    pick.left("web-a", LEFT_A.to_owned(), now);
+    assert!(
+        matches!(pick.choose(now + Duration::from_secs(30)), Chosen::Pod(pod) if &*pod.name == "web-b")
+    );
 }
 
 #[tokio::test(start_paused = true)]
