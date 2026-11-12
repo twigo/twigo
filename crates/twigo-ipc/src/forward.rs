@@ -80,8 +80,9 @@ pub struct ResumeForward {
     rename_all_fields = "camelCase"
 )]
 pub enum ForwardStarted {
-    /// Listening. A port that has a forward already answers with that one,
-    /// started again if it was stopped.
+    /// Listening. A port that has a forward already, or whose start is
+    /// under way, answers with that one, started again if it was stopped or
+    /// failed.
     Started { forward: Box<Forward> },
     /// The local port could not be bound, and nothing was started or kept.
     Busy {
@@ -144,20 +145,25 @@ pub struct Forward {
     rename_all_fields = "camelCase"
 )]
 pub enum ForwardState {
-    /// Listening, while the first pod is found and a first stream proves
-    /// that it can be reached.
+    /// Listening, while the start or the resume a person asked for finds a
+    /// pod and a first stream proves that it can be reached; it ends `Ready`
+    /// or `Failed`.
     Starting,
-    /// Listening since the app started, its cluster not asked yet: the
-    /// first connection, or the space's connecting, starts it.
+    /// Listening, and it has asked its cluster nothing: since the app
+    /// started, or since a refusal was lifted. Its first connection, or its
+    /// space's connecting, makes it ask; nothing else does.
     Restored,
     Ready,
-    /// It worked, and now waits: for a pod that is ready, or for the
-    /// cluster to answer.
+    /// No pod can be reached, for the reason given: none is ready, the
+    /// cluster does not answer, or a stream to a pod failed. It looks again
+    /// while it has connections, and at the next one.
     Reconnecting {
         reason: String,
     },
-    /// Still listening, and every connection is closed at once: the target
-    /// is gone, the cluster refused, or the context's mode does.
+    /// Still listening, and every connection is closed at once, until a
+    /// start or a resume: the cluster refused, the context's mode does, or
+    /// no source lists the context. One whose target is gone looks at it
+    /// again at its next connection.
     Failed {
         error: IpcError,
     },
