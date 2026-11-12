@@ -129,8 +129,6 @@ interface Live {
   readonly podPort: number;
   readonly timers: Set<ReturnType<typeof setTimeout>>;
   ticks: number;
-  /** Its local port is the free one that was offered in place of a busy one, which is never remembered. */
-  detour: boolean;
 }
 
 /** What the forwards need of the rest of the mock backend. */
@@ -227,28 +225,25 @@ function key(target: ForwardTarget, port: number): string {
 export class MockForwards {
   readonly #lives = new Map<ForwardId, Live>();
   readonly #last = new Map<string, number>();
-  /** The free port offered in place of a busy one, by the port of the target it was asked for. */
-  readonly #offered = new Map<string, number>();
   readonly #forbidden = new Set<string>();
   #follower: ((event: ForwardEvent) => void) | undefined;
   #next = 1;
-  #seeded = false;
   #policed = false;
-  #life: ReturnType<typeof setInterval> | undefined;
+  #ticking = false;
 
   constructor(
     private readonly scenario: ForwardScenario | undefined,
     private readonly host: ForwardHost,
-  ) {}
+  ) {
+    if (scenario === "forwardRestored") this.#seed();
+  }
 
   watch(onMessage: (event: ForwardEvent) => void): Forward[] {
-    this.#seed();
     this.#follower = onMessage;
     return [...this.#lives.values()].map(({ forward }) => forward);
   }
 
   ports(target: ForwardTarget): ForwardPorts {
-    this.#seed();
     const { kind, ports } = this.#declared(target);
     const [first] = [...ports].sort((a, b) => rank(a) - rank(b));
     return {
@@ -266,7 +261,6 @@ export class MockForwards {
   }
 
   start({ target, port, local }: StartForward): ForwardStarted {
-    this.#seed();
     this.#allow(target);
     const existing = this.#find(target, port);
     if (existing) return this.resume({ id: existing.forward.id, local });
@@ -279,19 +273,17 @@ export class MockForwards {
       );
     }
     const wanted = local ?? this.#localOf(target, port);
-    const busy = this.#busy(key(target, port), wanted);
+    const busy = this.#busy(wanted);
     if (busy) return busy;
     const live = this.#add(target, kind, declared, wanted, {
       state: "starting",
     });
-    live.detour = this.#takeOffered(key(target, port), wanted);
     this.#remember(live);
     this.#begin(live);
     return { outcome: "started", forward: live.forward };
   }
 
   stop(id: ForwardId): null {
-    this.#seed();
     const live = this.#live(id);
     this.#clear(live);
     this.#set(live, {
@@ -306,7 +298,6 @@ export class MockForwards {
   }
 
   resume({ id, local }: ResumeForward): ForwardStarted {
-    this.#seed();
     const live = this.#live(id);
     this.#allow(live.forward.target);
     const wanted = local ?? live.forward.local;
@@ -315,12 +306,8 @@ export class MockForwards {
     if (runs && wanted === live.forward.local) {
       return { outcome: "started", forward: live.forward };
     }
-    const { target, port } = live.forward;
-    const busy = this.#busy(key(target, port), wanted, id);
+    const busy = this.#busy(wanted, id);
     if (busy) return busy;
-    if (live.forward.local !== wanted) {
-      live.detour = this.#takeOffered(key(target, port), wanted);
-    }
     if (runs) {
       this.#set(live, { local: wanted });
     } else {
@@ -332,12 +319,10 @@ export class MockForwards {
   }
 
   remove(id: ForwardId): null {
-    this.#seed();
     const live = this.#live(id);
     this.#clear(live);
     this.#lives.delete(id);
     this.#follower?.({ event: "removed", id });
-    this.#unwind();
     return null;
   }
 
@@ -418,17 +403,8 @@ export class MockForwards {
     );
   }
 
-  #remember({ forward, detour }: Live): void {
-    if (!detour) {
-      this.#last.set(key(forward.target, forward.port), forward.local);
-    }
-  }
-
-  /** Whether `local` is the free port that was offered for this port of the target, which is then spent. */
-  #takeOffered(at: string, local: number): boolean {
-    const offered = this.#offered.get(at);
-    this.#offered.delete(at);
-    return offered === local;
+  #remember({ forward }: Live): void {
+    this.#last.set(key(forward.target, forward.port), forward.local);
   }
 
   #taken(port: number, except?: ForwardId): boolean {
@@ -441,11 +417,7 @@ export class MockForwards {
     );
   }
 
-  #busy(
-    at: string,
-    local: number,
-    except?: ForwardId,
-  ): ForwardStarted | undefined {
+  #busy(local: number, except?: ForwardId): ForwardStarted | undefined {
     const why =
       local < 1024
         ? ("notPermitted" as const)
@@ -455,7 +427,6 @@ export class MockForwards {
     if (!why) return undefined;
     let free = Math.max(local + 1, 1024);
     while (this.#taken(free, except)) free++;
-    this.#offered.set(at, free);
     return { outcome: "busy", local, why, free };
   }
 
@@ -489,7 +460,6 @@ export class MockForwards {
       },
       timers: new Set(),
       ticks: 0,
-      detour: false,
     };
     this.#lives.set(id, live);
     return live;
@@ -614,7 +584,6 @@ export class MockForwards {
         queued: 0,
       });
     }
-    this.#unwind();
     setTimeout(() => {
       this.#lift(context);
     }, LIFTS_AFTER_MS);
@@ -666,7 +635,9 @@ export class MockForwards {
       queued: queued ? QUEUED : 0,
       failure: null,
     });
-    this.#life ??= setInterval(() => {
+    if (this.#ticking) return;
+    this.#ticking = true;
+    setInterval(() => {
       this.#tick();
     }, LIFE_MS);
   }
@@ -710,18 +681,7 @@ export class MockForwards {
     }
   }
 
-  #unwind(): void {
-    const ready = [...this.#lives.values()].some(
-      ({ forward }) => forward.state.state === "ready",
-    );
-    if (ready || this.#life === undefined) return;
-    clearInterval(this.#life);
-    this.#life = undefined;
-  }
-
   #seed(): void {
-    if (this.#seeded || this.scenario !== "forwardRestored") return;
-    this.#seeded = true;
     const space = "prod-eu";
     const at = (resource: string, group: string, name: string) => ({
       space,
