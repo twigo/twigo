@@ -624,6 +624,64 @@ test("a laid-over menu shows only on hover or focus, also on the cursor's row, a
   );
 });
 
+test("a laid-over menu lies over the surface the grid sits on, the editor's unless a part sets --surface, and its button carries no visibility of its own", () => {
+  grid({
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  const button = screen.getByRole("button", { name: "Row actions" });
+  const cell = button.closest<HTMLElement>('[role="gridcell"]');
+  expect(cell?.classList.contains("bg-[var(--surface,var(--editor))]")).toBe(
+    true,
+  );
+  expect(cell?.classList.contains("bg-editor")).toBe(false);
+  expect(button.className).not.toContain("opacity");
+});
+
+test("a laid-over menu stays while its menu is open, with the pointer in the menu", () => {
+  grid({
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  const button = screen.getByRole("button", { name: "Row actions" });
+  fireEvent.pointerDown(button, { button: 0, ctrlKey: false });
+  fireEvent.pointerLeave(rowNamed("gateway-1"));
+  expect(screen.getByRole("menuitem", { name: "Copy Name" })).toBeTruthy();
+  expect(button.getAttribute("data-state")).toBe("open");
+  expect(
+    button
+      .closest('[role="gridcell"]')
+      ?.classList.contains("has-[[data-state=open]]:opacity-100"),
+  ).toBe(true);
+});
+
+test("without the overlay a row's button shows on its hover, on the cursor's row, on the keyboard's focus and while its menu is open", () => {
+  grid({
+    selected: "a1",
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  const buttonOf = (name: string) =>
+    within(rowNamed(name)).getByRole("button", { name: "Row actions" });
+  const shown = [
+    "group-hover/row:opacity-100",
+    "focus-visible:opacity-100",
+    "data-[state=open]:opacity-100",
+  ];
+
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  const other = buttonOf("gateway-1");
+  expect(other.classList.contains("opacity-0")).toBe(true);
+  expect(other.classList.contains("opacity-100")).toBe(false);
+  for (const name of shown) expect(other.classList.contains(name)).toBe(true);
+
+  const cursor = buttonOf("api-1");
+  expect(cursor.classList.contains("opacity-100")).toBe(true);
+  expect(cursor.classList.contains("opacity-0")).toBe(false);
+  for (const name of shown) expect(cursor.classList.contains(name)).toBe(true);
+});
+
 test("the focus moving within a row keeps its actions", () => {
   grid({ menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]] });
   const row = rowNamed("gateway-1");

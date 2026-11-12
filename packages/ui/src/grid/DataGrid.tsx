@@ -74,7 +74,9 @@ export interface DataGridProps<R, G> {
    * Lays the ⋯ over the end of a row on hover and focus, instead of
    * reserving a column of its own for it: for a grid so narrow that the
    * column costs its rows more than the button is worth. Not with `inline`
-   * or `headerEnd`, which sit beside that column.
+   * or `headerEnd`, which sit beside that column. The button lies over the
+   * surface the grid sits on, which is `--surface`: the editor's unless the
+   * part holding the grid sets its own.
    */
   readonly overlayMenu?: boolean;
   /** Actions with icons that show on a hovered row, run on that row. */
@@ -709,7 +711,7 @@ function DataRow({
         shown && (
           <div
             role="gridcell"
-            className="absolute inset-y-0 right-0 flex items-center bg-editor opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+            className="absolute inset-y-0 right-0 flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
           >
             <div className={cn("flex h-full items-center px-1", overlay)}>
               {actions}
