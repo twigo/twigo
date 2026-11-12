@@ -41,6 +41,7 @@ async function withEveryEnablement() {
     "forward",
     "forward.running",
     "forward.startable",
+    "forward.movable",
     "forward.web",
   ])
     workbench.keys.set(key, true);
