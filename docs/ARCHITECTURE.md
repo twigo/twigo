@@ -999,7 +999,10 @@ Extensions add commands, not prefixes.
     A port that another process holds on `0.0.0.0` or `[::]` is in use too.
     `SO_REUSEADDR`, which [mio sets](https://github.com/tokio-rs/mio/blob/v1.2.4/src/net/tcp/listener.rs#L67-L82) and which a port needs to bind again while the connections it served wait out `TIME_WAIT`, makes macOS bind `127.0.0.1:P` beside such a listener and give the new socket that process's loopback clients, where Linux refuses with or without it (bind probes of macOS 27.2 and of Linux 6.12.54 in Docker Desktop, 2026-11-12).
     So Linux binds with the option, Windows without it, as mio does, since there it lets a socket in use be bound over, and macOS binds without it first; when that finds the port in use, the port is busy unless nothing accepts a connection on it, which leaves only the connections of a closed listener that are still open or wait out `TIME_WAIT`, and then binds with the option.
-    A forward's listeners close when the forward is dropped or moved, so a stop, a move and a shutdown return with the port free.
+    A forward's listeners close when the forward is dropped or moved, so they are closed when a stop, a move or a shutdown returns.
+    A child that Twigo starts at that moment (a credential plugin, a terminal's shell, the login shell) holds a copy of every descriptor until its program starts, so a bind straight after can find the port in use for that moment.
+    On macOS a start or a resume that binds that fast gets `Busy` from the path of `bind` in `crates/twigo-sessions/src/forward/listen.rs` that tells a listener from leftovers.
+    A probe process, not Twigo, held a closed listener for under 50 µs when it was started with `posix_spawn` and for up to about 1 ms when it was a fork (macOS 27.2, 2026-11-12); std 1.99.1 uses `posix_spawnp` on Apple.
     The local port of a start is the one that port of that target had last, else the same number, else for a port below 1024 that number plus 8000.
     A free port offered in place of a busy one is never taken silently, and starting on it is not remembered.
   - **The pod.**
@@ -1018,7 +1021,8 @@ Extensions add commands, not prefixes.
       Connections already open keep their pod.
   - **A connection.**
     Each accepted TCP connection holds a place among the context's sessions (3.2) for its life, waiting in `queued` when the budget is full, then goes to the current pod, waiting 20 s at most for one to be a candidate.
-    A pod behind a Service or a workload whose upgrade answers `404` has been sent nothing of the client's, so the connection chooses again within those 20 s and goes on, and gives up only when no pod is left by then.
+    A pod behind a Service or a workload whose upgrade answers `404` has been sent nothing of the client's, so the connection chooses again while its 20 s last, and gives up when no pod is left by then.
+    Once the 20 s have passed, a `404` ends the connection with that `404`'s words: a connection's preparing is bounded by its 20 s and one connect.
     It is its own kube-rs WebSocket on the sessions client, opened under a timeout of its own, since that stack has none.
     The text the pod's side gives on the error channel is the connection's failure, and a refused port closes that connection alone.
     - On the client's FIN the connection does not shut the stream down: kube-rs answers that by dropping what the pod still sends and closing the socket.

@@ -87,6 +87,9 @@ Findings that belong to no step yet.
   - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
   - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
   - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
+  - On macOS a socket is made close-on-exec in a second call after `socket()` and `accept()` ([socket2 0.6.5 `Socket::new`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L116-L118) and [`set_common_flags`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L773-L805), [mio 1.2.4 `new_socket`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/net.rs#L37-L81) and [`accept`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/tcp.rs#L110-L118)), so a child spawned between the two keeps a forward's listener or connection for its life: a terminal's shell opened as a forward binds can keep the port listening after a stop.
+    Starting children with only their stdio (`POSIX_SPAWN_CLOEXEC_DEFAULT`, closing the descriptors above 2 in `pre_exec`) would end it; not done.
+  - A stop, a move or a shutdown followed at once by a bind of the same port can find it in use for a moment on macOS, since a child Twigo starts then holds a copy of the closed listeners until its program starts: a start or a resume answers `Busy` for that moment (ARCHITECTURE 4.6).
   - Safari and Firefox were not measured against the session budget.
     Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
   - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
