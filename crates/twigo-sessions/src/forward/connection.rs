@@ -18,7 +18,7 @@ use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
 use super::watching::{Candidate, UNANSWERED_YET};
-use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Kind, Open, PROBE_WINDOW, QUIET, Report, Shared};
+use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Kind, Open, PROBE_WINDOW, QUIET, Report, Shared, at};
 use crate::shell::abandoned;
 
 const CHUNK: usize = 16 * 1024;
@@ -38,8 +38,8 @@ pub(super) enum Fault {
     /// No pod was a candidate within the wait, and why.
     NoPod(String),
     /// The upgrade to a pod behind a Service or a workload answered 404, in
-    /// these words: that pod is no candidate any more.
-    Left(String),
+    /// `words`, so that pod is avoided; `alone` when no other was left.
+    Left { words: String, alone: bool },
     /// The clients were replaced, or the network changed under them.
     Lost,
 }
@@ -48,7 +48,9 @@ impl Fault {
     /// What the forward's `failure` says of it.
     pub(super) fn words(&self) -> Option<String> {
         match self {
-            Fault::Port(words) | Fault::NoPod(words) | Fault::Left(words) => Some(words.clone()),
+            Fault::Port(words) | Fault::NoPod(words) | Fault::Left { words, .. } => {
+                Some(words.clone())
+            }
             Fault::Transient(cause) => Some(cause.error().message.clone()),
             Fault::Fatal(_) | Fault::Lost => None,
         }
@@ -68,14 +70,6 @@ fn fault(error: IpcError) -> Fault {
         Fault::Fatal(error)
     } else {
         Fault::Transient(error.into())
-    }
-}
-
-fn upgrade_fault(error: &kube::Error, pod_is_target: bool) -> Fault {
-    match Cause::upgrade(error) {
-        Some(gone) if pod_is_target => Fault::Transient(gone),
-        Some(gone) => Fault::Left(gone.into_error().message),
-        None => fault(twigo_kube::errors::request(error)),
     }
 }
 
@@ -230,11 +224,13 @@ async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
             Chosen::None(why) => why,
             Chosen::Unknown(why) => why.unwrap_or_else(|| UNANSWERED_YET.to_owned()),
         };
+        let back = shared.pick().back(Instant::now());
         tokio::select! {
             biased;
             over = link.interrupted() => return Err(over),
             _ = picked.changed() => {}
             () = sleep_until(deadline) => return Err(Over::Fault(Fault::NoPod(why))),
+            () = at(back) => {}
         }
     }
 }
@@ -257,7 +253,15 @@ async fn connect(
     .await;
     let fault = match opened {
         Ok(Ok(connected)) => return Ok(connected),
-        Ok(Err(error)) => upgrade_fault(&error, target.kind == Kind::Pod),
+        Ok(Err(error)) => match Cause::upgrade(&error) {
+            Some(gone) if target.kind == Kind::Pod => Fault::Transient(gone),
+            Some(gone) => {
+                let words = gone.into_error().message;
+                let alone = !shared.left(&candidate.key, words.clone());
+                return Err(Over::Fault(Fault::Left { words, alone }));
+            }
+            None => fault(twigo_kube::errors::request(&error)),
+        },
         Err(_) => Fault::Transient(
             IpcError::new(
                 ErrorKind::Timeout,
@@ -266,10 +270,8 @@ async fn connect(
             .into(),
         ),
     };
-    match &fault {
-        Fault::Left(words) => shared.left(&candidate.key, words.clone()),
-        Fault::Fatal(_) => {}
-        _ => shared.failed(&candidate.key),
+    if !matches!(fault, Fault::Fatal(_)) {
+        shared.failed(&candidate.key);
     }
     Err(Over::Fault(fault))
 }

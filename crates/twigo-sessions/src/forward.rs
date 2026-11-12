@@ -192,9 +192,22 @@ impl Status {
     }
 }
 
+/// How a forward begins.
+pub enum Begin {
+    /// A person's start, which proves at once that a pod can be reached.
+    Started,
+    /// Restored at a start of the app: it waits, listening, and asks its
+    /// cluster at its first connection or once its space connects.
+    Restored,
+    /// Restored while its context's mode or the catalog refuses it: failed
+    /// with that from its first instant, until it is lifted.
+    Refused(IpcError),
+}
+
 enum Control {
     Restart,
     Connected,
+    SignedIn,
     Refuse(IpcError),
     Allow,
     Handled(oneshot::Sender<()>),
@@ -213,11 +226,8 @@ pub struct Forward {
 }
 
 impl Forward {
-    /// Starts a forward on `listeners`: a `restored` one waits, listening,
-    /// and asks its cluster at its first connection or once its space
-    /// connects; any other is a person's start, which proves at once that a
-    /// pod can be reached. Needs the runtime.
-    pub fn spawn(hub: Hub, config: Config, listeners: Listeners, restored: bool) -> Self {
+    /// Starts a forward on `listeners`, as `begin` says. Needs the runtime.
+    pub fn spawn(hub: Hub, config: Config, listeners: Listeners, begin: Begin) -> Self {
         let addresses = listeners.addresses();
         let (sender, sockets) = mpsc::unbounded_channel();
         let accepting = listeners.accept(&sender);
@@ -226,7 +236,7 @@ impl Forward {
             config,
             (sender, sockets),
             (addresses, Some(accepting)),
-            restored,
+            begin,
             Arc::new(Kube),
         )
     }
@@ -238,14 +248,19 @@ impl Forward {
         config: Config,
         (sender, sockets): (mpsc::UnboundedSender<Socket>, Sockets),
         (addresses, accepting): (Vec<String>, Option<Accepting>),
-        restored: bool,
+        begin: Begin,
         connect: Arc<dyn Connect>,
     ) -> Self {
-        let (phase, state, proof) = if restored {
-            (Phase::Restored, ForwardState::Restored, None)
-        } else {
-            let proof = Proof::new(Asker::Person);
-            (Phase::Starting, ForwardState::Starting, Some(proof))
+        let (phase, state, proof) = match begin {
+            Begin::Started => {
+                let proof = Proof::new(Asker::Person);
+                (Phase::Starting, ForwardState::Starting, Some(proof))
+            }
+            Begin::Restored => (Phase::Restored, ForwardState::Restored, None),
+            Begin::Refused(error) => {
+                let lift = Cause::from(error.clone()).lift();
+                (Phase::Failed(lift), ForwardState::Failed { error }, None)
+            }
         };
         let (status, status_rx) = watch::channel(Status::new(state));
         let (control, control_rx) = mpsc::unbounded_channel();
@@ -311,8 +326,9 @@ impl Forward {
         self.accepting = Some(listeners.accept(&self.sockets));
     }
 
-    /// A person's start of a forward that failed: it proves again that a
-    /// pod can be reached. Any other forward stays as it is.
+    /// A person's start or resume: it forgets the pods it avoided, and one
+    /// that failed proves again that a pod can be reached. Any other stays
+    /// as it is.
     pub fn restart(&self) {
         // The supervisor lives as long as the forward.
         let _ = self.control.send(Control::Restart);
@@ -323,6 +339,13 @@ impl Forward {
     /// without a connection. Any other stays as it is.
     pub fn connected(&self) {
         let _ = self.control.send(Control::Connected);
+    }
+
+    /// A sign-in the person started got a credential: a forward that failed
+    /// for its credential proves once that a pod can be reached, as its
+    /// space's connecting would. Any other stays as it is.
+    pub fn signed_in(&self) {
+        let _ = self.control.send(Control::SignedIn);
     }
 
     /// Ends every connection and fails the forward with `error`, which
@@ -404,8 +427,11 @@ impl Shared {
         self.pick().failed(key, Instant::now());
     }
 
-    fn left(&self, key: &str, words: String) {
-        self.pick().left(key, words);
+    /// The upgrade to a pod behind a Service or a workload answered 404, in
+    /// `words`: whether another pod is left, which the status names then.
+    fn left(&self, key: &str, words: String) -> bool {
+        self.pick().left(key, words, Instant::now());
+        matches!(self.choose(), Chosen::Pod(_))
     }
 
     fn report(&self, report: Report) {
@@ -476,8 +502,9 @@ enum Asker {
     /// forward.
     Person,
     /// The space connecting, which proves a forward that waits, or that
-    /// failed for a credential, with no connection, within the same bounds.
-    /// A system's proof, as below.
+    /// failed for a credential, with no connection, within the same bounds;
+    /// so does a sign-in the person started, for a forward that failed for
+    /// its credential. A system's proof, as below.
     Space,
     /// A connection, or the forward's own tries while it has connections. A
     /// system's proof keeps the forward's words, says `Reconnecting` for
@@ -653,11 +680,14 @@ impl Supervisor {
 
     fn control(&mut self, control: Control) {
         match control {
-            Control::Restart if matches!(self.phase, Phase::Failed(_)) => {
-                self.close_queued();
-                self.phase = Phase::Starting;
-                self.proof = Some(Proof::new(Asker::Person));
-                self.say(ForwardState::Starting);
+            Control::Restart => {
+                self.shared.pick().forget();
+                if matches!(self.phase, Phase::Failed(_)) {
+                    self.close_queued();
+                    self.phase = Phase::Starting;
+                    self.proof = Some(Proof::new(Asker::Person));
+                    self.say(ForwardState::Starting);
+                }
             }
             Control::Connected => match (self.phase, &mut self.proof) {
                 (Phase::Restored | Phase::Failed(Lift::Clients), None) => {
@@ -666,6 +696,11 @@ impl Supervisor {
                 (Phase::Restored, Some(proof)) => proof.by = Asker::Space,
                 _ => {}
             },
+            Control::SignedIn => {
+                if self.phase == Phase::Failed(Lift::Clients) && self.proof.is_none() {
+                    self.proof = Some(Proof::new(Asker::Space));
+                }
+            }
             Control::Refuse(error) => self.fail(error),
             Control::Allow if matches!(self.phase, Phase::Failed(_)) => {
                 self.close_queued();
@@ -675,7 +710,7 @@ impl Supervisor {
             Control::Handled(done) => {
                 let _ = done.send(());
             }
-            Control::Restart | Control::Allow => {}
+            Control::Allow => {}
         }
     }
 
@@ -795,8 +830,8 @@ impl Supervisor {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => match fault {
                 Fault::Fatal(error) => self.fail(error),
-                // That pod is no candidate any more: the proof chooses again.
-                Fault::Left(words) => self.failure(words),
+                // That pod is avoided: the proof chooses again.
+                Fault::Left { words, .. } => self.failure(words),
                 Fault::Port(words) | Fault::NoPod(words) => {
                     self.failure(words.clone());
                     self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
@@ -939,8 +974,8 @@ impl Supervisor {
     fn ended(&mut self, fault: Fault) {
         match fault {
             Fault::Fatal(error) => self.fail(error),
-            Fault::Port(_) => {}
-            Fault::NoPod(why) | Fault::Left(why) => self.reconnecting(why),
+            Fault::Port(_) | Fault::Left { alone: false, .. } => {}
+            Fault::NoPod(why) | Fault::Left { words: why, .. } => self.reconnecting(why),
             Fault::Transient(cause) if cause.is_gone() => self.fail(cause),
             Fault::Transient(cause) => self.reconnecting(cause.into_error().message),
             Fault::Lost => {

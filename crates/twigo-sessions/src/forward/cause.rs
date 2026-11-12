@@ -24,8 +24,9 @@ pub(super) enum Lift {
     /// Its target was gone: its next connection looks at it again.
     Connection,
     /// The cluster refused the credentials: its space connecting, which
-    /// builds the context's clients anew, proves it. Trying again at each
-    /// connection would run a credential plugin again and again.
+    /// builds the context's clients anew, proves it, and so does a sign-in
+    /// the person started. Trying again at each connection would run a
+    /// credential plugin again and again.
     Clients,
 }
 

@@ -380,7 +380,12 @@ impl Forwards {
             port: base.port,
             port_name: base.port_name.clone(),
         };
-        let forward = data::Forward::spawn(hub, config, listeners, restored);
+        let begin = if restored {
+            data::Begin::Restored
+        } else {
+            data::Begin::Started
+        };
+        let forward = data::Forward::spawn(hub, config, listeners, begin);
         let status = forward.status();
         let table = Arc::downgrade(&self.table);
         let id = base.id;
