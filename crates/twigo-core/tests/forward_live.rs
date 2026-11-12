@@ -33,6 +33,10 @@ use twigo_ipc::{
 };
 
 const WAIT: Duration = Duration::from_secs(90);
+/// Longer than the data path waits for a pod (20 s) and then for an upgrade
+/// (15 s), so a client of the test never leaves while an upgrade of its
+/// connection is still under way.
+const PATIENCE: Duration = Duration::from_secs(45);
 const COREDNS: &str = "registry.k8s.io/coredns/coredns:";
 const COREFILE: &str = ".:5353 {\n    health :8080\n    whoami\n}\n";
 
@@ -261,32 +265,56 @@ impl Cluster {
         self.target("apps", "deployments", "web")
     }
 
-    /// How many `pods/portforward` requests the API server has served, which
-    /// it counts when they end.
-    async fn settled_upgrades(&self) -> u64 {
-        let mut last = self.upgrades().await;
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            let now = self.upgrades().await;
-            if now == last {
-                return now;
-            }
-            last = now;
-        }
-    }
-
-    async fn upgrades(&self) -> u64 {
+    /// The `pods/portforward` requests the API server has ended and those it
+    /// has under way. It counts a request in `apiserver_request_total` once
+    /// its handler returns ([`MonitorRequest`] after the route function,
+    /// `InstrumentRouteFunc`), and in `apiserver_longrunning_requests` from
+    /// when a connect handler starts until it returns
+    /// ([`RecordLongRunning`], called by `ConnectResource`), so the two
+    /// together are the requests started, but for the instant between a
+    /// handler's return and its count.
+    ///
+    /// [`MonitorRequest`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go#L569-L582
+    /// [`RecordLongRunning`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go#L539-L559
+    async fn portforwards(&self) -> (u64, u64) {
         let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
         let metrics = self.admin.request_text(request).await.unwrap();
-        metrics
-            .lines()
-            .filter(|line| {
-                line.starts_with("apiserver_request_total{")
-                    && line.contains("resource=\"pods\"")
-                    && line.contains("subresource=\"portforward\"")
-            })
-            .map(|line| line.rsplit(' ').next().unwrap().parse::<f64>().unwrap() as u64)
-            .sum()
+        let sum = |name: &str| -> u64 {
+            metrics
+                .lines()
+                .filter(|line| {
+                    line.starts_with(name)
+                        && line.contains("resource=\"pods\"")
+                        && line.contains("subresource=\"portforward\"")
+                })
+                .map(|line| line.rsplit(' ').next().unwrap().parse::<f64>().unwrap() as u64)
+                .sum()
+        };
+        (
+            sum("apiserver_request_total{"),
+            sum("apiserver_longrunning_requests{"),
+        )
+    }
+
+    /// How many requests the API server has started, once `running` are
+    /// under way and the number has held over a pause, which takes in a
+    /// request that ended between the two counts.
+    async fn started_with(&self, running: u64) -> u64 {
+        let waited = tokio::time::timeout(WAIT, async {
+            let mut previous = None;
+            loop {
+                let (ended, under_way) = self.portforwards().await;
+                let started = ended + under_way;
+                if under_way == running && previous == Some(started) {
+                    return started;
+                }
+                previous = (under_way == running).then_some(started);
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        });
+        waited
+            .await
+            .unwrap_or_else(|_| panic!("{running} requests under way and none new within 90 s"))
     }
 }
 
@@ -376,9 +404,9 @@ async fn health(port: u16) -> Result<String, String> {
             Err(format!("an answer without the health: {answer:?}"))
         }
     };
-    tokio::time::timeout(Duration::from_secs(10), get)
+    tokio::time::timeout(PATIENCE, get)
         .await
-        .unwrap_or_else(|_| Err("no answer within 10 s".to_owned()))
+        .unwrap_or_else(|_| Err("no answer within 45 s".to_owned()))
 }
 
 async fn answered(port: u16) {
@@ -680,7 +708,21 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     let restored = forward(&second, started.id);
     assert_eq!(restored.state, ForwardState::Restored);
     assert_eq!(restored.local, started.local);
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    let ForwardStarted::Started { forward: resumed } = second
+        .forward_resume(ResumeForward {
+            id: started.id,
+            local: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert_eq!(
+        resumed.state,
+        ForwardState::Restored,
+        "a resume, which waits for the restore to end, leaves it waiting"
+    );
     assert_eq!(
         connections.load(Ordering::SeqCst),
         0,
@@ -832,8 +874,12 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
         assert_ne!(read, 0, "{reply:?}");
         reply.push_str(&String::from_utf8_lossy(&chunk[..read]));
     }
-    assert_eq!(forward(&core, started.id).connections, 1);
-    let before = cluster.settled_upgrades().await;
+    eventually("it is ready with one connection", || async {
+        let now = forward(&core, started.id);
+        now.state == ForwardState::Ready && now.connections == 1
+    })
+    .await;
+    let before = cluster.started_with(1).await;
 
     core.set_context_mode(SetContextMode {
         context: cluster.context.clone(),
@@ -879,9 +925,9 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
         .unwrap_err();
     assert_eq!(resumed.kind, ErrorKind::Permissions);
     assert_eq!(
-        cluster.settled_upgrades().await,
-        before + 1,
-        "since the mode turned the API server served only the open connection's own request"
+        cluster.started_with(0).await,
+        before,
+        "since the mode turned the API server started no request"
     );
 
     core.set_context_mode(SetContextMode {
@@ -895,6 +941,7 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     })
     .await;
     answered(started.local).await;
-    assert!(cluster.upgrades().await > before + 1);
+    let (ended, under_way) = cluster.portforwards().await;
+    assert!(ended + under_way > before, "it sends again once allowed");
     cluster.delete().await;
 }
