@@ -36,6 +36,7 @@ withScreenSize(1400);
 
 const NAMESPACE = "auth";
 const SERVICES = { group: "", version: "v1", resource: "services" };
+const PODS = { group: "", version: "v1", resource: "pods" };
 const API: ForwardTarget = {
   space: "qa",
   gvr: SERVICES,
@@ -201,6 +202,26 @@ test("the target and the pod are links to their objects, which open beside the t
   const [pod, options] = opened.mock.calls[1] ?? [];
   expect(pod).toMatch(/^k8s:\/\/qa\/\/v1\/pods\/auth\/auth-api-/);
   expect(options).toEqual({ preview: true });
+});
+
+test("a forward to a pod has one row for it, which carries the port it reaches, and the pod opens from it", async () => {
+  const { workbench, forwards, start, open } = await mounted();
+  const service = await start(API, 80);
+  const name = forwards.ofSpace("qa").find(({ id }) => id === service.id)?.pod;
+  if (!name) throw new Error("the service's forward names no pod");
+  const forward = await start({ ...API, gvr: PODS, name }, 8080, 8081);
+  await open(forward);
+  const rows = screen.getAllByText("Pod", { selector: "dt" });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.nextSibling?.textContent).toBe(`auth/${name} port 8080`);
+  const opened = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  fireEvent.click(button(`auth/${name}`));
+  expect(opened).toHaveBeenLastCalledWith(
+    objectUri({ space: "qa", gvr: PODS, namespace: NAMESPACE, name }),
+    { preview: true },
+  );
 });
 
 test("a forward that loses its pod says it is reconnecting, why, and then shows the other pod", async () => {

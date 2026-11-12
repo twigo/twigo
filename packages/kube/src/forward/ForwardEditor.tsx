@@ -14,6 +14,7 @@ import {
 import { formatBytes } from "@twigo/utils";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { objectUri, parsePfUri } from "../uri";
+import { isPod } from "./kinds";
 import type { Forwards } from "./service";
 import {
   addressOf,
@@ -80,7 +81,8 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
   const { editors } = useWorkbench();
   const shown = stateOf(forward);
   const listens = listensOn(forward);
-  const { target, pod, queued } = forward;
+  const { target, pod, podPort, queued } = forward;
+  const onPod = isPod(target.gvr);
   const open = (name: string, pods: boolean) => {
     editors.pin(uri);
     editors.open(
@@ -111,37 +113,42 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
       key: "target",
       label: forward.kind,
       value: (
-        <LinkButton
-          onClick={() => {
-            open(target.name, false);
-          }}
-        >
-          {target.namespace}/{target.name}
-        </LinkButton>
+        <>
+          <LinkButton
+            onClick={() => {
+              open(target.name, false);
+            }}
+          >
+            {target.namespace}/{target.name}
+          </LinkButton>
+          {onPod && podPort !== null && <Quiet> port {String(podPort)}</Quiet>}
+        </>
       ),
     },
     { key: "port", label: "Port", value: portWords(forward) },
-    {
-      key: "pod",
-      label: "Pod",
-      value:
-        pod === null ? (
-          <Quiet>Not chosen yet</Quiet>
-        ) : (
-          <>
-            <LinkButton
-              onClick={() => {
-                open(pod, true);
-              }}
-            >
-              {pod}
-            </LinkButton>
-            {forward.podPort !== null && (
-              <Quiet> port {String(forward.podPort)}</Quiet>
-            )}
-          </>
-        ),
-    },
+    ...(onPod
+      ? []
+      : [
+          {
+            key: "pod",
+            label: "Pod",
+            value:
+              pod === null ? (
+                <Quiet>Not chosen yet</Quiet>
+              ) : (
+                <>
+                  <LinkButton
+                    onClick={() => {
+                      open(pod, true);
+                    }}
+                  >
+                    {pod}
+                  </LinkButton>
+                  {podPort !== null && <Quiet> port {String(podPort)}</Quiet>}
+                </>
+              ),
+          },
+        ]),
     {
       key: "address",
       label: "Local address",
