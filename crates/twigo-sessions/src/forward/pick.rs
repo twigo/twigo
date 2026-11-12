@@ -3,8 +3,8 @@
 //! the replicas; another when it leaves or fails. A pod that failed is
 //! avoided for a backoff unless it is the only one. A pod whose upgrade
 //! answered 404, which a kubelet answers for a pod it does not hold, as
-//! around its restart, is avoided for the backoff's longest time, the only
-//! one too.
+//! around its restart, is avoided for the backoff's longest delay, the only
+//! one too, and a failure meanwhile does not shorten that.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -16,7 +16,7 @@ use twigo_ipc::IpcError;
 use super::cause::Cause;
 use super::watching::{Candidate, Seen};
 
-/// The backoff's longest delay.
+/// The backoff's longest delay, before its jitter.
 const LONGEST: Duration = Duration::from_secs(30);
 
 pub(super) enum Known {
@@ -54,9 +54,20 @@ pub(super) enum Chosen {
 struct Avoided {
     until: Instant,
     backoff: ExponentialBackoff,
-    /// What the upgrade said when it answered 404: such a pod is not chosen
-    /// before `until`, even as the only one.
-    missing: Option<String>,
+    missing: Option<Missing>,
+}
+
+/// What the upgrade said when it answered 404: such a pod is not chosen
+/// before `until`, even as the only one.
+struct Missing {
+    words: String,
+    until: Instant,
+}
+
+impl Avoided {
+    fn missing(&self, now: Instant) -> Option<&Missing> {
+        self.missing.as_ref().filter(|missing| missing.until > now)
+    }
 }
 
 pub(super) struct Pick {
@@ -65,8 +76,9 @@ pub(super) struct Pick {
     avoided: HashMap<Box<str>, Avoided>,
 }
 
-/// Jitter adds up to the delay again: 0.5–5 s for a first failure of the
-/// hub's, growing to 30 s for a pod that keeps failing.
+/// 0.5 s for a first failure, doubling to 30 s for a pod that keeps
+/// failing, each with a jitter of up to the delay again, so 0.5–1 s and
+/// 30–60 s ([`ExponentialBackoff::next`](https://github.com/Xuanwo/backon/blob/e24dc92742e201f7320868d46a12ff59eb82ef72/backon/src/backoff/exponential.rs#L210-L235), backon 1.6.0).
 fn backoff() -> ExponentialBackoff {
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))
@@ -130,18 +142,17 @@ impl Pick {
                 listed
                     .iter()
                     .filter_map(|candidate| Some((candidate, self.held(candidate, now)?)))
-                    .filter(|(_, avoided)| avoided.missing.is_none())
+                    .filter(|(_, avoided)| avoided.missing(now).is_none())
                     .min_by_key(|(_, avoided)| avoided.until)
                     .map(|(candidate, _)| candidate)
             });
         let Some(chosen) = chosen.cloned() else {
             let missing = listed
                 .iter()
-                .filter_map(|candidate| self.held(candidate, now))
-                .min_by_key(|avoided| avoided.until)
-                .and_then(|avoided| avoided.missing.clone())
+                .filter_map(|candidate| self.held(candidate, now)?.missing(now))
+                .min_by_key(|missing| missing.until)
                 .expect("every candidate answered 404");
-            return Chosen::None(missing);
+            return Chosen::None(missing.words.clone());
         };
         self.current = Some(chosen.clone());
         Chosen::Pod(chosen)
@@ -155,10 +166,8 @@ impl Pick {
         };
         let mut back = None;
         for candidate in candidates {
-            let avoided = self
-                .held(candidate, now)
-                .filter(|avoided| avoided.missing.is_some())?;
-            back = Some(back.map_or(avoided.until, |back: Instant| back.min(avoided.until)));
+            let missing = self.held(candidate, now)?.missing(now)?;
+            back = Some(back.map_or(missing.until, |back: Instant| back.min(missing.until)));
         }
         back
     }
@@ -178,18 +187,19 @@ impl Pick {
         })
     }
 
-    /// A connection to the pod failed.
+    /// A connection to the pod failed. The later end of an avoidance stands.
     pub(super) fn failed(&mut self, key: &str, now: Instant) {
         let avoided = self.avoid(key, now);
-        avoided.until = now + avoided.backoff.next().expect("without a limit");
-        avoided.missing = None;
+        let until = now + avoided.backoff.next().expect("without a limit");
+        avoided.until = avoided.until.max(until);
     }
 
     /// The upgrade to the pod answered 404, in these words.
     pub(super) fn left(&mut self, key: &str, words: String, now: Instant) {
         let avoided = self.avoid(key, now);
-        avoided.until = now + LONGEST;
-        avoided.missing = Some(words);
+        let until = now + LONGEST;
+        avoided.until = avoided.until.max(until);
+        avoided.missing = Some(Missing { words, until });
     }
 
     /// The pod carried a connection, so it is not avoided.

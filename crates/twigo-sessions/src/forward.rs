@@ -404,8 +404,8 @@ impl Shared {
     }
 
     /// The pod to go to, which the status names once it is chosen.
-    fn choose(&self) -> Chosen {
-        let chosen = self.pick().choose(Instant::now());
+    fn choose(&self, now: Instant) -> Chosen {
+        let chosen = self.pick().choose(now);
         if let Chosen::Pod(candidate) = &chosen {
             self.update(|status| {
                 let changed = status.pod.as_deref() != Some(&*candidate.name)
@@ -423,6 +423,16 @@ impl Shared {
         self.picked.send_modify(|picks| *picks += 1);
     }
 
+    fn forget(&self) {
+        self.pick().forget();
+        self.picked.send_modify(|picks| *picks += 1);
+    }
+
+    fn served(&self, key: &str) {
+        self.pick().served(key);
+        self.picked.send_modify(|picks| *picks += 1);
+    }
+
     fn failed(&self, key: &str) {
         self.pick().failed(key, Instant::now());
     }
@@ -430,8 +440,9 @@ impl Shared {
     /// The upgrade to a pod behind a Service or a workload answered 404, in
     /// `words`: whether another pod is left, which the status names then.
     fn left(&self, key: &str, words: String) -> bool {
-        self.pick().left(key, words, Instant::now());
-        matches!(self.choose(), Chosen::Pod(_))
+        let now = Instant::now();
+        self.pick().left(key, words, now);
+        matches!(self.choose(now), Chosen::Pod(_))
     }
 
     fn report(&self, report: Report) {
@@ -444,6 +455,7 @@ impl Shared {
 enum Report {
     /// A pod sent it bytes, so the forward works.
     Served(u64),
+    /// Why it ended, or a 404 of its pod, after which it chooses again.
     Failed(u64, Fault),
 }
 
@@ -643,12 +655,28 @@ impl Supervisor {
 
     /// Run after every event (a control, a report, a socket, the end of a
     /// connection, a change the hub tells, a probe's end, a timer). A forward
-    /// nobody uses holds no subscription, opens no stream and has no timer
-    /// armed, keeping its words: a proof under way ends, and only a probe in
-    /// flight stays, for its result. A forward that is used and cannot
-    /// reach a pod proves, and it watches its target while it proves or
-    /// is ready.
+    /// nobody uses, before or after the step its proof takes here, holds no
+    /// subscription, opens no stream and has no timer armed, keeping its
+    /// words: a proof under way ends, and only a probe in flight stays, for
+    /// its result. A forward that is used and cannot reach a pod proves, and
+    /// it watches its target while it proves or is ready.
     fn settle(&mut self) {
+        if self.used() {
+            if self.phase == Phase::Ready && self.proof.is_none() {
+                self.ensure_watching();
+                let chosen = self.shared.choose(Instant::now());
+                if !matches!(chosen, Chosen::Pod(_) | Chosen::Unknown(None)) {
+                    self.proof = Some(Proof::new(Asker::Connection));
+                }
+            }
+            if self.phase == Phase::Reconnecting && self.proof.is_none() {
+                self.proof = Some(Proof::new(Asker::Connection));
+            }
+            if self.proof.is_some() {
+                self.ensure_watching();
+                self.advance();
+            }
+        }
         if !self.used() {
             if self
                 .proof
@@ -658,22 +686,7 @@ impl Supervisor {
                 self.proof = None;
             }
             self.unwatch();
-            return;
-        }
-        if self.phase == Phase::Ready && self.proof.is_none() {
-            self.ensure_watching();
-            if !matches!(self.shared.choose(), Chosen::Pod(_) | Chosen::Unknown(None)) {
-                self.proof = Some(Proof::new(Asker::Connection));
-            }
-        }
-        if self.phase == Phase::Reconnecting && self.proof.is_none() {
-            self.proof = Some(Proof::new(Asker::Connection));
-        }
-        if self.proof.is_some() {
-            self.ensure_watching();
-            self.advance();
-        }
-        if self.proof.is_none() && self.phase != Phase::Ready {
+        } else if self.proof.is_none() && self.phase != Phase::Ready {
             self.unwatch();
         }
     }
@@ -681,7 +694,7 @@ impl Supervisor {
     fn control(&mut self, control: Control) {
         match control {
             Control::Restart => {
-                self.shared.pick().forget();
+                self.shared.forget();
                 if matches!(self.phase, Phase::Failed(_)) {
                     self.close_queued();
                     self.phase = Phase::Starting;
@@ -778,7 +791,7 @@ impl Supervisor {
         self.shared
             .know(Known::from(watching.look(&self.shared.config)));
         // The pod new connections go to may have changed.
-        self.shared.choose();
+        self.shared.choose(Instant::now());
     }
 
     /// Takes the proof under way a step on: a probe of the pod it would
@@ -791,7 +804,7 @@ impl Supervisor {
             return;
         }
         let (by, received) = (proof.by, self.shared.received.load(Ordering::Relaxed));
-        match self.shared.choose() {
+        match self.shared.choose(Instant::now()) {
             Chosen::Pod(candidate) => {
                 let (shared, end) = (Arc::clone(&self.shared), self.shared.end.subscribe());
                 let proof = self.proof.as_mut().expect("checked");
@@ -853,7 +866,7 @@ impl Supervisor {
     /// meanwhile, so they are looked at again before it says so; where
     /// nobody uses it any more, the proof's result counts.
     fn proven(&mut self) {
-        let ready = match self.shared.choose() {
+        let ready = match self.shared.choose(Instant::now()) {
             Chosen::Pod(_) => true,
             Chosen::Unknown(None) => self.watching.is_none() && self.opening.is_none(),
             Chosen::None(_) | Chosen::Unknown(Some(_)) | Chosen::Refused(_) | Chosen::Fault(_) => {

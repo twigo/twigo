@@ -144,7 +144,7 @@ async fn run(
         permit: _permit,
     } = tokio::select! {
         biased;
-        prepared = prepare(shared, end) => prepared?,
+        prepared = prepare(shared, number, end) => prepared?,
         () = leaves(&mut socket, &mut early) => return Ok(()),
     };
     pump(
@@ -160,7 +160,14 @@ struct Prepared {
     permit: Permit,
 }
 
-async fn prepare(shared: &Arc<Shared>, end: watch::Receiver<u64>) -> Result<Prepared, Over> {
+/// The connection's place among the sessions, then its pod and a stream to
+/// it. A pod that answers 404 has been sent nothing of the client's, so the
+/// connection tells it and chooses again within its wait for a pod.
+async fn prepare(
+    shared: &Arc<Shared>,
+    number: u64,
+    end: watch::Receiver<u64>,
+) -> Result<Prepared, Over> {
     let mut link = Link::new(shared, end).await?;
     let clients = Arc::clone(&link.clients);
     let waiting = Waiting(Arc::new({
@@ -181,18 +188,29 @@ async fn prepare(shared: &Arc<Shared>, end: watch::Receiver<u64>) -> Result<Prep
         over = link.interrupted() => return Err(over),
         permit = clients.admit_session(Actor::Ui, Some(&waiting)) => permit,
     };
-    let candidate = pod(shared, &mut link).await?;
-    let connected = tokio::select! {
-        biased;
-        over = link.interrupted() => return Err(over),
-        connected = connect(shared, &clients, &candidate) => connected?,
-    };
-    Ok(Prepared {
-        link,
-        candidate,
-        connected,
-        permit,
-    })
+    let deadline = Instant::now() + CANDIDATE_WAIT;
+    loop {
+        let candidate = pod(shared, &mut link, deadline).await?;
+        let connected = tokio::select! {
+            biased;
+            over = link.interrupted() => return Err(over),
+            connected = connect(shared, &clients, &candidate) => connected,
+        };
+        match connected {
+            Ok(connected) => {
+                return Ok(Prepared {
+                    link,
+                    candidate,
+                    connected,
+                    permit,
+                });
+            }
+            Err(Over::Fault(left @ Fault::Left { .. })) => {
+                shared.report(Report::Failed(number, left));
+            }
+            Err(over) => return Err(over),
+        }
+    }
 }
 
 /// Returns once the client is gone without having sent anything, which a
@@ -212,11 +230,13 @@ async fn leaves(socket: &mut Socket, early: &mut Vec<u8>) {
     pending().await
 }
 
-async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
+/// The pod to go to, waiting for one until `deadline`; a wait that ends
+/// chooses once more before it gives up.
+async fn pod(shared: &Shared, link: &mut Link, deadline: Instant) -> Result<Candidate, Over> {
     let mut picked = shared.picked.subscribe();
-    let deadline = Instant::now() + CANDIDATE_WAIT;
     loop {
-        let why = match shared.choose() {
+        let now = Instant::now();
+        let why = match shared.choose(now) {
             Chosen::Pod(candidate) => return Ok(candidate),
             // The forward fails with it, which ends this connection.
             Chosen::Fault(_) => return Err(Over::Ended),
@@ -224,12 +244,15 @@ async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
             Chosen::None(why) => why,
             Chosen::Unknown(why) => why.unwrap_or_else(|| UNANSWERED_YET.to_owned()),
         };
-        let back = shared.pick().back(Instant::now());
+        if now >= deadline {
+            return Err(Over::Fault(Fault::NoPod(why)));
+        }
+        let back = shared.pick().back(now);
         tokio::select! {
             biased;
             over = link.interrupted() => return Err(over),
             _ = picked.changed() => {}
-            () = sleep_until(deadline) => return Err(Over::Fault(Fault::NoPod(why))),
+            () = sleep_until(deadline) => {}
             () = at(back) => {}
         }
     }
@@ -362,7 +385,7 @@ async fn pump(
                     shared.received.fetch_add(read as u64, Ordering::Relaxed);
                     if !served {
                         served = true;
-                        shared.pick().served(&candidate.key);
+                        shared.served(&candidate.key);
                         shared.report(Report::Served(number));
                     }
                 }

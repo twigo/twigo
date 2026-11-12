@@ -39,7 +39,8 @@ impl Cause {
         }
     }
 
-    /// The upgrade to the pod answered 404: that pod is gone.
+    /// The upgrade to the pod answered 404: a pod that is the target is
+    /// gone, and one behind a Service or a workload is avoided in its words.
     pub(super) fn upgrade(error: &kube::Error) -> Option<Self> {
         match error {
             kube::Error::Api(status) if status.code == 404 => Some(Self {
