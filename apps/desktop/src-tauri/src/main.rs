@@ -690,8 +690,8 @@ async fn forward_start(
 }
 
 #[tauri::command]
-fn forward_stop(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
-    app.core.forward_stop(request)
+async fn forward_stop(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
+    app.core.forward_stop(request).await
 }
 
 #[tauri::command]
@@ -703,8 +703,8 @@ async fn forward_resume(
 }
 
 #[tauri::command]
-fn forward_remove(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
-    app.core.forward_remove(request)
+async fn forward_remove(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
+    app.core.forward_remove(request).await
 }
 
 #[tauri::command]

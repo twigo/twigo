@@ -370,7 +370,7 @@ async fn a_forward_keeps_its_ports_app_protocol_across_a_restart() {
         listed(&core)[0].app_protocol.as_deref(),
         Some("kubernetes.io/h2c")
     );
-    core.forward_stop(ForwardId(1)).unwrap();
+    core.forward_stop(ForwardId(1)).await.unwrap();
     assert_eq!(
         core.state.forwards("kind-plain").forwards[0]
             .app_protocol
@@ -575,7 +575,7 @@ async fn a_stop_keeps_a_forward_a_remove_forgets_it_and_a_quit_changes_what_ran_
     let before = core.follow_forwards("main", move |event| events.send(event).is_ok());
     assert_eq!(before.len(), 2);
 
-    core.forward_stop(ForwardId(1)).unwrap();
+    core.forward_stop(ForwardId(1)).await.unwrap();
     let ForwardEvent::Changed { forward } = seen.recv_timeout(Duration::from_secs(5)).unwrap()
     else {
         panic!("a stop changes the forward");
@@ -590,13 +590,13 @@ async fn a_stop_keeps_a_forward_a_remove_forgets_it_and_a_quit_changes_what_ran_
     .await;
     assert!(!core.state.forwards("kind-plain").forwards[0].runs);
 
-    core.forward_remove(ForwardId(1)).unwrap();
+    core.forward_remove(ForwardId(1)).await.unwrap();
     let event = seen.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(matches!(event, ForwardEvent::Removed { id } if id == ForwardId(1)));
     let kept = core.state.forwards("kind-plain");
     assert_eq!(kept.forwards.len(), 1);
     assert_eq!(kept.ports.len(), 1, "the port stays remembered");
-    assert!(core.forward_stop(ForwardId(1)).is_err());
+    assert!(core.forward_stop(ForwardId(1)).await.is_err());
 
     core.shutdown();
     until("the port is released", || {
@@ -724,7 +724,7 @@ async fn a_later_follower_of_a_window_replaces_the_earlier() {
     let current = core.follow_forwards("main", move |event| later.send(event).is_ok());
     assert_eq!(current.len(), 1);
 
-    core.forward_stop(ForwardId(1)).unwrap();
+    core.forward_stop(ForwardId(1)).await.unwrap();
     assert!(matches!(
         later_sees.recv_timeout(Duration::from_secs(5)).unwrap(),
         ForwardEvent::Changed { .. }
@@ -732,7 +732,7 @@ async fn a_later_follower_of_a_window_replaces_the_earlier() {
     assert!(earlier_sees.try_recv().is_err());
 
     core.drop_window("main");
-    core.forward_remove(ForwardId(1)).unwrap();
+    core.forward_remove(ForwardId(1)).await.unwrap();
     assert!(later_sees.recv_timeout(Duration::from_millis(200)).is_err());
 }
 
@@ -812,7 +812,7 @@ async fn a_forward_on_a_detour_is_never_remembered_not_even_by_a_stop_and_a_resu
     let ForwardStarted::Started { forward } = core.forward_start(start(free)).await.unwrap() else {
         panic!("the free port starts");
     };
-    core.forward_stop(forward.id).unwrap();
+    core.forward_stop(forward.id).await.unwrap();
     core.forward_resume(ResumeForward {
         id: forward.id,
         local: None,
@@ -823,7 +823,7 @@ async fn a_forward_on_a_detour_is_never_remembered_not_even_by_a_stop_and_a_resu
     assert!(kept.ports.is_empty(), "{:?}", kept.ports);
     assert!(kept.forwards[0].detour);
 
-    core.forward_remove(forward.id).unwrap();
+    core.forward_remove(forward.id).await.unwrap();
     let ports = core
         .forward_ports(target("kind-plain", "api"))
         .await
@@ -1186,7 +1186,7 @@ async fn a_restore_that_finds_a_forward_of_the_same_port_of_the_target_adds_none
     assert_eq!(forwards[0].id, forward.id);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_state_keeps_what_the_table_holds_when_two_commands_race() {
     let dir = tempfile::tempdir().unwrap();
     keep(dir.path(), &Saved::default());
@@ -1213,15 +1213,20 @@ async fn the_state_keeps_what_the_table_holds_when_two_commands_race() {
             }
         }
         core.save_forwards("kind-plain");
-        let (barrier, core) = (&std::sync::Barrier::new(2), &core);
-        std::thread::scope(|scope| {
-            for id in [2 * round + 1, 2 * round + 2] {
-                scope.spawn(move || {
-                    barrier.wait();
-                    core.forward_remove(ForwardId(id)).unwrap();
-                });
-            }
-        });
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let removes: Vec<_> = [2 * round + 1, 2 * round + 2]
+            .into_iter()
+            .map(|id| {
+                let (core, barrier) = (Arc::clone(&core), Arc::clone(&barrier));
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    core.forward_remove(ForwardId(id)).await.unwrap();
+                })
+            })
+            .collect();
+        for remove in removes {
+            remove.await.unwrap();
+        }
         let kept = core.state.forwards("kind-plain").forwards.len();
         assert_eq!(
             kept, 0,
@@ -1264,7 +1269,7 @@ async fn a_forward_that_carried_bytes() -> (tempfile::TempDir, Arc<Core>, Forwar
 async fn a_stop_keeps_the_bytes_the_forward_carried() {
     let (_dir, core, forward, _local) = a_forward_that_carried_bytes().await;
 
-    core.forward_stop(forward.id).unwrap();
+    core.forward_stop(forward.id).await.unwrap();
     let stopped = &listed(&core)[0];
     assert_eq!((stopped.sent, stopped.received), (5, 5));
 
@@ -1360,7 +1365,7 @@ async fn a_run_the_forward_has_left_says_nothing_older_after_a_stop_and_nothing_
         assert_eq!(forward.state, ForwardState::Stopped, "not the old run's");
     }
 
-    core.forward_remove(ForwardId(7)).unwrap();
+    core.forward_remove(ForwardId(7)).await.unwrap();
     assert!(matches!(
         seen.try_recv(),
         Ok(ForwardEvent::Removed { id }) if id == ForwardId(7)
@@ -1466,7 +1471,7 @@ async fn a_stop_a_move_and_a_shutdown_leave_the_port_free_when_they_return() {
     assert_eq!(forward_state(&core, 2).await, ForwardState::Restored);
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    core.forward_stop(ForwardId(1)).unwrap();
+    core.forward_stop(ForwardId(1)).await.unwrap();
     assert!(
         std::net::TcpListener::bind(("127.0.0.1", first)).is_ok(),
         "a stop leaves the port free"
@@ -1620,4 +1625,348 @@ async fn a_forward_goes_out_at_most_four_times_a_second_but_a_change_of_state_at
         *at - sent[sent.len() - 2].0 < Duration::from_millis(250),
         "a state goes out inside the window of the last"
     );
+}
+
+async fn unattended(dir: &Path, api: &Api) -> Arc<Core> {
+    let kubeconfig = dir.join("config");
+    std::fs::write(
+        &kubeconfig,
+        KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", api.port)),
+    )
+    .unwrap();
+    let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
+    core.catalog
+        .follow(crate::catalog::sources(Some(kubeconfig), None, None));
+    core.proxy_env
+        .send_replace(Some(twigo_kube::client::ProxyEnv::default()));
+    core.catalog.contexts().await;
+    core
+}
+
+fn other_target(mut saved: SavedForward, name: &str) -> SavedForward {
+    saved.target = target("kind-plain", name);
+    saved
+}
+
+const REFUSING: &str = r#"{"readOnly": {"allowPortForward": false}}"#;
+
+async fn set_the_mode(core: &Core, mode: Mode) {
+    core.set_context_mode(SetContextMode {
+        context: "kind-plain".to_owned(),
+        mode: Some(mode),
+    })
+    .await
+    .unwrap();
+}
+
+async fn refused_while_restored(dir: &Path, api: &Api) -> Arc<Core> {
+    std::fs::write(dir.join("policy.json"), REFUSING).unwrap();
+    keep(
+        dir,
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = unattended(dir, api).await;
+    core.restore_forwards().await;
+    assert_eq!(listed(&core)[0].state, ForwardState::Restored);
+    set_the_mode(&core, Mode::ReadOnly).await;
+    core.forwards.recheck();
+    until("the mode refuses it", || {
+        failed_with(&core, |error| error.kind == ErrorKind::Permissions)
+    })
+    .await;
+    core
+}
+
+async fn stays_waiting_and_asks_nobody(core: &Core, api: &Api) {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(listed(core)[0].state, ForwardState::Restored);
+    assert_eq!(api.requests.load(Ordering::SeqCst), 0, "nobody was asked");
+}
+
+#[tokio::test]
+async fn a_start_waits_for_the_restore_and_sees_the_ports_and_forwards_it_restored() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let remembered = free();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![other_target(forward_of(1, 5432, free(), true), "db")],
+            ports: vec![Remembered {
+                target: target("kind-plain", "api"),
+                port: 8080,
+                local: remembered,
+            }],
+        },
+    );
+    let core = unattended(dir.path(), &api).await;
+
+    let starting = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            core.forward_start(StartForward {
+                target: target("kind-plain", "api"),
+                port: 8080,
+                local: None,
+            })
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!starting.is_finished(), "a start waits for the restore");
+    assert!(listed(&core).is_empty());
+
+    core.restore_forwards().await;
+    let ForwardStarted::Started { forward } = starting.await.unwrap().unwrap() else {
+        panic!("the remembered port is free");
+    };
+    assert_eq!(forward.local, remembered);
+    let kept = core.state.forwards("kind-plain");
+    assert_eq!(kept.forwards.len(), 2, "the restored forward is kept");
+    assert_eq!(
+        serde_json::to_value(&kept).unwrap(),
+        serde_json::to_value(core.forwards.table().saved("kind-plain")).unwrap(),
+        "the state is the table"
+    );
+}
+
+#[tokio::test]
+async fn every_command_that_reads_or_changes_the_table_waits_for_the_restore() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![
+                forward_of(1, 8080, free(), true),
+                other_target(forward_of(2, 5432, free(), true), "db"),
+                other_target(forward_of(3, 6379, free(), true), "cache"),
+            ],
+            ports: Vec::new(),
+        },
+    );
+    let core = unattended(dir.path(), &api).await;
+
+    let ports = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.forward_ports(target("kind-plain", "api")).await }
+    });
+    let resume = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move {
+            core.forward_resume(ResumeForward {
+                id: ForwardId(1),
+                local: None,
+            })
+            .await
+        }
+    });
+    let stop = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.forward_stop(ForwardId(2)).await }
+    });
+    let remove = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.forward_remove(ForwardId(3)).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for (command, finished) in [
+        ("forward_ports", ports.is_finished()),
+        ("forward_resume", resume.is_finished()),
+        ("forward_stop", stop.is_finished()),
+        ("forward_remove", remove.is_finished()),
+    ] {
+        assert!(!finished, "{command} waits for the restore");
+    }
+
+    core.restore_forwards().await;
+    let ports = ports.await.unwrap().unwrap();
+    assert_eq!(ports.ports[0].forward, Some(ForwardId(1)));
+    resume.await.unwrap().unwrap();
+    stop.await.unwrap().unwrap();
+    remove.await.unwrap().unwrap();
+    let ids: Vec<_> = listed(&core).iter().map(|forward| forward.id.0).collect();
+    assert_eq!(ids, [1, 2]);
+}
+
+#[tokio::test]
+async fn clients_made_while_the_restore_is_under_way_start_the_forwards_it_restores() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = unattended(dir.path(), &api).await;
+
+    core.forwards.connected("kind-plain");
+    core.restore_forwards().await;
+    until("the space's connecting starts it", || {
+        let now = listed(&core)[0].state.clone();
+        (now != ForwardState::Restored).then_some(now)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_start_that_finds_its_port_started_meanwhile_moves_that_forward_to_the_local_port_it_asked()
+ {
+    let api = Api::start(true).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let (first, second) = (free(), free());
+    let start = |local| StartForward {
+        target: target("kind-plain", "api"),
+        port: 8080,
+        local: Some(local),
+    };
+
+    let late = tokio::spawn({
+        let core = Arc::clone(&core);
+        async move { core.forward_start(start(first)).await }
+    });
+    api.reached().await;
+    let ForwardStarted::Started { forward: winner } =
+        core.forward_start(start(second)).await.unwrap()
+    else {
+        panic!("a free port starts");
+    };
+    api.release.notify_one();
+    let ForwardStarted::Started { forward } = late.await.unwrap().unwrap() else {
+        panic!("the port has a forward");
+    };
+
+    assert_eq!((forward.id, forward.local), (winner.id, first));
+    assert_eq!(listed(&core).len(), 1, "no second forward");
+    assert_eq!(listed(&core)[0].local, first);
+    assert!(TcpStream::connect(("127.0.0.1", first)).await.is_ok());
+    until("the port it left is released", || {
+        std::net::TcpListener::bind(("127.0.0.1", second)).ok()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_clients_of_a_context_that_lifts_the_refusal_start_the_forward_it_had_restored() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = refused_while_restored(dir.path(), &api).await;
+
+    set_the_mode(&core, Mode::ReadWrite).await;
+    core.forwards.connected("kind-plain");
+    until("the lifted refusal and the clients start it", || {
+        let now = listed(&core)[0].state.clone();
+        (now != ForwardState::Restored && !matches!(now, ForwardState::Failed { .. }))
+            .then_some(now)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_clients_of_a_context_ask_the_policy_themselves_whether_its_forwards_may_run() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("policy.json"), REFUSING).unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = unattended(dir.path(), &api).await;
+    core.restore_forwards().await;
+    set_the_mode(&core, Mode::ReadOnly).await;
+
+    core.forwards.connected("kind-plain");
+    until("the clients fail it", || {
+        failed_with(&core, |error| error.kind == ErrorKind::Permissions)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(failed_with(&core, |error| error.kind == ErrorKind::Permissions).is_some());
+    assert_eq!(api.requests.load(Ordering::SeqCst), 0, "nobody was asked");
+
+    set_the_mode(&core, Mode::ReadWrite).await;
+    core.forwards.recheck();
+    stays_waiting_and_asks_nobody(&core, &api).await;
+}
+
+#[tokio::test]
+async fn a_resume_that_lifts_the_refusal_of_a_forward_that_waited_leaves_it_waiting() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = refused_while_restored(dir.path(), &api).await;
+
+    set_the_mode(&core, Mode::ReadWrite).await;
+    core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: None,
+    })
+    .await
+    .unwrap();
+    stays_waiting_and_asks_nobody(&core, &api).await;
+}
+
+#[tokio::test]
+async fn a_resume_between_a_lifted_refusal_and_the_data_path_handling_it_leaves_the_forward_waiting()
+ {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = refused_while_restored(dir.path(), &api).await;
+
+    set_the_mode(&core, Mode::ReadWrite).await;
+    core.forwards.recheck();
+    core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: None,
+    })
+    .await
+    .unwrap();
+    stays_waiting_and_asks_nobody(&core, &api).await;
+}
+
+#[tokio::test]
+async fn a_move_after_the_clients_came_does_not_leave_the_forward_waiting() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = unattended(dir.path(), &api).await;
+    core.restore_forwards().await;
+
+    core.forwards.connected("kind-plain");
+    assert!(
+        !core.forwards.table().entries[&1]
+            .run
+            .as_ref()
+            .unwrap()
+            .data
+            .waits(),
+        "the manager told it to start"
+    );
+    core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: Some(free()),
+    })
+    .await
+    .unwrap();
+    until("the moved forward starts", || {
+        let now = listed(&core)[0].state.clone();
+        (now != ForwardState::Restored).then_some(now)
+    })
+    .await;
 }

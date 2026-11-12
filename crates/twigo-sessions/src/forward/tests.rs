@@ -1151,6 +1151,17 @@ async fn a_lifted_refusal_returns_a_restored_forward_to_waiting_and_a_started_on
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_forward_that_was_told_to_start_no_longer_says_it_waits_before_it_handles_the_order() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let forward = start(&fake, pod_target("web-1"), true, Budgets::default());
+    assert!(forward.forward.waits());
+
+    forward.forward.restart();
+    assert!(!forward.forward.waits());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_forward_says_whether_it_waits_for_its_first_connection_also_when_it_is_refused() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));

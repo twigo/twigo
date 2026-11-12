@@ -6,7 +6,7 @@
 mod ports;
 mod saved;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -161,6 +161,9 @@ struct Table {
     detours: HashMap<Key, u16>,
     /// One per window: a later follower replaces the earlier.
     followers: HashMap<Arc<str>, Follower>,
+    /// Until the saved forwards are in, the contexts whose clients were
+    /// made, which then start theirs over.
+    early: Option<HashSet<String>>,
 }
 
 impl Table {
@@ -282,6 +285,11 @@ impl Checks {
 pub(crate) struct Forwards {
     table: Arc<Mutex<Table>>,
     checks: Checks,
+    /// True once the saved forwards are in the table, which every command
+    /// that reads or changes it waits for: a start before that would not
+    /// see the ports and forwards not restored yet, and its save would
+    /// replace what the space kept.
+    restored: watch::Sender<bool>,
 }
 
 impl Forwards {
@@ -290,13 +298,25 @@ impl Forwards {
         catalog: watch::Receiver<Option<Arc<Contexts>>>,
     ) -> Self {
         Self {
-            table: Arc::default(),
+            table: Arc::new(Mutex::new(Table {
+                early: Some(HashSet::new()),
+                ..Table::default()
+            })),
             checks: Checks { policy, catalog },
+            restored: watch::Sender::new(false),
         }
     }
 
     fn table(&self) -> MutexGuard<'_, Table> {
         self.table.lock().expect("forwards lock")
+    }
+
+    async fn after_restore(&self) {
+        self.restored
+            .subscribe()
+            .wait_for(|restored| *restored)
+            .await
+            .expect("the manager holds the sender");
     }
 
     fn run(
@@ -358,9 +378,22 @@ impl Forwards {
     }
 
     /// The clients of `context` were made: a forward of it that waits for
-    /// its first connection starts over, unless it is refused.
+    /// its first connection starts over, unless it is refused. While the
+    /// forwards are being restored it waits for them.
     pub(crate) fn connected(&self, context: &str) {
         let mut table = self.table();
+        match &mut table.early {
+            Some(early) => {
+                early.insert(context.to_owned());
+            }
+            None => self.start_over(&mut table, context),
+        }
+    }
+
+    /// Decided on what the manager knows, not on the status, which lags the
+    /// controls it has sent: the queue applies a lifted refusal and then the
+    /// start.
+    fn start_over(&self, table: &mut Table, context: &str) {
         for entry in table
             .entries
             .values_mut()
@@ -369,7 +402,7 @@ impl Forwards {
             entry.check(&self.checks);
             if entry.refused.is_none()
                 && let Some(run) = &entry.run
-                && run.status.borrow().state == ForwardState::Restored
+                && run.data.waits()
             {
                 run.data.restart();
             }
@@ -474,6 +507,7 @@ enum Bound {
 
 impl Core {
     pub async fn forward_ports(&self, target: ForwardTarget) -> Result<ForwardPorts, IpcError> {
+        self.forwards.after_restore().await;
         let context = self.context(&target.space)?;
         let kind =
             data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?.label();
@@ -530,9 +564,10 @@ impl Core {
         let StartForward {
             target,
             port,
-            local,
+            local: asked,
         } = request;
-        named(local)?;
+        named(asked)?;
+        self.forwards.after_restore().await;
         let context = self.context(&target.space)?;
         let kind = data::Target::new(&target.gvr, target.namespace.clone(), target.name.clone())?
             .label()
@@ -541,9 +576,11 @@ impl Core {
         let key = Key::of(&target, port);
         let existing = self.forwards.table().find(&key);
         if let Some(id) = existing {
-            return self.forward_resume(ResumeForward { id, local }).await;
+            return self
+                .forward_resume(ResumeForward { id, local: asked })
+                .await;
         }
-        let local = local.unwrap_or_else(|| {
+        let local = asked.unwrap_or_else(|| {
             let remembered = self.forwards.table().remembered.get(&key).map(|r| r.local);
             ports::local(remembered, port)
         });
@@ -627,7 +664,7 @@ impl Core {
                 return self
                     .forward_resume(ResumeForward {
                         id: existing,
-                        local: None,
+                        local: asked,
                     })
                     .await;
             }
@@ -643,6 +680,7 @@ impl Core {
     pub async fn forward_resume(&self, request: ResumeForward) -> Result<ForwardStarted, IpcError> {
         let ResumeForward { id, local } = request;
         named(local)?;
+        self.forwards.after_restore().await;
         let (context, target, base) = {
             let table = self.forwards.table();
             let entry = table.entries.get(&id.0).ok_or_else(|| {
@@ -666,11 +704,10 @@ impl Core {
                 ));
             };
             if wanted == base.local && entry.run.is_some() {
-                let refused = entry.refused.is_some();
                 entry.check(&self.forwards.checks);
-                if !refused
-                    && entry.refused.is_none()
+                if entry.refused.is_none()
                     && let Some(run) = &entry.run
+                    && !run.data.waits()
                     && matches!(run.status.borrow().state, ForwardState::Failed { .. })
                 {
                     run.data.restart();
@@ -733,7 +770,8 @@ impl Core {
     }
 
     /// Closes a forward's port and connections, and keeps it listed.
-    pub fn forward_stop(&self, id: ForwardId) -> Result<(), IpcError> {
+    pub async fn forward_stop(&self, id: ForwardId) -> Result<(), IpcError> {
+        self.forwards.after_restore().await;
         let space = {
             let mut table = self.forwards.table();
             let entry = table.entries.get_mut(&id.0).ok_or_else(|| {
@@ -752,7 +790,8 @@ impl Core {
 
     /// Stops a forward and forgets it; the local port its target's port had
     /// stays.
-    pub fn forward_remove(&self, id: ForwardId) -> Result<(), IpcError> {
+    pub async fn forward_remove(&self, id: ForwardId) -> Result<(), IpcError> {
+        self.forwards.after_restore().await;
         let space = {
             let mut table = self.forwards.table();
             let entry = table.entries.remove(&id.0).ok_or_else(|| {
@@ -787,7 +826,8 @@ impl Core {
     /// wait for its first connection or its space's connecting: nothing asks
     /// a cluster. A forward whose port another process holds fails with
     /// that; the policy and the catalog are asked about the rest once they
-    /// are loaded.
+    /// are loaded. The commands wait for it, and the spaces whose clients
+    /// were made meanwhile start their forwards over at its end.
     pub(crate) async fn restore_forwards(&self) {
         for space in self.state.spaces() {
             let saved = self.state.forwards(&space.id);
@@ -805,6 +845,11 @@ impl Core {
                 self.restore_forward(context, saved).await;
             }
         }
+        let mut table = self.forwards.table();
+        for context in table.early.take().unwrap_or_default() {
+            self.forwards.start_over(&mut table, &context);
+        }
+        self.forwards.restored.send_replace(true);
     }
 
     async fn restore_forward(&self, context: &str, saved: SavedForward) {

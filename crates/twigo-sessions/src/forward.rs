@@ -255,6 +255,7 @@ impl Forward {
             sent: AtomicU64::new(0),
             received: AtomicU64::new(0),
             waits: AtomicBool::new(restored),
+            told: AtomicBool::new(false),
         });
         let supervisor = Supervisor {
             shared: Arc::clone(&shared),
@@ -299,9 +300,10 @@ impl Forward {
     }
 
     /// Whether it waits for its first connection, or did when it was
-    /// refused: it has asked no cluster yet.
+    /// refused: it has asked no cluster yet and was not told to start, which
+    /// it may not have handled yet.
     pub fn waits(&self) -> bool {
-        self.shared.waits.load(Ordering::Relaxed)
+        self.shared.waits.load(Ordering::Relaxed) && !self.shared.told.load(Ordering::Relaxed)
     }
 
     /// The bytes to the pod and from it so far, which the status shows with
@@ -316,6 +318,7 @@ impl Forward {
     /// Starts over a forward that waits for its first connection, or that
     /// failed; any other is working already.
     pub fn restart(&self) {
+        self.shared.told.store(true, Ordering::Relaxed);
         // The supervisor lives as long as the forward.
         let _ = self.control.send(Control::Restart);
     }
@@ -354,6 +357,8 @@ struct Shared {
     sent: AtomicU64,
     received: AtomicU64,
     waits: AtomicBool,
+    /// [`Forward::restart`] was called, so a forward that waits will not.
+    told: AtomicBool,
 }
 
 impl Shared {
