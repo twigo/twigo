@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -183,6 +183,7 @@ struct Api {
     reads: Arc<AtomicUsize>,
     requests: Arc<AtomicUsize>,
     release: Arc<Notify>,
+    upgrades: Arc<AtomicU16>,
 }
 
 impl Api {
@@ -200,19 +201,22 @@ impl Api {
         let reads = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(AtomicUsize::new(0));
         let release = Arc::new(Notify::new());
+        let upgrades = Arc::new(AtomicU16::new(0));
         tokio::spawn({
-            let (reads, requests, release) = (
+            let (reads, requests, release, upgrades) = (
                 Arc::clone(&reads),
                 Arc::clone(&requests),
                 Arc::clone(&release),
+                Arc::clone(&upgrades),
             );
             async move {
                 loop {
                     let (mut socket, _) = listener.accept().await.unwrap();
-                    let (reads, requests, release) = (
+                    let (reads, requests, release, upgrades) = (
                         Arc::clone(&reads),
                         Arc::clone(&requests),
                         Arc::clone(&release),
+                        Arc::clone(&upgrades),
                     );
                     tokio::spawn(async move {
                         let mut seen = Vec::new();
@@ -229,6 +233,20 @@ impl Api {
                             seen.drain(..end);
                             requests.fetch_add(1, Ordering::SeqCst);
                             let path = head.split_whitespace().nth(1).unwrap_or_default();
+                            let refused = upgrades.load(Ordering::SeqCst);
+                            if data && path.contains("/portforward") && refused != 0 {
+                                let status = format!(
+                                    r#"{{"kind":"Status","apiVersion":"v1","status":"Failure","message":"refused with {refused}","code":{refused}}}"#
+                                );
+                                let answer = format!(
+                                    "HTTP/1.1 {refused} Refused\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{status}",
+                                    status.len()
+                                );
+                                if socket.write_all(answer.as_bytes()).await.is_err() {
+                                    return;
+                                }
+                                continue;
+                            }
                             if data && path.contains("/portforward") {
                                 echo(socket, &head).await;
                                 return;
@@ -273,7 +291,12 @@ impl Api {
             reads,
             requests,
             release,
+            upgrades,
         }
+    }
+
+    fn refuse_upgrades(&self, code: u16) {
+        self.upgrades.store(code, Ordering::SeqCst);
     }
 
     async fn reached(&self) {
@@ -444,7 +467,8 @@ async fn a_forward_of_a_context_the_catalog_lacks_fails_naming_it() {
 async fn a_busy_port_answers_with_a_free_one_and_keeps_nothing() {
     let dir = tempfile::tempdir().unwrap();
     keep(dir.path(), &Saved::default());
-    let core = running(dir.path());
+    let api = Api::start(false).await;
+    let core = running_over(dir.path(), &api);
     core.catalog.contexts().await;
     let taken = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let held = taken.local_addr().unwrap().port();
@@ -769,8 +793,14 @@ async fn a_mode_that_turns_while_a_start_is_under_way_fails_the_forward_it_ends_
     .await
     .unwrap();
     api.release.notify_one();
-    let started = starting.await.unwrap().unwrap();
-    assert!(matches!(started, ForwardStarted::Started { .. }));
+    let ForwardStarted::Started { forward } = starting.await.unwrap().unwrap() else {
+        panic!("a free port starts");
+    };
+    assert!(
+        matches!(&forward.state, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions),
+        "the answer is the forward the mode refused: {:?}",
+        forward.state
+    );
     until("the mode fails the forward", || {
         let now = listed(&core).first()?.state.clone();
         matches!(&now, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions)
@@ -971,6 +1001,8 @@ async fn a_move_while_the_catalog_lacks_the_context_keeps_the_refusal_and_the_fo
 {
     let dir = tempfile::tempdir().unwrap();
     let core = restored_without_its_context(dir.path()).await;
+    let (events, seen) = mpsc::channel();
+    core.follow_forwards("main", move |event| events.send(event).is_ok());
 
     let moved = free();
     core.forward_resume(ResumeForward {
@@ -982,6 +1014,8 @@ async fn a_move_while_the_catalog_lacks_the_context_keeps_the_refusal_and_the_fo
     assert_eq!(listed(&core)[0].local, moved);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
+    let states = states_of(&seen);
+    assert!(!states.contains(&ForwardState::Starting), "{states:?}");
 
     find_the_context(dir.path());
     stays_restored(&core).await;
@@ -1838,8 +1872,8 @@ fn started(answer: Result<Result<ForwardStarted, IpcError>, tokio::task::JoinErr
 }
 
 #[tokio::test]
-async fn a_start_of_a_port_whose_start_is_under_way_waits_for_it_and_moves_its_forward_to_the_port_it_asked()
- {
+async fn a_start_waits_for_no_other_start_s_read_of_the_target_and_the_later_one_moves_the_forward()
+{
     let api = Api::start(true).await;
     let dir = tempfile::tempdir().unwrap();
     keep(dir.path(), &Saved::default());
@@ -1850,23 +1884,21 @@ async fn a_start_of_a_port_whose_start_is_under_way_waits_for_it_and_moves_its_f
     let earlier = start_of(&core, Some(first));
     api.reached().await;
     let later = start_of(&core, Some(second));
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(!later.is_finished(), "it waits for the start under way");
-    assert!(
-        std::net::TcpListener::bind(("127.0.0.1", second)).is_ok(),
-        "and binds nothing meanwhile"
+    let made = started(
+        tokio::time::timeout(Duration::from_secs(5), later)
+            .await
+            .expect("no claim is held while a target is read"),
     );
+    assert_eq!(made.local, second);
     api.release.notify_one();
-    let made = started(earlier.await);
-    let moved = started(later.await);
+    let moved = started(earlier.await);
 
-    assert_eq!((made.id, made.local), (moved.id, first));
-    assert_eq!(moved.local, second);
+    assert_eq!((moved.id, moved.local), (made.id, first));
     assert_eq!(listed(&core).len(), 1, "no second forward");
-    assert_eq!(listed(&core)[0].local, second);
-    assert!(TcpStream::connect(("127.0.0.1", second)).await.is_ok());
+    assert_eq!(listed(&core)[0].local, first);
+    assert!(TcpStream::connect(("127.0.0.1", first)).await.is_ok());
     until("the port it left is released", || {
-        std::net::TcpListener::bind(("127.0.0.1", first)).ok()
+        std::net::TcpListener::bind(("127.0.0.1", second)).ok()
     })
     .await;
 }
@@ -2086,4 +2118,212 @@ async fn a_move_of_a_forward_that_works_asks_for_no_proof_and_keeps_its_connecti
         .collect();
     assert!(!states.contains(&ForwardState::Starting), "{states:?}");
     assert_eq!(listed(&core)[0].state, ForwardState::Ready);
+}
+
+fn states_of(seen: &mpsc::Receiver<ForwardEvent>) -> Vec<ForwardState> {
+    seen.try_iter()
+        .filter_map(|event| match event {
+            ForwardEvent::Changed { forward } => Some(forward.state),
+            ForwardEvent::Removed { .. } => None,
+        })
+        .collect()
+}
+
+async fn failed_for_a_credential(api: &Api, dir: &Path) -> (Arc<Core>, ForwardId) {
+    keep(dir, &Saved::default());
+    let core = running_over(dir, api);
+    core.catalog.contexts().await;
+    api.refuse_upgrades(401);
+    let ForwardStarted::Started { forward } = core
+        .forward_start(StartForward {
+            target: target("kind-plain", "api"),
+            port: 8080,
+            local: Some(free()),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a free port starts");
+    };
+    until("the proof fails it", || {
+        failed_with(&core, |error| error.kind == ErrorKind::Unauthorized)
+    })
+    .await;
+    api.refuse_upgrades(0);
+    (core, forward.id)
+}
+
+#[tokio::test]
+async fn a_resume_of_a_failed_forward_answers_starting_and_starts_it_again() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, id) = failed_for_a_credential(&api, dir.path()).await;
+
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward { id, local: None })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert_eq!(forward.state, ForwardState::Starting);
+    until("the forward is ready", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_move_of_a_failed_forward_answers_starting_and_starts_it_again() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, id) = failed_for_a_credential(&api, dir.path()).await;
+
+    let moved = free();
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward {
+            id,
+            local: Some(moved),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a move answers with the forward");
+    };
+    assert_eq!(
+        (forward.state, forward.local),
+        (ForwardState::Starting, moved)
+    );
+    until("the forward is ready", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_resume_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_the_refusal_and_starts_nothing()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+    lose_the_context(dir.path());
+    until("the catalog loses the context", || {
+        let catalog = core.catalog.subscribe();
+        let lacks = catalog
+            .borrow()
+            .as_deref()
+            .is_some_and(|contexts| contexts.find("kind-plain").is_none());
+        lacks.then_some(())
+    })
+    .await;
+    let (events, seen) = mpsc::channel();
+    core.follow_forwards("main", move |event| events.send(event).is_ok());
+
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward {
+            id: ForwardId(1),
+            local: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert!(
+        matches!(&forward.state, ForwardState::Failed { error } if error.message == NO_SOURCE),
+        "{:?}",
+        forward.state
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let states = states_of(&seen);
+    assert!(!states.contains(&ForwardState::Starting), "{states:?}");
+    assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_resumes_of_a_stopped_forward_at_once_never_answer_busy() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+    for round in 0..300 {
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let resumes: Vec<_> = (0..2)
+            .map(|_| {
+                let (core, barrier) = (Arc::clone(&core), Arc::clone(&barrier));
+                tokio::spawn(async move {
+                    barrier.wait().await;
+                    core.forward_resume(ResumeForward {
+                        id: ForwardId(1),
+                        local: None,
+                    })
+                    .await
+                })
+            })
+            .collect();
+        for resume in resumes {
+            let answer = resume.await.unwrap().unwrap();
+            assert!(
+                matches!(answer, ForwardStarted::Started { .. }),
+                "round {round}: {answer:?}"
+            );
+        }
+        core.forward_stop(ForwardId(1)).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_stop_and_a_remove_wait_for_the_command_that_changes_the_forward() {
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![
+                forward_of(1, 8080, free(), true),
+                other_target(forward_of(2, 5432, free(), true), "db"),
+            ],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    assert_eq!(forward_state(&core, 2).await, ForwardState::Restored);
+
+    for (id, name, port) in [(1, "api", 8080), (2, "db", 5432)] {
+        let claim = core
+            .forwards
+            .claim(&Key::of(&target("kind-plain", name), port))
+            .await;
+        let command = tokio::spawn({
+            let core = Arc::clone(&core);
+            async move {
+                if id == 1 {
+                    core.forward_stop(ForwardId(id)).await
+                } else {
+                    core.forward_remove(ForwardId(id)).await
+                }
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!command.is_finished(), "forward {id} waits for the claim");
+        drop(claim);
+        command.await.unwrap().unwrap();
+    }
+    let forwards = listed(&core);
+    assert_eq!(forwards.len(), 1);
+    assert_eq!(forwards[0].state, ForwardState::Stopped);
 }

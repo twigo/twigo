@@ -365,6 +365,54 @@ contexts:
     }
 
     #[tokio::test]
+    async fn of_two_calls_at_once_only_the_one_that_builds_the_clients_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Arc::new(Connections::default());
+        let catalog = load(dir.path());
+        let a = find(&catalog, "kind-a").clone();
+        let slot = Arc::clone(
+            connections
+                .contexts
+                .lock()
+                .unwrap()
+                .entry("kind-a".to_owned())
+                .or_default(),
+        );
+        let building = slot.building.lock().await;
+        let calls: Vec<_> = (0..2)
+            .map(|_| {
+                let (connections, a) = (Arc::clone(&connections), a.clone());
+                tokio::spawn(async move {
+                    connections
+                        .clients(&a, &ProxyEnv::default(), None, Gate::unrestricted())
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        drop(building);
+        let mut answers = Vec::new();
+        for call in calls {
+            answers.push(call.await.unwrap());
+        }
+        assert!(Arc::ptr_eq(&answers[0].0, &answers[1].0));
+        assert_eq!(
+            answers.iter().filter(|(_, built)| *built).count(),
+            1,
+            "{:?}",
+            answers.iter().map(|(_, built)| built).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
     async fn retiring_reaches_clients_while_new_ones_are_built() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
