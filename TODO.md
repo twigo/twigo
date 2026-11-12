@@ -90,6 +90,7 @@ Findings that belong to no step yet.
   - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
   - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
   - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
+    Its claim is held across its answer by a test and across its bind only by a stress test that seldom fails without it, for the same reason.
   - On macOS a socket is made close-on-exec in a second call after `socket()` and `accept()`, so a child spawned between the two keeps a forward's listener or connection for as long as it runs, and the port stays listening after a stop.
     The listeners come from tokio's [`TcpSocket::new`](https://github.com/tokio-rs/tokio/blob/tokio-1.54.1/tokio/src/net/tcp/socket.rs#L163-L191), which calls socket2's [`Socket::new`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L116-L118) and so [`set_common_flags`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L773-L805), and the accepted connections from mio's [`accept`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/tcp.rs#L110-L118) (tokio 1.54.1, socket2 0.6.5, mio 1.2.4).
     A terminal's shell is not such a child: `crates/twigo-sessions/src/terminal/spawn.rs` marks every descriptor above 2 close-on-exec in `pre_exec`.
