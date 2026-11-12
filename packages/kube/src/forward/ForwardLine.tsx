@@ -1,5 +1,7 @@
+import { useState } from "react";
 import type { Forward } from "@twigo/protocol";
 import {
+  cn,
   StatusDot,
   TonedText,
   Tooltip,
@@ -7,15 +9,16 @@ import {
   TooltipTrigger,
 } from "@twigo/ui";
 import { KindIcon } from "../KindIcon";
+import { useWidth } from "../useWidth";
 import { addressOf, localWords, portLabel, portWords, stateOf } from "./words";
 
 /**
  * A forward as one line that fits a side bar: its state's dot, its kind's
  * icon, the target and port, the state's words when it is not ready, and the
- * local port at the end. The state's words give way first, and go whole
- * under 2.5rem rather than leave a letter; the target's name gives way next.
- * The port's name and the local port stay whole. The tooltip has what the
- * line leaves out.
+ * local port at the end. The state's words give way first, and show only
+ * where the room the row leaves is as wide as they are; the target's name
+ * gives way next. The port's name and the local port stay whole. The tooltip
+ * has what the line leaves out.
  */
 export function ForwardLine({ forward }: { forward: Forward }) {
   const { label, tone, pulse, detail } = stateOf(forward);
@@ -38,13 +41,7 @@ export function ForwardLine({ forward }: { forward: Forward }) {
             <span className="truncate">{forward.target.name}</span>
             <span className="shrink-0">:{portLabel(forward)}</span>
           </span>
-          {!ready && (
-            <span className="@container min-w-0 flex-1">
-              <span className="ml-1.5 block truncate text-xs text-muted-foreground @max-[2.5rem]:hidden">
-                {label}
-              </span>
-            </span>
-          )}
+          {!ready && <Words>{label}</Words>}
           <span className="ml-auto shrink-0 pl-1.5">{localWords(forward)}</span>
         </span>
       </TooltipTrigger>
@@ -66,5 +63,28 @@ export function ForwardLine({ forward }: { forward: Forward }) {
         )}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** The state's words, whole or not at all: no part of a word is left where the row has no room for it. */
+function Words({ children }: { children: string }) {
+  const [room, setRoom] = useState<HTMLElement | null>(null);
+  const [words, setWords] = useState<HTMLElement | null>(null);
+  const available = useWidth(room);
+  const needed = useWidth(words);
+  const fits = needed > 0 && available >= needed;
+  return (
+    <span ref={setRoom} className="min-w-0 flex-1 overflow-hidden pl-1.5">
+      <span
+        ref={setWords}
+        aria-hidden={!fits || undefined}
+        className={cn(
+          "block w-max text-xs text-muted-foreground",
+          !fits && "invisible",
+        )}
+      >
+        {children}
+      </span>
+    </span>
   );
 }
