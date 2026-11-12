@@ -26,8 +26,8 @@ import { recordedManifest } from "./objects";
  * on the pod's port, `forwardQueued` has connections wait for a session,
  * `forwardRestored` starts prod-eu with three forwards that an earlier run
  * left, and `forwardBlocked` has a policy file forbid forwards in the
- * context of the first forward that is ready. Any other scenario starts
- * none and lets every start through.
+ * context of the first forward that is ready, and lift that for good a
+ * while later. Any other scenario starts none and lets every start through.
  */
 export type ForwardScenario =
   | "forwardBusy"
@@ -58,8 +58,11 @@ export const FAILS_AFTER_MS = 600;
 /** After how long `forwardReconnecting` loses the pod, and for how long it waits for another. */
 export const LOSES_POD_AFTER_MS = 8000;
 export const RECONNECTS_FOR_MS = 5000;
-/** After how long `forwardBlocked` forbids forwards. */
+/** After how long `forwardBlocked` forbids forwards, and for how long. */
 export const BLOCKED_AFTER_MS = 8000;
+export const LIFTS_AFTER_MS = 15_000;
+/** After how long a forward that waits has its first connection, which proves it. */
+export const FIRST_CONNECTION_AFTER_MS = 20_000;
 const LIFE_MS = 1000;
 const QUEUED = 2;
 const BUSY_PORT = 8080;
@@ -130,8 +133,10 @@ interface Live {
 export interface ForwardHost {
   context(space: string): string | undefined;
   cluster(context: string): Cluster;
-  /** A policy file makes the context read-only and forbids forwards in it. */
-  forbid(context: string): ContextAccess;
+  /** A policy file makes the context read-only and forbids forwards in it, until it is lifted. */
+  forbid(context: string): void;
+  lift(context: string): void;
+  access(context: string): ContextAccess;
 }
 
 interface Manifest {
@@ -222,6 +227,7 @@ export class MockForwards {
   #follower: ((event: ForwardEvent) => void) | undefined;
   #next = 1;
   #seeded = false;
+  #policed = false;
   #life: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -250,6 +256,7 @@ export class MockForwards {
   }
 
   start({ target, port, local }: StartForward): ForwardStarted {
+    this.#allow(target);
     const { kind, ports } = this.#declared(target);
     const declared = ports.find((candidate) => candidate.port === port);
     if (!declared) {
@@ -259,12 +266,7 @@ export class MockForwards {
       );
     }
     const existing = this.#find(target, port);
-    if (existing) {
-      const { state } = existing.forward.state;
-      return state === "stopped" || state === "failed"
-        ? this.resume({ id: existing.forward.id, local })
-        : { outcome: "started", forward: existing.forward };
-    }
+    if (existing) return this.resume({ id: existing.forward.id, local });
     const wanted = local ?? this.#localOf(target, port);
     const busy = this.#busy(wanted);
     if (busy) return busy;
@@ -292,21 +294,22 @@ export class MockForwards {
 
   resume({ id, local }: ResumeForward): ForwardStarted {
     const live = this.#live(id);
+    this.#allow(live.forward.target);
     const wanted = local ?? live.forward.local;
     const { state } = live.forward.state;
-    if (
-      state !== "stopped" &&
-      state !== "failed" &&
-      wanted === live.forward.local
-    ) {
+    const runs = state !== "stopped" && state !== "failed";
+    if (runs && wanted === live.forward.local) {
       return { outcome: "started", forward: live.forward };
     }
     const busy = this.#busy(wanted, id);
     if (busy) return busy;
-    this.#clear(live);
-    this.#set(live, { local: wanted });
+    if (runs) {
+      this.#set(live, { local: wanted });
+    } else {
+      this.#clear(live);
+      this.#begin(live, wanted);
+    }
     this.#remember(live);
-    this.#begin(live);
     return { outcome: "started", forward: live.forward };
   }
 
@@ -361,6 +364,12 @@ export class MockForwards {
       );
     }
     return { kind, ports };
+  }
+
+  /** Refuses what the context's mode refuses, before anything is read or bound. */
+  #allow(target: ForwardTarget): void {
+    const context = this.#context(target.space);
+    if (this.#forbidden.has(context)) throw this.#blocked(target, context);
   }
 
   #context(space: string): string {
@@ -433,6 +442,7 @@ export class MockForwards {
         kind,
         port: declared.port,
         portName: declared.name,
+        appProtocol: declared.appProtocol,
         local,
         addresses: ["127.0.0.1", "::1"],
         state,
@@ -469,8 +479,9 @@ export class MockForwards {
     live.timers.clear();
   }
 
-  #begin(live: Live): void {
+  #begin(live: Live, local: number = live.forward.local): void {
     this.#set(live, {
+      local,
       state: { state: "starting" },
       pod: null,
       podPort: null,
@@ -489,12 +500,7 @@ export class MockForwards {
 
   #settle(live: Live): void {
     const { target } = live.forward;
-    const context = this.#context(target.space);
-    const refusal =
-      this.#missing(target) ??
-      (this.#forbidden.has(context)
-        ? this.#blocked(live, context)
-        : this.#unreachable(live));
+    const refusal = this.#missing(target) ?? this.#unreachable(live);
     if (refusal) {
       this.#set(live, {
         state: { state: "failed", error: wire(refusal) },
@@ -509,10 +515,12 @@ export class MockForwards {
         this.#lose(live);
       });
     }
-    if (this.scenario === "forwardBlocked") {
-      this.#later(live, BLOCKED_AFTER_MS, () => {
+    if (this.scenario === "forwardBlocked" && !this.#policed) {
+      this.#policed = true;
+      const context = this.#context(target.space);
+      setTimeout(() => {
         this.#forbid(context);
-      });
+      }, BLOCKED_AFTER_MS);
     }
   }
 
@@ -535,18 +543,18 @@ export class MockForwards {
     );
   }
 
-  #blocked(live: Live, context: string): IpcError {
-    const { source, mode } = this.host.forbid(context);
-    const { namespace } = live.forward.target;
-    const { pod } = this.#route(live, 0);
+  /** The gate's refusal of the request a connection sends, which names a pod only for a pod target. */
+  #blocked(target: ForwardTarget, context: string): IpcError {
+    const { source, mode } = this.host.access(context);
+    const pod = target.gvr.resource === "pods" ? `/${target.name}` : "";
     const blocked: Blocked = {
       context,
       mode,
       source,
       class: "forward",
       reason: "mode",
-      verb: "create",
-      target: `pods/${pod}/portforward in ${namespace}`,
+      verb: "get",
+      target: `pods${pod}/portforward in ${target.namespace}`,
     };
     return new IpcError(
       "permissions",
@@ -557,13 +565,14 @@ export class MockForwards {
 
   #forbid(context: string): void {
     this.#forbidden.add(context);
+    this.host.forbid(context);
     for (const live of this.#lives.values()) {
       const { target, state } = live.forward;
       if (this.host.context(target.space) !== context) continue;
       if (state.state === "stopped") continue;
       this.#clear(live);
       this.#set(live, {
-        state: { state: "failed", error: wire(this.#blocked(live, context)) },
+        state: { state: "failed", error: wire(this.#blocked(target, context)) },
         pod: null,
         podPort: null,
         connections: 0,
@@ -571,6 +580,28 @@ export class MockForwards {
       });
     }
     this.#unwind();
+    setTimeout(() => {
+      this.#lift(context);
+    }, LIFTS_AFTER_MS);
+  }
+
+  /** What was refused in place waits for its first connection, whatever it was before. */
+  #lift(context: string): void {
+    this.#forbidden.delete(context);
+    this.host.lift(context);
+    for (const live of this.#lives.values()) {
+      const { target, state } = live.forward;
+      if (this.host.context(target.space) !== context) continue;
+      if (state.state !== "failed" || !state.error.blocked) continue;
+      this.#set(live, { state: { state: "restored" } });
+      this.#awaitConnection(live);
+    }
+  }
+
+  #awaitConnection(live: Live): void {
+    this.#later(live, FIRST_CONNECTION_AFTER_MS, () => {
+      this.#ready(live, 0);
+    });
   }
 
   /** The pod new connections go to, the `n`th of the target's, and the port of it they reach. */
@@ -672,9 +703,11 @@ export class MockForwards {
       return { kind, declared };
     };
     const restored = named(api, 8080);
-    this.#add(api, restored.kind, restored.declared, 8081, {
-      state: "restored",
-    });
+    this.#awaitConnection(
+      this.#add(api, restored.kind, restored.declared, 8081, {
+        state: "restored",
+      }),
+    );
     const stopped = named(gateway, 9090);
     this.#add(gateway, stopped.kind, stopped.declared, 9090, {
       state: "stopped",

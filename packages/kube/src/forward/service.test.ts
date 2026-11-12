@@ -23,6 +23,7 @@ function forward(
     kind: "Service",
     port: 80,
     portName: "http",
+    appProtocol: null,
     local: 8080 + id,
     addresses: ["127.0.0.1"],
     state,

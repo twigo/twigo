@@ -80,6 +80,13 @@ export class MockAccess {
     this.#emit();
   }
 
+  /** The policy file stops making it read-only. */
+  liftFile(name: string): void {
+    fixture(name);
+    this.#filed.delete(name);
+    this.#emit();
+  }
+
   /** What a context lets through now. */
   of(name: string): ContextAccess {
     return this.#access(fixture(name));

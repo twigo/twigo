@@ -525,7 +525,7 @@ test("a tab that opens before the core has answered shows no forward is gone", a
 });
 
 const BLOCKED =
-  "qa is read-only by qa in /Library/Application Support/Twigo/policy.json, so Twigo did not send create pods/";
+  "qa is read-only by qa in /Library/Application Support/Twigo/policy.json, so Twigo did not send get pods/portforward in auth";
 
 test("a forward that a policy file forbids says the mode's words, still listening, not that it failed", async () => {
   const { start, open } = await mounted("forwardBlocked");
@@ -544,19 +544,24 @@ test("a forward that a policy file forbids says the mode's words, still listenin
   );
 });
 
-test("a start that the mode refuses says so as a warning, not as the target's failure", async () => {
-  const { start, open } = await mounted("forwardBlocked");
+test("a start that the mode refuses says so as a warning in the gate's words, and the forward stays as it was", async () => {
+  const { start, open, backend, forwards } = await mounted("forwardBlocked");
   const forward = await start(API, 80);
   await open(forward);
   await later(BLOCKED_AFTER_MS);
+  const calls = recording(backend);
   fireEvent.click(button("Start"));
   await later(READY_AFTER_MS + 100);
+  expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
   const [toast] = live();
   expect(toast).toMatch(
-    /^auth-api:http → 8080 failed: qa is read-only by qa in /,
+    /^auth-api:http is not forwarded: qa is read-only by qa in /,
   );
+  expect(toast).not.toContain("failed");
   const icon = document.querySelector(
     '[data-sonner-toast] svg[class*="text-"]',
   );
   expect(icon?.getAttribute("class")).toContain("text-warn");
+  expect(forwards.get(forward.id)?.state.state).toBe("failed");
+  expect(screen.getAllByText("Read-only").length).toBeGreaterThan(0);
 });

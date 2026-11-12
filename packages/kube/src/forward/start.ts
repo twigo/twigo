@@ -7,7 +7,7 @@ import type {
 import { notify } from "@twigo/ui";
 import type { QuickPickItem, Workbench } from "@twigo/workbench";
 import { pfUri } from "../uri";
-import { tellBind, tellFailure } from "./busy";
+import { tellBind, tellFailure, unlessRefused } from "./busy";
 import type { Forwards } from "./service";
 import { variant } from "./variants";
 import { addressOf, stateOf } from "./words";
@@ -81,7 +81,10 @@ export function startForward(
     const port = chosen.port;
     const again = (local: number | null) =>
       backend.invoke("forward_start", { target, port, local });
-    const started = await again(null);
+    const started = await unlessRefused(named(target, chosen), () =>
+      again(null),
+    );
+    if (!started) return;
     await tellBind(
       workbench,
       started,

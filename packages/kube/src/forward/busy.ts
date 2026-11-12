@@ -1,4 +1,4 @@
-import type { Forward, ForwardStarted } from "@twigo/protocol";
+import { toIpcError, type Forward, type ForwardStarted } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import type { Workbench } from "@twigo/workbench";
 import type { Forwards } from "./service";
@@ -22,6 +22,28 @@ export function validPort(value: string): string | undefined {
 }
 
 /**
+ * Runs a start or a resume. One that the context's mode refuses answers the
+ * gate's error and changes nothing (ARCHITECTURE 4.6), so it is told here as
+ * a warning in the gate's words and nothing is returned; any other failure
+ * goes on to be reported.
+ */
+export async function unlessRefused<T>(
+  what: string,
+  run: () => Promise<T>,
+): Promise<T | undefined> {
+  try {
+    return await run();
+  } catch (error) {
+    const { blocked, message } = toIpcError(error);
+    if (blocked === undefined) throw error;
+    notify.warning(`${what} is not forwarded: ${message}`, {
+      key: `forward-refused:${what}`,
+    });
+    return undefined;
+  }
+}
+
+/**
  * What a start or a resume answered. A forward is handed to `done`; a port
  * that could not be bound starts nothing, and the next free one is offered
  * as data, never taken by itself: a toast to accept it, or a field with it
@@ -41,7 +63,8 @@ export async function tellBind(
   }
   const retry = async (local: number): Promise<void> => {
     try {
-      await tellBind(workbench, await again(local), what, again, done);
+      const answer = await unlessRefused(what, () => again(local));
+      if (answer) await tellBind(workbench, answer, what, again, done);
     } catch (error) {
       workbench.report(error);
     }

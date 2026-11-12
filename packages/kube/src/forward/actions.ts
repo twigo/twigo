@@ -13,7 +13,7 @@ import * as v from "valibot";
 import type { Forward } from "@twigo/protocol";
 import type { MenuId, Workbench } from "@twigo/workbench";
 import { pfUri } from "../uri";
-import { tellBind, tellFailure, validPort } from "./busy";
+import { tellBind, tellFailure, unlessRefused, validPort } from "./busy";
 import type { Forwards } from "./service";
 import { addressOf, targetWords, webUrl } from "./words";
 
@@ -59,11 +59,12 @@ export function registerForwardActions(
   const resume = async (forward: Forward, local: number | null) => {
     const again = (port: number) =>
       backend.invoke("forward_resume", { id: forward.id, local: port });
-    const started = await backend.invoke("forward_resume", {
-      id: forward.id,
-      local,
-    });
-    await tellBind(workbench, started, targetWords(forward), again, told);
+    const started = await unlessRefused(targetWords(forward), () =>
+      backend.invoke("forward_resume", { id: forward.id, local }),
+    );
+    if (started) {
+      await tellBind(workbench, started, targetWords(forward), again, told);
+    }
   };
 
   const actions: readonly {

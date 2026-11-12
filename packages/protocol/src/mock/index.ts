@@ -96,6 +96,8 @@ export { FIRST_ASK_MS, NEXT_ASK_MS, WITHDRAWN_AFTER_MS } from "./approvals";
 export {
   BLOCKED_AFTER_MS,
   FAILS_AFTER_MS,
+  FIRST_CONNECTION_AFTER_MS,
+  LIFTS_AFTER_MS,
   LOSES_POD_AFTER_MS,
   READY_AFTER_MS,
   RECONNECTS_FOR_MS,
@@ -275,8 +277,11 @@ export function createMockBackend(
       cluster,
       forbid: (context) => {
         access.lockByFile(context);
-        return access.of(context);
       },
+      lift: (context) => {
+        access.liftFile(context);
+      },
+      access: (context) => access.of(context),
     },
   );
 

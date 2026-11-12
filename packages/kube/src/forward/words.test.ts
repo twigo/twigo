@@ -25,6 +25,7 @@ function forward(more: Partial<Forward> = {}): Forward {
     kind: "Service",
     port: 80,
     portName: "http",
+    appProtocol: null,
     local: 8080,
     addresses: ["127.0.0.1", "::1"],
     state: { state: "ready" },

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { IpcError } from "../error";
 import type { Backend } from "../backend";
 import type {
+  ContextAccess,
   Forward,
   ForwardEvent,
   ForwardStarted,
@@ -14,6 +15,8 @@ import {
   BLOCKED_AFTER_MS,
   createMockBackend,
   FAILS_AFTER_MS,
+  FIRST_CONNECTION_AFTER_MS,
+  LIFTS_AFTER_MS,
   LOSES_POD_AFTER_MS,
   READY_AFTER_MS,
   RECONNECTS_FOR_MS,
@@ -277,6 +280,24 @@ test("a start is listed starting, then ready on a pod of its target, and its cou
   expect(new Set(connections).size).toBeGreaterThan(1);
 });
 
+test("a forward carries the appProtocol its port declares", async () => {
+  const { backend, start, latest } = await followed();
+  const grpc = started(await start(GATEWAY, 9000));
+  expect(grpc.appProtocol).toBe("grpc");
+  const http = started(await start(GATEWAY, 80, 8081));
+  expect(http.appProtocol).toBeNull();
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
+  expect(latest(grpc.id)?.appProtocol).toBe("grpc");
+  const ports = await answered(backend.invoke("forward_ports", GATEWAY));
+  expect(
+    ports.ports.map(({ port, appProtocol }) => [port, appProtocol]),
+  ).toEqual([
+    [9090, null],
+    [80, null],
+    [9000, "grpc"],
+  ]);
+});
+
 test("a pod target forwards to itself", async () => {
   const { latest, start } = await followed();
   const forward = started(await start(POD, 8080));
@@ -367,19 +388,89 @@ test("resume starts a stopped forward on another port when asked, and a busy por
   });
 });
 
-test("a running forward moves to another local port", async () => {
-  const { backend, start, latest } = await followed();
+test("a running forward moves to another local port and keeps its state, its pod and its connections", async () => {
+  const { backend, start, latest, events } = await followed();
   const forward = started(await start(SERVICE, 80));
-  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
-  await answered(
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + 1000);
+  const before = latest(forward.id);
+  expect(before).toMatchObject({ state: { state: "ready" }, connections: 1 });
+
+  const moved = await answered(
     backend.invoke("forward_resume", { id: forward.id, local: 8091 }),
   );
+  expect(moved).toMatchObject({
+    outcome: "started",
+    forward: {
+      id: forward.id,
+      local: 8091,
+      state: { state: "ready" },
+      pod: before?.pod,
+      connections: 1,
+    },
+  });
+  const states = events.flatMap((event) =>
+    event.event === "changed" ? [event.forward.state.state] : [],
+  );
+  expect(states.filter((state) => state === "starting")).toHaveLength(1);
+
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
   expect(latest(forward.id)).toMatchObject({
     local: 8091,
-    state: { state: "starting" },
+    state: { state: "ready" },
   });
+});
+
+test("a move to a port that is taken answers busy and leaves the forward where it is", async () => {
+  const { backend, start, latest, events } = await followed();
+  const forward = started(await start(SERVICE, 80));
+  started(await start(GATEWAY, 80, 8090));
   await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
-  expect(latest(forward.id)?.state).toEqual({ state: "ready" });
+  const before = events.length;
+  const busy = await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: 8090 }),
+  );
+  expect(busy).toMatchObject({ outcome: "busy", why: "inUse", free: 8091 });
+  expect(events).toHaveLength(before);
+  expect(latest(forward.id)).toMatchObject({
+    local: 8080,
+    state: { state: "ready" },
+  });
+});
+
+test("a start of a port that has a forward answers it, moved when another local port is asked", async () => {
+  const { backend, start, latest, events } = await followed();
+  const forward = started(await start(SERVICE, 80));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
+  const before = events.length;
+  expect(started(await start(SERVICE, 80))).toBe(latest(forward.id));
+  expect(events).toHaveLength(before);
+
+  const moved = started(await start(SERVICE, 80, 8090));
+  expect(moved).toMatchObject({
+    id: forward.id,
+    local: 8090,
+    state: { state: "ready" },
+  });
+  expect(latest(forward.id)?.local).toBe(8090);
+  const ports = await answered(backend.invoke("forward_ports", SERVICE));
+  expect(ports.ports[0]).toMatchObject({ local: 8090, forward: forward.id });
+  expect(await start(GATEWAY, 80, 8090)).toMatchObject({
+    outcome: "busy",
+    why: "inUse",
+  });
+});
+
+test("a resume leaves a ready forward as it is, answering it, with no change told", async () => {
+  const { backend, start, latest, events } = await followed();
+  const forward = started(await start(SERVICE, 80));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
+  const ready = latest(forward.id);
+  const before = events.length;
+  const answer = await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: null }),
+  );
+  expect(answer).toEqual({ outcome: "started", forward: ready });
+  expect(events).toHaveLength(before);
 });
 
 test("remove forgets a forward but the local port it had stays remembered", async () => {
@@ -449,6 +540,24 @@ test("forwardReconnecting loses the pod after 8 s, says why for 5 s, and is read
   expect(latest(forward.id)?.state).toEqual({ state: "ready" });
 });
 
+test("a resume leaves a reconnecting forward reconnecting, and it is ready on another pod when its wait ends", async () => {
+  const { backend, start, latest, events } = await followed(
+    "forwardReconnecting",
+  );
+  const forward = started(await start(SERVICE, 80));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + LOSES_POD_AFTER_MS);
+  const lost = latest(forward.id);
+  expect(lost?.state.state).toBe("reconnecting");
+  const before = events.length;
+  const answer = await answered(
+    backend.invoke("forward_resume", { id: forward.id, local: null }),
+  );
+  expect(answer).toEqual({ outcome: "started", forward: lost });
+  expect(events).toHaveLength(before);
+  await vi.advanceTimersByTimeAsync(RECONNECTS_FOR_MS);
+  expect(latest(forward.id)?.state).toEqual({ state: "ready" });
+});
+
 test("forwardFailed fails a start because nothing listens on the pod's port, and still listens", async () => {
   const { start, latest } = await followed("forwardFailed");
   const forward = started(await start(POD, 8080));
@@ -501,7 +610,7 @@ test("forwardRestored starts prod-eu with a restored, a stopped and a failed for
   });
   expect(first[0]).toMatchObject({ pod: null, connections: 0 });
 
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(FIRST_CONNECTION_AFTER_MS - 1);
   const again = await answered(
     backend.subscribe("forwards_watch", null, () => undefined),
   );
@@ -510,6 +619,38 @@ test("forwardRestored starts prod-eu with a restored, a stopped and a failed for
     "stopped",
     "failed",
   ]);
+});
+
+test("forwardRestored's restored forward leaves by its first connection after 20 s: ready on a pod, its counters moving", async () => {
+  const { latest } = await followed("forwardRestored");
+  await vi.advanceTimersByTimeAsync(FIRST_CONNECTION_AFTER_MS - 1);
+  expect(latest(1)).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(latest(1)).toMatchObject({
+    state: { state: "ready" },
+    podPort: 8080,
+    connections: 0,
+  });
+  expect(latest(1)?.pod).toMatch(/^payments-api-/);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(latest(1)?.sent).toBeGreaterThan(0);
+  expect(latest(2)).toBeUndefined();
+  expect(latest(3)).toBeUndefined();
+});
+
+test("a resume leaves a restored forward restored, and its first connection still comes on time", async () => {
+  const { backend, latest, events } = await followed("forwardRestored");
+  await vi.advanceTimersByTimeAsync(5000);
+  const answer = await answered(
+    backend.invoke("forward_resume", { id: 1, local: null }),
+  );
+  expect(answer).toMatchObject({
+    outcome: "started",
+    forward: { id: 1, state: { state: "restored" } },
+  });
+  expect(events).toEqual([]);
+  await vi.advanceTimersByTimeAsync(FIRST_CONNECTION_AFTER_MS - 5000);
+  expect(latest(1)?.state).toEqual({ state: "ready" });
 });
 
 test("forwardRestored's stopped forward starts again, and its failed one fails again, in words", async () => {
@@ -525,12 +666,27 @@ test("forwardRestored's stopped forward starts again, and its failed one fails a
   });
 });
 
+const POLICY = "/Library/Application Support/Twigo/policy.json";
+
+/** The context's access as the catalog last told it. */
+async function accessOf(backend: Backend, name: string) {
+  let found: ContextAccess | undefined;
+  const first = await answered(
+    backend.subscribe("contexts_watch", null, (contexts) => {
+      found = contexts.find((context) => context.name === name)?.access;
+    }),
+  );
+  found = first.find((context) => context.name === name)?.access;
+  return () => found;
+}
+
 test("forwardBlocked forbids forwards by a policy file 8 s after a forward is ready, and the forward says why", async () => {
   const { backend, start, latest } = await followed("forwardBlocked");
+  const access = await accessOf(backend, "qa");
   const forward = started(await start(SERVICE, 80));
   await vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS - 1);
   expect(latest(forward.id)?.state).toEqual({ state: "ready" });
-  const routed = latest(forward.id)?.pod;
+  expect(access()?.mode).toBe("read-write");
   await vi.advanceTimersByTimeAsync(1);
   const state = latest(forward.id)?.state;
   expect(state).toMatchObject({
@@ -542,30 +698,135 @@ test("forwardBlocked forbids forwards by a policy file 8 s after a forward is re
         mode: "read-only",
         class: "forward",
         reason: "mode",
-        source: {
-          kind: "policyFile",
-          file: "/Library/Application Support/Twigo/policy.json",
-          pattern: "qa",
-        },
+        verb: "get",
+        target: `pods/portforward in ${pod.namespace}`,
+        source: { kind: "policyFile", file: POLICY, pattern: "qa" },
       },
     },
   });
   if (state?.state !== "failed") throw new Error("not failed");
   expect(state.error.message).toBe(
-    `qa is read-only by qa in /Library/Application Support/Twigo/policy.json, so Twigo did not send create pods/${routed ?? ""}/portforward in ${pod.namespace}`,
+    `qa is read-only by qa in ${POLICY}, so Twigo did not send get pods/portforward in ${pod.namespace}`,
   );
-
-  const contexts = await answered(
-    backend.subscribe("contexts_watch", null, () => undefined),
-  );
-  expect(contexts.find(({ name }) => name === "qa")?.access).toMatchObject({
+  expect(latest(forward.id)).toMatchObject({
+    pod: null,
+    connections: 0,
+    local: 8080,
+  });
+  expect(access()).toMatchObject({
     mode: "read-only",
     source: { kind: "policyFile" },
   });
-  const later = started(await start(GATEWAY, 80, 8099));
+});
+
+test("a pod target's refusal names the pod, as the gate does for a request to it", async () => {
+  const { backend, start } = await followed("forwardBlocked");
+  started(await start(POD, 8080));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS);
+  const error = await refused(
+    backend.invoke("forward_start", { target: POD, port: 8080, local: null }),
+  );
+  expect(error.message).toBe(
+    `qa is read-only by qa in ${POLICY}, so Twigo did not send get pods/${pod.name}/portforward in ${pod.namespace}`,
+  );
+});
+
+test("a start, a resume and a move that the mode refuses answer its error and change nothing", async () => {
+  const { backend, start, latest, events } = await followed("forwardBlocked");
+  const forward = started(await start(SERVICE, 80));
+  const stopped = started(await start(GATEWAY, 80, 8099));
   await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
-  expect(latest(later.id)?.state).toMatchObject({
-    state: "failed",
-    error: { kind: "permissions" },
+  await answered(backend.invoke("forward_stop", stopped.id));
+  await vi.advanceTimersByTimeAsync(BLOCKED_AFTER_MS);
+  expect(latest(forward.id)?.state.state).toBe("failed");
+  const before = events.length;
+
+  const fresh = await refused(
+    backend.invoke("forward_start", {
+      target: GATEWAY,
+      port: 9090,
+      local: null,
+    }),
+  );
+  expect(fresh).toMatchObject({
+    kind: "permissions",
+    blocked: { class: "forward", reason: "mode", mode: "read-only" },
   });
+  const wrongPort = await refused(
+    backend.invoke("forward_start", { target: SERVICE, port: 9999, local: 1 }),
+  );
+  expect(wrongPort.kind).toBe("permissions");
+  for (const request of [
+    { id: forward.id, local: null },
+    { id: forward.id, local: 8091 },
+    { id: stopped.id, local: null },
+  ]) {
+    const error = await refused(backend.invoke("forward_resume", request));
+    expect(error.kind).toBe("permissions");
+  }
+  const again = await refused(
+    backend.invoke("forward_start", { target: SERVICE, port: 80, local: null }),
+  );
+  expect(again.kind).toBe("permissions");
+
+  expect(events).toHaveLength(before);
+  expect(latest(forward.id)).toMatchObject({
+    local: 8080,
+    state: { state: "failed" },
+  });
+  expect(latest(stopped.id)).toMatchObject({
+    local: 8099,
+    state: { state: "stopped" },
+  });
+
+  await vi.advanceTimersByTimeAsync(LIFTS_AFTER_MS);
+  const next = started(await start(GATEWAY, 9090));
+  expect(next.id).toBe(stopped.id + 1);
+});
+
+test("forwardBlocked lifts the lock 15 s later: what was refused waits, restored, and its first connection makes it ready", async () => {
+  const { backend, start, latest } = await followed("forwardBlocked");
+  const access = await accessOf(backend, "qa");
+  const forward = started(await start(SERVICE, 80));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS);
+  expect(latest(forward.id)?.state.state).toBe("failed");
+
+  await vi.advanceTimersByTimeAsync(LIFTS_AFTER_MS - 1);
+  expect(latest(forward.id)?.state.state).toBe("failed");
+  expect(access()?.mode).toBe("read-only");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(latest(forward.id)).toMatchObject({
+    state: { state: "restored" },
+    pod: null,
+    local: 8080,
+  });
+  expect(access()).toMatchObject({
+    mode: "read-write",
+    source: { kind: "default" },
+  });
+
+  await vi.advanceTimersByTimeAsync(FIRST_CONNECTION_AFTER_MS - 1);
+  expect(latest(forward.id)?.state).toEqual({ state: "restored" });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(latest(forward.id)?.state).toEqual({ state: "ready" });
+  expect(latest(forward.id)?.pod).toBeTruthy();
+
+  await vi.advanceTimersByTimeAsync(BLOCKED_AFTER_MS + LIFTS_AFTER_MS);
+  expect(latest(forward.id)?.state).toEqual({ state: "ready" });
+  const later = started(await start(GATEWAY, 80, 8099));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 1);
+  expect(latest(later.id)?.state).toEqual({ state: "ready" });
+});
+
+test("a stopped forward stays stopped through the refusal and its lifting", async () => {
+  const { backend, start, latest } = await followed("forwardBlocked");
+  const forward = started(await start(SERVICE, 80));
+  const stopped = started(await start(GATEWAY, 80, 8099));
+  await vi.advanceTimersByTimeAsync(READY_AFTER_MS);
+  await answered(backend.invoke("forward_stop", stopped.id));
+  await vi.advanceTimersByTimeAsync(
+    BLOCKED_AFTER_MS + LIFTS_AFTER_MS + FIRST_CONNECTION_AFTER_MS,
+  );
+  expect(latest(forward.id)?.state.state).toBe("ready");
+  expect(latest(stopped.id)).toMatchObject({ state: { state: "stopped" } });
 });

@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
+  BLOCKED_AFTER_MS,
   createMockBackend,
   FAILS_AFTER_MS,
   READY_AFTER_MS,
@@ -429,4 +430,37 @@ test("a start that fails opens its tab and says the target's own failure", async
   expect(live()[0]).toMatch(
     /^payments-gateway:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
   );
+});
+
+test("a start that the mode refuses starts nothing and says so as a warning in the gate's words", async () => {
+  const { workbench, backend, calls } = await listed("forwardBlocked");
+  const first = await act(() =>
+    backend.invoke("forward_start", {
+      target: GATEWAY,
+      port: 9090,
+      local: null,
+    }),
+  );
+  expect(first.outcome).toBe("started");
+  await act(() =>
+    vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 100),
+  );
+  const run = forwardGateway(workbench);
+  await settle(6);
+  await pick(workbench, "80");
+  await run;
+  await settle(6);
+  expect(calls("forward_start")).toHaveLength(2);
+  const [toast] = live();
+  expect(toast).toMatch(
+    /^payments-gateway:http is not forwarded: prod-eu is read-only by prod-eu in \/Library\/Application Support\/Twigo\/policy\.json, so Twigo did not send get pods\/portforward in payments$/,
+  );
+  expect(
+    document
+      .querySelector('[data-sonner-toast] svg[class*="text-"]')
+      ?.getAttribute("class"),
+  ).toContain("text-warn");
+  expect(workbench.editors.active).not.toMatch(/^pf:/);
+  const ports = await backend.invoke("forward_ports", GATEWAY);
+  expect(ports.ports.map(({ forward }) => forward)).toEqual([1, null, null]);
 });
