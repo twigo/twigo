@@ -1898,6 +1898,39 @@ async fn a_client_that_arrives_while_the_cut_connections_close_does_not_lose_tha
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_context_the_clients_cannot_find_fails_a_forward_for_good() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    let mut open = forward.client();
+    open.write_all(b"x").await.unwrap();
+    let held = forward.next().await;
+
+    fake.set_no_context(true);
+    let _lost = forward.client();
+    let failed = forward.state("the forward fails", is_failed).await;
+    fake.set_no_context(false);
+    drop((open, held));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+
+    let before = forward.pods.connects().len();
+    let mut next = forward.client();
+    let mut left = Vec::new();
+    within(
+        "the next connection closes at once",
+        next.read_to_end(&mut left),
+    )
+    .await
+    .unwrap();
+    assert_eq!(forward.pods.connects().len(), before, "it reached no pod");
+    assert_eq!(forward.status.borrow().state, failed.state);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_forward_that_worked_tries_again_only_while_it_has_a_connection() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));

@@ -400,7 +400,6 @@ enum Report {
 
 struct Open {
     shared: Arc<Shared>,
-    /// Counts the connections in the order they were accepted, from 1.
     number: u64,
 }
 
@@ -752,7 +751,7 @@ impl Supervisor {
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => match fault {
-                Fault::Fatal(error) => self.fail(error),
+                Fault::Fatal(error) => self.end_with(error, false),
                 Fault::Port(words) => {
                     self.failure(words.clone());
                     self.unreachable(IpcError::new(ErrorKind::Unavailable, words));
@@ -866,7 +865,7 @@ impl Supervisor {
                     self.proven();
                 }
             }
-            Report::Failed(Fault::Fatal(error)) => self.fail(error),
+            Report::Failed(Fault::Fatal(error)) => self.end_with(error, false),
             Report::Failed(Fault::Port(words)) => self.failure(words),
             Report::Failed(Fault::Transient(error)) => {
                 self.failure(error.message.clone());

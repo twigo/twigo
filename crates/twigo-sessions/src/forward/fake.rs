@@ -16,7 +16,7 @@ use http_body_util::{BodyExt, Full, StreamBody};
 use serde_json::{Value, json};
 use tower::BoxError;
 use twigo_cache::hub::{Connect, Hub};
-use twigo_ipc::IpcError;
+use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 
 pub const NAMESPACE: &str = "shop";
@@ -31,6 +31,7 @@ pub struct Fake(Arc<Mutex<State>>);
 struct State {
     offline: bool,
     stalled: bool,
+    no_context: bool,
     forbidden: BTreeSet<String>,
     version: u64,
     /// By resource, then name.
@@ -87,9 +88,19 @@ impl Fake {
         };
         let connect: Connect = {
             let current = Arc::clone(&renew.current);
+            let fake = self.clone();
             Arc::new(move |_context| {
                 let clients = Arc::clone(&current.lock().unwrap());
-                Box::pin(async move { Ok::<_, IpcError>(clients) })
+                let missing = fake.state().no_context;
+                Box::pin(async move {
+                    if missing {
+                        return Err(IpcError::new(
+                            ErrorKind::NotFound,
+                            "no source lists the context \"kind-test\"",
+                        ));
+                    }
+                    Ok(clients)
+                })
             })
         };
         (Hub::new(connect), renew)
@@ -143,6 +154,10 @@ impl Fake {
 
     pub fn set_stalled(&self, stalled: bool) {
         self.state().stalled = stalled;
+    }
+
+    pub fn set_no_context(&self, missing: bool) {
+        self.state().no_context = missing;
     }
 
     pub fn forbid(&self, resource: &str, forbidden: bool) {
