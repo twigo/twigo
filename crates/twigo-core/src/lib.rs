@@ -130,36 +130,38 @@ impl Core {
             Audit::open(&data.join("audit.jsonl")),
         );
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
-        let forwards = Forwards::new(Arc::clone(&policy), catalog.subscribe());
-        Arc::new_cyclic(|core| Self {
-            this: core.clone(),
-            hub: Hub::new(connect(core.clone())),
-            policy,
-            proxy: Arc::new(Proxy::new(data.join("proxy"))),
-            approvals,
-            choosing: Mutex::default(),
-            lists: Subscriptions::new("list"),
-            objects: Subscriptions::new("object"),
-            logs: Subscriptions::new("logs"),
-            shells: Subscriptions::new("shell"),
-            forwards,
-            terminals: terminal::Terminals::new(data.join("terminals")),
-            bus: Arc::default(),
-            undos: Arc::default(),
-            discovery: Arc::new(Cache::new(cache.join("discovery"))),
-            openapi: openapi::Cache::new(cache.join("openapi")),
-            state,
-            catalog,
-            connections: Connections::default(),
-            trust: Trust::open(data.join("trust.json")),
-            credentials: Registry::new(
-                shell_env.subscribe(),
-                focused.subscribe(),
-                Timeouts::default(),
-            ),
-            focused,
-            proxy_env: watch::Sender::new(None),
-            shell_env,
+        Arc::new_cyclic(|core| {
+            let hub = Hub::new(connect(core.clone()));
+            Self {
+                this: core.clone(),
+                forwards: Forwards::new(Arc::clone(&policy), catalog.subscribe(), hub.clone()),
+                hub,
+                policy,
+                proxy: Arc::new(Proxy::new(data.join("proxy"))),
+                approvals,
+                choosing: Mutex::default(),
+                lists: Subscriptions::new("list"),
+                objects: Subscriptions::new("object"),
+                logs: Subscriptions::new("logs"),
+                shells: Subscriptions::new("shell"),
+                terminals: terminal::Terminals::new(data.join("terminals")),
+                bus: Arc::default(),
+                undos: Arc::default(),
+                discovery: Arc::new(Cache::new(cache.join("discovery"))),
+                openapi: openapi::Cache::new(cache.join("openapi")),
+                state,
+                catalog,
+                connections: Connections::default(),
+                trust: Trust::open(data.join("trust.json")),
+                credentials: Registry::new(
+                    shell_env.subscribe(),
+                    focused.subscribe(),
+                    Timeouts::default(),
+                ),
+                focused,
+                proxy_env: watch::Sender::new(None),
+                shell_env,
+            }
         })
     }
 

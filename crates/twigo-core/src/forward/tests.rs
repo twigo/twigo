@@ -1334,13 +1334,7 @@ fn a_run(core: &Core, id: u32, local: u16, listeners: Listeners) -> (Forward, Ru
     base.local = local;
     let run = core
         .forwards
-        .run(
-            "kind-plain",
-            &base,
-            listeners,
-            data::Begin::Restored,
-            core.hub.clone(),
-        )
+        .run("kind-plain", &base, listeners, data::Begin::Restored)
         .unwrap();
     (base, run)
 }
