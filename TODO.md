@@ -106,3 +106,6 @@ Findings that belong to no step yet.
     Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
   - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
     Not verified on Windows: whether a port just closed binds again at once there, after connections it served.
+- Tests that failed once in CI and passed on a rerun (2026-11-12, on a branch that touches neither):
+  - `apply::a_status_write_during_a_preview_does_not_answer_stale` (`crates/twigo-core/tests/bus_live/apply.rs`) answered `Stale` on Kubernetes 1.33 and passed on 1.34 to 1.37 in the same run; the cause was not looked for.
+  - `packages/kube/src/logs/logs.test.tsx` ended with an unhandled `requestAnimationFrame is not defined` from `FrameAcks` (`packages/protocol/src/acks.ts`): a timer of the mock's logs fired after the test's environment was gone, with every test passed.
