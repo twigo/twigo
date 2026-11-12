@@ -481,7 +481,7 @@ test("with the input variant a busy port asks again with the free port filled in
   await settle(6);
   const ask = workbench.quickAccess.session?.ask;
   expect(ask?.prompt).toBe(
-    "8080 is in use by another process or forward. Forward auth-api:http on",
+    "8080 is in use by another process or forward. Enter forwards auth-api:http on the port above.",
   );
   expect(ask?.value).toBe("8081");
   expect(live()).toEqual([]);
@@ -495,6 +495,25 @@ test("with the input variant a busy port asks again with the free port filled in
     { id: forward.id, local: 8080 },
     { id: forward.id, local: 8081 },
   ]);
+});
+
+test("with the input variant a port below 1024 says why in the prompt, whole, under the field", async () => {
+  history.replaceState(null, "", "/?variant=busy:input");
+  const { workbench, start, open } = await mounted();
+  const forward = await start(API, 80, 8085);
+  await open(forward);
+  fireEvent.click(button("Change Local Port…"));
+  await settle(4);
+  act(() => {
+    workbench.quickAccess.setValue("80");
+    workbench.quickAccess.submit();
+  });
+  await settle(6);
+  const prompt =
+    "Twigo cannot listen on 80: ports below 1024 need privileges it does not have. Enter forwards auth-api:http on the port above.";
+  expect(workbench.quickAccess.session?.ask?.prompt).toBe(prompt);
+  expect(workbench.quickAccess.session?.ask?.value).toBe("1024");
+  expect(screen.getByText(prompt).className).not.toContain("truncate");
 });
 
 test("a start that fails says the target's own failure in a toast, which neither bind answer does", async () => {

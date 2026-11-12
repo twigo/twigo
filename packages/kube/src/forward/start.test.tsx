@@ -403,7 +403,7 @@ test("with busy:input the free port is asked for, filled in, with why", async ()
   await settle(6);
   const ask = workbench.quickAccess.session?.ask;
   expect(ask?.prompt).toBe(
-    "8080 is in use by another process or forward. Forward payments-gateway:http on",
+    "8080 is in use by another process or forward. Enter forwards payments-gateway:http on the port above.",
   );
   expect(ask?.value).toBe("8081");
   expect(live()).toEqual([]);

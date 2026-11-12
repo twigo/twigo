@@ -73,7 +73,7 @@ export async function tellBind(
   if (variant("busy") === "input") {
     const typed = await workbench.quickAccess.input({
       placeholder: "Local port",
-      prompt: `${words}. Forward ${what} on`,
+      prompt: `${words}. Enter forwards ${what} on the port above.`,
       acceptLabel: "Forward",
       value: String(started.free),
       validate: validPort,
