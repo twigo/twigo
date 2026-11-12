@@ -80,7 +80,6 @@ export class MockAccess {
     this.#emit();
   }
 
-  /** The policy file stops making it read-only. */
   liftFile(name: string): void {
     fixture(name);
     this.#filed.delete(name);

@@ -686,7 +686,6 @@ test("forwardRestored's stopped forward starts again, and its failed one fails a
 
 const POLICY = "/Library/Application Support/Twigo/policy.json";
 
-/** The context's access as the catalog last told it. */
 async function accessOf(backend: Backend, name: string) {
   let found: ContextAccess | undefined;
   const first = await answered(
