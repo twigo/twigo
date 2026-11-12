@@ -13,7 +13,7 @@ use twigo_cache::hub::{Hub, Resource, Subscription};
 use twigo_cache::object::Object;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 
-use super::cause::Cause;
+use super::cause::{Cause, passes};
 use super::{Config, Kind};
 use crate::pods::{Subscriptions, v1};
 
@@ -38,10 +38,10 @@ pub(super) enum Seen {
     /// Not everything is listed yet; the cluster does not answer, when that
     /// is why.
     Unlisted(Option<String>),
-    /// The credentials are rejected, which the hub gives up on, or the
-    /// target is gone.
+    /// What does not pass by itself: a rejected credential, a 403, an error
+    /// such as a missing context, or the target is gone.
     Fault(Cause),
-    /// The cluster refuses or fails in a way the hub tries again.
+    /// The cluster fails in a way that may pass, which the hub tries again.
     Refused(IpcError),
     Listed {
         candidates: Vec<Candidate>,
@@ -115,20 +115,22 @@ impl Watching {
         select_all(waits).await;
     }
 
+    /// What the subscriptions say. The target is gone once its own
+    /// subscription has listed it missing, whatever the others say.
     pub(super) fn look(&self, config: &Config) -> Seen {
         let label = &config.target.label;
         let name = &config.target.name;
         match self {
             Watching::Pod(pod) => {
+                let Ok(object) = listed(pod) else {
+                    return Seen::Fault(Cause::gone(label, name));
+                };
                 let states = [pod.state()];
                 if let Some(seen) = refusal(&states) {
                     return seen;
                 }
-                if !pod.listed() {
+                let Some(object) = object else {
                     return Seen::Unlisted(unanswered(&states));
-                }
-                let Some(object) = pod.items().into_iter().next() else {
-                    return Seen::Fault(Cause::gone(label, name));
                 };
                 let Ok(doc) = serde_json::from_str::<PodDoc>(object.json.get()) else {
                     return Seen::Listed {
@@ -158,27 +160,27 @@ impl Watching {
                 }
             }
             Watching::Service { service, slices } => {
+                let Ok(object) = listed(service) else {
+                    return Seen::Fault(Cause::gone(label, name));
+                };
                 let states = [service.state(), slices.state()];
                 if let Some(seen) = refusal(&states) {
                     return seen;
                 }
-                if !(service.listed() && slices.listed()) {
+                let Some(object) = object.filter(|_| slices.listed()) else {
                     return Seen::Unlisted(unanswered(&states));
-                }
-                let Some(object) = service.items().into_iter().next() else {
-                    return Seen::Fault(Cause::gone(label, name));
                 };
                 let (candidates, why) =
                     behind(&object, &slices.items(), name, config.port_name.as_deref());
                 Seen::Listed { candidates, why }
             }
             Watching::Workload(workload) => {
+                if workload.target_missing() {
+                    return Seen::Fault(Cause::gone(label, name));
+                }
                 let states = workload.states();
                 if let Some(seen) = refusal(&states) {
                     return seen;
-                }
-                if workload.gone().is_some() {
-                    return Seen::Fault(Cause::gone(label, name));
                 }
                 let Some(pods) = workload.pods() else {
                     return Seen::Unlisted(unanswered(&states));
@@ -195,8 +197,19 @@ impl Watching {
     }
 }
 
-/// What the hub's states say of the cluster's refusals: only a rejected
-/// credential is final, since the hub tries every other error again.
+/// The target as its own subscription has it, once that has listed; `Err`
+/// once it has listed it missing.
+fn listed(target: &Subscription<Object>) -> Result<Option<Arc<Object>>, ()> {
+    let listed = target.listed();
+    match target.items().into_iter().next() {
+        None if listed => Err(()),
+        object => Ok(object.filter(|_| listed)),
+    }
+}
+
+/// What the hub's states say of the cluster's refusals: a rejected
+/// credential, a 403 and an error that does not pass by itself are final,
+/// though the hub tries them again; the others may pass.
 fn refusal(states: &[ViewState]) -> Option<Seen> {
     if states.contains(&ViewState::Unauthorized) {
         return Some(Seen::Fault(
@@ -207,14 +220,19 @@ fn refusal(states: &[ViewState]) -> Option<Seen> {
             .into(),
         ));
     }
-    states.iter().find_map(|state| match state {
-        ViewState::Forbidden { verb, resource } => Some(Seen::Refused(IpcError::new(
+    let failed = states.iter().filter_map(|state| match state {
+        ViewState::Forbidden { verb, resource } => Some(IpcError::new(
             ErrorKind::Forbidden,
             format!("you may not {verb} {resource}"),
-        ))),
-        ViewState::Error { error } => Some(Seen::Refused(error.clone())),
+        )),
+        ViewState::Error { error } => Some(error.clone()),
         _ => None,
-    })
+    });
+    let (passing, lasting): (Vec<_>, Vec<_>) = failed.partition(|error| passes(error.kind));
+    match lasting.into_iter().next() {
+        Some(error) => Some(Seen::Fault(error.into())),
+        None => passing.into_iter().next().map(Seen::Refused),
+    }
 }
 
 /// Why nothing is listed yet, when it is known: a subscription is queued for

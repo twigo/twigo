@@ -226,7 +226,7 @@ fn start(fake: &Fake, config: Config, restored: bool, budgets: Budgets) -> Harne
     let forward = Forward::spawn_with(
         hub.clone(),
         config,
-        accepted,
+        (sockets.clone(), accepted),
         (Vec::new(), None),
         restored,
         Arc::new(pods.clone()),
@@ -520,7 +520,11 @@ async fn a_pod_that_fails_is_avoided_and_comes_back_after_its_backoff() {
 }
 
 async fn seen(fake: &Fake, config: &Config) -> Seen {
-    let (hub, _clients) = fake.hub(Budgets::default());
+    seen_with(fake, config, Budgets::default()).await
+}
+
+async fn seen_with(fake: &Fake, config: &Config, budgets: Budgets) -> Seen {
+    let (hub, _clients) = fake.hub(budgets);
     let mut watching = Watching::new(&hub, config).await.unwrap();
     within("the objects are listed", async {
         loop {
@@ -840,15 +844,11 @@ async fn with_a_budget_of_two_a_third_connection_waits_and_goes_when_one_closes(
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_forward_that_never_worked_fails_at_once_and_closes_what_it_accepts() {
+async fn a_person_s_start_fails_at_once_and_the_forward_closes_what_it_accepts() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
-    let mut forward = start(&fake, pod_target("web-1"), true, Budgets::default());
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
     forward.pods.refuse("web-1", 500);
-    assert_eq!(forward.status.borrow().state, ForwardState::Restored);
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert_eq!(fake.watching(), 0, "a restored forward asks nothing");
-
     let mut first = forward.client();
     let failed = forward
         .state("the forward fails", |state| {
@@ -902,7 +902,7 @@ async fn a_port_nobody_listens_on_fails_a_forward_that_never_worked() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_forward_that_worked_reconnects_when_its_pod_is_not_found_and_fails_when_forbidden() {
+async fn a_404_for_the_pod_that_is_the_target_fails_a_forward_as_gone_and_a_403_for_good() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
     let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
@@ -910,20 +910,15 @@ async fn a_forward_that_worked_reconnects_when_its_pod_is_not_found_and_fails_wh
 
     forward.pods.refuse("web-1", 404);
     let mut client = forward.client();
-    let status = forward
-        .state("the forward reconnects", |state| {
-            matches!(state, ForwardState::Reconnecting { .. })
-        })
-        .await;
+    let status = forward.state("the forward fails", is_failed).await;
     assert_eq!(
         status.state,
-        ForwardState::Reconnecting {
-            reason: "the upgrade to web-1 was refused with 404".to_owned()
+        ForwardState::Failed {
+            error: IpcError::new(
+                ErrorKind::NotFound,
+                "the upgrade to web-1 was refused with 404"
+            )
         }
-    );
-    assert_eq!(
-        status.failure.as_deref(),
-        Some("the upgrade to web-1 was refused with 404")
     );
     let mut left = Vec::new();
     within("its connection closes", client.read_to_end(&mut left))
@@ -931,8 +926,7 @@ async fn a_forward_that_worked_reconnects_when_its_pod_is_not_found_and_fails_wh
         .unwrap();
 
     forward.pods.allow("web-1");
-    let _again = forward.client();
-    forward.ready().await;
+    wakes_and_serves(&mut forward, b"again").await;
 
     forward.pods.refuse("web-1", 403);
     let mut client = forward.client();
@@ -1072,7 +1066,7 @@ async fn the_subscriptions_last_only_as_long_as_the_forward_needs_them() {
     let mut forward = start(&fake, pod_target("web-1"), true, Budgets::default());
     assert_eq!(forward.hub.subscribers("pods"), 0);
 
-    forward.forward.restart();
+    forward.forward.connected();
     forward.ready().await;
     assert_eq!(
         forward.hub.subscribers("pods"),
@@ -1118,7 +1112,7 @@ async fn a_target_that_is_gone_fails_the_forward_with_its_name() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_lifted_refusal_returns_a_restored_forward_to_waiting_and_a_started_one_to_starting() {
+async fn a_lifted_refusal_returns_any_forward_to_waiting_and_asks_nothing() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
     let mut restored = start(&fake, pod_target("web-1"), true, Budgets::default());
@@ -1144,51 +1138,100 @@ async fn a_lifted_refusal_returns_a_restored_forward_to_waiting_and_a_started_on
 
     let mut started = start(&fake, pod_target("web-1"), false, Budgets::default());
     started.ready().await;
+    tokio::time::sleep(LINGER + Duration::from_secs(1)).await;
+    let tries = started.pods.connects().len();
     started.forward.refuse(refusal);
     started.state("the forward fails", is_failed).await;
+    fake.set_stalled(true);
     started.forward.allow();
-    started.ready().await;
+    tokio::time::sleep(Duration::from_secs(25)).await;
+    assert_eq!(
+        started.status.borrow().state,
+        ForwardState::Restored,
+        "a forward that worked waits too, and the cluster that does not answer fails nothing"
+    );
+    assert_eq!(started.pods.connects().len(), tries, "it opened no stream");
+    assert_eq!(started.hub.subscribers("pods"), 0, "and watches nothing");
+
+    fake.set_stalled(false);
+    wakes_and_serves(&mut started, b"again").await;
+}
+
+fn states(forward: &Harness) -> Arc<Mutex<Vec<ForwardState>>> {
+    let mut status = forward.status.clone();
+    let seen = Arc::new(Mutex::new(vec![status.borrow_and_update().state.clone()]));
+    tokio::spawn({
+        let seen = Arc::clone(&seen);
+        async move {
+            while status.changed().await.is_ok() {
+                let state = status.borrow().state.clone();
+                let mut seen = seen.lock().unwrap();
+                if seen.last() != Some(&state) {
+                    seen.push(state);
+                }
+            }
+        }
+    });
+    seen
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_forward_that_was_told_to_start_no_longer_says_it_waits_before_it_handles_the_order() {
+async fn the_space_connecting_proves_a_forward_that_waits_without_saying_starting_and_no_other() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
-    let forward = start(&fake, pod_target("web-1"), true, Budgets::default());
-    assert!(forward.forward.waits());
-
-    forward.forward.restart();
-    assert!(!forward.forward.waits());
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_forward_says_whether_it_waits_for_its_first_connection_also_when_it_is_refused() {
-    let fake = Fake::default();
-    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
-    let refusal = IpcError::new(ErrorKind::Permissions, "the context is read-only");
-
     let mut restored = start(&fake, pod_target("web-1"), true, Budgets::default());
-    assert!(restored.forward.waits());
-    restored.forward.refuse(refusal.clone());
-    restored.state("the forward fails", is_failed).await;
-    assert!(restored.forward.waits());
-    restored.forward.allow();
-    restored
-        .state("the forward waits", |state| {
-            *state == ForwardState::Restored
-        })
-        .await;
-    assert!(restored.forward.waits());
-    let _client = restored.client();
+    let seen = states(&restored);
+    restored.forward.connected();
     restored.ready().await;
-    assert!(!restored.forward.waits());
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [ForwardState::Restored, ForwardState::Ready]
+    );
+    tokio::task::yield_now().await;
+    assert_eq!(
+        restored.hub.subscribers("pods"),
+        0,
+        "it watches nothing after"
+    );
 
-    let mut started = start(&fake, pod_target("web-1"), false, Budgets::default());
-    assert!(!started.forward.waits());
-    started.ready().await;
-    started.forward.refuse(refusal);
-    started.state("the forward fails", is_failed).await;
-    assert!(!started.forward.waits());
+    let tries = restored.pods.connects().len();
+    restored.forward.connected();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(restored.pods.connects().len(), tries, "a ready forward");
+
+    restored.forward.refuse(IpcError::new(
+        ErrorKind::Permissions,
+        "the context is read-only",
+    ));
+    restored.state("the forward fails", is_failed).await;
+    restored.forward.connected();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(is_failed(&restored.status.borrow().state));
+    assert_eq!(restored.pods.connects().len(), tries, "a refused forward");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_space_connecting_to_a_cluster_that_does_not_answer_ends_reconnecting_and_rests() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    fake.set_stalled(true);
+    let mut forward = start(&fake, pod_target("web-1"), true, Budgets::default());
+    let seen = states(&forward);
+    let began = Instant::now();
+    forward.forward.connected();
+    let status = forward.state("the forward says why", is_reconnecting).await;
+    assert_eq!(began.elapsed(), Duration::from_secs(20));
+    assert_eq!(
+        status.state,
+        ForwardState::Reconnecting {
+            reason: "the cluster has not answered yet".to_owned()
+        }
+    );
+    rests(&forward).await;
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [ForwardState::Restored, status.state]
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1534,11 +1577,10 @@ async fn a_forward_whose_probe_finds_every_session_taken_says_so_after_a_while()
         .admit_session(twigo_kube::client::Actor::Ui, None)
         .await;
     let (pods, _served) = Pods::new();
-    let (_sockets, accepted) = mpsc::unbounded_channel();
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
-        accepted,
+        mpsc::unbounded_channel(),
         (Vec::new(), None),
         false,
         Arc::new(pods),
@@ -1565,16 +1607,16 @@ async fn a_forward_whose_probe_finds_every_session_taken_says_so_after_a_while()
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_hub_s_errors_make_a_forward_that_worked_reconnect_and_fail_one_that_never_did() {
+async fn a_hub_error_that_passes_makes_a_forward_that_worked_reconnect_and_a_403_fails_it() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
     let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
     forward.ready().await;
     let mut client = forward.client();
     client.write_all(b"x").await.unwrap();
-    let _pod = forward.next().await;
+    let pod = forward.next().await;
 
-    fake.forbid("pods", true);
+    fake.set_clients_fail(true);
     fake.end_watches();
     let status = forward
         .state("the forward reconnects", is_reconnecting)
@@ -1582,19 +1624,32 @@ async fn the_hub_s_errors_make_a_forward_that_worked_reconnect_and_fail_one_that
     assert_eq!(
         status.state,
         ForwardState::Reconnecting {
-            reason: "you may not watch pods".to_owned()
+            reason: "the context's clients could not be made".to_owned()
         }
     );
-    fake.forbid("pods", false);
+    fake.set_clients_fail(false);
     forward
         .state("the forward is ready again", |state| {
             *state == ForwardState::Ready
         })
         .await;
 
-    let mut never = start(&fake, pod_target("web-1"), false, Budgets::default());
     fake.forbid("pods", true);
-    never.state("the forward fails", is_failed).await;
+    fake.end_watches();
+    let status = forward.state("the forward fails", is_failed).await;
+    assert_eq!(
+        status.state,
+        ForwardState::Failed {
+            error: IpcError::new(ErrorKind::Forbidden, "you may not watch pods")
+        }
+    );
+    fake.forbid("pods", false);
+    drop((client, pod));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+    stays_failed(&mut forward).await;
 }
 
 async fn refuse_a_port(forward: &mut Harness) -> String {
@@ -1652,7 +1707,7 @@ async fn a_failure_goes_when_the_forward_is_ready_again_after_not_being_so() {
     forward.ready().await;
     refuse_a_port(&mut forward).await;
 
-    forward.pods.refuse("web-1", 404);
+    forward.pods.refuse("web-1", 500);
     let _fails = forward.client();
     forward
         .state("the forward reconnects", is_reconnecting)
@@ -1690,26 +1745,26 @@ async fn the_error_channel_s_text_ends_the_connection_after_what_the_pod_sent_is
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_forward_is_not_ready_when_the_last_pod_left_while_its_first_stream_was_open() {
+async fn a_person_s_start_is_not_ready_when_the_last_pod_left_while_its_first_stream_was_open() {
     let fake = Fake::default();
     behind_web(&fake, &[("web-a", true)]);
     let mut forward = start(&fake, service_target(), false, Budgets::default());
+    let began = Instant::now();
     let _probe = forward.next().await;
     behind_web(&fake, &[("web-a", false)]);
-    forward
-        .state("the forward waits", |state| {
-            is_reconnecting(state) || *state == ForwardState::Ready
-        })
+    let status = forward
+        .state("the start ends", |state| *state != ForwardState::Starting)
         .await;
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let status = forward.status.borrow().clone();
     assert_eq!(
         status.state,
-        ForwardState::Reconnecting {
-            reason: "no pod behind Service web is ready".to_owned()
+        ForwardState::Failed {
+            error: IpcError::new(ErrorKind::Unavailable, "no pod behind Service web is ready")
         },
-        "it was {:?} when it first changed",
-        status.state
+    );
+    assert!(
+        began.elapsed() >= Duration::from_secs(20),
+        "{:?}",
+        began.elapsed()
     );
 }
 
@@ -1998,11 +2053,10 @@ async fn a_forward_that_never_worked_fails_in_the_words_of_a_hub_that_has_no_str
         )
         .unwrap();
     let (pods, _served) = Pods::new();
-    let (_sockets, accepted) = mpsc::unbounded_channel();
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
-        accepted,
+        mpsc::unbounded_channel(),
         (Vec::new(), None),
         false,
         Arc::new(pods),
@@ -2131,6 +2185,14 @@ async fn a_forward_restarted_for_a_gone_target_rests_when_the_cluster_does_not_a
     fake.set_stalled(true);
     comes_and_leaves(&mut forward).await;
     rests(&forward).await;
+    tokio::time::sleep(Duration::from_secs(3600)).await;
+    assert_eq!(
+        forward.status.borrow().state,
+        ForwardState::Reconnecting {
+            reason: "the cluster has not answered yet".to_owned()
+        },
+        "it rests saying why it could not reach the pod"
+    );
 
     fake.set_stalled(false);
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
@@ -2149,6 +2211,12 @@ async fn a_forward_restarted_for_a_gone_target_rests_when_the_cluster_fails_its_
     fake.set_times_out(true);
     comes_and_leaves(&mut forward).await;
     rests(&forward).await;
+    assert_eq!(
+        forward.status.borrow().state,
+        ForwardState::Reconnecting {
+            reason: "the cluster has not answered yet".to_owned()
+        }
+    );
 
     fake.set_times_out(false);
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
@@ -2331,13 +2399,11 @@ async fn a_probe_that_finds_no_context_fails_the_forward_without_calling_its_tar
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_404_on_the_upgrade_fails_a_forward_that_never_worked_and_the_next_connection_looks_again()
- {
+async fn a_404_on_the_upgrade_fails_a_person_s_start_and_the_next_connection_looks_again() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
-    let mut forward = start(&fake, pod_target("web-1"), true, Budgets::default());
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
     forward.pods.refuse("web-1", 404);
-    forward.forward.restart();
     let failed = forward.state("the forward fails", is_failed).await;
     let ForwardState::Failed { error } = failed.state else {
         unreachable!("waited for");
@@ -2461,7 +2527,8 @@ async fn a_port_binds_again_straight_after_a_forward_that_served_connections_clo
     }
     let listeners = listeners().await;
     let port = listeners.port();
-    let (mut sockets, accepting) = listeners.accept();
+    let (sender, mut sockets) = mpsc::unbounded_channel();
+    let accepting = listeners.accept(&sender);
     let mut open = Vec::new();
     for (round, address) in loopbacks.iter().enumerate() {
         let mut client = TcpStream::connect((*address, port)).await.unwrap();
@@ -2496,11 +2563,12 @@ async fn a_dropped_forward_has_closed_its_port_when_the_drop_returns() {
     let (pods, _served) = Pods::new();
     let listeners = listeners().await;
     let (port, addresses) = (listeners.port(), listeners.addresses());
-    let (sockets, accepting) = listeners.accept();
+    let (sender, sockets) = mpsc::unbounded_channel();
+    let accepting = listeners.accept(&sender);
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
-        sockets,
+        (sender, sockets),
         (addresses, Some(accepting)),
         false,
         Arc::new(pods),
@@ -2523,11 +2591,12 @@ async fn a_client_of_either_loopback_is_served_by_the_pod() {
     let (pods, mut served) = Pods::new();
     let listeners = listeners().await;
     let (port, addresses) = (listeners.port(), listeners.addresses());
-    let (sockets, accepting) = listeners.accept();
+    let (sender, sockets) = mpsc::unbounded_channel();
+    let accepting = listeners.accept(&sender);
     let forward = Forward::spawn_with(
         hub,
         pod_target("web-1"),
-        sockets,
+        (sender, sockets),
         (addresses, Some(accepting)),
         false,
         Arc::new(pods),
@@ -2571,4 +2640,197 @@ async fn a_privileged_port_is_not_permitted() {
 fn is_root() -> bool {
     // SAFETY: `geteuid` reads the process's own identity.
     unsafe { libc::geteuid() == 0 }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_last_connection_s_failure_is_followed_by_no_try_for_nobody() {
+    for round in 0..40 {
+        let fake = Fake::default();
+        fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+        let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+        forward.ready().await;
+        forward.pods.refuse("web-1", 500);
+        let tries = forward.pods.connects().len();
+        comes_and_leaves(&mut forward).await;
+        rests(&forward).await;
+        assert_eq!(
+            forward.pods.connects().len() - tries,
+            1,
+            "round {round}: the connection's own stream, and no other"
+        );
+        assert_eq!(
+            forward.status.borrow().state,
+            ForwardState::Reconnecting {
+                reason: "the upgrade to web-1 was refused with 500".to_owned()
+            },
+            "round {round}"
+        );
+
+        let fake = Fake::default();
+        fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+        let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+        forward.ready().await;
+        let mut client = forward.client();
+        client.write_all(b"x").await.unwrap();
+        let _pod = forward.next().await;
+        let tries = forward.pods.connects().len();
+        forward.renew.clients().connections().wake();
+        let mut left = Vec::new();
+        within("the connection ends", client.read_to_end(&mut left))
+            .await
+            .unwrap();
+        forward
+            .until("it has no connections", |status| status.connections == 0)
+            .await;
+        rests(&forward).await;
+        assert_eq!(forward.pods.connects().len(), tries, "round {round}");
+        assert_eq!(
+            forward.status.borrow().state,
+            ForwardState::Reconnecting {
+                reason: "the connection to the cluster was lost".to_owned()
+            },
+            "round {round}"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_probe_in_its_window_when_the_last_connection_closes_still_proves_the_forward() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    let (held, held_pod, _probe) = probing_with_a_connection_open(&mut forward).await;
+
+    drop((held, held_pod));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+    assert_eq!(forward.hub.subscribers("pods"), 0, "nobody uses it");
+    let status = forward
+        .state("the probe proves it", |state| *state == ForwardState::Ready)
+        .await;
+    assert_eq!(status.state, ForwardState::Ready);
+    rests(&forward).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_workload_whose_own_subscription_lists_it_missing_is_gone_whatever_the_others_say() {
+    let fake = Fake::default();
+    let target = config("apps", "deployments", "api", 8080, None);
+    let slots = Budgets {
+        watches: 2,
+        ..Budgets::default()
+    };
+    let Seen::Fault(cause) = seen_with(&fake, &target, slots).await else {
+        panic!("its pods' watch waits for a slot, and the Deployment is gone");
+    };
+    assert!(cause.is_gone());
+    assert_eq!(cause.error().message, "Deployment api is gone");
+
+    fake.forbid("pods", true);
+    let Seen::Fault(cause) = seen(&fake, &target).await else {
+        panic!("its pods are forbidden, and the Deployment is gone");
+    };
+    assert!(cause.is_gone());
+
+    let mut forward = start(&fake, target, false, slots);
+    let status = forward.state("the start fails", is_failed).await;
+    assert_eq!(
+        status.state,
+        ForwardState::Failed {
+            error: IpcError::new(ErrorKind::NotFound, "Deployment api is gone")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restored_forward_s_first_connection_proves_it_without_saying_starting_and_waits_on_what_passes()
+ {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), true, Budgets::default());
+    forward.pods.refuse("web-1", 500);
+    let seen = states(&forward);
+    let mut client = forward.client();
+    client.write_all(b"hello").await.unwrap();
+    let status = forward.state("the forward says why", is_reconnecting).await;
+    assert_eq!(
+        status.state,
+        ForwardState::Reconnecting {
+            reason: "the upgrade to web-1 was refused with 500".to_owned()
+        }
+    );
+    forward.pods.allow("web-1");
+    wakes_and_serves(&mut forward, b"again").await;
+    let seen = seen.lock().unwrap();
+    assert!(!seen.contains(&ForwardState::Starting), "{seen:?}");
+    assert!(!seen.iter().any(is_failed), "{seen:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_404_for_one_pod_behind_a_service_moves_the_forward_to_another_and_ends_no_connection() {
+    let fake = Fake::default();
+    two_pods(&fake);
+    let mut forward = start(&fake, service_target(), false, Budgets::default());
+    forward.ready().await;
+    let mut held = forward.client();
+    held.write_all(b"x").await.unwrap();
+    let mut held_pod = forward.next().await;
+    assert_eq!(held_pod.pod, "web-a");
+
+    forward.pods.refuse("web-a", 404);
+    let _refused = forward.client();
+    forward
+        .until("the forward moves to web-b", |status| {
+            status.state == ForwardState::Ready && status.pod.as_deref() == Some("web-b")
+        })
+        .await;
+    held_pod.io.write_all(b"still").await.unwrap();
+    assert_eq!(read_exactly(&mut held, 5).await, b"still");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_rejected_credential_fails_a_forward_for_good() {
+    let fake = Fake::default();
+    fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    let mut held = forward.client();
+    held.write_all(b"x").await.unwrap();
+    let held_pod = forward.next().await;
+    fake.set_unauthorized(true);
+    fake.end_watches();
+    let failed = forward.state("the watch fails it", is_failed).await;
+    let ForwardState::Failed { error } = failed.state else {
+        unreachable!("waited for");
+    };
+    assert_eq!(error.kind, ErrorKind::Unauthorized);
+    fake.set_unauthorized(false);
+    drop((held, held_pod));
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+    stays_failed(&mut forward).await;
+
+    let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
+    forward.ready().await;
+    forward.pods.refuse("web-1", 401);
+    let mut client = forward.client();
+    let failed = forward.state("the upgrade fails it", is_failed).await;
+    let ForwardState::Failed { error } = failed.state else {
+        unreachable!("waited for");
+    };
+    assert_eq!(error.kind, ErrorKind::Unauthorized);
+    let mut left = Vec::new();
+    within("its connection closes", client.read_to_end(&mut left))
+        .await
+        .unwrap();
+    forward.pods.allow("web-1");
+    forward
+        .until("it has no connections", |status| status.connections == 0)
+        .await;
+    tokio::task::yield_now().await;
+    stays_failed(&mut forward).await;
 }

@@ -7,8 +7,8 @@
 //! The listener lives as long as the forward, whatever happens to pods. Each
 //! accepted connection holds a place among the context's sessions, goes to
 //! the forward's current pod and is its own WebSocket. The hub's
-//! subscriptions to the target exist only while the forward proves that it
-//! can be reached or has connections.
+//! subscriptions to the target exist only while someone uses the forward: a
+//! connection, or a proof that a person or the space's connecting asked for.
 
 mod cause;
 mod connect;
@@ -25,7 +25,7 @@ mod live;
 mod tests;
 
 use std::future::pending;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -194,6 +194,7 @@ impl Status {
 
 enum Control {
     Restart,
+    Connected,
     Refuse(IpcError),
     Allow,
 }
@@ -203,22 +204,26 @@ pub struct Forward {
     shared: Arc<Shared>,
     status: watch::Receiver<Status>,
     control: mpsc::UnboundedSender<Control>,
+    /// Where its listeners send what they accept.
+    sockets: mpsc::UnboundedSender<Socket>,
     addresses: Vec<String>,
     task: JoinHandle<()>,
-    _accepting: Option<Accepting>,
+    accepting: Option<Accepting>,
 }
 
 impl Forward {
-    /// Starts a forward on `listeners`. A `restored` one waits, listening,
-    /// for its first connection or for [`Forward::restart`] before it asks
-    /// the cluster anything. Needs the runtime.
+    /// Starts a forward on `listeners`: a `restored` one waits, listening,
+    /// and asks its cluster at its first connection or once its space
+    /// connects; any other is a person's start, which proves at once that a
+    /// pod can be reached. Needs the runtime.
     pub fn spawn(hub: Hub, config: Config, listeners: Listeners, restored: bool) -> Self {
         let addresses = listeners.addresses();
-        let (sockets, accepting) = listeners.accept();
+        let (sender, sockets) = mpsc::unbounded_channel();
+        let accepting = listeners.accept(&sender);
         Self::spawn_with(
             hub,
             config,
-            sockets,
+            (sender, sockets),
             (addresses, Some(accepting)),
             restored,
             Arc::new(Kube),
@@ -230,15 +235,16 @@ impl Forward {
     fn spawn_with(
         hub: Hub,
         config: Config,
-        sockets: Sockets,
+        (sender, sockets): (mpsc::UnboundedSender<Socket>, Sockets),
         (addresses, accepting): (Vec<String>, Option<Accepting>),
         restored: bool,
         connect: Arc<dyn Connect>,
     ) -> Self {
-        let state = if restored {
-            ForwardState::Restored
+        let (phase, state, proof) = if restored {
+            (Phase::Restored, ForwardState::Restored, None)
         } else {
-            ForwardState::Starting
+            let proof = Proof::new(Asker::Person);
+            (Phase::Starting, ForwardState::Starting, Some(proof))
         };
         let (status, status_rx) = watch::channel(Status::new(state));
         let (control, control_rx) = mpsc::unbounded_channel();
@@ -254,8 +260,6 @@ impl Forward {
             reports,
             sent: AtomicU64::new(0),
             received: AtomicU64::new(0),
-            waits: AtomicBool::new(restored),
-            told: AtomicBool::new(false),
         });
         let supervisor = Supervisor {
             shared: Arc::clone(&shared),
@@ -263,31 +267,21 @@ impl Forward {
             control: control_rx,
             reports: reports_rx,
             tasks: JoinSet::new(),
-            phase: if restored {
-                Phase::Restored
-            } else {
-                Phase::Proving
-            },
-            worked: false,
-            gone: false,
-            refused_from_restored: false,
+            phase,
+            proof,
             watching: None,
             opening: None,
-            probe: None,
-            received_at_probe: 0,
             accepted: 0,
             failed_after: 0,
-            retry: None,
-            retries: retries(),
-            no_pod_by: None,
         };
         Self {
             shared,
             status: status_rx,
             control,
+            sockets: sender,
             addresses,
             task: tokio::spawn(supervisor.run()),
-            _accepting: accepting,
+            accepting,
         }
     }
 
@@ -299,13 +293,6 @@ impl Forward {
         &self.addresses
     }
 
-    /// Whether it waits for its first connection, or did when it was
-    /// refused: it has asked no cluster yet and was not told to start, which
-    /// it may not have handled yet.
-    pub fn waits(&self) -> bool {
-        self.shared.waits.load(Ordering::Relaxed) && !self.shared.told.load(Ordering::Relaxed)
-    }
-
     /// The bytes to the pod and from it so far, which the status shows with
     /// a delay.
     pub fn bytes(&self) -> (u64, u64) {
@@ -315,12 +302,25 @@ impl Forward {
         )
     }
 
-    /// Starts over a forward that waits for its first connection, or that
-    /// failed; any other is working already.
+    /// Listens on `listeners` in place of its own, which are closed when it
+    /// returns. Its state, its connections and what it is doing stay.
+    pub fn rebind(&mut self, listeners: Listeners) {
+        self.addresses = listeners.addresses();
+        self.accepting = Some(listeners.accept(&self.sockets));
+    }
+
+    /// A person's start of a forward that failed: it proves again that a
+    /// pod can be reached. Any other forward stays as it is.
     pub fn restart(&self) {
-        self.shared.told.store(true, Ordering::Relaxed);
         // The supervisor lives as long as the forward.
         let _ = self.control.send(Control::Restart);
+    }
+
+    /// Its space's clients were made: a forward that waits proves that a pod
+    /// can be reached, which it does without a connection. Any other stays
+    /// as it is.
+    pub fn connected(&self) {
+        let _ = self.control.send(Control::Connected);
     }
 
     /// Ends every connection and fails the forward with `error`, which
@@ -330,8 +330,8 @@ impl Forward {
         let _ = self.control.send(Control::Refuse(error));
     }
 
-    /// Lifts a refusal: the forward goes back to what it was, waiting for
-    /// its first connection if it was restored, else starting over.
+    /// Lifts a refusal: the forward waits, as at a start of the app, and
+    /// asks nothing by itself.
     pub fn allow(&self) {
         let _ = self.control.send(Control::Allow);
     }
@@ -356,9 +356,6 @@ struct Shared {
     reports: mpsc::UnboundedSender<Report>,
     sent: AtomicU64,
     received: AtomicU64,
-    waits: AtomicBool,
-    /// [`Forward::restart`] was called, so a forward that waits will not.
-    told: AtomicBool,
 }
 
 impl Shared {
@@ -406,6 +403,7 @@ enum Report {
     Failed(Fault),
 }
 
+/// An open connection, which the status counts while it lives.
 struct Open {
     shared: Arc<Shared>,
     number: u64,
@@ -433,24 +431,75 @@ impl Drop for Open {
     }
 }
 
+/// What the forward says, as its status's state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
-    /// Listening, its cluster not asked yet.
+    /// Listening, and it has asked nothing: since the app started, or since
+    /// a refusal was lifted.
     Restored,
-    /// Finding a first pod and proving it can be reached: `Starting` until
-    /// it worked once, `Reconnecting` after.
-    Proving,
+    /// A person's proof is under way.
+    Starting,
     Ready,
-    /// It worked once, and no pod can be reached now: the target has none
-    /// that is ready, or the cluster refuses or does not answer. It looks
-    /// again while it has connections, and when one comes.
-    Waiting,
-    /// Listening, and closing what it accepts.
-    Failed,
+    /// No pod can be reached now, for the reason the status gives.
+    Reconnecting,
+    /// Listening, and closing what it accepts, unless its target is gone,
+    /// which the next connection looks at again.
+    Failed {
+        gone: bool,
+    },
 }
 
-/// A pause between tries to prove a forward that worked once: 0.5–5 s with
-/// jitter, as the hub's (ARCHITECTURE 3.2).
+/// Who asked for the proof under way: finding a pod and opening a first
+/// stream to its port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asker {
+    /// A start or a resume of a forward that did not run or that failed. It
+    /// says `Starting`, holds the forward with no connection, and ends
+    /// `Ready` or `Failed` within the waits' bounds: any failure fails the
+    /// forward.
+    Person,
+    /// The space connecting, which proves a forward that waits with no
+    /// connection, within the same bounds. A system's proof, as below.
+    Space,
+    /// A connection, or the forward's own tries while it has connections. A
+    /// system's proof keeps the forward's words, says `Reconnecting` for
+    /// what may pass, and fails the forward only for what does not.
+    Connection,
+}
+
+struct Proof {
+    by: Asker,
+    probe: Option<BoxFuture<'static, Result<(), connection::Over>>>,
+    received_at_probe: u64,
+    /// The next try, when the last one failed.
+    retry: Option<Instant>,
+    retries: ExponentialBackoff,
+    /// When a proof asked with no connection gives up waiting for a pod.
+    no_pod_by: Option<Instant>,
+}
+
+impl Proof {
+    fn new(by: Asker) -> Self {
+        Self {
+            by,
+            probe: None,
+            received_at_probe: 0,
+            retry: None,
+            retries: retries(),
+            no_pod_by: None,
+        }
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        match (self.retry, self.no_pod_by) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+}
+
+/// A pause between tries to prove a forward: 0.5–5 s with jitter, as the
+/// hub's (ARCHITECTURE 3.2).
 fn retries() -> ExponentialBackoff {
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))
@@ -467,28 +516,13 @@ struct Supervisor {
     reports: mpsc::UnboundedReceiver<Report>,
     tasks: JoinSet<()>,
     phase: Phase,
-    /// It reached a pod since it started over, or started over because its
-    /// target was gone.
-    worked: bool,
-    /// It failed because its target is gone, which a connection looks at
-    /// again.
-    gone: bool,
-    /// The refusal that failed it came while it waited for its first
-    /// connection.
-    refused_from_restored: bool,
+    proof: Option<Proof>,
     watching: Option<Watching>,
     opening: Option<BoxFuture<'static, Result<Watching, IpcError>>>,
-    probe: Option<BoxFuture<'static, Result<(), connection::Over>>>,
-    received_at_probe: u64,
     accepted: u64,
     /// How many had been when the `failure` was set: a connection with a
     /// greater number was opened after it.
     failed_after: u64,
-    /// The next try, when the last one failed.
-    retry: Option<Instant>,
-    retries: ExponentialBackoff,
-    /// When a forward that never worked gives up waiting for a pod.
-    no_pod_by: Option<Instant>,
 }
 
 async fn changed(watching: &mut Option<Watching>) {
@@ -505,10 +539,10 @@ async fn ready<T>(future: &mut Option<BoxFuture<'static, T>>) -> T {
     }
 }
 
-fn earliest(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
+async fn probed(proof: &mut Option<Proof>) -> Result<(), connection::Over> {
+    match proof.as_mut().and_then(|proof| proof.probe.as_mut()) {
+        Some(probe) => probe.await,
+        None => pending().await,
     }
 }
 
@@ -523,78 +557,117 @@ impl Supervisor {
     async fn run(mut self) {
         let mut publish = tokio::time::interval(PUBLISH);
         publish.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        if self.phase == Phase::Proving {
-            self.ensure_watching();
-        }
         loop {
-            self.rest();
-            self.advance();
-            self.shared.waits.store(
-                self.phase == Phase::Restored
-                    || (self.phase == Phase::Failed && self.refused_from_restored),
-                Ordering::Relaxed,
-            );
-            let deadline = earliest(self.no_pod_by, self.retry);
+            self.settle();
+            let deadline = self.proof.as_ref().and_then(Proof::deadline);
+            // A connection reports before its task ends, and its report is
+            // read first.
             tokio::select! {
+                biased;
                 Some(control) = self.control.recv() => self.control(control),
-                Some(socket) = self.sockets.recv() => self.accepted(socket),
                 Some(report) = self.reports.recv() => self.report(report),
+                Some(socket) = self.sockets.recv() => self.accepted(socket),
                 Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.publish(),
-                () = changed(&mut self.watching) => self.look(),
                 opened = ready(&mut self.opening) => self.opened(opened),
-                proved = ready(&mut self.probe) => self.proved(proved),
+                () = changed(&mut self.watching) => self.look(),
+                proved = probed(&mut self.proof) => self.proved(proved),
                 () = at(deadline) => self.timed_out(),
                 _ = publish.tick(), if !self.tasks.is_empty() => self.publish(),
             }
         }
     }
 
-    fn control(&mut self, control: Control) {
-        if matches!(control, Control::Restart | Control::Allow) {
-            // What came while the forward was failed is closed, not served.
-            while let Ok(socket) = self.sockets.try_recv() {
-                self.accepted(socket);
+    /// Whether someone uses the forward: an open connection, as the status
+    /// counts them, or a proof asked with no connection.
+    fn used(&self) -> bool {
+        self.shared.status.borrow().connections > 0
+            || self
+                .proof
+                .as_ref()
+                .is_some_and(|proof| proof.by != Asker::Connection)
+    }
+
+    fn person(&self) -> bool {
+        self.proof
+            .as_ref()
+            .is_some_and(|proof| proof.by == Asker::Person)
+    }
+
+    /// Run after every event (a control, a report, a socket, the end of a
+    /// connection, a change the hub tells, a probe's end, a timer). A forward
+    /// nobody uses holds no subscription, opens no stream and has no timer
+    /// armed, keeping its words: a proof under way ends, and only a probe in
+    /// flight stays, for its result. A forward that is used and cannot
+    /// reach a pod proves, and it watches its target while it proves or
+    /// is ready.
+    fn settle(&mut self) {
+        if !self.used() {
+            if self
+                .proof
+                .as_ref()
+                .is_some_and(|proof| proof.probe.is_none())
+            {
+                self.proof = None;
+            }
+            self.unwatch();
+            return;
+        }
+        if self.phase == Phase::Ready && self.proof.is_none() {
+            self.ensure_watching();
+            if !matches!(self.shared.choose(), Chosen::Pod(_) | Chosen::Unknown(None)) {
+                self.proof = Some(Proof::new(Asker::Connection));
             }
         }
+        if self.phase == Phase::Reconnecting && self.proof.is_none() {
+            self.proof = Some(Proof::new(Asker::Connection));
+        }
+        if self.proof.is_some() {
+            self.ensure_watching();
+            self.advance();
+        }
+        if self.proof.is_none() && self.phase != Phase::Ready {
+            self.unwatch();
+        }
+    }
+
+    fn control(&mut self, control: Control) {
         match control {
-            Control::Restart => {
-                if matches!(self.phase, Phase::Restored | Phase::Failed) {
-                    self.begin(false);
-                }
+            Control::Restart if matches!(self.phase, Phase::Failed { .. }) => {
+                self.close_queued();
+                self.phase = Phase::Starting;
+                self.proof = Some(Proof::new(Asker::Person));
+                self.say(ForwardState::Starting);
             }
-            Control::Refuse(error) => {
-                if self.phase != Phase::Failed {
-                    self.refused_from_restored = self.phase == Phase::Restored;
-                }
-                self.fail(error);
+            Control::Connected if self.phase == Phase::Restored && self.proof.is_none() => {
+                self.proof = Some(Proof::new(Asker::Space));
             }
-            Control::Allow => {
-                if self.phase != Phase::Failed {
-                    return;
-                }
-                if self.refused_from_restored {
-                    self.refused_from_restored = false;
-                    self.phase = Phase::Restored;
-                    self.shared.update(|status| {
-                        status.state = ForwardState::Restored;
-                        true
-                    });
-                } else {
-                    self.begin(false);
-                }
+            Control::Refuse(error) => self.fail(error),
+            Control::Allow if matches!(self.phase, Phase::Failed { .. }) => {
+                self.close_queued();
+                self.phase = Phase::Restored;
+                self.say(ForwardState::Restored);
             }
+            Control::Restart | Control::Connected | Control::Allow => {}
+        }
+    }
+
+    /// What came while the forward was failed is closed, not served, unless
+    /// its target is gone.
+    fn close_queued(&mut self) {
+        while let Ok(socket) = self.sockets.try_recv() {
+            self.accepted(socket);
         }
     }
 
     fn accepted(&mut self, socket: Socket) {
         match self.phase {
-            Phase::Failed if self.gone => self.begin(true),
             // Closed at once: its socket drops here.
-            Phase::Failed => return,
-            Phase::Restored => self.begin(false),
-            Phase::Proving | Phase::Ready | Phase::Waiting => {}
+            Phase::Failed { gone: false } => return,
+            Phase::Restored | Phase::Failed { gone: true } if self.proof.is_none() => {
+                self.proof = Some(Proof::new(Asker::Connection));
+            }
+            _ => {}
         }
-        self.ensure_watching();
         self.accepted += 1;
         let open = Open::new(&self.shared, self.accepted);
         let end = self.shared.end.subscribe();
@@ -606,21 +679,6 @@ impl Supervisor {
         ));
     }
 
-    fn begin(&mut self, worked: bool) {
-        self.phase = Phase::Proving;
-        self.worked = worked;
-        self.gone = false;
-        self.refused_from_restored = false;
-        self.retry = None;
-        self.no_pod_by = None;
-        self.retries = retries();
-        self.shared.update(|status| {
-            status.state = ForwardState::Starting;
-            true
-        });
-        self.ensure_watching();
-    }
-
     fn ensure_watching(&mut self) {
         if self.watching.is_some() || self.opening.is_some() {
             return;
@@ -630,30 +688,7 @@ impl Supervisor {
             Some(async move { Watching::new(&shared.hub, &shared.config).await }.boxed());
     }
 
-    /// Whether anything needs the forward to know its pods: a connection, a
-    /// probe in flight, or the first proof of a forward that never worked,
-    /// which a person asked for and which ends within the waits' bounds in
-    /// `Ready` or `Failed`.
-    fn wanted(&self) -> bool {
-        !self.tasks.is_empty()
-            || self.probe.is_some()
-            || (self.phase == Phase::Proving && !self.worked)
-    }
-
-    /// Run before the supervisor does anything else, so that after any event
-    /// (a control, a report, a change of the hub's, a timer, the end of a
-    /// connection) a forward that nothing wants holds no subscription, opens
-    /// no stream and has no timer armed, whatever its phase. It keeps its
-    /// state's words, and the next connection looks again.
-    fn rest(&mut self) {
-        if self.wanted() {
-            return;
-        }
-        if self.phase == Phase::Proving {
-            self.phase = Phase::Waiting;
-        }
-        self.retry = None;
-        self.no_pod_by = None;
+    fn unwatch(&mut self) {
         if self.watching.is_some() || self.opening.is_some() {
             self.watching = None;
             self.opening = None;
@@ -672,109 +707,73 @@ impl Supervisor {
         }
     }
 
+    /// Takes in what the hub tells; [`Supervisor::settle`] acts on it.
     fn look(&mut self) {
         let Some(watching) = &self.watching else {
             return;
         };
-        let known = Known::from(watching.look(&self.shared.config));
-        let reaction = match &known {
-            Known::Fault(cause) => Reaction::Fault(cause.clone()),
-            Known::Refused(error) => Reaction::Refused(error.clone()),
-            Known::Listed { candidates, why } if candidates.is_empty() => {
-                Reaction::Empty(why.clone())
-            }
-            Known::Unknown(Some(why)) => Reaction::Empty(why.clone()),
-            Known::Listed { .. } => Reaction::Found,
-            Known::Unknown(None) => Reaction::Nothing,
-        };
-        self.shared.know(known);
+        self.shared
+            .know(Known::from(watching.look(&self.shared.config)));
         // The pod new connections go to may have changed.
         self.shared.choose();
-        if matches!(self.phase, Phase::Restored | Phase::Failed) {
-            return;
-        }
-        match reaction {
-            Reaction::Fault(cause) => self.fail(cause),
-            Reaction::Refused(error) => self.refused(error),
-            // A forward that is proving finds it out when it is asked.
-            Reaction::Empty(why) if self.phase != Phase::Proving => self.wait(why),
-            Reaction::Found if self.phase == Phase::Waiting => self.phase = Phase::Proving,
-            Reaction::Empty(_) | Reaction::Found | Reaction::Nothing => {}
-        }
     }
 
-    /// Starts the proof or the wait for a pod, whichever the forward is at.
+    /// Takes the proof under way a step on: a probe of the pod it would
+    /// reach, or what it does without one.
     fn advance(&mut self) {
-        if self.phase != Phase::Proving || self.probe.is_some() || self.retry.is_some() {
+        let Some(proof) = &self.proof else {
+            return;
+        };
+        if proof.probe.is_some() || proof.retry.is_some() {
             return;
         }
-        self.ensure_watching();
+        let (by, received) = (proof.by, self.shared.received.load(Ordering::Relaxed));
         match self.shared.choose() {
-            Chosen::Unknown(None) => self.unanswered(),
-            Chosen::Unknown(Some(why)) | Chosen::None(why) => self.nothing_to_reach(why),
-            Chosen::Refused(error) => self.refused(error),
-            Chosen::Fault(cause) => self.fail(cause),
             Chosen::Pod(candidate) => {
-                self.no_pod_by = None;
-                self.received_at_probe = self.shared.received.load(Ordering::Relaxed);
                 let (shared, end) = (Arc::clone(&self.shared), self.shared.end.subscribe());
-                self.probe = Some(connection::probe(shared, candidate, end).boxed());
+                let proof = self.proof.as_mut().expect("checked");
+                proof.no_pod_by = None;
+                proof.received_at_probe = received;
+                proof.probe = Some(connection::probe(shared, candidate, end).boxed());
+            }
+            Chosen::Fault(cause) => self.fail(cause),
+            Chosen::Refused(error) => self.unreachable(error.into(), false),
+            Chosen::None(why) | Chosen::Unknown(Some(why)) if by != Asker::Person => {
+                self.reconnecting(why);
+            }
+            Chosen::None(_) | Chosen::Unknown(_) => {
+                if by != Asker::Connection {
+                    self.wait_for_a_pod();
+                }
             }
         }
     }
 
-    fn nothing_to_reach(&mut self, why: String) {
-        if self.worked {
-            self.wait(why);
-        } else {
-            self.give_up_by_the_wait();
+    /// A proof asked with no connection waits for a pod no longer than a
+    /// connection does.
+    fn wait_for_a_pod(&mut self) {
+        if let Some(proof) = &mut self.proof {
+            proof
+                .no_pod_by
+                .get_or_insert_with(|| Instant::now() + CANDIDATE_WAIT);
         }
-    }
-
-    /// The hub has listed nothing yet: a forward that never worked gives up
-    /// after the wait, as it does for a pod that is not there.
-    fn unanswered(&mut self) {
-        if !self.worked {
-            self.give_up_by_the_wait();
-        }
-    }
-
-    fn give_up_by_the_wait(&mut self) {
-        if self.no_pod_by.is_none() {
-            self.no_pod_by = Some(Instant::now() + CANDIDATE_WAIT);
-        }
-    }
-
-    /// The hub's error states, which it tries again: a forward that never
-    /// worked fails with the cluster's words, one that did waits.
-    fn refused(&mut self, error: IpcError) {
-        if self.worked {
-            self.wait(error.message);
-        } else {
-            self.fail(error);
-        }
-    }
-
-    fn wait(&mut self, reason: String) {
-        self.phase = Phase::Waiting;
-        self.probe = None;
-        self.retry = None;
-        self.reconnecting(reason);
     }
 
     fn proved(&mut self, proved: Result<(), connection::Over>) {
-        self.probe = None;
+        if let Some(proof) = &mut self.proof {
+            proof.probe = None;
+        }
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => match fault {
                 Fault::Fatal(error) => self.fail(error),
-                Fault::Port(words) => {
+                Fault::Port(words) | Fault::NoPod(words) => {
                     self.failure(words.clone());
-                    self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into());
+                    self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
                 }
                 Fault::Transient(cause) => {
                     self.failure(cause.error().message.clone());
-                    self.unreachable(cause);
+                    self.unreachable(cause, true);
                 }
                 Fault::Lost => self.pause(),
             },
@@ -785,25 +784,27 @@ impl Supervisor {
     }
 
     /// A stream to a pod, or a connection that carried bytes, proved the
-    /// forward. The pods may have gone meanwhile, so they are looked at
-    /// again before it says so.
+    /// forward. Where the forward still watches, the pods may have gone
+    /// meanwhile, so they are looked at again before it says so; where
+    /// nobody uses it any more, the proof's result counts.
     fn proven(&mut self) {
-        self.probe = None;
-        self.worked = true;
-        self.no_pod_by = None;
-        self.retries = retries();
-        match self.shared.choose() {
-            Chosen::Pod(_) => self.set_ready(),
-            Chosen::None(why) | Chosen::Unknown(Some(why)) => self.wait(why),
-            Chosen::Refused(error) => self.wait(error.message),
-            Chosen::Fault(cause) => self.fail(cause),
-            Chosen::Unknown(None) => self.phase = Phase::Proving,
+        let ready = match self.shared.choose() {
+            Chosen::Pod(_) => true,
+            Chosen::Unknown(None) => self.watching.is_none() && self.opening.is_none(),
+            Chosen::None(_) | Chosen::Unknown(Some(_)) | Chosen::Refused(_) | Chosen::Fault(_) => {
+                false
+            }
+        };
+        if ready {
+            self.set_ready();
+        } else if let Some(proof) = &mut self.proof {
+            proof.probe = None;
         }
     }
 
     fn set_ready(&mut self) {
         self.phase = Phase::Ready;
-        self.retry = None;
+        self.proof = None;
         self.shared.update(|status| {
             status.state = ForwardState::Ready;
             status.failure = None;
@@ -819,50 +820,65 @@ impl Supervisor {
         });
     }
 
-    /// Waits before the next try to prove the forward.
+    /// Waits before the next try of the proof under way.
     fn pause(&mut self) {
-        let pause = self.retries.next().expect("without a limit");
-        self.retry = Some(Instant::now() + pause);
+        if let Some(proof) = &mut self.proof {
+            let pause = proof.retries.next().expect("without a limit");
+            proof.retry = Some(Instant::now() + pause);
+        }
     }
 
-    /// A try to prove the forward failed: it fails if it never worked, else
-    /// it tries again after a pause, or with its next connection if it has
-    /// none.
-    fn unreachable(&mut self, cause: Cause) {
-        if !self.worked {
+    /// A try to reach a pod failed: a person's proof fails the forward with
+    /// it, as does a target that is gone; any other says why and, with
+    /// `retry`, tries again after a pause while the forward is used.
+    fn unreachable(&mut self, cause: Cause, retry: bool) {
+        if self.person() || cause.is_gone() {
             self.fail(cause);
             return;
         }
-        self.pause();
         self.reconnecting(cause.into_error().message);
+        if retry {
+            self.pause();
+        }
     }
 
+    /// What may pass keeps the forward from its pods, which it says, unless
+    /// a person's proof is under way, which ends by itself, or it failed for
+    /// good. The space's proof ends with this result, and the forward goes
+    /// on proving only while it has connections.
     fn reconnecting(&mut self, reason: String) {
+        if matches!(self.phase, Phase::Starting | Phase::Failed { gone: false }) {
+            return;
+        }
+        self.phase = Phase::Reconnecting;
+        if let Some(proof) = &mut self.proof
+            && proof.by == Asker::Space
+        {
+            proof.by = Asker::Connection;
+            proof.no_pod_by = None;
+        }
+        self.say(ForwardState::Reconnecting { reason });
+    }
+
+    fn say(&self, state: ForwardState) {
         self.shared.update(|status| {
-            let state = ForwardState::Reconnecting { reason };
             let changed = status.state != state;
             status.state = state;
             changed
         });
     }
 
-    /// Ends the connections. A forward whose target is gone looks at it
-    /// again with its next connection.
+    /// Ends the connections and the proof under way. A forward whose target
+    /// is gone looks at it again with its next connection.
     fn fail(&mut self, cause: impl Into<Cause>) {
         let cause = cause.into();
-        self.gone = cause.is_gone();
-        self.phase = Phase::Failed;
-        self.probe = None;
-        self.retry = None;
-        self.no_pod_by = None;
+        self.phase = Phase::Failed {
+            gone: cause.is_gone(),
+        };
+        self.proof = None;
         self.shared.end.send_modify(|ends| *ends += 1);
-        self.shared.update(|status| {
-            let state = ForwardState::Failed {
-                error: cause.into_error(),
-            };
-            let changed = status.state != state;
-            status.state = state;
-            changed
+        self.say(ForwardState::Failed {
+            error: cause.into_error(),
         });
     }
 
@@ -872,46 +888,46 @@ impl Supervisor {
                 if number > self.failed_after {
                     self.shared.update(|status| status.failure.take().is_some());
                 }
-                if self.phase == Phase::Proving && self.probe.is_some() {
+                if self.proof.is_some() {
                     self.proven();
                 }
             }
             Report::Failed(Fault::Fatal(error)) => self.fail(error),
             Report::Failed(Fault::Port(words)) => self.failure(words),
+            Report::Failed(Fault::NoPod(why)) => {
+                self.failure(why.clone());
+                self.reconnecting(why);
+            }
             Report::Failed(Fault::Transient(cause)) => {
-                let error = cause.into_error();
-                self.failure(error.message.clone());
-                if self.phase == Phase::Ready {
-                    self.phase = Phase::Proving;
-                    self.reconnecting(error.message);
+                self.failure(cause.error().message.clone());
+                if cause.is_gone() {
+                    self.fail(cause);
+                } else {
+                    self.reconnecting(cause.into_error().message);
                 }
             }
             Report::Failed(Fault::Lost) => {
-                if self.phase == Phase::Ready {
-                    self.phase = Phase::Proving;
-                    self.reconnecting("the connection to the cluster was lost".to_owned());
-                }
+                self.reconnecting("the connection to the cluster was lost".to_owned());
             }
         }
     }
 
     fn timed_out(&mut self) {
         let now = Instant::now();
-        if self.retry.is_some_and(|retry| retry <= now) {
-            self.retry = None;
+        let Some(proof) = &mut self.proof else {
+            return;
+        };
+        if proof.retry.is_some_and(|retry| retry <= now) {
+            proof.retry = None;
         }
-        if self.no_pod_by.is_some_and(|by| by <= now) {
-            self.no_pod_by = None;
-            let chosen = self.shared.pick().choose(now);
-            match chosen {
-                Chosen::None(why) | Chosen::Unknown(Some(why)) => {
-                    self.fail(IpcError::new(ErrorKind::Unavailable, why));
-                }
-                Chosen::Unknown(None) => {
-                    self.fail(IpcError::new(ErrorKind::Unavailable, UNANSWERED_YET));
-                }
-                Chosen::Pod(_) | Chosen::Fault(_) | Chosen::Refused(_) => {}
-            }
+        if proof.no_pod_by.is_some_and(|by| by <= now) {
+            proof.no_pod_by = None;
+            let why = match self.shared.pick().choose(now) {
+                Chosen::None(why) | Chosen::Unknown(Some(why)) => why,
+                Chosen::Unknown(None) => UNANSWERED_YET.to_owned(),
+                Chosen::Pod(_) | Chosen::Fault(_) | Chosen::Refused(_) => return,
+            };
+            self.unreachable(IpcError::new(ErrorKind::Unavailable, why).into(), false);
         }
     }
 
@@ -926,17 +942,12 @@ impl Supervisor {
             status.received = received;
             changed
         });
-        if self.phase == Phase::Proving && self.probe.is_some() && received > self.received_at_probe
+        if self
+            .proof
+            .as_ref()
+            .is_some_and(|proof| proof.probe.is_some() && received > proof.received_at_probe)
         {
             self.proven();
         }
     }
-}
-
-enum Reaction {
-    Fault(Cause),
-    Refused(IpcError),
-    Empty(String),
-    Found,
-    Nothing,
 }

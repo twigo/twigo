@@ -2,7 +2,8 @@
 //! one namespace by resource, listed and watched whole as raw objects, as a
 //! server without Table sends them, picked by a `metadata.name` field
 //! selector or all of them. It can be unreachable, never answer, fail every
-//! request after a timeout, forbid a resource and end its watches.
+//! request after a timeout, reject the credential, forbid a resource, fail
+//! to make the clients and end its watches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -33,7 +34,9 @@ struct State {
     offline: bool,
     stalled: bool,
     times_out: bool,
+    unauthorized: bool,
     no_context: bool,
+    clients_fail: bool,
     forbidden: BTreeSet<String>,
     missing: BTreeSet<String>,
     version: u64,
@@ -94,12 +97,21 @@ impl Fake {
             let fake = self.clone();
             Arc::new(move |_context| {
                 let clients = Arc::clone(&current.lock().unwrap());
-                let missing = fake.state().no_context;
+                let (missing, failing) = {
+                    let state = fake.state();
+                    (state.no_context, state.clients_fail)
+                };
                 Box::pin(async move {
                     if missing {
                         return Err(IpcError::new(
                             ErrorKind::NotFound,
                             "no source lists the context \"kind-test\"",
+                        ));
+                    }
+                    if failing {
+                        return Err(IpcError::new(
+                            ErrorKind::Unavailable,
+                            "the context's clients could not be made",
                         ));
                     }
                     Ok(clients)
@@ -167,8 +179,19 @@ impl Fake {
         self.state().times_out = times_out;
     }
 
+    /// Answers 401 to every request for a resource, as a cluster that
+    /// rejects the credential does.
+    pub fn set_unauthorized(&self, unauthorized: bool) {
+        self.state().unauthorized = unauthorized;
+    }
+
     pub fn set_no_context(&self, missing: bool) {
         self.state().no_context = missing;
+    }
+
+    /// The context's clients cannot be made, in a way that may pass.
+    pub fn set_clients_fail(&self, failing: bool) {
+        self.state().clients_fail = failing;
     }
 
     pub fn forbid(&self, resource: &str, forbidden: bool) {
@@ -220,6 +243,19 @@ impl Fake {
             .and_then(|selector| selector.strip_prefix("metadata.name="))
             .map(str::to_owned);
         let mut state = self.state();
+        if state.unauthorized {
+            return Ok(full(
+                StatusCode::UNAUTHORIZED,
+                &json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "status": "Failure",
+                    "message": "Unauthorized",
+                    "reason": "Unauthorized",
+                    "code": 401,
+                }),
+            ));
+        }
         if state.forbidden.contains(&resource) {
             return Ok(full(
                 StatusCode::FORBIDDEN,

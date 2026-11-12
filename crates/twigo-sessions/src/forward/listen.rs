@@ -61,18 +61,18 @@ impl Listeners {
         self.port
     }
 
-    /// Accepts on every listener, from a task of its own each.
-    pub(super) fn accept(self) -> (Sockets, Accepting) {
-        let (sender, sockets) = mpsc::unbounded_channel();
+    /// Accepts on every listener, from a task of its own each, into
+    /// `sockets`.
+    pub(super) fn accept(self, sockets: &mpsc::UnboundedSender<Socket>) -> Accepting {
         let held: Vec<Arc<Held>> = std::iter::once(self.v4)
             .chain(self.v6)
             .map(|listener| Arc::new(Held(Mutex::new(Some(listener)))))
             .collect();
         let tasks = held
             .iter()
-            .map(|held| tokio::spawn(accept(Arc::clone(held), sender.clone())))
+            .map(|held| tokio::spawn(accept(Arc::clone(held), sockets.clone())))
             .collect();
-        (sockets, Accepting { held, tasks })
+        Accepting { held, tasks }
     }
 
     pub fn addresses(&self) -> Vec<String> {

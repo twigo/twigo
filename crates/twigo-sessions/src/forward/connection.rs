@@ -13,12 +13,12 @@ use tokio::time::{Instant, sleep, sleep_until, timeout};
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 
-use super::cause::Cause;
+use super::cause::{Cause, passes};
 use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
 use super::watching::{Candidate, UNANSWERED_YET};
-use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Open, PROBE_WINDOW, QUIET, Report, Shared};
+use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Kind, Open, PROBE_WINDOW, QUIET, Report, Shared};
 use crate::shell::abandoned;
 
 const CHUNK: usize = 16 * 1024;
@@ -33,8 +33,10 @@ pub(super) enum Fault {
     Fatal(IpcError),
     /// The pod or the cluster did not answer.
     Transient(Cause),
-    /// The pod's side refused the port, in its own words, or none was found.
+    /// The pod's side refused the port, in its own words.
     Port(String),
+    /// No pod was a candidate within the wait, and why.
+    NoPod(String),
     /// The clients were replaced, or the network changed under them.
     Lost,
 }
@@ -48,16 +50,15 @@ pub(super) enum Over {
 }
 
 fn clients_fault(error: IpcError) -> Fault {
-    match error.kind {
-        ErrorKind::Unavailable | ErrorKind::Timeout | ErrorKind::Internal => {
-            Fault::Transient(error.into())
-        }
-        _ => Fault::Fatal(error),
+    if passes(error.kind) {
+        Fault::Transient(error.into())
+    } else {
+        Fault::Fatal(error)
     }
 }
 
-fn upgrade_fault(error: &kube::Error) -> Fault {
-    if let Some(gone) = Cause::upgrade(error) {
+fn upgrade_fault(error: &kube::Error, pod_is_target: bool) -> Fault {
+    if pod_is_target && let Some(gone) = Cause::upgrade(error) {
         return Fault::Transient(gone);
     }
     let error = twigo_kube::errors::request(error);
@@ -109,14 +110,16 @@ impl Link {
 }
 
 /// Serves an accepted socket until it ends, and tells the supervisor why it
-/// failed, if it did.
+/// failed, if it did, once it no longer counts among the open connections.
 pub(super) async fn serve(
     shared: Arc<Shared>,
     socket: Socket,
     open: Open,
     end: watch::Receiver<u64>,
 ) {
-    match run(&shared, socket, open.number, end).await {
+    let over = run(&shared, socket, open.number, end).await;
+    drop(open);
+    match over {
         Ok(()) | Err(Over::Ended) => {}
         Err(Over::Lost) => shared.report(Report::Failed(Fault::Lost)),
         Err(Over::Fault(fault)) => shared.report(Report::Failed(fault)),
@@ -221,7 +224,7 @@ async fn pod(shared: &Shared, link: &mut Link) -> Result<Candidate, Over> {
             biased;
             over = link.interrupted() => return Err(over),
             _ = picked.changed() => {}
-            () = sleep_until(deadline) => return Err(Over::Fault(Fault::Port(why))),
+            () = sleep_until(deadline) => return Err(Over::Fault(Fault::NoPod(why))),
         }
     }
 }
@@ -244,7 +247,7 @@ async fn connect(
     .await;
     let fault = match opened {
         Ok(Ok(connected)) => return Ok(connected),
-        Ok(Err(error)) => upgrade_fault(&error),
+        Ok(Err(error)) => upgrade_fault(&error, target.kind == Kind::Pod),
         Err(_) => Fault::Transient(
             IpcError::new(
                 ErrorKind::Timeout,

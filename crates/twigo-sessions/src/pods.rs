@@ -156,7 +156,7 @@ impl Subscriptions {
 
     pub(crate) fn gone(&self) -> Option<IpcError> {
         let ready = hub::combine(self.states().into_iter()) == ViewState::Ready;
-        (ready && self.object.listed() && self.object.items().is_empty()).then(|| {
+        (ready && self.target_missing()).then(|| {
             IpcError::new(
                 ErrorKind::NotFound,
                 format!(
@@ -166,6 +166,12 @@ impl Subscriptions {
                 ),
             )
         })
+    }
+
+    /// Whether the target's own subscription has listed it and found
+    /// nothing, whatever the others say.
+    pub(crate) fn target_missing(&self) -> bool {
+        self.object.listed() && self.object.items().is_empty()
     }
 
     /// The target's pods, once its subscriptions have listed them.
