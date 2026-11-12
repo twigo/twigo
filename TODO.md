@@ -90,7 +90,7 @@ Findings that belong to no step yet.
   - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
   - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
   - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
-    Its claim is held across its answer by a test and across its bind only by a stress test that seldom fails without it, for the same reason.
+    Its claim is one guard held to the end of the command, and `a_stop_waits_for_the_resume_of_its_forward_until_the_resume_has_answered` and `a_start_and_a_resume_wait_for_the_claim_of_their_port_once_the_target_is_read` fail without it.
   - On macOS a socket is made close-on-exec in a second call after `socket()` and `accept()`, so a child spawned between the two keeps a forward's listener or connection for as long as it runs, and the port stays listening after a stop.
     The listeners come from tokio's [`TcpSocket::new`](https://github.com/tokio-rs/tokio/blob/tokio-1.54.1/tokio/src/net/tcp/socket.rs#L163-L191), which calls socket2's [`Socket::new`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L116-L118) and so [`set_common_flags`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L773-L805), and the accepted connections from mio's [`accept`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/tcp.rs#L110-L118) (tokio 1.54.1, socket2 0.6.5, mio 1.2.4).
     A terminal's shell is not such a child: `crates/twigo-sessions/src/terminal/spawn.rs` marks every descriptor above 2 close-on-exec in `pre_exec`.
@@ -98,6 +98,10 @@ Findings that belong to no step yet.
     Starting those with only their stdio (`POSIX_SPAWN_CLOEXEC_DEFAULT`, or closing the descriptors above 2 in `pre_exec` as terminals do) would end it; not done.
   - A stop, a move or a shutdown followed at once by a bind of the same port can find it in use for a moment, since a child Twigo starts then holds a copy of the closed listeners until its program starts: a start or a resume answers `Busy` for that moment (ARCHITECTURE 4.6).
     It was seen on macOS 27.2 (2026-11-12) and not run on Linux, where a forked child holds its parent's descriptors until it execs as well.
+    A probe process's children held the probe's closed listener for under 50 µs when they were started with `posix_spawn` and for up to about 1 ms when they were forked (macOS 27.2, 2026-11-12); Twigo's own children were not measured.
+    std 1.99.1 uses `posix_spawnp` on Apple only for a command with no `pre_exec` closure and no `setsid`, and, when its environment was cleared or sets `PATH`, only for a program given by a path ([`posix_spawn`](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L467-L474) and its [`setsid` branch](https://github.com/rust-lang/rust/blob/1.99.1/library/std/src/sys/process/unix/unix.rs#L756-L765)); any other command forks.
+    Twigo's children fork: a terminal's shell and the login shell through `pre_exec`, and a credential plugin named without a path through its cleared environment; a plugin given by a path meets the conditions for `posix_spawnp`.
+    So the figure that applies to Twigo is the fork's, about 1 ms, not 50 µs, except for a plugin given by a path.
   - Safari and Firefox were not measured against the session budget.
     Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
   - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
