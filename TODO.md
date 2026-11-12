@@ -84,6 +84,9 @@ Findings that belong to no step yet.
   - What forwards do when the app starts is fixed: they come back as they were.
     The settings files of M3 let a person choose: as they were, all stopped, or none.
   - A forward's `failure` is the runtime's text as it comes, which on containerd names the sandbox's id and both loopback dials.
+  - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
+  - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
+  - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
   - Safari and Firefox were not measured against the session budget.
     Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
   - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
