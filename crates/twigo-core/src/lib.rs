@@ -177,7 +177,8 @@ impl Core {
     }
 
     /// The context's clients, once the catalog and the login shell's
-    /// environment are known.
+    /// environment are known. When this call builds them, the context's
+    /// forwards are told that their space connected.
     pub async fn clients(&self, context: &str) -> Result<Arc<Clients>, ClientsError> {
         let contexts = self.catalog.contexts().await;
         let Some(found) = contexts.find(context) else {
@@ -192,7 +193,7 @@ impl Core {
             .expect("the core outlives its subscribers")
             .clone()
             .expect("waited for");
-        let clients = self
+        let (clients, built) = self
             .connections
             .clients(
                 found,
@@ -205,7 +206,9 @@ impl Core {
             )
             .await
             .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))?;
-        self.forwards.connected(context);
+        if built {
+            self.forwards.connected(context);
+        }
         Ok(clients)
     }
 

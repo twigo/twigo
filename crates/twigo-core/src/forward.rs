@@ -162,8 +162,10 @@ struct Table {
     /// One per window: a later follower replaces the earlier.
     followers: HashMap<Arc<str>, Follower>,
     /// Until the saved forwards are in, the contexts whose clients were
-    /// made, which then start theirs over.
+    /// made, whose forwards are told so then.
     early: Option<HashSet<String>>,
+    /// The ports of targets whose start or resume is under way.
+    claimed: HashSet<Key>,
 }
 
 impl Table {
@@ -290,6 +292,23 @@ pub(crate) struct Forwards {
     /// see the ports and forwards not restored yet, and its save would
     /// replace what the space kept.
     restored: watch::Sender<bool>,
+    /// Told whenever a claim on a port of a target ends.
+    released: watch::Sender<()>,
+}
+
+/// A port of a target whose start or resume is under way, from the moment
+/// it is accepted: another start or resume of it waits until this one has
+/// ended, and then finds the forward it made.
+struct Claim<'a> {
+    forwards: &'a Forwards,
+    key: Key,
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.forwards.table().claimed.remove(&self.key);
+        self.forwards.released.send_replace(());
+    }
 }
 
 impl Forwards {
@@ -304,6 +323,21 @@ impl Forwards {
             })),
             checks: Checks { policy, catalog },
             restored: watch::Sender::new(false),
+            released: watch::Sender::new(()),
+        }
+    }
+
+    async fn claim(&self, key: &Key) -> Claim<'_> {
+        let mut released = self.released.subscribe();
+        while !self.table().claimed.insert(key.clone()) {
+            released
+                .changed()
+                .await
+                .expect("the manager holds the sender");
+        }
+        Claim {
+            forwards: self,
+            key: key.clone(),
         }
     }
 
@@ -377,8 +411,8 @@ impl Forwards {
         }
     }
 
-    /// The clients of `context` were made: a forward of it that waits for
-    /// its first connection starts over, unless it is refused. While the
+    /// The clients of `context` were made: a forward of it that waits
+    /// proves that it can reach a pod, unless it is refused. While the
     /// forwards are being restored it waits for them.
     pub(crate) fn connected(&self, context: &str) {
         let mut table = self.table();
@@ -386,25 +420,22 @@ impl Forwards {
             Some(early) => {
                 early.insert(context.to_owned());
             }
-            None => self.start_over(&mut table, context),
+            None => self.tell_connected(&mut table, context),
         }
     }
 
-    /// Decided on what the manager knows, not on the status, which lags the
-    /// controls it has sent: the queue applies a lifted refusal and then the
-    /// start.
-    fn start_over(&self, table: &mut Table, context: &str) {
+    /// The data path decides what to do, in the order of the controls: a
+    /// refusal or its lifting comes first, and only a forward that waits
+    /// then proves.
+    fn tell_connected(&self, table: &mut Table, context: &str) {
         for entry in table
             .entries
             .values_mut()
             .filter(|entry| entry.context == context)
         {
             entry.check(&self.checks);
-            if entry.refused.is_none()
-                && let Some(run) = &entry.run
-                && run.data.waits()
-            {
-                run.data.restart();
+            if let Some(run) = &entry.run {
+                run.data.connected();
             }
         }
     }
@@ -559,7 +590,8 @@ impl Core {
 
     /// Binds a local port and forwards it to a port of the target. A port of
     /// a target that has a forward answers with that forward, started again
-    /// if it was stopped, and moved if another `local` is asked.
+    /// if it was stopped or failed, and moved if another `local` is asked;
+    /// so does one whose start is under way, once that has ended.
     pub async fn forward_start(&self, request: StartForward) -> Result<ForwardStarted, IpcError> {
         let StartForward {
             target,
@@ -574,11 +606,10 @@ impl Core {
             .to_owned();
         self.authorize(&context, &[attributes(&target)])?;
         let key = Key::of(&target, port);
+        let _claim = self.forwards.claim(&key).await;
         let existing = self.forwards.table().find(&key);
         if let Some(id) = existing {
-            return self
-                .forward_resume(ResumeForward { id, local: asked })
-                .await;
+            return self.resume_claimed(id, asked).await;
         }
         let local = asked.unwrap_or_else(|| {
             let remembered = self.forwards.table().remembered.get(&key).map(|r| r.local);
@@ -627,47 +658,27 @@ impl Core {
             received: 0,
             failure: None,
         };
-        let mut run =
-            Some(
-                self.forwards
-                    .run(&context, &base, listeners, false, self.hub.clone())?,
-            );
+        let run = self
+            .forwards
+            .run(&context, &base, listeners, false, self.hub.clone())?;
         let started = {
             let mut table = self.forwards.table();
-            match table.find(&key) {
-                // Another start of this port came in meanwhile and won.
-                Some(existing) => Err(existing),
-                None => {
-                    let detour = table.detour(&key, local);
-                    if !detour {
-                        table.remember(&key, &target, local);
-                    }
-                    let mut entry = Entry {
-                        base,
-                        context,
-                        run: run.take(),
-                        unbound: None,
-                        refused: None,
-                        detour,
-                    };
-                    entry.check(&self.forwards.checks);
-                    table.entries.insert(id.0, entry);
-                    table.changed(id);
-                    Ok(table.entries[&id.0].forward())
-                }
+            let detour = table.detour(&key, local);
+            if !detour {
+                table.remember(&key, &target, local);
             }
-        };
-        let started = match started {
-            Ok(started) => started,
-            Err(existing) => {
-                drop(run);
-                return self
-                    .forward_resume(ResumeForward {
-                        id: existing,
-                        local: asked,
-                    })
-                    .await;
-            }
+            let mut entry = Entry {
+                base,
+                context,
+                run: Some(run),
+                unbound: None,
+                refused: None,
+                detour,
+            };
+            entry.check(&self.forwards.checks);
+            table.entries.insert(id.0, entry);
+            table.changed(id);
+            table.entries[&id.0].forward()
         };
         self.save_forwards(&target.space);
         Ok(ForwardStarted::Started {
@@ -681,34 +692,43 @@ impl Core {
         let ResumeForward { id, local } = request;
         named(local)?;
         self.forwards.after_restore().await;
-        let (context, target, base) = {
+        let key = {
             let table = self.forwards.table();
             let entry = table.entries.get(&id.0).ok_or_else(|| {
                 IpcError::new(ErrorKind::NotFound, format!("no forward {}", id.0))
             })?;
-            (
-                entry.context.clone(),
-                entry.base.target.clone(),
-                entry.base.clone(),
-            )
+            Key::of(&entry.base.target, entry.base.port)
         };
-        self.authorize(&context, &[attributes(&target)])?;
-        let key = Key::of(&target, base.port);
+        let _claim = self.forwards.claim(&key).await;
+        self.resume_claimed(id, local).await
+    }
+
+    /// A resume of a forward whose port is claimed. A forward that runs is
+    /// asked to start again, which the data path does only if it failed;
+    /// a move hands it the new port and changes nothing else.
+    async fn resume_claimed(
+        &self,
+        id: ForwardId,
+        local: Option<u16>,
+    ) -> Result<ForwardStarted, IpcError> {
+        let removed =
+            || IpcError::new(ErrorKind::NotFound, format!("forward {} was removed", id.0));
+        let (context, base) = {
+            let table = self.forwards.table();
+            let entry = table.entries.get(&id.0).ok_or_else(removed)?;
+            (entry.context.clone(), entry.base.clone())
+        };
+        let target = &base.target;
+        self.authorize(&context, &[attributes(target)])?;
+        let key = Key::of(target, base.port);
         let wanted = local.unwrap_or(base.local);
-        {
+        if wanted == base.local {
             let mut table = self.forwards.table();
-            let Some(entry) = table.entries.get_mut(&id.0) else {
-                return Err(IpcError::new(
-                    ErrorKind::NotFound,
-                    format!("forward {} was removed", id.0),
-                ));
-            };
-            if wanted == base.local && entry.run.is_some() {
+            let entry = table.entries.get_mut(&id.0).ok_or_else(removed)?;
+            if entry.run.is_some() {
                 entry.check(&self.forwards.checks);
                 if entry.refused.is_none()
                     && let Some(run) = &entry.run
-                    && !run.data.waits()
-                    && matches!(run.status.borrow().state, ForwardState::Failed { .. })
                 {
                     run.data.restart();
                 }
@@ -720,45 +740,42 @@ impl Core {
             Bound::Listening(listeners) => listeners,
             Bound::Busy(busy) => return Ok(busy),
         };
-        let mut moved = base;
-        moved.local = wanted;
-        moved.addresses = listeners.addresses();
         let started = {
             let mut table = self.forwards.table();
-            let Some(was) = table
-                .entries
-                .get(&id.0)
-                .map(|entry| (entry.base.local, entry.detour))
-            else {
-                return Err(IpcError::new(
-                    ErrorKind::NotFound,
-                    format!("forward {} was removed", id.0),
-                ));
-            };
-            let waits = table.entries[&id.0]
-                .run
-                .as_ref()
-                .is_some_and(|run| run.data.waits());
-            let run = self
-                .forwards
-                .run(&context, &moved, listeners, waits, self.hub.clone())?;
-            let detour = if was.0 == wanted {
-                was.1
+            let entry = table.entries.get(&id.0).ok_or_else(removed)?;
+            let detour = if entry.base.local == wanted {
+                entry.detour
             } else {
                 table.detour(&key, wanted)
             };
             if !detour {
-                table.remember(&key, &target, wanted);
+                table.remember(&key, target, wanted);
             }
             let entry = table.entries.get_mut(&id.0).expect("checked");
-            entry.stop();
+            let addresses = listeners.addresses();
+            match &mut entry.run {
+                Some(run) => run.data.rebind(listeners),
+                None => {
+                    let mut moved = entry.base.clone();
+                    moved.local = wanted;
+                    moved.addresses = addresses.clone();
+                    let run =
+                        self.forwards
+                            .run(&context, &moved, listeners, false, self.hub.clone())?;
+                    entry.run = Some(run);
+                    entry.unbound = None;
+                    entry.refused = None;
+                }
+            }
             entry.base.local = wanted;
-            entry.base.addresses = moved.addresses;
-            entry.run = Some(run);
-            entry.unbound = None;
-            entry.refused = None;
+            entry.base.addresses = addresses;
             entry.detour = detour;
             entry.check(&self.forwards.checks);
+            if entry.refused.is_none()
+                && let Some(run) = &entry.run
+            {
+                run.data.restart();
+            }
             let started = entry.forward();
             table.changed(id);
             started
@@ -826,8 +843,8 @@ impl Core {
     /// wait for its first connection or its space's connecting: nothing asks
     /// a cluster. A forward whose port another process holds fails with
     /// that; the policy and the catalog are asked about the rest once they
-    /// are loaded. The commands wait for it, and the spaces whose clients
-    /// were made meanwhile start their forwards over at its end.
+    /// are loaded. The commands wait for it, and the forwards of the spaces
+    /// whose clients were made meanwhile are told so at its end.
     pub(crate) async fn restore_forwards(&self) {
         for space in self.state.spaces() {
             let saved = self.state.forwards(&space.id);
@@ -847,7 +864,7 @@ impl Core {
         }
         let mut table = self.forwards.table();
         for context in table.early.take().unwrap_or_default() {
-            self.forwards.start_over(&mut table, &context);
+            self.forwards.tell_connected(&mut table, &context);
         }
         self.forwards.restored.send_replace(true);
     }

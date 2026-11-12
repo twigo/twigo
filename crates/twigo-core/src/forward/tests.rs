@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 use twigo_env::ShellEnv;
 use twigo_ipc::{Gvr, Mode, SetContextMode};
 
@@ -1293,8 +1294,11 @@ async fn a_move_keeps_the_bytes_the_forward_carried() {
     })
     .await
     .unwrap();
-    let moved = &listed(&core)[0];
-    assert_eq!((moved.sent, moved.received), (5, 5));
+    until("the bytes are shown", || {
+        let moved = &listed(&core)[0];
+        ((moved.sent, moved.received) == (5, 5)).then_some(())
+    })
+    .await;
 }
 
 fn a_run(core: &Core, id: u32, local: u16, listeners: Listeners) -> (Forward, Run) {
@@ -1320,7 +1324,7 @@ async fn a_run_whose_forward_was_never_inserted_emits_nothing() {
     let (_base, run) = a_run(&core, 7, local, listen(local).await.unwrap());
     tokio::task::yield_now().await;
 
-    run.data.restart();
+    run.data.connected();
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(seen.try_recv().is_err(), "an id that was never inserted");
 }
@@ -1356,7 +1360,7 @@ async fn a_run_the_forward_has_left_says_nothing_older_after_a_stop_and_nothing_
         .take();
     tokio::task::yield_now().await;
 
-    old.as_ref().unwrap().data.restart();
+    old.as_ref().unwrap().data.connected();
     tokio::time::sleep(Duration::from_millis(400)).await;
     while let Ok(event) = seen.try_recv() {
         let ForwardEvent::Changed { forward } = event else {
@@ -1814,8 +1818,27 @@ async fn clients_made_while_the_restore_is_under_way_start_the_forwards_it_resto
     .await;
 }
 
+fn start_of(core: &Arc<Core>, local: Option<u16>) -> JoinHandle<Result<ForwardStarted, IpcError>> {
+    let core = Arc::clone(core);
+    tokio::spawn(async move {
+        core.forward_start(StartForward {
+            target: target("kind-plain", "api"),
+            port: 8080,
+            local,
+        })
+        .await
+    })
+}
+
+fn started(answer: Result<Result<ForwardStarted, IpcError>, tokio::task::JoinError>) -> Forward {
+    match answer.unwrap().unwrap() {
+        ForwardStarted::Started { forward } => *forward,
+        busy @ ForwardStarted::Busy { .. } => panic!("the port of its own forward: {busy:?}"),
+    }
+}
+
 #[tokio::test]
-async fn a_start_that_finds_its_port_started_meanwhile_moves_that_forward_to_the_local_port_it_asked()
+async fn a_start_of_a_port_whose_start_is_under_way_waits_for_it_and_moves_its_forward_to_the_port_it_asked()
  {
     let api = Api::start(true).await;
     let dir = tempfile::tempdir().unwrap();
@@ -1823,33 +1846,27 @@ async fn a_start_that_finds_its_port_started_meanwhile_moves_that_forward_to_the
     let core = running_over(dir.path(), &api);
     core.catalog.contexts().await;
     let (first, second) = (free(), free());
-    let start = |local| StartForward {
-        target: target("kind-plain", "api"),
-        port: 8080,
-        local: Some(local),
-    };
 
-    let late = tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.forward_start(start(first)).await }
-    });
+    let earlier = start_of(&core, Some(first));
     api.reached().await;
-    let ForwardStarted::Started { forward: winner } =
-        core.forward_start(start(second)).await.unwrap()
-    else {
-        panic!("a free port starts");
-    };
+    let later = start_of(&core, Some(second));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!later.is_finished(), "it waits for the start under way");
+    assert!(
+        std::net::TcpListener::bind(("127.0.0.1", second)).is_ok(),
+        "and binds nothing meanwhile"
+    );
     api.release.notify_one();
-    let ForwardStarted::Started { forward } = late.await.unwrap().unwrap() else {
-        panic!("the port has a forward");
-    };
+    let made = started(earlier.await);
+    let moved = started(later.await);
 
-    assert_eq!((forward.id, forward.local), (winner.id, first));
+    assert_eq!((made.id, made.local), (moved.id, first));
+    assert_eq!(moved.local, second);
     assert_eq!(listed(&core).len(), 1, "no second forward");
-    assert_eq!(listed(&core)[0].local, first);
-    assert!(TcpStream::connect(("127.0.0.1", first)).await.is_ok());
+    assert_eq!(listed(&core)[0].local, second);
+    assert!(TcpStream::connect(("127.0.0.1", second)).await.is_ok());
     until("the port it left is released", || {
-        std::net::TcpListener::bind(("127.0.0.1", second)).ok()
+        std::net::TcpListener::bind(("127.0.0.1", first)).ok()
     })
     .await;
 }
@@ -1949,15 +1966,6 @@ async fn a_move_after_the_clients_came_does_not_leave_the_forward_waiting() {
     core.restore_forwards().await;
 
     core.forwards.connected("kind-plain");
-    assert!(
-        !core.forwards.table().entries[&1]
-            .run
-            .as_ref()
-            .unwrap()
-            .data
-            .waits(),
-        "the manager told it to start"
-    );
     core.forward_resume(ResumeForward {
         id: ForwardId(1),
         local: Some(free()),
@@ -1969,4 +1977,113 @@ async fn a_move_after_the_clients_came_does_not_leave_the_forward_waiting() {
         (now != ForwardState::Restored).then_some(now)
     })
     .await;
+}
+
+#[tokio::test]
+async fn clients_the_core_had_made_already_start_no_forward_that_waits() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = refused_while_restored(dir.path(), &api).await;
+    core.clients("kind-plain").await.unwrap();
+    set_the_mode(&core, Mode::ReadWrite).await;
+    core.forwards.recheck();
+    stays_waiting_and_asks_nobody(&core, &api).await;
+
+    core.clients("kind-plain").await.unwrap();
+    stays_waiting_and_asks_nobody(&core, &api).await;
+}
+
+#[tokio::test]
+async fn two_starts_of_one_port_at_once_answer_with_one_forward_on_one_port() {
+    for asked in [None, Some(free())] {
+        let api = Api::start(true).await;
+        let dir = tempfile::tempdir().unwrap();
+        let remembered = free();
+        keep(
+            dir.path(),
+            &Saved {
+                forwards: Vec::new(),
+                ports: vec![Remembered {
+                    target: target("kind-plain", "api"),
+                    port: 8080,
+                    local: remembered,
+                }],
+            },
+        );
+        let core = running_over(dir.path(), &api);
+        core.catalog.contexts().await;
+
+        let first = start_of(&core, asked);
+        api.reached().await;
+        let second = start_of(&core, asked);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        api.release.notify_one();
+        let (first, second) = (started(first.await), started(second.await));
+        assert_eq!(first.id, second.id, "{asked:?}");
+        assert_eq!(first.local, asked.unwrap_or(remembered));
+        assert_eq!(second.local, first.local);
+        assert_eq!(listed(&core).len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn a_move_of_a_forward_that_works_asks_for_no_proof_and_keeps_its_connections() {
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let local = free();
+    let ForwardStarted::Started { forward } = core
+        .forward_start(StartForward {
+            target: target("kind-plain", "api"),
+            port: 8080,
+            local: Some(local),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a free port starts");
+    };
+    until("the forward is ready", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+    let mut open = TcpStream::connect(("127.0.0.1", local)).await.unwrap();
+    open.write_all(b"hello").await.unwrap();
+    let mut echoed = [0; 5];
+    open.read_exact(&mut echoed).await.unwrap();
+    let (events, seen) = mpsc::channel();
+    core.follow_forwards("main", move |event| events.send(event).is_ok());
+
+    let moved = free();
+    core.forward_resume(ResumeForward {
+        id: forward.id,
+        local: Some(moved),
+    })
+    .await
+    .unwrap();
+    assert!(
+        std::net::TcpListener::bind(("127.0.0.1", local)).is_ok(),
+        "the port it left is free"
+    );
+    open.write_all(b"again").await.unwrap();
+    open.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(
+        &echoed, b"again",
+        "a connection open before the move goes on"
+    );
+    let mut after = TcpStream::connect(("127.0.0.1", moved)).await.unwrap();
+    after.write_all(b"moved").await.unwrap();
+    after.read_exact(&mut echoed).await.unwrap();
+    assert_eq!(&echoed, b"moved");
+    let states: Vec<_> = seen
+        .try_iter()
+        .filter_map(|event| match event {
+            ForwardEvent::Changed { forward } => Some(forward.state),
+            ForwardEvent::Removed { .. } => None,
+        })
+        .collect();
+    assert!(!states.contains(&ForwardState::Starting), "{states:?}");
+    assert_eq!(listed(&core)[0].state, ForwardState::Ready);
 }
