@@ -80,9 +80,11 @@ pub struct ResumeForward {
     rename_all_fields = "camelCase"
 )]
 pub enum ForwardStarted {
-    /// Listening. A port that has a forward already, or whose start is
-    /// under way, answers with that one, started again if it was stopped or
-    /// failed.
+    /// Listening: the forward as the command left it, `Starting` for one
+    /// started again and `Failed` with the refusal for one its context's mode
+    /// or the catalog refuses, which has asked nothing. A port that has a
+    /// forward already, or whose start binds meanwhile, answers with that
+    /// one, started again if it was stopped or failed.
     Started { forward: Box<Forward> },
     /// The local port could not be bound, and nothing was started or kept.
     Busy {
@@ -149,21 +151,30 @@ pub enum ForwardState {
     /// pod and a first stream proves that it can be reached; it ends `Ready`
     /// or `Failed`.
     Starting,
-    /// Listening, and it has asked its cluster nothing: since the app
-    /// started, or since a refusal was lifted. Its first connection, or its
-    /// space's connecting, makes it ask; nothing else does.
+    /// Listening, and not proven since the app started or since a refusal
+    /// was lifted. Its first connection, or its space's connecting, makes it
+    /// ask; nothing else does. It stays `Restored` while its first
+    /// connection's proof is under way and if that connection leaves before
+    /// the proof ends, and its space's connecting meanwhile makes that proof
+    /// the space's.
     Restored,
     Ready,
     /// No pod can be reached, for the reason given: none is ready, the
-    /// cluster does not answer, or a stream to a pod failed. It looks again
-    /// while it has connections, and at the next one.
+    /// cluster does not answer or refuses for now, or a stream to a pod
+    /// failed. It looks again while it has connections, and at the next one.
     Reconnecting {
         reason: String,
     },
-    /// Still listening, and every connection is closed at once, until a
-    /// start or a resume: the cluster refused, the context's mode does, or
-    /// no source lists the context. One whose target is gone looks at it
-    /// again at its next connection.
+    /// Still listening, and every connection is closed at once. A start or
+    /// a resume fails it for anything, what may pass too: a cluster that does
+    /// not answer, no ready pod within the wait, a refused port, a 403. The
+    /// proofs its connections and its space's connecting ask for fail it
+    /// only for the gate's refusal, a context that no source lists, a
+    /// credential failure or a target that is gone, and its context's mode
+    /// and the catalog fail it too. A start or a resume starts it again, and a lifted refusal makes
+    /// it wait, `Restored`; one whose target is gone looks at it again at its
+    /// next connection, and one that failed for a credential is proven again
+    /// by its space's connecting.
     Failed {
         error: IpcError,
     },
