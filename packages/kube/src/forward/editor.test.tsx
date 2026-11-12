@@ -7,7 +7,14 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, Forward, ForwardTarget } from "@twigo/protocol";
+import type {
+  Backend,
+  Blocked,
+  Forward,
+  ForwardEvent,
+  ForwardTarget,
+  ModeSource,
+} from "@twigo/protocol";
 import {
   BLOCKED_AFTER_MS,
   createMockBackend,
@@ -66,11 +73,37 @@ interface Mounted {
   readonly open: (forward: Forward) => Promise<string>;
 }
 
+/** `backend`, telling the window every forward as `patch` makes it, to give one a state the mock does not reach. */
+function patching(
+  backend: Backend,
+  patch: (forward: Forward) => Forward,
+): Backend {
+  return {
+    invoke: (command, request) => backend.invoke(command, request),
+    subscribe: (async (
+      command: "forwards_watch",
+      request: null,
+      onMessage: (event: ForwardEvent) => void,
+    ) => {
+      const first = await backend.subscribe(command, request, (event) => {
+        onMessage(
+          event.event === "changed"
+            ? { event: "changed", forward: patch(event.forward) }
+            : event,
+        );
+      });
+      return first.map(patch);
+    }) as Backend["subscribe"],
+  };
+}
+
 async function mounted(
   scenario: MockScenario = "live",
   space = "qa",
+  patch?: (forward: Forward) => Forward,
 ): Promise<Mounted> {
-  const backend = createMockBackend(scenario);
+  const mock = createMockBackend(scenario);
+  const backend = patch ? patching(mock, patch) : mock;
   const workbench = await testWorkbench(scenario, backend);
   const forwards = new Forwards(backend);
   registerForwards(workbench, forwards);
@@ -163,9 +196,9 @@ test("the counters of a ready forward move while the tab is open", async () => {
   const forward = await start(API, 80);
   await open(forward);
   const sent = () => screen.getByText("Sent").nextSibling?.textContent;
-  expect(sent()).toBe("0 B");
+  expect(sent()).toMatch(/^0 B/);
   await later(3000);
-  expect(sent()).not.toBe("0 B");
+  expect(sent()).not.toMatch(/^0 B/);
 });
 
 test("the target and the pod are links to their objects, which open beside the tab", async () => {
@@ -216,7 +249,7 @@ test("a forward that loses its pod says it is reconnecting, why, and then shows 
   expect(second).toMatch(/port 8080$/);
 });
 
-test("a forward that failed says the target's own failure, and that it still listens", async () => {
+test("a forward that failed says the target's own failure, that it still listens and that Start tries again, and no claim about its connections", async () => {
   const { start, open } = await mounted("forwardFailed");
   const forward = await start(API, 80);
   await open(forward);
@@ -224,9 +257,8 @@ test("a forward that failed says the target's own failure, and that it still lis
   screen.getByText(
     /refused the connection to port 8080: nothing listens on it$/,
   );
-  screen.getByText(
-    /It still listens on localhost:8080 and closes every connection/,
-  );
+  screen.getByText("It still listens on localhost:8080. Start tries it again.");
+  expect(screen.queryByText(/closes every connection/)).toBeNull();
 });
 
 test("restored, stopped and failed forwards of an earlier run say so, each in its words", async () => {
@@ -282,6 +314,8 @@ test("a tab a restored layout brings back for a forward the core lacks says so a
   });
   await settle(6);
   screen.getByText("This port-forward is gone");
+  screen.getByText("It was not found, so there is nothing to show.");
+  expect(screen.queryByText(/removed/)).toBeNull();
   fireEvent.click(button("Close"));
   await settle(4);
   expect(tabsIn("editor")).toEqual([]);
@@ -599,6 +633,8 @@ test("a start that the mode refuses says so as a warning in the gate's words, an
   const { start, open, backend, forwards } = await mounted("forwardBlocked");
   const forward = await start(API, 80);
   await open(forward);
+  fireEvent.click(button("Stop"));
+  await settle(6);
   await later(BLOCKED_AFTER_MS);
   const calls = recording(backend);
   fireEvent.click(button("Start"));
@@ -613,6 +649,171 @@ test("a start that the mode refuses says so as a warning in the gate's words, an
     '[data-sonner-toast] svg[class*="text-"]',
   );
   expect(icon?.getAttribute("class")).toContain("text-warn");
-  expect(forwards.get(forward.id)?.state.state).toBe("failed");
-  expect(screen.getAllByText("Read-only").length).toBeGreaterThan(0);
+  expect(forwards.get(forward.id)?.state.state).toBe("stopped");
+});
+
+const REFUSED = (source: ModeSource): Forward["state"] => {
+  const blocked: Blocked = {
+    context: "qa",
+    mode: "read-only",
+    source,
+    class: "forward",
+    reason: "mode",
+    verb: "get",
+    target: "pods/portforward in auth",
+  };
+  return {
+    state: "failed",
+    error: { kind: "permissions", message: "qa is read-only", blocked },
+  };
+};
+
+test("a forward that failed on a lock the person may lift keeps Start and Change Local Port…, and one a policy file or an unlisted context locks has neither", async () => {
+  for (const [source, offered] of [
+    [{ kind: "user" }, true],
+    [
+      { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: null },
+      false,
+    ],
+    [{ kind: "unlisted" }, false],
+  ] as const) {
+    const { start, open } = await mounted("live", "qa", (forward) => ({
+      ...forward,
+      state: REFUSED(source),
+    }));
+    await open(await start(API, 80));
+    expect(screen.getAllByText("qa is read-only").length).toBeGreaterThan(0);
+    if (offered) {
+      button("Start");
+      button("Change Local Port…");
+    } else {
+      absent("Start");
+      absent("Change Local Port…");
+    }
+    button("Stop");
+    button("Remove");
+    cleanup();
+  }
+});
+
+test("a reconnecting forward offers Start, which asks again and leaves its state", async () => {
+  const { start, open, backend, forwards } = await mounted(
+    "forwardReconnecting",
+  );
+  const calls = recording(backend);
+  const forward = await start(API, 80);
+  await open(forward);
+  absent("Start");
+  await later(LOSES_POD_AFTER_MS - READY_AFTER_MS);
+  expect(forwards.get(forward.id)?.state.state).toBe("reconnecting");
+  button("Start");
+  button("Change Local Port…");
+  fireEvent.click(button("Start"));
+  await settle(6);
+  expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
+  expect(forwards.get(forward.id)?.state.state).toBe("reconnecting");
+});
+
+test("Open in Browser is offered while the forward listens and has not failed", async () => {
+  const states: [Forward["state"], string[], boolean][] = [
+    [{ state: "ready" }, ["127.0.0.1"], true],
+    [{ state: "restored" }, ["127.0.0.1"], true],
+    [{ state: "stopped" }, ["127.0.0.1", "::1"], false],
+    [{ state: "stopped" }, [], false],
+    [
+      { state: "failed", error: { kind: "internal", message: "x" } },
+      ["::1"],
+      false,
+    ],
+    [{ state: "failed", error: { kind: "internal", message: "x" } }, [], false],
+    [{ state: "ready" }, [], false],
+  ];
+  for (const [state, addresses, offered] of states) {
+    const { start, open } = await mounted("live", "qa", (forward) => ({
+      ...forward,
+      state,
+      addresses,
+    }));
+    await open(await start(API, 80));
+    if (offered) button("Open in Browser");
+    else absent("Open in Browser");
+    button("Copy Address");
+    cleanup();
+  }
+});
+
+test("a forward that listens nowhere says so: not on an address, and that Change Local Port… and Start are the way out", async () => {
+  const { start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    addresses: [],
+    state: {
+      state: "failed",
+      error: {
+        kind: "conflict",
+        message: "port 8080 is held by another process",
+      },
+    },
+  }));
+  await open(await start(API, 80));
+  screen.getByText("port 8080 is held by another process");
+  screen.getByText(
+    "Nothing listens on localhost:8080. Change Local Port… moves it to another port, and Start tries this one again.",
+  );
+  expect(screen.queryByText(/still listens/)).toBeNull();
+  const address = screen.getByText("Local address", { selector: "dt" })
+    .nextSibling?.textContent;
+  expect(address).toBe("localhost:8080 not listening");
+  button("Start");
+  button("Change Local Port…");
+});
+
+test("a stopped forward's address line does not contradict its banner, whatever addresses the core still holds", async () => {
+  const { start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    state: { state: "stopped" },
+    addresses: ["127.0.0.1", "::1"],
+  }));
+  await open(await start(API, 80));
+  screen.getByText(/Nothing listens on localhost:8080; Start brings it back\./);
+  const address = screen.getByText("Local address", { selector: "dt" })
+    .nextSibling?.textContent;
+  expect(address).toBe("localhost:8080 not listening");
+});
+
+test("the counters say that they count since Twigo started, and each shows its own bytes and the failure its own words", async () => {
+  const { start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    sent: 1536,
+    received: 5 * 1024 * 1024,
+    failure: "pod auth-api-1 refused the connection to port 8080",
+  }));
+  await open(await start(API, 80));
+  const value = (label: string) =>
+    screen.getByText(label, { selector: "dt" }).nextSibling?.textContent;
+  expect(value("Sent")).toBe("1.5 KiB since Twigo started");
+  expect(value("Received")).toBe("5 MiB since Twigo started");
+  expect(value("Last failure")).toBe(
+    "pod auth-api-1 refused the connection to port 8080",
+  );
+});
+
+test("a tab whose address names another space shows nothing of that space's forward", async () => {
+  const { workbench, start } = await mounted();
+  const forward = await start(API, 80);
+  await act(() => workbench.spaces.open("prod-eu"));
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  const other = pfUri({ space: "prod-eu", id: forward.id });
+  act(() => {
+    workbench.editors.open(other);
+  });
+  await settle(6);
+  expect(tabsIn("editor")).toEqual([other]);
+  screen.getByText("This port-forward is gone");
+  expect(
+    screen.queryByText("auth-api:http → 8080", { selector: "h2" }),
+  ).toBeNull();
+  expect(workbench.editors.title(other)).toBe("Port forward");
+  absent("Stop");
 });

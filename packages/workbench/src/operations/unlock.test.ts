@@ -5,7 +5,7 @@ import {
   type Blocked,
   type ModeSource,
 } from "@twigo/protocol";
-import { unlockAction } from "./unlock";
+import { canUnlock, unlockAction } from "./unlock";
 
 function refusal(source: ModeSource, more: Partial<Blocked> = {}): IpcError {
   const blocked: Blocked = {
@@ -61,6 +61,22 @@ test("a refusal that is not the mode of a read-only context, and any other error
   expect(none(refusal(source, { reason: "noGrant" }))).toBeUndefined();
   expect(none(new IpcError("notFound", "no forward 41"))).toBeUndefined();
   expect(none(new Error("boom"))).toBeUndefined();
+});
+
+test.each<[ModeSource, boolean]>([
+  [{ kind: "user" }, true],
+  [{ kind: "kubeconfig" }, true],
+  [
+    { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: null },
+    false,
+  ],
+  [{ kind: "unlisted" }, false],
+])("a lock set by %o may be lifted: %s", (source, lifted) => {
+  const { blocked } = refusal(source);
+  if (!blocked) throw new Error("no refusal");
+  expect(canUnlock(blocked)).toBe(lifted);
+  expect(canUnlock({ ...blocked, mode: "guarded" })).toBe(false);
+  expect(canUnlock({ ...blocked, reason: "noGrant" })).toBe(false);
 });
 
 test("an unlock that fails is reported", async () => {

@@ -35,6 +35,12 @@ export class Forwards {
     return this.#byId.get(id);
   }
 
+  /** The forward a `pf://` address names: its id, as a forward of the space the address says. */
+  find({ space, id }: { space: string; id: ForwardId }): Forward | undefined {
+    const forward = this.#byId.get(id);
+    return forward?.target.space === space ? forward : undefined;
+  }
+
   /** A space's forwards in the order they were made, the same array until one changes. */
   ofSpace(space: string): readonly Forward[] {
     let found = this.#bySpace.get(space);

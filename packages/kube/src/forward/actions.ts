@@ -142,7 +142,7 @@ export function registerForwardActions(
       id: "k8s.forward.changeLocal",
       title: "Change Local Port…",
       icon: Pencil,
-      when: "forward",
+      when: "forward.movable",
       menus: [
         ["editor/title", "navigation"],
         ["view/item", "3_state"],

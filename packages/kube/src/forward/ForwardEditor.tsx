@@ -15,7 +15,13 @@ import { formatBytes } from "@twigo/utils";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { objectUri, parsePfUri } from "../uri";
 import type { Forwards } from "./service";
-import { addressOf, forwardTitle, portWords, stateOf } from "./words";
+import {
+  addressOf,
+  forwardTitle,
+  listensOn,
+  portWords,
+  stateOf,
+} from "./words";
 
 const PODS = { group: "", version: "v1", resource: "pods" };
 
@@ -31,7 +37,7 @@ export function ForwardEditor({
   const { editors } = useWorkbench();
   useChanges(forwards.changes);
   const input = useMemo(() => parsePfUri(uri), [uri]);
-  const forward = input && forwards.get(input.id);
+  const forward = input && forwards.find(input);
   const title = forward && forwardTitle(forward);
   useEffect(() => {
     if (title) editors.setTitle(uri, title);
@@ -57,7 +63,7 @@ export function ForwardEditor({
         }}
         className="h-full"
       >
-        <p>It was removed, so there is nothing left to show.</p>
+        <p>It was not found, so there is nothing to show.</p>
       </EmptyState>
     ) : (
       <div aria-busy className="flex flex-col gap-3 p-4">
@@ -73,6 +79,7 @@ export function ForwardEditor({
 function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
   const { editors } = useWorkbench();
   const shown = stateOf(forward);
+  const listens = listensOn(forward);
   const { target, pod, queued } = forward;
   const open = (name: string, pods: boolean) => {
     editors.pin(uri);
@@ -137,7 +144,11 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
       value: (
         <>
           <code className="font-mono text-xs">{addressOf(forward)}</code>
-          <Quiet> on {forward.addresses.join(" and ")}</Quiet>
+          <Quiet>
+            {listens.length > 0
+              ? ` on ${listens.join(" and ")}`
+              : " not listening"}
+          </Quiet>
         </>
       ),
     },
@@ -149,11 +160,25 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
           ? `${String(forward.connections)}, ${String(queued)} waiting`
           : String(forward.connections),
     },
-    { key: "sent", label: "Sent", value: formatBytes(forward.sent) },
+    {
+      key: "sent",
+      label: "Sent",
+      value: (
+        <>
+          {formatBytes(forward.sent)}
+          <Quiet> since Twigo started</Quiet>
+        </>
+      ),
+    },
     {
       key: "received",
       label: "Received",
-      value: formatBytes(forward.received),
+      value: (
+        <>
+          {formatBytes(forward.received)}
+          <Quiet> since Twigo started</Quiet>
+        </>
+      ),
     },
     {
       key: "failure",
@@ -223,28 +248,23 @@ function Problem({ forward }: { forward: Forward }) {
       </Callout>
     );
   }
-  if (state.state === "failed" && state.error.blocked) {
-    const { context, mode } = state.error.blocked;
-    return (
-      <Callout tone="warn" title={`${context} is ${mode}`}>
-        <p className="break-words">{state.error.message}</p>
-        <p className="text-muted-foreground">
-          It still listens on {addressOf(forward)} and closes every connection
-          at once, until the mode lets forwards through.
-        </p>
-      </Callout>
-    );
-  }
-  if (state.state === "failed") {
-    return (
-      <Callout tone="error" title="Failed">
-        <p className="break-words">{state.error.message}</p>
-        <p className="text-muted-foreground">
-          It still listens on {addressOf(forward)} and closes every connection
-          at once.
-        </p>
-      </Callout>
-    );
-  }
-  return null;
+  if (state.state !== "failed") return null;
+  const { error } = state;
+  const where = addressOf(forward);
+  const [title, tone] = error.blocked
+    ? [`${error.blocked.context} is ${error.blocked.mode}`, "warn" as const]
+    : ["Failed", "error" as const];
+  const listens = listensOn(forward).length > 0;
+  return (
+    <Callout tone={tone} title={title}>
+      <p className="break-words">{error.message}</p>
+      <p className="text-muted-foreground">
+        {!listens
+          ? `Nothing listens on ${where}. Change Local Port… moves it to another port, and Start tries this one again.`
+          : error.blocked
+            ? `It still listens on ${where} and closes every connection at once, until the mode lets forwards through.`
+            : `It still listens on ${where}. Start tries it again.`}
+      </p>
+    </Callout>
+  );
 }

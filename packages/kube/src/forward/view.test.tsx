@@ -287,7 +287,6 @@ test("the first right click on a row opens its menu, which carries the tab's act
   ]);
   expect(await menuOf(1)).toEqual([
     "Open",
-    "Open in Browser",
     "Copy Address",
     "Start",
     "Change Local Port…",
@@ -295,7 +294,6 @@ test("the first right click on a row opens its menu, which carries the tab's act
   ]);
   expect(await menuOf(2)).toEqual([
     "Open",
-    "Open in Browser",
     "Copy Address",
     "Stop",
     "Start",

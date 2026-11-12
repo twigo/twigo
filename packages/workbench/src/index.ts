@@ -32,7 +32,7 @@ export type {
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
 export type { Look, Outcome } from "./operations/service";
-export { unlockAction } from "./operations/unlock";
+export { canUnlock, unlockAction } from "./operations/unlock";
 export { StateStore } from "./state/store";
 export type { SpaceConnection, SpaceStatusProvider } from "./spaces/status";
 export type {

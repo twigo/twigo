@@ -51,7 +51,7 @@ export function registerForwards(
     space: (uri) => parsePfUri(uri.href)?.space,
     title: (uri) => {
       const input = parsePfUri(uri.href);
-      const forward = input && forwards.get(input.id);
+      const forward = input && forwards.find(input);
       return forward ? forwardTitle(forward) : "Port forward";
     },
     icon: ({ className }) => <ArrowLeftRight className={className} />,

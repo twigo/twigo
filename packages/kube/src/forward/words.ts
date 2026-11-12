@@ -32,6 +32,11 @@ export function addressOf({ local }: Forward): string {
   return `localhost:${String(local)}`;
 }
 
+/** The addresses a forward listens on: none while it is stopped, whatever the core still holds, and none when its port was held at the restore. */
+export function listensOn({ state, addresses }: Forward): readonly string[] {
+  return state.state === "stopped" ? [] : addresses;
+}
+
 export interface Shown {
   readonly label: string;
   readonly tone: Tone;

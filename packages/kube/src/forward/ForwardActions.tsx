@@ -19,7 +19,7 @@ export function ForwardActions({
   useChanges(workbench.menus.changes);
   useChanges(workbench.keys.changes);
   const input = parsePfUri(uri);
-  const forward = input && forwards.get(input.id);
+  const forward = input && forwards.find(input);
   if (!forward) return null;
   const { label, tone, pulse } = stateOf(forward);
   const lookup = withForward(workbench.keys.lookup(null), forward);
