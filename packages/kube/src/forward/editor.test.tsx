@@ -7,13 +7,14 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type {
-  Backend,
-  Blocked,
-  Forward,
-  ForwardEvent,
-  ForwardTarget,
-  ModeSource,
+import {
+  IpcError,
+  type Backend,
+  type Blocked,
+  type Forward,
+  type ForwardEvent,
+  type ForwardTarget,
+  type ModeSource,
 } from "@twigo/protocol";
 import {
   BLOCKED_AFTER_MS,
@@ -462,7 +463,7 @@ test("Change Local Port asks for the port and resumes the forward on it, and the
 
 test("a local port that is in use starts nothing on another by itself: the next free one is offered, and taken only when the person takes it", async () => {
   const { workbench, start, open, backend } = await mounted("forwardBusy");
-  const forward = await start(API, 80, 8081);
+  const forward = await start(API, 80, 8085);
   await open(forward);
   const calls = recording(backend);
   fireEvent.click(button("Change Local Port…"));
@@ -473,17 +474,35 @@ test("a local port that is in use starts nothing on another by itself: the next 
   });
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so auth-api:http is not forwarded.Use 8081",
+    "8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
   ]);
   await later(5000);
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: 8080 }]);
-  screen.getByText("localhost:8081");
+  screen.getByText("localhost:8085");
 
   fireEvent.click(toastButton("Use 8081"));
   await settle(6);
   expect(calls("forward_resume")).toEqual([
     { id: forward.id, local: 8080 },
     { id: forward.id, local: 8081 },
+  ]);
+});
+
+test("a stopped forward that is moved onto a busy port is not forwarded, and says so", async () => {
+  const { workbench, start, open } = await mounted("forwardBusy");
+  const forward = await start(API, 80, 8085);
+  await open(forward);
+  fireEvent.click(button("Stop"));
+  await settle(6);
+  fireEvent.click(button("Change Local Port…"));
+  await settle(4);
+  act(() => {
+    workbench.quickAccess.setValue("8080");
+    workbench.quickAccess.submit();
+  });
+  await settle(6);
+  expect(live()).toEqual([
+    "8080 is in use by another process or forward, so auth-api:http is not forwarded.Use 8081",
   ]);
 });
 
@@ -500,7 +519,7 @@ test("a port below 1024 says that Twigo cannot listen on it, not that it is in u
   await settle(6);
   const [toast] = live();
   expect(toast).toContain(
-    "Twigo cannot listen on 80: ports below 1024 need privileges it does not have, so auth-api:http is not forwarded.",
+    "Twigo cannot listen on 80: ports below 1024 need privileges it does not have, so auth-api:http stays on 8085.",
   );
   expect(toast).not.toContain("in use");
   toastButton("Use 1024");
@@ -593,6 +612,97 @@ test("a tab that opens before the core has answered shows no forward is gone", a
   await settle(6);
   expect(screen.queryByText("This port-forward is gone")).toBeNull();
   expect(document.querySelector("[aria-busy]")).not.toBeNull();
+});
+
+test("a busy port's field that is dismissed moves nothing: the forward stays where it was, and no port is taken", async () => {
+  history.replaceState(null, "", "/?variant=busy:input");
+  const { workbench, start, open, backend, forwards } =
+    await mounted("forwardBusy");
+  const forward = await start(API, 80, 8085);
+  await open(forward);
+  const calls = recording(backend);
+  fireEvent.click(button("Change Local Port…"));
+  await settle(4);
+  act(() => {
+    workbench.quickAccess.setValue("8080");
+    workbench.quickAccess.submit();
+  });
+  await settle(6);
+  expect(workbench.quickAccess.session?.ask?.value).toBe("8081");
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  await later(5000);
+  expect(calls("forward_resume")).toEqual([{ id: forward.id, local: 8080 }]);
+  expect(forwards.get(forward.id)?.local).toBe(8085);
+  expect(live()).toEqual([]);
+});
+
+test("a resume that fails for another reason than a busy port or the mode is shown as an error in the core's words, from Start and from Change Local Port…", async () => {
+  const mock = createMockBackend("live");
+  let failing = false;
+  const backend: Backend = {
+    invoke: (command, request) =>
+      failing && command === "forward_resume"
+        ? Promise.reject(
+            new IpcError("unavailable", "the cluster does not answer"),
+          )
+        : mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, onMessage),
+  };
+  const workbench = await testWorkbench("live", backend);
+  const forwards = new Forwards(backend);
+  registerForwards(workbench, forwards);
+  await act(() => workbench.spaces.open("qa"));
+  act(() => {
+    workbench.spaces.select("qa");
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  await settle();
+  const started = backend.invoke("forward_start", {
+    target: API,
+    port: 80,
+    local: null,
+  });
+  await settle(2);
+  const answer = await started;
+  if (answer.outcome !== "started") throw new Error("the start was busy");
+  await later(READY_AFTER_MS + 200);
+  const { id } = answer.forward;
+  act(() => {
+    workbench.editors.open(pfUri({ space: "qa", id }));
+  });
+  await settle(6);
+  fireEvent.click(button("Stop"));
+  await settle(6);
+
+  failing = true;
+  fireEvent.click(button("Start"));
+  await settle(8);
+  expect(live().join("\n")).toContain("the cluster does not answer");
+  expect(
+    document
+      .querySelector('[data-sonner-toast] svg[class*="text-"]')
+      ?.getAttribute("class"),
+  ).toContain("text-error");
+  expect(forwards.get(id)?.state.state).toBe("stopped");
+  for (const dismiss of document.querySelectorAll<HTMLElement>(
+    '[data-sonner-toast] button[aria-label="Dismiss"]',
+  ))
+    dismiss.click();
+  await settle(6);
+  expect(live()).toEqual([]);
+
+  fireEvent.click(button("Change Local Port…"));
+  await settle(4);
+  act(() => {
+    workbench.quickAccess.setValue("8090");
+    workbench.quickAccess.submit();
+  });
+  await settle(8);
+  expect(live().join("\n")).toContain("the cluster does not answer");
+  expect(forwards.get(id)?.local).toBe(8080);
 });
 
 const BLOCKED =

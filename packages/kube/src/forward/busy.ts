@@ -7,11 +7,14 @@ import { targetWords } from "./words";
 
 type Busy = Extract<ForwardStarted, { outcome: "busy" }>;
 
-/** Why a local port could not be bound, in words that tell the two apart. */
+/** Why a local port could not be bound, in words that tell the two apart; the privileges are the reason only below 1024. */
 function whyBusy({ local, why }: Busy): string {
-  return why === "inUse"
-    ? `${String(local)} is in use by another process or forward`
-    : `Twigo cannot listen on ${String(local)}: ports below 1024 need privileges it does not have`;
+  if (why === "inUse") {
+    return `${String(local)} is in use by another process or forward`;
+  }
+  return local < 1024
+    ? `Twigo cannot listen on ${String(local)}: ports below 1024 need privileges it does not have`
+    : `Twigo cannot listen on ${String(local)}: the system does not let it bind that port`;
 }
 
 export function validPort(value: string): string | undefined {
@@ -54,7 +57,9 @@ export async function unlessRefused<T>(
  * that could not be bound starts nothing, and the next free one is offered
  * as data, never taken by itself: a toast to accept it, or a field with it
  * filled in. The person's choice goes through `again`, which asks the core
- * with that port, and its answer is told the same way.
+ * with that port, and its answer is told the same way. A forward that
+ * listens on `stays` keeps that port, and is told so instead of not being
+ * forwarded.
  */
 export async function tellBind(
   workbench: Workbench,
@@ -62,6 +67,7 @@ export async function tellBind(
   what: string,
   again: (local: number) => Promise<ForwardStarted>,
   done: (forward: Forward) => void,
+  stays?: number,
 ): Promise<void> {
   if (started.outcome === "started") {
     done(started.forward);
@@ -70,7 +76,7 @@ export async function tellBind(
   const retry = async (local: number): Promise<void> => {
     try {
       const answer = await unlessRefused(workbench, what, () => again(local));
-      if (answer) await tellBind(workbench, answer, what, again, done);
+      if (answer) await tellBind(workbench, answer, what, again, done, stays);
     } catch (error) {
       workbench.report(error);
     }
@@ -87,7 +93,11 @@ export async function tellBind(
     if (typed !== undefined) await retry(Number(typed.trim()));
     return;
   }
-  notify.warning(`${words}, so ${what} is not forwarded.`, {
+  const left =
+    stays === undefined
+      ? `${what} is not forwarded`
+      : `${what} stays on ${String(stays)}`;
+  notify.warning(`${words}, so ${left}.`, {
     key: `forward-busy:${what}`,
     action: {
       label: `Use ${String(started.free)}`,

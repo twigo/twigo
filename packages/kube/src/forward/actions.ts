@@ -15,7 +15,7 @@ import type { MenuId, Workbench } from "@twigo/workbench";
 import { pfUri } from "../uri";
 import { tellBind, tellFailure, unlessRefused, validPort } from "./busy";
 import type { Forwards } from "./service";
-import { addressOf, targetWords, webUrl } from "./words";
+import { addressOf, listensOn, targetWords, webUrl } from "./words";
 
 const ARGUMENT = v.object({ id: v.number() });
 
@@ -63,7 +63,15 @@ export function registerForwardActions(
       backend.invoke("forward_resume", { id: forward.id, local }),
     );
     if (started) {
-      await tellBind(workbench, started, targetWords(forward), again, told);
+      const stays = listensOn(forward).length > 0 ? forward.local : undefined;
+      await tellBind(
+        workbench,
+        started,
+        targetWords(forward),
+        again,
+        told,
+        stays,
+      );
     }
   };
 

@@ -77,6 +77,9 @@ Findings that belong to no step yet.
     Move Editor into New Group to the Right (`mod+\`) loses its key to Toggle Terminal the same way on Linux with the recorded French layout, a Mac's, where the backtick sits on the `Backslash` key; not verified with a French layout of Linux.
     Both stay in the palette until the keybindings editor lets a person rebind them.
   - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).
+- Port-forwards, the webview (`packages/kube/src/forward`, ARCHITECTURE 4.6):
+  - The checkpoint's variants are still live: `start:pick` or `start:once` for what `f` does, `busy:offer` or `busy:input` for a local port in use.
+    `variants.ts` and the branches that read it go, keeping the chosen variant of each group, once the owner has chosen.
 - Port-forwards (`twigo_sessions::forward`, `twigo_core::forward`, ARCHITECTURE 4.6):
   - The HTTP request tester of 4.3 comes later: the `pf://` tab has Open in browser and Copy address only.
   - A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd: no half-close reaches the pod over `v4.channel.k8s.io`, and kubectl's SPDY tunnel loses the answer after 1 s on containerd 2.3.4 (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).

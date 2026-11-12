@@ -145,6 +145,7 @@ test("f on a pod with one port starts it at once and opens its tab", async () =>
   ]);
   await settle(6);
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
+  expect(live()).toEqual([]);
 });
 
 test("f on a Service with several ports asks which, the default first, each line saying its local port", async () => {
@@ -162,6 +163,7 @@ test("f on a Service with several ports asks which, the default first, each line
     { target: GATEWAY, port: 9090, local: null },
   ]);
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
+  expect(live()).toEqual([]);
 });
 
 test("a pick that is dismissed starts nothing", async () => {
@@ -259,6 +261,86 @@ test.each([
     expect(invoke.mock.calls.some(([name]) => name === "forward_ports")).toBe(
       forwardable,
     );
+  },
+);
+
+const APPS = { group: "apps", version: "v1" };
+
+test.each([
+  ["a Service", SERVICES, "payments-gateway", "Service", true],
+  [
+    "a Deployment",
+    { ...APPS, resource: "deployments" },
+    "payments-api",
+    "Deployment",
+    true,
+  ],
+  [
+    "a ReplicaSet",
+    { ...APPS, resource: "replicasets" },
+    "payments-api-6d8b9c7f5",
+    "ReplicaSet",
+    true,
+  ],
+  [
+    "a StatefulSet",
+    { ...APPS, resource: "statefulsets" },
+    "db",
+    "StatefulSet",
+    false,
+  ],
+  [
+    "a DaemonSet",
+    { ...APPS, resource: "daemonsets" },
+    "node-exporter",
+    "DaemonSet",
+    false,
+  ],
+])(
+  "f on %s asks the core for its ports, and starts one where it declares any",
+  async (_name, gvr, name, kind, starts) => {
+    const { workbench, calls } = await listed();
+    const target = { space: "prod-eu", gvr, namespace: "payments", name };
+    const run = workbench.commands.execute(
+      "k8s.forward.open",
+      workbench.keys.lookup(null),
+      target,
+    );
+    await settle(8);
+    if (workbench.quickAccess.session?.pick) await pick(workbench, "80");
+    await run;
+    await settle(6);
+    expect(calls("forward_ports")).toEqual([target]);
+    expect(calls("forward_start")).toHaveLength(starts ? 1 : 0);
+    if (starts) {
+      expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
+    } else {
+      expect(live().join("\n")).toContain(
+        `${kind} ${name} declares no TCP port to forward`,
+      );
+    }
+  },
+);
+
+test.each([
+  ["a Job", { ...APPS, group: "batch", resource: "jobs" }],
+  ["a ConfigMap", { group: "", version: "v1", resource: "configmaps" }],
+  [
+    "a Pod's Service account",
+    { group: "", version: "v1", resource: "serviceaccounts" },
+  ],
+])(
+  "f on %s asks nothing, since it has no port to forward",
+  async (_name, gvr) => {
+    const { workbench, calls } = await listed();
+    await workbench.commands.execute(
+      "k8s.forward.open",
+      workbench.keys.lookup(null),
+      { space: "prod-eu", gvr, namespace: "payments", name: "x" },
+    );
+    await settle(6);
+    expect(calls("forward_ports")).toEqual([]);
+    expect(live()).toEqual([]);
   },
 );
 
@@ -521,4 +603,109 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   expect(live()).toEqual([
     "payments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
   ]);
+});
+
+test("a busy port's field that is dismissed starts nothing on the free port", async () => {
+  const { workbench, calls, backend } = await listed(
+    "forwardBusy",
+    "busy:input",
+  );
+  const run = forwardGateway(workbench);
+  await settle(6);
+  await pick(workbench, "80");
+  await settle(6);
+  expect(workbench.quickAccess.session?.ask?.value).toBe("8081");
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  await settle(8);
+  await run;
+  await act(() => vi.advanceTimersByTimeAsync(5000));
+  expect(calls("forward_start")).toEqual([
+    { target: GATEWAY, port: 80, local: null },
+  ]);
+  expect(workbench.editors.active).not.toMatch(/^pf:/);
+  expect(live()).toEqual([]);
+  const ports = await backend.invoke("forward_ports", GATEWAY);
+  expect(ports.ports.map(({ forward }) => forward)).toEqual([null, null, null]);
+});
+
+/** `mock`, with every `forward_start` rejected with `error`. */
+function startFailing(mock: Backend, error: IpcError): Backend {
+  return {
+    invoke: (name, request) =>
+      name === "forward_start"
+        ? Promise.reject(error)
+        : mock.invoke(name, request),
+    subscribe: (name, request, onMessage) =>
+      mock.subscribe(name, request, onMessage),
+  };
+}
+
+test("a start that fails for another reason than a busy port or the mode is shown, in the core's words, and opens no tab", async () => {
+  const mock = createMockBackend("live");
+  const backend = startFailing(
+    mock,
+    new IpcError("unavailable", "the cluster does not answer"),
+  );
+  const workbench = await openList(backend);
+  await act(() => vi.advanceTimersByTimeAsync(1500));
+  const run = forwardGateway(workbench);
+  await settle(6);
+  await pick(workbench, "80");
+  await run;
+  await settle(6);
+  expect(live().join("\n")).toContain("the cluster does not answer");
+  expect(workbench.editors.active).not.toMatch(/^pf:/);
+  const icon = document.querySelector(
+    '[data-sonner-toast] svg[class*="text-"]',
+  );
+  expect(icon?.getAttribute("class")).toContain("text-error");
+});
+
+test("two invocations at once make one forward and one tab, and the second says nothing of a busy port", async () => {
+  const { workbench, calls, backend } = await listed();
+  await selectFirst();
+  letter("f");
+  letter("f");
+  await settle(10);
+  expect(calls("forward_start")).toHaveLength(2);
+  const forwards = await backend.subscribe(
+    "forwards_watch",
+    null,
+    () => undefined,
+  );
+  expect(forwards.map(({ id }) => id)).toEqual([1]);
+  expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
+  expect(
+    document.querySelectorAll('[role="tab"][aria-label*="http → 8080"]'),
+  ).toHaveLength(1);
+  expect(live()).toEqual([]);
+});
+
+test("a forward the mode refuses in place just after its start is told as a warning, not as a failure", async () => {
+  const { workbench, backend } = await listed("forwardBlocked");
+  await act(() =>
+    backend.invoke("forward_start", {
+      target: GATEWAY,
+      port: 9090,
+      local: null,
+    }),
+  );
+  await act(() =>
+    vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS - 200),
+  );
+  const run = forwardGateway(workbench);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  await pick(workbench, "80");
+  await run;
+  const [toast] = live();
+  expect(toast).toMatch(
+    /^payments-gateway:http → 8080 failed: prod-eu is read-only by prod-eu in /,
+  );
+  const icon = document.querySelector(
+    '[data-sonner-toast] svg[class*="text-"]',
+  );
+  expect(icon?.getAttribute("class")).toContain("text-warn");
+  expect(icon?.getAttribute("class")).not.toContain("text-error");
 });

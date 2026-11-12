@@ -1,7 +1,8 @@
 /**
  * The checkpoint's live choices (`?variant=busy:input`, several separated by
- * commas or repeated), each group's first the default. This file goes once
- * the owner has chosen, and the code that reads it keeps the choice.
+ * commas or repeated), each group's first the default.
+ * @todo: remove this file, and keep the chosen variant of each group in
+ * start.ts and busy.ts, once the owner has chosen `start:` and `busy:`.
  */
 const VARIANTS = {
   start: ["pick", "once"],
