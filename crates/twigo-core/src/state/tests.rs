@@ -163,3 +163,90 @@ fn the_webview_cannot_write_the_contexts_modes() {
         Some(&twigo_ipc::Mode::ReadOnly)
     );
 }
+
+fn forward(id: u32) -> crate::forward::SavedForward {
+    crate::forward::SavedForward {
+        id: twigo_ipc::ForwardId(id),
+        target: twigo_ipc::ForwardTarget {
+            space: "kind-a".to_owned(),
+            gvr: twigo_ipc::Gvr {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "pods".to_owned(),
+            },
+            namespace: "shop".to_owned(),
+            name: "api".to_owned(),
+        },
+        kind: "Pod".to_owned(),
+        port: 8080,
+        port_name: None,
+        app_protocol: None,
+        local: 8080,
+        detour: false,
+        runs: true,
+    }
+}
+
+#[test]
+fn the_webview_cannot_write_the_forwards_and_they_go_with_their_space() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, state) = store(&dir);
+    state.open_space("kind-a");
+    for entry in [
+        entry(Some("kind-a"), FORWARDS, "{}"),
+        entry(None, LAST_FORWARD, "7"),
+    ] {
+        let refused = state.set(vec![entry]).unwrap_err();
+        assert!(matches!(refused, Error::Reserved(_)), "{refused:?}");
+    }
+    assert!(state.forwards("kind-a").forwards.is_empty());
+    let refused = state
+        .set_forwards("kind-absent", &crate::forward::Saved::default())
+        .unwrap_err();
+    assert!(matches!(refused, Error::NoSpace(_)));
+
+    let saved = crate::forward::Saved {
+        forwards: vec![forward(3)],
+        ports: Vec::new(),
+    };
+    state.set_forwards("kind-a", &saved).unwrap();
+    state.flush().unwrap();
+    drop(state);
+    let reopened = State::open_with(path.clone(), Duration::from_secs(3600));
+    let kept = reopened.forwards("kind-a");
+    assert_eq!(kept.forwards.len(), 1);
+    assert_eq!(kept.forwards[0].id, twigo_ipc::ForwardId(3));
+    assert!(
+        !reopened.snapshot().spaces["kind-a"][FORWARDS].is_empty(),
+        "the webview reads them"
+    );
+
+    let start = Timestamp::now();
+    reopened.saw(&HashSet::new(), start);
+    reopened.saw(
+        &HashSet::new(),
+        start + SignedDuration::from_hours(100 * 24),
+    );
+    reopened.flush().unwrap();
+    drop(reopened);
+    let dropped = State::open_with(path, Duration::from_secs(3600));
+    assert!(dropped.spaces().is_empty());
+    assert!(dropped.forwards("kind-a").forwards.is_empty());
+}
+
+#[test]
+fn a_forward_id_is_never_given_twice_across_restarts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, state) = store(&dir);
+    assert_eq!(state.next_forward_id(0), twigo_ipc::ForwardId(1));
+    assert_eq!(state.next_forward_id(0), twigo_ipc::ForwardId(2));
+    assert_eq!(
+        state.next_forward_id(9),
+        twigo_ipc::ForwardId(10),
+        "past the ids the store holds"
+    );
+    state.flush().unwrap();
+    drop(state);
+    let reopened = State::open_with(path, Duration::from_secs(3600));
+    assert_eq!(reopened.next_forward_id(0), twigo_ipc::ForwardId(11));
+}

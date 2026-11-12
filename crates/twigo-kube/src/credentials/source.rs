@@ -272,22 +272,24 @@ impl Source {
     }
 
     /// Runs the plugin now, unless a run is under way: how the person signs
-    /// in, again after a failure too.
-    pub fn sign_in(self: &Arc<Self>) {
+    /// in, again after a failure too. When this starts the run, the run's
+    /// outcome.
+    pub fn sign_in(
+        self: &Arc<Self>,
+    ) -> Option<impl Future<Output = Result<Arc<Credential>, RunError>> + Send + 'static> {
         let mut state = self.state();
         state.held = None;
         match state.run.as_mut() {
-            None => {
-                self.start(&mut state, true);
-            }
+            None => Some(outcome(self.start(&mut state, true))),
             Some(run) if !run.shown => {
                 run.shown = true;
                 self.status.send_replace(Status::Running {
                     since: run.since,
                     output: run.output.clone(),
                 });
+                None
             }
-            Some(_) => {}
+            Some(_) => None,
         }
     }
 

@@ -9,6 +9,7 @@ mod bus;
 pub mod catalog;
 pub mod connections;
 mod errors;
+mod forward;
 pub mod objects;
 mod proxy;
 pub mod state;
@@ -38,7 +39,7 @@ use twigo_ipc::{
     ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
-use twigo_kube::credentials::{ExecError, OidcError, Provider, Registry, Source, Timeouts};
+use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
@@ -54,6 +55,7 @@ pub use auth::AuthFollower;
 use bus::{Bus, Finished, Progress, Waiting};
 use catalog::Catalog;
 use connections::Connections;
+use forward::Forwards;
 use objects::{Opened, Target};
 use proxy::Proxy;
 pub use proxy::ProxyProcess;
@@ -80,6 +82,7 @@ pub struct Core {
     objects: Subscriptions<Opened>,
     logs: Subscriptions<Session>,
     shells: Subscriptions<terminal::Shell>,
+    forwards: Forwards,
     terminals: terminal::Terminals,
     bus: Arc<Bus>,
     undos: Arc<Undos>,
@@ -127,6 +130,7 @@ impl Core {
             Audit::open(&data.join("audit.jsonl")),
         );
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
+        let forwards = Forwards::new(Arc::clone(&policy), catalog.subscribe());
         Arc::new_cyclic(|core| Self {
             this: core.clone(),
             hub: Hub::new(connect(core.clone())),
@@ -138,6 +142,7 @@ impl Core {
             objects: Subscriptions::new("object"),
             logs: Subscriptions::new("logs"),
             shells: Subscriptions::new("shell"),
+            forwards,
             terminals: terminal::Terminals::new(data.join("terminals")),
             bus: Arc::default(),
             undos: Arc::default(),
@@ -162,15 +167,18 @@ impl Core {
         self.focused.send_replace(focused);
     }
 
-    /// Kills the plugins under way and hangs up every terminal at once, as
-    /// the app quits: nothing drops them then.
+    /// Kills the plugins under way, hangs up every terminal and closes every
+    /// forward's port and connections at once, as the app quits: nothing
+    /// drops them then. What the state says ran stays.
     pub fn shutdown(&self) {
         self.credentials.shutdown();
         self.shells.each(terminal::Shell::quit);
+        self.forwards.shutdown();
     }
 
     /// The context's clients, once the catalog and the login shell's
-    /// environment are known.
+    /// environment are known. When this call builds them, the context's
+    /// forwards are told that their space connected.
     pub async fn clients(&self, context: &str) -> Result<Arc<Clients>, ClientsError> {
         let contexts = self.catalog.contexts().await;
         let Some(found) = contexts.find(context) else {
@@ -185,7 +193,8 @@ impl Core {
             .expect("the core outlives its subscribers")
             .clone()
             .expect("waited for");
-        self.connections
+        let (clients, built) = self
+            .connections
             .clients(
                 found,
                 &env,
@@ -196,7 +205,11 @@ impl Core {
                     .gate_for(context, Actor::Ui, found.fingerprint.value()),
             )
             .await
-            .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))
+            .map_err(|error| ClientsError::Connect(context.to_owned(), Box::new(error)))?;
+        if built {
+            self.forwards.connected(context);
+        }
+        Ok(clients)
     }
 
     /// Where the context's credential comes from when Twigo gets it: its
@@ -240,14 +253,45 @@ impl Core {
             .ok_or_else(|| ClientsError::NoPlugin(context.to_owned()))
     }
 
-    /// Runs the context's plugin now: how the person signs in.
+    /// Runs the context's plugin now: how the person signs in. Once the run
+    /// this starts gets a credential, the forwards of each context whose
+    /// plugin it is that failed for their credential prove once; a run that
+    /// a request started, which follows a 401, does not.
     pub async fn sign_in(&self, context: &str) -> Result<(), IpcError> {
         let plugin = self
             .trusted_plugin(context)
             .await
             .map_err(|e| IpcError::from(&e))?;
-        plugin.sign_in();
+        if let Some(run) = plugin.sign_in() {
+            let core = self.this.clone();
+            tokio::spawn(async move {
+                if run.await.is_ok()
+                    && let Some(core) = core.upgrade()
+                {
+                    core.signed_in(plugin.exec()).await;
+                }
+            });
+        }
         Ok(())
+    }
+
+    /// Tells the forwards of every context whose plugin is `exec` that a
+    /// sign-in got a credential.
+    async fn signed_in(&self, exec: &Exec) {
+        let contexts: Vec<String> = self
+            .catalog
+            .contexts()
+            .await
+            .iter()
+            .filter(|context| {
+                context
+                    .entries
+                    .exec()
+                    .is_ok_and(|found| found.as_ref() == Some(exec))
+            })
+            .map(|context| context.name.clone())
+            .collect();
+        self.forwards.signed_in(&contexts).await;
     }
 
     /// Ends the run of the context's plugin.
@@ -853,7 +897,7 @@ impl Core {
 
     /// Ends the lists, open objects, logs sessions, shells and terminals,
     /// plans, asks and offers of a window that reloads or closes: its asks
-    /// are denied.
+    /// are denied. The forwards stay, and the window stops following them.
     pub fn drop_window(&self, window: &str) {
         self.lists.drop_window(window);
         self.objects.drop_window(window);
@@ -862,6 +906,7 @@ impl Core {
         self.bus.drop_window(window);
         self.approvals.drop_window(window);
         self.terminals.drop_window(window);
+        self.forwards.unfollow(window);
     }
 
     /// Retires every connection on wake, and those whose route moved on a
@@ -937,7 +982,13 @@ impl Core {
                 self.terminals.refresh_offers().await;
             }
         };
-        tokio::join!(sources, seen, offered, self.policy.follow_unlocks());
+        tokio::join!(
+            sources,
+            seen,
+            offered,
+            self.policy.follow_unlocks(),
+            self.follow_forward_modes()
+        );
     }
 }
 

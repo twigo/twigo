@@ -77,4 +77,20 @@ Findings that belong to no step yet.
     Move Editor into New Group to the Right (`mod+\`) loses its key to Toggle Terminal the same way on Linux with the recorded French layout, a Mac's, where the backtick sits on the `Backslash` key; not verified with a French layout of Linux.
     Both stay in the palette until the keybindings editor lets a person rebind them.
   - The resolver drops a command's key hint only where one later rule takes the key wherever the binding's `when` holds (`packages/workbench/src/keybindings/resolver.ts`): later rules that take it only together, as one under `w` and one under `!w`, leave the hint; weigh them together when `keybindings.json` comes (M3).
-- Port-forwards (`packages/kube/src/forward`, ARCHITECTURE 4.3): the `pf://` tab has no quick HTTP request tester, only Open in browser and Copy address.
+- Port-forwards (`twigo_sessions::forward`, `twigo_core::forward`, ARCHITECTURE 4.6):
+  - The HTTP request tester of 4.3 comes later: the `pf://` tab has Open in browser and Copy address only.
+  - A server that answers only after end of input gets no answer through a forward, as through kubectl on containerd: no half-close reaches the pod over `v4.channel.k8s.io`, and kubectl's SPDY tunnel loses the answer after 1 s on containerd 2.3.4 (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
+    CRI-O was not read or run.
+  - What forwards do when the app starts is fixed: they come back as they were.
+    The settings files of M3 let a person choose: as they were, all stopped, or none.
+  - A forward's `failure` is the runtime's text as it comes, which on containerd names the sandbox's id and both loopback dials.
+  - A Pod target whose upgrade answers `404` fails as gone, though a kubelet answers `404` around its restart (ARCHITECTURE 4.6); it looks again at its next connection.
+  - A `500` or a timeout from one pod behind a Service makes the forward `Reconnecting`, though another pod may be ready.
+  - The resume's second check, under the table's lock, has no test: nothing can hold a resume between its bind and that check.
+  - On macOS a socket is made close-on-exec in a second call after `socket()` and `accept()` ([socket2 0.6.5 `Socket::new`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L116-L118) and [`set_common_flags`](https://github.com/rust-lang/socket2/blob/v0.6.5/src/socket.rs#L773-L805), [mio 1.2.4 `new_socket`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/net.rs#L37-L81) and [`accept`](https://github.com/tokio-rs/mio/blob/v1.2.4/src/sys/unix/tcp.rs#L110-L118)), so a child spawned between the two keeps a forward's listener or connection for its life: a terminal's shell opened as a forward binds can keep the port listening after a stop.
+    Starting children with only their stdio (`POSIX_SPAWN_CLOEXEC_DEFAULT`, closing the descriptors above 2 in `pre_exec`) would end it; not done.
+  - A stop, a move or a shutdown followed at once by a bind of the same port can find it in use for a moment on macOS, since a child Twigo starts then holds a copy of the closed listeners until its program starts: a start or a resume answers `Busy` for that moment (ARCHITECTURE 4.6).
+  - Safari and Firefox were not measured against the session budget.
+    Chrome 157.0.8103.39, headless, held five to six connections to a forwarded port (kind 1.37, 2026-11-11, ARCHITECTURE 4.6).
+  - On Windows a forward binds its ports without `SO_REUSEADDR`, as mio does there, since the option lets a socket in use be bound over (`crates/twigo-sessions/src/forward/listen.rs`).
+    Not verified on Windows: whether a port just closed binds again at once there, after connections it served.
