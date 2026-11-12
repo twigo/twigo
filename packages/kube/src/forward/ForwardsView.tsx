@@ -52,10 +52,9 @@ function SpaceForwards({
   const selectedId = forwards.selected(space);
   const selected =
     selectedId === undefined ? undefined : forwards.get(selectedId);
-  const keysOfRow = JSON.stringify(selected ? forwardKeys(selected) : {});
   const registerList = useListRegistration({
     forwardsFocus: true,
-    ...(JSON.parse(keysOfRow) as Record<string, boolean>),
+    ...(selected && forwardKeys(selected)),
   });
   const register = useCallback(
     (element: HTMLElement, controller: ListController) => {

@@ -82,15 +82,9 @@ export function startForward(
       again(null),
     );
     if (!started) return;
-    tellBind(
-      workbench,
-      started,
-      named(target, chosen),
-      (local) => again(local),
-      (forward) => {
-        told(forward);
-        reveal(target, forward.id);
-      },
-    );
+    tellBind(workbench, started, named(target, chosen), again, (forward) => {
+      told(forward);
+      reveal(target, forward.id);
+    });
   };
 }

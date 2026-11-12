@@ -206,14 +206,12 @@ export function registerForwardActions(
     enablement: "forwards.running > 0",
     run: async (_args, lookup) => {
       const space = workbench.spaces.active?.id;
-      const running = space === undefined ? [] : forwards.ofSpace(space);
+      const running = space === undefined ? [] : forwards.running(space);
       // The view's title button goes once none runs and takes the focus with it; run from anywhere else the focus stays.
       if (space !== undefined && lookup("view") === FORWARDS_VIEW)
         forwards.focus(space);
       await Promise.all(
-        running
-          .filter(({ state }) => state.state !== "stopped")
-          .map(({ id }) => backend.invoke("forward_stop", id)),
+        running.map(({ id }) => backend.invoke("forward_stop", id)),
       );
     },
   });

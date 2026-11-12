@@ -20,12 +20,7 @@ export function forwardEntries(
     useChanges(forwards.changes);
     useChanges(workbench.spaces.changes);
     const space = workbench.spaces.active?.id;
-    const running =
-      space === undefined
-        ? []
-        : forwards
-            .ofSpace(space)
-            .filter(({ state }) => state.state !== "stopped");
+    const running = space === undefined ? [] : forwards.running(space);
     if (running.length === 0) return [];
     const listening = running.filter(
       (forward) => listensOn(forward).length > 0,
