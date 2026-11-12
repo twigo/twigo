@@ -7,6 +7,7 @@
 //! cargo test -p twigo-core --test forward_release
 
 use std::ffi::OsString;
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
@@ -39,6 +40,14 @@ fn listening(port: u16) -> bool {
         TcpStream::connect_timeout(&SocketAddr::new(address, port), Duration::from_millis(250))
             .is_ok()
     })
+}
+
+fn released(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+        && match TcpListener::bind(("::1", port)) {
+            Ok(_) => true,
+            Err(error) => error.kind() == io::ErrorKind::AddrNotAvailable,
+        }
 }
 
 /// Three ports next to a fourth that this run holds a listener on, which
@@ -144,23 +153,14 @@ async fn a_stop_a_move_and_a_shutdown_leave_the_port_free_when_they_return() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     core.forward_stop(ForwardId(1)).await.unwrap();
-    assert!(
-        TcpListener::bind(("127.0.0.1", first)).is_ok(),
-        "a stop leaves the port free"
-    );
+    assert!(released(first), "a stop leaves the port free");
     core.forward_resume(ResumeForward {
         id: ForwardId(2),
         local: Some(third),
     })
     .await
     .unwrap();
-    assert!(
-        TcpListener::bind(("127.0.0.1", second)).is_ok(),
-        "a move leaves the port it left free"
-    );
+    assert!(released(second), "a move leaves the port it left free");
     core.shutdown();
-    assert!(
-        TcpListener::bind(("127.0.0.1", third)).is_ok(),
-        "a shutdown leaves the port free"
-    );
+    assert!(released(third), "a shutdown leaves the port free");
 }

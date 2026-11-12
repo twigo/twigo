@@ -2119,10 +2119,6 @@ async fn a_move_of_a_forward_that_works_asks_for_no_proof_and_keeps_its_connecti
     })
     .await
     .unwrap();
-    assert!(
-        std::net::TcpListener::bind(("127.0.0.1", local)).is_ok(),
-        "the port it left is free"
-    );
     open.write_all(b"again").await.unwrap();
     open.read_exact(&mut echoed).await.unwrap();
     assert_eq!(
@@ -2417,6 +2413,43 @@ async fn a_start_and_a_resume_wait_for_the_claim_of_their_port_once_the_target_i
 }
 
 #[tokio::test]
+async fn a_stop_waits_for_the_resume_of_its_forward_until_the_resume_has_answered() {
+    let api = Api::start(false).await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+
+    let resume = core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: None,
+    });
+    let stop = core.forward_stop(ForwardId(1));
+    tokio::pin!(resume, stop);
+    assert!(
+        futures::poll!(resume.as_mut()).is_pending(),
+        "the resume waits for its data path, which has not run yet"
+    );
+    assert!(
+        futures::poll!(stop.as_mut()).is_pending(),
+        "the stop waits for the claim of the resume"
+    );
+    let ForwardStarted::Started { forward } = resume.await.unwrap() else {
+        panic!("the port of its own forward is free");
+    };
+    assert_eq!(forward.state, ForwardState::Starting);
+    stop.await.unwrap();
+    assert_eq!(listed(&core)[0].state, ForwardState::Stopped);
+}
+
+#[tokio::test]
 async fn a_start_that_waited_for_a_remove_reads_the_target_and_makes_a_forward() {
     let api = Api::start(false).await;
     let dir = tempfile::tempdir().unwrap();
@@ -2575,7 +2608,7 @@ async fn after_the_shutdown_no_command_saves_binds_or_starts() {
     );
     assert!(core.forward_stop(ForwardId(1)).await.is_err());
     assert!(core.forward_remove(ForwardId(2)).await.is_err());
-    for port in [ran, stopped, other] {
+    for port in [stopped, other] {
         assert!(
             std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(),
             "port {port} is free"
