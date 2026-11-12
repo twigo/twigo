@@ -7,7 +7,7 @@ export function patching(
 ): Backend {
   return {
     invoke: (command, request) => backend.invoke(command, request),
-    subscribe: (async (
+    subscribe: async (
       command: string,
       request: never,
       onMessage: (event: ForwardEvent) => void,
@@ -27,6 +27,6 @@ export function patching(
         );
       });
       return first.map(patch);
-    }),
+    },
   };
 }
