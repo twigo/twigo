@@ -715,7 +715,12 @@ export function createMockBackend(
       const served = queryColumns(kind.columns, query);
       const join =
         kind.metrics && metrics.served
-          ? new MetricsJoin(metrics, metricsAt(served))
+          ? new MetricsJoin(
+              metrics,
+              metricsAt(served),
+              context,
+              query.namespaces,
+            )
           : undefined;
       const columns = join
         ? [
@@ -980,6 +985,7 @@ class Subscription {
   #cache:
     { base: object; samples: number; result: QueryResult<MockRow> } | undefined;
   #scrape = -1;
+  #sentRows = false;
   #sent: {
     total: number;
     start: number;
@@ -1014,6 +1020,10 @@ class Subscription {
     join?: MetricsJoin,
   ) {
     this.#join = join;
+    join?.listen(() => {
+      this.touch();
+      this.#flushSoon();
+    });
     this.#query = query;
     this.#fields = fields;
     this.#kind = kind;
@@ -1079,6 +1089,7 @@ class Subscription {
 
   close(): void {
     for (const timer of this.#timers) clearTimeout(timer);
+    this.#join?.close();
   }
 
   /** The ids of this subscription's window that live in `context`. */
@@ -1144,10 +1155,16 @@ class Subscription {
     this.#dirty = false;
     this.#moved = false;
     const { rows, readable, counts, groups } = this.#rows();
+    const join = this.#join;
+    // Rust holds the first rows of a list sorted by a metric until the
+    // scopes it reads have answered, so the order is the values' order.
+    if (!this.#sentRows && this.#query.sort?.metric && join?.waiting) {
+      this.#dirty = true;
+      return;
+    }
     const total = rows.length;
     const [start, end] = this.#window;
     let visible = readable.slice(start, end);
-    const join = this.#join;
     if (join && !this.#query.sort?.metric) {
       join.poll(visible, false);
       visible = visible.map((row) => join.fill(row));
@@ -1198,6 +1215,7 @@ class Subscription {
       metrics: metrics ?? this.#sent.metrics,
     };
     this.#seq++;
+    this.#sentRows ||= ids.length > 0;
     this.#onMessage({
       seq: this.#seq,
       total,

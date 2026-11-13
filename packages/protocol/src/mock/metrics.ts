@@ -37,6 +37,8 @@ export const SCRAPE_MS = 15_000;
 const YOUNG_MS = 30_000;
 /** A scrape changes the samples of a third of the pods. */
 const SHARES = 3;
+/** What a scope nobody read before takes to answer: one flush of a list. */
+const ANSWER_MS = 50;
 
 const MI = 1024 * 1024;
 const MILLI = 1_000_000;
@@ -120,6 +122,7 @@ function allOrNone(values: readonly (number | null)[]): number | null {
  * scrapes. One node is over 90 % of its memory and one over its CPUs.
  */
 export class MockMetrics {
+  readonly board = new MetricsBoard();
   readonly #scenario: MetricsScenario | undefined;
   readonly #clock: () => number;
 
@@ -287,15 +290,70 @@ export function metricsAt(columns: readonly Column[]): number {
 }
 
 /**
+ * The scopes that open lists read, a namespace of a context's pods or its
+ * nodes, as Rust's board holds them: a scope nobody read answers one flush
+ * after a list first wants it, a scope that gains a reader has answered
+ * already, and one that loses its last reader forgets its answer.
+ */
+export class MetricsBoard {
+  readonly #scopes = new Map<
+    string,
+    {
+      readonly readers: Set<MetricsJoin>;
+      answered: boolean;
+      readonly timer: ReturnType<typeof setTimeout>;
+    }
+  >();
+
+  answered(scope: string): boolean {
+    return this.#scopes.get(scope)?.answered === true;
+  }
+
+  /** What `reader` wants from now on, in place of what it wanted. */
+  want(reader: MetricsJoin, wanted: ReadonlySet<string>): void {
+    for (const [scope, entry] of this.#scopes) {
+      if (wanted.has(scope) || !entry.readers.delete(reader)) continue;
+      if (entry.readers.size === 0) {
+        clearTimeout(entry.timer);
+        this.#scopes.delete(scope);
+      }
+    }
+    for (const scope of wanted) {
+      const held = this.#scopes.get(scope);
+      if (held) {
+        held.readers.add(reader);
+        continue;
+      }
+      const readers = new Set([reader]);
+      const entry = {
+        readers,
+        answered: false,
+        timer: setTimeout(() => {
+          entry.answered = true;
+          for (const each of readers) each.answer();
+        }, ANSWER_MS),
+      };
+      this.#scopes.set(scope, entry);
+    }
+  }
+}
+
+/**
  * What a list of pods or nodes reads of the Metrics API, as Rust's query
  * view joins it: the samples of the rows its window showed while it read,
- * or of every row while it sorts by a metric. A list that stops reading
- * keeps what it has, and a row without a sample has null cells.
+ * or of every row while it sorts by a metric, from the scopes that have
+ * answered. A list that stops reading keeps what it has, and a row without
+ * a sample has null cells. It reports the state of the API once a scope it
+ * reads has answered, and till then says `ready`.
  */
 export class MetricsJoin {
   readonly #metrics: MockMetrics;
   readonly #samples = new Map<RowId, Sample>();
+  readonly #namespaces: ReadonlySet<string>;
   #reads = false;
+  #wanted: ReadonlySet<string> = new Set();
+  #reported: MetricsState = "ready";
+  #listener: (() => void) | undefined;
   #polled: { rows: readonly MockRow[]; scrape: number } | undefined;
   /** Bumped when a sample a sort reads changed. */
   version = 0;
@@ -303,20 +361,45 @@ export class MetricsJoin {
   constructor(
     metrics: MockMetrics,
     readonly at: number,
+    private readonly context: string,
+    namespaces: readonly string[],
   ) {
     this.#metrics = metrics;
+    this.#namespaces = new Set(namespaces);
   }
 
-  get state(): MetricsState | null {
-    return this.#metrics.state;
+  get state(): MetricsState {
+    return this.#reported;
   }
 
   get scrape(): number {
     return this.#metrics.scrape;
   }
 
+  get waiting(): boolean {
+    return [...this.#wanted].some(
+      (scope) => !this.#metrics.board.answered(scope),
+    );
+  }
+
   reads(on: boolean): void {
+    if (on === this.#reads) return;
     this.#reads = on;
+    this.#polled = undefined;
+    if (!on) this.#want(new Set());
+  }
+
+  listen(listener: () => void): void {
+    this.#listener = listener;
+  }
+
+  answer(): void {
+    this.#polled = undefined;
+    this.#listener?.();
+  }
+
+  close(): void {
+    this.#want(new Set());
   }
 
   pad(cells: readonly Cell[]): Cell[] {
@@ -324,11 +407,11 @@ export class MetricsJoin {
   }
 
   /**
-   * Polls the namespaces of `rows` if the list reads; with `sorting`, a
-   * sort reads every row, and one that changed a sample is told by `version`.
+   * Polls the scopes of `rows` if the list reads; with `sorting`, a sort
+   * reads every row, and one that changed a sample is told by `version`.
    */
   poll(rows: readonly MockRow[], sorting: boolean): void {
-    if (!this.#reads || this.state !== "ready") return;
+    if (!this.#reads) return;
     const scrape = this.scrape;
     if (
       sorting &&
@@ -337,9 +420,25 @@ export class MetricsJoin {
     ) {
       return;
     }
+    const scopes = new Map<RowId, string>();
+    for (const row of rows) {
+      const scope = this.#scope(row);
+      if (scope !== undefined) scopes.set(row.id, scope);
+    }
+    this.#want(new Set(scopes.values()));
+    const { board, state } = this.#metrics;
+    if (state === null) return;
+    const answered = (id: RowId) => {
+      const scope = scopes.get(id);
+      return scope !== undefined && board.answered(scope);
+    };
+    if ([...this.#wanted].some((scope) => board.answered(scope))) {
+      this.#reported = state;
+    }
+    if (state !== "ready") return;
     let changed = false;
     for (const row of rows) {
-      if (row.metric === undefined) continue;
+      if (row.metric === undefined || !answered(row.id)) continue;
       const before = this.#samples.get(row.id);
       const sample = this.#metrics.sample(row.metric);
       if (sample === null) {
@@ -365,5 +464,20 @@ export class MetricsJoin {
     cells[this.at] = sample.cpu;
     cells[this.at + 1] = sample.memory;
     return { ...row, cells };
+  }
+
+  #scope({ metric }: MockRow): string | undefined {
+    if (metric === undefined) return undefined;
+    if (metric.kind === "node") return `${this.context}/nodes`;
+    const { namespace } = metric.pod;
+    if (this.#namespaces.size > 0 && !this.#namespaces.has(namespace)) {
+      return undefined;
+    }
+    return `${this.context}/pods/${namespace}`;
+  }
+
+  #want(scopes: ReadonlySet<string>): void {
+    this.#wanted = scopes;
+    this.#metrics.board.want(this, scopes);
   }
 }

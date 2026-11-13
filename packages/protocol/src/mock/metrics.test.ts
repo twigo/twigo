@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend } from "../backend";
 import type {
   Cell,
   Column,
@@ -349,6 +350,115 @@ test("a list that does not read leaves a sort by CPU to Name", async () => {
   expect(names).toEqual([...names].sort(natural));
 });
 
+async function reader(backend: Backend, q: ListQuery) {
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe("list_subscribe", q, (batch) =>
+    batches.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(1200);
+  const id = await pending;
+  const at = () =>
+    batches
+      .find((batch) => batch.columns !== null)
+      ?.columns?.findIndex((column) => column.name === "CPU") ?? -1;
+  return {
+    batches,
+    read: async () => {
+      await call(
+        backend.invoke("list_set_window", {
+          id,
+          start: 0,
+          end: 60,
+          metrics: true,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(1);
+    },
+    next: async (ms = 60) => {
+      const latest = batches[batches.length - 1];
+      if (latest)
+        await call(backend.invoke("list_ack", { id, seq: latest.seq }));
+      await vi.advanceTimersByTimeAsync(ms);
+    },
+    close: () => call(backend.invoke("list_unsubscribe", id)),
+    cpu: (batch: ListBatch | undefined) =>
+      batch?.upserts.map((row) => row.cells[at()] ?? null) ?? [],
+  };
+}
+
+const measured = (cells: readonly Cell[]) =>
+  cells.some((cell) => Number.isInteger(cell));
+
+test.each([
+  ["ready", "ready"],
+  ["metricsDown", "unavailable"],
+  ["metricsForbidden", "forbidden"],
+] as const)(
+  "%s: a list that reads what no other list reads has empty cells and no state in its first batch, and the values or the state one flush later",
+  async (scenario, state) => {
+    const pods = await reader(createMockBackend(scenario), query());
+    await pods.read();
+    const [first] = pods.batches;
+    expect(first?.metrics).toBe("ready");
+    expect(first?.upserts.length).toBeGreaterThan(0);
+    expect(pods.cpu(first).every((cell) => cell === null)).toBe(true);
+    await pods.next();
+    const [, second] = pods.batches;
+    expect(second?.metrics ?? "ready").toBe(
+      state === "ready" ? "ready" : state,
+    );
+    expect(measured(pods.cpu(second))).toBe(scenario === "ready");
+  },
+);
+
+test.each([
+  ["ready", "ready"],
+  ["metricsForbidden", "forbidden"],
+] as const)(
+  "%s: a list sorted by a metric waits for its scopes and has the values and the state in its first batch",
+  async (scenario, state) => {
+    const pods = await reader(
+      createMockBackend(scenario),
+      query({ sort: { column: "CPU", descending: true } }),
+    );
+    await pods.read();
+    expect(pods.batches).toEqual([]);
+    await pods.next();
+    const [first] = pods.batches;
+    expect(first?.metrics).toBe(state);
+    const cpu = pods.cpu(first);
+    expect(measured(cpu)).toBe(scenario === "ready");
+    const numbers = cpu.filter((cell): cell is number => cell !== null);
+    expect(numbers).toEqual([...numbers].sort((a, b) => b - a));
+  },
+);
+
+test.each([
+  ["ready", "ready"],
+  ["metricsForbidden", "forbidden"],
+] as const)(
+  "%s: a list that joins a scope another list reads has the values and the state in its first batch, and the scope forgets its answer with its last reader",
+  async (scenario, state) => {
+    const backend = createMockBackend(scenario);
+    const first = await reader(backend, query());
+    await first.read();
+    await first.next();
+    const second = await reader(backend, query());
+    await second.read();
+    expect(second.batches[0]?.metrics).toBe(state);
+    expect(measured(second.cpu(second.batches[0]))).toBe(scenario === "ready");
+    await first.close();
+    await second.next();
+    await second.close();
+    const third = await reader(backend, query());
+    await third.read();
+    expect(third.batches[0]?.metrics).toBe("ready");
+    expect(third.cpu(third.batches[0]).every((cell) => cell === null)).toBe(
+      true,
+    );
+  },
+);
+
 function usageOf(batches: ObjectBatch[]): Usage | null | undefined {
   return [...batches].reverse().find((batch) => batch.usage !== null)?.usage;
 }
@@ -515,10 +625,12 @@ test.each([
   async (scenario, state) => {
     const pods = await list(scenario);
     await pods.window(0, 60, true);
+    await pods.window(0, 60, true);
     expect(pods.columns().map((c) => c.name)).toContain("CPU");
-    expect(pods.batches.find((batch) => batch.metrics !== null)?.metrics).toBe(
-      state,
-    );
+    expect(
+      [...pods.batches].reverse().find((batch) => batch.metrics !== null)
+        ?.metrics,
+    ).toBe(state);
     expect(pods.column("CPU").every((cell) => cell === null)).toBe(true);
     expect(pods.column("Memory").every((cell) => cell === null)).toBe(true);
     const pod = sampled();
