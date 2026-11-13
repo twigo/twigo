@@ -63,20 +63,6 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
     },
   };
 
-/** The columns Rust adds for the Metrics API, by the name and kind it gives them. */
-const METRIC_COLUMNS: Readonly<Record<string, Column["kind"]>> = {
-  CPU: "cpu",
-  Memory: "memory",
-};
-
-/** Whether a column of that name is a measure of the Metrics API, which is known before the list's first batch. */
-export function isMetricColumn(gvr: Gvr, name: string): boolean {
-  const kind = METRIC_COLUMNS[name];
-  return (
-    kind !== undefined && columnRule(gvr, { name, kind, priority: 0 }).metric
-  );
-}
-
 /**
  * A pod's Status as Kubernetes prints it (printPod in kubernetes v1.37.1
  * pkg/printers/internalversion/printers.go): the phase or the pod's

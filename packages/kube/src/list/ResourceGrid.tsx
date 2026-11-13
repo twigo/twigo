@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Columns3 } from "lucide-react";
-import type { ListQuery, Resource, Row, RowGroup, Sort } from "@twigo/protocol";
+import {
+  INITIAL_SNAPSHOT,
+  type ListQuery,
+  type Resource,
+  type Row,
+  type RowGroup,
+  type Sort,
+} from "@twigo/protocol";
 import {
   ActionDropdown,
   Count,
@@ -19,7 +26,6 @@ import {
   byHealth,
   cellTone,
   columnRule,
-  isMetricColumn,
   type CellKind,
   HEALTH,
   healthValues,
@@ -104,10 +110,15 @@ function Grid({
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
   const collapsed = states.collapsed(uri);
+  // Which columns are measures only the list says, in the columns of a batch.
+  const [known, setKnown] = useState(INITIAL_SNAPSHOT.columns);
+  const measures = new Set(
+    known
+      .filter((column) => columnRule(gvr, column).metric)
+      .map((column) => column.name),
+  );
   const choices = Object.fromEntries(
-    Object.entries(preset.columns).filter(
-      ([name]) => !isMetricColumn(gvr, name),
-    ),
+    Object.entries(preset.columns).filter(([name]) => !measures.has(name)),
   );
   const query: ListQuery = {
     space: input.space,
@@ -120,7 +131,8 @@ function Grid({
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
     // query and a column toggle does not resubscribe, and the filter never
-    // reads a metric column, so its choice stays out too.
+    // reads a column of a measure's kind, so once the list's columns say
+    // which those are, their choices stay out too.
     columns: text !== "" && Object.keys(choices).length > 0 ? choices : null,
     sort: states.sort(uri) ?? null,
     countBy: countBy ?? null,
@@ -139,6 +151,7 @@ function Grid({
     setWindow,
     setMetrics,
   } = useListView(backend, query);
+  if (snapshot.columns !== known) setKnown(snapshot.columns);
   const visible = useVisible();
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.

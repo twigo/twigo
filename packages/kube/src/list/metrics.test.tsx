@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { Backend, ListBatch, RequestOf } from "@twigo/protocol";
+import type { Backend, ListBatch, ListQuery, RequestOf } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Changes } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
@@ -63,10 +63,40 @@ function spied(backend: Backend) {
     subscriptions: () =>
       subscribe.mock.calls.filter(([command]) => command === "list_subscribe")
         .length,
+    queries: () =>
+      subscribe.mock.calls
+        .filter(([command]) => command === "list_subscribe")
+        .map(([, request]) => request as ListQuery),
   };
 }
 
 const last = <T,>(items: readonly T[]) => items[items.length - 1];
+
+function scripted() {
+  const mock = createMockBackend("ready");
+  let send: ((batch: ListBatch) => void) | undefined;
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command.startsWith("list_")
+        ? Promise.resolve(null as never)
+        : mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
+      send = onMessage;
+      return Promise.resolve(1 as never);
+    },
+  };
+  return {
+    backend,
+    send: async (batch: ListBatch) => {
+      act(() => {
+        send?.(batch);
+      });
+      await settle(1);
+    },
+  };
+}
 
 async function choose(column: string) {
   fireEvent.pointerDown(
@@ -420,32 +450,6 @@ describe("a poll", () => {
   const everyRow = (nanocores: number | null) =>
     Object.fromEntries(IDS.map((id) => [id, nanocores]));
 
-  function scripted() {
-    const mock = createMockBackend("ready");
-    let send: ((batch: ListBatch) => void) | undefined;
-    const backend: Backend = {
-      invoke: (command, request) =>
-        command.startsWith("list_")
-          ? Promise.resolve(null as never)
-          : mock.invoke(command, request),
-      subscribe(command, request, onMessage) {
-        if (command !== "list_subscribe")
-          return mock.subscribe(command, request, onMessage);
-        send = onMessage;
-        return Promise.resolve(1 as never);
-      },
-    };
-    return {
-      backend,
-      send: async (batch: ListBatch) => {
-        act(() => {
-          send?.(batch);
-        });
-        await settle(1);
-      },
-    };
-  }
-
   const rowOf = (id: string) =>
     rows().find((candidate) => textOf(candidate, "Name") === id);
   const flashing = (id: string, column: string) =>
@@ -498,5 +502,76 @@ describe("a poll", () => {
     expect(flashing("a", "Restarts")).toBe(true);
     expect(textOf(rowOf("j"), "CPU")).toBe("20m");
     expect(flashing("j", "CPU")).toBe(false);
+  });
+});
+
+describe("a column named like a measure", () => {
+  withScreenSize(1000);
+
+  const POOLS = "k8s-list://prod-eu/kwok.x-k8s.io/v1alpha1/stages";
+
+  function pools(): ListBatch {
+    return {
+      seq: 1,
+      total: 2,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "CPU", kind: "string", priority: 1 },
+        { name: "Memory", kind: "string", priority: 1 },
+      ],
+      window: { start: 0, ids: ["a", "b"] },
+      upserts: [
+        ["a", "16", "64Gi"],
+        ["b", "8", "32Gi"],
+      ].map((cells) => ({
+        id: cells[0] ?? "",
+        created: null,
+        generated: null,
+        cells,
+      })),
+      status: { state: "ready" },
+      counts: null,
+      groups: null,
+      metrics: null,
+    };
+  }
+
+  test("of a custom resource is an ordinary column: shown, filtered and sorted as one, and it reads nothing", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    await openList(script.backend, POOLS);
+    await script.send(pools());
+    expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
+    await choose("CPU");
+    expect(textOf(rows()[0], "CPU")).toBe("16");
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "16" },
+    });
+    await settle(30);
+    expect(last(sent.queries())?.columns).toEqual({ CPU: true });
+    await script.send(pools());
+    await sortBy("CPU");
+    expect(last(sent.queries())?.sort).toEqual({
+      column: "CPU",
+      descending: false,
+    });
+    expect(sent.reads()).not.toContain(true);
+  });
+
+  test("is left out of a pod list's text filter only once the list's columns say it is a measure", async () => {
+    const backend = createMockBackend("ready");
+    const sent = spied(backend);
+    const workbench = await openList(backend);
+    await choose("CPU");
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/v1/pods?q=auth");
+    });
+    await settle(30);
+    expect(
+      sent
+        .queries()
+        .filter((query) => query.text === "auth")
+        .map((query) => query.columns),
+    ).toEqual([{ CPU: false }, null]);
   });
 });
