@@ -27,8 +27,10 @@ pub struct Followers {
 
 #[derive(Default)]
 struct Slot {
-    /// Built under the lock, so two askers at once get one follower.
-    followed: tokio::sync::Mutex<Weak<Followed>>,
+    /// Never held across an await: a list's or an object's opening is polled once and then
+    /// only when its webview answers, which a hidden document never does, so a lock that
+    /// passed to it would keep every other asker of the context waiting.
+    followed: Mutex<Weak<Followed>>,
     /// What the follower last confirmed, for the next one to begin from.
     kept: Mutex<Option<Kept>>,
 }
@@ -52,6 +54,8 @@ impl Followers {
     /// start it. A new follower begins from the Metrics API's state its predecessor last
     /// confirmed under the same fingerprint, so a list opened again has its columns in its
     /// first batch, and its first answer corrects it.
+    /// Askers that find none at once each build one, and the first to finish keeps its own:
+    /// the others' are dropped before they run.
     pub async fn get(
         &self,
         context: &str,
@@ -64,8 +68,7 @@ impl Followers {
                 .entry(context.to_owned())
                 .or_default(),
         );
-        let mut held = slot.followed.lock().await;
-        if let Some(followed) = held.upgrade() {
+        if let Some(followed) = slot.followed.lock().expect("followed lock").upgrade() {
             return followed;
         }
         let entry = entry.await;
@@ -79,6 +82,10 @@ impl Followers {
             entry,
         )
         .await;
+        let mut held = slot.followed.lock().expect("followed lock");
+        if let Some(followed) = held.upgrade() {
+            return followed;
+        }
         let followed = Arc::new(Followed::start(follower, kept, Arc::clone(&slot)));
         *held = Arc::downgrade(&followed);
         followed
