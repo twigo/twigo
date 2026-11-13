@@ -13,6 +13,10 @@ export type CellKind =
   | "restarts"
   /** The time since `created`. */
   | "age"
+  /** Measured CPU, nanocores, as kubectl prints it. */
+  | "cpu"
+  /** Measured memory, bytes, as kubectl prints it. */
+  | "memory"
   | "text";
 
 /** What a column of a resource's table does, as data. */
@@ -31,7 +35,24 @@ export interface ColumnRule {
   readonly health: boolean;
   /** The tone of an abnormal value; healthy values have none. */
   readonly tone?: (text: string) => Tone | undefined;
+  /** A measure of the Metrics API: the list reads it only while it is drawn or sorted by. */
+  readonly metric: boolean;
+  /** A changed value flashes; a measure that moves at every poll does not. */
+  readonly flash: boolean;
 }
+
+/** Rules for a column of a kind of its own, under those by name. */
+const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
+  {
+    cpu: { cell: "cpu", width: 64, align: "end", metric: true, flash: false },
+    memory: {
+      cell: "memory",
+      width: 72,
+      align: "end",
+      metric: true,
+      flash: false,
+    },
+  };
 
 /**
  * A pod's Status as Kubernetes prints it (printPod in kubernetes v1.37.1
@@ -135,6 +156,9 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     quiet: age,
     groups: false,
     health: false,
+    metric: false,
+    flash: true,
+    ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
   };

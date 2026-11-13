@@ -1,5 +1,6 @@
 import { useId } from "react";
-import { ArrowDown, ArrowUp, Check, Minus } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Info, Minus } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/tooltip";
 import { cn } from "../lib/cn";
 import type { GridColumn, GridSort } from "./types";
 
@@ -26,9 +27,35 @@ export function HeaderCell({
   onFit: () => void;
 }) {
   const title = useId();
+  const noteId = useId();
   const active = sort?.column === column.id;
   const Arrow = active && sort.descending ? ArrowDown : ArrowUp;
   const end = column.align === "end";
+  const { note } = column;
+  const sorter = (
+    <button
+      type="button"
+      onClick={() => {
+        onSort({
+          column: column.id,
+          descending: active && !sort.descending,
+        });
+      }}
+      className={cn(
+        "flex h-full w-full items-center gap-1 px-2 text-left outline-none hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)]",
+        end && "flex-row-reverse text-right",
+        active && "text-foreground",
+      )}
+    >
+      <span id={title} data-fit-header={column.id} className="truncate">
+        {column.title}
+      </span>
+      {active && <Arrow aria-hidden className="size-3 shrink-0" />}
+      {note && (
+        <Info aria-hidden className="size-3 shrink-0 text-muted-foreground-2" />
+      )}
+    </button>
+  );
   return (
     <div
       role="columnheader"
@@ -37,27 +64,22 @@ export function HeaderCell({
       }
       // Its content would add the resize edge's label to its name.
       aria-labelledby={title}
+      aria-describedby={note ? noteId : undefined}
       className="relative h-full border-r border-transparent group-hover/header:border-border-subtle"
     >
-      <button
-        type="button"
-        onClick={() => {
-          onSort({
-            column: column.id,
-            descending: active && !sort.descending,
-          });
-        }}
-        className={cn(
-          "flex h-full w-full items-center gap-1 px-2 text-left outline-none hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)]",
-          end && "flex-row-reverse text-right",
-          active && "text-foreground",
-        )}
-      >
-        <span id={title} data-fit-header={column.id} className="truncate">
-          {column.title}
-        </span>
-        {active && <Arrow aria-hidden className="size-3 shrink-0" />}
-      </button>
+      {note ? (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>{sorter}</TooltipTrigger>
+            <TooltipContent>{note}</TooltipContent>
+          </Tooltip>
+          <span id={noteId} className="sr-only">
+            {note}
+          </span>
+        </>
+      ) : (
+        sorter
+      )}
       <span
         role="separator"
         aria-orientation="vertical"

@@ -826,6 +826,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
   The flash is a setting, on by default.
+- CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and empty for a row without a sample, never zero.
+  They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
+  The list says with its window that it reads them while it draws one or is sorted by one and the document is visible; beside the details it draws and reads none.
+  A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay empty.
 
 ### 4.5 Quick access (the command palette)
 

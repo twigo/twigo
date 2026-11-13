@@ -20,6 +20,8 @@ export class ListStatuses {
   }
 
   set(uri: string, status: ListStatus | undefined): void {
+    const before = this.#lists.get(uri);
+    if (status && before && same(before, status)) return;
     if (status) this.#lists.set(uri, status);
     else this.#lists.delete(uri);
     this.changes.emit();
@@ -47,4 +49,15 @@ export function stateLabel(status: ViewState): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** What shows of a list is the same, so that a batch that changes only a measure repaints neither the status bar nor the explorer. */
+function same(a: ListStatus, b: ListStatus): boolean {
+  return (
+    a.title === b.title &&
+    a.total === b.total &&
+    a.columns === b.columns &&
+    a.counts === b.counts &&
+    JSON.stringify(a.status) === JSON.stringify(b.status)
+  );
 }
