@@ -391,7 +391,6 @@ const measured = (cells: readonly Cell[]) =>
 
 test.each([
   ["ready", "ready"],
-  ["metricsDown", "unavailable"],
   ["metricsForbidden", "forbidden"],
 ] as const)(
   "%s: a list that reads what no other list reads has empty cells and no state in its first batch, and the values or the state one flush later",
@@ -410,6 +409,26 @@ test.each([
     expect(measured(pods.cpu(second))).toBe(scenario === "ready");
   },
 );
+
+test("metricsDown has unavailable in the first batch that has the columns, and nothing changes it or the empty cells", async () => {
+  const pods = await reader(createMockBackend("metricsDown"), query());
+  await pods.read();
+  const [first] = pods.batches;
+  expect(first?.columns?.map((column) => column.name)).toContain("CPU");
+  expect(first?.metrics).toBe("unavailable");
+  expect(first?.upserts.length).toBeGreaterThan(0);
+  expect(pods.cpu(first).every((cell) => cell === null)).toBe(true);
+  await pods.next();
+  await pods.next();
+  expect(pods.batches.filter((batch) => batch.metrics !== null)).toHaveLength(
+    1,
+  );
+  expect(
+    pods.batches.every((batch) =>
+      pods.cpu(batch).every((cell) => cell === null),
+    ),
+  ).toBe(true);
+});
 
 test.each([
   ["ready", "ready"],

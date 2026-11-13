@@ -160,6 +160,10 @@ export class MockMetrics {
     return this.#served;
   }
 
+  get stale(): boolean {
+    return this.#scenario === "metricsDown";
+  }
+
   get state(): MetricsState | null {
     if (!this.#served) return null;
     switch (this.#scenario) {
@@ -371,7 +375,8 @@ export class MetricsBoard {
  * or of every row while it sorts by a metric, from the scopes that have
  * answered. A list that stops reading keeps what it has, and a row without
  * a sample has null cells. It reports the state of the API once a scope it
- * reads has answered, and till then says `ready`.
+ * reads has answered, and till then says `ready`, but for a stale API, which
+ * discovery tells at once as `unavailable`.
  */
 export class MetricsJoin {
   readonly #metrics: MockMetrics;
@@ -379,7 +384,7 @@ export class MetricsJoin {
   readonly #namespaces: ReadonlySet<string>;
   #reads = false;
   #wanted: ReadonlySet<string> = new Set();
-  #reported: MetricsState = "ready";
+  #reported: MetricsState;
   #listener: (() => void) | undefined;
   readonly #stop: () => void;
   #polled: { rows: readonly MockRow[]; scrape: number } | undefined;
@@ -394,6 +399,7 @@ export class MetricsJoin {
   ) {
     this.#metrics = metrics;
     this.#namespaces = new Set(namespaces);
+    this.#reported = metrics.stale ? "unavailable" : "ready";
     this.#stop = metrics.watch(() => {
       this.#listener?.();
     });
