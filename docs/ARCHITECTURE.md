@@ -535,6 +535,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).
   - Absence is no data and never zero: pending and finished pods, pods too young for two scrapes and unscraped nodes are missing from the answer, a missing key has no sample, and a real zero is `0`.
   - A scope that fails is a state of its readers, `unavailable` for a 503 whose body is plain text and no Status, a 404 or a failed connection, and `forbidden` for a 403, never an error on screen; it holds no value until it answers again, and retries on the backoff of 3.2.
+    A `401` or a failed credential ends its run until the context's clients are rebuilt or a reader asks for the scope anew, as the hub's upstreams restart for a new subscription (3.2), since a retry by itself would run the credential plugin again.
   - An open pod or node reads the same sample: its usage is a part of its batch with its own dirty flag, so a changed sample does not describe the Overview again (4.3).
 - **Discovery and OpenAPI.**
   - Aggregated discovery, GA since 1.30: one request each to `/api` and `/apis`, with client-go's `Accept`, the aggregated form first and plain JSON after it ([`acceptDiscoveryFormats`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L68)).

@@ -155,7 +155,23 @@ impl Pending {
 
 struct Request {
     answer: Option<Answer>,
+    /// A reader asked for the scope, which restarts the task a credential failure ended.
+    again: watch::Sender<()>,
     task: JoinHandle<()>,
+}
+
+impl State {
+    fn serving(&self, want: &Scope) -> Option<&Request> {
+        self.requests
+            .get(want)
+            .or_else(|| self.requests.get(&Scope::Cluster))
+            .or_else(|| match want {
+                Scope::Named { namespace, .. } => {
+                    self.requests.get(&Scope::Namespace(namespace.clone()))
+                }
+                _ => None,
+            })
+    }
 }
 
 impl Request {
@@ -230,6 +246,11 @@ impl Board {
         let added: Vec<Scope> = scopes.difference(&member.wants.scopes).cloned().collect();
         member.wants = Wants::new(scopes);
         self.replan(state);
+        for want in &added {
+            if let Some(request) = state.serving(want) {
+                request.again.send_replace(());
+            }
+        }
         let member = &state.members[&id];
         for want in &added {
             for (scope, request) in &state.requests {
@@ -301,13 +322,14 @@ impl Board {
         }
         state.requests.retain(|scope, _| needed.contains(scope));
         for scope in needed {
-            state
-                .requests
-                .entry(scope.clone())
-                .or_insert_with(|| Request {
+            state.requests.entry(scope.clone()).or_insert_with(|| {
+                let (again, heard) = watch::channel(());
+                Request {
                     answer: None,
-                    task: tokio::spawn(poll(Arc::clone(self), scope)),
-                });
+                    again,
+                    task: tokio::spawn(poll(Arc::clone(self), scope, heard)),
+                }
+            });
         }
     }
 
@@ -382,17 +404,10 @@ impl Board {
             .iter()
             .filter(|want| !(fallen_back && **want == Scope::Cluster))
             .fold(MetricsState::Ready, |worst, want| {
-                let request = state
-                    .requests
-                    .get(want)
-                    .or_else(|| state.requests.get(&Scope::Cluster))
-                    .or_else(|| match want {
-                        Scope::Named { namespace, .. } => {
-                            state.requests.get(&Scope::Namespace(namespace.clone()))
-                        }
-                        _ => None,
-                    });
-                let health = match request.and_then(|request| request.answer.as_ref()) {
+                let health = match state
+                    .serving(want)
+                    .and_then(|request| request.answer.as_ref())
+                {
                     Some(answer) => answer.health,
                     None if stale => MetricsState::Unavailable,
                     None => MetricsState::Ready,
@@ -402,11 +417,14 @@ impl Board {
     }
 }
 
-/// Failures back off as the hub's upstreams do, and clients abandoned meanwhile are followed as theirs are.
-async fn poll(board: Arc<Board>, scope: Scope) {
+/// Failures back off as the hub's upstreams do, and clients abandoned meanwhile are followed as
+/// theirs are. A credential failure ends the run until the clients are rebuilt or a reader asks
+/// for the scope anew, as the hub's upstreams are restarted by a new subscription.
+async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
     let mut backoff = upstream::backoff();
     let mut api = board.api.clone();
     loop {
+        again.borrow_and_update();
         let version = loop {
             if let Some(version) = api.borrow_and_update().version() {
                 break version;
@@ -420,7 +438,10 @@ async fn poll(board: Arc<Board>, scope: Scope) {
             Err(error) => {
                 board.land(&scope, MetricsState::Unavailable, Samples::default());
                 if error.kind == ErrorKind::Unauthorized {
-                    return;
+                    if again.changed().await.is_err() {
+                        return;
+                    }
+                    continue;
                 }
                 tokio::time::sleep(backoff.next().expect("the backoff has no limit")).await;
                 continue;
@@ -442,7 +463,12 @@ async fn poll(board: Arc<Board>, scope: Scope) {
             }
             Err(Failure::Unauthorized) => {
                 board.land(&scope, MetricsState::Unavailable, Samples::default());
-                return;
+                let mut abandoned = clients.connections().abandoned();
+                tokio::select! {
+                    asked = again.changed() => if asked.is_err() { return },
+                    _ = abandoned.wait_for(|abandoned| *abandoned) => {}
+                }
+                continue;
             }
             Err(failure) => {
                 let health = match failure {

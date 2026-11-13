@@ -656,3 +656,149 @@ async fn a_poll_follows_clients_abandoned_meanwhile() {
         "it listed over the new clients without waiting out its 15 s"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_failed_credential_stopped_starts_again_when_a_reader_asks_for_it_anew() {
+    let rig = rig().await;
+    rig.fake.state().unauthorized.insert(PODS.to_owned());
+    let mut first = rig.context.reader(Kind::Pods);
+    first.want(namespace("a"));
+    until(|| first.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = rig.fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "nothing asks again by itself, which would run the credential plugin again"
+    );
+
+    rig.fake.state().unauthorized.clear();
+    let mut elsewhere = rig.context.reader(Kind::Pods);
+    elsewhere.want(namespace("b"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "a reader of another scope does not"
+    );
+
+    let mut second = rig.context.reader(Kind::Pods);
+    second.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "a reader that comes later does, at once"
+    );
+    assert_eq!(second.drain().state, Some(MetricsState::Ready));
+    let mut heard = Update::default();
+    until(|| {
+        let update = first.drain();
+        heard.state = update.state;
+        heard.changes.extend(update.changes);
+        heard.changes.len() >= 2
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "and so does the first"
+    );
+    assert_eq!(
+        keys(&heard),
+        [
+            ("a/p1".to_owned(), Some(50_172_044)),
+            ("a/p2".to_owned(), Some(1_000_000_000))
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_401_stopped_starts_again_once_the_clients_are_rebuilt() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    fake.state().unauthorized.insert(PODS.to_owned());
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), stopped);
+
+    fake.state().unauthorized.clear();
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "it asked over the rebuilt clients, with no reader asking again"
+    );
+    assert_eq!(reader.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_a_failed_credential_could_not_build_come_with_the_next_reader() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    let clients = fake.clients(Budgets::default());
+    let refusing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let refusing = Arc::clone(&refusing);
+        Arc::new(move |_context| {
+            let clients = Arc::clone(&clients);
+            let refused = refusing.load(std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if refused {
+                    return Err(twigo_ipc::IpcError::new(
+                        twigo_ipc::ErrorKind::Unauthorized,
+                        "Twigo runs aws only once you trust it".to_owned(),
+                    ));
+                }
+                Ok(clients)
+            })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    refusing.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+
+    refusing.store(false, std::sync::atomic::Ordering::Relaxed);
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        0,
+        "it does not try again by itself"
+    );
+    let mut next = context.reader(Kind::Pods);
+    next.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), 1);
+    assert_eq!(next.drain().state, Some(MetricsState::Ready));
+}
