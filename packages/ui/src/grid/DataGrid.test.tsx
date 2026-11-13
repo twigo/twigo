@@ -806,3 +806,37 @@ test("a column's note is a quiet mark on its header, said in words to a screen r
     descending: false,
   });
 });
+
+test("a header's sort button is the same element with and without a note, so its focus stays", () => {
+  const columns = (note?: string) => [
+    { id: "Name", title: "Name", width: 200, grow: true },
+    { id: "CPU", title: "CPU", width: 80, ...(note && { note }) },
+  ];
+  const { rerender } = grid({ columns: columns("metrics-server is down") });
+  const button = () =>
+    within(screen.getByRole("columnheader", { name: "CPU" })).getByRole(
+      "button",
+    );
+  const sorter = button();
+  act(() => {
+    sorter.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "metrics-server is down",
+  );
+  rerender({ columns: columns() });
+  expect(button()).toBe(sorter);
+  expect(document.activeElement).toBe(sorter);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(
+    screen
+      .getByRole("columnheader", { name: "CPU" })
+      .hasAttribute("aria-describedby"),
+  ).toBe(false);
+  rerender({ columns: columns("you may not read metrics") });
+  expect(button()).toBe(sorter);
+  expect(document.activeElement).toBe(sorter);
+  expect(
+    screen.getByRole("columnheader", { name: "CPU" }).textContent,
+  ).toContain("you may not read metrics");
+});

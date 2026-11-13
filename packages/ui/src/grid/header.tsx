@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { ArrowDown, ArrowUp, Check, Info, Minus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/tooltip";
 import { cn } from "../lib/cn";
@@ -28,6 +28,7 @@ export function HeaderCell({
 }) {
   const title = useId();
   const noteId = useId();
+  const [noting, setNoting] = useState(false);
   const active = sort?.column === column.id;
   const Arrow = active && sort.descending ? ArrowDown : ArrowUp;
   const end = column.align === "end";
@@ -67,18 +68,14 @@ export function HeaderCell({
       aria-describedby={note ? noteId : undefined}
       className="relative h-full border-r border-transparent group-hover/header:border-border-subtle"
     >
-      {note ? (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>{sorter}</TooltipTrigger>
-            <TooltipContent>{note}</TooltipContent>
-          </Tooltip>
-          <span id={noteId} className="sr-only">
-            {note}
-          </span>
-        </>
-      ) : (
-        sorter
+      <Tooltip open={note !== undefined && noting} onOpenChange={setNoting}>
+        <TooltipTrigger asChild>{sorter}</TooltipTrigger>
+        {note && <TooltipContent>{note}</TooltipContent>}
+      </Tooltip>
+      {note && (
+        <span id={noteId} className="sr-only">
+          {note}
+        </span>
       )}
       <span
         role="separator"
