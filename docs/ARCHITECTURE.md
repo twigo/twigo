@@ -529,6 +529,11 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
     A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
     A list of chosen namespaces never asks for the cluster.
+  - A list's first batch has what the poller already holds.
+    A list that joins a scope another reads, as a new query's subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
+    A list sorted by CPU or Memory whose first window says it reads metrics holds the first batch that shows its rows until each of its scopes has answered or failed once, so that its first order is the true one, and for 2 s at most, a bound of its own beside the poll's interval: a cluster's list of 5,095 pods took 38.6 ms (above), so only a server that does not answer reaches it.
+    When the bound passes the batch goes out as it is and the order settles as the answers come.
+    A list not sorted by a metric never waits for the poller, nor does one sorted by a metric while its window says it does not read metrics.
   - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
     A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
     A row that enters the filters, as a pod does that turns CrashLoopBackOff under a text filter, takes the sample the poller already holds, since the poller tells only what changes, unless the sample was taken before the row was created: the API carries no uid, so that one is of another pod by the name.
