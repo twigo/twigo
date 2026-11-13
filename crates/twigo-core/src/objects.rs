@@ -24,7 +24,7 @@ use twigo_ipc::{
     ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
 
-use crate::usage::{absent, usage};
+use crate::usage::{absent, usage, waiting};
 
 /// An open object: dropping it ends its task and its upstreams.
 pub struct Opened {
@@ -177,6 +177,8 @@ struct Used {
     answered: bool,
     /// The context serves the resource, whether or not the object exists.
     api: bool,
+    /// Its APIService exists and lists no resources: discovery knows it without a request.
+    stale: bool,
     /// A usage was sent that the webview may still draw.
     offered: bool,
 }
@@ -224,7 +226,8 @@ impl Used {
         let changed = sample != self.sample
             || state != self.state
             || served != self.served
-            || answered != self.answered;
+            || answered != self.answered
+            || api.stale() != self.stale;
         *self = Self {
             sample,
             uid,
@@ -232,6 +235,7 @@ impl Used {
             served,
             answered,
             api: serves,
+            stale: api.stale(),
             offered: self.offered,
         };
         changed
@@ -285,6 +289,7 @@ async fn run(
         served: false,
         answered: false,
         api: false,
+        stale: false,
         offered: false,
     };
     loop {
@@ -429,7 +434,7 @@ async fn run(
         if let Some(reader) = &mut metrics {
             dirty.usage |= used.read(reader, current.as_deref(), parts.usage);
         }
-        let usage_shown = parts.usage && used.served && used.answered;
+        let usage_shown = parts.usage && used.served;
         let usage_withdrawn = parts.usage && used.offered && !used.api;
         let status_changed = status.as_ref() != Some(&state);
         let due = status_changed
@@ -462,7 +467,11 @@ async fn run(
                 used_by
                     .zip(parsed.as_ref())
                     .filter(|_| usage_shown && dirty.usage)
-                    .map(|(kind, object)| usage(kind, object, used.sample.as_deref(), used.state))
+                    .map(|(kind, object)| match (used.answered, used.stale) {
+                        (true, _) => usage(kind, object, used.sample.as_deref(), used.state),
+                        (false, true) => usage(kind, object, None, MetricsState::Unavailable),
+                        (false, false) => waiting(kind, object),
+                    })
             },
         };
         let mut batch = shown.batch(seq, state.clone());
