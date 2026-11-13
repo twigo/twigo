@@ -32,8 +32,10 @@ export function readsMetrics({
 export const METRICS_NOTES: Readonly<
   Record<Exclude<MetricsState, "ready">, string>
 > = {
-  unavailable: "metrics-server does not answer, so there is no CPU or memory.",
-  forbidden: "You may not read metrics here, so there is no CPU or memory.",
+  unavailable:
+    "metrics-server does not answer, so there are no CPU or memory figures.",
+  forbidden:
+    "You may not read metrics here, so there are no CPU or memory figures.",
 };
 
 /** What a metric column's header says while the Metrics API gives no values. */

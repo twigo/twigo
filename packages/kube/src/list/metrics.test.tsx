@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Backend, ListBatch, RequestOf } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Changes } from "@twigo/workbench";
-import { openList, settle, withScreenSize } from "../../test/workbench";
+import {
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
 
 const gridRenders = vi.hoisted(() => ({ count: 0 }));
 
@@ -57,6 +62,8 @@ function spied(backend: Backend) {
   };
 }
 
+const NO_SAMPLE = /^–?$/;
+
 const last = <T,>(items: readonly T[]) => items[items.length - 1];
 
 async function choose(column: string) {
@@ -98,8 +105,8 @@ describe("the main list", () => {
     expect(rows().length).toBeGreaterThan(0);
     for (const row of rows()) {
       expect(textOf(row, "Status")).toBe("Pending");
-      expect(textOf(row, "CPU")).toBe("");
-      expect(textOf(row, "Memory")).toBe("");
+      expect(textOf(row, "CPU")).toMatch(NO_SAMPLE);
+      expect(textOf(row, "Memory")).toMatch(NO_SAMPLE);
     }
   });
 
@@ -194,8 +201,8 @@ describe("the main list", () => {
       expect(header("Status").textContent).toBe("Status");
       expect(rows().length).toBeGreaterThan(0);
       for (const row of rows()) {
-        expect(textOf(row, "CPU")).toBe("");
-        expect(textOf(row, "Memory")).toBe("");
+        expect(textOf(row, "CPU")).toMatch(NO_SAMPLE);
+        expect(textOf(row, "Memory")).toMatch(NO_SAMPLE);
       }
       expect(screen.queryByText(/Could not load/)).toBeNull();
       expect(document.querySelector("[data-sonner-toast]")).toBeNull();
@@ -306,5 +313,56 @@ describe("a poll", () => {
     expect(flashing("a", "Restarts")).toBe(true);
     expect(textOf(rowOf("j"), "CPU")).toBe("20m");
     expect(flashing("j", "CPU")).toBe(false);
+  });
+});
+
+describe("the variants of the checkpoint", () => {
+  withScreenSize(1000);
+
+  afterEach(() => {
+    history.replaceState(null, "", "/");
+  });
+
+  const nodes = async () => {
+    const workbench = await mountKube(createMockBackend("ready"));
+    act(() => {
+      workbench.spaces.select("staging");
+    });
+    await settle();
+    act(() => {
+      workbench.editors.open("k8s-list://staging/v1/nodes");
+    });
+    await settle();
+    return (column: string) => rows().map((row) => textOf(row, column));
+  };
+
+  test("units:kubectl keeps millicores and Mi, and units:adaptive reads cores and Gi from one up", async () => {
+    const plain = await nodes();
+    expect(plain("CPU").every((text) => /^\d+m$/.test(text))).toBe(true);
+    expect(plain("Memory").every((text) => /^\d+Mi$/.test(text))).toBe(true);
+    cleanup();
+    history.replaceState(null, "", "/?variant=units:adaptive");
+    const adaptive = await nodes();
+    expect(adaptive("CPU").some((text) => /^\d+(\.\d+)?$/.test(text))).toBe(
+      true,
+    );
+    expect(
+      adaptive("Memory").some((text) => /^\d+(\.\d+)?Gi$/.test(text)),
+    ).toBe(true);
+  });
+
+  test("empty:dash writes a dash for a pod without a sample, and empty:blank nothing", async () => {
+    const pending = async () => {
+      await openList();
+      fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+        target: { value: "Pending" },
+      });
+      await settle();
+      return rows().map((row) => textOf(row, "CPU"));
+    };
+    expect(new Set(await pending())).toEqual(new Set(["–"]));
+    cleanup();
+    history.replaceState(null, "", "/?variant=empty:blank");
+    expect(new Set(await pending())).toEqual(new Set([""]));
   });
 });

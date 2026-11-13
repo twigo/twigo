@@ -1,12 +1,15 @@
 import type {
   Container,
   ContainerRole,
+  ContainerUsage,
   Field,
   ObjectRef,
+  Usage,
 } from "@twigo/protocol";
 import { Card, Pill, PropertyList, Section } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import type { OverviewStates } from "./overviewStates";
+import { ContainerUsageRows } from "./Usage";
 import { TONE } from "./tone";
 import { ValueView } from "./values";
 
@@ -28,12 +31,14 @@ export function Containers({
   states,
   kind,
   onOpen,
+  usage,
 }: {
   containers: readonly Container[];
   /** Where the folds are kept, for every object of `kind`. */
   states: OverviewStates;
   kind: string;
   onOpen: (target: ObjectRef) => void;
+  usage?: Usage | undefined;
 }) {
   useChanges(states.changes);
   return (
@@ -42,6 +47,7 @@ export function Containers({
         <ContainerCard
           key={`${container.role}/${container.name}`}
           container={container}
+          usage={usage?.containers.find(({ name }) => name === container.name)}
           fold={(title) => ({
             open: states.open(
               kind,
@@ -64,10 +70,12 @@ type Fold = (title: string) => { open: boolean; onToggle: () => void };
 
 function ContainerCard({
   container,
+  usage,
   fold,
   onOpen,
 }: {
   container: Container;
+  usage: ContainerUsage | undefined;
   fold: Fold;
   onOpen: (target: ObjectRef) => void;
 }) {
@@ -105,6 +113,7 @@ function ContainerCard({
         <span className="text-foreground">{version}</span>
       </code>
       {fields.length > 0 && <Fields fields={fields} onOpen={onOpen} />}
+      {usage && <ContainerUsageRows usage={usage} />}
       <Folded title="Details" fields={details} fold={fold} onOpen={onOpen} />
       <Folded title="Environment" fields={env} fold={fold} onOpen={onOpen} />
       <Folded title="Mounts" fields={mounts} fold={fold} onOpen={onOpen} />

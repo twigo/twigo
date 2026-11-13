@@ -72,13 +72,17 @@ function choose<T>(items: readonly T[], text: string): T {
 /**
  * The containers of a pod with what each asks for, which the pod's
  * Overview shows on the cards and its usage is measured against: one in
- * three has no CPU limit and one in five no memory limit.
+ * three has no CPU limit and one in five no memory limit, and one in
+ * twenty-five asks for two cores and 2 Gi.
  */
 export function containerSpecs(pod: Pod): ContainerSpec[] {
   return CONTAINER_NAMES.slice(0, pod.containers).map((name) => {
     const seed = `${pod.id}/${name}`;
-    const cpu = choose([25, 50, 100, 250, 500], `${seed}/cpu`) * MILLI;
-    const memory = choose([32, 64, 128, 256, 512], `${seed}/memory`) * MI;
+    const big = unit(`${seed}/big`) < 0.04;
+    const cpu =
+      (big ? 2000 : choose([25, 50, 100, 250, 500], `${seed}/cpu`)) * MILLI;
+    const memory =
+      (big ? 2048 : choose([32, 64, 128, 256, 512], `${seed}/memory`)) * MI;
     return {
       name,
       request: { cpu, memory },

@@ -1,6 +1,7 @@
-import type { Measure, Usage } from "@twigo/protocol";
-import { Meter, StatusDot, TonedText } from "@twigo/ui";
+import type { ContainerUsage, Measure, Usage } from "@twigo/protocol";
+import { Meter, PropertyList, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
+import { variant } from "../variants";
 import { figure, type Figure, type Resource } from "./figures";
 
 const LABEL: Readonly<Record<Resource, string>> = {
@@ -8,57 +9,128 @@ const LABEL: Readonly<Record<Resource, string>> = {
   memory: "Memory",
 };
 
+const GRID =
+  "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
+
+/** Something that uses resources: a pod, a container or a node. */
+interface Subject {
+  /** What its meters are labelled with. */
+  readonly name: string | null;
+  /** Whether its name heads its rows. */
+  readonly titled: boolean;
+  readonly cpu: Measure;
+  readonly memory: Measure;
+}
+
 /**
  * What a pod or a node uses (ARCHITECTURE 4.3): a pod's total and each of
- * its containers, a node against what it can allocate, each as a meter
- * with its figures. A row without a sample says no data yet, never zero,
- * and a Metrics API that gives none says so in place.
+ * its containers, a node against what it can allocate. A row without a
+ * sample says no data yet, never zero, and a Metrics API that gives none
+ * says so in place.
  */
 export function UsageView({ usage, node }: { usage: Usage; node: boolean }) {
-  if (usage.state !== "ready") {
+  if (usage.state !== "ready") return <Said state={usage.state} />;
+  return (
+    <Subjects
+      subjects={
+        node
+          ? [
+              {
+                name: null,
+                titled: false,
+                cpu: usage.cpu,
+                memory: usage.memory,
+              },
+            ]
+          : [
+              {
+                name: "Pod",
+                titled: true,
+                cpu: usage.cpu,
+                memory: usage.memory,
+              },
+              ...usage.containers.map((container) => ({
+                name: container.name,
+                titled: true,
+                cpu: container.cpu,
+                memory: container.memory,
+              })),
+            ]
+      }
+    />
+  );
+}
+
+export function UsageTotal({ usage }: { usage: Usage }) {
+  if (usage.state !== "ready") return <Said state={usage.state} />;
+  return (
+    <Subjects
+      subjects={[
+        { name: null, titled: false, cpu: usage.cpu, memory: usage.memory },
+      ]}
+    />
+  );
+}
+
+export function ContainerUsageRows({ usage }: { usage: ContainerUsage }) {
+  return (
+    <Subjects
+      subjects={[
+        {
+          name: usage.name,
+          titled: false,
+          cpu: usage.cpu,
+          memory: usage.memory,
+        },
+      ]}
+    />
+  );
+}
+
+function Said({ state }: { state: Exclude<Usage["state"], "ready"> }) {
+  return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
+}
+
+function Subjects({ subjects }: { subjects: readonly Subject[] }) {
+  if (variant("usage") === "text") {
     return (
-      <p className="text-muted-foreground">{METRICS_NOTES[usage.state]}</p>
+      <div className="flex flex-col gap-3">
+        {subjects.map((subject) => (
+          <div key={subject.name ?? ""} className="flex flex-col gap-1">
+            {subject.titled && (
+              <span className="font-semibold">{subject.name}</span>
+            )}
+            <PropertyList
+              items={(["cpu", "memory"] as const).map((resource) => ({
+                key: resource,
+                label: LABEL[resource],
+                value: <Text shown={figure(resource, subject[resource])} />,
+              }))}
+            />
+          </div>
+        ))}
+      </div>
     );
   }
   return (
-    <div className="grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1">
-      {node ? (
-        <Subject title={null} cpu={usage.cpu} memory={usage.memory} />
-      ) : (
-        <>
-          <Subject title="Pod" cpu={usage.cpu} memory={usage.memory} />
-          {usage.containers.map((container) => (
-            <Subject
-              key={container.name}
-              title={container.name}
-              cpu={container.cpu}
-              memory={container.memory}
-            />
-          ))}
-        </>
-      )}
+    <div className={GRID}>
+      {subjects.map((subject) => (
+        <Rows key={subject.name ?? ""} subject={subject} />
+      ))}
     </div>
   );
 }
 
-function Subject({
-  title,
-  cpu,
-  memory,
-}: {
-  title: string | null;
-  cpu: Measure;
-  memory: Measure;
-}) {
+function Rows({ subject }: { subject: Subject }) {
   return (
     <>
-      {title !== null && (
+      {subject.titled && (
         <span className="col-span-4 mt-2 font-semibold first:mt-0">
-          {title}
+          {subject.name}
         </span>
       )}
-      <Row resource="cpu" measure={cpu} subject={title} />
-      <Row resource="memory" measure={memory} subject={title} />
+      <Row resource="cpu" measure={subject.cpu} name={subject.name} />
+      <Row resource="memory" measure={subject.memory} name={subject.name} />
     </>
   );
 }
@@ -66,11 +138,11 @@ function Subject({
 function Row({
   resource,
   measure,
-  subject,
+  name,
 }: {
   resource: Resource;
   measure: Measure;
-  subject: string | null;
+  name: string | null;
 }) {
   const label = LABEL[resource];
   const shown = figure(resource, measure);
@@ -83,7 +155,7 @@ function Row({
         <>
           {shown.bar ? (
             <Meter
-              label={subject === null ? label : `${label} of ${subject}`}
+              label={name === null ? label : `${label} of ${name}`}
               {...shown.bar}
               {...(shown.tone && { tone: shown.tone })}
             />
@@ -98,6 +170,25 @@ function Row({
         </>
       )}
     </>
+  );
+}
+
+/** A figure as a field: `139m (92%)` and what it is held against, as the node's Resources table prints percents. */
+function Text({ shown }: { shown: Figure }) {
+  if (shown.used === null) {
+    return <span className="text-muted-foreground">No data yet</span>;
+  }
+  return (
+    <span className="tabular-nums">
+      {shown.used}
+      {shown.percent !== null && (
+        <span className="ml-1 inline-flex items-center gap-1">
+          {shown.tone && <StatusDot tone={shown.tone} />}
+          <TonedText tone={shown.tone ?? "idle"}>({shown.percent}%)</TonedText>
+        </span>
+      )}
+      <span className="text-muted-foreground">{details(shown)}</span>
+    </span>
   );
 }
 

@@ -47,7 +47,7 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
     cpu: { cell: "cpu", width: 64, align: "end", metric: true, flash: false },
     memory: {
       cell: "memory",
-      width: 72,
+      width: 80,
       align: "end",
       metric: true,
       flash: false,

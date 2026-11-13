@@ -1,13 +1,8 @@
 import type { Gvr, Measure } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { formatCpu, formatMemory } from "@twigo/utils";
+import { measureFormat } from "../variants";
 
 export type Resource = "cpu" | "memory";
-
-const FORMAT: Readonly<Record<Resource, (value: number) => string>> = {
-  cpu: formatCpu,
-  memory: formatMemory,
-};
 
 /** The share of its limit, or of what a node can allocate, from which a measure is a warning. */
 const WARN_FROM = 0.9;
@@ -46,7 +41,7 @@ export interface Figure {
  * pass, and the request; with none of them the figures are all it has.
  */
 export function figure(resource: Resource, measure: Measure): Figure {
-  const format = FORMAT[resource];
+  const format = measureFormat(resource);
   const text = (value: number | null) =>
     value === null ? null : format(value);
   const { used, request, limit, allocatable } = measure;
