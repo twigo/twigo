@@ -824,7 +824,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
   - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
   - A pod's and a node's Overview also show what the object uses, from the poller's sample (3.6).
-    Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown and the document visible.
+    Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown, under the gate a list reads its metrics by (4.4).
     Each container that has a sample comes against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
     A Usage section follows the Diagnostics with the pod's total and each of its containers, or the node, as meters against the limit with the request marked, else against the request, and a node's against what it can allocate; the percent is kubectl's, truncated and past 100 where it passes.
     Against a limit or what a node allocates, 90 % is a warning and the limit an error, in the meter and in words.
