@@ -17,6 +17,7 @@ pub fn usage(kind: Kind, object: &Value, sample: Option<&Sample>, state: Metrics
     };
     Usage {
         state,
+        waiting: false,
         sampled: sample
             .and_then(|sample| sample.sampled)
             .map(|sampled| sampled.to_string()),
@@ -30,6 +31,7 @@ pub fn usage(kind: Kind, object: &Value, sample: Option<&Sample>, state: Metrics
 pub fn absent() -> Usage {
     Usage {
         state: MetricsState::Absent,
+        waiting: false,
         sampled: None,
         cpu: Measure::default(),
         memory: Measure::default(),

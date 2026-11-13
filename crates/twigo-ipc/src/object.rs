@@ -86,6 +86,11 @@ pub struct ObjectBatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Usage {
     pub state: MetricsState,
+    /// True in the usage sent with the Overview, before the request that
+    /// serves the object has answered once: the figures are null, and
+    /// `containers` names the pod's running containers, which the answer
+    /// will hold, so the webview draws the section at its height at once.
+    pub waiting: bool,
     /// RFC 3339, when the sample was taken; null without one, as for a
     /// pod that is not running or started a moment ago.
     pub sampled: Option<String>,

@@ -1657,6 +1657,13 @@ export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", e
  */
 export type Usage = { state: MetricsState, 
 /**
+ * True in the usage sent with the Overview, before the request that
+ * serves the object has answered once: the figures are null, and
+ * `containers` names the pod's running containers, which the answer
+ * will hold, so the webview draws the section at its height at once.
+ */
+waiting: boolean, 
+/**
  * RFC 3339, when the sample was taken; null without one, as for a
  * pod that is not running or started a moment ago.
  */
