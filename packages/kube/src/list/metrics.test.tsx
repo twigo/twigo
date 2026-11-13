@@ -45,6 +45,15 @@ function spied(backend: Backend) {
   const invoke = vi.spyOn(backend, "invoke");
   const subscribe = vi.spyOn(backend, "subscribe");
   return {
+    reading: () => {
+      const last = new Map<number, boolean>();
+      for (const [command, request] of invoke.mock.calls) {
+        if (command !== "list_set_window") continue;
+        const { id, metrics } = request as RequestOf<"list_set_window">;
+        last.set(id, metrics);
+      }
+      return [...last.values()].some(Boolean);
+    },
     reads: () =>
       invoke.mock.calls
         .filter(([command]) => command === "list_set_window")
@@ -213,6 +222,44 @@ describe("the main list", () => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
     expect(last(sent.reads())).toBe(true);
+  });
+
+  test("a list behind another tab reads nothing, and reads again once shown", async () => {
+    const backend = createMockBackend("ready");
+    const sent = spied(backend);
+    const workbench = await openList(backend);
+    expect(sent.reading()).toBe(true);
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/apps/v1/deployments");
+    });
+    await settle();
+    expect(sent.reading()).toBe(false);
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/v1/pods");
+    });
+    await settle();
+    expect(sent.reading()).toBe(true);
+  });
+
+  test("a list under a maximized panel reads nothing, and reads again once the panel gives way", async () => {
+    const backend = createMockBackend("ready");
+    const sent = spied(backend);
+    const workbench = await openList(backend);
+    const space = workbench.spaces.active?.id ?? "";
+    expect(sent.reading()).toBe(true);
+    act(() => {
+      workbench.spaces.setPart(space, "panel", {
+        visible: true,
+        maximized: true,
+      });
+    });
+    await settle();
+    expect(sent.reading()).toBe(false);
+    act(() => {
+      workbench.spaces.setPart(space, "panel", { maximized: false });
+    });
+    await settle();
+    expect(sent.reading()).toBe(true);
   });
 
   test("beside the details the list draws no metric column and reads nothing, sorted by one or not", async () => {

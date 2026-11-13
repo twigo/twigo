@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { useEditorShown } from "@twigo/workbench";
 
 function subscribe(listener: () => void): () => void {
   document.addEventListener("visibilitychange", listener);
@@ -7,7 +8,13 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** Whether the document is visible, as `visibilitychange` says; a hidden window reads no metrics. */
+/**
+ * Whether what reads metrics is drawn: the document is visible, as
+ * `visibilitychange` says, and the editor is on screen, behind no other tab
+ * and under no maximized panel. A hidden window or editor reads no metrics.
+ */
 export function useVisible(): boolean {
-  return useSyncExternalStore(subscribe, () => !document.hidden);
+  const shown = useEditorShown();
+  const visible = useSyncExternalStore(subscribe, () => !document.hidden);
+  return shown && visible;
 }

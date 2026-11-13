@@ -290,6 +290,28 @@ describe("an open object", () => {
     expect(usage()).toBe(false);
   });
 
+  test("an open pod behind another tab asks for no usage, and asks again once shown", async () => {
+    const backend = createMockBackend("ready");
+    const usage = spied(backend);
+    const workbench = await mountKube(backend);
+    const pod = running();
+    act(() => {
+      workbench.editors.open(pod);
+    });
+    await settle();
+    expect(usage()).toBe(true);
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/apps/v1/deployments");
+    });
+    await settle();
+    expect(usage()).toBe(false);
+    act(() => {
+      workbench.editors.activate(pod);
+    });
+    await settle();
+    expect(usage()).toBe(true);
+  });
+
   test("the details beside a list show a pod's usage in their Overview", async () => {
     const backend = createMockBackend("ready");
     await openList(backend);

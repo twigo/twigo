@@ -7,6 +7,7 @@ import type {
   RequestOf,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { EditorShownContext } from "@twigo/workbench";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { EmbeddedList } from "./EmbeddedList";
@@ -37,6 +38,7 @@ async function shown(
   onOpen: (target: ObjectRef) => void,
   states = new OverviewStates(),
   backend?: Backend,
+  editorShown = true,
 ) {
   const pending = testWorkbench("ready", backend);
   await vi.advanceTimersByTimeAsync(10);
@@ -51,7 +53,16 @@ async function shown(
       onOpen={onOpen}
     />,
     {
-      wrapper: inWorkbench(workbench),
+      wrapper: ({ children }) => {
+        const Workbench = inWorkbench(workbench);
+        return (
+          <Workbench>
+            <EditorShownContext.Provider value={editorShown}>
+              {children}
+            </EditorShownContext.Provider>
+          </Workbench>
+        );
+      },
     },
   );
   await settle();
@@ -148,6 +159,13 @@ test("a node's pods show CPU and Memory and read them while the document is visi
   });
   expect(reads(invoke)).toBe(false);
   hidden.mockRestore();
+});
+
+test("a node's pods read nothing while their editor is not shown", async () => {
+  const backend = createMockBackend("ready");
+  const invoke = vi.spyOn(backend, "invoke");
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend, false);
+  expect(reads(invoke)).toBe(false);
 });
 
 test("a Metrics API that does not answer is said in the header's mark", async () => {
