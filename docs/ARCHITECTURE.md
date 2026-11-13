@@ -460,7 +460,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
 - A list sends rows only while it is ready, relisting or stale; in the other states its view shows the state, as 3.7 has it.
 - The mock backend sorts, filters and groups by the same rules, and `packages/protocol/src/query-cases.json` holds cases that both it and Rust's query view run.
   Its regexes are the browser's, which agree with Rust's `regex` crate only where both the pattern and the text are ASCII, without carriage returns, in the syntax both have, since the crate's `\d`, `\w`, `\s` and case folding follow Unicode and its `.` matches a carriage return, and it prints numbers as JavaScript does, `1e-7` where Rust prints `0.0000001`: the shared cases keep to what both read alike.
-  It sends the pod columns once a list knows them, from its first page on, as Rust does.
+  It sends the pod columns once a list knows them, from its first page on, and an empty list of columns before, as Rust does.
 - Multi-context spaces (7.2): the query view merges the upstreams of several contexts and adds a Context column.
   Row identity is `context/namespace/name` already, so one-context spaces, all that M1 serves, need no change then.
 - Selections and bulk actions refer to row IDs, so "select all 5,000" never ships 5,000 rows.
@@ -517,11 +517,12 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Absent: no CPU and Memory columns, and no request to the group.
     Served: `pods`, `nodes`, each or both, at `v1` before `v1beta1`, as kubectl picks.
     Stale: the APIService exists and its version lists no resources, as while metrics-server is down.
-    Served and stale give pod and node lists the columns from their first batch, whatever the poller has answered, so the columns never depend on a response.
+    Served and stale give pod and node lists the columns whatever the poller has answered, so the columns never depend on a response.
+    They come together with the list's own, in the batch that brings them: a list that has not listed yet has an empty list of columns and no state, so its header never shows CPU and Memory alone.
     The core follows each context's discovery with one follower, shared by every `resources_watch`, every list of pods or nodes and every open pod or node of the context, so the fact costs no second fetch.
     It runs while at least one of them holds it, and stops with the last: its CRD and APIService watches and its fetches end with it, as a background space's other subscriptions do (3.2), so a context nobody follows costs nothing.
     A context that leaves the sources while something holds its follower keeps the one follower and the one poller context when it returns, so the in-flight limit below holds across it.
-    The registry keeps what the follower last confirmed of the Metrics API, per context and the context's fingerprint (6.2), after it stops: a follower started again begins from it, so a list opened again has its columns in its first batch, and corrects it with its first answer if the cluster changed meanwhile; a kept state is used only under the fingerprint it was kept for.
+    The registry keeps what the follower last confirmed of the Metrics API, per context and the context's fingerprint (6.2), after it stops: a follower started again begins from it, so a list opened again has its columns in the batch that brings its own, and corrects it with its first answer if the cluster changed meanwhile; a kept state is used only under the fingerprint it was kept for.
     The webview subscribes a list only once its space's resources came (3.4), so a list finds the fact at its first batch; a list opened before any discovery answered gets the columns in the batch after the answer.
     Every change of the fact reaches lists and objects, a stale API that is uninstalled and an absent one that is installed but never ready included: the columns come and go, and an open usage hears `absent`.
   - A scope, a namespace or the cluster, is listed every 15 s, the metrics-server manifest's and the chart's resolution, while a reader wants it, the first time at once; with the last reader gone it is not listed again, with no linger.
