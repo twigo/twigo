@@ -839,3 +839,58 @@ async fn a_stale_api_that_is_uninstalled_takes_the_columns_away() {
         "{columns:?}"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_many_namespaces_whose_answers_are_slow_reaches_the_bound_and_the_order_settles()
+{
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    let namespaces: Vec<String> = (0..40).map(|n| format!("ns-{n:02}")).collect();
+    for (at, namespace) in namespaces.iter().enumerate() {
+        fake.add("pods", Some(namespace), "p");
+        fake.pod_usage(namespace, "p", &[("main", &format!("{}m", at + 1), "1Mi")]);
+    }
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/pods".to_owned());
+    fake.state().metrics_takes = Duration::from_millis(250);
+    let mut list = Metered::start_all(fake, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 40, true);
+    let (at, bounded) = first_at(&mut list).await;
+    assert!(
+        (FIRST_ANSWER..=FIRST_ANSWER + FLUSH).contains(&(at - asked)),
+        "the answers come four at a time, so they are not all in by the bound: {:?}",
+        at - asked
+    );
+    let known = cells_of(&bounded, "CPU")
+        .iter()
+        .filter(|cell| **cell != Cell::Null)
+        .count();
+    assert!(
+        (1..40).contains(&known),
+        "the batch leaves with what has come: {known} of 40"
+    );
+
+    let expected: Vec<String> = namespaces
+        .iter()
+        .rev()
+        .map(|namespace| format!("kind-test/{namespace}/p"))
+        .collect();
+    let later = list.watch(Duration::from_secs(10)).await;
+    let settled = later
+        .iter()
+        .rev()
+        .find_map(|batch| batch.window.as_ref())
+        .expect("the order settles when the rest answer");
+    assert_eq!(
+        settled
+            .ids
+            .iter()
+            .map(|id| id.0.as_str())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_ne!(window_ids(&bounded), expected, "it was not the true order");
+}
