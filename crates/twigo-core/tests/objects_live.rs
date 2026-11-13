@@ -308,6 +308,7 @@ const OVERVIEW: ObjectParts = ObjectParts {
     manifest: false,
     events: false,
     related: false,
+    usage: false,
 };
 
 #[tokio::test]
@@ -639,6 +640,7 @@ async fn a_list_with_a_field_selector_keeps_what_the_server_selects() {
             id,
             start: 0,
             end: 40,
+            metrics: false,
         },
     )
     .unwrap();

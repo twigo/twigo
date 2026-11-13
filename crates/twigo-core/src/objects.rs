@@ -533,6 +533,7 @@ impl Shown<'_> {
                 .map(|object| twigo_policy::redact::for_view(object.clone()).to_string()),
             events: (parts.events && dirty.events).then(|| (*events).clone()),
             related: (parts.related && dirty.related).then(|| (*related).clone()),
+            usage: None,
         }
     }
 }
@@ -851,6 +852,7 @@ mod tests {
                 manifest: true,
                 events: true,
                 related: true,
+                usage: false,
             },
             dirty: &Dirty::all(),
             object: Some(&secret),

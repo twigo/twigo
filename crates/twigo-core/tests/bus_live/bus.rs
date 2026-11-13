@@ -321,6 +321,7 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
         manifest: true,
         events: false,
         related: false,
+        usage: false,
     };
     let id = core
         .object_open("main", OpenObject { object, parts }, move |batch| {

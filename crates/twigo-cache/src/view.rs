@@ -615,6 +615,7 @@ impl QueryView {
             status: status.clone(),
             counts: if counts_changed { counts.clone() } else { None },
             groups: groups_changed.then(|| groups.clone().unwrap_or_default()),
+            metrics: None,
         };
         self.sent = Sent {
             columns: Some(Arc::clone(&self.layout.server)),

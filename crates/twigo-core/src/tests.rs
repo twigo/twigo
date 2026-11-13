@@ -398,6 +398,7 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
         id,
         start: 0,
         end: 40,
+        metrics: false,
     };
     core.list_set_window("main", window).unwrap();
     let first = tokio::time::timeout(Duration::from_secs(5), batches.recv())

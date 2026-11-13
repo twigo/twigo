@@ -87,7 +87,7 @@ fn column(column: &twigo_ipc::Column) -> Column {
         name: column.name.as_str().into(),
         kind: match column.kind {
             Wire::String => ColumnKind::String,
-            Wire::Integer => ColumnKind::Integer,
+            Wire::Integer | Wire::Cpu | Wire::Memory => ColumnKind::Integer,
             Wire::Number => ColumnKind::Number,
             Wire::Boolean => ColumnKind::Boolean,
             Wire::Date => ColumnKind::Date,

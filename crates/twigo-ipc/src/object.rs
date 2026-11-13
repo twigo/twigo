@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Gvr, SubscriptionId, ViewState};
+use crate::{Gvr, MetricsState, SubscriptionId, ViewState};
 
 /// Names one object of a space.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -31,6 +31,9 @@ pub struct ObjectParts {
     pub events: bool,
     /// Its owners and the objects it owns.
     pub related: bool,
+    /// What a pod or a node uses, read while it is drawn and the document
+    /// is visible.
+    pub usage: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -71,6 +74,46 @@ pub struct ObjectBatch {
     pub events: Option<EventList>,
     /// Present when it changed, while the related part is shown.
     pub related: Option<Related>,
+    /// Present when it changed, while the usage part is shown, for a pod
+    /// or a node of a context that serves the Metrics API.
+    pub usage: Option<Usage>,
+}
+
+/// What a pod or a node uses, from the sample its list's rows show.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Usage {
+    pub state: MetricsState,
+    /// RFC 3339, when the sample was taken; null without one, as for a
+    /// pod that is not running or started a moment ago.
+    pub sampled: Option<String>,
+    /// A pod's sum over its containers, or the node's own figures.
+    pub cpu: Measure,
+    pub memory: Measure,
+    /// A pod's containers that have a sample, in the pod's order; empty
+    /// for a node.
+    pub containers: Vec<ContainerUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct ContainerUsage {
+    pub name: String,
+    pub cpu: Measure,
+    pub memory: Measure,
+}
+
+/// One resource, in nanocores for CPU and bytes for memory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Measure {
+    /// Null without a sample.
+    pub used: Option<i64>,
+    /// A container's request, or a pod's when every container counted in
+    /// `used` has one.
+    pub request: Option<i64>,
+    /// A container's limit, or a pod's when every container counted in
+    /// `used` has one.
+    pub limit: Option<i64>,
+    /// A node's allocatable.
+    pub allocatable: Option<i64>,
 }
 
 /// An object described for people: sections in their order, each a list of

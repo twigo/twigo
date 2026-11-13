@@ -45,8 +45,8 @@ pub use forward::{
 };
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
-    Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, Row,
-    RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
+    Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, MetricsState,
+    Row, RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
 };
 pub use logs::{
     AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogAround,
@@ -55,10 +55,10 @@ pub use logs::{
     TextRange, TextStyle, TimeRange,
 };
 pub use object::{
-    Block, Condition, Container, ContainerRole, ContainerState, DataEntry, EmbeddedList, EventList,
-    Field, Finding, FindingLogs, GetValues, Label, ObjectBatch, ObjectEvent, ObjectParts,
-    ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject, Section, SetParts, Span,
-    Tone, TreeNode, TreeValue, Value,
+    Block, Condition, Container, ContainerRole, ContainerState, ContainerUsage, DataEntry,
+    EmbeddedList, EventList, Field, Finding, FindingLogs, GetValues, Label, Measure, ObjectBatch,
+    ObjectEvent, ObjectParts, ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject,
+    Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
 };
 pub use schema::SchemaQuery;
 pub use shell::{

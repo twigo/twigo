@@ -97,6 +97,10 @@ pub struct SetWindow {
     pub start: u32,
     /// Exclusive.
     pub end: u32,
+    /// Whether the list reads its metric columns now: one of them is
+    /// drawn or sorted by, and the document is visible. Only then are the
+    /// namespaces of the window's rows polled (ARCHITECTURE 3.6).
+    pub metrics: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -129,6 +133,23 @@ pub struct ListBatch {
     /// disappears or moves, or its rows or counts change. Empty once the
     /// list no longer has the column.
     pub groups: Option<Vec<RowGroup>>,
+    /// For a list with metric columns: whether their samples arrive,
+    /// present in the first batch that has the columns and whenever it
+    /// changes.
+    pub metrics: Option<MetricsState>,
+}
+
+/// What the Metrics API of a context answers. A context that does not
+/// serve it has no metric columns and no usage, and so no state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MetricsState {
+    /// It answers; a row without a sample has none yet.
+    Ready,
+    /// Served and not answering, as while metrics-server is down.
+    Unavailable,
+    /// The person may not list these metrics.
+    Forbidden,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -202,6 +223,10 @@ pub enum ColumnKind {
     Boolean,
     Date,
     Age,
+    /// Measured CPU, an integer of nanocores; null without a sample.
+    Cpu,
+    /// Measured memory, an integer of bytes; null without a sample.
+    Memory,
     Other,
 }
 
