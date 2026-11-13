@@ -525,6 +525,32 @@ async fn a_pod_alone_asks_for_itself_when_the_cluster_does_not_answer_for_it() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_answer_that_lands_between_the_check_and_the_drain_is_in_the_update_and_counted_next() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    let answer =
+        br#"{"items":[{"metadata":{"name":"p1","namespace":"a"},"timestamp":"2026-11-13T16:19:28Z",
+        "containers":[{"name":"main","usage":{"cpu":"7m","memory":"1Mi"}}]}]}"#;
+    let (settled, update) = reader.read_with(|| {
+        rig.context.board(Kind::Pods).land(
+            &Scope::Namespace("a".into()),
+            MetricsState::Ready,
+            sample::parse(answer, Kind::Pods).unwrap(),
+        );
+    });
+    assert!(!settled, "nothing had answered when it was checked");
+    let [reset] = &update.resets[..] else {
+        panic!("the answer is in the update: {update:?}");
+    };
+    assert_eq!(
+        reset.samples.get("a", "p1").map(|sample| sample.cpu),
+        Some(7_000_000)
+    );
+    assert!(reader.read().0, "and the next check counts it");
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_open_pod_beside_a_list_that_fell_back_to_its_namespaces_has_its_namespaces_state() {
     let rig = rig().await;
     rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());

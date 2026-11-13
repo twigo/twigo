@@ -105,11 +105,8 @@ struct FirstOrder {
 }
 
 impl FirstOrder {
-    fn holds(&mut self, view: &QueryView, metrics: Option<&Reader>) -> bool {
-        let Some(metrics) = metrics.filter(|_| !self.shown && view.sorts_by_metric()) else {
-            return false;
-        };
-        if metrics.settled() {
+    fn holds(&mut self, view: &QueryView, settled: bool) -> bool {
+        if self.shown || settled || !view.sorts_by_metric() {
             return false;
         }
         let since = *self.waiting_since.get_or_insert_with(Instant::now);
@@ -177,13 +174,16 @@ async fn run(
         // its rows on the next tick, rather than ready with some of them.
         let state = subscription.state();
         view.apply(subscription.drain());
+        let mut settled = true;
         if let Some(metrics) = &mut metrics {
             view.set_api(metrics.api());
             metrics.want(view.wants(reading));
-            view.samples(metrics.drain());
+            let (answered, update) = metrics.read();
+            settled = answered;
+            view.samples(update);
             view.sample_entered(|namespace, name| metrics.sample(namespace, name));
         }
-        if first_order.holds(&view, metrics.as_ref()) {
+        if first_order.holds(&view, settled) {
             continue;
         }
         if let Some(batch) = view.batch(state) {

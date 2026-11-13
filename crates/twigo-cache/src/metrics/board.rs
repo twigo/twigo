@@ -346,7 +346,7 @@ impl Board {
         }
     }
 
-    fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
+    pub(super) fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
         let mut guard = self.state();
         let state = &mut *guard;
         let Some(request) = state.requests.get_mut(scope) else {
@@ -535,9 +535,18 @@ impl Reader {
         &self.wants
     }
 
-    /// Every scope it wants has answered or failed once.
-    pub fn settled(&self) -> bool {
-        self.context.board(self.kind).settled(self.id)
+    /// Whether every scope it wants has answered or failed once, and what the poller holds for
+    /// it. The check comes first: an answer that lands between the two is in the update and
+    /// counted by the next check, where one counted after the update could be left out of it.
+    pub fn read(&self) -> (bool, Update) {
+        self.read_with(|| {})
+    }
+
+    /// `between` runs after the check and before the drain, where a test places an answer.
+    pub(super) fn read_with(&self, between: impl FnOnce()) -> (bool, Update) {
+        let settled = self.context.board(self.kind).settled(self.id);
+        between();
+        (settled, self.drain())
     }
 
     /// The sample the answers hold of a key this reader wants, and none of another's.
