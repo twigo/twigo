@@ -13,12 +13,15 @@ const FILL: Readonly<Record<Tone, string>> = {
  * `max` is the whole, and a value past it fills the bar; `mark` is a place
  * on it, such as what was requested. The words beside it say the figures,
  * and its tone is also said by them, so no state rests on hue alone.
+ * `valueText` is how a screen reader says the value, in the owner's units,
+ * where the numbers alone would be raw.
  */
 export function Meter({
   label,
   value,
   max,
   mark,
+  valueText,
   tone = "idle",
   className,
 }: {
@@ -26,6 +29,7 @@ export function Meter({
   value: number;
   max: number;
   mark?: number;
+  valueText?: string;
   tone?: Tone;
   className?: string;
 }) {
@@ -38,6 +42,7 @@ export function Meter({
       aria-valuemin={0}
       aria-valuemax={max}
       aria-valuenow={Math.min(value, max)}
+      aria-valuetext={valueText}
       className={cn("relative h-2 w-full min-w-12", className)}
     >
       <span className="absolute inset-0 overflow-hidden rounded-xs bg-foreground/12">

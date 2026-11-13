@@ -31,3 +31,14 @@ test("a mark stands at its place on the bar, and a warning has its own fill", ()
   ).toBe("25%");
   expect(fill()?.className).toContain("bg-warn");
 });
+
+test("a meter reads its value as the words it is given, else as its numbers", () => {
+  const { rerender } = render(
+    <Meter label="CPU" value={25} max={100} valueText="25m of 100m limit" />,
+  );
+  expect(screen.getByRole("meter").getAttribute("aria-valuetext")).toBe(
+    "25m of 100m limit",
+  );
+  rerender(<Meter label="CPU" value={25} max={100} />);
+  expect(screen.getByRole("meter").hasAttribute("aria-valuetext")).toBe(false);
+});

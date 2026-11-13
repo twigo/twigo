@@ -159,6 +159,46 @@ test("what nears its limit or passes it is a warning or an error in its meter an
   expect(usageSection().textContent).toContain("130%");
 });
 
+test("a meter says its figures in the printed units against what it is held to, and the tone in words", () => {
+  shown({
+    ...POD,
+    containers: [
+      {
+        name: "near",
+        cpu: measure({ used: 10_000_000, limit: 100_000_000 }),
+        memory: measure({ used: 92 * MI, limit: 100 * MI }),
+      },
+      {
+        name: "over",
+        cpu: measure({ used: 130_000_000, limit: 100_000_000 }),
+        memory: measure({ used: 10 * MI, request: 64 * MI }),
+      },
+    ],
+  });
+  const spoken = (name: string) =>
+    screen.getByRole("meter", { name }).getAttribute("aria-valuetext");
+  expect(spoken("CPU of near")).toBe("10m of 100m limit, 10%");
+  expect(spoken("Memory of near")).toBe("92Mi of 100Mi limit, 92%, warning");
+  expect(spoken("CPU of over")).toBe("130m of 100m limit, 130%, error");
+  expect(spoken("Memory of over")).toBe("10Mi of 64Mi request, 15%");
+  const section = usageSection();
+  expect(within(section).getAllByRole("img", { name: "Warning" })).toHaveLength(
+    1,
+  );
+  expect(within(section).getAllByRole("img", { name: "Error" })).toHaveLength(
+    1,
+  );
+});
+
+test("a node's meter says what it can allocate", () => {
+  shown(NODE, "/nodes", "core.node");
+  expect(
+    screen
+      .getByRole("meter", { name: "Memory" })
+      .getAttribute("aria-valuetext"),
+  ).toBe("15000Mi of 16000Mi allocatable, 93%, warning");
+});
+
 test("a pod without a sample says no data yet, never zero", () => {
   shown({
     ...POD,

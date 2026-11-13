@@ -84,6 +84,7 @@ function Row({
           {shown.bar ? (
             <Meter
               label={name === null ? label : `${label} of ${name}`}
+              valueText={spoken(shown)}
               {...shown.bar}
               {...(shown.tone && { tone: shown.tone })}
             />
@@ -111,6 +112,20 @@ function details({ base, limit, request, allocatable }: Figure): string {
 
 const OF = { limit: "limit", request: "request", allocatable: "allocatable" };
 
+const TONE_WORDS = { warn: "Warning", error: "Error" } as const;
+
+function spoken(shown: Figure): string {
+  const { used, base, percent, tone } = shown;
+  const against = base === null ? "" : ` of ${shown[base] ?? ""} ${OF[base]}`;
+  return [
+    `${used ?? ""}${against}`,
+    percent === null ? "" : `${String(percent)}%`,
+    tone === undefined ? "" : TONE_WORDS[tone].toLowerCase(),
+  ]
+    .filter((part) => part !== "")
+    .join(", ");
+}
+
 function Percent({ shown }: { shown: Figure }) {
   if (shown.percent === null || shown.base === null) return <span />;
   const { tone } = shown;
@@ -119,7 +134,7 @@ function Percent({ shown }: { shown: Figure }) {
       title={`of ${OF[shown.base]}`}
       className="inline-flex items-center justify-end gap-1 tabular-nums"
     >
-      {tone && <StatusDot tone={tone} />}
+      {tone && <StatusDot tone={tone} label={TONE_WORDS[tone]} />}
       <TonedText tone={tone ?? "idle"}>{shown.percent}%</TonedText>
     </span>
   );

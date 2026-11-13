@@ -1,5 +1,4 @@
 import type { Gvr, Measure } from "@twigo/protocol";
-import type { Tone } from "@twigo/ui";
 import { formatCpu, formatMemory } from "@twigo/utils";
 
 export type Resource = "cpu" | "memory";
@@ -26,7 +25,7 @@ export interface Figure {
   /** As kubectl computes it, truncated, and past 100 where a measure passes its base. */
   readonly percent: number | null;
   /** Taken from the printed percent, so the two agree; abnormal only against a limit or what a node can allocate, since a request may be passed. */
-  readonly tone: Tone | undefined;
+  readonly tone: "warn" | "error" | undefined;
   /** The bar: what it is the whole of, and where the request stands. */
   readonly bar: {
     readonly value: number;
