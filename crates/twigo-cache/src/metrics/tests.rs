@@ -525,6 +525,56 @@ async fn a_pod_alone_asks_for_itself_when_the_cluster_does_not_answer_for_it() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_open_pod_beside_a_list_that_fell_back_to_its_namespaces_has_its_namespaces_state() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([
+        Scope::Cluster,
+        Scope::Namespace("a".into()),
+    ]));
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(list.drain().state, Some(MetricsState::Ready));
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
+    assert_eq!(
+        alone.sample("a", "p1").map(|sample| sample.cpu),
+        Some(50_172_044)
+    );
+    assert_eq!(rig.fake.count("namespaces/a/pods"), 1);
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods?fieldSelector"),
+        0,
+        "no request of its own beside its namespace's"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_open_pod_restarts_the_namespace_request_a_401_stopped_when_the_cluster_does_not_answer()
+{
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    rig.fake.state().unauthorized.insert(PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([
+        Scope::Cluster,
+        Scope::Namespace("a".into()),
+    ]));
+    until(|| list.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = rig.fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(rig.fake.count("namespaces/a/pods"), stopped);
+
+    rig.fake.state().unauthorized.clear();
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(rig.fake.count("namespaces/a/pods"), stopped + 1);
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
 async fn what_a_context_serves_follows_the_cluster_and_a_stale_api_keeps_its_columns() {
     let fake = Fake::default();
     let apiservice = |name: &str| {

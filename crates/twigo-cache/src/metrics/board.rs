@@ -160,10 +160,13 @@ struct Request {
 }
 
 impl State {
+    /// The request that answers a want: the cluster's while it answers, else the want's own or,
+    /// for a pod, its namespace's.
     fn serving(&self, want: &Scope) -> Option<&Request> {
         self.requests
-            .get(want)
-            .or_else(|| self.requests.get(&Scope::Cluster))
+            .get(&Scope::Cluster)
+            .filter(|cluster| cluster.answers())
+            .or_else(|| self.requests.get(want))
             .or_else(|| match want {
                 Scope::Named { namespace, .. } => {
                     self.requests.get(&Scope::Namespace(namespace.clone()))
