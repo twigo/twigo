@@ -9,14 +9,17 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-test-util = []
+# The fake API server of the hub's tests, for the tests of the crates over it.
+test-util = ["dep:bytes", "dep:http-body", "dep:tower", "twigo-kube/test-util"]
 
 [dependencies]
 backon.workspace = true
+bytes = { workspace = true, optional = true }
 flate2.workspace = true
 form_urlencoded.workspace = true
 futures.workspace = true
 http.workspace = true
+http-body = { workspace = true, optional = true }
 http-body-util.workspace = true
 indexset.workspace = true
 jiff.workspace = true
@@ -28,6 +31,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
+tower = { workspace = true, optional = true }
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-quantity.workspace = true

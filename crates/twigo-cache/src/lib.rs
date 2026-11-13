@@ -5,8 +5,8 @@ pub mod batcher;
 mod cluster;
 pub mod decode;
 pub mod discovery;
-#[cfg(test)]
-mod fake;
+#[cfg(any(test, feature = "test-util"))]
+pub mod fake;
 pub mod hub;
 pub mod meta;
 pub mod metrics;

@@ -5953,6 +5953,7 @@ dependencies = [
  "twigo-kube",
  "twigo-netmon",
  "twigo-policy",
+ "twigo-quantity",
  "twigo-sessions",
 ]
 

@@ -7,20 +7,24 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use futures::FutureExt;
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
+use twigo_cache::metrics::{Kind, Opening, Reader, Sample, Scope};
 use twigo_cache::object::Object;
 use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
-    Block, ErrorKind, EventList, IpcError, ObjectBatch, ObjectEvent, ObjectParts, ObjectRef,
-    Overview, Related, RelatedObject, ViewState,
+    Block, ErrorKind, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
+    ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
+
+use crate::usage::usage;
 
 /// An open object: dropping it ends its task and its upstreams.
 pub struct Opened {
@@ -56,11 +60,20 @@ impl Opened {
         target: Target,
         object: Subscription<Object>,
         parts: ObjectParts,
+        metrics: Option<Opening>,
         send: impl FnMut(ObjectBatch) -> bool + Send + 'static,
     ) -> Self {
         let control = Arc::new(Control::default());
         let context = target.context.as_str().into();
-        let task = tokio::spawn(run(hub, target, object, parts, Arc::clone(&control), send));
+        let task = tokio::spawn(run(
+            hub,
+            target,
+            object,
+            parts,
+            metrics,
+            Arc::clone(&control),
+            send,
+        ));
         Self {
             context,
             control,
@@ -140,6 +153,7 @@ struct Dirty {
     manifest: bool,
     events: bool,
     related: bool,
+    usage: bool,
 }
 
 impl Dirty {
@@ -149,7 +163,64 @@ impl Dirty {
             manifest: true,
             events: true,
             related: true,
+            usage: true,
         }
+    }
+}
+
+struct Used {
+    sample: Option<Arc<Sample>>,
+    state: MetricsState,
+    served: bool,
+}
+
+impl Used {
+    /// Whether anything the batch carries changed.
+    fn read(&mut self, reader: &mut Reader, object: Option<&Object>, shown: bool) -> bool {
+        let kind = reader.kind();
+        let api = reader.api();
+        let served = api.columns(kind) && object.is_some();
+        let key = object.map(|object| {
+            (
+                object.meta.namespace.clone().unwrap_or_default(),
+                object.meta.name.clone(),
+            )
+        });
+        let wants = match (&key, shown && served, kind) {
+            (Some((namespace, name)), true, Kind::Pods) => HashSet::from([Scope::Named {
+                namespace: namespace.clone(),
+                name: name.clone(),
+            }]),
+            (Some(_), true, Kind::Nodes) => HashSet::from([Scope::Cluster]),
+            _ => HashSet::new(),
+        };
+        reader.want(wants);
+        let update = reader.drain();
+        let mut sample = self.sample.clone();
+        if let Some((namespace, name)) = &key {
+            for reset in &update.resets {
+                sample = reset.samples.get(namespace, name).cloned();
+            }
+            for change in &update.changes {
+                if change.namespace == *namespace && change.name == *name {
+                    sample = change.sample.clone();
+                }
+            }
+        } else {
+            sample = None;
+        }
+        let state = update.state.unwrap_or(if api.stale() {
+            MetricsState::Unavailable
+        } else {
+            MetricsState::Ready
+        });
+        let changed = sample != self.sample || state != self.state || served != self.served;
+        *self = Self {
+            sample,
+            state,
+            served,
+        };
+        changed
     }
 }
 
@@ -175,9 +246,11 @@ async fn run(
     target: Target,
     object: Subscription<Object>,
     mut parts: ObjectParts,
+    mut opening: Option<Opening>,
     control: Arc<Control>,
     mut send: impl FnMut(ObjectBatch) -> bool,
 ) {
+    let mut metrics: Option<Reader> = None;
     let mut interval = tokio::time::interval(FLUSH);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut seq = 0;
@@ -191,6 +264,11 @@ async fn run(
     let mut related = Related::default();
     let mut facts: Vec<Fact> = Vec::new();
     let mut last_lines = LastLines::new();
+    let mut used = Used {
+        sample: None,
+        state: MetricsState::Ready,
+        served: false,
+    };
     loop {
         let ticked = tokio::select! {
             _ = interval.tick() => true,
@@ -210,6 +288,7 @@ async fn run(
             dirty.manifest |= asked.manifest && !parts.manifest;
             dirty.events |= asked.events && !parts.events;
             dirty.related |= asked.related && !parts.related;
+            dirty.usage |= asked.usage && !parts.usage;
             parts = asked;
         }
         if acked.is_some() && acked == unacked {
@@ -323,12 +402,23 @@ async fn run(
             }
         }
 
+        if let Some(pending) = &mut opening
+            && let Some(reader) = pending.now_or_never()
+        {
+            metrics = Some(reader);
+            opening = None;
+        }
+        if let Some(reader) = &mut metrics {
+            dirty.usage |= used.read(reader, current.as_deref(), parts.usage);
+        }
+        let usage_shown = parts.usage && used.served;
         let status_changed = status.as_ref() != Some(&state);
         let due = status_changed
             || (parts.overview && dirty.overview)
             || (parts.manifest && dirty.manifest)
             || (parts.events && dirty.events)
-            || (parts.related && dirty.related);
+            || (parts.related && dirty.related)
+            || (usage_shown && dirty.usage);
         if !due {
             continue;
         }
@@ -337,6 +427,7 @@ async fn run(
             (Some(object), Some(columns)) => printed(columns, &object.cells),
             _ => Vec::new(),
         };
+        let used_by = metrics.as_ref().map(Reader::kind);
         let shown = Shown {
             parts,
             dirty: &dirty,
@@ -345,6 +436,10 @@ async fn run(
             events: &events,
             related: &related,
             facts: &facts,
+            usage: used_by
+                .zip(parsed.as_ref())
+                .filter(|_| usage_shown && dirty.usage)
+                .map(|(kind, object)| usage(kind, object, used.sample.as_deref(), used.state)),
         };
         let mut batch = shown.batch(seq, state.clone());
         if let (Some(overview), Some(json), Some(uid)) = (&mut batch.overview, &parsed, &uid) {
@@ -354,6 +449,7 @@ async fn run(
         dirty.manifest &= !parts.manifest;
         dirty.events &= !parts.events;
         dirty.related &= !parts.related;
+        dirty.usage &= !usage_shown;
         status = Some(state);
         unacked = Some(seq);
         if !send(batch) {
@@ -500,6 +596,7 @@ struct Shown<'a> {
     events: &'a EventList,
     related: &'a Related,
     facts: &'a [Fact],
+    usage: Option<Usage>,
 }
 
 impl Shown<'_> {
@@ -513,6 +610,7 @@ impl Shown<'_> {
             events,
             related,
             facts,
+            usage,
         } = self;
         ObjectBatch {
             seq,
@@ -533,7 +631,7 @@ impl Shown<'_> {
                 .map(|object| twigo_policy::redact::for_view(object.clone()).to_string()),
             events: (parts.events && dirty.events).then(|| (*events).clone()),
             related: (parts.related && dirty.related).then(|| (*related).clone()),
-            usage: None,
+            usage: usage.clone(),
         }
     }
 }
@@ -822,6 +920,9 @@ fn owned_by(
 }
 
 #[cfg(test)]
+mod metered;
+
+#[cfg(test)]
 mod tests {
     use serde_json::json;
 
@@ -863,6 +964,7 @@ mod tests {
             events: &EventList::default(),
             related: &related,
             facts: &[],
+            usage: None,
         };
         let batch = shown.batch(1, ViewState::Ready);
         assert!(batch.overview.is_some() && batch.manifest.is_some());

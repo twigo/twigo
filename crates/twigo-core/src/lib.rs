@@ -16,6 +16,7 @@ pub mod state;
 pub mod subscriptions;
 mod terminal;
 pub mod trust;
+mod usage;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -736,6 +737,7 @@ impl Core {
         let ticket = self.objects.ticket(window);
         let query = request.object;
         let context = self.context(&query.space)?;
+        let kind = Kind::of(&query.gvr.group, &query.gvr.version, &query.gvr.resource);
         let resource = Resource {
             group: query.gvr.group,
             version: query.gvr.version,
@@ -752,10 +754,18 @@ impl Core {
         let object = self
             .hub
             .object(&context, resource, namespace.clone(), &query.name)?;
+        let metrics = kind.map(|kind| self.metrics_opening(&context, kind));
         let target = Target { context, namespace };
         self.objects.keep(
             ticket,
-            Opened::spawn(self.hub.clone(), target, object, request.parts, send),
+            Opened::spawn(
+                self.hub.clone(),
+                target,
+                object,
+                request.parts,
+                metrics,
+                send,
+            ),
         )
     }
 
