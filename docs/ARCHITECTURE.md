@@ -522,7 +522,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   - A scope, a namespace or the cluster, is listed every 15 s, the metrics-server manifest's and the chart's resolution, while a reader wants it, the first time at once; with the last reader gone it is not listed again, with no linger.
     Two readers of a scope share one request.
     A pod open alone asks for its namespace with a field selector on its name, and asks nothing when a list reads its namespace.
-  - A list reads metrics only while its webview says a CPU or Memory column is drawn or sorted by and the document is visible, and it wants nothing once a batch has gone unacknowledged for 15 s, as a hidden window leaves it.
+  - A list reads metrics only while its webview says so with its window (4.4), and it wants nothing once a batch has gone unacknowledged for 15 s, as a hidden window leaves it.
     It wants the namespaces of the rows in its window, one request each while they are few.
     A list of all namespaces that reads more than 10 asks for the cluster instead, since a list under 128 KB is never compressed: on kind 1.37 with 5,095 pods in 13 namespaces, the lists of the 10 largest took 73,314 gzipped bytes and the 11 largest 83,975, against the cluster's 75,103 (`cargo run --release -p twigo-cache --example metrics_cost 41`, 2026-11-13), and the UI's request budget is 28 streams (3.2).
     A list of chosen namespaces never asks for the cluster.
@@ -532,7 +532,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).
   - Absence is no data and never zero: pending and finished pods, pods too young for two scrapes and unscraped nodes are missing from the answer, a missing key has no sample, and a real zero is `0`.
   - A scope that fails is a state of its readers, `unavailable` for a 503 whose body is plain text and no Status, a 404 or a failed connection, and `forbidden` for a 403, never an error on screen; it holds no value until it answers again, and retries on the backoff of 3.2.
-  - An open pod or node reads the same sample: its usage is a part of its batch with its own dirty flag, so a changed sample does not describe the Overview again (4.3).
+  - An open pod or node reads the same sample for its usage (4.3).
 - **Discovery and OpenAPI.**
   - Aggregated discovery, GA since 1.30: one request each to `/api` and `/apis`, with client-go's `Accept`, the aggregated form first and plain JSON after it ([`acceptDiscoveryFormats`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L68)).
     kube's `run_aggregated()` is not used: it sends no `If-None-Match`, and it reads a legacy `APIGroupList` as an empty list, since its `items` default ([`v2.rs`](https://github.com/kube-rs/kube/blob/5.0.0/kube-core/src/discovery/v2.rs#L20-L28)).
@@ -806,13 +806,14 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
-  - A pod's and a node's usage is not part of the document: it is a part of the object's batch beside it, from the poller's sample (3.6), each container that has one against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
     Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
     A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
   - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
-  - A pod's and a node's Overview also show what the object uses (3.6), as a part of the batch of its own that the webview asks for while the Overview is shown and the document visible, so a new sample describes nothing again.
+  - A pod's and a node's Overview also show what the object uses, from the poller's sample (3.6).
+    Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown and the document visible.
+    Each container that has a sample comes against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
     A Usage section follows the Diagnostics with the pod's total and each of its containers, or the node, as meters against the limit with the request marked, else against the request, and a node's against what it can allocate; the percent is kubectl's, truncated and past 100 where it passes.
     Against a limit or what a node allocates, 90 % is a warning and the limit an error, in the meter and in words.
     A row without a sample says no data yet, never zero, and a Metrics API that does not answer or may not be read says so in place.
@@ -825,8 +826,9 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, and Namespace unless the query names one namespace.
   Pod and node lists of a context that serves the Metrics API (3.6) also get CPU and Memory, of priority 0, just before the Age column, whose cells are numbers the webview prints as kubectl does.
   Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
-- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, and the tone of its abnormal values.
+- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, which way its first click sorts, and the tone of its abnormal values.
   Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
+  The name column also gives way to the others, down to its starting width of 160 px, and no other column does: the pods of every namespace need 904 px at the least and keep CPU, Memory and Age in view at 1280 px with the explorer open, where the grid has 972 (Chrome on the mock, 2026-11-13).
 - Cells read by what matters, data near-monochrome:
   - a name's generated part is quieter, and stays whole when the name is cut, since it tells siblings apart (3.4);
   - a status shows a tone dot, its text coloured when abnormal, the dot pulsing while the state is in flight (ContainerCreating, Terminating);
@@ -854,10 +856,11 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
   The flash is a setting, on by default.
-- CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and empty for a row without a sample, never zero.
+- CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and a quiet dash for a row without a sample, never zero.
   They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
   The list says with its window that it reads them while it draws one or is sorted by one and the document is visible; beside the details it draws and reads none.
-  A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay empty.
+  A first click on their header sorts the largest first, as [`kubectl top --sort-by`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_sorter.go#L71-L83) orders, and the second ascends.
+  A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay dashes.
 
 ### 4.5 Quick access (the command palette)
 

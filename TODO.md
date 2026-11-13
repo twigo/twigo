@@ -70,6 +70,8 @@ Findings that belong to no step yet.
   - The menu key and Shift+F10 on the focused grid open no row menu: the context-menu trigger wraps only the rows' container inside the grid (`ActionContextMenu` in `DataGrid.tsx`), and the key's `contextmenu` event is aimed at the focused element, the grid.
     Tab to the cursor row's ⋯ and Enter open it.
     A `contextmenu` event dispatched at the grid opened no menu and one dispatched at a row did, in headless Chrome on the mock (2026-11-12); the key itself was not pressed in any browser.
+- The lists' columns (`packages/kube/src/columns.ts`, ARCHITECTURE 4.4):
+  - Only the name column gives way, so the pods of every namespace scroll sideways again in a window narrower than 1212 px with the explorer open: none at 1212 px, 1 px of it at 1211 (Chrome on the mock, 2026-11-13).
 - The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
   - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
   - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).
