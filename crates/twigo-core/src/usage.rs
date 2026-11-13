@@ -26,6 +26,17 @@ pub fn usage(kind: Kind, object: &Value, sample: Option<&Sample>, state: Metrics
     }
 }
 
+/// What an open object is told once its context stops serving its resource: no figures.
+pub fn absent() -> Usage {
+    Usage {
+        state: MetricsState::Absent,
+        sampled: None,
+        cpu: Measure::default(),
+        memory: Measure::default(),
+        containers: Vec::new(),
+    }
+}
+
 fn nanocores(quantity: Quantity) -> Option<i64> {
     i64::try_from(quantity.nano()).ok()
 }

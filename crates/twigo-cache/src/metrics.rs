@@ -16,13 +16,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use twigo_ipc::{Discovered, MetricsState};
-use twigo_kube::discovery::Cache;
-use twigo_kube::kubeconfig::Fingerprint;
+use tokio::sync::{Semaphore, watch};
+use twigo_ipc::MetricsState;
 
-use crate::discovery::Follower;
 use crate::hub::Hub;
 use board::Board;
 
@@ -33,8 +29,9 @@ pub use sample::{Container, Sample, Samples};
 /// What metrics-server's manifest and chart scrape at; its answers change once per scrape.
 pub const INTERVAL: Duration = Duration::from_secs(15);
 
-/// More namespaces than this, read by a list of all of them, are asked for as the cluster.
-pub const CLUSTER_WIDE_ABOVE: usize = 10;
+/// The requests of a context under way at once, of the UI's 28 (ARCHITECTURE 3.2), so a list
+/// over many namespaces leaves the rest of them to the views and editors that wait on them.
+pub const IN_FLIGHT: usize = 4;
 
 /// A reader that opens once its context is known.
 pub type Opening = futures::future::BoxFuture<'static, Reader>;
@@ -44,82 +41,51 @@ pub struct Poller(Arc<Inner>);
 
 struct Inner {
     hub: Hub,
-    cache: Arc<Cache>,
     contexts: Mutex<HashMap<String, Weak<Context>>>,
 }
 
-/// One context's Metrics API and the scopes polled for it, alive while a reader holds it.
+/// The scopes polled for one context, alive while a reader holds it. What the context serves
+/// comes from its follower, which outlives every reader ([`crate::discovery::Followers`]).
 pub struct Context {
     api: watch::Receiver<Api>,
     pods: Arc<Board>,
     nodes: Arc<Board>,
-    follower: JoinHandle<()>,
 }
 
 impl Poller {
-    pub fn new(hub: Hub, cache: Arc<Cache>) -> Self {
+    pub fn new(hub: Hub) -> Self {
         Self(Arc::new(Inner {
             hub,
-            cache,
             contexts: Mutex::default(),
         }))
     }
 
-    /// The context's Metrics API, followed as long as a handle lives and shared by every list
-    /// and object of the context, since the webview's own follower may not have run yet.
-    pub async fn context(
-        &self,
-        name: &str,
-        entry: watch::Receiver<Option<Fingerprint>>,
-    ) -> Arc<Context> {
-        if let Some(held) = self.held(name) {
-            return held;
-        }
-        let built = Arc::new(self.build(name, entry).await);
+    pub fn context(&self, name: &str, api: watch::Receiver<Api>) -> Arc<Context> {
         let mut contexts = self.0.contexts.lock().expect("poller lock");
-        match contexts.get(name).and_then(Weak::upgrade) {
-            Some(held) => held,
-            None => {
-                contexts.insert(name.to_owned(), Arc::downgrade(&built));
-                built
-            }
-        }
-    }
-
-    fn held(&self, name: &str) -> Option<Arc<Context>> {
-        self.0
-            .contexts
-            .lock()
-            .expect("poller lock")
+        if let Some(held) = contexts
             .get(name)
             .and_then(Weak::upgrade)
-    }
-
-    async fn build(&self, name: &str, entry: watch::Receiver<Option<Fingerprint>>) -> Context {
-        let mut follower = Follower::new(
-            self.0.hub.clone(),
-            Arc::clone(&self.0.cache),
-            name.to_owned(),
-            entry,
-        )
-        .await;
-        let (sender, api) = watch::channel(Api::Absent);
-        let follower = tokio::spawn(async move {
-            loop {
-                let found = match follower.next().await {
-                    Discovered::Ready { .. } => follower.confirmed().map_or(Api::Absent, Api::of),
-                    Discovered::Pending { .. } | Discovered::Failed { .. } => Api::Absent,
-                };
-                sender.send_if_modified(|api| std::mem::replace(api, found) != found);
-            }
-        });
-        let board = |kind| Arc::new(Board::new(name, kind, self.0.hub.clone(), api.clone()));
-        Context {
+            .filter(|held| held.api.same_channel(&api))
+        {
+            return held;
+        }
+        let turns = Arc::new(Semaphore::new(IN_FLIGHT));
+        let board = |kind| {
+            Arc::new(Board::new(
+                name,
+                kind,
+                self.0.hub.clone(),
+                api.clone(),
+                Arc::clone(&turns),
+            ))
+        };
+        let built = Arc::new(Context {
             pods: board(Kind::Pods),
             nodes: board(Kind::Nodes),
             api,
-            follower,
-        }
+        });
+        contexts.insert(name.to_owned(), Arc::downgrade(&built));
+        built
     }
 }
 
@@ -140,18 +106,13 @@ impl Context {
     }
 }
 
-impl Drop for Context {
-    fn drop(&mut self) {
-        self.follower.abort();
-    }
-}
-
 /// Forbidden outranks unavailable, which outranks ready.
 pub(crate) fn worse(a: MetricsState, b: MetricsState) -> MetricsState {
-    use MetricsState::{Forbidden, Ready, Unavailable};
+    use MetricsState::{Absent, Forbidden, Ready, Unavailable};
     match (a, b) {
         (Forbidden, _) | (_, Forbidden) => Forbidden,
         (Unavailable, _) | (_, Unavailable) => Unavailable,
-        (Ready, Ready) => Ready,
+        (Ready, _) | (_, Ready) => Ready,
+        (Absent, Absent) => Absent,
     }
 }

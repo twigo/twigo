@@ -4,15 +4,14 @@
 # A kind cluster with kwok and its fake nodes, $TWIGO_BENCH_NODES of them
 # (default 10), and metrics-server, which reads the nodes' simulated usage
 # from kwok: a pod's own comes from its annotations kwok.x-k8s.io/usage-cpu
-# and usage-memory (bench/pods.sh sets them). The kubeconfig lives in
+# and usage-memory (bench/pods.sh sets them). The metrics-server release is
+# the one whose README lists the cluster's Kubernetes minor. The kubeconfig lives in
 # $TWIGO_BENCH_DIR/<name>/kubeconfig, never in ~/.kube/config, and every
 # kubectl call passes it explicitly.
 set -euo pipefail
 
 KWOK_VERSION=v0.8.0
 KWOK_USAGE_SHA256=880e46f117cc83587a210aaacc9c6b49ff55aaf455648f497281634377d09437
-METRICS_SERVER_VERSION=v0.9.1
-METRICS_SERVER_SHA256=3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1
 NODES=${TWIGO_BENCH_NODES:-10}
 
 usage() {
@@ -28,6 +27,17 @@ node_image() {
     1.36) echo "kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed" ;;
     1.37) echo "kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5" ;;
     *) echo "no kind node image for Kubernetes $1" >&2; exit 2 ;;
+  esac
+}
+
+# The release of metrics-server that supports a Kubernetes minor, with the checksum of its
+# components.yaml, from the compatibility matrix of its README at each tag: 0.8 serves 1.31 and
+# later and 0.9 serves 1.34 and later, so 1.33 takes the latest 0.8.
+metrics_server() {
+  case "$1" in
+    1.33) echo "v0.8.1 4a672c4891902573a3ff753cece5de1bf1f55dd053403dfec39df9d1636b7ff1" ;;
+    1.34|1.35|1.36|1.37) echo "v0.9.1 3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1" ;;
+    *) echo "no metrics-server release for Kubernetes $1" >&2; exit 2 ;;
   esac
 }
 
@@ -54,6 +64,7 @@ k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 case "$action" in
   up)
     image=$(node_image "$version")
+    metrics_server=$(metrics_server "$version")
     mkdir -p "$dir"
     cat > "$dir/kind.yaml" <<YAML
 kind: Cluster
@@ -114,8 +125,8 @@ YAML
     fetch "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK_VERSION/metrics-usage.yaml" \
       "$KWOK_USAGE_SHA256" "$dir/metrics-usage.yaml"
     k apply -f "$dir/metrics-usage.yaml" >/dev/null
-    fetch "https://github.com/kubernetes-sigs/metrics-server/releases/download/$METRICS_SERVER_VERSION/components.yaml" \
-      "$METRICS_SERVER_SHA256" "$dir/metrics-server.yaml"
+    fetch "https://github.com/kubernetes-sigs/metrics-server/releases/download/${metrics_server% *}/components.yaml" \
+      "${metrics_server#* }" "$dir/metrics-server.yaml"
     k apply -f "$dir/metrics-server.yaml" >/dev/null
     k -n kube-system patch deployment metrics-server --type=json >/dev/null \
       -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'

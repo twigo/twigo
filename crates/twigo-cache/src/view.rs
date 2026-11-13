@@ -24,7 +24,7 @@ use twigo_ipc::{
 };
 
 use crate::hub::Delta;
-use crate::metrics::{self, Api, CLUSTER_WIDE_ABOVE, Kind, Sample, Scope};
+use crate::metrics::{self, Api, Kind, Sample, Scope};
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 
@@ -409,6 +409,8 @@ pub struct QueryView {
     seq: u32,
     /// None while the context serves no metrics for the list's resource.
     metrics: Option<Metrics>,
+    /// Rows that entered the index without a sample since `sample_entered` last ran.
+    entered: Vec<RowKey>,
 }
 
 impl QueryView {
@@ -425,6 +427,7 @@ impl QueryView {
             sent: Sent::default(),
             seq: 0,
             metrics: None,
+            entered: Vec::new(),
         }
     }
 
@@ -505,7 +508,8 @@ impl QueryView {
     }
 
     /// The namespaces of the window's rows, or every one of the list when it is sorted by a
-    /// metric, and the cluster when the list reads all namespaces and they are many.
+    /// metric, which for a list of all namespaces adds the cluster: one request, with the
+    /// namespaces to fall back on when it is refused (decision 69).
     pub fn wants(&self, reading: bool) -> HashSet<Scope> {
         let Some(metrics) = self.metrics.as_ref().filter(|_| reading) else {
             return HashSet::new();
@@ -524,12 +528,11 @@ impl QueryView {
                 .filter_map(|entry| self.rows[&entry.row].row.meta.namespace.as_deref())
                 .collect()
         };
-        if self.spec.all_namespaces && namespaces.len() > CLUSTER_WIDE_ABOVE {
-            return HashSet::from([Scope::Cluster]);
-        }
+        let cluster = self.layout.sort_metric && self.spec.all_namespaces;
         namespaces
             .into_iter()
             .map(|namespace| Scope::Namespace(namespace.into()))
+            .chain(cluster.then_some(Scope::Cluster))
             .collect()
     }
 
@@ -551,6 +554,28 @@ impl QueryView {
                 .cloned();
             if let Some(key) = key {
                 self.set_sample(&key, change.sample);
+            }
+        }
+    }
+
+    /// Gives the rows that entered the index since the last call the sample the poller already
+    /// holds, which it tells no more of until it changes.
+    pub fn sample_entered(&mut self, held: impl Fn(&str, &str) -> Option<Arc<Sample>>) {
+        for key in std::mem::take(&mut self.entered) {
+            let Some(tracked) = self
+                .rows
+                .get(&key)
+                .filter(|tracked| tracked.sample.is_none())
+            else {
+                continue;
+            };
+            let found = held(
+                tracked.row.meta.namespace.as_deref().unwrap_or_default(),
+                &tracked.row.meta.name,
+            )
+            .filter(|found| found.taken_since(tracked.row.meta.created));
+            if found.is_some() {
+                self.set_sample(&key, found);
             }
         }
     }
@@ -692,6 +717,9 @@ impl QueryView {
                 .entry(row.meta.namespace.clone().unwrap_or_default())
                 .or_default()
                 .insert(row.meta.name.clone(), key.clone());
+            if sample.is_none() {
+                self.entered.push(key.clone());
+            }
         }
         self.rows.insert(
             key,

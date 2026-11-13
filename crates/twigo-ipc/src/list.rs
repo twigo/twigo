@@ -140,7 +140,8 @@ pub struct ListBatch {
 }
 
 /// What the Metrics API of a context answers. A context that does not
-/// serve it has no metric columns and no usage, and so no state.
+/// serve it has no metric columns and no usage, and so no state, but for
+/// the one `Absent` says to an open object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum MetricsState {
@@ -150,6 +151,10 @@ pub enum MetricsState {
     Unavailable,
     /// The person may not list these metrics.
     Forbidden,
+    /// Said only in a `Usage`, once, when the context stops serving the
+    /// resource while the usage part is shown: the usage holds no figures
+    /// and the webview draws none.
+    Absent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -11,16 +11,30 @@ use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 
 use super::*;
+use crate::discovery::Followers;
 use crate::fake::Fake;
 use crate::hub::Connect;
 
 const PODS: &str = "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods";
+const CLUSTER_PODS: &str = "/apis/metrics.k8s.io/v1beta1/pods";
 const APISERVICES: &str = "apiservices";
 
 struct Rig {
     fake: Fake,
     context: Arc<Context>,
-    _hub: (Hub, Arc<Clients>, TempDir),
+    _hub: (Hub, Arc<Clients>, TempDir, Followers),
+}
+
+async fn context_of(hub: &Hub, directory: &TempDir) -> (Followers, Arc<Context>) {
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+    let api = followers
+        .get("kind-test", async { watch::channel(None).1 })
+        .await
+        .api();
+    (
+        followers,
+        Poller::new(hub.clone()).context("kind-test", api),
+    )
 }
 
 async fn rig() -> Rig {
@@ -34,12 +48,11 @@ async fn rig() -> Rig {
 async fn followed(fake: Fake) -> Rig {
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let (followers, context) = context_of(&hub, &directory).await;
     let rig = Rig {
         fake,
         context,
-        _hub: (hub, clients, directory),
+        _hub: (hub, clients, directory, followers),
     };
     until(|| rig.context.api().columns(Kind::Pods)).await;
     rig
@@ -224,11 +237,11 @@ async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and
         "nothing on screen as a value"
     );
     let failed = polls(&rig.fake);
-    sleep(Duration::from_secs(14)).await;
-    assert!(
-        polls(&rig.fake) >= failed + 3,
-        "a failure retries on the backoff, not in 15 s: {} polls",
-        polls(&rig.fake) - failed
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        polls(&rig.fake),
+        failed + 3,
+        "a failure is asked again one interval later, not sooner"
     );
 
     rig.fake.state().no_endpoints.clear();
@@ -249,7 +262,11 @@ async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and
     );
     let polled = polls(&rig.fake);
     sleep(INTERVAL * 2 + Duration::from_secs(1)).await;
-    assert_eq!(polls(&rig.fake), polled + 2, "an answer resets the backoff");
+    assert_eq!(
+        polls(&rig.fake),
+        polled + 2,
+        "and an answer keeps the interval"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -348,6 +365,24 @@ async fn a_pod_alone_asks_for_itself_and_none_when_a_list_reads_its_namespace() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_reader_can_ask_for_the_sample_of_a_key_it_wants_and_of_no_other() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    assert!(reader.sample("a", "p1").is_none(), "it wants nothing yet");
+    reader.want(namespace("a"));
+    let mut other = rig.context.reader(Kind::Pods);
+    other.want(namespace("b"));
+    rig.fake.pod_usage("b", "q1", &[("main", "3m", "1Mi")]);
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(reader.sample("a", "p1").map(|s| s.cpu), Some(50_172_044));
+    assert!(reader.sample("a", "gone").is_none());
+    assert!(
+        reader.sample("b", "q1").is_none(),
+        "another reader's namespace is no concern of this one, which would hear no change of it"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn nodes_have_one_scope_and_the_cluster_one_covers_the_namespaces() {
     let rig = rig().await;
     rig.fake.node_usage("n1", "277147502n", "2509700Ki");
@@ -376,6 +411,118 @@ async fn nodes_have_one_scope_and_the_cluster_one_covers_the_namespaces() {
         2 + 2,
         "the cluster's and the nodes', every interval, none per namespace"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_context_has_at_most_its_limit_of_requests_in_flight_whatever_its_readers_want() {
+    let rig = rig().await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let namespaces: Vec<String> = (0..12).map(|n| format!("ns-{n:02}")).collect();
+    for namespace in &namespaces {
+        rig.fake.pod_usage(namespace, "p", &[("main", "1m", "1Mi")]);
+    }
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(
+        namespaces
+            .iter()
+            .map(|namespace| Scope::Namespace(namespace.as_str().into()))
+            .collect(),
+    );
+    let mut nodes = rig.context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    sleep(INTERVAL * 2).await;
+    assert_eq!(
+        rig.fake.state().metrics_overlap,
+        IN_FLIGHT,
+        "the pods' and the nodes' requests take turns together"
+    );
+    assert!(
+        polls(&rig.fake) >= 2 * (namespaces.len() + 1),
+        "every scope is still polled each interval: {} polls",
+        polls(&rig.fake)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cluster_covers_a_namespace_only_while_it_answers_and_the_namespace_then_speaks_for_itself()
+ {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut heard = Update::default();
+    until(|| {
+        let update = list.drain();
+        heard.state = update.state.or(heard.state);
+        heard.resets.extend(update.resets);
+        !heard.resets.is_empty()
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "its own namespace answers"
+    );
+    assert_eq!(heard.resets[0].scope, Scope::Namespace("a".into()));
+    assert_eq!(heard.resets[0].samples.len(), 2);
+    until(|| cluster.drain().state == Some(MetricsState::Forbidden)).await;
+    let before = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 2).await;
+    assert!(
+        rig.fake.count("namespaces/a/pods") >= before + 2,
+        "the namespace is polled for itself every interval"
+    );
+
+    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
+    rig.fake.state().forbidden.clear();
+    let mut back = Update::default();
+    until(|| {
+        let update = list.drain();
+        back.resets.extend(update.resets);
+        back.changes.extend(update.changes);
+        back.resets
+            .iter()
+            .any(|reset| reset.scope == Scope::Cluster)
+    })
+    .await;
+    let reset = back
+        .resets
+        .iter()
+        .find(|reset| reset.scope == Scope::Cluster)
+        .unwrap();
+    assert!(
+        reset.samples.get("a", "p2").is_none(),
+        "the cluster's answer is the whole one, a pod it lacks has no sample"
+    );
+    sleep(Duration::from_secs(1)).await;
+    let covered = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        covered,
+        "the cluster covers it again"
+    );
+    assert_eq!(list.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_alone_asks_for_itself_when_the_cluster_does_not_answer_for_it() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(INTERVAL).await;
+    assert!(
+        rig.fake
+            .count("namespaces/a/pods?fieldSelector=metadata.name%3Dp1")
+            >= 1,
+        "the pod's own request"
+    );
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
 }
 
 #[tokio::test(start_paused = true)]
@@ -445,13 +592,12 @@ async fn what_a_context_serves_follows_the_cluster_and_a_stale_api_keeps_its_col
 async fn followed_without_metrics(fake: Fake) -> Rig {
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let (followers, context) = context_of(&hub, &directory).await;
     sleep(Duration::from_secs(1)).await;
     Rig {
         fake,
         context,
-        _hub: (hub, clients, directory),
+        _hub: (hub, clients, directory, followers),
     }
 }
 
@@ -498,8 +644,8 @@ async fn a_poll_follows_clients_abandoned_meanwhile() {
         })
     };
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(Hub::new(connect), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
     until(|| context.api().columns(Kind::Pods)).await;
     let mut reader = context.reader(Kind::Pods);
     reader.want(namespace("a"));
@@ -513,4 +659,150 @@ async fn a_poll_follows_clients_abandoned_meanwhile() {
         polled + 1,
         "it listed over the new clients without waiting out its 15 s"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_failed_credential_stopped_starts_again_when_a_reader_asks_for_it_anew() {
+    let rig = rig().await;
+    rig.fake.state().unauthorized.insert(PODS.to_owned());
+    let mut first = rig.context.reader(Kind::Pods);
+    first.want(namespace("a"));
+    until(|| first.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = rig.fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "nothing asks again by itself, which would run the credential plugin again"
+    );
+
+    rig.fake.state().unauthorized.clear();
+    let mut elsewhere = rig.context.reader(Kind::Pods);
+    elsewhere.want(namespace("b"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "a reader of another scope does not"
+    );
+
+    let mut second = rig.context.reader(Kind::Pods);
+    second.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "a reader that comes later does, at once"
+    );
+    assert_eq!(second.drain().state, Some(MetricsState::Ready));
+    let mut heard = Update::default();
+    until(|| {
+        let update = first.drain();
+        heard.state = update.state;
+        heard.changes.extend(update.changes);
+        heard.changes.len() >= 2
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "and so does the first"
+    );
+    assert_eq!(
+        keys(&heard),
+        [
+            ("a/p1".to_owned(), Some(50_172_044)),
+            ("a/p2".to_owned(), Some(1_000_000_000))
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_401_stopped_starts_again_once_the_clients_are_rebuilt() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    fake.state().unauthorized.insert(PODS.to_owned());
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), stopped);
+
+    fake.state().unauthorized.clear();
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "it asked over the rebuilt clients, with no reader asking again"
+    );
+    assert_eq!(reader.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_a_failed_credential_could_not_build_come_with_the_next_reader() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    let clients = fake.clients(Budgets::default());
+    let refusing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let refusing = Arc::clone(&refusing);
+        Arc::new(move |_context| {
+            let clients = Arc::clone(&clients);
+            let refused = refusing.load(std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if refused {
+                    return Err(twigo_ipc::IpcError::new(
+                        twigo_ipc::ErrorKind::Unauthorized,
+                        "Twigo runs aws only once you trust it".to_owned(),
+                    ));
+                }
+                Ok(clients)
+            })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    refusing.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+
+    refusing.store(false, std::sync::atomic::Ordering::Relaxed);
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        0,
+        "it does not try again by itself"
+    );
+    let mut next = context.reader(Kind::Pods);
+    next.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), 1);
+    assert_eq!(next.drain().state, Some(MetricsState::Ready));
 }

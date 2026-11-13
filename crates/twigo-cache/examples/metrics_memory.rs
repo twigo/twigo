@@ -11,6 +11,7 @@ use std::time::Duration;
 use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use tokio::sync::watch;
+use twigo_cache::discovery::Followers;
 use twigo_cache::hub::{Connect, Hub};
 use twigo_cache::metrics::{Kind, Poller, Scope};
 use twigo_kube::client::{Clients, Gate, Options};
@@ -49,8 +50,13 @@ async fn main() {
     };
     let directory =
         std::env::temp_dir().join(format!("twigo-metrics-memory-{}", std::process::id()));
-    let poller = Poller::new(Hub::new(connect), Arc::new(Cache::new(&directory)));
-    let served = poller.context(&context, watch::channel(None).1).await;
+    let hub = Hub::new(connect);
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(&directory)));
+    let api = followers
+        .get(&context, async { watch::channel(None).1 })
+        .await
+        .api();
+    let served = Poller::new(hub).context(&context, api);
     while !served.api().columns(Kind::Pods) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

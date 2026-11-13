@@ -27,7 +27,7 @@ use jiff::Timestamp;
 use kube::core::GroupVersionKind;
 use tokio::sync::watch;
 use twigo_cache::batcher::Batcher;
-use twigo_cache::discovery::Follower;
+use twigo_cache::discovery::{Followed, Followers, Resources};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::metrics::{Kind, Opening, Poller};
 use twigo_cache::view::Spec;
@@ -74,6 +74,7 @@ pub struct Core {
     pub connections: Connections,
     pub trust: Trust,
     pub hub: Hub,
+    followers: Followers,
     metrics: Poller,
     pub policy: Arc<Policy>,
     proxy: Arc<Proxy>,
@@ -89,7 +90,6 @@ pub struct Core {
     terminals: terminal::Terminals,
     bus: Arc<Bus>,
     undos: Arc<Undos>,
-    discovery: Arc<Cache>,
     openapi: openapi::Cache,
     credentials: Registry,
     /// Whether a Twigo window has the focus, which a plugin that may ask
@@ -139,7 +139,8 @@ impl Core {
             Self {
                 this: core.clone(),
                 forwards: Forwards::new(Arc::clone(&policy), catalog.subscribe(), hub.clone()),
-                metrics: Poller::new(hub.clone(), Arc::clone(&discovery)),
+                followers: Followers::new(hub.clone(), Arc::clone(&discovery)),
+                metrics: Poller::new(hub.clone()),
                 hub,
                 policy,
                 proxy: Arc::new(Proxy::new(data.join("proxy"))),
@@ -152,7 +153,6 @@ impl Core {
                 terminals: terminal::Terminals::new(data.join("terminals")),
                 bus: Arc::default(),
                 undos: Arc::default(),
-                discovery,
                 openapi: openapi::Cache::new(cache.join("openapi")),
                 state,
                 catalog,
@@ -610,16 +610,17 @@ impl Core {
     }
 
     /// The resources a space's context serves, followed as they change.
-    pub async fn follow_resources(&self, space: &str) -> Result<Follower, IpcError> {
+    pub async fn follow_resources(&self, space: &str) -> Result<Resources, IpcError> {
         let context = self.context(space)?;
-        let entry = self.catalog.fingerprint(&context).await;
-        Ok(Follower::new(
-            self.hub.clone(),
-            Arc::clone(&self.discovery),
-            context,
-            entry,
-        )
-        .await)
+        Ok(self.followed(&context).await.follow())
+    }
+
+    /// The context's discovery, followed once for the webview's watches and for the lists and
+    /// objects that read what the context serves.
+    async fn followed(&self, context: &str) -> Arc<Followed> {
+        self.followers
+            .get(context, self.catalog.fingerprint(context))
+            .await
     }
 
     /// The namespaces of a space's context, from its namespace index
@@ -698,15 +699,16 @@ impl Core {
             .keep(ticket, Batcher::spawn(rows, spec, metrics, send))
     }
 
-    /// A list or an object does not wait for the catalog to list the context.
+    /// A list or an object does not wait for the catalog to list the context, and has the
+    /// reader at its first flush when the context's follower already exists.
     fn metrics_opening(&self, context: &str, kind: Kind) -> Opening {
         let (core, context) = (self.this.clone(), context.to_owned());
         Box::pin(async move {
             let Some(core) = core.upgrade() else {
                 return std::future::pending().await;
             };
-            let entry = core.catalog.fingerprint(&context).await;
-            core.metrics.context(&context, entry).await.reader(kind)
+            let followed = core.followed(&context).await;
+            core.metrics.context(&context, followed.api()).reader(kind)
         })
     }
 
@@ -1002,6 +1004,7 @@ impl Core {
                     let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
                     self.state.saw(&names, Timestamp::now());
                     self.connections.keep(listed.iter());
+                    self.followers.keep(&names);
                 }
                 if contexts.changed().await.is_err() {
                     return;

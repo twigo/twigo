@@ -90,6 +90,13 @@ impl Rig {
     }
 
     fn flush(&mut self) -> Option<ListBatch> {
+        self.flush_with(|_, _| None)
+    }
+
+    fn flush_with(
+        &mut self,
+        held: impl Fn(&str, &str) -> Option<Arc<Sample>>,
+    ) -> Option<ListBatch> {
         let delta = match self.store.drain(&self.feed) {
             Drained::Reset { items, columns } => Delta::Reset {
                 rows: items,
@@ -107,6 +114,7 @@ impl Rig {
             }
         };
         self.view.apply(delta);
+        self.view.sample_entered(held);
         self.view.batch(ViewState::Ready)
     }
 }
@@ -976,6 +984,68 @@ fn a_sample_goes_with_its_row_and_a_new_uid_has_none() {
 }
 
 #[test]
+fn a_row_that_enters_the_filters_takes_the_sample_the_poller_holds_at_once() {
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    let mut rig = Rig::new(&asked);
+    rig.view.set_api(served());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    rig.store.upsert(pod("a", "web-2", "Running", "0"));
+    rig.flush();
+    let held = |namespace: &str, name: &str| match (namespace, name) {
+        ("a", "web-1") => used(50, 7),
+        _ => None,
+    };
+
+    rig.store.upsert(pod("a", "web-1", "CrashLoopBackOff", "0"));
+    rig.store.upsert(pod("a", "web-2", "CrashLoopBackOff", "0"));
+    let entered = rig.flush_with(held).unwrap();
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-1"),
+        Some(ipc::Cell::Int(50)),
+        "the poller's sample, though it holds still and is told no more"
+    );
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-2"),
+        Some(ipc::Cell::Null),
+        "no sample, no zero"
+    );
+}
+
+#[test]
+fn a_row_does_not_take_a_sample_that_was_taken_before_it_was_created() {
+    let at = |text: &str| -> jiff::Timestamp { text.parse().unwrap() };
+    let held = |namespace: &str, name: &str| {
+        (namespace == "a" && name == "web-1").then(|| {
+            Arc::new(Sample {
+                sampled: Some(at("2026-11-13T16:00:10Z")),
+                cpu: 50,
+                memory: 7,
+                containers: Box::default(),
+            })
+        })
+    };
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    for (created, wanted) in [
+        ("2026-11-13T16:00:00Z", ipc::Cell::Int(50)),
+        ("2026-11-13T16:00:20Z", ipc::Cell::Null),
+    ] {
+        let mut rig = Rig::new(&asked);
+        rig.view.set_api(served());
+        let mut entered = pod("a", "web-1", "CrashLoopBackOff", "0");
+        entered.meta.created = Some(at(created));
+        rig.store.upsert(entered);
+        let batch = rig.flush_with(held).unwrap();
+        assert_eq!(
+            cpu_of(&batch, "kind-test/a/web-1"),
+            Some(wanted),
+            "created {created}: a pod made after the sample is another one by the name"
+        );
+    }
+}
+
+#[test]
 fn sorted_by_a_metric_rows_without_a_sample_come_last_either_way_and_a_sample_moves_its_row() {
     for descending in [false, true] {
         let mut rig = Rig::new(&sorted_by("CPU", descending));
@@ -1051,18 +1121,29 @@ fn a_list_reads_the_namespaces_of_its_window_and_all_of_them_when_sorted_by_a_me
     rig.view.set_window(0, 1);
     assert_eq!(
         rig.view.wants(true),
-        scopes(&["a", "b", "c"]),
-        "every namespace"
+        scopes(&["a", "b", "c"])
+            .into_iter()
+            .chain([Scope::Cluster])
+            .collect(),
+        "every namespace, and the cluster for a list of all of them"
     );
 }
 
 #[test]
-fn many_namespaces_of_a_list_of_all_of_them_are_asked_for_whole_and_chosen_ones_never() {
-    let namespaces: Vec<String> = (0..=CLUSTER_WIDE_ABOVE)
-        .map(|n| format!("ns-{n:02}"))
-        .collect();
-    for (chosen, whole) in [(false, true), (true, false)] {
-        let mut asked = query();
+fn only_a_list_of_all_namespaces_sorted_by_a_metric_asks_for_the_cluster_and_never_for_the_count() {
+    let namespaces: Vec<String> = (0..30).map(|n| format!("ns-{n:02}")).collect();
+    let each = |names: &[String]| -> HashSet<Scope> {
+        names
+            .iter()
+            .map(|name| Scope::Namespace(name.as_str().into()))
+            .collect()
+    };
+    for (chosen, sorted) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut asked = if sorted {
+            sorted_by("Memory", true)
+        } else {
+            query()
+        };
         if chosen {
             asked.namespaces = namespaces.clone();
         }
@@ -1072,32 +1153,17 @@ fn many_namespaces_of_a_list_of_all_of_them_are_asked_for_whole_and_chosen_ones_
             rig.store.upsert(pod(namespace, "x", "Running", "0"));
         }
         rig.flush();
-        let wants = rig.view.wants(true);
+        let mut wants = each(&namespaces);
+        if sorted && !chosen {
+            wants.insert(Scope::Cluster);
+        }
         assert_eq!(
+            rig.view.wants(true),
             wants,
-            if whole {
-                HashSet::from([Scope::Cluster])
-            } else {
-                namespaces
-                    .iter()
-                    .map(|name| Scope::Namespace(name.as_str().into()))
-                    .collect()
-            },
-            "chosen: {chosen}"
+            "chosen: {chosen}, sorted by a metric: {sorted}: one request per namespace, \
+             and the cluster's, to fall back from, only for all of them sorted"
         );
     }
-    let few = &namespaces[..CLUSTER_WIDE_ABOVE];
-    let mut rig = Rig::new(&query());
-    rig.view.set_api(served());
-    for namespace in few {
-        rig.store.upsert(pod(namespace, "x", "Running", "0"));
-    }
-    rig.flush();
-    assert_eq!(
-        rig.view.wants(true).len(),
-        CLUSTER_WIDE_ABOVE,
-        "one request each"
-    );
 }
 
 #[test]

@@ -54,7 +54,7 @@
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The metrics poller's heap at 5,000 pods, with `bench/pods.sh <kubeconfig> 5000` done: `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example metrics_memory`.
-  What a scope costs against the cluster-wide list, which `CLUSTER_WIDE_ABOVE` was set from: `cargo run --release -p twigo-cache --example metrics_cost 41` on the same cluster.
+  What a scope costs against the cluster-wide list, which shows that no number of namespaces makes the cluster's the cheaper one (3.6): `cargo run --release -p twigo-cache --example metrics_cost 41` on the same cluster.
 - The metrics live tests: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test metrics_live -- --ignored`.
   They read the pods of `kube-system`, whose real containers give metrics-server something to measure and whose kwok pods give it kwok's `1m` and `1Mi`, and wait up to three minutes for the first samples.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
@@ -94,8 +94,9 @@
 - tauri-build fails unless the `isolation` features in `Cargo.toml` match the config's pattern, so each pattern of the IPC bench is a crate of its own: `bench/ipc/brownfield` and `bench/ipc/isolation`.
 - Under the isolation pattern a `frame-src` must list the isolation frame's scheme, or every invoke waits forever.
   Tauri names it `isolation-<uuid>` anew on every build and adds it to `default-src` only, so `bench/ipc/isolation/src/main.rs` adds it to `frame-src` at startup from `Context::pattern()`.
-- `bench/cluster.sh up` installs metrics-server v0.9.1 with `--kubelet-insecure-tls`, kwok's `metrics-usage.yaml` and the annotation `metrics.k8s.io/resource-metrics-path` on each kwok node, and waits until every kwok node has a sample, which takes two scrapes; it checks both manifests against their pinned checksums.
-  metrics-server's README at v0.9.1 lists the 0.9 line for Kubernetes 1.34 and later, while the matrix starts at 1.33: whether it runs there is for CI's 1.33 job to say.
+- `bench/cluster.sh up` installs the metrics-server release whose README lists the cluster's minor, v0.8.1 for 1.33 and v0.9.1 for 1.34 and later (the compatibility matrix of its README at each tag lists 0.8.x for 1.31 and later and 0.9.x for 1.34 and later), with `--kubelet-insecure-tls`, kwok's `metrics-usage.yaml` and the annotation `metrics.k8s.io/resource-metrics-path` on each kwok node, and waits until every kwok node has a sample, which takes two scrapes; it checks the manifests against their pinned checksums.
+  kwok's annotation needs metrics-server 0.7.0 or later (kwok v0.8.0, `resource-usage-configuration.md`), which both releases are.
+  A new Kubernetes minor takes the release whose README lists it, with the checksum of its `components.yaml`.
 - A kwok node's address is the IP of the kwok-controller pod, which metrics-server scrapes: after a restart of Docker, or of that pod, the node keeps the old address, and metrics-server logs `connection refused` for every kwok node, `kubectl top node` printing `<unknown>`.
   Patch each node's `status.addresses` to the pod's IP, or recreate the cluster.
 - metrics-server leaves out a pod whose container reports zero CPU or zero memory (`decode.go` at v0.9.1), so a kwok pod annotated `kwok.x-k8s.io/usage-cpu: "0"` has no sample; a pod needs two scrapes, 20 to 45 s on kind 1.37 (2026-11-13), before it has one.

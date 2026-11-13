@@ -1056,9 +1056,10 @@ allocatable: number | null, };
 
 /**
  * What the Metrics API of a context answers. A context that does not
- * serve it has no metric columns and no usage, and so no state.
+ * serve it has no metric columns and no usage, and so no state, but for
+ * the one `Absent` says to an open object.
  */
-export type MetricsState = "ready" | "unavailable" | "forbidden";
+export type MetricsState = "ready" | "unavailable" | "forbidden" | "absent";
 
 /**
  * How much a context lets through (ARCHITECTURE 6.4). Rust owns it, and the

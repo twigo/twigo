@@ -1,6 +1,20 @@
-//! Resource quantities (apimachinery v0.37.1, `resource.Quantity`), read
-//! as billionths, the finest the type keeps: what is finer is rounded up,
-//! as `MilliValue` and `Value` round up what they cut.
+//! Resource quantities as apimachinery's `resource.Quantity` reads them
+//! ([v0.37.0](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go)),
+//! in billionths, the finest the type keeps: the parse rounds what is finer
+//! up, away from zero, to one billionth
+//! ([`ParseQuantity`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L369-L375)),
+//! and caps a binary suffix's value at the largest int64
+//! ([L377-L381](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L377-L381)).
+//! `Value` and `MilliValue` round what they cut up, away from zero, also
+//! below zero ([`Value`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L813-L835),
+//! [`negativeScaleInt64`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/math.go#L166-L199)).
+//!
+//! Sums are made in billionths and rounded once by whoever reads them, as
+//! `Quantity.Add` sums exactly. What passes about 1.7 × 10^29 whole units is
+//! not read: apimachinery keeps it in an arbitrary-precision decimal, but
+//! its `Value`, `MilliValue` and `ScaledValue` overflow an int64 long before
+//! ([`ScaledValue`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L824-L835)),
+//! so nothing that reads a quantity as they do gets a meaning from it.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Quantity(i128);
@@ -53,10 +67,14 @@ impl Quantity {
                 if power >= 0 { (ten, 1) } else { (1, ten) }
             }
         };
-        let nano = div_ceil(
-            digits.checked_mul(NANO)?.checked_mul(num)?,
-            scale.checked_mul(den)?,
-        );
+        let numerator = digits.checked_mul(num)?;
+        let denominator = scale.checked_mul(den)?;
+        let binary = suffix.ends_with('i');
+        let nano = if binary && over_int64(numerator, denominator) {
+            i128::from(i64::MAX) * NANO
+        } else {
+            div_ceil(numerator.checked_mul(NANO)?, denominator)
+        };
         Some(Quantity(if negative { -nano } else { nano }))
     }
 
@@ -65,14 +83,14 @@ impl Quantity {
         self.0
     }
 
-    /// In thousandths, rounded up as `MilliValue`.
+    /// In thousandths, rounded away from zero as `MilliValue`.
     pub fn milli(self) -> i128 {
-        div_ceil(self.0, NANO / 1000)
+        away_from_zero(self.0, NANO / 1000)
     }
 
-    /// Rounded up to a whole, as `Value`.
+    /// Rounded away from zero to a whole, as `Value`.
     pub fn value(self) -> i128 {
-        div_ceil(self.0, NANO)
+        away_from_zero(self.0, NANO)
     }
 }
 
@@ -82,6 +100,23 @@ impl std::ops::Add for Quantity {
     fn add(self, other: Quantity) -> Quantity {
         Quantity(self.0 + other.0)
     }
+}
+
+/// `a / b` for a positive `b`, rounded up when `a` is positive and down when it is not.
+fn away_from_zero(a: i128, b: i128) -> i128 {
+    let quotient = a / b;
+    if a % b != 0 {
+        quotient + a.signum()
+    } else {
+        quotient
+    }
+}
+
+/// Whether `numerator / denominator` passes the largest int64, as the cap tests it.
+fn over_int64(numerator: i128, denominator: i128) -> bool {
+    let max = i128::from(i64::MAX);
+    let whole = numerator / denominator;
+    whole > max || (whole == max && numerator % denominator != 0)
 }
 
 pub fn div_ceil(a: i128, b: i128) -> i128 {
@@ -134,6 +169,57 @@ mod tests {
             assert_eq!(Quantity::parse(text), None, "{text}");
         }
         assert_eq!(Quantity::parse("1500m").map(Quantity::value), Some(2));
+    }
+
+    #[test]
+    fn what_is_cut_rounds_away_from_zero_below_zero_too() {
+        for (text, milli, value) in [
+            ("1n", 1, 1),
+            ("-1n", -1, -1),
+            ("-1500m", -1500, -2),
+            ("-1.5", -1500, -2),
+            ("-0.0004", -1, -1),
+            ("-1", -1000, -1),
+            ("0", 0, 0),
+        ] {
+            let quantity = Quantity::parse(text).unwrap();
+            assert_eq!(
+                (quantity.milli(), quantity.value()),
+                (milli, value),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sum_is_made_exactly_and_rounded_once() {
+        let each = Quantity::parse("100u").unwrap();
+        assert_eq!(each.milli(), 1);
+        let sum = each + each + each;
+        assert_eq!((sum.nano(), sum.milli()), (300_000, 1), "not 3 times 1m");
+    }
+
+    #[test]
+    fn a_binary_suffix_is_capped_at_the_largest_int64_and_a_decimal_is_not() {
+        let max = i128::from(i64::MAX);
+        for (text, value) in [
+            ("200000000000Ei", max),
+            ("-200000000000Ei", -max),
+            ("8Ei", max),
+            ("7Ei", 7 << 60),
+            ("9223372036854775808", max + 1),
+            ("9223372036854775808k", (max + 1) * 1000),
+            ("1e29", 10i128.pow(29)),
+        ] {
+            assert_eq!(
+                Quantity::parse(text).map(Quantity::value),
+                Some(value),
+                "{text}"
+            );
+        }
+        for text in ["1e30", "200000000000E", "1000000000000000000000000000000"] {
+            assert_eq!(Quantity::parse(text), None, "{text}");
+        }
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, timeout_at};
+use twigo_cache::discovery::Followers;
 use twigo_cache::fake::Fake;
 use twigo_cache::hub::Resource;
 use twigo_cache::metrics::{Context, Poller, Scope};
@@ -53,7 +54,7 @@ struct Rig {
     fake: Fake,
     hub: Hub,
     context: Arc<Context>,
-    _held: (Arc<Clients>, tempfile::TempDir),
+    _held: (Arc<Clients>, tempfile::TempDir, Followers),
     batches: mpsc::UnboundedReceiver<ObjectBatch>,
 }
 
@@ -62,8 +63,12 @@ impl Rig {
         fake.serve_metrics("v1beta1");
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
-        let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-        let context = poller.context("kind-test", watch::channel(None).1).await;
+        let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+        let api = followers
+            .get("kind-test", async { watch::channel(None).1 })
+            .await
+            .api();
+        let context = Poller::new(hub.clone()).context("kind-test", api);
         let waited = async {
             while context.api().version().is_none() {
                 sleep(Duration::from_millis(10)).await;
@@ -76,7 +81,7 @@ impl Rig {
             fake,
             hub,
             context,
-            _held: (clients, directory),
+            _held: (clients, directory, followers),
             batches: mpsc::unbounded_channel().1,
         }
     }
@@ -155,6 +160,77 @@ async fn a_part_that_is_off_makes_no_request_and_sends_nothing() {
     let shown = rig.watch(&opened, Duration::from_secs(2)).await;
     assert!(!usages(&shown).is_empty(), "shown now");
     assert!(requests(&rig.fake) > 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_replaced_under_its_name_takes_the_sample_of_the_old_one_with_it() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let first = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(usages(&first).last().unwrap().cpu.used, Some(10_000_000));
+
+    let mut replaced = pod(json!([{ "name": "main", "resources": { "limits": { "cpu": "1" } } }]));
+    replaced["metadata"]["uid"] = json!("new-uid");
+    rig.fake.put("", "pods", Some("a"), replaced);
+    let after = rig.watch(&opened, Duration::from_secs(5)).await;
+    let usage = *usages(&after).last().expect("a usage for the new pod");
+    assert_eq!(
+        usage.cpu.used, None,
+        "the old pod's use against the new pod's limits"
+    );
+
+    rig.fake.pod_usage("a", "web-0", &[("main", "20m", "1Mi")]);
+    let next = rig.watch(&opened, Duration::from_secs(15)).await;
+    let usage = *usages(&next).last().expect("its own sample");
+    assert_eq!(usage.cpu.used, Some(20_000_000));
+    assert_eq!(usage.cpu.limit, Some(1_000_000_000));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_context_that_stops_serving_the_resource_withdraws_the_usage_once() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let shown = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(usages(&shown).last().unwrap().cpu.used, Some(10_000_000));
+
+    rig.fake.state().served.remove(twigo_cache::metrics::GROUP);
+    rig.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = rig.watch(&opened, Duration::from_secs(30)).await;
+    let [withdrawn] = &usages(&gone)[..] else {
+        panic!("one usage: {:?}", usages(&gone));
+    };
+    assert_eq!(withdrawn.state, MetricsState::Absent);
+    assert_eq!(withdrawn.cpu.used, None);
+    assert!(withdrawn.containers.is_empty());
+    let later = rig.watch(&opened, Duration::from_secs(120)).await;
+    assert!(usages(&later).is_empty(), "said once");
+
+    rig.fake.serve_metrics("v1beta1");
+    rig.fake
+        .put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let back = rig.watch(&opened, Duration::from_secs(30)).await;
+    let usage = *usages(&back).last().expect("a usage again");
+    assert_eq!(usage.state, MetricsState::Ready);
+    assert_eq!(usage.cpu.used, Some(10_000_000));
 }
 
 #[tokio::test(start_paused = true)]
@@ -288,14 +364,18 @@ async fn a_cluster_without_the_api_never_gets_a_usage() {
     fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+    let api = followers
+        .get("kind-test", async { watch::channel(None).1 })
+        .await
+        .api();
+    let context = Poller::new(hub.clone()).context("kind-test", api);
     sleep(Duration::from_secs(2)).await;
     let mut rig = Rig {
         fake,
         hub,
         context,
-        _held: (clients, directory),
+        _held: (clients, directory, followers),
         batches: mpsc::unbounded_channel().1,
     };
     let opened = rig.open(Kind::Pods, PARTS);
