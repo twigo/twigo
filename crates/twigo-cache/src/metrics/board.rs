@@ -266,6 +266,17 @@ impl Board {
         }
     }
 
+    fn settled(&self, id: u64) -> bool {
+        let state = self.state();
+        state.members.get(&id).is_none_or(|member| {
+            member.wants.scopes.iter().all(|want| {
+                state
+                    .serving(want)
+                    .is_some_and(|request| request.answer.is_some())
+            })
+        })
+    }
+
     fn sample(&self, id: u64, namespace: &str, name: &str) -> Option<Arc<Sample>> {
         let state = self.state();
         let member = state.members.get(&id)?;
@@ -519,6 +530,11 @@ impl Reader {
 
     pub fn wants(&self) -> &HashSet<Scope> {
         &self.wants
+    }
+
+    /// Every scope it wants has answered or failed once.
+    pub fn settled(&self) -> bool {
+        self.context.board(self.kind).settled(self.id)
     }
 
     /// The sample the answers hold of a key this reader wants, and none of another's.

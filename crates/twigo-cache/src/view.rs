@@ -466,6 +466,10 @@ impl QueryView {
         }
     }
 
+    pub fn sorts_by_metric(&self) -> bool {
+        self.layout.sort_metric
+    }
+
     /// The CPU and Memory columns come and go with the API, as a change of the columns.
     pub fn set_api(&mut self, api: Api) {
         let Some(kind) = self.spec.metrics else {

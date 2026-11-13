@@ -1,7 +1,7 @@
 //! The Metrics API against a kind cluster with metrics-server and kwok
 //! (`bench/cluster.sh`): a pod list gets the CPU and memory of its running
-//! pods, sorted by memory it holds its values in order, and an open pod and
-//! node answer what they use.
+//! pods, sorted by memory it holds its values in order, in its first rows too
+//! once the resources came, and an open pod and node answer what they use.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo test -p twigo-core --test metrics_live -- --ignored
 
@@ -192,8 +192,12 @@ async fn a_pod_list_gets_the_cpu_and_memory_of_a_running_pod() {
     core.list_unsubscribe("main", list.id).unwrap();
 }
 
-async fn opened_by_the_webview(core: &Arc<Core>, space: &str) -> Vec<ListBatch> {
-    let mut list = List::pods(core, space, None).await;
+async fn opened_by_the_webview(
+    core: &Arc<Core>,
+    space: &str,
+    sort: Option<Sort>,
+) -> Vec<ListBatch> {
+    let mut list = List::pods(core, space, sort).await;
     let mut seen = Vec::new();
     let reached = async {
         let mut rows = false;
@@ -255,7 +259,7 @@ async fn a_list_opened_after_the_resources_came_has_its_columns_in_its_first_bat
     ) {}
 
     for round in 0..2 {
-        let batches = opened_by_the_webview(&core, &space).await;
+        let batches = opened_by_the_webview(&core, &space, None).await;
         let first = batches
             .iter()
             .find(|batch| !batch.upserts.is_empty())
@@ -316,6 +320,50 @@ async fn a_list_sorted_by_memory_descending_holds_its_values_in_order() {
         "a real container's working set leads kwok's 1Mi: {valued:?}"
     );
     core.list_unsubscribe("main", list.id).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_list_sorted_by_memory_opened_after_the_resources_came_has_its_order_in_its_first_rows() {
+    let (path, context) = cluster();
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &path, &context);
+    let mut resources = core.follow_resources(&space).await.unwrap();
+    while !matches!(
+        tokio::time::timeout(WAIT, resources.next())
+            .await
+            .expect("discovery within 180 s"),
+        Discovered::Ready { .. }
+    ) {}
+    let sort = Sort {
+        column: "Memory".to_owned(),
+        descending: true,
+    };
+
+    let batches = opened_by_the_webview(&core, &space, Some(sort)).await;
+    let first = batches
+        .iter()
+        .find(|batch| !batch.upserts.is_empty())
+        .expect("a batch with rows");
+    let columns = first.columns.as_ref().expect("the columns come first");
+    let memory = columns.iter().position(|c| c.name == "Memory").unwrap();
+    let order = &first.window.as_ref().expect("a window").ids;
+    let values: HashMap<_, _> = first
+        .upserts
+        .iter()
+        .map(|row| (&row.id, used(&row.cells[memory])))
+        .collect();
+    let in_order: Vec<Option<i64>> = order.iter().map(|id| values[id]).collect();
+    let valued: Vec<i64> = in_order.iter().map_while(|value| *value).collect();
+    assert!(valued.len() >= 3, "values in the first rows: {in_order:?}");
+    assert!(
+        valued.windows(2).all(|pair| pair[0] >= pair[1]),
+        "largest first: {valued:?}"
+    );
+    assert!(
+        in_order[valued.len()..].iter().all(Option::is_none),
+        "rows without a value last: {in_order:?}"
+    );
 }
 
 async fn usage_of(

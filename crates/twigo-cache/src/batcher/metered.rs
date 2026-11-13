@@ -15,7 +15,7 @@ use super::*;
 use crate::discovery::Followers;
 use crate::fake::Fake;
 use crate::hub::{Hub, Query, Resource, RowFormat};
-use crate::metrics::{Kind, Poller};
+use crate::metrics::{FIRST_ANSWER, Kind, Poller};
 
 fn polls(fake: &Fake, namespace: &str) -> usize {
     fake.count(&format!(
@@ -132,6 +132,14 @@ impl Metered {
     }
 
     async fn of(fake: Fake, query: ListQuery, watched: bool) -> Self {
+        Self::build(fake, query, watched, false).await
+    }
+
+    async fn cold(fake: Fake, sort: Option<Sort>) -> Self {
+        Self::build(fake, query(sort, false), true, true).await
+    }
+
+    async fn build(fake: Fake, query: ListQuery, watched: bool, cold: bool) -> Self {
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
         let followers = Arc::new(Followers::new(
@@ -142,6 +150,7 @@ impl Metered {
         if watched {
             discovered(&followers).await;
         }
+        fake.state().hold_initial = cold;
         let (batcher, batches) = open(&hub, &poller, &followers, &query).await;
         Self {
             fake,
@@ -237,13 +246,20 @@ async fn nothing_is_polled_before_a_window_or_while_the_columns_are_not_read() {
     assert!(requests_to_the_group(&list.fake) > 0, "read now");
 }
 
-async fn first(list: &mut Metered) -> ListBatch {
-    let (_, batch) = timeout(Duration::from_secs(600), list.batches.recv())
+async fn first_at(list: &mut Metered) -> (Instant, ListBatch) {
+    let (at, batch) = timeout(Duration::from_secs(600), list.batches.recv())
         .await
         .expect("a batch within ten minutes")
         .expect("the batcher runs");
     list.batcher().ack(batch.seq);
-    batch
+    if let Some(columns) = &batch.columns {
+        list.columns.clone_from(columns);
+    }
+    (at, batch)
+}
+
+async fn first(list: &mut Metered) -> ListBatch {
+    first_at(list).await.1
 }
 
 fn has_metric_columns(batch: &ListBatch) -> bool {
@@ -279,6 +295,221 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     assert!(
         rest.iter().all(|batch| batch.columns.is_none()),
         "the columns do not change later: {rest:?}"
+    );
+}
+
+fn cells_of(batch: &ListBatch, column: &str) -> Vec<Cell> {
+    let at = batch
+        .columns
+        .as_ref()
+        .expect("the first batch has columns")
+        .iter()
+        .position(|candidate| candidate.name == column)
+        .expect("the column");
+    batch
+        .upserts
+        .iter()
+        .map(|row| row.cells[at].clone())
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_joins_a_scope_another_reads_has_its_values_and_state_in_its_first_batch() {
+    let mut list = Metered::start(cluster(true).await, None).await;
+    list.batcher().set_window(0, 3, true);
+    list.watch(Duration::from_secs(1)).await;
+    let asked = polls(&list.fake, "a");
+    assert_eq!(asked, 1);
+
+    let (second, mut batches) = open(&list.hub, &list.poller, &list.followers, &list.query).await;
+    second.set_window(0, 3, true);
+    let (_, joined) = batches.recv().await.expect("a first batch");
+    assert_eq!(
+        cells_of(&joined, "CPU"),
+        [2_000_000, 4_000_000, 6_000_000].map(Cell::Int)
+    );
+    assert_eq!(joined.metrics, Some(MetricsState::Ready));
+    assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 3, true);
+    let opened = list.watch(Duration::from_secs(1)).await;
+    assert_eq!(
+        opened.last().and_then(|batch| batch.metrics),
+        Some(MetricsState::Forbidden)
+    );
+    let asked = polls(&list.fake, "a");
+
+    let (second, mut batches) = open(&list.hub, &list.poller, &list.followers, &list.query).await;
+    second.set_window(0, 3, true);
+    let (_, joined) = batches.recv().await.expect("a first batch");
+    assert_eq!(joined.metrics, Some(MetricsState::Forbidden));
+    assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
+}
+
+fn cpu_descending() -> Option<Sort> {
+    Some(Sort {
+        column: "CPU".to_owned(),
+        descending: true,
+    })
+}
+
+const BY_CPU: [&str; 6] = [
+    "kind-test/b/q3",
+    "kind-test/a/p3",
+    "kind-test/b/q2",
+    "kind-test/a/p2",
+    "kind-test/b/q1",
+    "kind-test/a/p1",
+];
+
+const BY_ID: [&str; 6] = [
+    "kind-test/a/p1",
+    "kind-test/a/p2",
+    "kind-test/a/p3",
+    "kind-test/b/q1",
+    "kind-test/b/q2",
+    "kind-test/b/q3",
+];
+
+fn window_ids(batch: &ListBatch) -> Vec<&str> {
+    batch
+        .window
+        .as_ref()
+        .expect("a window")
+        .ids
+        .iter()
+        .map(|id| id.0.as_str())
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_sorted_by_a_metric_has_its_order_and_values_in_its_first_batch() {
+    let mut list = Metered::start(cluster(true).await, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 6, true);
+    let (at, opened) = first_at(&mut list).await;
+    assert_eq!(window_ids(&opened), BY_CPU);
+    assert_eq!(
+        cells_of(&opened, "CPU"),
+        [9, 6, 6, 4, 3, 2].map(|milli| Cell::Int(milli * 1_000_000))
+    );
+    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+    assert!(
+        at - asked <= FLUSH,
+        "as soon as the answers came: {:?}",
+        at - asked
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_that_never_answers_lets_the_first_batch_out_at_the_bound_and_the_order_settles() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_secs(20);
+    let mut list = Metered::start(fake, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 6, true);
+    let (at, bounded) = first_at(&mut list).await;
+    assert!(
+        (FIRST_ANSWER..=FIRST_ANSWER + FLUSH).contains(&(at - asked)),
+        "{:?}",
+        at - asked
+    );
+    assert_eq!(window_ids(&bounded), BY_ID, "as it is: no sample yet");
+    assert_eq!(bounded.metrics, Some(MetricsState::Ready));
+
+    let later = list.watch(Duration::from_secs(30)).await;
+    let moved = later
+        .iter()
+        .find(|batch| batch.window.is_some())
+        .expect("the order settles when the answers come");
+    assert_eq!(window_ids(moved), BY_CPU);
+    assert_eq!(
+        list.cpus(&later, "kind-test/b/q3").last(),
+        Some(&Cell::Int(9_000_000))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_that_refuses_lets_the_first_batch_out_at_once_saying_forbidden() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 6, true);
+    let (at, refused) = first_at(&mut list).await;
+    assert_eq!(refused.metrics, Some(MetricsState::Forbidden));
+    assert_eq!(window_ids(&refused), BY_ID);
+    assert!(at - asked <= FLUSH, "{:?}", at - asked);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_not_sorted_by_a_metric_never_waits_for_the_poller() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_secs(3600);
+    let mut list = Metered::start(fake, None).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 6, true);
+    let (at, opened) = first_at(&mut list).await;
+    assert_eq!(at, asked, "with its window");
+    assert_eq!(window_ids(&opened), BY_ID);
+    assert_eq!(cells_of(&opened, "CPU"), vec![Cell::Null; 6]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_sorted_by_a_metric_that_is_not_read_does_not_wait_either() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_secs(3600);
+    let mut list = Metered::start(fake, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 6, false);
+    let (at, opened) = first_at(&mut list).await;
+    assert_eq!(at, asked);
+    assert_eq!(window_ids(&opened), BY_ID);
+    assert_eq!(requests_to_the_group(&list.fake), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_whose_rows_come_after_its_window_holds_the_first_batch_that_has_them() {
+    let mut list = Metered::cold(cluster(true).await, cpu_descending()).await;
+    list.batcher().set_window(0, 6, true);
+    let (_, listing) = first_at(&mut list).await;
+    assert_eq!(
+        listing.total, 0,
+        "nothing to order yet: {:?}",
+        listing.status
+    );
+    assert_eq!(requests_to_the_group(&list.fake), 0);
+
+    list.fake.release_initial();
+    let opened = loop {
+        let batch = first(&mut list).await;
+        if batch.total > 0 {
+            break batch;
+        }
+    };
+    assert_eq!(window_ids(&opened), BY_CPU);
+    assert_eq!(
+        list.cpus(std::slice::from_ref(&opened), "kind-test/b/q3"),
+        [Cell::Int(9_000_000)]
     );
 }
 

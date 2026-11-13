@@ -13,7 +13,9 @@
 //! (ARCHITECTURE 3.6): it asks the poller for the namespaces of its window at
 //! each flush, and for nothing before its first window, while its metric
 //! columns are not read, or once a batch has gone unacknowledged for a poll's
-//! interval, as a hidden window leaves it.
+//! interval, as a hidden window leaves it. One sorted by a metric holds the
+//! first batch that shows its rows until its scopes have answered once, for
+//! at most [`FIRST_ANSWER`], so that the first order is the true one.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -26,7 +28,7 @@ use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_ipc::ListBatch;
 
 use crate::hub::Subscription;
-use crate::metrics::{INTERVAL, Opening, Reader};
+use crate::metrics::{FIRST_ANSWER, INTERVAL, Opening, Reader};
 use crate::table::Row;
 use crate::view::{QueryView, Spec};
 
@@ -94,6 +96,27 @@ impl Drop for Batcher {
     }
 }
 
+/// A list sorted by a metric, whose window reads metrics, has the order of its rows wrong until
+/// the answers come, so the first batch with rows waits for them.
+#[derive(Default)]
+struct FirstOrder {
+    waiting_since: Option<Instant>,
+    shown: bool,
+}
+
+impl FirstOrder {
+    fn holds(&mut self, view: &QueryView, metrics: Option<&Reader>) -> bool {
+        let Some(metrics) = metrics.filter(|_| !self.shown && view.sorts_by_metric()) else {
+            return false;
+        };
+        if metrics.settled() {
+            return false;
+        }
+        let since = *self.waiting_since.get_or_insert_with(Instant::now);
+        since.elapsed() < FIRST_ANSWER
+    }
+}
+
 async fn run(
     subscription: Subscription<Row>,
     spec: Spec,
@@ -110,6 +133,7 @@ async fn run(
     let mut moved = false;
     let mut reading = false;
     let mut unanswered: Option<Instant> = None;
+    let mut first_order = FirstOrder::default();
     loop {
         let ticked = tokio::select! {
             _ = interval.tick(), if unacked.is_none() => true,
@@ -159,7 +183,11 @@ async fn run(
             view.samples(metrics.drain());
             view.sample_entered(|namespace, name| metrics.sample(namespace, name));
         }
+        if first_order.holds(&view, metrics.as_ref()) {
+            continue;
+        }
         if let Some(batch) = view.batch(state) {
+            first_order.shown |= batch.total > 0;
             unacked = Some(batch.seq);
             unanswered = metrics
                 .as_ref()
