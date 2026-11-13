@@ -50,9 +50,8 @@ export interface CompiledQuery {
     at: number;
     descending: boolean;
     age: boolean;
-    /** A measured CPU or memory: numeric, rows without one last in both directions, equal ones by Name. */
+    /** A measured CPU or memory: numeric, rows without one last in both directions. */
     metric: boolean;
-    name: number | null;
   } | null;
   readonly count: number | null;
   readonly group: { at: number; collapsed: ReadonlySet<string> } | null;
@@ -80,8 +79,13 @@ export function compileQuery(
   );
   const sorted = query.sort === null ? null : find(query.sort.column);
   const at = sorted ?? find(NAME);
-  const valuesAt = query.values === null ? null : find(query.values.column);
-  const groupAt = query.groupBy === null ? null : find(query.groupBy.column);
+  const findText = (name: string) => {
+    const found = find(name);
+    return found === null || isMetric(columns[found]) ? null : found;
+  };
+  const valuesAt = query.values === null ? null : findText(query.values.column);
+  const groupAt =
+    query.groupBy === null ? null : findText(query.groupBy.column);
   return {
     query,
     selector:
@@ -96,9 +100,8 @@ export function compileQuery(
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
             metric: isMetric(columns[at]),
-            name: find(NAME),
           },
-    count: query.countBy === null ? null : find(query.countBy),
+    count: query.countBy === null ? null : findText(query.countBy),
     group:
       groupAt === null || query.groupBy === null
         ? null
@@ -200,10 +203,6 @@ export function runQuery<R extends QueryRow>(
       return (
         a.rank - b.rank ||
         compareMetrics(a.key, b.key, sort.descending) ||
-        natural(
-          cellText(a.row.cells[sort.name ?? 0]),
-          cellText(b.row.cells[sort.name ?? 0]),
-        ) ||
         natural(a.row.id, b.row.id)
       );
     }

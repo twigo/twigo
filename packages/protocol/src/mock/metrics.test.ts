@@ -265,22 +265,22 @@ test("some container has no limit, some pod no sample, and one node is over 90 %
   expect(over.length).toBeLessThan(usages.length);
 });
 
-test("sorting by a metric is numeric, leaves rows without one last in both directions, and ties go by Name", () => {
+test("sorting by a metric is numeric, leaves rows without one last in both directions, and ties go by row id", () => {
   const columns: Column[] = [
     { name: "Name", kind: "string", priority: 0 },
     { name: "CPU", kind: "cpu", priority: 0 },
   ];
   const rows: QueryRow[] = (
     [
-      ["b", 5],
-      ["a", 5],
-      ["none-b", null],
-      ["c", 20],
-      ["none-a", null],
-      ["d", 3],
+      ["b", "01", 5],
+      ["a", "02", 5],
+      ["none-b", "03", null],
+      ["c", "04", 20],
+      ["none-a", "05", null],
+      ["d", "06", 3],
     ] as const
-  ).map(([name, cpu]) => ({
-    id: `x/${name}`,
+  ).map(([name, id, cpu]) => ({
+    id: `x/${id}`,
     namespace: null,
     created: null,
     labels: {},
@@ -295,8 +295,8 @@ test("sorting by a metric is numeric, leaves rows without one last in both direc
         columns,
       ),
     ).rows.map((row) => row.cells[0]);
-  expect(sorted(false)).toEqual(["d", "a", "b", "c", "none-a", "none-b"]);
-  expect(sorted(true)).toEqual(["c", "a", "b", "d", "none-a", "none-b"]);
+  expect(sorted(false)).toEqual(["d", "b", "a", "c", "none-b", "none-a"]);
+  expect(sorted(true)).toEqual(["c", "b", "a", "d", "none-b", "none-a"]);
 });
 
 test("the text filter never matches CPU or Memory", () => {
