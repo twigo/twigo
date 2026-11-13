@@ -42,7 +42,7 @@ spec:
           image: fake-image
 YAML
 k -n bench wait --for=jsonpath='{.status.availableReplicas}'="$count" deployment/bench --timeout=900s >/dev/null
-k -n bench get pods -o name |
-  awk '{ printf "%s kwok.x-k8s.io/usage-cpu=%dm kwok.x-k8s.io/usage-memory=%dMi\n", $1, (NR % 97 + 1) * 10, (NR * 7) % 211 + 16 }' |
+k -n bench get pods --no-headers -o custom-columns=NAME:.metadata.name,GONE:.metadata.deletionTimestamp |
+  awk '$2 == "<none>" { n++; printf "pod/%s kwok.x-k8s.io/usage-cpu=%dm kwok.x-k8s.io/usage-memory=%dMi\n", $1, (n % 97 + 1) * 10, (n * 7) % 211 + 16 }' |
   xargs -L 1 -P 16 kubectl --kubeconfig "$kubeconfig" -n bench annotate --overwrite >/dev/null
 k -n bench get deployment bench -o jsonpath='{.status.availableReplicas}{" pods available\n"}'
