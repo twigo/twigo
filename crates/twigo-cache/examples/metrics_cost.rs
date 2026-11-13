@@ -1,6 +1,6 @@
 //! What the Metrics API costs per scope: the time and the bytes of the lists of
-//! the `k` namespaces with the most pods, sent together as the poller sends
-//! them, against the cluster-wide list, gzipped as the poller asks.
+//! the `k` namespaces with the most pods, sent `IN_FLIGHT` at a time as the
+//! poller sends them, against the cluster-wide list, gzipped as the poller asks.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example metrics_cost [runs]
 
@@ -9,7 +9,8 @@ use std::io::Read;
 use std::time::{Duration, Instant};
 
 use flate2::read::MultiGzDecoder;
-use futures::future::join_all;
+use futures::StreamExt;
+use futures::stream;
 use http::Request;
 use http::header::{ACCEPT, ACCEPT_ENCODING};
 use http_body_util::BodyExt;
@@ -17,6 +18,7 @@ use kube::Config;
 use kube::client::Body;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use serde_json::Value;
+use twigo_cache::metrics::IN_FLIGHT;
 use twigo_kube::client::{Clients, Gate, Options};
 
 const API: &str = "/apis/metrics.k8s.io/v1beta1";
@@ -50,7 +52,11 @@ async fn list(clients: &Clients, path: &str) -> (usize, Vec<u8>) {
 
 async fn together(clients: &Clients, paths: &[String]) -> (Duration, usize, usize) {
     let start = Instant::now();
-    let lists = join_all(paths.iter().map(|path| list(clients, path))).await;
+    let lists: Vec<_> = stream::iter(paths)
+        .map(|path| list(clients, path))
+        .buffer_unordered(IN_FLIGHT)
+        .collect()
+        .await;
     let took = start.elapsed();
     (
         took,
@@ -95,7 +101,7 @@ async fn main() {
     let total: usize = namespaces.iter().map(|(_, pods)| pods).sum();
 
     println!(
-        "{total} pods with metrics in {} namespaces, {runs} runs each, medians; the lists of the k namespaces with the most pods, sent together.",
+        "{total} pods with metrics in {} namespaces, {runs} runs each, medians; the lists of the k namespaces with the most pods, {IN_FLIGHT} at a time.",
         namespaces.len()
     );
     println!();
