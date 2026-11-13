@@ -58,6 +58,8 @@ const EVERY_COLUMN = [
   "Ready",
   "Status",
   "Restarts",
+  "CPU",
+  "Memory",
   "Age",
   "",
 ];

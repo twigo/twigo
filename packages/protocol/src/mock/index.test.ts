@@ -407,6 +407,8 @@ test("rows come sorted by the query's column, and the first batch carries the co
     "Ready",
     "Status",
     "Restarts",
+    "CPU",
+    "Memory",
     "Age",
     "IP",
     "Node",

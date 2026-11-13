@@ -62,7 +62,7 @@ const CONNECT_MS = 150;
 const LINE_MS = 1000;
 
 /** The recorded pods' containers, as the logs' streams name them. */
-const NAMES = ["api", "istio-proxy", "log-shipper"];
+export const CONTAINER_NAMES = ["api", "istio-proxy", "log-shipper"];
 
 /**
  * The containers of a pod a shell can reach: those that run, a pod that
@@ -82,7 +82,7 @@ export function shellContainers(
   }
   const count =
     scenario === "shellOneContainer" ? 1 : Math.max(2, pod.containers);
-  const containers = NAMES.slice(0, count);
+  const containers = CONTAINER_NAMES.slice(0, count);
   const annotated = scenario === "shellDefaultSecond" ? 1 : 0;
   return { containers, default: containers[annotated] ?? "api" };
 }

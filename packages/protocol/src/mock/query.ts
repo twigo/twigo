@@ -46,7 +46,14 @@ export interface CompiledQuery {
   readonly selector: Selector | null;
   readonly text: TextFilter | null;
   readonly textColumns: readonly number[];
-  readonly sort: { at: number; descending: boolean; age: boolean } | null;
+  readonly sort: {
+    at: number;
+    descending: boolean;
+    age: boolean;
+    /** A measured CPU or memory: numeric, rows without one last in both directions, equal ones by Name. */
+    metric: boolean;
+    name: number | null;
+  } | null;
   readonly count: number | null;
   readonly group: { at: number; collapsed: ReadonlySet<string> } | null;
   readonly values: { at: number; values: ReadonlySet<string> } | null;
@@ -66,7 +73,8 @@ export function compileQuery(
       ? query.columns[name]
       : undefined;
   const textColumns = columns.flatMap((column, at) =>
-    column.name === NAME || (chosen(column.name) ?? column.priority === 0)
+    !isMetric(column) &&
+    (column.name === NAME || (chosen(column.name) ?? column.priority === 0))
       ? [at]
       : [],
   );
@@ -87,6 +95,8 @@ export function compileQuery(
             at,
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
+            metric: isMetric(columns[at]),
+            name: find(NAME),
           },
     count: query.countBy === null ? null : find(query.countBy),
     group:
@@ -98,6 +108,11 @@ export function compileQuery(
         ? null
         : { at: valuesAt, values: new Set(query.values.values) },
   };
+}
+
+/** Whether a column is a measure of the Metrics API, which no text filter reads. */
+function isMetric(column: Column | undefined): boolean {
+  return column?.kind === "cpu" || column?.kind === "memory";
 }
 
 export interface QueryResult<R> {
@@ -181,6 +196,17 @@ export function runQuery<R extends QueryRow>(
     key: sort ? sortKey(row.cells[sort.at], sort.age, row.created) : NULL,
   }));
   keyed.sort((a, b) => {
+    if (sort?.metric) {
+      return (
+        a.rank - b.rank ||
+        compareMetrics(a.key, b.key, sort.descending) ||
+        natural(
+          cellText(a.row.cells[sort.name ?? 0]),
+          cellText(b.row.cells[sort.name ?? 0]),
+        ) ||
+        natural(a.row.id, b.row.id)
+      );
+    }
     const order = compareKeys(a.key, b.key);
     return (
       a.rank - b.rank ||
@@ -385,6 +411,15 @@ function compareKeys(a: SortKey, b: SortKey): number {
   }
   if (a.rank === 3 && b.rank === 3) return natural(a.text, b.text);
   return a.rank - b.rank;
+}
+
+/** Numbers in the sort's direction, and rows without one after them in either. */
+function compareMetrics(a: SortKey, b: SortKey, descending: boolean): number {
+  if (a.rank === 0 || b.rank === 0) {
+    return Number(a.rank === 0) - Number(b.rank === 0);
+  }
+  const order = compareKeys(a, b);
+  return descending ? -order : order;
 }
 
 /** By code points, as Rust compares strings. */

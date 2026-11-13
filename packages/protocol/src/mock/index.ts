@@ -11,6 +11,7 @@ import type {
   Column,
   KeyboardLayout,
   ListBatch,
+  MetricsState,
   RowId,
   ShellEnvironment,
   ShellKind,
@@ -50,6 +51,15 @@ import {
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
+import {
+  isMetricsScenario,
+  METRIC_COLUMNS,
+  METRICS_SCENARIOS,
+  metricsAt,
+  MetricsJoin,
+  MockMetrics,
+  type MetricsScenario,
+} from "./metrics";
 import { MockObject } from "./objects";
 import {
   isShellScenario,
@@ -128,7 +138,9 @@ type ListScenario = "live" | ViewState["state"];
  * processes ask the window to allow what they do (`approval` and the like),
  * or while a tool writes into a terminal's own kubeconfig (`terminalOffer`),
  * or while port-forwards are busy, lose their pod, fail, queue, come back
- * from an earlier run or are forbidden (`forwardBusy` and the like).
+ * from an earlier run or are forbidden (`forwardBusy` and the like), or
+ * while the context's Metrics API is not served, does not answer or refuses
+ * the person (`metricsNone` and the like).
  */
 export type MockScenario =
   | ListScenario
@@ -141,7 +153,8 @@ export type MockScenario =
   | ShellScenario
   | ApprovalScenario
   | TerminalScenario
-  | ForwardScenario;
+  | ForwardScenario
+  | MetricsScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -155,6 +168,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...APPROVAL_SCENARIOS,
   ...TERMINAL_SCENARIOS,
   ...FORWARD_SCENARIOS,
+  ...METRICS_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -225,9 +239,13 @@ export function createMockBackend(
     isShellScenario(scenario) ||
     isApprovalScenario(scenario) ||
     isTerminalScenario(scenario) ||
-    isForwardScenario(scenario)
+    isForwardScenario(scenario) ||
+    isMetricsScenario(scenario)
       ? "live"
       : scenario;
+  const metrics = new MockMetrics(
+    isMetricsScenario(scenario) ? scenario : undefined,
+  );
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
   const access = new MockAccess(scenario === "policyFile");
   const approvals = new MockApprovals(
@@ -550,8 +568,8 @@ export function createMockBackend(
       }
       return null;
     },
-    list_set_window: ({ id, start, end }) => {
-      subscription(id).setWindow(start, end);
+    list_set_window: ({ id, start, end, metrics: reads }) => {
+      subscription(id).setWindow(start, end, reads);
       return null;
     },
     list_ack: ({ id, seq }) => {
@@ -694,7 +712,18 @@ export function createMockBackend(
         );
       }
       const selected = parseFields(query.fieldSelector, kind);
-      const columns = queryColumns(kind.columns, query);
+      const served = queryColumns(kind.columns, query);
+      const join =
+        kind.metrics && metrics.served
+          ? new MetricsJoin(metrics, metricsAt(served))
+          : undefined;
+      const columns = join
+        ? [
+            ...served.slice(0, join.at),
+            ...METRIC_COLUMNS,
+            ...served.slice(join.at),
+          ]
+        : served;
       const compiled = compileQuery(query, columns);
       const id = nextId++;
       const forbidden: ViewState = {
@@ -728,6 +757,7 @@ export function createMockBackend(
           cluster(context),
           state,
           onMessage,
+          join,
         ),
       );
       if (lists === "live" && churn === undefined) {
@@ -750,6 +780,7 @@ export function createMockBackend(
           parts,
           context === undefined ? undefined : cluster(context),
           onMessage,
+          metrics,
           context === undefined
             ? undefined
             : {
@@ -934,6 +965,7 @@ class Subscription {
   readonly #key: string;
   readonly #cluster: Cluster;
   readonly #columns: Column[];
+  readonly #join: MetricsJoin | undefined;
   readonly #onMessage: (batch: ListBatch) => void;
   readonly #timers: ReturnType<typeof setTimeout>[] = [];
   #status: ViewState;
@@ -944,7 +976,10 @@ class Subscription {
   #seq = 0;
   #acked = 0;
   #dirty = true;
-  #cache: { version: number; result: QueryResult<MockRow> } | undefined;
+  #base: { version: number; rows: MockRow[] } | undefined;
+  #cache:
+    { base: object; samples: number; result: QueryResult<MockRow> } | undefined;
+  #scrape = -1;
   #sent: {
     total: number;
     start: number;
@@ -955,6 +990,7 @@ class Subscription {
     counts: string;
     groups: string;
     columns: boolean;
+    metrics: MetricsState | null;
   } = {
     total: -1,
     start: 0,
@@ -964,6 +1000,7 @@ class Subscription {
     counts: "",
     groups: "null",
     columns: false,
+    metrics: null,
   };
 
   constructor(
@@ -974,7 +1011,9 @@ class Subscription {
     cluster: Cluster,
     scenario: Exclude<ListScenario, "forbidden"> | ViewState,
     onMessage: (batch: ListBatch) => void,
+    join?: MetricsJoin,
   ) {
+    this.#join = join;
     this.#query = query;
     this.#fields = fields;
     this.#kind = kind;
@@ -1012,8 +1051,9 @@ class Subscription {
    * Flushes at once rather than on the next tick, or with the ack of the
    * batch in flight, as Rust's batcher does (ARCHITECTURE 3.5).
    */
-  setWindow(start: number, end: number): void {
+  setWindow(start: number, end: number, metrics: boolean): void {
     this.#window = [start, end];
+    this.#join?.reads(metrics);
     this.#moved = true;
     this.touch();
     this.#flushSoon();
@@ -1067,24 +1107,51 @@ class Subscription {
       };
     }
     const { version } = this.#cluster;
-    if (this.#cache?.version !== version) {
+    if (this.#base?.version !== version) {
       const withNamespace = this.#columns.some((c) => c.name === "Namespace");
       const rows = this.#kind
         .rows(this.#cluster, withNamespace)
-        .filter((row) => this.#fields(row.fields));
-      this.#cache = { version, result: runQuery(rows, this.#query) };
+        .filter((row) => this.#fields(row.fields))
+        .map((row) =>
+          this.#join ? { ...row, cells: this.#join.pad(row.cells) } : row,
+        );
+      this.#base = { version, rows };
+    }
+    const { rows } = this.#base;
+    const join = this.#query.sort?.metric ? this.#join : undefined;
+    join?.poll(rows, true);
+    const samples = join?.version ?? 0;
+    if (this.#cache?.base !== rows || this.#cache.samples !== samples) {
+      this.#cache = {
+        base: rows,
+        samples,
+        result: runQuery(
+          join ? rows.map((row) => join.fill(row)) : rows,
+          this.#query,
+        ),
+      };
     }
     return this.#cache.result;
   }
 
   #flush(): void {
+    const scrape = this.#join?.scrape;
+    if (scrape !== this.#scrape) {
+      this.#scrape = scrape ?? -1;
+      this.#dirty = true;
+    }
     if (!this.#window || !this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
     this.#moved = false;
     const { rows, readable, counts, groups } = this.#rows();
     const total = rows.length;
     const [start, end] = this.#window;
-    const visible = readable.slice(start, end);
+    let visible = readable.slice(start, end);
+    const join = this.#join;
+    if (join && !this.#query.sort?.metric) {
+      join.poll(visible, false);
+      visible = visible.map((row) => join.fill(row));
+    }
     const ids = visible.map((row) => row.id);
     const sent = new Map(
       visible.map((row) => [row.id, JSON.stringify(wireRow(row))]),
@@ -1097,6 +1164,8 @@ class Subscription {
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
     const columnsChanged = first || knows !== this.#sent.columns;
+    const metrics = knows ? (join?.state ?? null) : null;
+    const metricsChanged = metrics !== null && metrics !== this.#sent.metrics;
     const windowChanged =
       first ||
       start !== this.#sent.start ||
@@ -1112,6 +1181,7 @@ class Subscription {
       !countsChanged &&
       !groupsChanged &&
       !columnsChanged &&
+      !metricsChanged &&
       total === this.#sent.total
     ) {
       return;
@@ -1125,6 +1195,7 @@ class Subscription {
       counts: countsJson,
       groups: groupsJson,
       columns: knows,
+      metrics: metrics ?? this.#sent.metrics,
     };
     this.#seq++;
     this.#onMessage({
@@ -1136,7 +1207,7 @@ class Subscription {
       status: this.#status,
       counts: counts && (first || countsChanged) ? counts : null,
       groups: groupsChanged ? (groups ?? []) : null,
-      metrics: null,
+      metrics: metricsChanged ? metrics : null,
     });
   }
 }

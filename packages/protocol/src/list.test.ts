@@ -44,12 +44,14 @@ function fakeBackend() {
   let resolve: ((id: number) => void) | undefined;
   let reject: ((error: unknown) => void) | undefined;
   const calls: [string, unknown][] = [];
+  const opened = { count: 0 };
   const backend: Backend = {
     invoke(command, request) {
       calls.push([command, request]);
       return Promise.resolve(null);
     },
     subscribe(_command, _request, onMessage) {
+      opened.count++;
       send = onMessage;
       return new Promise((res, rej) => {
         resolve = res;
@@ -60,6 +62,9 @@ function fakeBackend() {
   return {
     backend,
     calls,
+    get subscribes() {
+      return opened.count;
+    },
     send: (b: ListBatch) => send?.(b),
     resolve: (id: number) => resolve?.(id),
     reject: (error: unknown) => reject?.(error),
@@ -152,6 +157,51 @@ test("a batch that arrives before the subscription id is acknowledged once the i
     ["list_set_window", { id: 7, start: 0, end: 40, metrics: false }],
     ["list_ack", { id: 7, seq: 1 }],
   ]);
+});
+
+test("a window says whether the list reads its metrics, and a change of that alone sends the window again", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  view.setMetrics(true);
+  view.setWindow(0, 40);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  view.setMetrics(true);
+  view.setMetrics(false);
+  view.setWindow(0, 40);
+  view.setWindow(10, 50);
+  expect(fake.calls).toEqual([
+    ["list_set_window", { id: 7, start: 0, end: 40, metrics: true }],
+    ["list_set_window", { id: 7, start: 0, end: 40, metrics: false }],
+    ["list_set_window", { id: 7, start: 10, end: 50, metrics: false }],
+  ]);
+  expect(fake.subscribes).toBe(1);
+});
+
+test("metrics asked for before any window wait for it", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  view.setMetrics(true);
+  expect(fake.calls).toEqual([]);
+  view.setWindow(0, 40);
+  expect(fake.calls).toEqual([
+    ["list_set_window", { id: 7, start: 0, end: 40, metrics: true }],
+  ]);
+});
+
+test("a batch's metrics state stays until another comes", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  expect(view.getSnapshot().metrics).toBeNull();
+  fake.send(batch(1, { metrics: "ready" }));
+  fake.send(batch(2, { total: 3 }));
+  expect(view.getSnapshot().metrics).toBe("ready");
+  fake.send(batch(3, { metrics: "unavailable" }));
+  expect(view.getSnapshot().metrics).toBe("unavailable");
 });
 
 test("a failed subscribe shows the error state", async () => {
