@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch } from "@twigo/protocol";
+import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   mountKube,
@@ -168,6 +168,37 @@ test("under StrictMode the list subscribes once and shows rows", async () => {
   );
   expect(subscribes.length - unsubscribes.length).toBe(1);
   expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
+});
+
+test("a new query's subscription opens before the old one closes, and unmounting leaves none open", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  const invoke = vi.spyOn(backend, "invoke");
+  await openList(backend);
+  const closed = () =>
+    invoke.mock.calls.flatMap(([command], at) =>
+      command === "list_unsubscribe" ? [at] : [],
+    );
+  const before = closed().length;
+  fireEvent.click(within(header("Ready")).getByRole("button"));
+  await settle();
+  const sorted = subscribe.mock.calls.findIndex(
+    ([command, query]) =>
+      command === "list_subscribe" && (query as ListQuery).sort !== null,
+  );
+  const closes = closed().slice(before);
+  expect(sorted).toBeGreaterThan(-1);
+  expect(closes).toHaveLength(1);
+  expect(subscribe.mock.invocationCallOrder[sorted]).toBeLessThan(
+    invoke.mock.invocationCallOrder[closes[0] ?? 0] ?? 0,
+  );
+  cleanup();
+  await settle(1);
+  const count = (calls: readonly (readonly unknown[])[], name: string) =>
+    calls.filter(([command]) => command === name).length;
+  expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(
+    count(subscribe.mock.calls, "list_subscribe"),
+  );
 });
 
 function scriptedBackend() {

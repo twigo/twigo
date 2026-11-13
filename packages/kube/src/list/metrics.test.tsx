@@ -103,6 +103,45 @@ describe("the main list", () => {
     }
   });
 
+  async function throughASort(
+    scenario: "ready" | "metricsForbidden",
+    each: (cpu: Map<string, string>) => void,
+  ) {
+    await openList(createMockBackend(scenario));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "auth-api" },
+    });
+    await settle(30);
+    const before = new Map(
+      rows().map((row) => [textOf(row, "Name"), textOf(row, "CPU")]),
+    );
+    fireEvent.click(within(header("Status")).getByRole("button"));
+    for (let step = 0; step < 20; step++) {
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      act(() => {
+        vi.advanceTimersToNextFrame();
+      });
+      each(before);
+    }
+    expect(header("Status").getAttribute("aria-sort")).toBe("ascending");
+  }
+
+  test("a change of sort never shows a dash in a row that had a value", async () => {
+    await throughASort("ready", (had) => {
+      expect([...had.values()].some((cpu) => cpu !== "–")).toBe(true);
+      for (const row of rows()) {
+        if ((had.get(textOf(row, "Name")) ?? "–") !== "–")
+          expect(textOf(row, "CPU")).not.toBe("–");
+      }
+    });
+  });
+
+  test("a change of sort keeps the header's mark when the context refuses metrics", async () => {
+    await throughASort("metricsForbidden", () => {
+      expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
+    });
+  });
+
   test("reads while a metric column is drawn, and a toggle says so at once without another subscription", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);

@@ -859,6 +859,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and a quiet dash for a row without a sample, never zero.
   They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
   The list says with its window that it reads them while it draws one or is sorted by one and the document is visible; beside the details it draws and reads none.
+  A new query, from a sort, a filter or a change of namespaces, opens its subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
   A first click on their header sorts the largest first, as [`kubectl top --sort-by`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_sorter.go#L71-L83) orders, and the second ascends.
   A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay dashes.
 
