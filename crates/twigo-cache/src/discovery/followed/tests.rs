@@ -1,14 +1,16 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use futures::FutureExt;
 use serde_json::json;
 use tokio::time::{Instant, sleep, timeout};
-use twigo_ipc::Discovered;
-use twigo_kube::client::Budgets;
+use twigo_ipc::{Discovered, IpcError};
+use twigo_kube::client::{Budgets, Clients};
 
 use super::*;
 use crate::discovery::RECHECKS;
 use crate::fake::{Fake, fingerprint};
+use crate::hub::{Connect, Hub};
 use crate::metrics::{GROUP, IN_FLIGHT, Kind, Poller, Scope};
 
 const APIS: &str = "/apis";
@@ -122,6 +124,70 @@ async fn every_watch_and_every_list_of_a_context_share_one_follower_and_its_requ
         1 + RECHECKS.len(),
         "a change costs what it costs one follower, for all of them"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_get_returns_while_an_earlier_one_that_nobody_polls_again_waits_for_its_entry() {
+    let fake = fake();
+    let cache = tempfile::tempdir().unwrap();
+    let (followers, _clients) = followers(&fake, cache.path());
+    let followers = Arc::new(followers);
+    let (release, released) = watch::channel(false);
+    let building = tokio::spawn({
+        let followers = Arc::clone(&followers);
+        async move {
+            let mut released = released;
+            followers
+                .get("kind-test", async move {
+                    released.wait_for(|released| *released).await.unwrap();
+                    watch::channel(None).1
+                })
+                .await
+        }
+    });
+    sleep(Duration::from_secs(1)).await;
+    let mut opening = Box::pin(followers.get(
+        "kind-test",
+        std::future::pending::<watch::Receiver<Option<Fingerprint>>>(),
+    ));
+    assert!(opening.as_mut().now_or_never().is_none(), "polled once");
+
+    release.send_replace(true);
+    let built = building.await.unwrap();
+    let third = timeout(Duration::from_secs(600), get(&followers))
+        .await
+        .expect("a get returns, whoever else waits");
+    assert!(Arc::ptr_eq(&built, &third), "and has the one follower");
+    drop(opening);
+}
+
+#[tokio::test(start_paused = true)]
+async fn askers_that_find_no_follower_at_once_end_with_one_that_runs_alone() {
+    let alone = {
+        let fake = fake();
+        let cache = tempfile::tempdir().unwrap();
+        let (followers, _clients) = followers(&fake, cache.path());
+        let followed = get(&followers).await;
+        ready(&mut followed.follow()).await;
+        sleep(Duration::from_secs(30)).await;
+        requests(&fake)
+    };
+
+    let fake = fake();
+    let cache = tempfile::tempdir().unwrap();
+    let (followers, _clients) = followers(&fake, cache.path());
+    let slowly = async || {
+        sleep(Duration::from_secs(1)).await;
+        watch::channel(None).1
+    };
+    let (first, second) = futures::join!(
+        followers.get("kind-test", slowly()),
+        followers.get("kind-test", slowly()),
+    );
+    assert!(Arc::ptr_eq(&first, &second), "one follower per context");
+    ready(&mut first.follow()).await;
+    sleep(Duration::from_secs(30)).await;
+    assert_eq!(requests(&fake), alone, "and one that fetches");
 }
 
 #[tokio::test(start_paused = true)]
@@ -365,6 +431,50 @@ async fn a_follower_started_again_begins_from_what_its_predecessor_confirmed_and
         *moved.api().borrow(),
         Api::Absent,
         "nothing kept for another fingerprint is used"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_cannot_be_built_after_an_answer_leave_what_it_confirmed_kept() {
+    let fake = fake();
+    let current: Arc<std::sync::Mutex<Result<Arc<Clients>, IpcError>>> =
+        Arc::new(std::sync::Mutex::new(Ok(fake.clients(Budgets::default()))));
+    let connect: Connect = {
+        let current = Arc::clone(&current);
+        Arc::new(move |_context| {
+            let clients = current.lock().unwrap().clone();
+            Box::pin(async move { clients })
+        })
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let followers = Followers::new(Hub::new(connect), Arc::new(Cache::new(cache.path())));
+    let (_edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let first = get_under(&followers, &entry).await;
+    let mut resources = first.follow();
+    assert!(matches!(
+        ready(&mut resources).await,
+        Discovered::Ready { .. }
+    ));
+    assert!(first.api().borrow().columns(Kind::Pods));
+
+    let broken = Err(IpcError::new(
+        twigo_ipc::ErrorKind::Unavailable,
+        "no such file: ca.pem".to_owned(),
+    ));
+    let replaced = std::mem::replace(&mut *current.lock().unwrap(), broken);
+    replaced.unwrap().connections().abandon();
+    assert!(matches!(
+        ready(&mut resources).await,
+        Discovered::Failed { .. }
+    ));
+    drop(resources);
+    drop(first);
+    sleep(Duration::from_secs(300)).await;
+
+    let second = get_under(&followers, &entry).await;
+    assert!(
+        second.api().borrow().columns(Kind::Pods),
+        "what the cluster last confirmed, not the failure that followed"
     );
 }
 

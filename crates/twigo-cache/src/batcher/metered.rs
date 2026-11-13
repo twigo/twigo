@@ -422,6 +422,40 @@ async fn a_list_sorted_by_a_metric_has_its_order_and_values_in_its_first_batch()
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_list_that_finds_the_follower_there_has_its_columns_and_its_order_beside_an_opening_nobody_polls_again()
+ {
+    let list = Metered::of(cluster(true).await, query(None, false), false).await;
+    let mut stuck = Box::pin(async {
+        list.followers
+            .get("kind-test", std::future::pending())
+            .await;
+    });
+    assert!(stuck.as_mut().now_or_never().is_none(), "polled once");
+
+    timeout(Duration::from_secs(600), discovered(&list.followers))
+        .await
+        .expect("the context's discovery, whoever else waits");
+    let (sorted, mut batches) = open(
+        &list.hub,
+        &list.poller,
+        &list.followers,
+        &query(cpu_descending(), false),
+    )
+    .await;
+    sleep(Duration::from_secs(1)).await;
+    sorted.set_window(0, 6, true);
+    let (_, opened) = batches.recv().await.expect("a first batch");
+    assert!(has_metric_columns(&opened), "{:?}", opened.columns);
+    assert_eq!(window_ids(&opened), BY_CPU);
+    assert_eq!(
+        cells_of(&opened, "CPU"),
+        [9, 6, 6, 4, 3, 2].map(|milli| Cell::Int(milli * 1_000_000))
+    );
+    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+    drop(stuck);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_scope_that_never_answers_lets_the_first_batch_out_at_the_bound_and_the_order_settles() {
     let fake = cluster(true).await;
     fake.state().metrics_takes = Duration::from_secs(20);

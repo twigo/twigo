@@ -98,8 +98,9 @@ pub struct SetWindow {
     /// Exclusive.
     pub end: u32,
     /// Whether the list reads its metric columns now: one of them is
-    /// drawn or sorted by, and the document is visible. Only then are the
-    /// namespaces of the window's rows polled (ARCHITECTURE 3.6).
+    /// drawn or sorted by, the document is visible, and the list's editor
+    /// is on screen. Only then are the namespaces of the window's rows
+    /// polled (ARCHITECTURE 3.6).
     pub metrics: bool,
 }
 
