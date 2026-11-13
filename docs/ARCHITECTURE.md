@@ -531,6 +531,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A list of chosen namespaces never asks for the cluster.
   - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
     A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
+    A row that enters the filters, as a pod does that turns CrashLoopBackOff under a text filter, takes the sample the poller already holds, since the poller tells only what changes.
     The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).
   - Absence is no data and never zero: pending and finished pods, pods too young for two scrapes and unscraped nodes are missing from the answer, a missing key has no sample, and a real zero is `0`.
   - A scope that fails is a state of its readers, `unavailable` for a 503 whose body is plain text and no Status, a 404 or a failed connection, and `forbidden` for a 403, never an error on screen; it holds no value until it answers again, and retries on the backoff of 3.2.

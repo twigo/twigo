@@ -90,6 +90,13 @@ impl Rig {
     }
 
     fn flush(&mut self) -> Option<ListBatch> {
+        self.flush_with(|_, _| None)
+    }
+
+    fn flush_with(
+        &mut self,
+        held: impl Fn(&str, &str) -> Option<Arc<Sample>>,
+    ) -> Option<ListBatch> {
         let delta = match self.store.drain(&self.feed) {
             Drained::Reset { items, columns } => Delta::Reset {
                 rows: items,
@@ -107,6 +114,7 @@ impl Rig {
             }
         };
         self.view.apply(delta);
+        self.view.sample_entered(held);
         self.view.batch(ViewState::Ready)
     }
 }
@@ -972,6 +980,35 @@ fn a_sample_goes_with_its_row_and_a_new_uid_has_none() {
         cpu_of(&again, "kind-test/a/web-1"),
         Some(ipc::Cell::Null),
         "no data, no zero"
+    );
+}
+
+#[test]
+fn a_row_that_enters_the_filters_takes_the_sample_the_poller_holds_at_once() {
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    let mut rig = Rig::new(&asked);
+    rig.view.set_api(served());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    rig.store.upsert(pod("a", "web-2", "Running", "0"));
+    rig.flush();
+    let held = |namespace: &str, name: &str| match (namespace, name) {
+        ("a", "web-1") => used(50, 7),
+        _ => None,
+    };
+
+    rig.store.upsert(pod("a", "web-1", "CrashLoopBackOff", "0"));
+    rig.store.upsert(pod("a", "web-2", "CrashLoopBackOff", "0"));
+    let entered = rig.flush_with(held).unwrap();
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-1"),
+        Some(ipc::Cell::Int(50)),
+        "the poller's sample, though it holds still and is told no more"
+    );
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-2"),
+        Some(ipc::Cell::Null),
+        "no sample, no zero"
     );
 }
 

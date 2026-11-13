@@ -246,6 +246,22 @@ impl Board {
         }
     }
 
+    fn sample(&self, id: u64, namespace: &str, name: &str) -> Option<Arc<Sample>> {
+        let state = self.state();
+        let member = state.members.get(&id)?;
+        if !member.wants.hears(namespace, name) {
+            return None;
+        }
+        state.requests.values().find_map(|request| {
+            request
+                .answer
+                .as_ref()?
+                .samples
+                .get(namespace, name)
+                .cloned()
+        })
+    }
+
     /// A scope covered by another has no request of its own. The cluster covers the others
     /// only while it answers, so one that is forbidden or unavailable hides no namespace.
     fn replan(self: &Arc<Self>, state: &mut State) {
@@ -483,6 +499,13 @@ impl Reader {
 
     pub fn wants(&self) -> &HashSet<Scope> {
         &self.wants
+    }
+
+    /// The sample the answers hold of a key this reader wants, and none of another's.
+    pub fn sample(&self, namespace: &str, name: &str) -> Option<Arc<Sample>> {
+        self.context
+            .board(self.kind)
+            .sample(self.id, namespace, name)
     }
 
     pub fn drain(&self) -> Update {

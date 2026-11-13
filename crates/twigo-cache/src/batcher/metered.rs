@@ -33,6 +33,7 @@ struct Metered {
     poller: Poller,
     hub: Hub,
     _held: (Arc<Clients>, tempfile::TempDir),
+    query: ListQuery,
     batcher: Option<Batcher>,
     batches: mpsc::UnboundedReceiver<(Instant, ListBatch)>,
     columns: Vec<twigo_ipc::Column>,
@@ -106,12 +107,11 @@ async fn open(
     hub: &Hub,
     poller: &Poller,
     followers: &Arc<Followers>,
-    sort: Option<Sort>,
-    all: bool,
+    query: &ListQuery,
 ) -> (Batcher, mpsc::UnboundedReceiver<(Instant, ListBatch)>) {
-    let namespaces: &[&str] = if all { &[] } else { &["a", "b"] };
-    let subscription = hub.rows(rows(namespaces)).await.unwrap();
-    let spec = Spec::new("kind-test", &query(sort, all)).unwrap();
+    let namespaces: Vec<&str> = query.namespaces.iter().map(String::as_str).collect();
+    let subscription = hub.rows(rows(&namespaces)).await.unwrap();
+    let spec = Spec::new("kind-test", query).unwrap();
     let (sender, batches) = mpsc::unbounded_channel();
     let batcher = Batcher::spawn(
         subscription,
@@ -124,14 +124,14 @@ async fn open(
 
 impl Metered {
     async fn start(fake: Fake, sort: Option<Sort>) -> Self {
-        Self::open_after(fake, sort, true, false).await
+        Self::of(fake, query(sort, false), true).await
     }
 
     async fn start_all(fake: Fake, sort: Option<Sort>) -> Self {
-        Self::open_after(fake, sort, true, true).await
+        Self::of(fake, query(sort, true), true).await
     }
 
-    async fn open_after(fake: Fake, sort: Option<Sort>, watched: bool, all: bool) -> Self {
+    async fn of(fake: Fake, query: ListQuery, watched: bool) -> Self {
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
         let followers = Arc::new(Followers::new(
@@ -142,9 +142,10 @@ impl Metered {
         if watched {
             discovered(&followers).await;
         }
-        let (batcher, batches) = open(&hub, &poller, &followers, sort, all).await;
+        let (batcher, batches) = open(&hub, &poller, &followers, &query).await;
         Self {
             fake,
+            query,
             followers,
             poller,
             hub,
@@ -162,7 +163,8 @@ impl Metered {
     async fn reopen(&mut self, sort: Option<Sort>, pause: Duration) {
         self.batcher = None;
         sleep(pause).await;
-        let (batcher, batches) = open(&self.hub, &self.poller, &self.followers, sort, false).await;
+        self.query.sort = sort;
+        let (batcher, batches) = open(&self.hub, &self.poller, &self.followers, &self.query).await;
         self.batcher = Some(batcher);
         self.batches = batches;
     }
@@ -282,7 +284,7 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
 
 #[tokio::test(start_paused = true)]
 async fn a_list_opened_before_any_discovery_answered_gets_its_columns_once_it_does() {
-    let mut list = Metered::open_after(cluster(true).await, None, false, false).await;
+    let mut list = Metered::of(cluster(true).await, query(None, false), false).await;
     list.batcher().set_window(0, 6, true);
     let before = first(&mut list).await;
     assert!(
@@ -462,6 +464,47 @@ async fn the_cells_arrive_change_in_place_and_an_unchanged_answer_sends_no_batch
     list.fake.pod_usage("a", "p1", &[("main", "2m", "1Mi")]);
     let quiet = list.watch(Duration::from_secs(60)).await;
     assert!(quiet.is_empty(), "a request's time is no change: {quiet:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_that_enters_the_filters_has_the_value_the_poller_holds_though_it_never_changes() {
+    let labelled = |name: &str, labels: serde_json::Value| {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": name, "namespace": "a", "uid": format!("uid-{name}"), "labels": labels },
+        })
+    };
+    let fake = cluster(true).await;
+    fake.put(
+        "",
+        "pods",
+        Some("a"),
+        labelled("p2", json!({ "tier": "front" })),
+    );
+    let mut asked = query(None, false);
+    asked.label_selector = Some("tier=front".to_owned());
+    let mut list = Metered::of(fake, asked, true).await;
+    list.batcher().set_window(0, 6, true);
+    let before = list.watch(Duration::from_secs(40)).await;
+    assert_eq!(
+        list.cpus(&before, "kind-test/a/p2").last(),
+        Some(&Cell::Int(4_000_000))
+    );
+    assert!(list.cpus(&before, "kind-test/a/p1").is_empty(), "left out");
+
+    list.fake.put(
+        "",
+        "pods",
+        Some("a"),
+        labelled("p1", json!({ "tier": "front" })),
+    );
+    let after = list.watch(Duration::from_secs(1)).await;
+    assert_eq!(
+        list.cpus(&after, "kind-test/a/p1"),
+        [Cell::Int(2_000_000)],
+        "its sample has held still since before it entered, so no poll would tell it again"
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -157,6 +157,7 @@ async fn run(
             view.set_api(metrics.api());
             metrics.want(view.wants(reading));
             view.samples(metrics.drain());
+            view.sample_entered(|namespace, name| metrics.sample(namespace, name));
         }
         if let Some(batch) = view.batch(state) {
             unacked = Some(batch.seq);

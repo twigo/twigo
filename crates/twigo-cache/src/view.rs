@@ -409,6 +409,8 @@ pub struct QueryView {
     seq: u32,
     /// None while the context serves no metrics for the list's resource.
     metrics: Option<Metrics>,
+    /// Rows that entered the index without a sample since `sample_entered` last ran.
+    entered: Vec<RowKey>,
 }
 
 impl QueryView {
@@ -425,6 +427,7 @@ impl QueryView {
             sent: Sent::default(),
             seq: 0,
             metrics: None,
+            entered: Vec::new(),
         }
     }
 
@@ -551,6 +554,27 @@ impl QueryView {
                 .cloned();
             if let Some(key) = key {
                 self.set_sample(&key, change.sample);
+            }
+        }
+    }
+
+    /// Gives the rows that entered the index since the last call the sample the poller already
+    /// holds, which it tells no more of until it changes.
+    pub fn sample_entered(&mut self, held: impl Fn(&str, &str) -> Option<Arc<Sample>>) {
+        for key in std::mem::take(&mut self.entered) {
+            let Some(tracked) = self
+                .rows
+                .get(&key)
+                .filter(|tracked| tracked.sample.is_none())
+            else {
+                continue;
+            };
+            let found = held(
+                tracked.row.meta.namespace.as_deref().unwrap_or_default(),
+                &tracked.row.meta.name,
+            );
+            if found.is_some() {
+                self.set_sample(&key, found);
             }
         }
     }
@@ -692,6 +716,9 @@ impl QueryView {
                 .entry(row.meta.namespace.clone().unwrap_or_default())
                 .or_default()
                 .insert(row.meta.name.clone(), key.clone());
+            if sample.is_none() {
+                self.entered.push(key.clone());
+            }
         }
         self.rows.insert(
             key,

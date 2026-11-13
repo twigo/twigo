@@ -361,6 +361,24 @@ async fn a_pod_alone_asks_for_itself_and_none_when_a_list_reads_its_namespace() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_reader_can_ask_for_the_sample_of_a_key_it_wants_and_of_no_other() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    assert!(reader.sample("a", "p1").is_none(), "it wants nothing yet");
+    reader.want(namespace("a"));
+    let mut other = rig.context.reader(Kind::Pods);
+    other.want(namespace("b"));
+    rig.fake.pod_usage("b", "q1", &[("main", "3m", "1Mi")]);
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(reader.sample("a", "p1").map(|s| s.cpu), Some(50_172_044));
+    assert!(reader.sample("a", "gone").is_none());
+    assert!(
+        reader.sample("b", "q1").is_none(),
+        "another reader's namespace is no concern of this one, which would hear no change of it"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn nodes_have_one_scope_and_the_cluster_one_covers_the_namespaces() {
     let rig = rig().await;
     rig.fake.node_usage("n1", "277147502n", "2509700Ki");
