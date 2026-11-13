@@ -58,7 +58,8 @@ The sources are in the appendix.
 | Login wall, paid tiers for basics (hotbar, MCP, extensions), closed source                                                                              | Lens since 2023                                    | Apache-2.0, no account, every core feature free (0.2)                                                                                                         |
 | Full list of every kind with no `limit`; one watch per namespace; a full app instance per open cluster (iframes)                                        | Freelens / OpenLens                                | Shared, ref-counted Table watches per GVR and scope (per namespace, widened above 4 namespaces); one webview; per-cluster budgets (3.2)                       |
 | Unbatched global events per watch event; full snapshot per change; merge on the UI thread                                                               | Kubeli, srelens, Aptakube                          | Rust coalesces, sorts and windows; one Channel per view; acks for flow control (3.5)                                                                          |
-| Hangs with "All namespaces" on 30k pods; freezes on big ConfigMaps; eager metrics on huge lists                                                         | Aptakube #499, #575                                | Rust owns sort, filter and window; metrics only for visible rows; large values rendered lazily (3.4, 3.6)                                                     |
+| Hangs with "All namespaces" on 30k pods; eager metrics on huge lists                                                                                    | Aptakube #499                                      | Rust owns sort, filter and window; metrics only for the rows in view, polled by a poller of its own (3.4, 3.6)                                                |
+| Freezes on big ConfigMaps                                                                                                                               | Aptakube #575                                      | Large values rendered lazily (3.6)                                                                                                                            |
 | Exec plugins not found from a Dock launch; kubelogin re-run every 30 s, opening browser tabs; device codes lost; plugins run for every context at start | Lens #7956, Headlamp #7879, Freelens < 2.0         | Login-shell environment, a credential runner of our own: timeout, single-flight, no retry loops, visible prompts; connect only on space activation (6.1, 6.2) |
 | Empty views after a fixed cache-sync timeout                                                                                                            | k9s PR #4023                                       | Typed view states: `syncing / ready / relisting / forbidden / unauthorized / error` (3.7)                                                                     |
 | Port-forwards tied to one pod; no failover behind a Service; random pod names restored                                                                  | k9s, Aptakube #384, #519                           | Forward targets are Services or workloads, their pods read through EndpointSlices, and a new pod is taken when the current one leaves (4.6)                   |
@@ -183,10 +184,11 @@ twigo/
 ├─ crates/
 │  ├─ twigo-core/             app services: spaces, settings layers, catalog, command bus and its actions, policy proxy and approval broker
 │  ├─ twigo-kube/             contexts, client factory, credential runner, discovery/OpenAPI cache
-│  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows
+│  ├─ twigo-cache/            watch hub (upstreams, row stores, query views, batching), the discovery it follows, the metrics poller
 │  ├─ twigo-describe/         describers by GroupKind: an object and its related facts → the Overview document (4.3)
 │  ├─ twigo-sessions/         logs, exec/attach, port-forward manager, pty terminal
 │  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
+│  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
@@ -364,7 +366,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - A relist, after `410 Gone` or over rebuilt clients, keeps the rows on screen and replaces them with its own once it ends.
   - A changed fingerprint or proxy variables, or a context no source lists any more, retire the connections of its clients at once, so its watches re-open over rebuilt clients and relist, or show that no source lists the context.
     Such clients are abandoned, not only retired: a watch that starts on them later still learns that they were replaced, which a count of retirements, followed from the moment it subscribes, would not tell it; so are clients a build finishes after such a change.
-  - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus and metrics do ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s, the interval of metrics (3.6).
+  - A resource the server cannot watch, which answers a watch with 405 as ComponentStatus does ([`handleWatch`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L268-L270)), is listed in pages again every 15 s.
+    Metrics are not relisted by the hub, which would reset every reader on every poll, linger 60 s after the last, and spend a watch on the 405: the poller of 3.6 reads them.
 - **Backoff.**
   UI-friendly: 0.5–5 s with jitter, reset on every event.
   kube-runtime's default of 0.8–30 s leaves lists stale for a long time after an API-server restart.
@@ -403,7 +406,7 @@ Table details that the decoder handles, checked on kind clusters from 1.33 to 1.
   Other date columns refresh on every modify event.
 - Every server built on `k8s.io/apiserver` implements Table, aggregated ones such as metrics-server included.
   A server that does not answers through the JSON fallback with raw objects, which get the metadata columns, Name and Age; the namespace comes from meta-lite, as for every kind.
-- Some objects have no uid or resourceVersion: ComponentStatus, and metrics-server's metrics.
+- Some objects have no uid or resourceVersion: ComponentStatus.
   Their rows keep only a name, and the row store keys them by namespace and name.
 - An empty Table may send `rows: null`, and metrics-server then sends no column definitions either.
 
@@ -439,6 +442,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - Rust derives sort keys: a ratio by its fraction, then its total, `0/0` as whole; a count such as `3 (5m ago)` by the count, then the duration; durations such as `1h5m` in seconds; Age by `creationTimestamp`, the youngest first.
     Other text sorts naturally: runs of ASCII digits by value, ASCII letters folded, ties by code points.
     Empty cells come first, then numbers, ratios and text; rows with equal keys follow their ids, ascending in either direction.
+  - A CPU or Memory cell is an integer of nanocores or bytes, empty for a row without a sample, which sorts last in both directions; no text filter, count, group or value reads it (3.6).
   - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
 - Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
   A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns or new upstreams send every row again.
@@ -508,9 +512,27 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
   It runs only while the object's events are shown: the Events tab, or the events section of the drawer or the Overview.
   No field of an event is indexed and the API server keeps no watch cache for events by default, so such a query is filtered, by inference from the source, from the namespace's events in etcd ([research](research/details.md#events)).
 - **Metrics** (metrics-server).
-  - `metrics.k8s.io` cannot be watched, so it is polled every 15 s.
-  - Only the namespaces of the rows currently in a visible window are polled, and only while a CPU or memory column is shown.
-  - The values merge into the rows in Rust as extra cells.
+  - `metrics.k8s.io` cannot be watched, and its lists carry no `resourceVersion`, uid or ETag, so a poller of its own, `twigo_cache::metrics`, reads it beside the hub, as plain JSON through the UI's client with gzip asked for: the Table has no namespace, containers or time.
+  - What a context serves comes from the discovery its cluster last confirmed, in three states.
+    Absent: no CPU and Memory columns, and no request to the group.
+    Served: `pods`, `nodes`, each or both, at `v1` before `v1beta1`, as kubectl picks.
+    Stale: the APIService exists and its version lists no resources, as while metrics-server is down.
+    Served and stale give pod and node lists the columns from their first batch, whatever the poller has answered, so the columns never depend on a response.
+    The core follows this once per context for as long as a list or an object of it reads metrics, whether or not the webview has asked for discovery.
+  - A scope, a namespace or the cluster, is listed every 15 s, the metrics-server manifest's and the chart's resolution, while a reader wants it, the first time at once; with the last reader gone it is not listed again, with no linger.
+    Two readers of a scope share one request.
+    A pod open alone asks for its namespace with a field selector on its name, and asks nothing when a list reads its namespace.
+  - A list reads metrics only while its webview says a CPU or Memory column is drawn or sorted by and the document is visible, and it wants nothing once a batch has gone unacknowledged for 15 s, as a hidden window leaves it.
+    It wants the namespaces of the rows in its window, one request each while they are few.
+    A list of all namespaces that reads more than 10 asks for the cluster instead, since a list under 128 KB is never compressed: on kind 1.37 with 5,095 pods in 13 namespaces, the lists of the 10 largest took 73,314 gzipped bytes and the 11 largest 83,975, against the cluster's 75,103 (`cargo run --release -p twigo-cache --example metrics_cost 41`, 2026-11-13), and the UI's request budget is 28 streams (3.2).
+    A list of chosen namespaces never asks for the cluster.
+  - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
+  - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
+    A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
+    The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).
+  - Absence is no data and never zero: pending and finished pods, pods too young for two scrapes and unscraped nodes are missing from the answer, a missing key has no sample, and a real zero is `0`.
+  - A scope that fails is a state of its readers, `unavailable` for a 503 whose body is plain text and no Status, a 404 or a failed connection, and `forbidden` for a 403, never an error on screen; it holds no value until it answers again, and retries on the backoff of 3.2.
+  - An open pod or node reads the same sample: its usage is a part of its batch with its own dirty flag, so a changed sample does not describe the Overview again (4.3).
 - **Discovery and OpenAPI.**
   - Aggregated discovery, GA since 1.30: one request each to `/api` and `/apis`, with client-go's `Accept`, the aggregated form first and plain JSON after it ([`acceptDiscoveryFormats`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/discovery/discovery_client.go#L68)).
     kube's `run_aggregated()` is not used: it sends no `If-None-Match`, and it reads a legacy `APIGroupList` as an empty list, since its `items` default ([`v2.rs`](https://github.com/kube-rs/kube/blob/5.0.0/kube-core/src/discovery/v2.rs#L20-L28)).
@@ -784,6 +806,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
+  - A pod's and a node's usage is not part of the document: it is a part of the object's batch beside it, from the poller's sample (3.6), each container that has one against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
     Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
@@ -795,7 +818,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 ### 4.4 Resource tables and the keyboard
 
-- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, CPU and memory when available, and Namespace unless the query names one namespace.
+- Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, and Namespace unless the query names one namespace.
+  Pod and node lists of a context that serves the Metrics API (3.6) also get CPU and Memory, of priority 0, just before the Age column, whose cells are numbers the webview prints as kubectl does.
   Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
 - What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, and the tone of its abnormal values.
   Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
