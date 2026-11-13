@@ -1203,8 +1203,7 @@ class Subscription {
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
-    // Rust's layout has the two metric columns before it has the server's.
-    const layout = knows ? this.#columns : join ? METRIC_COLUMNS : NO_COLUMNS;
+    const layout = knows ? this.#columns : NO_COLUMNS;
     const columnsChanged = first || layout !== this.#sent.layout;
     const metrics = knows ? (join?.state ?? null) : null;
     const metricsChanged = metrics !== null && metrics !== this.#sent.metrics;

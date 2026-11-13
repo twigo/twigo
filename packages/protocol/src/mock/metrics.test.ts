@@ -161,7 +161,7 @@ test.each([
   ["pods", query()],
   ["nodes", NODES],
 ])(
-  "a %s list that has not synced yet has CPU and Memory alone in every batch that has columns, and none with an empty list of them",
+  "a %s list that has not synced yet has an empty list of columns, and CPU and Memory come with the server's, just before Age",
   async (_, q) => {
     const backend = createMockBackend("live");
     const batches: ListBatch[] = [];
@@ -187,11 +187,12 @@ test.each([
     const named = batches.flatMap((batch) =>
       batch.columns ? [batch.columns.map((column) => column.name)] : [],
     );
-    expect(named[0]).toEqual(["CPU", "Memory"]);
+    expect(named[0]).toEqual([]);
     expect(named.length).toBeGreaterThan(1);
-    for (const names of named) {
-      expect(names).toContain("CPU");
-      expect(names).toContain("Memory");
+    for (const names of named.slice(1)) {
+      const age = names.indexOf("Age");
+      expect(names).toContain("Name");
+      expect(names.slice(age - 2, age)).toEqual(["CPU", "Memory"]);
     }
   },
 );

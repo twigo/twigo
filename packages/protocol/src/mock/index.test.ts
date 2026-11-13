@@ -432,7 +432,7 @@ test("text filters match and negate", async () => {
   expect(total).toBe(5000);
 });
 
-test("the server's columns come once a list knows them, from its first page, and only CPU and Memory before, as in Rust", async () => {
+test("columns come once a list knows them, from its first page, and an empty list before, as in Rust", async () => {
   for (const [scenario, known] of [
     ["queued", false],
     ["connecting", false],
@@ -444,7 +444,7 @@ test("the server's columns come once a list knows them, from its first page, and
     expect(
       sub.batches[0]?.columns?.map((column) => column.name),
       `${scenario} knows its columns`,
-    ).toEqual(known ? expect.arrayContaining(["Name"]) : ["CPU", "Memory"]);
+    ).toEqual(known ? expect.arrayContaining(["Name"]) : []);
   }
 });
 
