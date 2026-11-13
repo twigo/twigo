@@ -616,7 +616,7 @@ impl Core {
     }
 
     /// The context's discovery, followed once for the webview's watches and for the lists and
-    /// objects that read what the context serves.
+    /// objects that read what the context serves, for as long as any of them holds the follower.
     async fn followed(&self, context: &str) -> Arc<Followed> {
         self.followers
             .get(context, self.catalog.fingerprint(context))
@@ -708,7 +708,7 @@ impl Core {
                 return std::future::pending().await;
             };
             let followed = core.followed(&context).await;
-            core.metrics.context(&context, followed.api()).reader(kind)
+            core.metrics.context(&context, &followed).reader(kind)
         })
     }
 
@@ -1004,7 +1004,6 @@ impl Core {
                     let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
                     self.state.saw(&names, Timestamp::now());
                     self.connections.keep(listed.iter());
-                    self.followers.keep(&names);
                 }
                 if contexts.changed().await.is_err() {
                     return;

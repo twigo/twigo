@@ -773,8 +773,11 @@ counts: Array<ValueCount> | null,
 groups: Array<RowGroup> | null, 
 /**
  * For a list with metric columns: whether their samples arrive,
- * present in the first batch that has the columns and whenever it
- * changes.
+ * present once a scope has answered or failed, and whenever it
+ * changes. A list says none before that, so its first batch with the
+ * columns has none unless the API is stale, which says `unavailable`
+ * with them, and it keeps the one it said while its scopes are asked
+ * again.
  */
 metrics: MetricsState | null, };
 
@@ -1115,7 +1118,10 @@ events: EventList | null,
 related: Related | null, 
 /**
  * Present when it changed, while the usage part is shown, for a pod
- * or a node of a context that serves the Metrics API.
+ * or a node of a context that serves the Metrics API, and not before
+ * the scope that serves the object has answered or failed once: a
+ * `ready` usage whose `used` is null says that an answer came without
+ * the object.
  */
 usage: Usage | null, };
 

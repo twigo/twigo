@@ -10,10 +10,11 @@ use twigo_ipc::Discovered;
 use twigo_ipc::{Cell, Gvr, ListQuery, MetricsState, Sort, ViewState};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
+use twigo_kube::kubeconfig::Fingerprint;
 
 use super::*;
 use crate::discovery::Followers;
-use crate::fake::Fake;
+use crate::fake::{Fake, fingerprint};
 use crate::hub::{Hub, Query, Resource, RowFormat};
 use crate::metrics::{FIRST_ANSWER, Kind, Poller};
 
@@ -80,22 +81,20 @@ fn query(sort: Option<Sort>, all: bool) -> ListQuery {
     }
 }
 
+fn entry() -> watch::Receiver<Option<Fingerprint>> {
+    watch::channel(Some(fingerprint("https://a.example:6443"))).1
+}
+
 fn opening(poller: &Poller, followers: &Arc<Followers>) -> Opening {
     let (poller, followers) = (poller.clone(), Arc::clone(followers));
     Box::pin(async move {
-        let followed = followers
-            .get("kind-test", async { watch::channel(None).1 })
-            .await;
-        poller
-            .context("kind-test", followed.api())
-            .reader(Kind::Pods)
+        let followed = followers.get("kind-test", async { entry() }).await;
+        poller.context("kind-test", &followed).reader(Kind::Pods)
     })
 }
 
 async fn discovered(followers: &Followers) {
-    let followed = followers
-        .get("kind-test", async { watch::channel(None).1 })
-        .await;
+    let followed = followers.get("kind-test", async { entry() }).await;
     let mut resources = followed.follow();
     let waited = async { while !matches!(resources.next().await, Discovered::Ready { .. }) {} };
     timeout_at(Instant::now() + Duration::from_secs(600), waited)
@@ -238,7 +237,7 @@ async fn nothing_is_polled_before_a_window_or_while_the_columns_are_not_read() {
             .any(|c| c.name == "CPU"),
         "the columns are there whatever the poller has answered"
     );
-    assert_eq!(batches[0].metrics, Some(MetricsState::Ready));
+    assert_eq!(batches[0].metrics, None, "nothing is read, so nothing said");
     assert_eq!(requests_to_the_group(&list.fake), 0, "metrics: false");
 
     list.batcher().set_window(0, 6, true);
@@ -277,7 +276,7 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     list.batcher().set_window(0, 6, true);
     let opened = first(&mut list).await;
     assert!(has_metric_columns(&opened), "{:?}", opened.columns);
-    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+    assert_eq!(opened.metrics, None, "no scope has answered yet");
     assert_eq!(
         opened.upserts.len(),
         6,
@@ -289,12 +288,22 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     list.batcher().set_window(0, 6, true);
     let again = first(&mut list).await;
     assert!(has_metric_columns(&again), "{:?}", again.columns);
-    assert_eq!(again.metrics, Some(MetricsState::Ready));
+    assert_eq!(
+        again.metrics, None,
+        "its scopes were dropped with the last list"
+    );
     assert_eq!(again.upserts.len(), 6, "and nothing is sent twice");
     let rest = list.watch(Duration::from_secs(2)).await;
     assert!(
         rest.iter().all(|batch| batch.columns.is_none()),
         "the columns do not change later: {rest:?}"
+    );
+    assert_eq!(
+        rest.iter()
+            .filter_map(|batch| batch.metrics)
+            .collect::<Vec<_>>(),
+        [MetricsState::Ready],
+        "the state comes with the first answer"
     );
 }
 
@@ -427,7 +436,7 @@ async fn a_scope_that_never_answers_lets_the_first_batch_out_at_the_bound_and_th
         at - asked
     );
     assert_eq!(window_ids(&bounded), BY_ID, "as it is: no sample yet");
-    assert_eq!(bounded.metrics, Some(MetricsState::Ready));
+    assert_eq!(bounded.metrics, None, "nothing has answered");
 
     let later = list.watch(Duration::from_secs(30)).await;
     let moved = later
@@ -645,7 +654,10 @@ async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_na
         0,
         "one request for the cluster, none per namespace"
     );
-    assert_eq!(batches[0].metrics, Some(MetricsState::Ready));
+    assert_eq!(
+        batches.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Ready)
+    );
 
     let fake = cluster(true).await;
     fake.state()
@@ -801,4 +813,156 @@ async fn a_stale_api_keeps_the_columns_says_unavailable_and_recovers() {
         list.cpus(&back, "kind-test/a/p1").last(),
         Some(&Cell::Int(2_000_000))
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_api_that_is_uninstalled_takes_the_columns_away() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = cluster(false).await;
+    fake.stale_metrics("v1beta1");
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let down = list.watch(Duration::from_secs(5)).await;
+    assert!(has_metric_columns(&down[0]));
+    assert_eq!(down[0].metrics, Some(MetricsState::Unavailable));
+
+    list.fake.state().served.remove(crate::metrics::GROUP);
+    list.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = list.watch(Duration::from_secs(120)).await;
+    let columns = gone
+        .iter()
+        .find_map(|batch| batch.columns.as_ref())
+        .expect("the columns change");
+    assert!(
+        columns
+            .iter()
+            .all(|column| column.name != "CPU" && column.name != "Memory"),
+        "{columns:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_many_namespaces_whose_answers_are_slow_reaches_the_bound_and_the_order_settles()
+{
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    let namespaces: Vec<String> = (0..40).map(|n| format!("ns-{n:02}")).collect();
+    for (at, namespace) in namespaces.iter().enumerate() {
+        fake.add("pods", Some(namespace), "p");
+        fake.pod_usage(namespace, "p", &[("main", &format!("{}m", at + 1), "1Mi")]);
+    }
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/pods".to_owned());
+    fake.state().metrics_takes = Duration::from_millis(250);
+    let mut list = Metered::start_all(fake, cpu_descending()).await;
+    sleep(Duration::from_secs(1)).await;
+    let asked = Instant::now();
+    list.batcher().set_window(0, 40, true);
+    let (at, bounded) = first_at(&mut list).await;
+    assert!(
+        (FIRST_ANSWER..=FIRST_ANSWER + FLUSH).contains(&(at - asked)),
+        "the answers come four at a time, so they are not all in by the bound: {:?}",
+        at - asked
+    );
+    let known = cells_of(&bounded, "CPU")
+        .iter()
+        .filter(|cell| **cell != Cell::Null)
+        .count();
+    assert!(
+        (1..40).contains(&known),
+        "the batch leaves with what has come: {known} of 40"
+    );
+
+    let expected: Vec<String> = namespaces
+        .iter()
+        .rev()
+        .map(|namespace| format!("kind-test/{namespace}/p"))
+        .collect();
+    let later = list.watch(Duration::from_secs(10)).await;
+    let settled = later
+        .iter()
+        .rev()
+        .find_map(|batch| batch.window.as_ref())
+        .expect("the order settles when the rest answer");
+    assert_eq!(
+        settled
+            .ids
+            .iter()
+            .map(|id| id.0.as_str())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_ne!(window_ids(&bounded), expected, "it was not the true order");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_says_ready_with_its_first_answer_and_not_before() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_secs(3);
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let early = list.watch(Duration::from_secs(2)).await;
+    assert!(has_metric_columns(&early[0]));
+    assert!(
+        early.iter().all(|batch| batch.metrics.is_none()),
+        "nothing has answered: {:?}",
+        early.iter().map(|batch| batch.metrics).collect::<Vec<_>>()
+    );
+
+    let answered = list.watch(Duration::from_secs(5)).await;
+    assert_eq!(
+        answered
+            .iter()
+            .filter_map(|batch| batch.metrics)
+            .collect::<Vec<_>>(),
+        [MetricsState::Ready]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_stops_reading_and_reads_again_under_a_refusal_never_says_ready_between() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let first = list.watch(Duration::from_secs(3)).await;
+    assert_eq!(
+        first.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Forbidden)
+    );
+
+    list.batcher().set_window(0, 6, false);
+    let paused = list.watch(Duration::from_secs(30)).await;
+    list.fake.state().metrics_takes = Duration::from_secs(3);
+    list.batcher().set_window(0, 6, true);
+    let again = list.watch(Duration::from_secs(2)).await;
+    let later = list.watch(Duration::from_secs(5)).await;
+    let said: Vec<MetricsState> = paused
+        .iter()
+        .chain(&again)
+        .chain(&later)
+        .filter_map(|batch| batch.metrics)
+        .collect();
+    assert!(
+        said.iter().all(|state| *state == MetricsState::Forbidden),
+        "{said:?}"
+    );
+    assert_eq!(polls(&list.fake, "a"), 2, "it did read again");
 }

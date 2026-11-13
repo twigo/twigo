@@ -245,20 +245,24 @@ fn has_metric_columns(batch: &ListBatch) -> bool {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_list_opened_after_the_resources_came_has_its_columns_in_its_first_batch_even_opened_again()
+async fn a_list_opened_after_the_resources_came_has_its_columns_in_its_first_batch_even_after_nothing_follows_the_space()
  {
     let (path, context) = cluster();
     let dir = tempfile::tempdir().unwrap();
     let (core, space) = core(dir.path(), &path, &context);
-    let mut resources = core.follow_resources(&space).await.unwrap();
+    let mut resources = Some(core.follow_resources(&space).await.unwrap());
     while !matches!(
-        tokio::time::timeout(WAIT, resources.next())
+        tokio::time::timeout(WAIT, resources.as_mut().unwrap().next())
             .await
             .expect("discovery within 180 s"),
         Discovered::Ready { .. }
     ) {}
 
-    for round in 0..2 {
+    for round in 0..3 {
+        if round == 2 {
+            drop(resources.take());
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
         let batches = opened_by_the_webview(&core, &space, None).await;
         let first = batches
             .iter()

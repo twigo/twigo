@@ -27,6 +27,7 @@ Findings that belong to no step yet.
   - A view keeps its last samples while it reads none, as a hidden window does, so they show for as long as the first answer takes when the window comes back; nothing marks them as old.
   - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.
   - The core's RSS holds the poller's 0.87 MiB at 5,095 pods against a budget of 150 MB that the bench's runs already read 141 to 153 MB of (below, "The bench").
+  - A context's follower that a list or an object holds while no watch does, or while the watch is replaced, keeps a CRD or APIService upstream that a `401` ended: following again asks only a follower that a failed credential stopped to fetch again, so a CRD installed since goes unseen until nothing holds the follower or the context's fingerprint changes (ARCHITECTURE 3.6).
   - `tests::twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `twigo-core` failed once in three full runs of its library tests on 2026-11-13 and passed alone every time; nothing in it reads metrics.
 - OpenAPI documents (`twigo_kube::openapi`, ARCHITECTURE 3.6):
   - The cache keeps every hash a group/version has had for good, so a CRD that is edited often leaves a file for each edit in the cache directory: nothing evicts them yet.

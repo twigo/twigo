@@ -52,11 +52,10 @@ async fn main() {
         std::env::temp_dir().join(format!("twigo-metrics-memory-{}", std::process::id()));
     let hub = Hub::new(connect);
     let followers = Followers::new(hub.clone(), Arc::new(Cache::new(&directory)));
-    let api = followers
+    let followed = followers
         .get(&context, async { watch::channel(None).1 })
-        .await
-        .api();
-    let served = Poller::new(hub).context(&context, api);
+        .await;
+    let served = Poller::new(hub).context(&context, &followed);
     while !served.api().columns(Kind::Pods) {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }

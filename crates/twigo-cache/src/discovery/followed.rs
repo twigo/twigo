@@ -1,12 +1,12 @@
-//! A context's discovery, followed once for the whole app (ARCHITECTURE 3.6):
-//! what `resources_watch` sends the webview and what pod and node lists read
-//! of the Metrics API come from one follower, so the fact is there when a list
-//! opens and outlives every list.
+//! A context's discovery, followed for as long as something follows it
+//! (ARCHITECTURE 3.6): what `resources_watch` sends the webview and what pod
+//! and node lists and open objects read of the Metrics API come from one
+//! follower, shared by all of them, which stops with the last of them.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
 
-use tokio::sync::{OnceCell, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use twigo_ipc::Discovered;
 use twigo_kube::discovery::Cache;
@@ -16,12 +16,27 @@ use super::{Follower, Retry};
 use crate::hub::Hub;
 use crate::metrics::Api;
 
-/// The follower of each context, started when it is first asked for and kept
-/// while the sources list the context.
+/// The follower of each context, started when something first asks for it and
+/// held by the watches of the context's resources and the readers of its metrics:
+/// with the last of them gone its watches and fetches stop.
 pub struct Followers {
     hub: Hub,
     cache: Arc<Cache>,
-    followed: Mutex<HashMap<String, Arc<OnceCell<Arc<Followed>>>>>,
+    contexts: Mutex<HashMap<String, Arc<Slot>>>,
+}
+
+#[derive(Default)]
+struct Slot {
+    /// Built under the lock, so two askers at once get one follower.
+    followed: tokio::sync::Mutex<Weak<Followed>>,
+    /// What the follower last confirmed, for the next one to begin from.
+    kept: Mutex<Option<Kept>>,
+}
+
+#[derive(Clone, Copy)]
+struct Kept {
+    fingerprint: Fingerprint,
+    api: Api,
 }
 
 impl Followers {
@@ -29,43 +44,44 @@ impl Followers {
         Self {
             hub,
             cache,
-            followed: Mutex::default(),
+            contexts: Mutex::default(),
         }
     }
 
-    /// The context's follower; `entry` is awaited only to start it.
+    /// The context's follower, a new one when nobody holds it; `entry` is awaited only to
+    /// start it. A new follower begins from the Metrics API's state its predecessor last
+    /// confirmed under the same fingerprint, so a list opened again has its columns in its
+    /// first batch, and its first answer corrects it.
     pub async fn get(
         &self,
         context: &str,
         entry: impl Future<Output = watch::Receiver<Option<Fingerprint>>>,
     ) -> Arc<Followed> {
-        let cell = Arc::clone(
-            self.followed
+        let slot = Arc::clone(
+            self.contexts
                 .lock()
                 .expect("followers lock")
                 .entry(context.to_owned())
                 .or_default(),
         );
-        let followed = cell
-            .get_or_init(|| async {
-                let follower = Follower::new(
-                    self.hub.clone(),
-                    Arc::clone(&self.cache),
-                    context.to_owned(),
-                    entry.await,
-                )
-                .await;
-                Arc::new(Followed::start(follower))
-            })
-            .await;
-        Arc::clone(followed)
-    }
-
-    pub fn keep(&self, listed: &HashSet<String>) {
-        self.followed
-            .lock()
-            .expect("followers lock")
-            .retain(|context, _| listed.contains(context));
+        let mut held = slot.followed.lock().await;
+        if let Some(followed) = held.upgrade() {
+            return followed;
+        }
+        let entry = entry.await;
+        let fingerprint = *entry.borrow();
+        let kept = (*slot.kept.lock().expect("kept lock"))
+            .filter(|kept| Some(kept.fingerprint) == fingerprint);
+        let follower = Follower::new(
+            self.hub.clone(),
+            Arc::clone(&self.cache),
+            context.to_owned(),
+            entry,
+        )
+        .await;
+        let followed = Arc::new(Followed::start(follower, kept, Arc::clone(&slot)));
+        *held = Arc::downgrade(&followed);
+        followed
     }
 }
 
@@ -77,20 +93,37 @@ pub struct Followed {
 }
 
 impl Followed {
-    fn start(mut follower: Follower) -> Self {
+    fn start(mut follower: Follower, kept: Option<Kept>, slot: Arc<Slot>) -> Self {
         let retry = follower.retry();
         let (found, resources) = watch::channel(None);
-        let (served, api) = watch::channel(Api::Absent);
+        let (served, api) = watch::channel(kept.map_or(Api::Absent, |kept| kept.api));
         let task = tokio::spawn(async move {
+            // Until the cluster answers, the kept state stands for as long as the context's
+            // fingerprint is the one it was kept for: neither the cluster's name, which comes
+            // first, nor a failure to reach it says the cluster no longer serves it.
+            let mut trusted = kept.map(|kept| kept.fingerprint);
             loop {
                 let discovered = follower.next().await;
-                let api = match &discovered {
-                    Discovered::Ready { .. } => follower.confirmed().map_or(Api::Absent, Api::of),
-                    Discovered::Pending { .. } | Discovered::Failed { .. } => Api::Absent,
-                };
-                // First, so whoever hears the resources reads what they serve.
-                served.send_if_modified(|served| std::mem::replace(served, api) != api);
-                found.send_replace(Some(discovered));
+                if matches!(discovered, Discovered::Ready { .. })
+                    || follower.fingerprint() != trusted
+                {
+                    trusted = None;
+                }
+                if trusted.is_none() {
+                    let reached = follower.api();
+                    // First, so whoever hears the resources reads what they serve.
+                    served.send_if_modified(|served| std::mem::replace(served, reached) != reached);
+                    *slot.kept.lock().expect("kept lock") =
+                        follower.fingerprint().map(|fingerprint| Kept {
+                            fingerprint,
+                            api: reached,
+                        });
+                }
+                found.send_if_modified(|found| {
+                    let changed = found.as_ref() != Some(&discovered);
+                    *found = Some(discovered);
+                    changed
+                });
             }
         });
         Self {

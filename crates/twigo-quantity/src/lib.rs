@@ -5,16 +5,41 @@
 //! ([`ParseQuantity`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L369-L375)),
 //! and caps a binary suffix's value at the largest int64
 //! ([L377-L381](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L377-L381)).
-//! `Value` and `MilliValue` round what they cut up, away from zero, also
-//! below zero ([`Value`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L813-L835),
-//! [`negativeScaleInt64`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/math.go#L166-L199)).
-//!
 //! Sums are made in billionths and rounded once by whoever reads them, as
-//! `Quantity.Add` sums exactly. What passes about 1.7 × 10^29 whole units is
-//! not read: apimachinery keeps it in an arbitrary-precision decimal, but
-//! its `Value`, `MilliValue` and `ScaledValue` overflow an int64 long before
-//! ([`ScaledValue`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L824-L835)),
-//! so nothing that reads a quantity as they do gets a meaning from it.
+//! `Quantity.Add` sums exactly.
+//!
+//! `Value` and `MilliValue` round what they cut up away from zero, in either
+//! sign, as apimachinery's do, for:
+//! - what `ParseQuantity` keeps as an `int64Amount`, a decimal of at most 18
+//!   digits and no finer than the nano, or a binary one without a fraction
+//!   that its precision test passes
+//!   ([L296-L346](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L296-L346)),
+//!   whose `Value` and `MilliValue` come from
+//!   [`AsScaledInt64`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/amount.go#L95-L101)
+//!   and [`negativeScaleInt64`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/math.go#L166-L199);
+//! - what it keeps as an `inf.Dec`
+//!   ([L348-L391](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/quantity.go#L348-L391))
+//!   while the value asked for is exact or positive, since
+//!   [`scaledValue`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/scale_int.go#L61-L68)
+//!   adds one to what it truncated, which is away from zero above zero.
+//!
+//! They do not for inputs that no server writes for a request, a limit or a
+//! usage, so nothing on screen changes:
+//! - A negative `inf.Dec` that is not exact at the scale asked, which is a
+//!   quantity of more than nine decimals or a binary suffix with a fraction:
+//!   `scaledValue` adds one whatever the sign, so it rounds toward +∞ where
+//!   these round away from zero. `-0.3Ki` has `Value` -306 there and -308
+//!   here.
+//! - A binary value whose digits times its suffix pass an i128 is unread
+//!   here, where `ParseQuantity` caps it at the largest int64:
+//!   `1000000000000000000000Ei` has `Value` 9223372036854775807 there.
+//! - A value past an int64 and up to about 1.7 × 10^29 whole units is read
+//!   exactly here, where `Value` and `MilliValue` overflow there: an
+//!   `int64Amount` that does not fit answers 0
+//!   ([`positiveScaleInt64`](https://github.com/kubernetes/apimachinery/blob/v0.37.0/pkg/api/resource/math.go#L138-L162)),
+//!   so `1e29` has `Value` 0, and an `inf.Dec` wraps, so
+//!   `100000000000000000000` has 7766279631452241920. What passes the i128 is
+//!   unread here, `1e30` among it, whose `Value` is 0 there too.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Quantity(i128);
@@ -220,6 +245,54 @@ mod tests {
         for text in ["1e30", "200000000000E", "1000000000000000000000000000000"] {
             assert_eq!(Quantity::parse(text), None, "{text}");
         }
+    }
+
+    fn read(text: &str) -> (i128, i128) {
+        let quantity = Quantity::parse(text).unwrap();
+        (quantity.milli(), quantity.value())
+    }
+
+    #[test]
+    fn what_apimachinery_keeps_as_an_int64_amount_or_as_an_exact_or_positive_decimal_reads_alike() {
+        let max = i128::from(i64::MAX);
+        for (text, milli, value) in [
+            ("-1n", -1, -1),
+            ("-1500m", -1500, -2),
+            ("-1.5", -1500, -2),
+            ("-1.5Ki", -1_536_000, -1536),
+            ("0.3Ki", 307_200, 308),
+            ("0.0000000001", 1, 1),
+            ("1.5Gi", 1_610_612_736_000, 1_610_612_736),
+            ("-1.5Gi", -1_610_612_736_000, -1_610_612_736),
+        ] {
+            assert_eq!(read(text), (milli, value), "{text}");
+        }
+        assert_eq!(
+            read("200000000000Ei").1,
+            max,
+            "its Value, not its MilliValue"
+        );
+    }
+
+    #[test]
+    fn a_negative_quantity_that_apimachinery_keeps_inexact_in_a_decimal_rounds_differently() {
+        for (text, here, there) in [
+            ("-1.0000000001", (-1001, -2), (-999, 0)),
+            ("-0.001Ki", (-1024, -2), (-1024, 0)),
+            ("-0.0000000001", (-1, -1), (1, 1)),
+            ("-0.3Ki", (-307_200, -308), (-307_200, -306)),
+        ] {
+            assert_eq!(read(text), here, "{text}");
+            assert_ne!(here, there, "{text}: what apimachinery v0.37.0 answers");
+        }
+    }
+
+    #[test]
+    fn what_passes_an_int64_is_read_exactly_or_not_at_all_where_apimachinery_overflows() {
+        assert_eq!(read("1e29"), (10i128.pow(32), 10i128.pow(29)));
+        assert_eq!(read("100000000000000000000").1, 10i128.pow(20));
+        assert_eq!(Quantity::parse("1e30"), None);
+        assert_eq!(Quantity::parse("1000000000000000000000Ei"), None);
     }
 
     #[test]

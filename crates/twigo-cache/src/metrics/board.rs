@@ -68,7 +68,7 @@ pub struct Change {
 /// Its resets are read first, then each changed key.
 #[derive(Debug, Default)]
 pub struct Update {
-    /// None while the reader wants nothing.
+    /// None while the reader wants nothing, or none of its scopes has answered or failed yet.
     pub state: Option<MetricsState>,
     pub resets: Vec<Reset>,
     pub changes: Vec<Change>,
@@ -160,10 +160,13 @@ struct Request {
 }
 
 impl State {
+    /// The request that answers a want: the cluster's while it answers, else the want's own or,
+    /// for a pod, its namespace's.
     fn serving(&self, want: &Scope) -> Option<&Request> {
         self.requests
-            .get(want)
-            .or_else(|| self.requests.get(&Scope::Cluster))
+            .get(&Scope::Cluster)
+            .filter(|cluster| cluster.answers())
+            .or_else(|| self.requests.get(want))
             .or_else(|| match want {
                 Scope::Named { namespace, .. } => {
                     self.requests.get(&Scope::Namespace(namespace.clone()))
@@ -343,7 +346,7 @@ impl Board {
         }
     }
 
-    fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
+    pub(super) fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
         let mut guard = self.state();
         let state = &mut *guard;
         let Some(request) = state.requests.get_mut(scope) else {
@@ -398,11 +401,10 @@ impl Board {
         }
     }
 
-    /// A scope not answered yet counts as answering, unless the API is stale. A reader that
-    /// wants the cluster and namespaces too is told by the namespaces while the cluster does
-    /// not answer.
-    fn health(&self, state: &State, wants: &Wants) -> MetricsState {
-        let stale = self.api.borrow().stale();
+    /// The worst state among the scopes that have answered or failed once, none while none has:
+    /// a scope still waiting for its first answer adds nothing. A reader that wants the cluster
+    /// and namespaces too is told by the namespaces while the cluster does not answer.
+    fn health(&self, state: &State, wants: &Wants) -> Option<MetricsState> {
         let fallen_back = wants.cluster
             && wants.scopes.len() > 1
             && state
@@ -413,17 +415,14 @@ impl Board {
             .scopes
             .iter()
             .filter(|want| !(fallen_back && **want == Scope::Cluster))
-            .fold(MetricsState::Ready, |worst, want| {
-                let health = match state
-                    .serving(want)
-                    .and_then(|request| request.answer.as_ref())
-                {
-                    Some(answer) => answer.health,
-                    None if stale => MetricsState::Unavailable,
-                    None => MetricsState::Ready,
-                };
-                worse(worst, health)
+            .filter_map(|want| {
+                state
+                    .serving(want)?
+                    .answer
+                    .as_ref()
+                    .map(|answer| answer.health)
             })
+            .reduce(worse)
     }
 }
 
@@ -532,9 +531,18 @@ impl Reader {
         &self.wants
     }
 
-    /// Every scope it wants has answered or failed once.
-    pub fn settled(&self) -> bool {
-        self.context.board(self.kind).settled(self.id)
+    /// Whether every scope it wants has answered or failed once, and what the poller holds for
+    /// it. The check comes first: an answer that lands between the two is in the update and
+    /// counted by the next check, where one counted after the update could be left out of it.
+    pub fn read(&self) -> (bool, Update) {
+        self.read_with(|| {})
+    }
+
+    /// `between` runs after the check and before the drain, where a test places an answer.
+    pub(super) fn read_with(&self, between: impl FnOnce()) -> (bool, Update) {
+        let settled = self.context.board(self.kind).settled(self.id);
+        between();
+        (settled, self.drain())
     }
 
     /// The sample the answers hold of a key this reader wants, and none of another's.
@@ -552,7 +560,7 @@ impl Reader {
         Update {
             state: wants
                 .filter(|wants| !wants.scopes.is_empty())
-                .map(|wants| board.health(&state, wants)),
+                .and_then(|wants| board.health(&state, wants)),
             resets: std::mem::take(&mut pending.resets),
             changes: pending
                 .changes
