@@ -29,6 +29,9 @@ pub use sample::{Container, Sample, Samples};
 /// What metrics-server's manifest and chart scrape at; its answers change once per scrape.
 pub const INTERVAL: Duration = Duration::from_secs(15);
 
+/// How long a list sorted by a metric holds its first rows for its scopes' first answers.
+pub const FIRST_ANSWER: Duration = Duration::from_secs(2);
+
 /// The requests of a context under way at once, of the UI's 28 (ARCHITECTURE 3.2), so a list
 /// over many namespaces leaves the rest of them to the views and editors that wait on them.
 pub const IN_FLIGHT: usize = 4;
