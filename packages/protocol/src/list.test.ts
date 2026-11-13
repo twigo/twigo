@@ -34,6 +34,7 @@ function batch(seq: number, rest: Partial<ListBatch> = {}): ListBatch {
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
     ...rest,
   };
 }
@@ -148,7 +149,7 @@ test("a batch that arrives before the subscription id is acknowledged once the i
   fake.resolve(7);
   await vi.runAllTimersAsync();
   expect(fake.calls).toEqual([
-    ["list_set_window", { id: 7, start: 0, end: 40 }],
+    ["list_set_window", { id: 7, start: 0, end: 40, metrics: false }],
     ["list_ack", { id: 7, seq: 1 }],
   ]);
 });

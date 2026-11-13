@@ -231,6 +231,7 @@ function podsBatch(
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   };
 }
 

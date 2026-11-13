@@ -114,7 +114,12 @@ export class ListView {
   #sendWindow(start: number, end: number): void {
     if (this.#id === undefined) return;
     this.#backend
-      .invoke("list_set_window", { id: this.#id, start, end })
+      .invoke("list_set_window", {
+        id: this.#id,
+        start,
+        end,
+        metrics: false,
+      })
       .catch((error: unknown) => {
         this.#fail(error);
       });

@@ -1136,6 +1136,7 @@ class Subscription {
       status: this.#status,
       counts: counts && (first || countsChanged) ? counts : null,
       groups: groupsChanged ? (groups ?? []) : null,
+      metrics: null,
     });
   }
 }

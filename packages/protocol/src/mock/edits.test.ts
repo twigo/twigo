@@ -159,6 +159,7 @@ async function opened(
           manifest: true,
           events: false,
           related: false,
+          usage: false,
         },
       },
       (batch) => batches.push(batch),

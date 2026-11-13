@@ -40,7 +40,12 @@ async function open(scenario: MockScenario, q: ListQuery = query()) {
   );
   await vi.advanceTimersByTimeAsync(0);
   const id = await pending;
-  const windowed = backend.invoke("list_set_window", { id, start: 0, end: 0 });
+  const windowed = backend.invoke("list_set_window", {
+    id,
+    start: 0,
+    end: 0,
+    metrics: false,
+  });
   await vi.advanceTimersByTimeAsync(50);
   await windowed;
   const ack = async () => {
@@ -51,7 +56,12 @@ async function open(scenario: MockScenario, q: ListQuery = query()) {
     await done;
   };
   const window = async (start: number, end: number) => {
-    const done = backend.invoke("list_set_window", { id, start, end });
+    const done = backend.invoke("list_set_window", {
+      id,
+      start,
+      end,
+      metrics: false,
+    });
     await vi.advanceTimersByTimeAsync(0);
     await done;
   };
@@ -237,6 +247,7 @@ test("a live subscription connects, syncs and becomes ready with 5k pods; the ne
     id,
     start: 0,
     end: 40,
+    metrics: false,
   });
   await vi.advanceTimersByTimeAsync(50);
   await windowed;
@@ -272,7 +283,12 @@ test("nothing goes before the first window, as in Rust", async () => {
   const id = await pending;
   await vi.advanceTimersByTimeAsync(500);
   expect(batches).toEqual([]);
-  const windowed = backend.invoke("list_set_window", { id, start: 0, end: 5 });
+  const windowed = backend.invoke("list_set_window", {
+    id,
+    start: 0,
+    end: 5,
+    metrics: false,
+  });
   await vi.advanceTimersByTimeAsync(10);
   await windowed;
   expect(batches[0]?.window?.ids).toHaveLength(5);
@@ -350,7 +366,14 @@ test("with a rate, a live list changes that many pods a second and no more", asy
     const latest = last(batches);
     if (latest) await call(backend.invoke("list_ack", { id, seq: latest.seq }));
   };
-  await call(backend.invoke("list_set_window", { id, start: 0, end: 800 }));
+  await call(
+    backend.invoke("list_set_window", {
+      id,
+      start: 0,
+      end: 800,
+      metrics: false,
+    }),
+  );
   for (let ms = 0; ms < 2000; ms += 50) {
     await ack();
     await vi.advanceTimersByTimeAsync(50);
@@ -693,6 +716,7 @@ const OVERVIEW: ObjectParts = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 async function described(

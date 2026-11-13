@@ -98,6 +98,7 @@ export function Details({
       manifest: tab === "yaml",
       events: tab === "events",
       related: true,
+      usage: false,
     },
   );
   const reveal = useReveal(id);

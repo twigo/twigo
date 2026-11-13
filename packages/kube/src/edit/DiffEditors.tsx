@@ -97,7 +97,13 @@ function useManifest(discovery: Discovery, space: string, uri: string) {
   const { snapshot } = useObject(
     backend,
     input && objectQuery(input, resources),
-    { overview: false, manifest: true, events: false, related: false },
+    {
+      overview: false,
+      manifest: true,
+      events: false,
+      related: false,
+      usage: false,
+    },
   );
   return {
     manifest: snapshot.manifest,

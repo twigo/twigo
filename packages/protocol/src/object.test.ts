@@ -22,6 +22,7 @@ const OVERVIEW: ObjectParts = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 const DOCUMENT: Overview = {
@@ -37,6 +38,7 @@ function batch(seq: number, rest: Partial<ObjectBatch> = {}): ObjectBatch {
     manifest: null,
     events: null,
     related: null,
+    usage: null,
     ...rest,
   };
 }

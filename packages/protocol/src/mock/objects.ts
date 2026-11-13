@@ -187,6 +187,7 @@ export class MockObject {
       manifest: parts.manifest && !this.#parts.manifest,
       events: parts.events && !this.#parts.events,
       related: parts.related && !this.#parts.related,
+      usage: false,
     };
     this.#parts = parts;
     this.#send(shown);
@@ -234,6 +235,7 @@ export class MockObject {
       manifest: parts.manifest ? this.#manifest : null,
       events: parts.events ? events(this.#overview) : null,
       related: parts.related ? this.#related : null,
+      usage: null,
     });
   }
 }
@@ -245,6 +247,7 @@ const NONE: ObjectParts = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 /** What a colleague or a controller wrote: a label and an annotation, or a tick in the status. */

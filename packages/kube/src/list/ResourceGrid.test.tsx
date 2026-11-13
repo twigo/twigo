@@ -212,6 +212,7 @@ function batch(
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   };
 }
 

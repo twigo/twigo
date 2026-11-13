@@ -33,10 +33,10 @@ export function useObject(
   const key = query && JSON.stringify(query);
   const [live, setLive] = useState<{ key: string; view: ObjectView }>();
   const shown = useRef(parts);
-  const { overview, manifest, events, related } = parts;
+  const { overview, manifest, events, related, usage } = parts;
   useEffect(() => {
-    shown.current = { overview, manifest, events, related };
-  }, [overview, manifest, events, related]);
+    shown.current = { overview, manifest, events, related, usage };
+  }, [overview, manifest, events, related, usage]);
   useEffect(() => {
     if (key === undefined) return;
     const view = new ObjectView(
@@ -56,8 +56,8 @@ export function useObject(
   }, [backend, key]);
   const current = live?.key === key ? live?.view : undefined;
   useEffect(() => {
-    current?.setParts({ overview, manifest, events, related });
-  }, [current, overview, manifest, events, related]);
+    current?.setParts({ overview, manifest, events, related, usage });
+  }, [current, overview, manifest, events, related, usage]);
   const snapshot = useSyncExternalStore(
     current?.subscribe ?? NOTHING,
     current?.getSnapshot ?? INITIAL,

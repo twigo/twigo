@@ -53,6 +53,7 @@ export function ObjectEditor({
     manifest: tab === "yaml" || editing,
     events: tab === "events",
     related: tab === "related",
+    usage: false,
   });
   const reveal = useReveal(id);
   const statusLocked = hasStatusSubresource(resources, input?.gvr);
