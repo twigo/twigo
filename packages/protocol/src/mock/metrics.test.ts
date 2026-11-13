@@ -771,6 +771,17 @@ test("an object whose namespace a list already reads has its usage in its first 
   expect(batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
 });
 
+test("a list over a namespace that an open pod reads has its values and state in its first batch", async () => {
+  const backend = createMockBackend("live");
+  const pod = sampled();
+  await openOn(backend, PODS, pod.namespace, pod.name);
+  const pods = await reader(backend, query({ namespaces: [pod.namespace] }));
+  await pods.read();
+  const [first] = pods.batches;
+  expect(first?.metrics).toBe("ready");
+  expect(measured(pods.cpu(first))).toBe(true);
+});
+
 function showUsage(backend: Backend, id: number, usage: boolean) {
   return call(
     backend.invoke("object_set_parts", {
