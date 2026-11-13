@@ -25,8 +25,6 @@ Findings that belong to no step yet.
 - Metrics (`twigo_cache::metrics`, ARCHITECTURE 3.6):
   - A list of all namespaces that reads more than 10 asks for the cluster, which answers `forbidden` for a person who may list pods cluster-wide and metrics only in some namespaces; the namespaces' own lists would answer.
   - A pod deleted and created again under one name, with the same values at the next scrape, shows no sample until its values change: the view drops a sample with its row's uid, and the poller tells only what changed, since the API carries no uid.
-  - A list opened before the context's Metrics API is known has no CPU and Memory columns in its first batch, and gets them in the next: the poller follows discovery on its own and a list does not wait for it, since the catalog may not list the context yet.
-  - The poller's follower fetches discovery apart from the webview's, so every change of an APIService or a CRD costs two requests, each revalidated by its ETag; one follower per context for both would cost one.
   - A view keeps its last samples while it reads none, as a hidden window does, so they show for as long as the first answer takes when the window comes back; nothing marks them as old.
   - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.
   - The core's RSS holds the poller's 0.87 MiB at 5,095 pods against a budget of 150 MB that the bench's runs already read 141 to 153 MB of (below, "The bench").

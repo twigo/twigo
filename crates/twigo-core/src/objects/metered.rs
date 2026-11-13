@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, timeout_at};
+use twigo_cache::discovery::Followers;
 use twigo_cache::fake::Fake;
 use twigo_cache::hub::Resource;
 use twigo_cache::metrics::{Context, Poller, Scope};
@@ -53,7 +54,7 @@ struct Rig {
     fake: Fake,
     hub: Hub,
     context: Arc<Context>,
-    _held: (Arc<Clients>, tempfile::TempDir),
+    _held: (Arc<Clients>, tempfile::TempDir, Followers),
     batches: mpsc::UnboundedReceiver<ObjectBatch>,
 }
 
@@ -62,8 +63,12 @@ impl Rig {
         fake.serve_metrics("v1beta1");
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
-        let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-        let context = poller.context("kind-test", watch::channel(None).1).await;
+        let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+        let api = followers
+            .get("kind-test", async { watch::channel(None).1 })
+            .await
+            .api();
+        let context = Poller::new(hub.clone()).context("kind-test", api);
         let waited = async {
             while context.api().version().is_none() {
                 sleep(Duration::from_millis(10)).await;
@@ -76,7 +81,7 @@ impl Rig {
             fake,
             hub,
             context,
-            _held: (clients, directory),
+            _held: (clients, directory, followers),
             batches: mpsc::unbounded_channel().1,
         }
     }
@@ -288,14 +293,18 @@ async fn a_cluster_without_the_api_never_gets_a_usage() {
     fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+    let api = followers
+        .get("kind-test", async { watch::channel(None).1 })
+        .await
+        .api();
+    let context = Poller::new(hub.clone()).context("kind-test", api);
     sleep(Duration::from_secs(2)).await;
     let mut rig = Rig {
         fake,
         hub,
         context,
-        _held: (clients, directory),
+        _held: (clients, directory, followers),
         batches: mpsc::unbounded_channel().1,
     };
     let opened = rig.open(Kind::Pods, PARTS);

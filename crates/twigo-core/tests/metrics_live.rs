@@ -16,8 +16,8 @@ use tokio::sync::{mpsc, watch};
 use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Ack, Cell, Column, Gvr, ListBatch, ListQuery, MetricsState, ObjectBatch, ObjectParts,
-    ObjectQuery, OpenObject, SetWindow, Sort, SubscriptionId, Usage,
+    Ack, Cell, Column, Discovered, Gvr, ListBatch, ListQuery, MetricsState, ObjectBatch,
+    ObjectParts, ObjectQuery, OpenObject, SetWindow, Sort, SubscriptionId, Usage,
 };
 
 const WAIT: Duration = Duration::from_secs(180);
@@ -190,6 +190,93 @@ async fn a_pod_list_gets_the_cpu_and_memory_of_a_running_pod() {
     );
     assert!(at("CPU") < at("Age"), "before Age: {names:?}");
     core.list_unsubscribe("main", list.id).unwrap();
+}
+
+async fn opened_by_the_webview(core: &Arc<Core>, space: &str) -> Vec<ListBatch> {
+    let mut list = List::pods(core, space, None).await;
+    let mut seen = Vec::new();
+    let reached = async {
+        let mut rows = false;
+        let mut after = None;
+        loop {
+            let waited = async {
+                match after {
+                    Some(end) => tokio::time::timeout_at(end, list.batches.recv())
+                        .await
+                        .ok()
+                        .flatten(),
+                    None => list.batches.recv().await,
+                }
+            };
+            let Some(batch) = waited.await else { break };
+            core.list_ack(
+                "main",
+                Ack {
+                    id: list.id,
+                    seq: batch.seq,
+                },
+            )
+            .unwrap();
+            if !rows && !batch.upserts.is_empty() {
+                rows = true;
+                after = Some(tokio::time::Instant::now() + Duration::from_secs(2));
+            }
+            seen.push(batch);
+        }
+    };
+    tokio::time::timeout(WAIT, reached)
+        .await
+        .expect("a batch with rows within 180 s");
+    core.list_unsubscribe("main", list.id).unwrap();
+    seen
+}
+
+fn has_metric_columns(batch: &ListBatch) -> bool {
+    batch.columns.as_ref().is_some_and(|columns| {
+        ["CPU", "Memory"]
+            .iter()
+            .all(|name| columns.iter().any(|column| column.name == *name))
+    })
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_list_opened_after_the_resources_came_has_its_columns_in_its_first_batch_even_opened_again()
+ {
+    let (path, context) = cluster();
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = core(dir.path(), &path, &context);
+    let mut resources = core.follow_resources(&space).await.unwrap();
+    while !matches!(
+        tokio::time::timeout(WAIT, resources.next())
+            .await
+            .expect("discovery within 180 s"),
+        Discovered::Ready { .. }
+    ) {}
+
+    for round in 0..2 {
+        let batches = opened_by_the_webview(&core, &space).await;
+        let first = batches
+            .iter()
+            .find(|batch| !batch.upserts.is_empty())
+            .expect("a batch with rows");
+        assert!(
+            has_metric_columns(first),
+            "round {round}: {:?}",
+            first.columns
+        );
+        let changed = batches
+            .iter()
+            .skip_while(|batch| batch.upserts.is_empty())
+            .skip(1)
+            .filter(|batch| batch.columns.is_some())
+            .count();
+        assert_eq!(
+            changed, 0,
+            "round {round}: the columns changed after the rows came"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 #[tokio::test]

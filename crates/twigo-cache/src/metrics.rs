@@ -17,12 +17,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use twigo_ipc::{Discovered, MetricsState};
-use twigo_kube::discovery::Cache;
-use twigo_kube::kubeconfig::Fingerprint;
+use twigo_ipc::MetricsState;
 
-use crate::discovery::Follower;
 use crate::hub::Hub;
 use board::Board;
 
@@ -44,82 +40,42 @@ pub struct Poller(Arc<Inner>);
 
 struct Inner {
     hub: Hub,
-    cache: Arc<Cache>,
     contexts: Mutex<HashMap<String, Weak<Context>>>,
 }
 
-/// One context's Metrics API and the scopes polled for it, alive while a reader holds it.
+/// The scopes polled for one context, alive while a reader holds it. What the context serves
+/// comes from its follower, which outlives every reader ([`crate::discovery::Followers`]).
 pub struct Context {
     api: watch::Receiver<Api>,
     pods: Arc<Board>,
     nodes: Arc<Board>,
-    follower: JoinHandle<()>,
 }
 
 impl Poller {
-    pub fn new(hub: Hub, cache: Arc<Cache>) -> Self {
+    pub fn new(hub: Hub) -> Self {
         Self(Arc::new(Inner {
             hub,
-            cache,
             contexts: Mutex::default(),
         }))
     }
 
-    /// The context's Metrics API, followed as long as a handle lives and shared by every list
-    /// and object of the context, since the webview's own follower may not have run yet.
-    pub async fn context(
-        &self,
-        name: &str,
-        entry: watch::Receiver<Option<Fingerprint>>,
-    ) -> Arc<Context> {
-        if let Some(held) = self.held(name) {
-            return held;
-        }
-        let built = Arc::new(self.build(name, entry).await);
+    pub fn context(&self, name: &str, api: watch::Receiver<Api>) -> Arc<Context> {
         let mut contexts = self.0.contexts.lock().expect("poller lock");
-        match contexts.get(name).and_then(Weak::upgrade) {
-            Some(held) => held,
-            None => {
-                contexts.insert(name.to_owned(), Arc::downgrade(&built));
-                built
-            }
-        }
-    }
-
-    fn held(&self, name: &str) -> Option<Arc<Context>> {
-        self.0
-            .contexts
-            .lock()
-            .expect("poller lock")
+        if let Some(held) = contexts
             .get(name)
             .and_then(Weak::upgrade)
-    }
-
-    async fn build(&self, name: &str, entry: watch::Receiver<Option<Fingerprint>>) -> Context {
-        let mut follower = Follower::new(
-            self.0.hub.clone(),
-            Arc::clone(&self.0.cache),
-            name.to_owned(),
-            entry,
-        )
-        .await;
-        let (sender, api) = watch::channel(Api::Absent);
-        let follower = tokio::spawn(async move {
-            loop {
-                let found = match follower.next().await {
-                    Discovered::Ready { .. } => follower.confirmed().map_or(Api::Absent, Api::of),
-                    Discovered::Pending { .. } | Discovered::Failed { .. } => Api::Absent,
-                };
-                sender.send_if_modified(|api| std::mem::replace(api, found) != found);
-            }
-        });
+            .filter(|held| held.api.same_channel(&api))
+        {
+            return held;
+        }
         let board = |kind| Arc::new(Board::new(name, kind, self.0.hub.clone(), api.clone()));
-        Context {
+        let built = Arc::new(Context {
             pods: board(Kind::Pods),
             nodes: board(Kind::Nodes),
             api,
-            follower,
-        }
+        });
+        contexts.insert(name.to_owned(), Arc::downgrade(&built));
+        built
     }
 }
 
@@ -137,12 +93,6 @@ impl Context {
             Kind::Pods => &self.pods,
             Kind::Nodes => &self.nodes,
         }
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        self.follower.abort();
     }
 }
 

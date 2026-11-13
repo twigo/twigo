@@ -11,6 +11,7 @@ use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 
 use super::*;
+use crate::discovery::Followers;
 use crate::fake::Fake;
 use crate::hub::Connect;
 
@@ -20,7 +21,19 @@ const APISERVICES: &str = "apiservices";
 struct Rig {
     fake: Fake,
     context: Arc<Context>,
-    _hub: (Hub, Arc<Clients>, TempDir),
+    _hub: (Hub, Arc<Clients>, TempDir, Followers),
+}
+
+async fn context_of(hub: &Hub, directory: &TempDir) -> (Followers, Arc<Context>) {
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+    let api = followers
+        .get("kind-test", async { watch::channel(None).1 })
+        .await
+        .api();
+    (
+        followers,
+        Poller::new(hub.clone()).context("kind-test", api),
+    )
 }
 
 async fn rig() -> Rig {
@@ -34,12 +47,11 @@ async fn rig() -> Rig {
 async fn followed(fake: Fake) -> Rig {
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let (followers, context) = context_of(&hub, &directory).await;
     let rig = Rig {
         fake,
         context,
-        _hub: (hub, clients, directory),
+        _hub: (hub, clients, directory, followers),
     };
     until(|| rig.context.api().columns(Kind::Pods)).await;
     rig
@@ -445,13 +457,12 @@ async fn what_a_context_serves_follows_the_cluster_and_a_stale_api_keeps_its_col
 async fn followed_without_metrics(fake: Fake) -> Rig {
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let (followers, context) = context_of(&hub, &directory).await;
     sleep(Duration::from_secs(1)).await;
     Rig {
         fake,
         context,
-        _hub: (hub, clients, directory),
+        _hub: (hub, clients, directory, followers),
     }
 }
 
@@ -498,8 +509,8 @@ async fn a_poll_follows_clients_abandoned_meanwhile() {
         })
     };
     let directory = tempfile::tempdir().unwrap();
-    let poller = Poller::new(Hub::new(connect), Arc::new(Cache::new(directory.path())));
-    let context = poller.context("kind-test", watch::channel(None).1).await;
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
     until(|| context.api().columns(Kind::Pods)).await;
     let mut reader = context.reader(Kind::Pods);
     reader.want(namespace("a"));
