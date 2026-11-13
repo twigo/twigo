@@ -23,7 +23,6 @@ Findings that belong to no step yet.
   - When a watch reconnects with other column definitions, as a CRD's edited printer columns might bring (not verified that the API server sends them on a re-watch), the rows stored before keep their old cells, which the query view reads by the new columns until each row changes or a relist; the per-namespace upstreams of one list may disagree on columns meanwhile.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
 - Metrics (`twigo_cache::metrics`, ARCHITECTURE 3.6):
-  - A list of all namespaces that reads more than 10 asks for the cluster, which answers `forbidden` for a person who may list pods cluster-wide and metrics only in some namespaces; the namespaces' own lists would answer.
   - A pod deleted and created again under one name, with the same values at the next scrape, shows no sample until its values change: the view drops a sample with its row's uid, and the poller tells only what changed, since the API carries no uid.
   - A view keeps its last samples while it reads none, as a hidden window does, so they show for as long as the first answer takes when the window comes back; nothing marks them as old.
   - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.

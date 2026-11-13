@@ -1,8 +1,6 @@
-//! What the Metrics API costs per scope, to set where one list of the whole
-//! cluster beats one per namespace (`CLUSTER_WIDE_ABOVE`): the time and the
-//! bytes of the lists of the `k` namespaces with the most pods, sent
-//! together as the poller sends them, against the cluster-wide list, gzipped
-//! as the poller asks.
+//! What the Metrics API costs per scope: the time and the bytes of the lists of
+//! the `k` namespaces with the most pods, sent together as the poller sends
+//! them, against the cluster-wide list, gzipped as the poller asks.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example metrics_cost [runs]
 

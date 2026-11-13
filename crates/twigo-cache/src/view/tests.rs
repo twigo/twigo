@@ -1051,18 +1051,29 @@ fn a_list_reads_the_namespaces_of_its_window_and_all_of_them_when_sorted_by_a_me
     rig.view.set_window(0, 1);
     assert_eq!(
         rig.view.wants(true),
-        scopes(&["a", "b", "c"]),
-        "every namespace"
+        scopes(&["a", "b", "c"])
+            .into_iter()
+            .chain([Scope::Cluster])
+            .collect(),
+        "every namespace, and the cluster for a list of all of them"
     );
 }
 
 #[test]
-fn many_namespaces_of_a_list_of_all_of_them_are_asked_for_whole_and_chosen_ones_never() {
-    let namespaces: Vec<String> = (0..=CLUSTER_WIDE_ABOVE)
-        .map(|n| format!("ns-{n:02}"))
-        .collect();
-    for (chosen, whole) in [(false, true), (true, false)] {
-        let mut asked = query();
+fn only_a_list_of_all_namespaces_sorted_by_a_metric_asks_for_the_cluster_and_never_for_the_count() {
+    let namespaces: Vec<String> = (0..30).map(|n| format!("ns-{n:02}")).collect();
+    let each = |names: &[String]| -> HashSet<Scope> {
+        names
+            .iter()
+            .map(|name| Scope::Namespace(name.as_str().into()))
+            .collect()
+    };
+    for (chosen, sorted) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut asked = if sorted {
+            sorted_by("Memory", true)
+        } else {
+            query()
+        };
         if chosen {
             asked.namespaces = namespaces.clone();
         }
@@ -1072,32 +1083,17 @@ fn many_namespaces_of_a_list_of_all_of_them_are_asked_for_whole_and_chosen_ones_
             rig.store.upsert(pod(namespace, "x", "Running", "0"));
         }
         rig.flush();
-        let wants = rig.view.wants(true);
+        let mut wants = each(&namespaces);
+        if sorted && !chosen {
+            wants.insert(Scope::Cluster);
+        }
         assert_eq!(
+            rig.view.wants(true),
             wants,
-            if whole {
-                HashSet::from([Scope::Cluster])
-            } else {
-                namespaces
-                    .iter()
-                    .map(|name| Scope::Namespace(name.as_str().into()))
-                    .collect()
-            },
-            "chosen: {chosen}"
+            "chosen: {chosen}, sorted by a metric: {sorted}: one request per namespace, \
+             and the cluster's, to fall back from, only for all of them sorted"
         );
     }
-    let few = &namespaces[..CLUSTER_WIDE_ABOVE];
-    let mut rig = Rig::new(&query());
-    rig.view.set_api(served());
-    for namespace in few {
-        rig.store.upsert(pod(namespace, "x", "Running", "0"));
-    }
-    rig.flush();
-    assert_eq!(
-        rig.view.wants(true).len(),
-        CLUSTER_WIDE_ABOVE,
-        "one request each"
-    );
 }
 
 #[test]

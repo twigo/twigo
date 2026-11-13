@@ -53,7 +53,7 @@ async fn cluster(serving: bool) -> Fake {
     fake
 }
 
-fn query(sort: Option<Sort>) -> ListQuery {
+fn query(sort: Option<Sort>, all: bool) -> ListQuery {
     ListQuery {
         space: "kind-test".to_owned(),
         gvr: Gvr {
@@ -62,7 +62,11 @@ fn query(sort: Option<Sort>) -> ListQuery {
             resource: "pods".to_owned(),
         },
         namespaced: true,
-        namespaces: vec!["a".to_owned(), "b".to_owned()],
+        namespaces: if all {
+            Vec::new()
+        } else {
+            vec!["a".to_owned(), "b".to_owned()]
+        },
         label_selector: None,
         field_selector: None,
         owners: None,
@@ -103,9 +107,11 @@ async fn open(
     poller: &Poller,
     followers: &Arc<Followers>,
     sort: Option<Sort>,
+    all: bool,
 ) -> (Batcher, mpsc::UnboundedReceiver<(Instant, ListBatch)>) {
-    let subscription = hub.rows(rows(&["a", "b"])).await.unwrap();
-    let spec = Spec::new("kind-test", &query(sort)).unwrap();
+    let namespaces: &[&str] = if all { &[] } else { &["a", "b"] };
+    let subscription = hub.rows(rows(namespaces)).await.unwrap();
+    let spec = Spec::new("kind-test", &query(sort, all)).unwrap();
     let (sender, batches) = mpsc::unbounded_channel();
     let batcher = Batcher::spawn(
         subscription,
@@ -118,10 +124,14 @@ async fn open(
 
 impl Metered {
     async fn start(fake: Fake, sort: Option<Sort>) -> Self {
-        Self::open_after(fake, sort, true).await
+        Self::open_after(fake, sort, true, false).await
     }
 
-    async fn open_after(fake: Fake, sort: Option<Sort>, watched: bool) -> Self {
+    async fn start_all(fake: Fake, sort: Option<Sort>) -> Self {
+        Self::open_after(fake, sort, true, true).await
+    }
+
+    async fn open_after(fake: Fake, sort: Option<Sort>, watched: bool, all: bool) -> Self {
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
         let followers = Arc::new(Followers::new(
@@ -132,7 +142,7 @@ impl Metered {
         if watched {
             discovered(&followers).await;
         }
-        let (batcher, batches) = open(&hub, &poller, &followers, sort).await;
+        let (batcher, batches) = open(&hub, &poller, &followers, sort, all).await;
         Self {
             fake,
             followers,
@@ -152,7 +162,7 @@ impl Metered {
     async fn reopen(&mut self, sort: Option<Sort>, pause: Duration) {
         self.batcher = None;
         sleep(pause).await;
-        let (batcher, batches) = open(&self.hub, &self.poller, &self.followers, sort).await;
+        let (batcher, batches) = open(&self.hub, &self.poller, &self.followers, sort, false).await;
         self.batcher = Some(batcher);
         self.batches = batches;
     }
@@ -272,7 +282,7 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
 
 #[tokio::test(start_paused = true)]
 async fn a_list_opened_before_any_discovery_answered_gets_its_columns_once_it_does() {
-    let mut list = Metered::open_after(cluster(true).await, None, false).await;
+    let mut list = Metered::open_after(cluster(true).await, None, false, false).await;
     list.batcher().set_window(0, 6, true);
     let before = first(&mut list).await;
     assert!(
@@ -384,6 +394,45 @@ async fn sorted_by_a_metric_every_namespace_of_the_list_is_polled_until_the_sort
         "the sort changed, so b is out of the window"
     );
     assert_eq!(polls(&list.fake, "a"), a + 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_namespaces_when_refused()
+ {
+    let sort = || Sort {
+        column: "CPU".to_owned(),
+        descending: true,
+    };
+    let mut allowed = Metered::start_all(cluster(true).await, Some(sort())).await;
+    allowed.batcher().set_window(0, 6, true);
+    let batches = allowed.watch(Duration::from_secs(40)).await;
+    assert_eq!(allowed.fake.count("/apis/metrics.k8s.io/v1beta1/pods"), 3);
+    assert_eq!(
+        polls(&allowed.fake, "a") + polls(&allowed.fake, "b"),
+        0,
+        "one request for the cluster, none per namespace"
+    );
+    assert_eq!(batches[0].metrics, Some(MetricsState::Ready));
+
+    let fake = cluster(true).await;
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/pods".to_owned());
+    let mut refused = Metered::start_all(fake, Some(sort())).await;
+    refused.batcher().set_window(0, 6, true);
+    let batches = refused.watch(Duration::from_secs(40)).await;
+    assert!(polls(&refused.fake, "a") >= 2 && polls(&refused.fake, "b") >= 2);
+    let states: Vec<_> = batches.iter().filter_map(|batch| batch.metrics).collect();
+    assert_eq!(
+        states.last(),
+        Some(&MetricsState::Ready),
+        "the namespaces answer for the list: {states:?}"
+    );
+    assert_eq!(
+        refused.cpus(&batches, "kind-test/b/q3").last(),
+        Some(&Cell::Int(9_000_000)),
+        "and give it its values"
+    );
 }
 
 #[tokio::test(start_paused = true)]

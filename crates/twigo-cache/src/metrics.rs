@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use twigo_ipc::MetricsState;
 
 use crate::hub::Hub;
@@ -29,8 +29,9 @@ pub use sample::{Container, Sample, Samples};
 /// What metrics-server's manifest and chart scrape at; its answers change once per scrape.
 pub const INTERVAL: Duration = Duration::from_secs(15);
 
-/// More namespaces than this, read by a list of all of them, are asked for as the cluster.
-pub const CLUSTER_WIDE_ABOVE: usize = 10;
+/// The requests of a context under way at once, of the UI's 28 (ARCHITECTURE 3.2), so a list
+/// over many namespaces leaves the rest of them to the views and editors that wait on them.
+pub const IN_FLIGHT: usize = 4;
 
 /// A reader that opens once its context is known.
 pub type Opening = futures::future::BoxFuture<'static, Reader>;
@@ -68,7 +69,16 @@ impl Poller {
         {
             return held;
         }
-        let board = |kind| Arc::new(Board::new(name, kind, self.0.hub.clone(), api.clone()));
+        let turns = Arc::new(Semaphore::new(IN_FLIGHT));
+        let board = |kind| {
+            Arc::new(Board::new(
+                name,
+                kind,
+                self.0.hub.clone(),
+                api.clone(),
+                Arc::clone(&turns),
+            ))
+        };
         let built = Arc::new(Context {
             pods: board(Kind::Pods),
             nodes: board(Kind::Nodes),

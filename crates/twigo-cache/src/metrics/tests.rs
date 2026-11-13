@@ -16,6 +16,7 @@ use crate::fake::Fake;
 use crate::hub::Connect;
 
 const PODS: &str = "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods";
+const CLUSTER_PODS: &str = "/apis/metrics.k8s.io/v1beta1/pods";
 const APISERVICES: &str = "apiservices";
 
 struct Rig {
@@ -388,6 +389,118 @@ async fn nodes_have_one_scope_and_the_cluster_one_covers_the_namespaces() {
         2 + 2,
         "the cluster's and the nodes', every interval, none per namespace"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_context_has_at_most_its_limit_of_requests_in_flight_whatever_its_readers_want() {
+    let rig = rig().await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let namespaces: Vec<String> = (0..12).map(|n| format!("ns-{n:02}")).collect();
+    for namespace in &namespaces {
+        rig.fake.pod_usage(namespace, "p", &[("main", "1m", "1Mi")]);
+    }
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(
+        namespaces
+            .iter()
+            .map(|namespace| Scope::Namespace(namespace.as_str().into()))
+            .collect(),
+    );
+    let mut nodes = rig.context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    sleep(INTERVAL * 2).await;
+    assert_eq!(
+        rig.fake.state().metrics_overlap,
+        IN_FLIGHT,
+        "the pods' and the nodes' requests take turns together"
+    );
+    assert!(
+        polls(&rig.fake) >= 2 * (namespaces.len() + 1),
+        "every scope is still polled each interval: {} polls",
+        polls(&rig.fake)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cluster_covers_a_namespace_only_while_it_answers_and_the_namespace_then_speaks_for_itself()
+ {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut heard = Update::default();
+    until(|| {
+        let update = list.drain();
+        heard.state = update.state.or(heard.state);
+        heard.resets.extend(update.resets);
+        !heard.resets.is_empty()
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "its own namespace answers"
+    );
+    assert_eq!(heard.resets[0].scope, Scope::Namespace("a".into()));
+    assert_eq!(heard.resets[0].samples.len(), 2);
+    until(|| cluster.drain().state == Some(MetricsState::Forbidden)).await;
+    let before = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 2).await;
+    assert!(
+        rig.fake.count("namespaces/a/pods") >= before + 2,
+        "the namespace is polled for itself every interval"
+    );
+
+    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
+    rig.fake.state().forbidden.clear();
+    let mut back = Update::default();
+    until(|| {
+        let update = list.drain();
+        back.resets.extend(update.resets);
+        back.changes.extend(update.changes);
+        back.resets
+            .iter()
+            .any(|reset| reset.scope == Scope::Cluster)
+    })
+    .await;
+    let reset = back
+        .resets
+        .iter()
+        .find(|reset| reset.scope == Scope::Cluster)
+        .unwrap();
+    assert!(
+        reset.samples.get("a", "p2").is_none(),
+        "the cluster's answer is the whole one, a pod it lacks has no sample"
+    );
+    sleep(Duration::from_secs(1)).await;
+    let covered = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        covered,
+        "the cluster covers it again"
+    );
+    assert_eq!(list.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_alone_asks_for_itself_when_the_cluster_does_not_answer_for_it() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(INTERVAL).await;
+    assert!(
+        rig.fake
+            .count("namespaces/a/pods?fieldSelector=metadata.name%3Dp1")
+            >= 1,
+        "the pod's own request"
+    );
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
 }
 
 #[tokio::test(start_paused = true)]

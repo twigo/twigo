@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinHandle;
 use twigo_ipc::{ErrorKind, MetricsState};
 
@@ -80,6 +80,8 @@ pub(crate) struct Board {
     kind: Kind,
     hub: Hub,
     api: watch::Receiver<Api>,
+    /// The context's, shared by its boards: one per request under way.
+    turns: Arc<Semaphore>,
     state: Mutex<State>,
 }
 
@@ -156,6 +158,15 @@ struct Request {
     task: JoinHandle<()>,
 }
 
+impl Request {
+    /// Not answered yet counts as answering.
+    fn answers(&self) -> bool {
+        self.answer
+            .as_ref()
+            .is_none_or(|answer| answer.health == MetricsState::Ready)
+    }
+}
+
 impl Drop for Request {
     fn drop(&mut self) {
         self.task.abort();
@@ -168,12 +179,19 @@ struct Answer {
 }
 
 impl Board {
-    pub(crate) fn new(context: &str, kind: Kind, hub: Hub, api: watch::Receiver<Api>) -> Self {
+    pub(crate) fn new(
+        context: &str,
+        kind: Kind,
+        hub: Hub,
+        api: watch::Receiver<Api>,
+        turns: Arc<Semaphore>,
+    ) -> Self {
         Self {
             context: context.into(),
             kind,
             hub,
             api,
+            turns,
             state: Mutex::default(),
         }
     }
@@ -215,7 +233,10 @@ impl Board {
         let member = &state.members[&id];
         for want in &added {
             for (scope, request) in &state.requests {
-                if let Some(answer) = request.answer.as_ref().filter(|_| scope.covers(want)) {
+                let answer = request.answer.as_ref();
+                if let Some(answer) = answer
+                    .filter(|answer| answer.health == MetricsState::Ready && scope.covers(want))
+                {
                     member.feed.lock().expect("feed lock").reset(Reset {
                         scope: scope.clone(),
                         samples: Arc::clone(&answer.samples),
@@ -225,16 +246,25 @@ impl Board {
         }
     }
 
-    /// A scope covered by another has no request of its own.
+    /// A scope covered by another has no request of its own. The cluster covers the others
+    /// only while it answers, so one that is forbidden or unavailable hides no namespace.
     fn replan(self: &Arc<Self>, state: &mut State) {
         let wanted: HashSet<&Scope> = state
             .members
             .values()
             .flat_map(|member| &member.wants.scopes)
             .collect();
-        let needed: HashSet<Scope> = if wanted.contains(&Scope::Cluster) {
-            HashSet::from([Scope::Cluster])
-        } else {
+        let cluster = wanted.contains(&Scope::Cluster);
+        let covered = cluster
+            && state
+                .requests
+                .get(&Scope::Cluster)
+                .is_none_or(Request::answers);
+        let mut needed: HashSet<Scope> = HashSet::new();
+        if cluster {
+            needed.insert(Scope::Cluster);
+        }
+        if !covered {
             let namespaces: HashSet<&str> = wanted
                 .iter()
                 .filter_map(|scope| match scope {
@@ -242,15 +272,17 @@ impl Board {
                     _ => None,
                 })
                 .collect();
-            wanted
-                .iter()
-                .filter(|scope| match scope {
-                    Scope::Named { namespace, .. } => !namespaces.contains(&**namespace),
-                    _ => true,
-                })
-                .map(|scope| (*scope).clone())
-                .collect()
-        };
+            needed.extend(
+                wanted
+                    .iter()
+                    .filter(|scope| match scope {
+                        Scope::Cluster => false,
+                        Scope::Named { namespace, .. } => !namespaces.contains(&**namespace),
+                        Scope::Namespace(_) => true,
+                    })
+                    .map(|scope| (*scope).clone()),
+            );
+        }
         state.requests.retain(|scope, _| needed.contains(scope));
         for scope in needed {
             state
@@ -263,24 +295,33 @@ impl Board {
         }
     }
 
-    fn land(&self, scope: &Scope, health: MetricsState, samples: Samples) {
+    fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
         let mut guard = self.state();
         let state = &mut *guard;
         let Some(request) = state.requests.get_mut(scope) else {
             return;
         };
         let samples = Arc::new(samples);
+        let was_answering = request.answers();
         let previous = request.answer.replace(Answer {
             health,
             samples: Arc::clone(&samples),
         });
-        let Some(previous) = previous else {
+        if *scope == Scope::Cluster && was_answering != request.answers() {
+            self.replan(state);
+        }
+        let answers = health == MetricsState::Ready;
+        let reset = answers && (previous.is_none() || (*scope == Scope::Cluster && !was_answering));
+        if reset {
             for member in state.members.values().filter(|m| m.wants.relates(scope)) {
                 member.feed.lock().expect("feed lock").reset(Reset {
                     scope: scope.clone(),
                     samples: Arc::clone(&samples),
                 });
             }
+            return;
+        }
+        let Some(previous) = previous else {
             return;
         };
         let tell = |namespace: &str, name: &str, sample: Option<&Arc<Sample>>| {
@@ -309,12 +350,21 @@ impl Board {
         }
     }
 
-    /// A scope not answered yet counts as answering, unless the API is stale.
+    /// A scope not answered yet counts as answering, unless the API is stale. A reader that
+    /// wants the cluster and namespaces too is told by the namespaces while the cluster does
+    /// not answer.
     fn health(&self, state: &State, wants: &Wants) -> MetricsState {
         let stale = self.api.borrow().stale();
+        let fallen_back = wants.cluster
+            && wants.scopes.len() > 1
+            && state
+                .requests
+                .get(&Scope::Cluster)
+                .is_some_and(|request| !request.answers());
         wants
             .scopes
             .iter()
+            .filter(|want| !(fallen_back && **want == Scope::Cluster))
             .fold(MetricsState::Ready, |worst, want| {
                 let request = state
                     .requests
@@ -360,7 +410,15 @@ async fn poll(board: Arc<Board>, scope: Scope) {
                 continue;
             }
         };
-        let delay = match fetch(&clients, board.kind, version, &scope).await {
+        let fetched = {
+            let _turn = board
+                .turns
+                .acquire()
+                .await
+                .expect("the semaphore stays open");
+            fetch(&clients, board.kind, version, &scope).await
+        };
+        let delay = match fetched {
             Ok(samples) => {
                 backoff = upstream::backoff();
                 board.land(&scope, MetricsState::Ready, samples);

@@ -308,7 +308,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     - followed logs, 32;
     - the policy proxy's streams, 16;
     - requests, the 28 left.
-      Actors other than the UI may hold at most 20 of them, so an agent's lists cannot starve the UI.
+      Actors other than the UI may hold at most 20 of them, so an agent's lists cannot starve the UI, and a context's metrics polls take at most 4 of the UI's at a time (3.6).
   - A watch, log or request over its budget waits in the counter and shows `queued`.
     The proxy's class refuses instead, with the `429` of 6.4.
   - A request the policy proxy sends carries a marker, `Proxied`, that makes the counter take a stream of the proxy's class whatever its URI, a watch or a followed log included, so it never waits among the hub's, and fail at once with `OverBudget` when they are all taken.
@@ -524,10 +524,11 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Two readers of a scope share one request.
     A pod open alone asks for its namespace with a field selector on its name, and asks nothing when a list reads its namespace.
   - A list reads metrics only while its webview says a CPU or Memory column is drawn or sorted by and the document is visible, and it wants nothing once a batch has gone unacknowledged for 15 s, as a hidden window leaves it.
-    It wants the namespaces of the rows in its window, one request each while they are few.
-    A list of all namespaces that reads more than 10 asks for the cluster instead, since a list under 128 KB is never compressed: on kind 1.37 with 5,095 pods in 13 namespaces, the lists of the 10 largest took 73,314 gzipped bytes and the 11 largest 83,975, against the cluster's 75,103 (`cargo run --release -p twigo-cache --example metrics_cost 41`, 2026-11-13), and the UI's request budget is 28 streams (3.2).
-    A list of chosen namespaces never asks for the cluster.
+    It wants the namespaces of the rows in its window, one request each, and at most 4 of a context's requests are under way at once, since the UI's request budget is 28 streams (3.2) and one list over many namespaces would take them all.
+    No count of namespaces makes the cluster's list the cheaper one: on kind 1.37 with 5,095 pods in 13 namespaces the lists of the 10 namespaces with the most pods took 5.2 ms and 73,314 gzipped bytes, those of the 11 took 5.7 ms and 83,975, and the cluster's list 38.6 ms and 75,103 (`cargo run --release -p twigo-cache --example metrics_cost 41`, 2026-11-13); time never crossed, and bytes crossed only because the largest namespaces held nearly all the pods.
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
+    A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
+    A list of chosen namespaces never asks for the cluster.
   - An answer is parsed into nanocores and bytes per container, and samples are compared by value, ignoring the order of containers and the request's time, so a reader hears only the keys whose values changed, appeared or went.
     A pod's value is the sum over its containers, as kubectl sums them, joined to its row by namespace and name in Rust, and dropped with the row and with its uid.
     The poller holds 5,095 pods in 0.87 MiB (`cargo run --release -p twigo-cache --example metrics_memory`, kind 1.37, 2026-11-13).

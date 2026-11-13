@@ -24,7 +24,7 @@ use twigo_ipc::{
 };
 
 use crate::hub::Delta;
-use crate::metrics::{self, Api, CLUSTER_WIDE_ABOVE, Kind, Sample, Scope};
+use crate::metrics::{self, Api, Kind, Sample, Scope};
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 
@@ -505,7 +505,8 @@ impl QueryView {
     }
 
     /// The namespaces of the window's rows, or every one of the list when it is sorted by a
-    /// metric, and the cluster when the list reads all namespaces and they are many.
+    /// metric, which for a list of all namespaces adds the cluster: one request, with the
+    /// namespaces to fall back on when it is refused (decision 69).
     pub fn wants(&self, reading: bool) -> HashSet<Scope> {
         let Some(metrics) = self.metrics.as_ref().filter(|_| reading) else {
             return HashSet::new();
@@ -524,12 +525,11 @@ impl QueryView {
                 .filter_map(|entry| self.rows[&entry.row].row.meta.namespace.as_deref())
                 .collect()
         };
-        if self.spec.all_namespaces && namespaces.len() > CLUSTER_WIDE_ABOVE {
-            return HashSet::from([Scope::Cluster]);
-        }
+        let cluster = self.layout.sort_metric && self.spec.all_namespaces;
         namespaces
             .into_iter()
             .map(|namespace| Scope::Namespace(namespace.into()))
+            .chain(cluster.then_some(Scope::Cluster))
             .collect()
     }
 

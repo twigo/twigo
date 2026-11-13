@@ -73,6 +73,11 @@ pub struct State {
     pub served: BTreeMap<String, Group>,
     /// How many discovery requests got 304.
     pub not_modified: usize,
+    /// Each Metrics API request waits this long before it is answered.
+    pub metrics_takes: std::time::Duration,
+    /// The most Metrics API requests that waited at once.
+    pub metrics_overlap: usize,
+    metrics_waiting: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -143,6 +148,23 @@ fn target(path: &str) -> Target {
             namespace: None,
         },
         _ => panic!("the fake serves no {path}"),
+    }
+}
+
+struct Waiting<'a>(&'a Fake);
+
+impl<'a> Waiting<'a> {
+    fn start(fake: &'a Fake) -> Self {
+        let mut state = fake.state();
+        state.metrics_waiting += 1;
+        state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
+        Self(fake)
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.state().metrics_waiting -= 1;
     }
 }
 
@@ -371,6 +393,12 @@ impl Fake {
                 .requests
                 .push((Instant::now(), request.uri().to_string()));
             return std::future::pending().await;
+        }
+        if path.starts_with("/apis/metrics.k8s.io/") && !self.state().metrics_takes.is_zero() {
+            let _waiting = Waiting::start(self);
+            let takes = self.state().metrics_takes;
+            tokio::time::sleep(takes).await;
+            return Ok(self.respond(request));
         }
         let dead = if path == "/version" {
             self.state().dead

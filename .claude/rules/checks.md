@@ -54,7 +54,7 @@
 - The logs' live tests (`crates/twigo-sessions/tests/logs_live.rs`) and `objects_live`'s crash loop need a kubelet, so they refuse contexts other than `kind-*`.
   Their pods run on kind's node from its `docker.io/kindest/local-path-helper` image with `imagePullPolicy: Never`, so nothing is pulled; it has bash and no other command, so their scripts sleep by reading a coprocess that never writes, and a forced restart is `crictl stop` through `docker exec`.
 - The metrics poller's heap at 5,000 pods, with `bench/pods.sh <kubeconfig> 5000` done: `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example metrics_memory`.
-  What a scope costs against the cluster-wide list, which `CLUSTER_WIDE_ABOVE` was set from: `cargo run --release -p twigo-cache --example metrics_cost 41` on the same cluster.
+  What a scope costs against the cluster-wide list, which shows that no number of namespaces makes the cluster's the cheaper one (3.6): `cargo run --release -p twigo-cache --example metrics_cost 41` on the same cluster.
 - The metrics live tests: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test metrics_live -- --ignored`.
   They read the pods of `kube-system`, whose real containers give metrics-server something to measure and whose kwok pods give it kwok's `1m` and `1Mi`, and wait up to three minutes for the first samples.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
