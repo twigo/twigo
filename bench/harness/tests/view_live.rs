@@ -236,9 +236,10 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
     let batcher = Batcher::spawn(
         hub.rows(hub_query(context)).await.unwrap(),
         Spec::new(context, &query(context)).unwrap(),
+        None,
         move |batch| sender.send(batch).is_ok(),
     );
-    batcher.set_window(0, WINDOW);
+    batcher.set_window(0, WINDOW, false);
     let mut live = Live {
         batcher,
         batches,
@@ -300,7 +301,7 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
     ];
     for (start, end) in windows {
         let expected = &all[start as usize..end as usize];
-        live.batcher.set_window(start, end);
+        live.batcher.set_window(start, end, false);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             live.follow(Duration::from_millis(500)).await;

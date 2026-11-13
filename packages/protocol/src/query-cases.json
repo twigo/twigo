@@ -1,5 +1,5 @@
 {
-  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind.",
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind. The CPU and Memory columns of the pods and nodes lists are of kind cpu and memory, whose cells are integers of nanocores and bytes, or null for a row without a sample: Rust joins them from its poller's samples, before the Age column, and a metric is sorted by, with rows without a value last in both directions, and never matched by the text filter, counted, grouped or valued.",
   "context": "kind-test",
   "lists": [
     {
@@ -27,6 +27,16 @@
           "priority": 0
         },
         {
+          "name": "CPU",
+          "kind": "cpu",
+          "priority": 0
+        },
+        {
+          "name": "Memory",
+          "kind": "memory",
+          "priority": 0
+        },
+        {
           "name": "Age",
           "kind": "age",
           "priority": 0
@@ -46,8 +56,22 @@
             "app": "web",
             "tier": "front"
           },
-          "cells": ["web-1", "1/1", "Running", "0", null, "10.0.0.1"],
-          "owners": [{ "uid": "rs-a", "controller": true }]
+          "cells": [
+            "web-1",
+            "1/1",
+            "Running",
+            "0",
+            50172044,
+            208896,
+            null,
+            "10.0.0.1"
+          ],
+          "owners": [
+            {
+              "uid": "rs-a",
+              "controller": true
+            }
+          ]
         },
         {
           "namespace": "alpha",
@@ -64,9 +88,16 @@
             "CrashLoopBackOff",
             "12 (5m ago)",
             null,
+            null,
+            null,
             "10.0.0.2"
           ],
-          "owners": [{ "uid": "rs-a", "controller": true }]
+          "owners": [
+            {
+              "uid": "rs-a",
+              "controller": true
+            }
+          ]
         },
         {
           "namespace": "alpha",
@@ -76,8 +107,22 @@
             "app": "web",
             "tier": "front"
           },
-          "cells": ["web-10", "1/2", "Running", "3 (1h ago)", null, "10.0.0.3"],
-          "owners": [{ "uid": "rs-b", "controller": true }]
+          "cells": [
+            "web-10",
+            "1/2",
+            "Running",
+            "3 (1h ago)",
+            1500000,
+            41943040,
+            null,
+            "10.0.0.3"
+          ],
+          "owners": [
+            {
+              "uid": "rs-b",
+              "controller": true
+            }
+          ]
         },
         {
           "namespace": "alpha",
@@ -88,8 +133,22 @@
             "tier": "back",
             "gen": "3"
           },
-          "cells": ["db-1", "2/2", "Running", "3 (5m ago)", null, "10.0.1.1"],
-          "owners": [{ "uid": "rs-a", "controller": false }]
+          "cells": [
+            "db-1",
+            "2/2",
+            "Running",
+            "3 (5m ago)",
+            250000000,
+            41943040,
+            null,
+            "10.0.1.1"
+          ],
+          "owners": [
+            {
+              "uid": "rs-a",
+              "controller": false
+            }
+          ]
         },
         {
           "namespace": "beta",
@@ -98,7 +157,16 @@
           "labels": {
             "app": "web"
           },
-          "cells": ["web-09", "1/1", "Pending", "0", null, "10.0.2.1"]
+          "cells": [
+            "web-09",
+            "1/1",
+            "Pending",
+            "0",
+            null,
+            null,
+            null,
+            "10.0.2.1"
+          ]
         },
         {
           "namespace": "beta",
@@ -108,7 +176,16 @@
             "app": "web",
             "gen": "1"
           },
-          "cells": ["Web-3", "1/1", "Running", "1 (45s ago)", null, "10.0.2.2"]
+          "cells": [
+            "Web-3",
+            "1/1",
+            "Running",
+            "1 (45s ago)",
+            0,
+            1048576,
+            null,
+            "10.0.2.2"
+          ]
         },
         {
           "namespace": "beta",
@@ -118,14 +195,32 @@
             "app": "api",
             "tier": "back"
           },
-          "cells": ["api-1", "0/0", "Error", "0", null, "10.0.2.3"]
+          "cells": [
+            "api-1",
+            "0/0",
+            "Error",
+            "0",
+            1500000,
+            2569932800,
+            null,
+            "10.0.2.3"
+          ]
         },
         {
           "namespace": "beta",
           "name": "api-2",
           "created": "2026-10-15T00:00:00Z",
           "labels": {},
-          "cells": ["api-2", "0/3", "Completed", "2", null, "10.0.2.4"]
+          "cells": [
+            "api-2",
+            "0/3",
+            "Completed",
+            "2",
+            250000000,
+            1048576,
+            null,
+            "10.0.2.4"
+          ]
         }
       ],
       "cases": [
@@ -179,6 +274,8 @@
               "Ready",
               "Status",
               "Restarts",
+              "CPU",
+              "Memory",
               "Age",
               "IP"
             ],
@@ -484,7 +581,16 @@
           },
           "window": [0, 50],
           "expect": {
-            "columns": ["Name", "Ready", "Status", "Restarts", "Age", "IP"],
+            "columns": [
+              "Name",
+              "Ready",
+              "Status",
+              "Restarts",
+              "CPU",
+              "Memory",
+              "Age",
+              "IP"
+            ],
             "total": 0,
             "ids": []
           }
@@ -959,7 +1065,16 @@
           },
           "window": [0, 1],
           "expect": {
-            "columns": ["Name", "Ready", "Status", "Restarts", "Age", "IP"],
+            "columns": [
+              "Name",
+              "Ready",
+              "Status",
+              "Restarts",
+              "CPU",
+              "Memory",
+              "Age",
+              "IP"
+            ],
             "total": 4,
             "ids": ["kind-test/alpha/db-1"]
           }
@@ -1025,6 +1140,147 @@
           "expect": {
             "total": 0,
             "ids": []
+          }
+        },
+        {
+          "name": "CPU ascending, equal values in id order and rows without a sample last",
+          "query": {
+            "sort": {
+              "column": "CPU",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/Web-3",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-1",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/db-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "CPU descending keeps rows without a sample last, and ties in id order",
+          "query": {
+            "sort": {
+              "column": "CPU",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/alpha/db-1",
+              "kind-test/beta/api-2",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-1",
+              "kind-test/beta/Web-3",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "Memory descending",
+          "query": {
+            "sort": {
+              "column": "Memory",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/beta/api-1",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/alpha/web-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "Memory ascending leaves rows without a sample last too",
+          "query": {
+            "sort": {
+              "column": "Memory",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 8,
+            "ids": [
+              "kind-test/alpha/web-1",
+              "kind-test/beta/api-2",
+              "kind-test/beta/Web-3",
+              "kind-test/alpha/db-1",
+              "kind-test/alpha/web-10",
+              "kind-test/beta/api-1",
+              "kind-test/alpha/web-2",
+              "kind-test/beta/web-09"
+            ]
+          }
+        },
+        {
+          "name": "a metric is a window like any column",
+          "query": {
+            "sort": {
+              "column": "CPU",
+              "descending": false
+            }
+          },
+          "window": [6, 50],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/alpha/web-2", "kind-test/beta/web-09"]
+          }
+        },
+        {
+          "name": "the text filter never matches a metric cell, shown or not",
+          "query": {
+            "text": "5017204",
+            "columns": {
+              "CPU": true,
+              "Memory": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "a count, a group or values by a metric do nothing",
+          "query": {
+            "countBy": "CPU",
+            "groupBy": {
+              "column": "Memory",
+              "collapsed": []
+            },
+            "values": {
+              "column": "CPU",
+              "values": ["0"]
+            }
+          },
+          "window": [0, 1],
+          "expect": {
+            "total": 8,
+            "ids": ["kind-test/beta/api-1"],
+            "counts": []
           }
         }
       ]
@@ -1179,6 +1435,16 @@
           "priority": 0
         },
         {
+          "name": "CPU",
+          "kind": "cpu",
+          "priority": 0
+        },
+        {
+          "name": "Memory",
+          "kind": "memory",
+          "priority": 0
+        },
+        {
           "name": "Age",
           "kind": "age",
           "priority": 0
@@ -1195,14 +1461,22 @@
           "name": "node-a",
           "created": "2026-09-01T00:00:00Z",
           "labels": {},
-          "cells": ["node-a", "Ready", "control-plane", null, "v1.33.10"]
+          "cells": [
+            "node-a",
+            "Ready",
+            "control-plane",
+            277147502,
+            2569932800,
+            null,
+            "v1.33.10"
+          ]
         },
         {
           "namespace": null,
           "name": "node-b",
           "created": "2026-09-02T00:00:00Z",
           "labels": {},
-          "cells": ["node-b", "NotReady", "<none>", null, "v1.33.9"]
+          "cells": ["node-b", "NotReady", "<none>", null, null, null, "v1.33.9"]
         },
         {
           "namespace": null,
@@ -1213,6 +1487,8 @@
             "node-c",
             "Ready,SchedulingDisabled",
             "<none>",
+            100000000,
+            1073741824,
             null,
             "v1.37.0"
           ]
@@ -1226,7 +1502,15 @@
           },
           "window": [0, 50],
           "expect": {
-            "columns": ["Name", "Status", "Roles", "Age", "Version"],
+            "columns": [
+              "Name",
+              "Status",
+              "Roles",
+              "CPU",
+              "Memory",
+              "Age",
+              "Version"
+            ],
             "total": 3,
             "ids": ["kind-test/node-a", "kind-test/node-b", "kind-test/node-c"]
           }
@@ -1254,6 +1538,34 @@
           "expect": {
             "total": 2,
             "ids": ["kind-test/node-a", "kind-test/node-c"]
+          }
+        },
+        {
+          "name": "Memory descending puts the node without a sample last",
+          "query": {
+            "sort": {
+              "column": "Memory",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": ["kind-test/node-a", "kind-test/node-c", "kind-test/node-b"]
+          }
+        },
+        {
+          "name": "CPU ascending puts the node without a sample last",
+          "query": {
+            "sort": {
+              "column": "CPU",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": ["kind-test/node-c", "kind-test/node-a", "kind-test/node-b"]
           }
         }
       ]

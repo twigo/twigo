@@ -1,5 +1,6 @@
 //! The query cases the mock runs too (`packages/protocol/src/query-cases.json`),
-//! through Rust's query view.
+//! through Rust's query view. A list's CPU and Memory columns are the
+//! poller's samples joined to the rows, not cells of the rows' own.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use twigo_cache::hub::Delta;
 use twigo_cache::meta::{Meta, Owner};
+use twigo_cache::metrics::{Api, Change, Sample, Update};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{
@@ -81,29 +83,34 @@ struct Expect {
     groups: Option<Vec<RowGroup>>,
 }
 
-fn column(column: &twigo_ipc::Column) -> Column {
+fn is_metric(column: &twigo_ipc::Column) -> bool {
     use twigo_ipc::ColumnKind as Wire;
-    Column {
+    matches!(column.kind, Wire::Cpu | Wire::Memory)
+}
+
+fn column(column: &twigo_ipc::Column) -> Option<Column> {
+    use twigo_ipc::ColumnKind as Wire;
+    Some(Column {
         name: column.name.as_str().into(),
         kind: match column.kind {
             Wire::String => ColumnKind::String,
-            Wire::Integer | Wire::Cpu | Wire::Memory => ColumnKind::Integer,
+            Wire::Integer => ColumnKind::Integer,
             Wire::Number => ColumnKind::Number,
             Wire::Boolean => ColumnKind::Boolean,
             Wire::Date => ColumnKind::Date,
             Wire::Age => ColumnKind::Age,
             Wire::Other => ColumnKind::Other,
+            Wire::Cpu | Wire::Memory => return None,
         },
         format: "".into(),
         priority: column.priority,
-    }
+    })
 }
 
 /// A row as the Table decoder makes it: Age cells, and JSON's types.
-fn row(row: &CaseRow, columns: &[Column], at: usize) -> Row {
-    let cells = row
-        .cells
-        .iter()
+fn row(row: &CaseRow, cells: Vec<&Value>, columns: &[Column], at: usize) -> Row {
+    let cells = cells
+        .into_iter()
         .zip(columns)
         .map(|(cell, column)| match (column.kind, cell) {
             (ColumnKind::Age, _) => Cell::Age,
@@ -151,7 +158,12 @@ fn the_query_cases_pass() {
     let cases: Cases = serde_json::from_str(CASES).unwrap();
     let mut failed = Vec::new();
     for list in &cases.lists {
-        let columns: Arc<[Column]> = list.columns.iter().map(column).collect();
+        let columns: Arc<[Column]> = list.columns.iter().filter_map(column).collect();
+        let metric_at = |kind: twigo_ipc::ColumnKind| {
+            list.columns.iter().position(|column| column.kind == kind)
+        };
+        let metrics =
+            metric_at(twigo_ipc::ColumnKind::Cpu).zip(metric_at(twigo_ipc::ColumnKind::Memory));
         for case in &list.cases {
             let query = ListQuery {
                 space: cases.context.clone(),
@@ -185,7 +197,35 @@ fn the_query_cases_pass() {
                             .as_ref()
                             .is_some_and(|namespace| query.namespaces.contains(namespace))
                 })
-                .map(|(at, case_row)| Arc::new(row(case_row, &columns, at)))
+                .collect::<Vec<_>>();
+            let samples: Vec<Change> = rows
+                .iter()
+                .filter_map(|(_, case_row)| {
+                    let (cpu, memory) = metrics?;
+                    Some(Change {
+                        namespace: case_row.namespace.as_deref().unwrap_or_default().into(),
+                        name: case_row.name.as_str().into(),
+                        sample: Some(Arc::new(Sample {
+                            sampled: None,
+                            cpu: case_row.cells[cpu].as_i64()?,
+                            memory: case_row.cells[memory].as_i64()?,
+                            containers: Box::default(),
+                        })),
+                    })
+                })
+                .collect();
+            let rows = rows
+                .into_iter()
+                .map(|(at, case_row)| {
+                    let cells = case_row
+                        .cells
+                        .iter()
+                        .zip(&list.columns)
+                        .filter(|(_, column)| !is_metric(column))
+                        .map(|(cell, _)| cell)
+                        .collect();
+                    Arc::new(row(case_row, cells, &columns, at))
+                })
                 .collect();
             let spec = Spec::new(&cases.context, &query);
             if let Some(kind) = case.expect.refused {
@@ -202,10 +242,19 @@ fn the_query_cases_pass() {
                 continue;
             };
             let mut view = QueryView::new(spec);
+            view.set_api(Api::Served {
+                version: "v1beta1",
+                pods: true,
+                nodes: true,
+            });
             view.set_window(case.window.0, case.window.1);
             view.apply(Delta::Reset {
                 rows,
                 columns: Some(Arc::clone(&columns)),
+            });
+            view.samples(Update {
+                changes: samples,
+                ..Update::default()
             });
             let batch = view.batch(ViewState::Ready).unwrap();
             let ids: Vec<&str> = batch
