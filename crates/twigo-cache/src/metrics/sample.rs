@@ -30,6 +30,15 @@ pub struct Container {
     pub memory: i64,
 }
 
+impl Sample {
+    /// Taken before an object was created, a sample is of another that had its name.
+    pub fn taken_since(&self, created: Option<Timestamp>) -> bool {
+        self.sampled
+            .zip(created)
+            .is_none_or(|(sampled, created)| sampled >= created)
+    }
+}
+
 impl PartialEq for Sample {
     fn eq(&self, other: &Self) -> bool {
         self.cpu == other.cpu && self.memory == other.memory && self.containers == other.containers

@@ -572,7 +572,8 @@ impl QueryView {
             let found = held(
                 tracked.row.meta.namespace.as_deref().unwrap_or_default(),
                 &tracked.row.meta.name,
-            );
+            )
+            .filter(|found| found.taken_since(tracked.row.meta.created));
             if found.is_some() {
                 self.set_sample(&key, found);
             }

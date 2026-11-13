@@ -163,6 +163,33 @@ async fn a_part_that_is_off_makes_no_request_and_sends_nothing() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_pod_replaced_under_its_name_takes_the_sample_of_the_old_one_with_it() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let first = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(usages(&first).last().unwrap().cpu.used, Some(10_000_000));
+
+    let mut replaced = pod(json!([{ "name": "main", "resources": { "limits": { "cpu": "1" } } }]));
+    replaced["metadata"]["uid"] = json!("new-uid");
+    rig.fake.put("", "pods", Some("a"), replaced);
+    let after = rig.watch(&opened, Duration::from_secs(5)).await;
+    let usage = *usages(&after).last().expect("a usage for the new pod");
+    assert_eq!(
+        usage.cpu.used, None,
+        "the old pod's use against the new pod's limits"
+    );
+
+    rig.fake.pod_usage("a", "web-0", &[("main", "20m", "1Mi")]);
+    let next = rig.watch(&opened, Duration::from_secs(15)).await;
+    let usage = *usages(&next).last().expect("its own sample");
+    assert_eq!(usage.cpu.used, Some(20_000_000));
+    assert_eq!(usage.cpu.limit, Some(1_000_000_000));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pod_is_its_containers_against_their_requests_and_a_container_without_a_limit_leaves_the_pod_none()
  {
     let fake = Fake::default();

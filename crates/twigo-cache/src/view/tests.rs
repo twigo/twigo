@@ -1013,6 +1013,39 @@ fn a_row_that_enters_the_filters_takes_the_sample_the_poller_holds_at_once() {
 }
 
 #[test]
+fn a_row_does_not_take_a_sample_that_was_taken_before_it_was_created() {
+    let at = |text: &str| -> jiff::Timestamp { text.parse().unwrap() };
+    let held = |namespace: &str, name: &str| {
+        (namespace == "a" && name == "web-1").then(|| {
+            Arc::new(Sample {
+                sampled: Some(at("2026-11-13T16:00:10Z")),
+                cpu: 50,
+                memory: 7,
+                containers: Box::default(),
+            })
+        })
+    };
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    for (created, wanted) in [
+        ("2026-11-13T16:00:00Z", ipc::Cell::Int(50)),
+        ("2026-11-13T16:00:20Z", ipc::Cell::Null),
+    ] {
+        let mut rig = Rig::new(&asked);
+        rig.view.set_api(served());
+        let mut entered = pod("a", "web-1", "CrashLoopBackOff", "0");
+        entered.meta.created = Some(at(created));
+        rig.store.upsert(entered);
+        let batch = rig.flush_with(held).unwrap();
+        assert_eq!(
+            cpu_of(&batch, "kind-test/a/web-1"),
+            Some(wanted),
+            "created {created}: a pod made after the sample is another one by the name"
+        );
+    }
+}
+
+#[test]
 fn sorted_by_a_metric_rows_without_a_sample_come_last_either_way_and_a_sample_moves_its_row() {
     for descending in [false, true] {
         let mut rig = Rig::new(&sorted_by("CPU", descending));

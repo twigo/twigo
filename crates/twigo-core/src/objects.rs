@@ -170,6 +170,7 @@ impl Dirty {
 
 struct Used {
     sample: Option<Arc<Sample>>,
+    uid: Option<Box<str>>,
     state: MetricsState,
     served: bool,
 }
@@ -196,7 +197,8 @@ impl Used {
         };
         reader.want(wants);
         let update = reader.drain();
-        let mut sample = self.sample.clone();
+        let uid = object.and_then(|object| object.meta.uid.clone());
+        let mut sample = self.sample.clone().filter(|_| uid == self.uid);
         if let Some((namespace, name)) = &key {
             for reset in &update.resets {
                 sample = reset.samples.get(namespace, name).cloned();
@@ -217,6 +219,7 @@ impl Used {
         let changed = sample != self.sample || state != self.state || served != self.served;
         *self = Self {
             sample,
+            uid,
             state,
             served,
         };
@@ -266,6 +269,7 @@ async fn run(
     let mut last_lines = LastLines::new();
     let mut used = Used {
         sample: None,
+        uid: None,
         state: MetricsState::Ready,
         served: false,
     };
