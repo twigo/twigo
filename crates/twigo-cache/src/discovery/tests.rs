@@ -7,10 +7,10 @@ use tokio::time::{Instant, sleep, timeout};
 use twigo_ipc::{Discovered, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
-use twigo_kube::kubeconfig::{Fingerprint, Sources};
+use twigo_kube::kubeconfig::Fingerprint;
 
 use super::*;
-use crate::fake::Fake;
+use crate::fake::{Fake, fingerprint};
 use crate::hub::Connect;
 
 const CRDS: &str = "/apis/apiextensions.k8s.io/v1/customresourcedefinitions";
@@ -352,21 +352,6 @@ fn rebuild(current: &Current, next: Result<Arc<Clients>, IpcError>) {
     if let Ok(replaced) = replaced {
         replaced.connections().abandon();
     }
-}
-
-fn fingerprint(server: &str) -> Fingerprint {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("kubeconfig");
-    std::fs::write(
-        &file,
-        format!(
-            "clusters: [{{ name: c, cluster: {{ server: '{server}' }} }}]
-contexts: [{{ name: kind-test, context: {{ cluster: c }} }}]
-"
-        ),
-    )
-    .unwrap();
-    Sources::explicit(file).load().contexts[0].fingerprint
 }
 
 #[tokio::test(start_paused = true)]

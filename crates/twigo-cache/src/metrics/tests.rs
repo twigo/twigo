@@ -27,13 +27,12 @@ struct Rig {
 
 async fn context_of(hub: &Hub, directory: &TempDir) -> (Followers, Arc<Context>) {
     let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let api = followers
+    let followed = followers
         .get("kind-test", async { watch::channel(None).1 })
-        .await
-        .api();
+        .await;
     (
         followers,
-        Poller::new(hub.clone()).context("kind-test", api),
+        Poller::new(hub.clone()).context("kind-test", &followed),
     )
 }
 

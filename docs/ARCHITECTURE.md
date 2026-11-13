@@ -518,8 +518,12 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Served: `pods`, `nodes`, each or both, at `v1` before `v1beta1`, as kubectl picks.
     Stale: the APIService exists and its version lists no resources, as while metrics-server is down.
     Served and stale give pod and node lists the columns from their first batch, whatever the poller has answered, so the columns never depend on a response.
-    The core follows each context's discovery once, from the first time the webview, a list or an object asks for it until the sources no longer list the context, and `resources_watch` reads the same follower, so the fact costs no second fetch and outlives every list.
-    The webview subscribes a list only once its space's resources came (3.4), so a list finds the fact at its first batch, one opened again a second after the last closed included; a list opened before any discovery answered gets the columns in the batch after the answer.
+    The core follows each context's discovery with one follower, shared by every `resources_watch`, every list of pods or nodes and every open pod or node of the context, so the fact costs no second fetch.
+    It runs while at least one of them holds it, and stops with the last: its CRD and APIService watches and its fetches end with it, as a background space's other subscriptions do (3.2), so a context nobody follows costs nothing.
+    A context that leaves the sources while something holds its follower keeps the one follower and the one poller context when it returns, so the in-flight limit below holds across it.
+    The registry keeps what the follower last confirmed of the Metrics API, per context and the context's fingerprint (6.2), after it stops: a follower started again begins from it, so a list opened again has its columns in its first batch, and corrects it with its first answer if the cluster changed meanwhile; a kept state is used only under the fingerprint it was kept for.
+    The webview subscribes a list only once its space's resources came (3.4), so a list finds the fact at its first batch; a list opened before any discovery answered gets the columns in the batch after the answer.
+    Every change of the fact reaches lists and objects, a stale API that is uninstalled and an absent one that is installed but never ready included: the columns come and go, and an open usage hears `absent`.
   - A scope, a namespace or the cluster, is listed every 15 s, the metrics-server manifest's and the chart's resolution, while a reader wants it, the first time at once; with the last reader gone it is not listed again, with no linger.
     Two readers of a scope share one request.
     A pod open alone asks for its namespace with a field selector on its name, and asks nothing when a list reads its namespace.
@@ -557,13 +561,14 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     One recreated with the same CA shares the name, and only the server's ETags tell the two apart.
   - `resources_watch` follows the active space's discovery in `twigo-cache`, through the CRD and APIService metadata upstreams.
     It answers at once and sends the resources over its channel, since discovery may wait on the network or a sign-in, and the webview asks for the next space's watch only once the last one answered.
-    The follower is the context's own and outlives the watch: a watch starts from what it knows, `Ready` with no `Pending` before it once resources are known, and sends each change.
+    The follower is the context's own, shared by every watch, list and object that reads it, and lives while any of them holds it: a watch starts from what it knows, `Ready` with no `Pending` before it once resources are known, and sends each change.
+    Once nothing holds it, following the space again starts a new follower, which fetches discovery and holds the CRD and APIService upstreams anew.
     The API server updates its discovery from such a change in a controller of its own, which may not be done when the change reaches Twigo: apiextensions' discovery controller waits for the CRD's `Established` condition through an informer of its own ([`sync`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_discovery_controller.go#L105)).
     So discovery is fetched once the changes have been quiet for 0.5 s, or 2 s after the first of them if they keep coming, and again 2 s and 10 s after the last of them.
     A new follower whose upstreams another one left listed fetches at those times too, since the changes they told may still lag.
     On kind 1.37 a CRD came with the first of these, 0.52 to 0.54 s after its creation, in four runs of `a_crd_created_while_followed_comes_without_a_restart` (2026-11-02).
   - Users who may not list CRDs or may not list APIServices poll discovery with its ETags every minute, the interval at which kube-aggregator refreshes an aggregated server's discovery ([`discoveryRefreshInterval`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_discovery.go#L58)).
-    An aggregated server whose resources change while its APIService does not is seen with the next change, or once the space is followed again.
+    An aggregated server whose resources change while its APIService does not is seen with the next change, or once the space is followed again after nobody followed it.
   - A follower first sends the name of the cluster its context reaches, as soon as its clients are built from the kubeconfig and before it asks for discovery, and again whenever an edit moves the context to another cluster.
     An edit drops a discovery request under way, which may wait on the old cluster's timeout or sign-in.
     A space keeps its last resources in the explorer while that name is the same, so a switch shows it at once, and shows a placeholder until the new cluster answers when the name changed.
@@ -574,7 +579,8 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The fingerprint is taken once the catalog's sources have been read, so their first read at a start is no change, and it leaves out the oidc tokens that Twigo and kubelogin write back (6.2) and other contexts' entries, so neither sets off a fetch.
     The frontend follows the active space again whenever a credential comes after none or after a failed run, and a watch of a stopped follower asks it to fetch again, as a new follower did.
     A run that a rejected credential sets off by itself does not count: against a server that keeps refusing fresh credentials, every view asking again would run the plugin again, forever.
-    A fix on the server's side, as a role binding for the identity, and new oidc tokens are seen once the space is followed again, as after switching to another space and back.
+    A fix on the server's side, as a role binding for the identity, and new oidc tokens are seen once the space is followed again after nobody followed it, as after switching to another space and back.
+    A follower that a list or an object still holds keeps the CRD and APIService upstreams that a `401` ended until the context's fingerprint changes: a watch that follows it again asks only a stopped follower to fetch again.
   - OpenAPI v3 documents are fetched on the first edit of a group/version, through the context's `api` client, so the gate sees them.
     `GET /openapi/v3` lists each group/version with a `serverRelativeURL` whose `?hash=` is the upper-case hex SHA-512 of the JSON the server serves for it ([`computeETag`](https://github.com/kubernetes/kube-openapi/blob/d427ff9ee9ad05f5da435abbb7c5929cb713ac56/pkg/handler3/handler.go#L121-L126)), the aggregated servers' documents included.
     A document is cached on disk for good under that URL, and used only while its bytes still hash to it, so a cached copy cannot be stale or another cluster's, and a server that answers something else under a hash writes nothing.

@@ -19,6 +19,7 @@ use std::time::Duration;
 use tokio::sync::{Semaphore, watch};
 use twigo_ipc::MetricsState;
 
+use crate::discovery::Followed;
 use crate::hub::Hub;
 use board::Board;
 
@@ -48,9 +49,10 @@ struct Inner {
 }
 
 /// The scopes polled for one context, alive while a reader holds it. What the context serves
-/// comes from its follower, which outlives every reader ([`crate::discovery::Followers`]).
+/// comes from its follower, which a reader holds with it ([`crate::discovery::Followers`]).
 pub struct Context {
     api: watch::Receiver<Api>,
+    _followed: Arc<Followed>,
     pods: Arc<Board>,
     nodes: Arc<Board>,
 }
@@ -63,16 +65,15 @@ impl Poller {
         }))
     }
 
-    pub fn context(&self, name: &str, api: watch::Receiver<Api>) -> Arc<Context> {
+    /// The context's, shared by every reader of it: it holds the follower, whose registry
+    /// gives one per context for as long as anything holds it.
+    pub fn context(&self, name: &str, followed: &Arc<Followed>) -> Arc<Context> {
         let mut contexts = self.0.contexts.lock().expect("poller lock");
-        if let Some(held) = contexts
-            .get(name)
-            .and_then(Weak::upgrade)
-            .filter(|held| held.api.same_channel(&api))
-        {
+        if let Some(held) = contexts.get(name).and_then(Weak::upgrade) {
             return held;
         }
         let turns = Arc::new(Semaphore::new(IN_FLIGHT));
+        let api = followed.api();
         let board = |kind| {
             Arc::new(Board::new(
                 name,
@@ -86,6 +87,7 @@ impl Poller {
             pods: board(Kind::Pods),
             nodes: board(Kind::Nodes),
             api,
+            _followed: Arc::clone(followed),
         });
         contexts.insert(name.to_owned(), Arc::downgrade(&built));
         built

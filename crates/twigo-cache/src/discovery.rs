@@ -3,7 +3,9 @@
 //! APIServices the hub lists change, every minute while the person may not
 //! list them, after the hub's longest backoff while it fails, which keeps
 //! the resources the server last answered, and once the context's entry in
-//! the kubeconfig changes, even after a failed credential stopped it.
+//! the kubeconfig changes, even after a failed credential stopped it. It
+//! lasts as long as something follows the context, with a follower shared by
+//! all that do.
 
 mod followed;
 
@@ -20,6 +22,7 @@ use twigo_kube::discovery::{Cache, Discovery, Error};
 use twigo_kube::kubeconfig::Fingerprint;
 
 use crate::hub::{Hub, Query, RETRY_WITHIN, Resource, RowFormat, Subscription};
+use crate::metrics::Api;
 use crate::table::Row;
 
 /// The API server updates its discovery from a change of a CRD or an
@@ -60,6 +63,8 @@ pub struct Follower {
     /// The cluster the last `Pending` named.
     named: Option<String>,
     last: Option<Discovered>,
+    /// What the context served of the Metrics API when `last` was sent.
+    served: Api,
     asked: Arc<watch::Sender<()>>,
     /// Whether it was asked since the last fetch began.
     heard: watch::Receiver<()>,
@@ -117,6 +122,7 @@ impl Follower {
             failed: None,
             named: None,
             last: None,
+            served: Api::Absent,
             asked: Arc::new(asked),
             heard,
         };
@@ -129,9 +135,10 @@ impl Follower {
     }
 
     /// The cluster the context reaches at first, as soon as its clients
-    /// are built, then its resources, then each time they change, with the
-    /// cluster named first again whenever an edit moves the context to
-    /// another.
+    /// are built, then its resources, then each time they change or what
+    /// they say of the Metrics API does, which a stale version and an absent
+    /// group both leave out of the resources, with the cluster named first
+    /// again whenever an edit moves the context to another.
     pub async fn next(&mut self) -> Discovered {
         let mut wait = !matches!(self.last, None | Some(Discovered::Pending { .. }));
         loop {
@@ -145,8 +152,13 @@ impl Follower {
                 continue;
             };
             self.poll = Instant::now() + POLL;
-            if self.last.as_ref() != Some(&discovered) {
+            let served = match discovered {
+                Discovered::Ready { .. } => self.confirmed().map_or(Api::Absent, Api::of),
+                Discovered::Pending { .. } | Discovered::Failed { .. } => Api::Absent,
+            };
+            if self.last.as_ref() != Some(&discovered) || self.served != served {
                 self.last = Some(discovered.clone());
+                self.served = served;
                 return discovered;
             }
         }
@@ -165,6 +177,15 @@ impl Follower {
             .as_ref()
             .filter(|_| self.confirmed)
             .map(|(_, discovery)| discovery)
+    }
+
+    /// What the context serves of the Metrics API, as the last [`Self::next`] sent it.
+    pub fn api(&self) -> Api {
+        self.served
+    }
+
+    pub fn fingerprint(&self) -> Option<Fingerprint> {
+        *self.entry.borrow()
     }
 
     async fn wait(&mut self) {

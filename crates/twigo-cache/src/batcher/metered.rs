@@ -10,10 +10,11 @@ use twigo_ipc::Discovered;
 use twigo_ipc::{Cell, Gvr, ListQuery, MetricsState, Sort, ViewState};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
+use twigo_kube::kubeconfig::Fingerprint;
 
 use super::*;
 use crate::discovery::Followers;
-use crate::fake::Fake;
+use crate::fake::{Fake, fingerprint};
 use crate::hub::{Hub, Query, Resource, RowFormat};
 use crate::metrics::{FIRST_ANSWER, Kind, Poller};
 
@@ -80,22 +81,20 @@ fn query(sort: Option<Sort>, all: bool) -> ListQuery {
     }
 }
 
+fn entry() -> watch::Receiver<Option<Fingerprint>> {
+    watch::channel(Some(fingerprint("https://a.example:6443"))).1
+}
+
 fn opening(poller: &Poller, followers: &Arc<Followers>) -> Opening {
     let (poller, followers) = (poller.clone(), Arc::clone(followers));
     Box::pin(async move {
-        let followed = followers
-            .get("kind-test", async { watch::channel(None).1 })
-            .await;
-        poller
-            .context("kind-test", followed.api())
-            .reader(Kind::Pods)
+        let followed = followers.get("kind-test", async { entry() }).await;
+        poller.context("kind-test", &followed).reader(Kind::Pods)
     })
 }
 
 async fn discovered(followers: &Followers) {
-    let followed = followers
-        .get("kind-test", async { watch::channel(None).1 })
-        .await;
+    let followed = followers.get("kind-test", async { entry() }).await;
     let mut resources = followed.follow();
     let waited = async { while !matches!(resources.next().await, Discovered::Ready { .. }) {} };
     timeout_at(Instant::now() + Duration::from_secs(600), waited)
@@ -800,5 +799,43 @@ async fn a_stale_api_keeps_the_columns_says_unavailable_and_recovers() {
     assert_eq!(
         list.cpus(&back, "kind-test/a/p1").last(),
         Some(&Cell::Int(2_000_000))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_api_that_is_uninstalled_takes_the_columns_away() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = cluster(false).await;
+    fake.stale_metrics("v1beta1");
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let down = list.watch(Duration::from_secs(5)).await;
+    assert!(has_metric_columns(&down[0]));
+    assert_eq!(down[0].metrics, Some(MetricsState::Unavailable));
+
+    list.fake.state().served.remove(crate::metrics::GROUP);
+    list.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = list.watch(Duration::from_secs(120)).await;
+    let columns = gone
+        .iter()
+        .find_map(|batch| batch.columns.as_ref())
+        .expect("the columns change");
+    assert!(
+        columns
+            .iter()
+            .all(|column| column.name != "CPU" && column.name != "Memory"),
+        "{columns:?}"
     );
 }

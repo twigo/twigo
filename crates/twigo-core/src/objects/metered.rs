@@ -64,11 +64,10 @@ impl Rig {
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
         let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-        let api = followers
+        let followed = followers
             .get("kind-test", async { watch::channel(None).1 })
-            .await
-            .api();
-        let context = Poller::new(hub.clone()).context("kind-test", api);
+            .await;
+        let context = Poller::new(hub.clone()).context("kind-test", &followed);
         let waited = async {
             while context.api().version().is_none() {
                 sleep(Duration::from_millis(10)).await;
@@ -234,6 +233,49 @@ async fn a_context_that_stops_serving_the_resource_withdraws_the_usage_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_context_whose_stale_api_is_uninstalled_withdraws_the_usage_too() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut rig = Rig::new(fake).await;
+    rig.fake.stale_metrics("v1beta1");
+    rig.fake
+        .state()
+        .no_endpoints
+        .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
+    rig.fake
+        .put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let opened = rig.open(Kind::Pods, PARTS);
+    let down = rig.watch(&opened, Duration::from_secs(30)).await;
+    assert_eq!(
+        usages(&down).last().map(|usage| usage.state),
+        Some(MetricsState::Unavailable),
+        "metrics-server is down"
+    );
+
+    rig.fake.state().served.remove(twigo_cache::metrics::GROUP);
+    rig.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = rig.watch(&opened, Duration::from_secs(120)).await;
+    assert_eq!(
+        usages(&gone).last().map(|usage| usage.state),
+        Some(MetricsState::Absent),
+        "and then uninstalled"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pod_is_its_containers_against_their_requests_and_a_container_without_a_limit_leaves_the_pod_none()
  {
     let fake = Fake::default();
@@ -365,11 +407,10 @@ async fn a_cluster_without_the_api_never_gets_a_usage() {
     let (hub, clients) = fake.hub(Budgets::default());
     let directory = tempfile::tempdir().unwrap();
     let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
-    let api = followers
+    let followed = followers
         .get("kind-test", async { watch::channel(None).1 })
-        .await
-        .api();
-    let context = Poller::new(hub.clone()).context("kind-test", api);
+        .await;
+    let context = Poller::new(hub.clone()).context("kind-test", &followed);
     sleep(Duration::from_secs(2)).await;
     let mut rig = Rig {
         fake,

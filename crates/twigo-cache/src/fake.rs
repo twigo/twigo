@@ -824,3 +824,23 @@ fn accepts_gzip(headers: &http::HeaderMap) -> bool {
 fn stream(receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, Infallible>>) -> Response<Body> {
     Response::new(StreamBody::new(receiver).boxed_unsync())
 }
+
+/// The fingerprint of a context that reaches `server`, as the catalog makes it.
+#[cfg(test)]
+pub fn fingerprint(server: &str) -> twigo_kube::kubeconfig::Fingerprint {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("kubeconfig");
+    std::fs::write(
+        &file,
+        format!(
+            "clusters: [{{ name: c, cluster: {{ server: '{server}' }} }}]
+contexts: [{{ name: kind-test, context: {{ cluster: c }} }}]
+"
+        ),
+    )
+    .unwrap();
+    twigo_kube::kubeconfig::Sources::explicit(file)
+        .load()
+        .contexts[0]
+        .fingerprint
+}
