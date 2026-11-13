@@ -167,6 +167,24 @@ describe("the main list", () => {
     expect(sent.subscriptions()).toBe(subscriptions);
   });
 
+  test("with a text filter set, showing or hiding CPU or Memory opens no subscription, though another column does", async () => {
+    const backend = createMockBackend("ready");
+    const sent = spied(backend);
+    await openList(backend);
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "auth" },
+    });
+    await settle(30);
+    const subscriptions = sent.subscriptions();
+    await choose("CPU");
+    await choose("Memory");
+    await choose("CPU");
+    expect(last(sent.reads())).toBe(true);
+    expect(sent.subscriptions()).toBe(subscriptions);
+    await choose("Restarts");
+    expect(sent.subscriptions()).toBe(subscriptions + 1);
+  });
+
   test("reads while the list is sorted by a metric though none is drawn, and stops with the sort", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);

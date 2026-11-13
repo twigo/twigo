@@ -19,6 +19,7 @@ import {
   byHealth,
   cellTone,
   columnRule,
+  isMetricColumn,
   type CellKind,
   HEALTH,
   healthValues,
@@ -103,6 +104,11 @@ function Grid({
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
   const collapsed = states.collapsed(uri);
+  const choices = Object.fromEntries(
+    Object.entries(preset.columns).filter(
+      ([name]) => !isMetricColumn(gvr, name),
+    ),
+  );
   const query: ListQuery = {
     space: input.space,
     gvr,
@@ -113,11 +119,9 @@ function Grid({
     owners: null,
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
-    // query and a column toggle does not resubscribe.
-    columns:
-      text !== "" && Object.keys(preset.columns).length > 0
-        ? { ...preset.columns }
-        : null,
+    // query and a column toggle does not resubscribe, and the filter never
+    // reads a metric column, so its choice stays out too.
+    columns: text !== "" && Object.keys(choices).length > 0 ? choices : null,
     sort: states.sort(uri) ?? null,
     countBy: countBy ?? null,
     groupBy: preset.group
