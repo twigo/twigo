@@ -1,0 +1,9 @@
+[package]
+name = "twigo-quantity"
+description = "Kubernetes resource quantities: what apimachinery's resource.Quantity reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true

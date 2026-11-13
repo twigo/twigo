@@ -1,11 +1,14 @@
 //! Resource quantities (apimachinery v0.37.1, `resource.Quantity`), read
-//! as thousandths, rounded up as `MilliValue` rounds them.
+//! as billionths, the finest the type keeps: what is finer is rounded up,
+//! as `MilliValue` and `Value` round up what they cut.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Quantity(i128);
+pub struct Quantity(i128);
+
+const NANO: i128 = 1_000_000_000;
 
 impl Quantity {
-    pub const ONE: Quantity = Quantity(1000);
+    pub const ONE: Quantity = Quantity(NANO);
     pub const ZERO: Quantity = Quantity(0);
 
     /// `500m`, `1.5Gi`, `2e3`; None for anything else.
@@ -50,21 +53,26 @@ impl Quantity {
                 if power >= 0 { (ten, 1) } else { (1, ten) }
             }
         };
-        let milli = div_ceil(
-            digits.checked_mul(1000)?.checked_mul(num)?,
+        let nano = div_ceil(
+            digits.checked_mul(NANO)?.checked_mul(num)?,
             scale.checked_mul(den)?,
         );
-        Some(Quantity(if negative { -milli } else { milli }))
+        Some(Quantity(if negative { -nano } else { nano }))
     }
 
-    /// In thousandths, as `MilliValue`.
-    pub fn milli(self) -> i128 {
+    /// In billionths, which is what `n` writes.
+    pub fn nano(self) -> i128 {
         self.0
+    }
+
+    /// In thousandths, rounded up as `MilliValue`.
+    pub fn milli(self) -> i128 {
+        div_ceil(self.0, NANO / 1000)
     }
 
     /// Rounded up to a whole, as `Value`.
     pub fn value(self) -> i128 {
-        div_ceil(self.0, 1000)
+        div_ceil(self.0, NANO)
     }
 }
 
@@ -76,7 +84,7 @@ impl std::ops::Add for Quantity {
     }
 }
 
-pub(crate) fn div_ceil(a: i128, b: i128) -> i128 {
+pub fn div_ceil(a: i128, b: i128) -> i128 {
     let quotient = a / b;
     if a % b != 0 && (a > 0) == (b > 0) {
         quotient + 1
@@ -102,6 +110,11 @@ mod tests {
             ("1n", 1),
             ("100u", 1),
             ("-1", -1000),
+            ("50172044n", 51),
+            ("1999934n", 2),
+            ("0", 0),
+            ("204Ki", 208_896_000),
+            ("40Mi", 41_943_040_000),
         ] {
             assert_eq!(
                 Quantity::parse(text).map(Quantity::milli),
@@ -121,5 +134,41 @@ mod tests {
             assert_eq!(Quantity::parse(text), None, "{text}");
         }
         assert_eq!(Quantity::parse("1500m").map(Quantity::value), Some(2));
+    }
+
+    #[test]
+    fn what_metrics_server_writes_keeps_its_nanocores_and_bytes() {
+        for (text, nano) in [
+            ("50172044n", 50_172_044),
+            ("277147502n", 277_147_502),
+            ("68758110500n", 68_758_110_500),
+            ("0", 0),
+            ("1", 1_000_000_000),
+            ("250m", 250_000_000),
+            ("1500u", 1_500_000),
+            ("1n", 1),
+        ] {
+            assert_eq!(
+                Quantity::parse(text).map(Quantity::nano),
+                Some(nano),
+                "{text}"
+            );
+        }
+        for (text, bytes) in [
+            ("204Ki", 208_896),
+            ("2509700Ki", 2_569_932_800),
+            ("40Mi", 41_943_040),
+            ("1Mi", 1_048_576),
+            ("0", 0),
+            ("123456", 123_456),
+            ("12M", 12_000_000),
+            ("1500m", 2),
+        ] {
+            assert_eq!(
+                Quantity::parse(text).map(Quantity::value),
+                Some(bytes),
+                "{text}"
+            );
+        }
     }
 }

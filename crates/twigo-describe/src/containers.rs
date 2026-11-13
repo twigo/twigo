@@ -5,9 +5,9 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Container, ContainerRole, ContainerState, Field, Tone, Value as Shown};
 
-use crate::quantity::{Quantity, div_ceil};
 use crate::show::{CONFIG_MAP, Fields, SECRET, code, link, plain, quantities};
 use crate::{message, text};
+use twigo_quantity::{Quantity, div_ceil};
 
 /// Waiting reasons that the kubelet keeps a container in until something
 /// changes: its image, its configuration or its process.

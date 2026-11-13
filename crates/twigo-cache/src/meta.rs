@@ -19,8 +19,8 @@ pub type Labels = Box<[(Box<str>, Box<str>)]>;
 pub struct Meta {
     pub name: Box<str>,
     pub namespace: Option<Box<str>>,
-    /// None for objects the server builds without one, such as ComponentStatus
-    /// and metrics-server's metrics.
+    /// None for objects the server builds without one, such as
+    /// ComponentStatus.
     pub uid: Option<Box<str>>,
     pub resource_version: Box<str>,
     pub labels: Labels,

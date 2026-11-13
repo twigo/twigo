@@ -13,9 +13,11 @@ test-util = []
 
 [dependencies]
 backon.workspace = true
+flate2.workspace = true
 form_urlencoded.workspace = true
 futures.workspace = true
 http.workspace = true
+http-body-util.workspace = true
 indexset.workspace = true
 jiff.workspace = true
 k8s-openapi.workspace = true
@@ -28,13 +30,13 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-quantity.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
 dhat.workspace = true
 fastrand.workspace = true
 http-body.workspace = true
-http-body-util.workspace = true
 kube = { workspace = true, features = ["runtime"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "time"] }

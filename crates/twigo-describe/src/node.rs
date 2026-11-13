@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use twigo_ipc::{Block, EmbeddedList, Finding, Gvr, Section, Span, Tone, Value as Shown};
 
-use crate::quantity::Quantity;
 use crate::show::{Fields, POD, code, link, list, plain, toned};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
+use twigo_quantity::Quantity;
 
 const ROLE: &str = "node-role.kubernetes.io/";
 

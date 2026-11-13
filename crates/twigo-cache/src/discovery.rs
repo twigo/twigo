@@ -132,6 +132,15 @@ impl Follower {
         }
     }
 
+    /// The discovery the cluster last answered to this follower, or
+    /// confirmed against its ETags, as the last [`Self::next`] sent it.
+    pub fn confirmed(&self) -> Option<&Discovery> {
+        self.known
+            .as_ref()
+            .filter(|_| self.confirmed)
+            .map(|(_, discovery)| discovery)
+    }
+
     async fn wait(&mut self) {
         if self.failed == Some(Failed::Stop) {
             edited(&mut self.entry).await;

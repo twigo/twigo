@@ -53,6 +53,14 @@ pub struct Discovery {
     groups: Document,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupVersion {
+    pub version: String,
+    /// The aggregated server behind it is down, so it lists no resources.
+    pub stale: bool,
+    pub resources: Vec<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -105,6 +113,36 @@ impl Discovery {
             core: kept(core, core_cached),
             groups: kept(groups, groups_cached),
         }))
+    }
+
+    pub fn versions(&self, group: &str) -> Vec<GroupVersion> {
+        self.core
+            .list
+            .items
+            .iter()
+            .chain(&self.groups.list.items)
+            .filter(|found| {
+                found
+                    .metadata
+                    .as_ref()
+                    .and_then(|meta| meta.name.as_deref())
+                    .unwrap_or_default()
+                    == group
+            })
+            .flat_map(|found| &found.versions)
+            .filter_map(|version| {
+                Some(GroupVersion {
+                    version: version.version.clone()?,
+                    stale: version.freshness.as_deref() == Some("Stale"),
+                    resources: version
+                        .resources
+                        .iter()
+                        .filter(|resource| resource.verbs.iter().any(|verb| verb == "list"))
+                        .filter_map(|resource| resource.resource.clone())
+                        .collect(),
+                })
+            })
+            .collect()
     }
 
     /// The resources a client may list, those it cannot watch included,
@@ -292,6 +330,62 @@ mod tests {
                 ("gadgets".to_owned(), "v1".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn a_groups_versions_say_whether_they_are_stale_and_what_they_list() {
+        let metrics = |freshness: &str, resources: serde_json::Value| {
+            json!({
+                "metadata": { "name": "metrics.k8s.io" },
+                "versions": [{ "version": "v1beta1", "freshness": freshness, "resources": resources }],
+            })
+        };
+        let resource = |plural: &str, verbs: &[&str]| {
+            json!({
+                "resource": plural,
+                "responseKind": { "group": "", "version": "", "kind": "PodMetrics" },
+                "scope": "Namespaced",
+                "verbs": verbs,
+            })
+        };
+        let discovery = |group: serde_json::Value| Discovery {
+            core: Document {
+                etag: None,
+                list: APIGroupDiscoveryList::default(),
+            },
+            groups: Document {
+                etag: None,
+                list: serde_json::from_value(json!({ "items": [group] })).unwrap(),
+            },
+        };
+        let current = discovery(metrics(
+            "Current",
+            json!([
+                resource("pods", &["get", "list"]),
+                resource("watched", &["watch"])
+            ]),
+        ));
+        assert_eq!(
+            current.versions("metrics.k8s.io"),
+            [GroupVersion {
+                version: "v1beta1".to_owned(),
+                stale: false,
+                resources: vec!["pods".to_owned()],
+            }]
+        );
+        let down = discovery(json!({
+            "metadata": { "name": "metrics.k8s.io" },
+            "versions": [{ "version": "v1beta1", "freshness": "Stale" }],
+        }));
+        assert_eq!(
+            down.versions("metrics.k8s.io"),
+            [GroupVersion {
+                version: "v1beta1".to_owned(),
+                stale: true,
+                resources: Vec::new(),
+            }]
+        );
+        assert!(current.versions("example.com").is_empty());
     }
 
     #[test]

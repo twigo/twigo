@@ -9,6 +9,7 @@ pub mod discovery;
 mod fake;
 pub mod hub;
 pub mod meta;
+pub mod metrics;
 pub mod object;
 pub mod request;
 pub mod store;

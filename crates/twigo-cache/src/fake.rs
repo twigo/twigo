@@ -1,14 +1,18 @@
-//! A fake API server for the hub's tests on paused time: pods and
-//! namespaces as metadata, list pages, watches resumed from a
-//! `resourceVersion` or streaming their initial events, `410 Gone` below a
-//! compacted version, refusals, probes, access reviews, and aggregated
-//! discovery with its ETags.
+//! A fake API server for the hub's tests on paused time: objects by group,
+//! resource, namespace and name, as metadata unless a test puts whole ones,
+//! list pages, watches resumed from a `resourceVersion` or streaming their
+//! initial events, `410 Gone` below a compacted version, refusals, probes,
+//! access reviews, aggregated discovery with its ETags, and the Metrics
+//! API, which lists whole and cannot be watched.
 
 use std::collections::{BTreeMap, HashSet};
 use std::convert::Infallible;
+use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use futures::channel::mpsc;
 use http::{Request, Response, StatusCode};
 use http_body::Frame;
@@ -31,8 +35,8 @@ pub struct Fake(Arc<Mutex<State>>);
 #[derive(Default)]
 pub struct State {
     version: u64,
-    /// Objects by resource, then namespace and name.
-    objects: BTreeMap<(String, Option<String>, String), Value>,
+    /// By group, resource, then namespace and name.
+    objects: BTreeMap<(String, String, Option<String>, String), Value>,
     /// Changes in order, for watches that resume.
     log: Vec<Change>,
     watches: Vec<Watch>,
@@ -48,6 +52,8 @@ pub struct State {
     pub forbidden: HashSet<String>,
     /// Paths that answer `401`.
     pub unauthorized: HashSet<String>,
+    /// Paths that answer `503` with a plain-text body, as the aggregator does for a server that is down.
+    pub no_endpoints: HashSet<String>,
     /// Resources the server cannot watch, as ComponentStatus.
     pub unwatchable: HashSet<String>,
     /// The person may list pods cluster-wide.
@@ -60,22 +66,43 @@ pub struct State {
     pub discovery_hangs: bool,
     /// When each request came, with its path and query.
     pub requests: Vec<(Instant, String)>,
-    /// What discovery serves, by group, the core group as `""`: each
-    /// resource's plural and kind.
-    pub served: BTreeMap<String, Vec<(String, String)>>,
+    /// What discovery serves, by group, the core group as `""`.
+    pub served: BTreeMap<String, Group>,
     /// How many discovery requests got 304.
     pub not_modified: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Group {
+    pub version: String,
+    /// The version stays with no resources, as an aggregated server that is down leaves it.
+    pub stale: bool,
+    pub resources: Vec<(String, String, bool)>,
+    pub verbs: Vec<&'static str>,
+}
+
+impl Group {
+    fn new(version: &str) -> Self {
+        Self {
+            version: version.to_owned(),
+            stale: false,
+            resources: Vec::new(),
+            verbs: vec!["get", "list", "watch"],
+        }
+    }
 }
 
 struct Change {
     version: u64,
     kind: &'static str,
+    group: String,
     resource: String,
     namespace: Option<String>,
     object: Value,
 }
 
 struct Watch {
+    group: String,
     resource: String,
     namespace: Option<String>,
     sender: mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>,
@@ -85,22 +112,30 @@ struct Watch {
 
 /// What a request's path names.
 struct Target {
+    group: String,
     resource: String,
     namespace: Option<String>,
 }
 
 fn target(path: &str) -> Target {
-    let collection = match path.strip_prefix("/apis/") {
-        Some(rest) => rest.splitn(3, '/').nth(2).expect("a group and a version"),
-        None => path.trim_start_matches("/api/v1/"),
+    let (group, collection) = match path.strip_prefix("/apis/") {
+        Some(rest) => {
+            let mut parts = rest.splitn(3, '/');
+            let group = parts.next().expect("a group");
+            parts.next().expect("a version");
+            (group, parts.next().expect("a collection"))
+        }
+        None => ("", path.trim_start_matches("/api/v1/")),
     };
     let parts: Vec<&str> = collection.split('/').collect();
     match parts[..] {
         ["namespaces", namespace, resource] => Target {
+            group: group.to_owned(),
             resource: resource.to_owned(),
             namespace: Some(namespace.to_owned()),
         },
         [resource] => Target {
+            group: group.to_owned(),
             resource: resource.to_owned(),
             namespace: None,
         },
@@ -146,42 +181,63 @@ impl Fake {
     }
 
     pub fn add(&self, resource: &str, namespace: Option<&str>, name: &str) {
-        let mut state = self.state();
-        state.version += 1;
+        self.add_to("", resource, namespace, name);
+    }
+
+    pub fn add_to(&self, group: &str, resource: &str, namespace: Option<&str>, name: &str) {
         let object = json!({
             "kind": "PartialObjectMetadata",
             "apiVersion": "meta.k8s.io/v1",
             "metadata": {
                 "name": name,
                 "namespace": namespace,
-                "uid": format!("{}-{}-{name}", resource, namespace.unwrap_or("")),
-                "resourceVersion": state.version.to_string(),
+                "uid": format!("{group}-{resource}-{}-{name}", namespace.unwrap_or("")),
             }
         });
+        self.put(group, resource, namespace, object);
+    }
+
+    /// A `resourceVersion` is set unless the group has none, as `metrics.k8s.io` has not.
+    pub fn put(&self, group: &str, resource: &str, namespace: Option<&str>, mut object: Value) {
+        let mut state = self.state();
+        state.version += 1;
+        if group != crate::metrics::GROUP {
+            object["metadata"]["resourceVersion"] = json!(state.version.to_string());
+        }
+        let name = object["metadata"]["name"]
+            .as_str()
+            .expect("an object with a name")
+            .to_owned();
         let key = (
+            group.to_owned(),
             resource.to_owned(),
             namespace.map(str::to_owned),
-            name.to_owned(),
+            name,
         );
         let kind = if state.objects.insert(key, object.clone()).is_some() {
             "MODIFIED"
         } else {
             "ADDED"
         };
-        state.change(resource, namespace, kind, object);
+        state.change(group, resource, namespace, kind, object);
     }
 
     pub fn delete(&self, resource: &str, namespace: Option<&str>, name: &str) {
+        self.delete_from("", resource, namespace, name);
+    }
+
+    pub fn delete_from(&self, group: &str, resource: &str, namespace: Option<&str>, name: &str) {
         let mut state = self.state();
         state.version += 1;
         let key = (
+            group.to_owned(),
             resource.to_owned(),
             namespace.map(str::to_owned),
             name.to_owned(),
         );
         let mut object = state.objects.remove(&key).expect("an object to delete");
         object["metadata"]["resourceVersion"] = json!(state.version.to_string());
-        state.change(resource, namespace, "DELETED", object);
+        state.change(group, resource, namespace, "DELETED", object);
     }
 
     /// Sends every watch a bookmark.
@@ -204,6 +260,7 @@ impl Fake {
         let mut watches = std::mem::take(&mut state.watches);
         for watch in watches.iter_mut().filter(|watch| watch.held) {
             let target = Target {
+                group: watch.group.clone(),
                 resource: watch.resource.clone(),
                 namespace: watch.namespace.clone(),
             };
@@ -228,6 +285,69 @@ impl Fake {
         let mut state = self.state();
         state.watches.retain(|watch| !watch.sender.is_closed());
         state.watches.len()
+    }
+
+    pub fn serve_metrics(&self, version: &str) {
+        self.state().served.insert(
+            crate::metrics::GROUP.to_owned(),
+            Group {
+                version: version.to_owned(),
+                stale: false,
+                resources: vec![
+                    ("nodes".to_owned(), "NodeMetrics".to_owned(), false),
+                    ("pods".to_owned(), "PodMetrics".to_owned(), true),
+                ],
+                verbs: vec!["get", "list"],
+            },
+        );
+    }
+
+    pub fn stale_metrics(&self, version: &str) {
+        self.state().served.insert(
+            crate::metrics::GROUP.to_owned(),
+            Group {
+                stale: true,
+                ..Group::new(version)
+            },
+        );
+    }
+
+    pub fn pod_usage(&self, namespace: &str, name: &str, containers: &[(&str, &str, &str)]) {
+        let containers: Vec<Value> = containers
+            .iter()
+            .map(|(container, cpu, memory)| {
+                json!({ "name": container, "usage": { "cpu": cpu, "memory": memory } })
+            })
+            .collect();
+        self.put(
+            crate::metrics::GROUP,
+            "pods",
+            Some(namespace),
+            json!({
+                "kind": "PodMetrics",
+                "apiVersion": "metrics.k8s.io/v1beta1",
+                "metadata": { "name": name, "namespace": namespace },
+                "timestamp": "2026-11-13T16:19:28Z",
+                "window": "15s",
+                "containers": containers,
+            }),
+        );
+    }
+
+    pub fn node_usage(&self, name: &str, cpu: &str, memory: &str) {
+        self.put(
+            crate::metrics::GROUP,
+            "nodes",
+            None,
+            json!({
+                "kind": "NodeMetrics",
+                "apiVersion": "metrics.k8s.io/v1beta1",
+                "metadata": { "name": name },
+                "timestamp": "2026-11-13T16:19:28Z",
+                "window": "15s",
+                "usage": { "cpu": cpu, "memory": memory },
+            }),
+        );
     }
 
     pub fn count(&self, needle: &str) -> usize {
@@ -274,6 +394,7 @@ impl Fake {
             .headers()
             .get(http::header::IF_NONE_MATCH)
             .map(|value| value.to_str().unwrap().to_owned());
+        let request_headers = request.headers().clone();
         let uri = request.uri().clone();
         let path = uri.path().to_owned();
         let query: Vec<(String, String)> =
@@ -307,6 +428,9 @@ impl Fake {
             state.unavailable -= 1;
             return status(StatusCode::SERVICE_UNAVAILABLE, "ServiceUnavailable");
         }
+        if state.no_endpoints.contains(&path) {
+            return text(StatusCode::SERVICE_UNAVAILABLE, "service unavailable\n");
+        }
         if state.forbidden.contains(&path) {
             return status(StatusCode::FORBIDDEN, "Forbidden");
         }
@@ -317,6 +441,15 @@ impl Fake {
             return state.discovery(path == "/api", if_none_match.as_deref());
         }
         let target = target(&path);
+        if target.group == crate::metrics::GROUP {
+            let gzip = accepts_gzip(&request_headers);
+            return state.metrics(
+                &target,
+                param("watch") == Some("true"),
+                param("fieldSelector"),
+                gzip,
+            );
+        }
         if param("watch") != Some("true") {
             // A continue token is the list's version and where the next
             // page starts.
@@ -367,6 +500,7 @@ impl Fake {
             }
             if state.hold_initial {
                 state.watches.push(Watch {
+                    group: target.group,
                     resource: target.resource,
                     namespace: target.namespace,
                     sender,
@@ -399,13 +533,14 @@ impl Fake {
             }
             for change in &state.log {
                 if change.version > from
-                    && target.matches(&change.resource, change.namespace.as_deref())
+                    && target.matches(&change.group, &change.resource, change.namespace.as_deref())
                 {
                     send(&json!({ "type": change.kind, "object": change.object }));
                 }
             }
         }
         state.watches.push(Watch {
+            group: target.group,
             resource: target.resource,
             namespace: target.namespace,
             sender,
@@ -416,19 +551,20 @@ impl Fake {
 }
 
 impl Target {
-    fn matches(&self, resource: &str, namespace: Option<&str>) -> bool {
-        self.resource == resource
+    fn matches(&self, group: &str, resource: &str, namespace: Option<&str>) -> bool {
+        self.group == group
+            && self.resource == resource
             && (self.namespace.is_none() || self.namespace.as_deref() == namespace)
     }
 }
 
 impl State {
-    /// Serves `resource` from now on, cluster-scoped.
     pub fn serve(&mut self, group: &str, resource: &str, kind: &str) {
         self.served
             .entry(group.to_owned())
-            .or_default()
-            .push((resource.to_owned(), kind.to_owned()));
+            .or_insert_with(|| Group::new("v1"))
+            .resources
+            .push((resource.to_owned(), kind.to_owned(), false));
     }
 
     fn discovery(&mut self, core: bool, if_none_match: Option<&str>) -> Response<Body> {
@@ -436,22 +572,25 @@ impl State {
             .served
             .iter()
             .filter(|(group, _)| group.is_empty() == core)
-            .map(|(group, resources)| {
-                let resources: Vec<Value> = resources
+            .map(|(name, group)| {
+                let resources: Vec<Value> = group
+                    .resources
                     .iter()
-                    .map(|(resource, kind)| {
+                    .map(|(resource, kind, namespaced)| {
                         json!({
                             "resource": resource,
                             "responseKind": { "group": "", "version": "", "kind": kind },
-                            "scope": "Cluster",
-                            "verbs": ["get", "list", "watch"],
+                            "scope": if *namespaced { "Namespaced" } else { "Cluster" },
+                            "verbs": group.verbs,
                         })
                     })
                     .collect();
-                json!({
-                    "metadata": { "name": group },
-                    "versions": [{ "version": "v1", "resources": resources, "freshness": "Current" }],
-                })
+                let version = if group.stale {
+                    json!({ "version": group.version, "freshness": "Stale" })
+                } else {
+                    json!({ "version": group.version, "resources": resources, "freshness": "Current" })
+                };
+                json!({ "metadata": { "name": name }, "versions": [version] })
             })
             .collect();
         let body = serde_json::to_vec(&json!({
@@ -483,16 +622,81 @@ impl State {
         response
     }
 
+    /// As metrics-server answers: whole, with the request's time as each `creationTimestamp`
+    /// and the containers in an order that changes with every request.
+    fn metrics(
+        &self,
+        target: &Target,
+        watch: bool,
+        selector: Option<&str>,
+        gzip: bool,
+    ) -> Response<Body> {
+        if watch {
+            return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
+        }
+        let name = selector.and_then(|selector| selector.strip_prefix("metadata.name="));
+        let at = jiff::Timestamp::from_second(1_800_000_000 + self.requests.len() as i64)
+            .expect("a time")
+            .to_string();
+        let items: Vec<Value> = self
+            .items(target)
+            .into_iter()
+            .filter(|item| name.is_none_or(|name| item["metadata"]["name"] == name))
+            .map(|mut item| {
+                item["metadata"]["creationTimestamp"] = json!(at);
+                if self.requests.len() % 2 == 1
+                    && let Some(containers) =
+                        item.get_mut("containers").and_then(Value::as_array_mut)
+                {
+                    containers.reverse();
+                }
+                item
+            })
+            .collect();
+        let kind = if target.resource == "nodes" {
+            "NodeMetricsList"
+        } else {
+            "PodMetricsList"
+        };
+        let body = serde_json::to_vec(&json!({
+            "kind": kind,
+            "apiVersion": "metrics.k8s.io/v1beta1",
+            "metadata": {},
+            "items": items,
+        }))
+        .unwrap();
+        let mut response = Response::new(Full::new(Bytes::new()).boxed_unsync());
+        if gzip {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&body).unwrap();
+            *response.body_mut() = Full::new(Bytes::from(encoder.finish().unwrap())).boxed_unsync();
+            response.headers_mut().insert(
+                http::header::CONTENT_ENCODING,
+                http::HeaderValue::from_static("gzip"),
+            );
+        } else {
+            *response.body_mut() = Full::new(Bytes::from(body)).boxed_unsync();
+        }
+        response.headers_mut().insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("application/json"),
+        );
+        response
+    }
+
     fn items(&self, target: &Target) -> Vec<Value> {
         self.objects
             .iter()
-            .filter(|((resource, namespace, _), _)| target.matches(resource, namespace.as_deref()))
+            .filter(|((group, resource, namespace, _), _)| {
+                target.matches(group, resource, namespace.as_deref())
+            })
             .map(|(_, object)| object.clone())
             .collect()
     }
 
     fn change(
         &mut self,
+        group: &str,
         resource: &str,
         namespace: Option<&str>,
         kind: &'static str,
@@ -502,19 +706,21 @@ impl State {
         self.log.push(Change {
             version: self.version,
             kind,
+            group: group.to_owned(),
             resource: resource.to_owned(),
             namespace: namespace.map(str::to_owned),
             object,
         });
         self.watches.retain(|watch| {
             let target = Target {
+                group: watch.group.clone(),
                 resource: watch.resource.clone(),
                 namespace: watch.namespace.clone(),
             };
             // A held list sends what it holds once released, changes
             // after.
             watch.held
-                || !target.matches(resource, namespace)
+                || !target.matches(group, resource, namespace)
                 || watch
                     .sender
                     .unbounded_send(Ok(Frame::data(event.clone())))
@@ -564,6 +770,23 @@ fn status(code: StatusCode, reason: &str) -> Response<Body> {
             "message": reason,
         }),
     )
+}
+
+fn text(code: StatusCode, body: &'static str) -> Response<Body> {
+    let mut response = Response::new(Full::new(Bytes::from_static(body.as_bytes())).boxed_unsync());
+    *response.status_mut() = code;
+    response.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
+
+fn accepts_gzip(headers: &http::HeaderMap) -> bool {
+    headers
+        .get(http::header::ACCEPT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("gzip"))
 }
 
 fn stream(receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, Infallible>>) -> Response<Body> {
