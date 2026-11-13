@@ -44,7 +44,7 @@ export interface ColumnRule {
 /** Rules for a column of a kind of its own, under those by name. */
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
-    cpu: { cell: "cpu", width: 64, align: "end", metric: true, flash: false },
+    cpu: { cell: "cpu", width: 72, align: "end", metric: true, flash: false },
     memory: {
       cell: "memory",
       width: 80,
