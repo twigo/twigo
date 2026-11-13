@@ -116,6 +116,7 @@ export {
 export { OFFER_AFTER_MS } from "./terminal";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
+export { SCRAPE_MS } from "./metrics";
 
 /**
  * `live` connects, syncs and then changes pods every second, and refuses

@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, SCRAPE_MS } from "@twigo/protocol/mock";
 import type { QuickAccessContext } from "@twigo/workbench";
 import {
   mountKube,
@@ -681,8 +681,9 @@ const pinButton = (label: string) =>
 const explorer = () => screen.getByRole("tree", { name: "Resources" });
 
 test("a cluster-scoped list keeps its marks as the namespace scope changes", async () => {
+  vi.setSystemTime(Math.ceil(Date.now() / SCRAPE_MS) * SCRAPE_MS - 1000);
   const workbench = await openList(undefined, "k8s-list://prod-eu/v1/nodes");
-  const before = rows().map((row) => row.textContent);
+  const before = rows().map(nameOf);
   fireEvent.click(
     within(rows()[0] ?? document.body).getByRole("checkbox", {
       name: "Mark row",
@@ -697,7 +698,7 @@ test("a cluster-scoped list keeps its marks as the namespace scope changes", asy
     }));
   });
   await settle();
-  expect(rows().map((row) => row.textContent)).toEqual(before);
+  expect(rows().map(nameOf)).toEqual(before);
   expect(markBar()?.textContent).toContain("1 marked");
 });
 
