@@ -190,6 +190,50 @@ async fn a_pod_replaced_under_its_name_takes_the_sample_of_the_old_one_with_it()
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_context_that_stops_serving_the_resource_withdraws_the_usage_once() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let shown = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(usages(&shown).last().unwrap().cpu.used, Some(10_000_000));
+
+    rig.fake.state().served.remove(twigo_cache::metrics::GROUP);
+    rig.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = rig.watch(&opened, Duration::from_secs(30)).await;
+    let [withdrawn] = &usages(&gone)[..] else {
+        panic!("one usage: {:?}", usages(&gone));
+    };
+    assert_eq!(withdrawn.state, MetricsState::Absent);
+    assert_eq!(withdrawn.cpu.used, None);
+    assert!(withdrawn.containers.is_empty());
+    let later = rig.watch(&opened, Duration::from_secs(120)).await;
+    assert!(usages(&later).is_empty(), "said once");
+
+    rig.fake.serve_metrics("v1beta1");
+    rig.fake
+        .put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let back = rig.watch(&opened, Duration::from_secs(30)).await;
+    let usage = *usages(&back).last().expect("a usage again");
+    assert_eq!(usage.state, MetricsState::Ready);
+    assert_eq!(usage.cpu.used, Some(10_000_000));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_pod_is_its_containers_against_their_requests_and_a_container_without_a_limit_leaves_the_pod_none()
  {
     let fake = Fake::default();

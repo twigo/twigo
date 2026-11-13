@@ -24,7 +24,7 @@ use twigo_ipc::{
     ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
 
-use crate::usage::usage;
+use crate::usage::{absent, usage};
 
 /// An open object: dropping it ends its task and its upstreams.
 pub struct Opened {
@@ -173,6 +173,10 @@ struct Used {
     uid: Option<Box<str>>,
     state: MetricsState,
     served: bool,
+    /// The context serves the resource, whether or not the object exists.
+    api: bool,
+    /// A usage was sent that the webview may still draw.
+    offered: bool,
 }
 
 impl Used {
@@ -180,7 +184,8 @@ impl Used {
     fn read(&mut self, reader: &mut Reader, object: Option<&Object>, shown: bool) -> bool {
         let kind = reader.kind();
         let api = reader.api();
-        let served = api.columns(kind) && object.is_some();
+        let serves = api.columns(kind);
+        let served = serves && object.is_some();
         let key = object.map(|object| {
             (
                 object.meta.namespace.clone().unwrap_or_default(),
@@ -222,6 +227,8 @@ impl Used {
             uid,
             state,
             served,
+            api: serves,
+            offered: self.offered,
         };
         changed
     }
@@ -272,6 +279,8 @@ async fn run(
         uid: None,
         state: MetricsState::Ready,
         served: false,
+        api: false,
+        offered: false,
     };
     loop {
         let ticked = tokio::select! {
@@ -416,13 +425,15 @@ async fn run(
             dirty.usage |= used.read(reader, current.as_deref(), parts.usage);
         }
         let usage_shown = parts.usage && used.served;
+        let usage_withdrawn = parts.usage && used.offered && !used.api;
         let status_changed = status.as_ref() != Some(&state);
         let due = status_changed
             || (parts.overview && dirty.overview)
             || (parts.manifest && dirty.manifest)
             || (parts.events && dirty.events)
             || (parts.related && dirty.related)
-            || (usage_shown && dirty.usage);
+            || (usage_shown && dirty.usage)
+            || usage_withdrawn;
         if !due {
             continue;
         }
@@ -440,12 +451,19 @@ async fn run(
             events: &events,
             related: &related,
             facts: &facts,
-            usage: used_by
-                .zip(parsed.as_ref())
-                .filter(|_| usage_shown && dirty.usage)
-                .map(|(kind, object)| usage(kind, object, used.sample.as_deref(), used.state)),
+            usage: if usage_withdrawn {
+                Some(absent())
+            } else {
+                used_by
+                    .zip(parsed.as_ref())
+                    .filter(|_| usage_shown && dirty.usage)
+                    .map(|(kind, object)| usage(kind, object, used.sample.as_deref(), used.state))
+            },
         };
         let mut batch = shown.batch(seq, state.clone());
+        if let Some(sent) = &batch.usage {
+            used.offered = sent.state != MetricsState::Absent;
+        }
         if let (Some(overview), Some(json), Some(uid)) = (&mut batch.overview, &parsed, &uid) {
             last_lines.fill(overview, json, uid, &hub, &target);
         }
