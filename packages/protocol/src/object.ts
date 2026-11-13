@@ -3,7 +3,6 @@ import type { Backend } from "./backend";
 import { IpcError, toIpcError } from "./error";
 import type {
   EventList,
-  MetricsState,
   ObjectBatch,
   ObjectParts,
   ObjectQuery,
@@ -26,11 +25,10 @@ export interface ObjectSnapshot {
   readonly related: Related | undefined;
   /**
    * What a pod or a node uses, while the usage part is shown and the context
-   * serves the Metrics API; an `absent` usage withdraws it, until another comes.
+   * serves the Metrics API, with no figure while it `waits` for its first
+   * answer; an `absent` usage withdraws it, until another comes.
    */
   readonly usage: ShownUsage | undefined;
-  /** The state of the last usage a batch brought, `absent` included, which `usage` leaves out; null until one came. */
-  readonly usageState: MetricsState | null;
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
@@ -42,7 +40,6 @@ export const INITIAL_OBJECT: ObjectSnapshot = {
   events: undefined,
   related: undefined,
   usage: undefined,
-  usageState: null,
 };
 
 /**
@@ -161,7 +158,7 @@ export class ObjectView {
         : undefined,
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
-      ...usageAfter(batch, previous),
+      usage: usageAfter(batch, previous.usage),
     });
     this.#acks.took(batch.seq);
   }
@@ -182,16 +179,11 @@ export class ObjectView {
 
 function usageAfter(
   batch: ObjectBatch,
-  previous: ObjectSnapshot,
-): Pick<ObjectSnapshot, "usage" | "usageState"> {
-  if (!batch.exists) return { usage: undefined, usageState: null };
-  if (batch.usage === null) {
-    return { usage: previous.usage, usageState: previous.usageState };
-  }
-  return {
-    usage: isShown(batch.usage) ? batch.usage : undefined,
-    usageState: batch.usage.state,
-  };
+  previous: ShownUsage | undefined,
+): ShownUsage | undefined {
+  if (!batch.exists) return undefined;
+  if (batch.usage === null) return previous;
+  return isShown(batch.usage) ? batch.usage : undefined;
 }
 
 function sameParts(a: ObjectParts, b: ObjectParts): boolean {

@@ -31,7 +31,7 @@ import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
 import type { Reveal } from "./reveal";
-import { ExpectedUsage, UsageView, type Expected } from "./Usage";
+import { UsageView } from "./Usage";
 import { Age, ValueView } from "./values";
 
 const USAGE = "core.usage";
@@ -54,8 +54,6 @@ export interface OverviewProps {
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
   /** What the object uses, once it has come: its section follows the Diagnostics. */
   readonly usage?: ShownUsage | undefined;
-  /** What the section shows until a usage comes. */
-  readonly expected?: Expected | undefined;
 }
 
 /**
@@ -74,7 +72,6 @@ export function Overview({
   reveal,
   onLogs,
   usage,
-  expected,
 }: OverviewProps) {
   useChanges(states.changes);
   const titles = overview.sections.flatMap((section) =>
@@ -111,25 +108,7 @@ export function Overview({
       </div>
     </Folding>
   ));
-  const node = kind === "/nodes";
-  const drawn = usage ? (
-    <UsageView usage={usage} node={node} />
-  ) : (
-    expected && (
-      <ExpectedUsage
-        expected={expected}
-        node={node}
-        containers={overview.sections.flatMap((section) =>
-          section.blocks.flatMap((block) =>
-            block.type === "containers"
-              ? block.containers.map((container) => container.name)
-              : [],
-          ),
-        )}
-      />
-    )
-  );
-  if (drawn) {
+  if (usage) {
     rendered.splice(
       overview.sections[0]?.id === "core.diagnostics" ? 1 : 0,
       0,
@@ -141,7 +120,7 @@ export function Overview({
           states.toggle(kind, USAGE);
         }}
       >
-        {drawn}
+        <UsageView usage={usage} node={kind === "/nodes"} />
       </Folding>,
     );
   }

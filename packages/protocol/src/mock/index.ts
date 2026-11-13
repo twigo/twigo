@@ -881,9 +881,10 @@ export function createMockBackend(
         onMessage({
           state: "ready",
           cluster: `mock://${id}`,
-          resources: metrics.served
-            ? RESOURCES
-            : RESOURCES.filter(({ gvr }) => gvr.group !== METRICS_GROUP),
+          resources:
+            metrics.served && !metrics.stale
+              ? RESOURCES
+              : RESOURCES.filter(({ gvr }) => gvr.group !== METRICS_GROUP),
         });
       };
       send();

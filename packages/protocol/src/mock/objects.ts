@@ -12,7 +12,13 @@ import type {
   Usage,
   Value,
 } from "../generated";
-import { replicaSetUid, type Cluster, type Node, type Pod } from "./cluster";
+import {
+  hash,
+  replicaSetUid,
+  type Cluster,
+  type Node,
+  type Pod,
+} from "./cluster";
 import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
 import { CRASH_LINE as LAST_LINE } from "./logs";
 import {
@@ -101,7 +107,8 @@ export interface EditBinding {
  * once and again for each part shown later. Its live lists list what the
  * mock has of it: a Deployment's pods, a node's pods. A pod's containers
  * are the mock pod's, and its usage, as a node's, is what the list's rows
- * show, sent once the scope that serves it has answered.
+ * show, sent with the Overview: with no figure while the scope that serves it
+ * has not answered, and with them once it has.
  */
 export class MockObject {
   /** The recorded object it stands for. */
@@ -213,7 +220,8 @@ export class MockObject {
 
   #read(): void {
     if (this.#scope === undefined || !this.#metrics) return;
-    const reads = this.#parts.usage && this.#metrics.served;
+    const reads =
+      this.#parts.usage && this.#metrics.served && !this.#metrics.stale;
     this.#metrics.board.want(this.#reader, new Set(reads ? [this.#scope] : []));
   }
 
@@ -246,11 +254,11 @@ export class MockObject {
       this.#offered = false;
       return withdraw ? ABSENT : null;
     }
-    if (!this.#answered()) return null;
     this.#offered = true;
+    const answered = this.#answered();
     return "pod" in subject
-      ? this.#metrics.podUsage(subject.pod)
-      : this.#metrics.nodeUsage(subject.node);
+      ? this.#metrics.podUsage(subject.pod, answered)
+      : this.#metrics.nodeUsage(subject.node, answered);
   }
 
   /** Follows what edits leave of the object, and makes the changes a scenario asks for. */
@@ -404,6 +412,14 @@ function resourcesText({ cpu, memory }: ContainerSpec["request"]): string {
     .join(", ");
 }
 
+/** One running pod in four has finished an init container, which its Overview lists and its usage does not. */
+export function finishedInit(pod: Pod): boolean {
+  return (
+    (pod.status === "Running" || pod.status === "CrashLoopBackOff") &&
+    hash(`${pod.id}/init`) % 4 === 0
+  );
+}
+
 /**
  * The recorded pod's first container as the cards of the mock pod's own
  * containers, each asking for what its spec says, so that its usage has a
@@ -411,6 +427,28 @@ function resourcesText({ cpu, memory }: ContainerSpec["request"]): string {
  */
 function withContainers(overview: Overview, pod: Pod): Overview {
   const specs = containerSpecs(pod);
+  const init = (first: Container): Container[] =>
+    finishedInit(pod)
+      ? [
+          {
+            ...first,
+            name: "init-config",
+            role: "init",
+            image: `registry.example.com/${pod.namespace}/init-config:1.42.0`,
+            state: {
+              text: "Terminated · Completed",
+              tone: "neutral",
+              ready: true,
+              restarts: 0,
+            },
+            ports: [],
+            fields: [],
+            details: [],
+            env: [],
+            mounts: [],
+          },
+        ]
+      : [];
   const card = (first: Container, spec: ContainerSpec, index: number) => {
     const asks: [string, ContainerSpec["request"]][] = [
       ["Requests", spec.request],
@@ -456,7 +494,10 @@ function withContainers(overview: Overview, pod: Pod): Overview {
         return block.type === "containers" && first
           ? {
               ...block,
-              containers: specs.map((spec, index) => card(first, spec, index)),
+              containers: [
+                ...init(first),
+                ...specs.map((spec, index) => card(first, spec, index)),
+              ],
             }
           : block;
       }),

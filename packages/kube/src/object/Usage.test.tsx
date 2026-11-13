@@ -16,7 +16,8 @@ import type {
   ShownUsage,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { Cluster } from "../../../protocol/src/mock/cluster";
+import { Cluster, type Pod } from "../../../protocol/src/mock/cluster";
+import { finishedInit } from "../../../protocol/src/mock/objects";
 import {
   mountKube,
   openList,
@@ -25,7 +26,6 @@ import {
 } from "../../test/workbench";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
-import type { Expected } from "./Usage";
 
 afterEach(() => {
   cleanup();
@@ -42,6 +42,7 @@ const NOTHING = measure({});
 
 const POD: ShownUsage = {
   state: "ready",
+  waiting: false,
   sampled: "2026-11-13T10:00:00Z",
   cpu: measure({ used: 120_000_000, request: 100_000_000 }),
   memory: measure({ used: 90 * MI, request: 64 * MI, limit: 128 * MI }),
@@ -65,10 +66,34 @@ const POD: ShownUsage = {
 
 const NODE: ShownUsage = {
   state: "ready",
+  waiting: false,
   sampled: "2026-11-13T10:00:00Z",
   cpu: measure({ used: 7_421_000_000, allocatable: 16_000_000_000 }),
   memory: measure({ used: 15_000 * MI, allocatable: 16_000 * MI }),
   containers: [],
+};
+
+const WAITING_POD: ShownUsage = {
+  state: "ready",
+  waiting: true,
+  sampled: null,
+  cpu: NOTHING,
+  memory: NOTHING,
+  containers: [
+    {
+      name: "api",
+      cpu: measure({ request: 100_000_000, limit: 400_000_000 }),
+      memory: measure({ request: 64 * MI, limit: 128 * MI }),
+    },
+  ],
+};
+
+const WAITING_NODE: ShownUsage = {
+  ...NODE,
+  waiting: true,
+  sampled: null,
+  cpu: measure({ allocatable: 16_000_000_000 }),
+  memory: measure({ allocatable: 16_000 * MI }),
 };
 
 const TITLES: Readonly<Record<string, string>> = {
@@ -105,7 +130,11 @@ const LISTED: Document = {
       blocks: [
         {
           type: "containers",
-          containers: [CONTAINER("api"), CONTAINER("proxy")],
+          containers: [
+            { ...CONTAINER("init-config"), role: "init" },
+            CONTAINER("api"),
+            CONTAINER("proxy"),
+          ],
         },
       ],
     },
@@ -134,7 +163,6 @@ function shown(
 
 function listed(
   usage: ShownUsage | undefined,
-  expected: Expected | undefined,
   kind = "/pods",
   overview: Document = LISTED,
 ) {
@@ -147,7 +175,6 @@ function listed(
       kind={kind}
       onOpen={() => undefined}
       usage={usage}
-      expected={expected}
     />
   );
   const { rerender } = render(view(usage));
@@ -293,22 +320,20 @@ test.each([
   },
 );
 
-test("a pod's usage on its way is the rows it will have, with empty meters that say loading and no figure, and the answer fills them", () => {
-  const answer = listed(undefined, "loading");
+test("a usage that waits draws the rows it names, whatever the Overview lists, with empty meters that say loading and no figure, and the answer fills them", () => {
+  const answer = listed(WAITING_POD, "/pods");
   const section = usageSection();
   const headings = () =>
     within(usageSection())
-      .getAllByText(/^(Pod|api|proxy)$/)
+      .getAllByText(/^(Pod|api|proxy|init-config)$/)
       .map((heading) => heading.textContent);
-  expect(headings()).toEqual(["Pod", "api", "proxy"]);
+  expect(headings()).toEqual(["Pod", "api"]);
   const empty = within(section).getAllByRole("progressbar");
   expect(empty.map((meter) => meter.getAttribute("aria-label"))).toEqual([
     "CPU of Pod",
     "Memory of Pod",
     "CPU of api",
     "Memory of api",
-    "CPU of proxy",
-    "Memory of proxy",
   ]);
   for (const meter of empty) {
     expect(meter.getAttribute("aria-valuetext")).toBe("Loading");
@@ -317,17 +342,17 @@ test("a pod's usage on its way is the rows it will have, with empty meters that 
   expect(section.textContent).not.toMatch(/\d|No data yet|%/);
   const labels = () =>
     within(usageSection()).getAllByText(/^(CPU|Memory)$/).length;
-  expect(labels()).toBe(6);
+  expect(labels()).toBe(4);
 
-  answer(POD);
-  expect(headings()).toEqual(["Pod", "api", "proxy"]);
-  expect(labels()).toBe(6);
-  expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
+  answer({ ...POD, containers: POD.containers.slice(0, 1) });
+  expect(headings()).toEqual(["Pod", "api"]);
+  expect(labels()).toBe(4);
+  expect(within(usageSection()).getAllByRole("meter")).toHaveLength(4);
   expect(within(usageSection()).queryAllByRole("progressbar")).toHaveLength(0);
 });
 
-test("a node's usage on its way is its pair of empty meters", () => {
-  listed(undefined, "loading", "/nodes", {
+test("a node's usage that waits is its pair of empty meters", () => {
+  listed(WAITING_NODE, "/nodes", {
     sections: [SECTION("core.node"), SECTION("core.metadata")],
   });
   const section = usageSection();
@@ -337,25 +362,6 @@ test("a node's usage on its way is its pair of empty meters", () => {
       .map((meter) => meter.getAttribute("aria-label")),
   ).toEqual(["CPU", "Memory"]);
   expect(within(section).queryByText("Pod")).toBeNull();
-});
-
-test.each([
-  ["unavailable", /metrics-server does not answer/],
-  ["forbidden", /may not read metrics/],
-] as const)(
-  "a usage on its way where the API last said %s is the sentence at once, with no empty meters",
-  (state, words) => {
-    listed(undefined, state);
-    const section = usageSection();
-    expect(section.textContent).toMatch(words);
-    expect(within(section).queryAllByRole("progressbar")).toHaveLength(0);
-  },
-);
-
-test("a usage that came is drawn whatever is expected", () => {
-  listed(POD, "loading");
-  expect(within(usageSection()).queryAllByRole("progressbar")).toHaveLength(0);
-  expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
 });
 
 test("the section follows the Diagnostics, else comes first, and without a usage there is none", () => {
@@ -414,17 +420,22 @@ describe("an open object", () => {
     };
   }
 
-  const running = (outside?: string) => {
-    const pod = new Cluster("prod-eu", 5000, Date.now()).pods.find(
+  const pod = (pick: (candidate: Pod) => boolean, outside?: string) => {
+    const found = new Cluster("prod-eu", 5000, Date.now()).pods.find(
       (candidate) =>
-        candidate.status === "Running" &&
-        candidate.containers === 2 &&
         Date.now() - candidate.created > 120_000 &&
-        candidate.namespace !== outside,
+        candidate.namespace !== outside &&
+        pick(candidate),
     );
-    if (!pod) throw new Error("no such pod in the mock");
-    return `k8s://prod-eu//v1/pods/${pod.namespace}/${pod.name}`;
+    if (!found) throw new Error("no such pod in the mock");
+    return `k8s://prod-eu//v1/pods/${found.namespace}/${found.name}`;
   };
+  const running = (outside?: string) =>
+    pod(
+      (candidate) =>
+        candidate.status === "Running" && candidate.containers === 2,
+      outside,
+    );
   const namespaceOf = (uri: string) => uri.split("/")[6];
 
   const drawn = () => {
@@ -436,14 +447,37 @@ describe("an open object", () => {
     return "sentence";
   };
 
-  async function trail(ms = 1500, step = 5) {
-    const seen: string[] = [drawn()];
+  const frame = () => ({
+    overview: screen.queryByRole("region", { name: "Metadata" }) !== null,
+    state: drawn(),
+    rows: [
+      ...document.querySelectorAll('[role="progressbar"], [role="meter"]'),
+    ].map((meter) => meter.getAttribute("aria-label")),
+  });
+
+  async function frames(ms = 1500, step = 5) {
+    const seen = [frame()];
     for (let at = 0; at < ms; at += step) {
       await act(() => vi.advanceTimersByTimeAsync(step));
-      const now = drawn();
-      if (seen[seen.length - 1] !== now) seen.push(now);
+      const now = frame();
+      const last = seen[seen.length - 1];
+      if (
+        last?.state !== now.state ||
+        last.overview !== now.overview ||
+        last.rows.join() !== now.rows.join()
+      ) {
+        seen.push(now);
+      }
     }
     return seen;
+  }
+
+  async function trail(ms = 1500, step = 5) {
+    const states: string[] = [];
+    for (const { state } of await frames(ms, step)) {
+      if (states[states.length - 1] !== state) states.push(state);
+    }
+    return states;
   }
 
   test("an open pod's Overview shows its usage while the document is visible, and the part follows the tab", async () => {
@@ -542,20 +576,54 @@ describe("an open object", () => {
     expect(screen.getByRole("region", { name: "Containers" })).toBeTruthy();
   });
 
-  test("a pod's Usage section stands in place from the Overview's first paint, with empty meters, and the figures fill it", async () => {
+  test("a pod's Usage section is in the Overview's first paint, with empty meters, and the figures fill it", async () => {
     const workbench = await mountKube(createMockBackend("ready"));
     act(() => {
       workbench.editors.open(running());
     });
-    const seen = await trail();
-    expect(seen.filter((state) => state !== "none")).toEqual([
-      "empty",
-      "figures",
-    ]);
+    const seen = await frames();
+    expect(seen.find(({ overview }) => overview)?.state).toBe("empty");
+    expect(
+      seen.filter(({ overview }) => overview).map(({ state }) => state),
+    ).toEqual(["empty", "figures"]);
     expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
   });
 
-  test("the details beside a list stand it in place too, when no list reads the pod's namespace", async () => {
+  test.each([
+    [
+      "a pod with a finished init container",
+      (candidate: Pod) =>
+        candidate.status === "Running" &&
+        candidate.containers === 2 &&
+        finishedInit(candidate),
+      ["Pod", "api", "istio-proxy"],
+    ],
+    [
+      "a crash-looping pod at Ready 1/2",
+      (candidate: Pod) =>
+        candidate.status === "CrashLoopBackOff" &&
+        candidate.containers === 2 &&
+        candidate.ready === 1,
+      ["Pod", "api"],
+    ],
+  ])(
+    "%s: the empty meters stand for the containers the answer lists, and the answer moves no row",
+    async (_, pick, names) => {
+      const workbench = await mountKube(createMockBackend("ready"));
+      act(() => {
+        workbench.editors.open(pod(pick));
+      });
+      const seen = (await frames()).filter(({ overview }) => overview);
+      expect(seen.map(({ state }) => state)).toEqual(["empty", "figures"]);
+      const rows = names.flatMap((name) => [
+        `CPU of ${name}`,
+        `Memory of ${name}`,
+      ]);
+      expect(seen.map((one) => one.rows)).toEqual([rows, rows]);
+    },
+  );
+
+  test("the details beside a list draw the waiting section too, when no list reads the pod's namespace", async () => {
     const backend = createMockBackend("ready");
     const workbench = await mountKube(backend);
     workbench.state.set(null, "list//pods", {
@@ -575,27 +643,24 @@ describe("an open object", () => {
           "Running",
       );
     fireEvent.click(running ?? document.body);
-    const seen = await trail();
-    expect(seen.filter((state) => state !== "none")).toEqual([
-      "empty",
-      "figures",
-    ]);
+    const seen = await frames();
+    expect(
+      seen.filter(({ overview }) => overview).map(({ state }) => state),
+    ).toEqual(["empty", "figures"]);
   });
 
-  test("a node's Usage section stands in place with its pair of empty meters", async () => {
+  test("a node's Usage section is in the Overview's first paint with its pair of empty meters", async () => {
     const workbench = await mountKube(createMockBackend("ready"));
     act(() => {
       workbench.editors.open("k8s://prod-eu//v1/nodes/prod-eu-node-1");
     });
-    const seen = await trail();
-    expect(seen.filter((state) => state !== "none")).toEqual([
-      "empty",
-      "figures",
-    ]);
+    const seen = (await frames()).filter(({ overview }) => overview);
+    expect(seen.map(({ state }) => state)).toEqual(["empty", "figures"]);
+    expect(seen[0]?.rows).toEqual(["CPU", "Memory"]);
     expect(within(usageSection()).getAllByRole("meter")).toHaveLength(2);
   });
 
-  test("where the API refuses, the first pod's section is empty until it says so, and the next pod of the space says it at once", async () => {
+  test("where the API refuses, the first pod's section waits with empty meters until it says so, and the next pod of the space says it at once", async () => {
     const workbench = await mountKube(createMockBackend("metricsForbidden"));
     const first = running();
     act(() => {
@@ -611,6 +676,20 @@ describe("an open object", () => {
     const next = await trail();
     expect(next).not.toContain("empty");
     expect(next[next.length - 1]).toBe("sentence");
+  });
+
+  test("where the API is stale, every pod's Overview has the sentence in its first paint, and no empty meters stand for it", async () => {
+    const workbench = await mountKube(createMockBackend("metricsDown"));
+    const first = running();
+    for (const uri of [first, running(namespaceOf(first))]) {
+      act(() => {
+        workbench.editors.open(uri);
+      });
+      const seen = await frames();
+      expect(
+        seen.filter(({ overview }) => overview).map(({ state }) => state),
+      ).toEqual(["sentence"]);
+    }
   });
 
   test("a context that serves no Metrics API stands nothing in place", async () => {

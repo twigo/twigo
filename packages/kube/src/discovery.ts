@@ -170,21 +170,6 @@ export function hasStatusSubresource(
   );
 }
 
-/** Whether the Metrics API serves the resource's usage: false until discovery says. */
-export function servesUsage(
-  resources: Loaded<readonly Resource[]>,
-  { resource }: Gvr,
-): boolean {
-  return (
-    resources.state === "ready" &&
-    resources.value.some(
-      (served) =>
-        served.gvr.group === "metrics.k8s.io" &&
-        served.gvr.resource === resource,
-    )
-  );
-}
-
 export function sameGvr(a: Gvr, b: Gvr): boolean {
   return (
     a.group === b.group && a.version === b.version && a.resource === b.resource

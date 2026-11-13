@@ -92,6 +92,7 @@ test("a batch keeps the parts it does not carry and is acked on the next frame",
 
 const USAGE: Usage = {
   state: "ready",
+  waiting: false,
   sampled: "2026-11-13T10:00:00Z",
   cpu: { used: 250_000_000, request: null, limit: null, allocatable: null },
   memory: {
@@ -142,25 +143,6 @@ test("an absent usage withdraws the usage, as if none had come, until a later ba
   expect(view.getSnapshot().usage).toBeUndefined();
   fake.send(batch(4, { usage: USAGE }));
   expect(view.getSnapshot().usage).toBe(USAGE);
-});
-
-test("the state of the last usage is kept, absent included, until the object is gone", async () => {
-  const fake = fakeBackend();
-  const view = new ObjectView(fake.backend, POD, { ...OVERVIEW, usage: true });
-  fake.resolve(7);
-  await vi.runAllTimersAsync();
-  expect(view.getSnapshot().usageState).toBeNull();
-  fake.send(batch(1, { overview: DOCUMENT, usage: USAGE }));
-  expect(view.getSnapshot().usageState).toBe("ready");
-  fake.send(batch(2, { manifest: "{}" }));
-  expect(view.getSnapshot().usageState).toBe("ready");
-  fake.send(batch(3, { usage: { ...USAGE, state: "absent" } }));
-  expect(view.getSnapshot().usage).toBeUndefined();
-  expect(view.getSnapshot().usageState).toBe("absent");
-  fake.send(batch(4, { usage: { ...USAGE, state: "forbidden" } }));
-  expect(view.getSnapshot().usageState).toBe("forbidden");
-  fake.send(batch(5, { exists: false }));
-  expect(view.getSnapshot().usageState).toBeNull();
 });
 
 test("showing the usage part asks for it, and asks again only when it changes", async () => {

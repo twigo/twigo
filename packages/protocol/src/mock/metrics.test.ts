@@ -13,6 +13,7 @@ import type {
 } from "../generated";
 import { Cluster, type Pod } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
+import { finishedInit } from "./objects";
 import {
   ANSWER_MS,
   containerSpecs,
@@ -322,7 +323,7 @@ test("some container has no limit, some pod no sample, and one node is over 90 %
   expect(cluster.pods.some((pod) => metrics.containers(pod) === null)).toBe(
     true,
   );
-  const usages = cluster.nodes.map((node) => metrics.nodeUsage(node));
+  const usages = cluster.nodes.map((node) => metrics.nodeUsage(node, true));
   const over = usages.filter(
     ({ memory }) => (memory.used ?? 0) > (memory.allocatable ?? 0) * 0.9,
   );
@@ -658,7 +659,7 @@ test("an open pod answers its usage by container, and the pod's request and limi
   }
 });
 
-test("an open pod without a sample says so only once its scope has answered, in the state ready", async () => {
+test("an open pod without a sample waits with no container, and says no sample once its scope has answered, in the state ready", async () => {
   const cluster = new Cluster("staging", 800, Date.now());
   const pending = cluster.pods.find((pod) => pod.status === "Pending");
   if (!pending) throw new Error("no pending pod in the mock");
@@ -670,10 +671,15 @@ test("an open pod without a sample says so only once its scope has answered, in 
     undefined,
     ANSWER_MS - 1,
   );
-  expect(batches.every((batch) => batch.usage === null)).toBe(true);
+  expect(batches[0]?.usage).toMatchObject({
+    state: "ready",
+    waiting: true,
+    containers: [],
+  });
   await vi.advanceTimersByTimeAsync(1);
   expect(usageOf(batches)).toMatchObject({
     state: "ready",
+    waiting: false,
     sampled: null,
     cpu: { used: null },
     memory: { used: null },
@@ -696,7 +702,7 @@ test.each([
   ["a pod", "pod"],
   ["a node", "node"],
 ] as const)(
-  "%s: no usage is sent before its scope has answered, and the first one carries the figures",
+  "%s: the batch that carries the Overview carries a usage that waits with no figure, and the answer's has them",
   async (_, kind) => {
     const pod = sampled();
     const { batches } =
@@ -717,22 +723,95 @@ test.each([
             undefined,
             ANSWER_MS - 1,
           );
-    expect(batches.length).toBeGreaterThan(0);
-    expect(batches.every((batch) => batch.usage === null)).toBe(true);
+    const [first] = batches;
+    expect(first?.overview).not.toBeNull();
+    expect(first?.usage).toMatchObject({
+      state: "ready",
+      waiting: true,
+      sampled: null,
+      cpu: { used: null },
+      memory: { used: null },
+    });
+    expect(batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     const sent = batches.filter((batch) => batch.usage !== null);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]?.usage?.state).toBe("ready");
-    expect(sent[0]?.usage?.cpu.used).toBeGreaterThan(0);
-    expect(sent[0]?.usage?.memory.used).toBeGreaterThan(0);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.usage?.state).toBe("ready");
+    expect(sent[1]?.usage?.waiting).toBe(false);
+    expect(sent[1]?.usage?.cpu.used).toBeGreaterThan(0);
+    expect(sent[1]?.usage?.memory.used).toBeGreaterThan(0);
   },
 );
+
+test("a pod's waiting usage names the containers that run with their requests and limits, and the answer lists the same", () => {
+  const metrics = new MockMetrics(undefined);
+  const cluster = new Cluster("staging", 800, Date.now());
+  const pods = cluster.pods.filter((pod) => metrics.containers(pod) !== null);
+  const crashing = pods.find((pod) => pod.status === "CrashLoopBackOff");
+  const running = pods.find((pod) => pod.status === "Running");
+  if (!crashing || !running) throw new Error("no such pods in the mock");
+  expect(crashing.ready).toBeLessThan(crashing.containers);
+  for (const pod of [running, crashing]) {
+    const waiting = metrics.podUsage(pod, false);
+    const answer = metrics.podUsage(pod, true);
+    const names = (usage: Usage) =>
+      usage.containers.map((container) => container.name);
+    expect(waiting.waiting).toBe(true);
+    expect(answer.waiting).toBe(false);
+    expect(names(waiting)).toEqual(names(answer));
+    expect(names(waiting)).toEqual(
+      containerSpecs(pod)
+        .slice(0, pod.status === "Running" ? undefined : pod.ready)
+        .map(({ name }) => name),
+    );
+    for (const [index, container] of waiting.containers.entries()) {
+      expect(container.cpu).toEqual({
+        ...answer.containers[index]?.cpu,
+        used: null,
+      });
+      expect(container.memory).toEqual({
+        ...answer.containers[index]?.memory,
+        used: null,
+      });
+    }
+  }
+});
+
+test("a pod with a finished init container lists it on its card and not in its usage", async () => {
+  const metrics = new MockMetrics(undefined);
+  const pod = new Cluster("staging", 800, Date.now()).pods.find(
+    (candidate) =>
+      candidate.status === "Running" &&
+      metrics.containers(candidate) !== null &&
+      finishedInit(candidate),
+  );
+  if (!pod) throw new Error("no pod with a finished init container");
+  const { batches } = await open(
+    "live",
+    PODS,
+    pod.namespace,
+    pod.name,
+    undefined,
+    ANSWER_MS - 1,
+  );
+  const listed = batches[0]?.overview?.sections
+    .flatMap((section) => section.blocks)
+    .flatMap((block) => (block.type === "containers" ? block.containers : []))
+    .map(({ name, role }) => `${role}/${name}`);
+  expect(listed).toEqual([
+    "init/init-config",
+    ...containerSpecs(pod).map(({ name }) => `regular/${name}`),
+  ]);
+  expect(batches[0]?.usage?.containers.map(({ name }) => name)).toEqual(
+    containerSpecs(pod).map(({ name }) => name),
+  );
+});
 
 test.each([
   ["metricsDown", "unavailable"],
   ["metricsForbidden", "forbidden"],
 ] as const)(
-  "%s: an open pod's first usage comes once its scope has answered, and says %s",
+  "%s: an open pod's usage says %s, at once for a stale API and once the scope has answered for a refusal",
   async (scenario, state) => {
     const pod = sampled();
     const { batches } = await open(
@@ -743,9 +822,17 @@ test.each([
       undefined,
       ANSWER_MS - 1,
     );
-    expect(batches.every((batch) => batch.usage === null)).toBe(true);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
+    const stale = scenario === "metricsDown";
+    expect(batches[0]?.usage).toMatchObject(
+      stale
+        ? { state, waiting: false, cpu: { used: null }, containers: [] }
+        : { state: "ready", waiting: true, cpu: { used: null } },
+    );
+    await vi.advanceTimersByTimeAsync(ANSWER_MS * 3);
+    const sent = batches.filter((batch) => batch.usage !== null);
+    expect(sent.map((batch) => batch.usage?.waiting)).toEqual(
+      stale ? [false] : [true, false],
+    );
     expect(usageOf(batches)).toMatchObject({ state, cpu: { used: null } });
   },
 );
@@ -798,7 +885,7 @@ function showUsage(backend: Backend, id: number, usage: boolean) {
   );
 }
 
-test("a usage part shown later has its usage at once when a list holds its scope, and after the scope answers when none does", async () => {
+test("a usage part shown later has its figures at once when a list holds its scope, and a waiting usage before the scope answers when none does", async () => {
   const pod = sampled();
   const alone = await open(
     "live",
@@ -809,9 +896,13 @@ test("a usage part shown later has its usage at once when a list holds its scope
     1,
   );
   await showUsage(alone.backend, alone.id, true);
-  expect(alone.batches.every((batch) => batch.usage === null)).toBe(true);
+  expect(usageOf(alone.batches)?.waiting).toBe(true);
   await vi.advanceTimersByTimeAsync(ANSWER_MS);
-  expect(usageOf(alone.batches)?.state).toBe("ready");
+  expect(usageOf(alone.batches)).toMatchObject({
+    state: "ready",
+    waiting: false,
+  });
+  expect(usageOf(alone.batches)?.cpu.used).toBeGreaterThan(0);
 
   const backend = createMockBackend("live");
   const pods = await reader(
@@ -829,7 +920,10 @@ test("a usage part shown later has its usage at once when a list holds its scope
     1,
   );
   await showUsage(backend, held.id, true);
-  expect(usageOf(held.batches)?.state).toBe("ready");
+  expect(usageOf(held.batches)).toMatchObject({
+    state: "ready",
+    waiting: false,
+  });
   expect(held.batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
 });
 
@@ -842,11 +936,11 @@ test("usage is sent again at a scrape while the part is shown, and not once it i
     pod.name,
   );
   const count = () => batches.filter((batch) => batch.usage !== null).length;
-  expect(count()).toBe(1);
-  await vi.advanceTimersByTimeAsync(SCRAPE_MS);
   expect(count()).toBe(2);
+  await vi.advanceTimersByTimeAsync(SCRAPE_MS);
+  expect(count()).toBe(3);
   await vi.advanceTimersByTimeAsync(SCRAPE_MS * 2);
-  expect(count()).toBe(4);
+  expect(count()).toBe(5);
   await call(
     backend.invoke("object_set_parts", {
       id,
@@ -860,7 +954,7 @@ test("usage is sent again at a scrape while the part is shown, and not once it i
     }),
   );
   await vi.advanceTimersByTimeAsync(SCRAPE_MS * 3);
-  expect(count()).toBe(4);
+  expect(count()).toBe(5);
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -892,15 +986,17 @@ async function discovered(scenario: MockScenario) {
   };
 }
 
-test("discovery lists the Metrics API's pods and nodes where the context serves it, even stale or refusing", async () => {
-  for (const scenario of [
-    "ready",
-    "metricsDown",
-    "metricsForbidden",
-  ] as const) {
+test("discovery lists the Metrics API's pods and nodes where the context serves it, even refusing", async () => {
+  for (const scenario of ["ready", "metricsForbidden"] as const) {
     const { metrics } = await discovered(scenario);
     expect(metrics(), scenario).toEqual([["nodes", "pods"]]);
   }
+});
+
+test("metricsDown's discovery lists no resource of the Metrics API, as a stale one does", async () => {
+  const { metrics, messages } = await discovered("metricsDown");
+  expect(messages).toHaveLength(1);
+  expect(metrics()).toEqual([[]]);
 });
 
 test("metricsNone's discovery has no Metrics API", async () => {
@@ -939,7 +1035,7 @@ test("metricsRemoved serves the API for 20 s, then an open pod's usage is withdr
   );
   const states = () =>
     batches.flatMap((batch) => (batch.usage ? [batch.usage.state] : []));
-  expect(states()).toEqual(["ready"]);
+  expect(states()).toEqual(["ready", "ready"]);
   await vi.advanceTimersByTimeAsync(REMOVED - 100);
   expect(states().every((state) => state === "ready")).toBe(true);
   await vi.advanceTimersByTimeAsync(200);
@@ -982,12 +1078,12 @@ test("a usage part that was hidden when the API went hears absent once it is sho
   await vi.advanceTimersByTimeAsync(REMOVED + 1000);
   const states = () =>
     batches.flatMap((batch) => (batch.usage ? [batch.usage.state] : []));
-  expect(states()).toEqual(["ready"]);
+  expect(states()).toEqual(["ready", "ready"]);
   await parts(true);
-  expect(states()).toEqual(["ready", "absent"]);
+  expect(states()).toEqual(["ready", "ready", "absent"]);
   await parts(false);
   await parts(true);
-  expect(states()).toEqual(["ready", "absent"]);
+  expect(states()).toEqual(["ready", "ready", "absent"]);
 });
 
 test("metricsRemoved: an open list loses its CPU and Memory columns and their cells when the API goes, a sort by them falls to Name, and a list opened later has none", async () => {

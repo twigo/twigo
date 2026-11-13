@@ -116,6 +116,7 @@ const NOTHING: Measure = measure(null, null, null);
 
 export const ABSENT: Usage = {
   state: "absent",
+  waiting: false,
   sampled: null,
   cpu: NOTHING,
   memory: NOTHING,
@@ -206,13 +207,34 @@ export class MockMetrics {
     };
   }
 
-  podUsage(pod: Pod): Usage {
+  /**
+   * What an open pod is told: the state of its scope once that has answered,
+   * and before it the running containers with no figure, as Rust says them
+   * with the Overview. A stale API is known without a request, so it says
+   * `unavailable` at once.
+   */
+  podUsage(pod: Pod, answered: boolean): Usage {
     const state = this.state;
     if (state === null) throw new Error("the context serves no metrics");
+    if (!answered && !this.stale) {
+      return {
+        state: "ready",
+        waiting: true,
+        sampled: null,
+        cpu: NOTHING,
+        memory: NOTHING,
+        containers: this.running(pod).map(({ name, request, limit }) => ({
+          name,
+          cpu: measure(null, request.cpu, limit.cpu),
+          memory: measure(null, request.memory, limit.memory),
+        })),
+      };
+    }
     const containers = state === "ready" ? this.containers(pod) : null;
     if (containers === null) {
       return {
         state,
+        waiting: false,
         sampled: null,
         cpu: NOTHING,
         memory: NOTHING,
@@ -229,6 +251,7 @@ export class MockMetrics {
     };
     return {
       state,
+      waiting: false,
       sampled: new Date(this.scrape * SCRAPE_MS).toISOString(),
       cpu: total((container) => container.cpu),
       memory: total((container) => container.memory),
@@ -236,13 +259,15 @@ export class MockMetrics {
     };
   }
 
-  nodeUsage(node: Node): Usage {
+  nodeUsage(node: Node, answered: boolean): Usage {
     const state = this.state;
     if (state === null) throw new Error("the context serves no metrics");
+    const waiting = !answered && !this.stale;
+    const ready = state === "ready" && !waiting;
     const sample = this.nodeSample(node);
-    const ready = state === "ready";
     return {
-      state,
+      state: waiting ? "ready" : state,
+      waiting,
       sampled: ready ? new Date(this.scrape * SCRAPE_MS).toISOString() : null,
       cpu: measure(ready ? sample.cpu : null, null, null, ALLOCATABLE.cpu),
       memory: measure(
@@ -270,16 +295,24 @@ export class MockMetrics {
     };
   }
 
+  /**
+   * The containers of a pod that run by its own status, in the order a
+   * usage lists them: one that ended or waits is not listed, nor a finished
+   * init container.
+   */
+  running(pod: Pod): ContainerSpec[] {
+    const specs = containerSpecs(pod);
+    return pod.status === "Running"
+      ? specs
+      : pod.status === "CrashLoopBackOff"
+        ? specs.slice(0, pod.ready)
+        : [];
+  }
+
   containers(pod: Pod): ContainerUsage[] | null {
     const at = this.scrape * SCRAPE_MS;
     if (at - pod.created < YOUNG_MS) return null;
-    const specs = containerSpecs(pod);
-    const running =
-      pod.status === "Running"
-        ? specs
-        : pod.status === "CrashLoopBackOff"
-          ? specs.slice(0, pod.ready)
-          : [];
+    const running = this.running(pod);
     if (running.length === 0) return null;
     const version = Math.floor(
       (this.scrape + (hash(pod.id) % SHARES)) / SHARES,

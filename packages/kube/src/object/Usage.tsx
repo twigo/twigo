@@ -11,9 +11,6 @@ const LABEL: Readonly<Record<Resource, string>> = {
 const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
-/** What the section shows before a usage comes: the figures' place, or what the API last said. */
-export type Expected = "loading" | Exclude<ShownUsage["state"], "ready">;
-
 interface Subject {
   /** What its meters are labelled with, and its heading when it has one. */
   readonly name: string | null;
@@ -25,7 +22,8 @@ interface Subject {
  * What a pod or a node uses (ARCHITECTURE 4.3): a pod's total and each of
  * its containers, a node against what it can allocate. A row without a
  * sample says no data yet, never zero, and a Metrics API that gives none
- * says so in place.
+ * says so in place. A usage that waits for its first answer draws the rows
+ * it names with empty meters, so the answer moves nothing below it.
  */
 export function UsageView({
   usage,
@@ -35,45 +33,20 @@ export function UsageView({
   node: boolean;
 }) {
   if (usage.state !== "ready") return <Said state={usage.state} />;
+  const subjectOf = (name: string | null, cpu: Measure, memory: Measure) =>
+    usage.waiting ? { name, cpu: null, memory: null } : { name, cpu, memory };
   const subjects: readonly Subject[] = node
-    ? [{ name: null, cpu: usage.cpu, memory: usage.memory }]
+    ? [subjectOf(null, usage.cpu, usage.memory)]
     : [
-        { name: "Pod", cpu: usage.cpu, memory: usage.memory },
-        ...usage.containers.map(({ name, cpu, memory }) => ({
-          name,
-          cpu,
-          memory,
-        })),
+        subjectOf("Pod", usage.cpu, usage.memory),
+        ...usage.containers.map(({ name, cpu, memory }) =>
+          subjectOf(name, cpu, memory),
+        ),
       ];
   return (
     <div className={GRID}>
       {subjects.map((subject) => (
         <Rows key={subject.name ?? ""} subject={subject} />
-      ))}
-    </div>
-  );
-}
-
-/**
- * What stands in the section until a usage comes: the rows it will have, as
- * a pod's total and each container the Overview lists or a node's pair,
- * with empty meters and no figures, so the answer moves nothing below it.
- */
-export function ExpectedUsage({
-  expected,
-  node,
-  containers,
-}: {
-  expected: Expected;
-  node: boolean;
-  containers: readonly string[];
-}) {
-  if (expected !== "loading") return <Said state={expected} />;
-  const names = node ? [null] : ["Pod", ...containers];
-  return (
-    <div className={GRID}>
-      {names.map((name) => (
-        <Rows key={name ?? ""} subject={{ name, cpu: null, memory: null }} />
       ))}
     </div>
   );
