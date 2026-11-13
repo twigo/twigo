@@ -745,3 +745,28 @@ test("a selected or marked row keeps its tint under the pointer, the others take
   expect(row("gateway-1")).not.toContain("hover:bg-row-hover");
   expect(row("api-2")).toContain("hover:bg-row-hover");
 });
+
+test("a column's note is a quiet mark on its header, said in words to a screen reader, and its click still sorts", () => {
+  const { handlers } = grid({
+    columns: [
+      { id: "Name", title: "Name", width: 200, grow: true },
+      { id: "CPU", title: "CPU", width: 80, note: "metrics-server is down" },
+    ],
+  });
+  const cpu = screen.getByRole("columnheader", { name: "CPU" });
+  const described = cpu.getAttribute("aria-describedby");
+  expect(described).not.toBeNull();
+  expect(document.getElementById(described ?? "")?.textContent).toBe(
+    "metrics-server is down",
+  );
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Name" })
+      .hasAttribute("aria-describedby"),
+  ).toBe(false);
+  fireEvent.click(within(cpu).getByRole("button"));
+  expect(handlers.onSort).toHaveBeenCalledWith({
+    column: "CPU",
+    descending: false,
+  });
+});

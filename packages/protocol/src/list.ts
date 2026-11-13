@@ -6,6 +6,7 @@ import type {
   Column,
   ListBatch,
   ListQuery,
+  MetricsState,
   Row,
   RowGroup,
   RowId,
@@ -29,6 +30,8 @@ export interface ListSnapshot {
   readonly groups: readonly RowGroup[];
   /** Column indexes of the cells the latest batch changed, by row. */
   readonly changed: ReadonlyMap<RowId, readonly number[]>;
+  /** Whether the Metrics API answers, once the list has metric columns. */
+  readonly metrics: MetricsState | null;
 }
 
 /** Before the first batch. */
@@ -43,6 +46,7 @@ export const INITIAL_SNAPSHOT: ListSnapshot = {
   counts: [],
   groups: [],
   changed: new Map(),
+  metrics: null,
 };
 
 /**
@@ -63,6 +67,7 @@ export class ListView {
     },
   );
   #window: [number, number] | undefined;
+  #metrics = false;
   #closed = false;
 
   constructor(backend: Backend, query: ListQuery) {
@@ -103,6 +108,18 @@ export class ListView {
     if (this.#id !== undefined) this.#sendWindow(start, end);
   }
 
+  /**
+   * Whether the list reads its metric columns now (ARCHITECTURE 3.6). It
+   * rides with the window, so a change sends the window again and never
+   * opens a new subscription.
+   */
+  setMetrics(metrics: boolean): void {
+    if (this.#closed || metrics === this.#metrics) return;
+    this.#metrics = metrics;
+    if (this.#id !== undefined && this.#window)
+      this.#sendWindow(...this.#window);
+  }
+
   close(): void {
     this.#closed = true;
     this.#listeners.clear();
@@ -114,7 +131,12 @@ export class ListView {
   #sendWindow(start: number, end: number): void {
     if (this.#id === undefined) return;
     this.#backend
-      .invoke("list_set_window", { id: this.#id, start, end })
+      .invoke("list_set_window", {
+        id: this.#id,
+        start,
+        end,
+        metrics: this.#metrics,
+      })
       .catch((error: unknown) => {
         this.#fail(error);
       });
@@ -153,6 +175,7 @@ export class ListView {
       counts: batch.counts ?? previous.counts,
       groups: batch.groups ?? previous.groups,
       changed,
+      metrics: batch.metrics ?? previous.metrics,
     });
     this.#acks.took(batch.seq);
   }

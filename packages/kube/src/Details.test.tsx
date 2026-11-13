@@ -58,6 +58,8 @@ const EVERY_COLUMN = [
   "Ready",
   "Status",
   "Restarts",
+  "CPU",
+  "Memory",
   "Age",
   "",
 ];
@@ -231,6 +233,7 @@ function podsBatch(
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   };
 }
 

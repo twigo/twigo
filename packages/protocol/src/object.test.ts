@@ -5,6 +5,7 @@ import type {
   ObjectParts,
   ObjectQuery,
   Overview,
+  Usage,
 } from "./generated";
 import { createMockBackend } from "./mock";
 import { ObjectView } from "./object";
@@ -22,6 +23,7 @@ const OVERVIEW: ObjectParts = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 const DOCUMENT: Overview = {
@@ -37,6 +39,7 @@ function batch(seq: number, rest: Partial<ObjectBatch> = {}): ObjectBatch {
     manifest: null,
     events: null,
     related: null,
+    usage: null,
     ...rest,
   };
 }
@@ -85,6 +88,50 @@ test("a batch keeps the parts it does not carry and is acked on the next frame",
   expect(view.getSnapshot().manifest).toBe("{}");
   await vi.runAllTimersAsync();
   expect(fake.calls).toContainEqual(["object_ack", { id: 7, seq: 2 }]);
+});
+
+const USAGE: Usage = {
+  state: "ready",
+  sampled: "2026-11-13T10:00:00Z",
+  cpu: { used: 250_000_000, request: null, limit: null, allocatable: null },
+  memory: {
+    used: 64 * 1024 * 1024,
+    request: null,
+    limit: null,
+    allocatable: null,
+  },
+  containers: [],
+};
+
+test("a batch's usage stays until another comes, and goes with a deleted object", async () => {
+  const fake = fakeBackend();
+  const view = new ObjectView(fake.backend, POD, { ...OVERVIEW, usage: true });
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  expect(view.getSnapshot().usage).toBeUndefined();
+  fake.send(batch(1, { overview: DOCUMENT, usage: USAGE }));
+  fake.send(batch(2, { manifest: "{}" }));
+  expect(view.getSnapshot().usage).toBe(USAGE);
+  const next = { ...USAGE, sampled: "2026-11-13T10:00:15Z" };
+  fake.send(batch(3, { usage: next }));
+  expect(view.getSnapshot().usage).toBe(next);
+  fake.send(batch(4, { exists: false }));
+  expect(view.getSnapshot().usage).toBeUndefined();
+});
+
+test("showing the usage part asks for it, and asks again only when it changes", async () => {
+  const fake = fakeBackend();
+  const view = new ObjectView(fake.backend, POD, OVERVIEW);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  view.setParts({ ...OVERVIEW, usage: true });
+  view.setParts({ ...OVERVIEW, usage: true });
+  view.setParts(OVERVIEW);
+  const sent = fake.calls.filter(([command]) => command === "object_set_parts");
+  expect(sent.map(([, request]) => request)).toEqual([
+    { id: 7, parts: { ...OVERVIEW, usage: true } },
+    { id: 7, parts: OVERVIEW },
+  ]);
 });
 
 test("a deleted object drops its document", async () => {

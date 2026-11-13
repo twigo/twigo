@@ -812,6 +812,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
     A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
   - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
+  - A pod's and a node's Overview also show what the object uses (3.6), as a part of the batch of its own that the webview asks for while the Overview is shown and the document visible, so a new sample describes nothing again.
+    A Usage section follows the Diagnostics with the pod's total and each of its containers, or the node, as meters against the limit with the request marked, else against the request, and a node's against what it can allocate; the percent is kubectl's, truncated and past 100 where it passes.
+    Against a limit or what a node allocates, 90 % is a warning and the limit an error, in the meter and in words.
+    A row without a sample says no data yet, never zero, and a Metrics API that does not answer or may not be read says so in place.
   - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
   - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
@@ -850,6 +854,10 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Changed cells flash briefly: the cell's background starts at the `--flash` tint and fades out over 1 s, as the opacity of a layer behind the text, which runs on the compositor and leaves the page asleep ([bench](bench.md#the-visible-window)).
   A batch that changes more than 8 rows flashes nothing, so a rollout does not strobe the table.
   The flash is a setting, on by default.
+- CPU and Memory are measures, not states (3.6): end-aligned numbers as `kubectl top` prints them, CPU in whole millicores rounded up (`12m`) and memory in whole Mi rounded down (`34Mi`), and empty for a row without a sample, never zero.
+  They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
+  The list says with its window that it reads them while it draws one or is sorted by one and the document is visible; beside the details it draws and reads none.
+  A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay empty.
 
 ### 4.5 Quick access (the command palette)
 

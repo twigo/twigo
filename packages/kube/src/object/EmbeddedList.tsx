@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   EmbeddedList as Spec,
   ListQuery,
@@ -24,8 +24,10 @@ import { cellTone, columnRule, statusColumn, type CellKind } from "../columns";
 import { kindIcon } from "../kinds";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
+import { metricsNote, readsMetrics } from "../list/metrics";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
+import { useVisible } from "../useVisible";
 import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import type { OverviewStates } from "./overviewStates";
@@ -92,32 +94,49 @@ export function EmbeddedList({
     groupBy: null,
     values: null,
   };
-  const { snapshot, flash, setWindow } = useListView(backend, query);
+  const { snapshot, flash, setWindow, setMetrics } = useListView(
+    backend,
+    query,
+  );
+  const visible = useVisible();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const narrow = useWidth(element) < WIDE;
-  const columns: readonly ShownColumn[] = snapshot.columns
-    .map((column, index) => ({
-      name: column.name,
-      index,
-      rule: columnRule(gvr, column),
-      priority: column.priority,
-    }))
-    .filter(
-      (column) =>
-        column.name === "Name" ||
-        (column.priority === 0 && (!narrow || NARROW.has(column.rule.cell))),
-    );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const gridColumns: readonly GridColumn[] = columns.map((column) => ({
-    id: column.name,
-    title: column.name,
-    width:
-      narrow && column.rule.grow
-        ? Math.min(column.rule.width, NARROW_NAME)
-        : column.rule.width,
-    grow: column.rule.grow,
-    align: column.rule.align,
+  const every = snapshot.columns.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(gvr, column),
+    priority: column.priority,
   }));
+  const columns: readonly ShownColumn[] = every.filter(
+    (column) =>
+      column.name === "Name" ||
+      (column.priority === 0 && (!narrow || NARROW.has(column.rule.cell))),
+  );
+  const byName = new Map(columns.map((column) => [column.name, column]));
+  const gridColumns: readonly GridColumn[] = columns.map((column) => {
+    const note = metricsNote(snapshot.metrics, column);
+    return {
+      id: column.name,
+      title: column.name,
+      width:
+        narrow && column.rule.grow
+          ? Math.min(column.rule.width, NARROW_NAME)
+          : column.rule.width,
+      grow: column.rule.grow,
+      align: column.rule.align,
+      ...(note !== undefined && { note }),
+    };
+  });
+  const reads = readsMetrics({
+    columns: every,
+    shown: columns,
+    sort,
+    visible,
+    narrow,
+  });
+  useEffect(() => {
+    setMetrics(reads);
+  }, [setMetrics, reads]);
   const statusAt = countBy
     ? snapshot.columns.findIndex((column) => column.name === countBy)
     : -1;

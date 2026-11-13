@@ -9,6 +9,7 @@ import type {
   Overview,
   Related,
   SubscriptionId,
+  Usage,
   ViewState,
 } from "./generated";
 
@@ -22,6 +23,8 @@ export interface ObjectSnapshot {
   readonly manifest: string | undefined;
   readonly events: EventList | undefined;
   readonly related: Related | undefined;
+  /** What a pod or a node uses, while the usage part is shown and the context serves the Metrics API. */
+  readonly usage: Usage | undefined;
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
@@ -32,6 +35,7 @@ export const INITIAL_OBJECT: ObjectSnapshot = {
   manifest: undefined,
   events: undefined,
   related: undefined,
+  usage: undefined,
 };
 
 /**
@@ -150,6 +154,7 @@ export class ObjectView {
         : undefined,
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
+      usage: batch.exists ? (batch.usage ?? previous.usage) : undefined,
     });
     this.#acks.took(batch.seq);
   }
@@ -173,6 +178,7 @@ function sameParts(a: ObjectParts, b: ObjectParts): boolean {
     a.overview === b.overview &&
     a.manifest === b.manifest &&
     a.events === b.events &&
-    a.related === b.related
+    a.related === b.related &&
+    a.usage === b.usage
   );
 }

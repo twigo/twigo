@@ -19,6 +19,7 @@ import type {
   ObjectRef,
   Overview as Document,
   Section,
+  Usage,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
@@ -30,7 +31,12 @@ import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
 import type { Reveal } from "./reveal";
+import { variant } from "../variants";
+import { UsageTotal, UsageView } from "./Usage";
 import { Age, ValueView } from "./values";
+
+const USAGE = "core.usage";
+const STATUS: ReadonlySet<string> = new Set(["core.pod", "core.node"]);
 
 export interface OverviewProps {
   readonly overview: Document;
@@ -48,6 +54,8 @@ export interface OverviewProps {
   readonly reveal?: Reveal | undefined;
   /** Opens a container's logs from a finding about it. */
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
+  /** What the object uses, once it has come: its section follows the Diagnostics. */
+  readonly usage?: Usage | undefined;
 }
 
 /**
@@ -65,6 +73,7 @@ export function Overview({
   values,
   reveal,
   onLogs,
+  usage,
 }: OverviewProps) {
   useChanges(states.changes);
   const titles = overview.sections.flatMap((section) =>
@@ -74,39 +83,56 @@ export function Overview({
         : [],
     ),
   );
+  const inside = usage !== undefined && variant("place") === "containers";
+  const rendered = overview.sections.map((section) => (
+    <Folding
+      key={section.id}
+      title={section.title}
+      open={states.open(kind, section.id, true)}
+      onToggle={() => {
+        states.toggle(kind, section.id);
+      }}
+    >
+      <div className="flex flex-col gap-3">
+        {section.blocks.map((block, index) => (
+          <BlockView
+            key={index}
+            section={section}
+            block={block}
+            space={space}
+            states={states}
+            kind={kind}
+            onOpen={onOpen}
+            values={values}
+            reveal={reveal}
+            onLogs={onLogs}
+            usage={inside ? usage : undefined}
+          />
+        ))}
+        {inside && STATUS.has(section.id) && <UsageTotal usage={usage} />}
+      </div>
+    </Folding>
+  ));
+  if (usage && !inside) {
+    rendered.splice(
+      overview.sections[0]?.id === "core.diagnostics" ? 1 : 0,
+      0,
+      <Folding
+        key={USAGE}
+        title="Usage"
+        open={states.open(kind, USAGE, true)}
+        onToggle={() => {
+          states.toggle(kind, USAGE);
+        }}
+      >
+        <UsageView usage={usage} node={kind === "/nodes"} />
+      </Folding>,
+    );
+  }
   return (
     <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
       <Announcer titles={titles} />
-      {overview.sections.map((section) => {
-        const open = states.open(kind, section.id, true);
-        return (
-          <Folding
-            key={section.id}
-            title={section.title}
-            open={open}
-            onToggle={() => {
-              states.toggle(kind, section.id);
-            }}
-          >
-            <div className="flex flex-col gap-3">
-              {section.blocks.map((block, index) => (
-                <BlockView
-                  key={index}
-                  section={section}
-                  block={block}
-                  space={space}
-                  states={states}
-                  kind={kind}
-                  onOpen={onOpen}
-                  values={values}
-                  reveal={reveal}
-                  onLogs={onLogs}
-                />
-              ))}
-            </div>
-          </Folding>
-        );
-      })}
+      {rendered}
     </div>
   );
 }
@@ -149,6 +175,7 @@ function BlockView({
   values,
   reveal,
   onLogs,
+  usage,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
   section: Section;
@@ -160,6 +187,7 @@ function BlockView({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
+  usage: Usage | undefined;
 }) {
   switch (block.type) {
     case "fields":
@@ -187,6 +215,7 @@ function BlockView({
           states={states}
           kind={kind}
           onOpen={onOpen}
+          usage={usage}
         />
       );
     case "table":

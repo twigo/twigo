@@ -72,6 +72,8 @@ test("rows from the window render with the server's priority-0 columns", async (
     "Ready",
     "Status",
     "Restarts",
+    "CPU",
+    "Memory",
     "Age",
     "",
   ]);
@@ -212,6 +214,7 @@ function batch(
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   };
 }
 
@@ -290,14 +293,14 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   const backend = createMockBackend("ready");
   await openList(backend);
   expect(template()).toBe(
-    "28px minmax(280px, 1fr) 120px 56px 160px 132px 64px 32px",
+    "28px minmax(280px, 1fr) 120px 56px 160px 132px 72px 80px 64px 32px",
   );
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
   expect(template()).toBe(
-    "28px 380px 120px 56px 160px 132px 64px minmax(0, 1fr) 32px",
+    "28px 380px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px",
   );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
@@ -332,7 +335,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 56px 160px 132px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
     );
 
     const ready = Math.max(
@@ -344,7 +347,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 83px 160px 132px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");

@@ -24,6 +24,7 @@ export * from "./components/count";
 export * from "./components/icon-button";
 export * from "./components/key-hints";
 export * from "./components/link-button";
+export * from "./components/meter";
 export * from "./components/pill";
 export * from "./components/property-list";
 export * from "./components/search-field";

@@ -27,9 +27,11 @@ import {
 import { kindIcon } from "../kinds";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
+import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { CellView, type ShownColumn } from "./cells";
 import { SHOWS_ROWS } from "./listStatus";
+import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -131,7 +133,9 @@ function Grid({
     flash,
     query: shown,
     setWindow,
+    setMetrics,
   } = useListView(backend, query);
+  const visible = useVisible();
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.
   const showing = JSON.stringify(
@@ -156,28 +160,41 @@ function Grid({
   const grouping =
     shown?.groupBy && snapshot.groups.length > 0 ? shown.groupBy : undefined;
 
-  const columns: readonly ShownColumn[] = snapshot.columns
-    .map((column, index) => ({
-      name: column.name,
-      index,
-      rule: columnRule(gvr, column),
-      priority: column.priority,
-    }))
-    .filter(
-      (column) =>
-        column.name === "Name" ||
-        (column.name !== grouping?.column &&
-          (preset.columns[column.name] ?? column.priority === 0) &&
-          (!narrow || NARROW.has(column.rule.cell))),
-    );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const gridColumns: readonly GridColumn[] = columns.map((column) => ({
-    id: column.name,
-    title: column.name,
-    width: column.rule.width,
-    grow: column.rule.grow,
-    align: column.rule.align,
+  const every = snapshot.columns.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(gvr, column),
+    priority: column.priority,
   }));
+  const columns: readonly ShownColumn[] = every.filter(
+    (column) =>
+      column.name === "Name" ||
+      (column.name !== grouping?.column &&
+        (preset.columns[column.name] ?? column.priority === 0) &&
+        (!narrow || NARROW.has(column.rule.cell))),
+  );
+  const byName = new Map(columns.map((column) => [column.name, column]));
+  const gridColumns: readonly GridColumn[] = columns.map((column) => {
+    const note = metricsNote(snapshot.metrics, column);
+    return {
+      id: column.name,
+      title: column.name,
+      width: column.rule.width,
+      grow: column.rule.grow,
+      align: column.rule.align,
+      ...(note !== undefined && { note }),
+    };
+  });
+  const reads = readsMetrics({
+    columns: every,
+    shown: columns,
+    sort: query.sort,
+    visible,
+    narrow,
+  });
+  useEffect(() => {
+    setMetrics(reads);
+  }, [setMetrics, reads]);
 
   const items = useMemo(
     () =>
@@ -280,7 +297,8 @@ function Grid({
   const live = current && snapshot.rows.get(current.row.id);
   const changed =
     live !== undefined &&
-    (live !== current?.row || snapshot.columns !== current.columns);
+    (!sameBesidesMetrics(live, current?.row, every) ||
+      snapshot.columns !== current?.columns);
   useEffect(() => {
     if (changed) select(live);
   }, [changed, live, select]);

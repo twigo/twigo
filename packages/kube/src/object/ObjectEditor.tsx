@@ -13,10 +13,12 @@ import { canShell } from "../exec/kinds";
 import { canForward } from "../forward/kinds";
 import { logsKind } from "../logs/entries";
 import { parseObjectUri } from "../uri";
+import { useVisible } from "../useVisible";
 import { ObjectContent } from "./ObjectContent";
 import type { OverviewStates } from "./overviewStates";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
+import { hasUsage } from "./figures";
 import { objectQuery, refUri, useObject } from "./useObject";
 
 /**
@@ -42,6 +44,7 @@ export function ObjectEditor({
   useChanges(tabs.changes);
   useChanges(edits.copies.changes);
   const tab = tabs.get(uri);
+  const visible = useVisible();
   const query = input && objectQuery(input, resources);
   // An edit holds the object's text until it is applied, and an applied one
   // until the object shows it, so the object is followed for what changes
@@ -53,6 +56,11 @@ export function ObjectEditor({
     manifest: tab === "yaml" || editing,
     events: tab === "events",
     related: tab === "related",
+    usage:
+      tab === "overview" &&
+      visible &&
+      input !== undefined &&
+      hasUsage(input.gvr),
   });
   const reveal = useReveal(id);
   const statusLocked = hasStatusSubresource(resources, input?.gvr);
