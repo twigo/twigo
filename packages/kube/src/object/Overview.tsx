@@ -19,7 +19,7 @@ import type {
   ObjectRef,
   Overview as Document,
   Section,
-  Usage,
+  ShownUsage,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
@@ -53,7 +53,7 @@ export interface OverviewProps {
   /** Opens a container's logs from a finding about it. */
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
   /** What the object uses, once it has come: its section follows the Diagnostics. */
-  readonly usage?: Usage | undefined;
+  readonly usage?: ShownUsage | undefined;
 }
 
 /**

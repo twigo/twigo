@@ -119,6 +119,31 @@ test("a batch's usage stays until another comes, and goes with a deleted object"
   expect(view.getSnapshot().usage).toBeUndefined();
 });
 
+test("an absent usage withdraws the usage, as if none had come, until a later batch brings one", async () => {
+  const fake = fakeBackend();
+  const view = new ObjectView(fake.backend, POD, { ...OVERVIEW, usage: true });
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  fake.send(batch(1, { overview: DOCUMENT, usage: USAGE }));
+  expect(view.getSnapshot().usage).toBe(USAGE);
+  fake.send(
+    batch(2, {
+      usage: {
+        ...USAGE,
+        state: "absent",
+        sampled: null,
+        cpu: { ...USAGE.cpu, used: null },
+        memory: { ...USAGE.memory, used: null },
+      },
+    }),
+  );
+  expect(view.getSnapshot().usage).toBeUndefined();
+  fake.send(batch(3, { manifest: "{}" }));
+  expect(view.getSnapshot().usage).toBeUndefined();
+  fake.send(batch(4, { usage: USAGE }));
+  expect(view.getSnapshot().usage).toBe(USAGE);
+});
+
 test("showing the usage part asks for it, and asks again only when it changes", async () => {
   const fake = fakeBackend();
   const view = new ObjectView(fake.backend, POD, OVERVIEW);

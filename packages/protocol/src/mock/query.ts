@@ -114,7 +114,7 @@ export function compileQuery(
 }
 
 /** Whether a column is a measure of the Metrics API, which no text filter reads. */
-function isMetric(column: Column | undefined): boolean {
+export function isMetric(column: Column | undefined): boolean {
   return column?.kind === "cpu" || column?.kind === "memory";
 }
 

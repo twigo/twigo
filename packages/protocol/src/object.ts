@@ -9,9 +9,9 @@ import type {
   Overview,
   Related,
   SubscriptionId,
-  Usage,
   ViewState,
 } from "./generated";
+import { isShown, type ShownUsage } from "./metrics";
 
 export interface ObjectSnapshot {
   readonly seq: number;
@@ -23,8 +23,11 @@ export interface ObjectSnapshot {
   readonly manifest: string | undefined;
   readonly events: EventList | undefined;
   readonly related: Related | undefined;
-  /** What a pod or a node uses, while the usage part is shown and the context serves the Metrics API. */
-  readonly usage: Usage | undefined;
+  /**
+   * What a pod or a node uses, while the usage part is shown and the context
+   * serves the Metrics API; an `absent` usage withdraws it, until another comes.
+   */
+  readonly usage: ShownUsage | undefined;
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
@@ -154,7 +157,7 @@ export class ObjectView {
         : undefined,
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
-      usage: batch.exists ? (batch.usage ?? previous.usage) : undefined,
+      usage: usageAfter(batch, previous.usage),
     });
     this.#acks.took(batch.seq);
   }
@@ -171,6 +174,15 @@ export class ObjectView {
     this.#snapshot = snapshot;
     for (const listener of this.#listeners) listener();
   }
+}
+
+function usageAfter(
+  batch: ObjectBatch,
+  previous: ShownUsage | undefined,
+): ShownUsage | undefined {
+  if (!batch.exists) return undefined;
+  if (batch.usage === null) return previous;
+  return isShown(batch.usage) ? batch.usage : undefined;
 }
 
 function sameParts(a: ObjectParts, b: ObjectParts): boolean {

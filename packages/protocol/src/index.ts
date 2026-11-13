@@ -152,6 +152,7 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
+export type { ServedMetrics, ShownUsage } from "./metrics";
 export {
   CLUSTER_STREAMS,
   INITIAL_LOGS,

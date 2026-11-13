@@ -617,6 +617,103 @@ test("metricsNone has no metric columns, no state and no usage", async () => {
   expect(batches.every((batch) => batch.usage === null)).toBe(true);
 });
 
+const REMOVED = 20_000;
+
+test("metricsRemoved serves the API for 20 s, then an open pod's usage is withdrawn with absent, once, and its scrapes stop", async () => {
+  const pod = sampled();
+  const { batches } = await open(
+    "metricsRemoved",
+    PODS,
+    pod.namespace,
+    pod.name,
+  );
+  const states = () =>
+    batches.flatMap((batch) => (batch.usage ? [batch.usage.state] : []));
+  expect(states()).toEqual(["ready"]);
+  await vi.advanceTimersByTimeAsync(REMOVED - 100);
+  expect(states().every((state) => state === "ready")).toBe(true);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(states()[states().length - 1]).toBe("absent");
+  expect(batches[batches.length - 1]?.usage).toMatchObject({
+    sampled: null,
+    cpu: { used: null },
+    memory: { used: null },
+    containers: [],
+  });
+  const count = batches.length;
+  await vi.advanceTimersByTimeAsync(SCRAPE_MS * 3);
+  expect(batches).toHaveLength(count);
+  expect(states().filter((state) => state === "absent")).toHaveLength(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("a usage part that was hidden when the API went hears absent once it is shown, and only once", async () => {
+  const pod = sampled();
+  const { backend, batches, id } = await open(
+    "metricsRemoved",
+    PODS,
+    pod.namespace,
+    pod.name,
+  );
+  const parts = (usage: boolean) =>
+    call(
+      backend.invoke("object_set_parts", {
+        id,
+        parts: {
+          overview: true,
+          manifest: false,
+          events: false,
+          related: false,
+          usage,
+        },
+      }),
+    );
+  await parts(false);
+  await vi.advanceTimersByTimeAsync(REMOVED + 1000);
+  const states = () =>
+    batches.flatMap((batch) => (batch.usage ? [batch.usage.state] : []));
+  expect(states()).toEqual(["ready"]);
+  await parts(true);
+  expect(states()).toEqual(["ready", "absent"]);
+  await parts(false);
+  await parts(true);
+  expect(states()).toEqual(["ready", "absent"]);
+});
+
+test("metricsRemoved: an open list loses its CPU and Memory columns and their cells when the API goes, a sort by them falls to Name, and a list opened later has none", async () => {
+  const pods = await list(
+    "metricsRemoved",
+    query({ sort: { column: "CPU", descending: true } }),
+  );
+  await pods.window(0, 40, true);
+  expect(pods.columns().map((column) => column.name)).toContain("CPU");
+  expect(pods.column("CPU").some((cell) => cell !== null)).toBe(true);
+  await vi.advanceTimersByTimeAsync(REMOVED);
+  await pods.sync();
+  await vi.advanceTimersByTimeAsync(200);
+  await pods.sync();
+  const names = pods.columns().map((column) => column.name);
+  expect(names).not.toContain("CPU");
+  expect(names).not.toContain("Memory");
+  expect(pods.shown().length).toBeGreaterThan(0);
+  expect(pods.shown().every((row) => row.cells.length === names.length)).toBe(
+    true,
+  );
+  const order = pods.column("Name").map(String);
+  expect(order).toEqual([...order].sort(natural));
+  expect(
+    [...pods.batches].reverse().find((batch) => batch.metrics !== null)
+      ?.metrics,
+  ).toBe("ready");
+
+  const late = await reader(createMockBackend("metricsRemoved"), query());
+  await vi.advanceTimersByTimeAsync(REMOVED);
+  await late.read();
+  await late.next();
+  const [first] = late.batches;
+  expect(first?.columns?.map((column) => column.name)).not.toContain("CPU");
+});
+
 test.each([
   ["metricsDown", "unavailable"],
   ["metricsForbidden", "forbidden"],

@@ -1,12 +1,11 @@
 import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
-import { toIpcError } from "./error";
+import { IpcError, toIpcError } from "./error";
 import type {
   Cell,
   Column,
   ListBatch,
   ListQuery,
-  MetricsState,
   Row,
   RowGroup,
   RowId,
@@ -14,6 +13,7 @@ import type {
   ValueCount,
   ViewState,
 } from "./generated";
+import type { ServedMetrics } from "./metrics";
 
 export interface ListSnapshot {
   readonly seq: number;
@@ -31,7 +31,7 @@ export interface ListSnapshot {
   /** Column indexes of the cells the latest batch changed, by row. */
   readonly changed: ReadonlyMap<RowId, readonly number[]>;
   /** Whether the Metrics API answers, once the list has metric columns. */
-  readonly metrics: MetricsState | null;
+  readonly metrics: ServedMetrics | null;
 }
 
 /** Before the first batch. */
@@ -144,6 +144,12 @@ export class ListView {
 
   #apply(batch: ListBatch): void {
     if (this.#closed) return;
+    if (batch.metrics === "absent") {
+      this.#fail(
+        new IpcError("internal", "a list was told metrics are absent"),
+      );
+      return;
+    }
     const previous = this.#snapshot;
     const ids = batch.window?.ids ?? previous.ids;
     const rows = new Map<RowId, Row>();

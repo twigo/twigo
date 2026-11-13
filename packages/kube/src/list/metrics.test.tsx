@@ -310,6 +310,27 @@ describe("the main list", () => {
     expect(last(sent.reads())).toBe(false);
   });
 
+  test("a list loses its metric columns when the context stops serving the API, and stays a list that reads nothing", async () => {
+    const backend = createMockBackend("metricsRemoved");
+    const sent = spied(backend);
+    await openList(backend);
+    await settle(30);
+    fireEvent.click(within(header("CPU")).getByRole("button"));
+    await settle(10);
+    expect(header("CPU").getAttribute("aria-sort")).toBe("descending");
+    expect(last(sent.reads())).toBe(true);
+
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    await settle(10);
+    expect(
+      screen.getAllByRole("columnheader").map((h) => h.textContent),
+    ).not.toContain("CPU");
+    expect(header("Name")).toBeTruthy();
+    expect(rows().length).toBeGreaterThan(0);
+    expect(last(sent.reads())).toBe(false);
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+  });
+
   test.each([
     ["metricsDown", /metrics-server does not answer/],
     ["metricsForbidden", /may not read metrics/],

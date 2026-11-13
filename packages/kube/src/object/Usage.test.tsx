@@ -12,7 +12,7 @@ import type {
   Measure,
   Overview as Document,
   RequestOf,
-  Usage,
+  ShownUsage,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Cluster } from "../../../protocol/src/mock/cluster";
@@ -38,7 +38,7 @@ function measure(rest: Partial<Measure>): Measure {
 
 const NOTHING = measure({});
 
-const POD: Usage = {
+const POD: ShownUsage = {
   state: "ready",
   sampled: "2026-11-13T10:00:00Z",
   cpu: measure({ used: 120_000_000, request: 100_000_000 }),
@@ -61,7 +61,7 @@ const POD: Usage = {
   ],
 };
 
-const NODE: Usage = {
+const NODE: ShownUsage = {
   state: "ready",
   sampled: "2026-11-13T10:00:00Z",
   cpu: measure({ used: 7_421_000_000, allocatable: 16_000_000_000 }),
@@ -82,7 +82,11 @@ const SECTION = (id: string): Document["sections"][number] => ({
   blocks: [],
 });
 
-function shown(usage: Usage | undefined, kind = "/pods", first = "core.pod") {
+function shown(
+  usage: ShownUsage | undefined,
+  kind = "/pods",
+  first = "core.pod",
+) {
   const states = new OverviewStates();
   render(
     <Overview
@@ -370,6 +374,20 @@ describe("an open object", () => {
     });
     await settle();
     expect(usage()).toBe(false);
+  });
+
+  test("a pod's Usage section goes, as if none had come, once the context stops serving the Metrics API", async () => {
+    const backend = createMockBackend("metricsRemoved");
+    const workbench = await mountKube(backend);
+    act(() => {
+      workbench.editors.open(running());
+    });
+    await settle();
+    expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
+    await act(() => vi.advanceTimersByTimeAsync(20_000));
+    await settle();
+    expect(screen.queryByRole("region", { name: "Usage" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Containers" })).toBeTruthy();
   });
 
   test("a context without the Metrics API shows no section", async () => {

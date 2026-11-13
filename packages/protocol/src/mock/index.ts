@@ -96,6 +96,7 @@ import us from "./layouts/us.json";
 import RESOURCES from "./resources.json";
 import {
   compileQuery,
+  isMetric,
   queryColumns,
   runQuery,
   type CompiledQuery,
@@ -964,13 +965,13 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
 
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
-  readonly #query: CompiledQuery;
+  #query: CompiledQuery;
   readonly #fields: FieldSelector;
   readonly #kind: MockKind;
   readonly #key: string;
   readonly #cluster: Cluster;
-  readonly #columns: Column[];
-  readonly #join: MetricsJoin | undefined;
+  #columns: Column[];
+  #join: MetricsJoin | undefined;
   readonly #onMessage: (batch: ListBatch) => void;
   readonly #timers: ReturnType<typeof setTimeout>[] = [];
   #status: ViewState;
@@ -996,6 +997,7 @@ class Subscription {
     counts: string;
     groups: string;
     columns: boolean;
+    layout: readonly Column[];
     metrics: MetricsState | null;
   } = {
     total: -1,
@@ -1006,6 +1008,7 @@ class Subscription {
     counts: "",
     groups: "null",
     columns: false,
+    layout: [],
     metrics: null,
   };
 
@@ -1145,7 +1148,19 @@ class Subscription {
     return this.#cache.result;
   }
 
+  /** The context stopped serving the API: the columns go with it, as Rust's layout is built anew. */
+  #withdrawMetrics(): void {
+    this.#join?.close();
+    this.#join = undefined;
+    this.#columns = this.#columns.filter((column) => !isMetric(column));
+    this.#query = compileQuery(this.#query.query, this.#columns);
+    this.#base = undefined;
+    this.#cache = undefined;
+    this.#dirty = true;
+  }
+
   #flush(): void {
+    if (this.#join && !this.#join.served) this.#withdrawMetrics();
     const scrape = this.#join?.scrape;
     if (scrape !== this.#scrape) {
       this.#scrape = scrape ?? -1;
@@ -1180,7 +1195,10 @@ class Subscription {
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
-    const columnsChanged = first || knows !== this.#sent.columns;
+    const columnsChanged =
+      first ||
+      knows !== this.#sent.columns ||
+      (knows && this.#columns !== this.#sent.layout);
     const metrics = knows ? (join?.state ?? null) : null;
     const metricsChanged = metrics !== null && metrics !== this.#sent.metrics;
     const windowChanged =
@@ -1212,6 +1230,7 @@ class Subscription {
       counts: countsJson,
       groups: groupsJson,
       columns: knows,
+      layout: this.#columns,
       metrics: metrics ?? this.#sent.metrics,
     };
     this.#seq++;

@@ -1,4 +1,4 @@
-import type { Cell, MetricsState, Row, Sort } from "@twigo/protocol";
+import type { Cell, Row, ServedMetrics, Sort } from "@twigo/protocol";
 import { formatCpu, formatMemory } from "@twigo/utils";
 import type { ShownColumn } from "./cells";
 
@@ -38,7 +38,7 @@ export function readsMetrics({
 }
 
 export const METRICS_NOTES: Readonly<
-  Record<Exclude<MetricsState, "ready">, string>
+  Record<Exclude<ServedMetrics, "ready">, string>
 > = {
   unavailable:
     "metrics-server does not answer, so there are no CPU or memory figures.",
@@ -47,7 +47,7 @@ export const METRICS_NOTES: Readonly<
 };
 
 export function metricsNote(
-  state: MetricsState | null,
+  state: ServedMetrics | null,
   column: ShownColumn,
 ): string | undefined {
   return state !== null && state !== "ready" && column.rule.metric

@@ -14,16 +14,21 @@ import { CONTAINER_NAMES } from "./shell";
 /**
  * What the context says of the Metrics API: `metricsNone` serves none, so
  * its lists have no metric columns and its objects no usage, `metricsDown`
- * serves it without an answer, `metricsForbidden` to nobody the person is.
+ * serves it without an answer, `metricsForbidden` to nobody the person is,
+ * and `metricsRemoved` stops serving it once the backend has run for
+ * `REMOVED_MS`.
  */
 export type MetricsScenario =
-  "metricsNone" | "metricsDown" | "metricsForbidden";
+  "metricsNone" | "metricsDown" | "metricsForbidden" | "metricsRemoved";
 
 export const METRICS_SCENARIOS: readonly MetricsScenario[] = [
   "metricsNone",
   "metricsDown",
   "metricsForbidden",
+  "metricsRemoved",
 ];
+
+export const REMOVED_MS = 20_000;
 
 export function isMetricsScenario(
   scenario: string,
@@ -107,6 +112,14 @@ function measure(
 
 const NOTHING: Measure = measure(null, null, null);
 
+export const ABSENT: Usage = {
+  state: "absent",
+  sampled: null,
+  cpu: NOTHING,
+  memory: NOTHING,
+  containers: [],
+};
+
 /** The sum of values that all exist, else none, as a pod's request and limit are. */
 function allOrNone(values: readonly (number | null)[]): number | null {
   if (values.length === 0 || values.some((value) => value === null)) {
@@ -125,6 +138,8 @@ export class MockMetrics {
   readonly board = new MetricsBoard();
   readonly #scenario: MetricsScenario | undefined;
   readonly #clock: () => number;
+  readonly #watchers = new Set<() => void>();
+  #served: boolean;
 
   constructor(
     scenario: MetricsScenario | undefined,
@@ -132,23 +147,35 @@ export class MockMetrics {
   ) {
     this.#scenario = scenario;
     this.#clock = clock;
+    this.#served = scenario !== "metricsNone";
+    if (scenario === "metricsRemoved") {
+      setTimeout(() => {
+        this.#served = false;
+        for (const watcher of this.#watchers) watcher();
+      }, REMOVED_MS);
+    }
   }
 
   get served(): boolean {
-    return this.#scenario !== "metricsNone";
+    return this.#served;
   }
 
   get state(): MetricsState | null {
+    if (!this.#served) return null;
     switch (this.#scenario) {
-      case "metricsNone":
-        return null;
       case "metricsDown":
         return "unavailable";
       case "metricsForbidden":
         return "forbidden";
-      case undefined:
+      default:
         return "ready";
     }
+  }
+
+  /** Tells `watcher` when the context stops serving the API; returns what stops it. */
+  watch(watcher: () => void): () => void {
+    this.#watchers.add(watcher);
+    return () => this.#watchers.delete(watcher);
   }
 
   get scrape(): number {
@@ -354,6 +381,7 @@ export class MetricsJoin {
   #wanted: ReadonlySet<string> = new Set();
   #reported: MetricsState = "ready";
   #listener: (() => void) | undefined;
+  readonly #stop: () => void;
   #polled: { rows: readonly MockRow[]; scrape: number } | undefined;
   /** Bumped when a sample a sort reads changed. */
   version = 0;
@@ -366,10 +394,17 @@ export class MetricsJoin {
   ) {
     this.#metrics = metrics;
     this.#namespaces = new Set(namespaces);
+    this.#stop = metrics.watch(() => {
+      this.#listener?.();
+    });
   }
 
   get state(): MetricsState {
     return this.#reported;
+  }
+
+  get served(): boolean {
+    return this.#metrics.served;
   }
 
   get scrape(): number {
@@ -399,6 +434,7 @@ export class MetricsJoin {
   }
 
   close(): void {
+    this.#stop();
     this.#want(new Set());
   }
 

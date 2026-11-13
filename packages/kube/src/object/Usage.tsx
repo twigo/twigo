@@ -1,4 +1,4 @@
-import type { Measure, Usage } from "@twigo/protocol";
+import type { Measure, ShownUsage } from "@twigo/protocol";
 import { Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
 import { figure, type Figure, type Resource } from "./figures";
@@ -24,7 +24,13 @@ interface Subject {
  * sample says no data yet, never zero, and a Metrics API that gives none
  * says so in place.
  */
-export function UsageView({ usage, node }: { usage: Usage; node: boolean }) {
+export function UsageView({
+  usage,
+  node,
+}: {
+  usage: ShownUsage;
+  node: boolean;
+}) {
   if (usage.state !== "ready") return <Said state={usage.state} />;
   const subjects: readonly Subject[] = node
     ? [{ name: null, cpu: usage.cpu, memory: usage.memory }]
@@ -45,7 +51,7 @@ export function UsageView({ usage, node }: { usage: Usage; node: boolean }) {
   );
 }
 
-function Said({ state }: { state: Exclude<Usage["state"], "ready"> }) {
+function Said({ state }: { state: Exclude<ShownUsage["state"], "ready"> }) {
   return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
 }
 

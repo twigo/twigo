@@ -204,6 +204,18 @@ test("a batch's metrics state stays until another comes", async () => {
   expect(view.getSnapshot().metrics).toBe("unavailable");
 });
 
+test("a batch that tells a list that metrics are absent fails the view, since Rust never does", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  fake.send(batch(1, { metrics: "ready" }));
+  fake.send(batch(2, { metrics: "absent" }));
+  const { status, metrics } = view.getSnapshot();
+  expect(status.state === "error" && status.error.kind).toBe("internal");
+  expect(metrics).toBe("ready");
+});
+
 test("a failed subscribe shows the error state", async () => {
   const fake = fakeBackend();
   const view = new ListView(fake.backend, QUERY);

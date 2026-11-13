@@ -16,6 +16,7 @@ import { replicaSetUid, type Cluster, type Node, type Pod } from "./cluster";
 import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
 import { CRASH_LINE as LAST_LINE } from "./logs";
 import {
+  ABSENT,
   containerSpecs,
   type ContainerSpec,
   type MockMetrics,
@@ -110,6 +111,8 @@ export class MockObject {
   readonly #subject: { pod: Pod } | { node: Node } | undefined;
   readonly #metrics: MockMetrics | undefined;
   #scrapes: ReturnType<typeof setTimeout> | undefined;
+  /** A usage was sent that the webview may still draw. */
+  #offered = false;
   #parts: ObjectParts;
   #seq = 0;
 
@@ -178,6 +181,16 @@ export class MockObject {
     }, 0);
     if (binding) this.#follow(binding);
     this.#followScrapes();
+    if (metrics) {
+      this.#stops.push(
+        metrics.watch(() => {
+          this.#followScrapes();
+          if (this.#offered && this.#parts.usage) {
+            this.#send({ ...NONE, usage: true });
+          }
+        }),
+      );
+    }
   }
 
   /** A scrape moves the samples, so a shown usage is sent again at each, and only while it is shown. */
@@ -194,7 +207,13 @@ export class MockObject {
 
   #usage(): Usage | null {
     const subject = this.#subject;
-    if (!subject || !this.#metrics?.served) return null;
+    if (!subject || !this.#metrics) return null;
+    if (!this.#metrics.served) {
+      const withdraw = this.#offered;
+      this.#offered = false;
+      return withdraw ? ABSENT : null;
+    }
+    this.#offered = true;
     return "pod" in subject
       ? this.#metrics.podUsage(subject.pod)
       : this.#metrics.nodeUsage(subject.node);
