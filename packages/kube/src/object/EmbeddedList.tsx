@@ -45,8 +45,6 @@ const HEADER = 28;
 /** Narrower than this, as in the details beside a list, it keeps fewer columns. */
 const WIDE = 640;
 const NARROW: ReadonlySet<CellKind> = new Set(["name", "ratio", "status"]);
-/** The least a narrow list's name column takes. */
-const NARROW_NAME = 160;
 
 /**
  * A live list inside an Overview (ARCHITECTURE 4.3), such as a workload's
@@ -118,10 +116,7 @@ export function EmbeddedList({
     return {
       id: column.name,
       title: column.name,
-      width:
-        narrow && column.rule.grow
-          ? Math.min(column.rule.width, NARROW_NAME)
-          : column.rule.width,
+      width: column.rule.width,
       grow: column.rule.grow,
       align: column.rule.align,
       descendFirst: column.rule.descendFirst,

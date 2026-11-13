@@ -22,9 +22,9 @@ export type CellKind =
 /** What a column of a resource's table does, as data. */
 export interface ColumnRule {
   readonly cell: CellKind;
-  /** The starting width in px. */
+  /** The starting width in px, and the least a growing column takes. */
   readonly width: number;
-  /** Takes the free width while the user has not sized it. */
+  /** Takes the free width while the user has not sized it, so it is the column that gives way. */
   readonly grow: boolean;
   readonly align: "start" | "end";
   /** A first click on the header sorts the largest first, as `kubectl top --sort-by` does. */
@@ -116,7 +116,7 @@ export const IN_FLIGHT =
 
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
-  Name: { cell: "name", width: 280, grow: true },
+  Name: { cell: "name", width: 160, grow: true },
   Namespace: { width: 120, quiet: true, groups: true },
   Context: { width: 120, quiet: true, groups: true },
   Node: { width: 200, groups: true },
