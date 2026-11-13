@@ -3,6 +3,7 @@ import { Capabilities } from "./capabilities";
 import { Discovery } from "./discovery";
 import { ListGrids } from "./list/grids";
 import { ListStatuses } from "./list/listStatus";
+import { KnownMeasures } from "./list/measures";
 import { ListStates } from "./listState";
 import { PinnedLists } from "./explorer/pinned";
 import { createEdits, type EditServices } from "./edit/services";
@@ -23,6 +24,8 @@ export interface ListServices {
   readonly statuses: ListStatuses;
   /** Each list editor's grid, for the keyboard focus. */
   readonly grids: ListGrids;
+  /** Which columns of each kind are measures, as the session's lists learnt it. */
+  readonly measures: KnownMeasures;
   /** The lists each space pinned to its explorer. */
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
@@ -51,6 +54,7 @@ export function createServices(workbench: Workbench): ListServices {
     selection: new Selection(),
     statuses: new ListStatuses(),
     grids,
+    measures: new KnownMeasures(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
     capabilities,

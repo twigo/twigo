@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Columns3 } from "lucide-react";
 import {
-  INITIAL_SNAPSHOT,
   type ListQuery,
   type Resource,
   type Row,
@@ -96,13 +95,14 @@ function Grid({
 }) {
   const workbench = useWorkbench();
   const { backend, spaces, menus, keys } = workbench;
-  const { presets, states, selection, statuses, grids } = services;
+  const { presets, states, selection, statuses, grids, measures } = services;
   useChanges(spaces.changes);
   useChanges(presets.changes);
   useChanges(states.changes);
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(measures.changes);
   const { gvr } = input;
   const preset = presets.get(gvr);
   const countBy = statusColumn(gvr);
@@ -110,15 +110,9 @@ function Grid({
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
   const collapsed = states.collapsed(uri);
-  // Which columns are measures only the list says, in the columns of a batch.
-  const [known, setKnown] = useState(INITIAL_SNAPSHOT.columns);
-  const measures = new Set(
-    known
-      .filter((column) => columnRule(gvr, column).metric)
-      .map((column) => column.name),
-  );
+  const known = measures.get(gvr);
   const choices = Object.fromEntries(
-    Object.entries(preset.columns).filter(([name]) => !measures.has(name)),
+    Object.entries(preset.columns).filter(([name]) => !known.has(name)),
   );
   const query: ListQuery = {
     space: input.space,
@@ -131,8 +125,8 @@ function Grid({
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
     // query and a column toggle does not resubscribe, and the filter never
-    // reads a column of a measure's kind, so once the list's columns say
-    // which those are, their choices stay out too.
+    // reads a column of a measure's kind, so once a list of the kind has
+    // said which those are, their choices stay out too.
     columns: text !== "" && Object.keys(choices).length > 0 ? choices : null,
     sort: states.sort(uri) ?? null,
     countBy: countBy ?? null,
@@ -151,7 +145,9 @@ function Grid({
     setWindow,
     setMetrics,
   } = useListView(backend, query);
-  if (snapshot.columns !== known) setKnown(snapshot.columns);
+  useEffect(() => {
+    measures.learn(gvr, snapshot.columns);
+  }, [measures, gvr, snapshot.columns]);
   const visible = useVisible();
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.

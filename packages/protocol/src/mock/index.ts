@@ -964,6 +964,8 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
   "stale",
 ]);
 
+const NO_COLUMNS: readonly Column[] = [];
+
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
 class Subscription {
   #query: CompiledQuery;
@@ -997,7 +999,6 @@ class Subscription {
     status: string;
     counts: string;
     groups: string;
-    columns: boolean;
     layout: readonly Column[];
     metrics: MetricsState | null;
   } = {
@@ -1008,8 +1009,7 @@ class Subscription {
     status: "",
     counts: "",
     groups: "null",
-    columns: false,
-    layout: [],
+    layout: NO_COLUMNS,
     metrics: null,
   };
 
@@ -1196,10 +1196,9 @@ class Subscription {
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
     const knows = KNOWS_COLUMNS.has(this.#status.state);
-    const columnsChanged =
-      first ||
-      knows !== this.#sent.columns ||
-      (knows && this.#columns !== this.#sent.layout);
+    // Rust's layout has the two metric columns before it has the server's.
+    const layout = knows ? this.#columns : join ? METRIC_COLUMNS : NO_COLUMNS;
+    const columnsChanged = first || layout !== this.#sent.layout;
     const metrics = knows ? (join?.state ?? null) : null;
     const metricsChanged = metrics !== null && metrics !== this.#sent.metrics;
     const windowChanged =
@@ -1230,8 +1229,7 @@ class Subscription {
       status,
       counts: countsJson,
       groups: groupsJson,
-      columns: knows,
-      layout: this.#columns,
+      layout,
       metrics: metrics ?? this.#sent.metrics,
     };
     this.#seq++;
@@ -1239,7 +1237,7 @@ class Subscription {
     this.#onMessage({
       seq: this.#seq,
       total,
-      columns: columnsChanged ? (knows ? this.#columns : []) : null,
+      columns: columnsChanged ? [...layout] : null,
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map(wireRow),
       status: this.#status,

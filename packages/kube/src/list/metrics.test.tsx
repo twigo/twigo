@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { Backend, ListBatch, ListQuery, RequestOf } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Changes } from "@twigo/workbench";
-import { openList, settle, withScreenSize } from "../../test/workbench";
+import {
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
 
 const gridRenders = vi.hoisted(() => ({ count: 0 }));
 
@@ -558,20 +563,120 @@ describe("a column named like a measure", () => {
     expect(sent.reads()).not.toContain(true);
   });
 
-  test("is left out of a pod list's text filter only once the list's columns say it is a measure", async () => {
+  test("is left out of a pod list's text filter once the list's columns say it is a measure, and from the first query of a kind seen before", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);
-    const workbench = await openList(backend);
-    await choose("CPU");
+    const workbench = await mountKube(backend);
+    workbench.state.set(null, "list//pods", {
+      columns: { CPU: false },
+      widths: {},
+    });
+    const asked = (text: string) =>
+      sent
+        .queries()
+        .filter((query) => query.text === text)
+        .map((query) => query.columns);
     act(() => {
       workbench.editors.open("k8s-list://prod-eu/v1/pods?q=auth");
     });
     await settle(30);
-    expect(
-      sent
-        .queries()
-        .filter((query) => query.text === "auth")
-        .map((query) => query.columns),
-    ).toEqual([{ CPU: false }, null]);
+    expect(asked("auth")).toEqual([{ CPU: false }, null]);
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/v1/pods?q=payments");
+    });
+    await settle(30);
+    expect(asked("payments")).toEqual([null]);
+  });
+});
+
+describe("a kind whose first batches do not know the columns", () => {
+  withScreenSize(1000);
+
+  const NAMES = [
+    { name: "Name", kind: "string", priority: 0 },
+    { name: "Status", kind: "string", priority: 0 },
+    { name: "CPU", kind: "cpu", priority: 0 },
+    { name: "Memory", kind: "memory", priority: 0 },
+  ] as const;
+
+  function batch(seq: number, known: boolean): ListBatch {
+    return {
+      seq,
+      total: known ? 2 : 0,
+      columns: known ? [...NAMES] : [],
+      window: { start: 0, ids: known ? ["a", "b"] : [] },
+      upserts: known
+        ? ["a", "b"].map((id) => ({
+            id,
+            created: null,
+            generated: null,
+            cells: [id, "Running", 10_000_000, 64 * 1024 * 1024],
+          }))
+        : [],
+      status: { state: known ? "ready" : "connecting" },
+      counts: null,
+      groups: null,
+      metrics: null,
+    };
+  }
+
+  function lateColumns() {
+    const mock = createMockBackend("ready");
+    const backend: Backend = {
+      invoke: (command, request) =>
+        command.startsWith("list_")
+          ? Promise.resolve(null as never)
+          : mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "list_subscribe")
+          return mock.subscribe(command, request, onMessage);
+        setTimeout(() => {
+          onMessage(batch(1, false));
+        }, 10);
+        setTimeout(() => {
+          onMessage(batch(2, true));
+        }, 1100);
+        return Promise.resolve(1 as never);
+      },
+    };
+    return backend;
+  }
+
+  async function filtered(backend: Backend, uri: string) {
+    const sent = spied(backend);
+    const workbench = await mountKube(backend);
+    workbench.state.set(null, "list//pods", {
+      columns: { CPU: false },
+      widths: {},
+    });
+    act(() => {
+      workbench.editors.open(uri);
+    });
+    await settle(200);
+    return sent;
+  }
+
+  const asked = (sent: ReturnType<typeof spied>) =>
+    sent
+      .queries()
+      .filter((query) => query.text === "auth")
+      .map((query) => query.columns);
+
+  test("opens one more subscription once its columns come, in ten seconds, and never another", async () => {
+    const sent = await filtered(
+      lateColumns(),
+      "k8s-list://prod-eu/v1/pods?q=auth",
+    );
+    expect(asked(sent)).toEqual([{ CPU: false }, null]);
+    expect(rows().length).toBe(2);
+  });
+
+  test("on the mock, a pod list with a text filter and a stored choice for CPU, opened before its kind has synced, loads its rows", async () => {
+    const sent = await filtered(
+      createMockBackend("live"),
+      "k8s-list://prod-eu/v1/pods?q=auth",
+    );
+    expect(asked(sent).length).toBeLessThanOrEqual(2);
+    expect(rows().length).toBeGreaterThan(0);
   });
 });

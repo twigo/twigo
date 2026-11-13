@@ -155,6 +155,66 @@ test("pod and node lists carry CPU and Memory of priority 0 just before Age, fro
   expect(deployments.batches.find((b) => b.metrics !== null)).toBeUndefined();
 });
 
+test.each([
+  ["pods", query()],
+  ["nodes", NODES],
+])(
+  "a %s list that has not synced yet has CPU and Memory alone in every batch that has columns, and none with an empty list of them",
+  async (_, q) => {
+    const backend = createMockBackend("live");
+    const batches: ListBatch[] = [];
+    let id = 0;
+    const pending = backend.subscribe("list_subscribe", q, (batch) => {
+      batches.push(batch);
+      void backend.invoke("list_ack", { id, seq: batch.seq });
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    id = await pending;
+    await call(
+      backend.invoke("list_set_window", {
+        id,
+        start: 0,
+        end: 40,
+        metrics: false,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    const states = batches.map((batch) => batch.status.state);
+    expect(states[0]).toBe("connecting");
+    expect(states).toContain("ready");
+    const named = batches.flatMap((batch) =>
+      batch.columns ? [batch.columns.map((column) => column.name)] : [],
+    );
+    expect(named[0]).toEqual(["CPU", "Memory"]);
+    expect(named.length).toBeGreaterThan(1);
+    for (const names of named) {
+      expect(names).toContain("CPU");
+      expect(names).toContain("Memory");
+    }
+  },
+);
+
+test("a list of a context that serves no Metrics API has no columns before its kind has synced, as after", async () => {
+  const backend = createMockBackend("metricsNone");
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe("list_subscribe", query(), (batch) => {
+    batches.push(batch);
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await pending;
+  await call(
+    backend.invoke("list_set_window", {
+      id,
+      start: 0,
+      end: 40,
+      metrics: false,
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(100);
+  expect(batches[0]?.status.state).toBe("connecting");
+  expect(batches[0]?.columns).toEqual([]);
+});
+
 test("values come only while the list says it reads, and stay as they were when it stops", async () => {
   const pods = await list("ready");
   await pods.window(0, 60, false);
