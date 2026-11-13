@@ -41,7 +41,6 @@ export interface ColumnRule {
   readonly flash: boolean;
 }
 
-/** Rules for a column of a kind of its own, under those by name. */
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
     cpu: { cell: "cpu", width: 72, align: "end", metric: true, flash: false },

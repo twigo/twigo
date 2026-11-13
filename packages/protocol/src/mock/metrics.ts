@@ -135,7 +135,6 @@ export class MockMetrics {
     return this.#scenario !== "metricsNone";
   }
 
-  /** What it answers; none for a context that does not serve it. */
   get state(): MetricsState | null {
     switch (this.#scenario) {
       case "metricsNone":
@@ -276,7 +275,6 @@ export class MockMetrics {
   }
 }
 
-/** The columns of the Metrics API, which a list of pods or nodes gets before its Age. */
 export const METRIC_COLUMNS: readonly Column[] = [
   { name: "CPU", kind: "cpu", priority: 0 },
   { name: "Memory", kind: "memory", priority: 0 },

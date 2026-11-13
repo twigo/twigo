@@ -28,7 +28,6 @@ export function readsMetrics({
   );
 }
 
-/** What is said where a Metrics API gives no values. */
 export const METRICS_NOTES: Readonly<
   Record<Exclude<MetricsState, "ready">, string>
 > = {
@@ -38,7 +37,6 @@ export const METRICS_NOTES: Readonly<
     "You may not read metrics here, so there are no CPU or memory figures.",
 };
 
-/** What a metric column's header says while the Metrics API gives no values. */
 export function metricsNote(
   state: MetricsState | null,
   column: ShownColumn,

@@ -12,7 +12,6 @@ const LABEL: Readonly<Record<Resource, string>> = {
 const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
-/** Something that uses resources: a pod, a container or a node. */
 interface Subject {
   /** What its meters are labelled with. */
   readonly name: string | null;
@@ -173,7 +172,6 @@ function Row({
   );
 }
 
-/** A figure as a field: `139m (92%)` and what it is held against, as the node's Resources table prints percents. */
 function Text({ shown }: { shown: Figure }) {
   if (shown.used === null) {
     return <span className="text-muted-foreground">No data yet</span>;
