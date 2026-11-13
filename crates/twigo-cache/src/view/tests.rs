@@ -1199,6 +1199,35 @@ fn the_state_of_the_columns_is_the_pollers_or_else_the_apis() {
 }
 
 #[test]
+fn a_list_that_has_heard_nothing_says_no_state_and_keeps_what_it_said() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "x", "Running", "0"));
+    rig.view.set_api(served());
+    let opened = rig.flush().unwrap();
+    assert!(opened.columns.is_some());
+    assert_eq!(opened.metrics, None, "no scope has answered");
+
+    rig.view.samples(metrics::Update::default());
+    assert!(
+        rig.view.batch(ViewState::Ready).is_none(),
+        "and nothing changes"
+    );
+    rig.view.samples(metrics::Update {
+        state: Some(MetricsState::Forbidden),
+        ..metrics::Update::default()
+    });
+    assert_eq!(
+        rig.view.batch(ViewState::Ready).unwrap().metrics,
+        Some(MetricsState::Forbidden)
+    );
+    rig.view.samples(metrics::Update::default());
+    assert!(
+        rig.view.batch(ViewState::Ready).is_none(),
+        "it keeps the state while its scopes are asked anew"
+    );
+}
+
+#[test]
 fn a_node_list_reads_the_one_scope_of_nodes() {
     let mut nodes = query();
     nodes.gvr.resource = "nodes".to_owned();

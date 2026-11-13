@@ -68,7 +68,7 @@ pub struct Change {
 /// Its resets are read first, then each changed key.
 #[derive(Debug, Default)]
 pub struct Update {
-    /// None while the reader wants nothing.
+    /// None while the reader wants nothing, or none of its scopes has answered or failed yet.
     pub state: Option<MetricsState>,
     pub resets: Vec<Reset>,
     pub changes: Vec<Change>,
@@ -401,11 +401,10 @@ impl Board {
         }
     }
 
-    /// A scope not answered yet counts as answering, unless the API is stale. A reader that
-    /// wants the cluster and namespaces too is told by the namespaces while the cluster does
-    /// not answer.
-    fn health(&self, state: &State, wants: &Wants) -> MetricsState {
-        let stale = self.api.borrow().stale();
+    /// The worst state among the scopes that have answered or failed once, none while none has:
+    /// a scope still waiting for its first answer adds nothing. A reader that wants the cluster
+    /// and namespaces too is told by the namespaces while the cluster does not answer.
+    fn health(&self, state: &State, wants: &Wants) -> Option<MetricsState> {
         let fallen_back = wants.cluster
             && wants.scopes.len() > 1
             && state
@@ -416,17 +415,14 @@ impl Board {
             .scopes
             .iter()
             .filter(|want| !(fallen_back && **want == Scope::Cluster))
-            .fold(MetricsState::Ready, |worst, want| {
-                let health = match state
-                    .serving(want)
-                    .and_then(|request| request.answer.as_ref())
-                {
-                    Some(answer) => answer.health,
-                    None if stale => MetricsState::Unavailable,
-                    None => MetricsState::Ready,
-                };
-                worse(worst, health)
+            .filter_map(|want| {
+                state
+                    .serving(want)?
+                    .answer
+                    .as_ref()
+                    .map(|answer| answer.health)
             })
+            .reduce(worse)
     }
 }
 
@@ -564,7 +560,7 @@ impl Reader {
         Update {
             state: wants
                 .filter(|wants| !wants.scopes.is_empty())
-                .map(|wants| board.health(&state, wants)),
+                .and_then(|wants| board.health(&state, wants)),
             resets: std::mem::take(&mut pending.resets),
             changes: pending
                 .changes

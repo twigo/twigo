@@ -220,11 +220,7 @@ impl Used {
         } else {
             sample = None;
         }
-        let state = update.state.unwrap_or(if api.stale() {
-            MetricsState::Unavailable
-        } else {
-            MetricsState::Ready
-        });
+        let state = update.state.unwrap_or(self.state);
         let changed = sample != self.sample
             || state != self.state
             || served != self.served

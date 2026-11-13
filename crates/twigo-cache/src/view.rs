@@ -638,12 +638,13 @@ impl QueryView {
         }
     }
 
+    /// The state its scopes last said, kept while it reads nothing; none until they say one,
+    /// but `unavailable` for a stale API, which discovery knows without a request.
     fn metrics_state(&self) -> Option<MetricsState> {
-        self.metrics.as_ref().map(|metrics| match metrics.reported {
-            Some(state) => state,
-            None if metrics.stale => MetricsState::Unavailable,
-            None => MetricsState::Ready,
-        })
+        let metrics = self.metrics.as_ref()?;
+        metrics
+            .reported
+            .or_else(|| metrics.stale.then_some(MetricsState::Unavailable))
     }
 
     /// The rows from `start` up to `end`, exclusive, of those the window

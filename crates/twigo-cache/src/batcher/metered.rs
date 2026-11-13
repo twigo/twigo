@@ -237,7 +237,7 @@ async fn nothing_is_polled_before_a_window_or_while_the_columns_are_not_read() {
             .any(|c| c.name == "CPU"),
         "the columns are there whatever the poller has answered"
     );
-    assert_eq!(batches[0].metrics, Some(MetricsState::Ready));
+    assert_eq!(batches[0].metrics, None, "nothing is read, so nothing said");
     assert_eq!(requests_to_the_group(&list.fake), 0, "metrics: false");
 
     list.batcher().set_window(0, 6, true);
@@ -276,7 +276,7 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     list.batcher().set_window(0, 6, true);
     let opened = first(&mut list).await;
     assert!(has_metric_columns(&opened), "{:?}", opened.columns);
-    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+    assert_eq!(opened.metrics, None, "no scope has answered yet");
     assert_eq!(
         opened.upserts.len(),
         6,
@@ -288,12 +288,22 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     list.batcher().set_window(0, 6, true);
     let again = first(&mut list).await;
     assert!(has_metric_columns(&again), "{:?}", again.columns);
-    assert_eq!(again.metrics, Some(MetricsState::Ready));
+    assert_eq!(
+        again.metrics, None,
+        "its scopes were dropped with the last list"
+    );
     assert_eq!(again.upserts.len(), 6, "and nothing is sent twice");
     let rest = list.watch(Duration::from_secs(2)).await;
     assert!(
         rest.iter().all(|batch| batch.columns.is_none()),
         "the columns do not change later: {rest:?}"
+    );
+    assert_eq!(
+        rest.iter()
+            .filter_map(|batch| batch.metrics)
+            .collect::<Vec<_>>(),
+        [MetricsState::Ready],
+        "the state comes with the first answer"
     );
 }
 
@@ -426,7 +436,7 @@ async fn a_scope_that_never_answers_lets_the_first_batch_out_at_the_bound_and_th
         at - asked
     );
     assert_eq!(window_ids(&bounded), BY_ID, "as it is: no sample yet");
-    assert_eq!(bounded.metrics, Some(MetricsState::Ready));
+    assert_eq!(bounded.metrics, None, "nothing has answered");
 
     let later = list.watch(Duration::from_secs(30)).await;
     let moved = later
@@ -644,7 +654,10 @@ async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_na
         0,
         "one request for the cluster, none per namespace"
     );
-    assert_eq!(batches[0].metrics, Some(MetricsState::Ready));
+    assert_eq!(
+        batches.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Ready)
+    );
 
     let fake = cluster(true).await;
     fake.state()
@@ -893,4 +906,63 @@ async fn a_list_of_many_namespaces_whose_answers_are_slow_reaches_the_bound_and_
         expected
     );
     assert_ne!(window_ids(&bounded), expected, "it was not the true order");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_says_ready_with_its_first_answer_and_not_before() {
+    let fake = cluster(true).await;
+    fake.state().metrics_takes = Duration::from_secs(3);
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let early = list.watch(Duration::from_secs(2)).await;
+    assert!(has_metric_columns(&early[0]));
+    assert!(
+        early.iter().all(|batch| batch.metrics.is_none()),
+        "nothing has answered: {:?}",
+        early.iter().map(|batch| batch.metrics).collect::<Vec<_>>()
+    );
+
+    let answered = list.watch(Duration::from_secs(5)).await;
+    assert_eq!(
+        answered
+            .iter()
+            .filter_map(|batch| batch.metrics)
+            .collect::<Vec<_>>(),
+        [MetricsState::Ready]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_stops_reading_and_reads_again_under_a_refusal_never_says_ready_between() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let first = list.watch(Duration::from_secs(3)).await;
+    assert_eq!(
+        first.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Forbidden)
+    );
+
+    list.batcher().set_window(0, 6, false);
+    let paused = list.watch(Duration::from_secs(30)).await;
+    list.fake.state().metrics_takes = Duration::from_secs(3);
+    list.batcher().set_window(0, 6, true);
+    let again = list.watch(Duration::from_secs(2)).await;
+    let later = list.watch(Duration::from_secs(5)).await;
+    let said: Vec<MetricsState> = paused
+        .iter()
+        .chain(&again)
+        .chain(&later)
+        .filter_map(|batch| batch.metrics)
+        .collect();
+    assert!(
+        said.iter().all(|state| *state == MetricsState::Forbidden),
+        "{said:?}"
+    );
+    assert_eq!(polls(&list.fake, "a"), 2, "it did read again");
 }
