@@ -108,10 +108,11 @@ impl Context {
 
 /// Forbidden outranks unavailable, which outranks ready.
 pub(crate) fn worse(a: MetricsState, b: MetricsState) -> MetricsState {
-    use MetricsState::{Forbidden, Ready, Unavailable};
+    use MetricsState::{Absent, Forbidden, Ready, Unavailable};
     match (a, b) {
         (Forbidden, _) | (_, Forbidden) => Forbidden,
         (Unavailable, _) | (_, Unavailable) => Unavailable,
-        (Ready, Ready) => Ready,
+        (Ready, _) | (_, Ready) => Ready,
+        (Absent, Absent) => Absent,
     }
 }
