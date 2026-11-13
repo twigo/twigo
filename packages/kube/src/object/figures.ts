@@ -1,6 +1,6 @@
 import type { Gvr, Measure } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { measureFormat } from "../variants";
+import { formatCpu, formatMemory } from "@twigo/utils";
 
 export type Resource = "cpu" | "memory";
 
@@ -41,7 +41,7 @@ export interface Figure {
  * pass, and the request; with none of them the figures are all it has.
  */
 export function figure(resource: Resource, measure: Measure): Figure {
-  const format = measureFormat(resource);
+  const format = resource === "cpu" ? formatCpu : formatMemory;
   const text = (value: number | null) =>
     value === null ? null : format(value);
   const { used, request, limit, allocatable } = measure;

@@ -31,12 +31,10 @@ import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
 import type { Reveal } from "./reveal";
-import { variant } from "../variants";
-import { UsageTotal, UsageView } from "./Usage";
+import { UsageView } from "./Usage";
 import { Age, ValueView } from "./values";
 
 const USAGE = "core.usage";
-const STATUS: ReadonlySet<string> = new Set(["core.pod", "core.node"]);
 
 export interface OverviewProps {
   readonly overview: Document;
@@ -83,7 +81,6 @@ export function Overview({
         : [],
     ),
   );
-  const inside = usage !== undefined && variant("place") === "containers";
   const rendered = overview.sections.map((section) => (
     <Folding
       key={section.id}
@@ -106,14 +103,12 @@ export function Overview({
             values={values}
             reveal={reveal}
             onLogs={onLogs}
-            usage={inside ? usage : undefined}
           />
         ))}
-        {inside && STATUS.has(section.id) && <UsageTotal usage={usage} />}
       </div>
     </Folding>
   ));
-  if (usage && !inside) {
+  if (usage) {
     rendered.splice(
       overview.sections[0]?.id === "core.diagnostics" ? 1 : 0,
       0,
@@ -175,7 +170,6 @@ function BlockView({
   values,
   reveal,
   onLogs,
-  usage,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
   section: Section;
@@ -187,7 +181,6 @@ function BlockView({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
-  usage: Usage | undefined;
 }) {
   switch (block.type) {
     case "fields":
@@ -215,7 +208,6 @@ function BlockView({
           states={states}
           kind={kind}
           onOpen={onOpen}
-          usage={usage}
         />
       );
     case "table":

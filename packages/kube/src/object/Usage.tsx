@@ -1,7 +1,6 @@
-import type { ContainerUsage, Measure, Usage } from "@twigo/protocol";
-import { Meter, PropertyList, StatusDot, TonedText } from "@twigo/ui";
+import type { Measure, Usage } from "@twigo/protocol";
+import { Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
-import { variant } from "../variants";
 import { figure, type Figure, type Resource } from "./figures";
 
 const LABEL: Readonly<Record<Resource, string>> = {
@@ -13,10 +12,8 @@ const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
 interface Subject {
-  /** What its meters are labelled with. */
+  /** What its meters are labelled with, and its heading when it has one. */
   readonly name: string | null;
-  /** Whether its name heads its rows. */
-  readonly titled: boolean;
   readonly cpu: Measure;
   readonly memory: Measure;
 }
@@ -29,88 +26,16 @@ interface Subject {
  */
 export function UsageView({ usage, node }: { usage: Usage; node: boolean }) {
   if (usage.state !== "ready") return <Said state={usage.state} />;
-  return (
-    <Subjects
-      subjects={
-        node
-          ? [
-              {
-                name: null,
-                titled: false,
-                cpu: usage.cpu,
-                memory: usage.memory,
-              },
-            ]
-          : [
-              {
-                name: "Pod",
-                titled: true,
-                cpu: usage.cpu,
-                memory: usage.memory,
-              },
-              ...usage.containers.map((container) => ({
-                name: container.name,
-                titled: true,
-                cpu: container.cpu,
-                memory: container.memory,
-              })),
-            ]
-      }
-    />
-  );
-}
-
-export function UsageTotal({ usage }: { usage: Usage }) {
-  if (usage.state !== "ready") return <Said state={usage.state} />;
-  return (
-    <Subjects
-      subjects={[
-        { name: null, titled: false, cpu: usage.cpu, memory: usage.memory },
-      ]}
-    />
-  );
-}
-
-export function ContainerUsageRows({ usage }: { usage: ContainerUsage }) {
-  return (
-    <Subjects
-      subjects={[
-        {
-          name: usage.name,
-          titled: false,
-          cpu: usage.cpu,
-          memory: usage.memory,
-        },
-      ]}
-    />
-  );
-}
-
-function Said({ state }: { state: Exclude<Usage["state"], "ready"> }) {
-  return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
-}
-
-function Subjects({ subjects }: { subjects: readonly Subject[] }) {
-  if (variant("usage") === "text") {
-    return (
-      <div className="flex flex-col gap-3">
-        {subjects.map((subject) => (
-          <div key={subject.name ?? ""} className="flex flex-col gap-1">
-            {subject.titled && (
-              <span className="font-semibold">{subject.name}</span>
-            )}
-            <PropertyList
-              items={(["cpu", "memory"] as const).map((resource) => ({
-                key: resource,
-                label: LABEL[resource],
-                value: <Text shown={figure(resource, subject[resource])} />,
-              }))}
-            />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  const subjects: readonly Subject[] = node
+    ? [{ name: null, cpu: usage.cpu, memory: usage.memory }]
+    : [
+        { name: "Pod", cpu: usage.cpu, memory: usage.memory },
+        ...usage.containers.map(({ name, cpu, memory }) => ({
+          name,
+          cpu,
+          memory,
+        })),
+      ];
   return (
     <div className={GRID}>
       {subjects.map((subject) => (
@@ -120,10 +45,14 @@ function Subjects({ subjects }: { subjects: readonly Subject[] }) {
   );
 }
 
+function Said({ state }: { state: Exclude<Usage["state"], "ready"> }) {
+  return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
+}
+
 function Rows({ subject }: { subject: Subject }) {
   return (
     <>
-      {subject.titled && (
+      {subject.name !== null && (
         <span className="col-span-4 mt-2 font-semibold first:mt-0">
           {subject.name}
         </span>
@@ -169,24 +98,6 @@ function Row({
         </>
       )}
     </>
-  );
-}
-
-function Text({ shown }: { shown: Figure }) {
-  if (shown.used === null) {
-    return <span className="text-muted-foreground">No data yet</span>;
-  }
-  return (
-    <span className="tabular-nums">
-      {shown.used}
-      {shown.percent !== null && (
-        <span className="ml-1 inline-flex items-center gap-1">
-          {shown.tone && <StatusDot tone={shown.tone} />}
-          <TonedText tone={shown.tone ?? "idle"}>({shown.percent}%)</TonedText>
-        </span>
-      )}
-      <span className="text-muted-foreground">{details(shown)}</span>
-    </span>
   );
 }
 

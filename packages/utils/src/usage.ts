@@ -17,24 +17,3 @@ export function formatCpu(nanocores: number): string {
 export function formatMemory(bytes: number): string {
   return `${String(Math.floor(bytes / MI))}Mi`;
 }
-
-const GI = 1024 * MI;
-
-function trimmed(value: number, digits: number): string {
-  return String(Number(value.toFixed(digits)));
-}
-
-/** A CPU as `12m` below a core, and in cores from one up: `1.25`. */
-export function formatCpuAdaptive(nanocores: number): string {
-  const millicores = Math.ceil(nanocores / MILLI);
-  return millicores < 1000
-    ? `${String(millicores)}m`
-    : trimmed(millicores / 1000, 2);
-}
-
-/** A memory as `34Mi` below a Gi, and in Gi from one up, rounded down: `1.5Gi`. */
-export function formatMemoryAdaptive(bytes: number): string {
-  return bytes < GI
-    ? formatMemory(bytes)
-    : `${trimmed(Math.floor((bytes / GI) * 100) / 100, 2)}Gi`;
-}
