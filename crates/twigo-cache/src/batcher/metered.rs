@@ -214,7 +214,7 @@ fn rows(namespaces: &[&str]) -> Query {
             resource: "pods".to_owned(),
             namespaced: true,
         },
-        format: RowFormat::Metadata,
+        format: RowFormat::Table,
         namespaces: namespaces.iter().map(|name| (*name).to_owned()).collect(),
         field_selector: None,
     }
@@ -259,6 +259,18 @@ async fn first_at(list: &mut Metered) -> (Instant, ListBatch) {
 
 async fn first(list: &mut Metered) -> ListBatch {
     first_at(list).await.1
+}
+
+fn with_columns(batches: &[ListBatch]) -> &ListBatch {
+    batches
+        .iter()
+        .find(|batch| {
+            batch
+                .columns
+                .as_ref()
+                .is_some_and(|columns| !columns.is_empty())
+        })
+        .expect("a batch with the list's columns")
 }
 
 fn has_metric_columns(batch: &ListBatch) -> bool {
@@ -557,6 +569,55 @@ async fn a_list_whose_rows_come_after_its_window_holds_the_first_batch_that_has_
 }
 
 #[tokio::test(start_paused = true)]
+async fn no_batch_has_the_metric_columns_without_the_lists_own_and_they_come_with_them_before_age()
+{
+    for stale in [false, true] {
+        let fake = cluster(!stale).await;
+        if stale {
+            fake.stale_metrics("v1beta1");
+        }
+        let mut list = Metered::cold(fake, None).await;
+        list.batcher().set_window(0, 6, true);
+        let listing = first(&mut list).await;
+        assert_eq!(listing.total, 0, "{:?}", listing.status);
+        assert_eq!(listing.columns, Some(Vec::new()), "stale: {stale}");
+        assert_eq!(listing.metrics, None, "stale: {stale}");
+
+        list.fake.release_initial();
+        let mut seen = vec![listing];
+        seen.extend(list.watch(Duration::from_secs(3)).await);
+        let mut own = false;
+        for batch in &seen {
+            let names: Vec<&str> = batch
+                .columns
+                .iter()
+                .flatten()
+                .map(|column| column.name.as_str())
+                .collect();
+            if names.iter().any(|name| ["CPU", "Memory"].contains(name)) {
+                assert!(names.contains(&"Name"), "{names:?}");
+            }
+            if names.contains(&"Name") {
+                assert_eq!(names, ["Name", "Namespace", "CPU", "Memory", "Age"]);
+                own = true;
+            }
+            assert!(
+                own || batch.metrics.is_none(),
+                "a state before the columns: {:?}",
+                batch.metrics
+            );
+        }
+        assert!(own, "the list's columns came");
+        if stale {
+            assert!(
+                seen.iter()
+                    .any(|batch| batch.metrics == Some(MetricsState::Unavailable))
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_list_opened_before_any_discovery_answered_gets_its_columns_once_it_does() {
     let mut list = Metered::of(cluster(true).await, query(None, false), false).await;
     list.batcher().set_window(0, 6, true);
@@ -789,14 +850,15 @@ async fn a_context_without_the_api_has_no_such_columns_and_asks_nothing_of_it() 
     let mut list = Metered::start(cluster(false).await, None).await;
     list.batcher().set_window(0, 6, true);
     let batches = list.watch(Duration::from_secs(120)).await;
-    let columns = batches[0].columns.as_ref().unwrap();
+    let opened = with_columns(&batches);
+    let columns = opened.columns.as_ref().unwrap();
     assert!(
         columns
             .iter()
             .all(|column| column.name != "CPU" && column.name != "Memory"),
         "{columns:?}"
     );
-    assert_eq!(batches[0].metrics, None);
+    assert_eq!(opened.metrics, None);
     assert_eq!(requests_to_the_group(&list.fake), 0);
     assert_eq!(batches.last().unwrap().status, ViewState::Ready);
 }
@@ -813,12 +875,13 @@ async fn a_stale_api_keeps_the_columns_says_unavailable_and_recovers() {
     let mut list = Metered::start(fake, None).await;
     list.batcher().set_window(0, 6, true);
     let down = list.watch(Duration::from_secs(5)).await;
-    let columns = down[0].columns.as_ref().unwrap();
+    let opened = with_columns(&down);
+    let columns = opened.columns.as_ref().unwrap();
     assert!(
         columns.iter().any(|column| column.name == "CPU"),
         "{columns:?}"
     );
-    assert_eq!(down[0].metrics, Some(MetricsState::Unavailable));
+    assert_eq!(opened.metrics, Some(MetricsState::Unavailable));
     assert!(
         down.iter()
             .all(|batch| batch.metrics != Some(MetricsState::Ready))
@@ -864,8 +927,9 @@ async fn a_stale_api_that_is_uninstalled_takes_the_columns_away() {
     let mut list = Metered::start(fake, None).await;
     list.batcher().set_window(0, 6, true);
     let down = list.watch(Duration::from_secs(5)).await;
-    assert!(has_metric_columns(&down[0]));
-    assert_eq!(down[0].metrics, Some(MetricsState::Unavailable));
+    let opened = with_columns(&down);
+    assert!(has_metric_columns(opened));
+    assert_eq!(opened.metrics, Some(MetricsState::Unavailable));
 
     list.fake.state().served.remove(crate::metrics::GROUP);
     list.fake.delete_from(
@@ -949,7 +1013,7 @@ async fn a_list_says_ready_with_its_first_answer_and_not_before() {
     let mut list = Metered::start(fake, None).await;
     list.batcher().set_window(0, 6, true);
     let early = list.watch(Duration::from_secs(2)).await;
-    assert!(has_metric_columns(&early[0]));
+    assert!(has_metric_columns(with_columns(&early)));
     assert!(
         early.iter().all(|batch| batch.metrics.is_none()),
         "nothing has answered: {:?}",

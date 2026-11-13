@@ -121,6 +121,7 @@ enum Metric {
 /// count, a group or values for a column the list lacks does nothing.
 struct Layout {
     server: Arc<[Column]>,
+    metrics: bool,
     wire: Vec<ipc::Column>,
     sources: Vec<Source>,
     /// What the text filter reads.
@@ -136,6 +137,8 @@ struct Layout {
 
 impl Layout {
     fn new(spec: &Spec, server: Arc<[Column]>, metrics: bool) -> Self {
+        // The metric columns come with the server's, in one batch.
+        let metrics = metrics && !server.is_empty();
         let mut wire = Vec::with_capacity(server.len() + 3);
         let mut sources = Vec::with_capacity(server.len() + 3);
         let metric_columns = |wire: &mut Vec<ipc::Column>, sources: &mut Vec<Source>| {
@@ -212,6 +215,7 @@ impl Layout {
             .and_then(|(column, values)| Some((find_text(column)?, values.clone())));
         Self {
             server,
+            metrics,
             wire,
             sources,
             text,
@@ -641,7 +645,7 @@ impl QueryView {
     /// The state its scopes last said, kept while it reads nothing; none until they say one,
     /// but `unavailable` for a stale API, which discovery knows without a request.
     fn metrics_state(&self) -> Option<MetricsState> {
-        let metrics = self.metrics.as_ref()?;
+        let metrics = self.metrics.as_ref().filter(|_| self.layout.metrics)?;
         metrics
             .reported
             .or_else(|| metrics.stale.then_some(MetricsState::Unavailable))

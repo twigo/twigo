@@ -1228,6 +1228,54 @@ fn a_list_that_has_heard_nothing_says_no_state_and_keeps_what_it_said() {
 }
 
 #[test]
+fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
+    let names = |batch: &ListBatch| -> Vec<String> {
+        batch
+            .columns
+            .iter()
+            .flatten()
+            .map(|column| column.name.clone())
+            .collect()
+    };
+    for (api, said) in [
+        (served(), None),
+        (
+            Api::Stale { version: "v1beta1" },
+            Some(MetricsState::Unavailable),
+        ),
+    ] {
+        let mut view = QueryView::new(Spec::new("kind-test", &query()).unwrap());
+        view.set_window(0, 100);
+        view.set_api(api);
+        let before = view.batch(ViewState::Connecting).unwrap();
+        assert_eq!(names(&before), Vec::<String>::new());
+        assert_eq!(before.metrics, None, "no columns, no state");
+
+        view.apply(Delta::Reset {
+            rows: vec![Arc::new(pod("a", "web-1", "Running", "0"))],
+            columns: Some(pod_columns()),
+        });
+        let after = view.batch(ViewState::Ready).unwrap();
+        assert_eq!(
+            names(&after),
+            [
+                "Name",
+                "Namespace",
+                "Ready",
+                "Status",
+                "Restarts",
+                "CPU",
+                "Memory",
+                "Age",
+                "IP"
+            ],
+            "with the server's, just before Age"
+        );
+        assert_eq!(after.metrics, said, "and the state with them");
+    }
+}
+
+#[test]
 fn a_node_list_reads_the_one_scope_of_nodes() {
     let mut nodes = query();
     nodes.gvr.resource = "nodes".to_owned();
