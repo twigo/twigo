@@ -71,6 +71,7 @@ export function ObjectContent({
               values={values}
               reveal={reveal}
               onLogs={onLogs}
+              usage={snapshot.usage}
             />
           )}
         </Shown>

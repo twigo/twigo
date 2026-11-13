@@ -18,11 +18,13 @@ import { KindIcon } from "./KindIcon";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
+import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
 import { objectUri } from "./uri";
 import { useNow } from "./useNow";
+import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
 const MIN_WIDTH = 320;
@@ -90,6 +92,7 @@ export function Details({
     };
   }, [query]);
   const tab = states.detailsTab(uri);
+  const visible = useVisible();
   const { snapshot, values, id } = useObject(
     backend,
     rested === query ? query : undefined,
@@ -98,7 +101,7 @@ export function Details({
       manifest: tab === "yaml",
       events: tab === "events",
       related: true,
-      usage: false,
+      usage: tab === "overview" && visible && hasUsage(gvr),
     },
   );
   const reveal = useReveal(id);

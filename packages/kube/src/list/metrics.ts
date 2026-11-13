@@ -28,7 +28,10 @@ export function readsMetrics({
   );
 }
 
-const NOTES: Readonly<Record<Exclude<MetricsState, "ready">, string>> = {
+/** What is said where a Metrics API gives no values. */
+export const METRICS_NOTES: Readonly<
+  Record<Exclude<MetricsState, "ready">, string>
+> = {
   unavailable: "metrics-server does not answer, so there is no CPU or memory.",
   forbidden: "You may not read metrics here, so there is no CPU or memory.",
 };
@@ -39,7 +42,7 @@ export function metricsNote(
   column: ShownColumn,
 ): string | undefined {
   return state !== null && state !== "ready" && column.rule.metric
-    ? NOTES[state]
+    ? METRICS_NOTES[state]
     : undefined;
 }
 
