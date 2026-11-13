@@ -31,7 +31,7 @@ export interface ListServices {
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
   readonly overviews: OverviewStates;
-  /** What each space's Metrics API last said of an object's usage. */
+  /** Which spaces' Metrics API refused the person. */
   readonly usageSaid: UsageSaid;
   /** What RBAC lets the person do, for the `capability.*` keys. */
   readonly capabilities: Capabilities;
@@ -50,8 +50,9 @@ export function createServices(workbench: Workbench): ListServices {
     capabilities.closed(uri);
     grids.closed(uri);
   });
+  const discovery = new Discovery(workbench);
   return {
-    discovery: new Discovery(workbench),
+    discovery,
     presets: new ListPresets(workbench.state),
     states,
     selection: new Selection(),
@@ -60,7 +61,7 @@ export function createServices(workbench: Workbench): ListServices {
     measures: new KnownMeasures(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
-    usageSaid: new UsageSaid(),
+    usageSaid: new UsageSaid(discovery),
     capabilities,
     edits: createEdits(workbench),
   };

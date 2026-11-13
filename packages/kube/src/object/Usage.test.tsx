@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   Backend,
   Container,
+  Discovered,
   Measure,
   Overview as Document,
   RequestOf,
@@ -17,6 +18,7 @@ import type {
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Cluster, type Pod } from "../../../protocol/src/mock/cluster";
+import RESOURCES from "../../../protocol/src/mock/resources.json";
 import { finishedInit } from "../../../protocol/src/mock/objects";
 import {
   mountKube,
@@ -676,6 +678,34 @@ describe("an open object", () => {
     const next = await trail();
     expect(next).not.toContain("empty");
     expect(next[next.length - 1]).toBe("sentence");
+  });
+
+  test("a new discovery of the space forgets the refusal, so the next pod waits with empty meters again", async () => {
+    const backend = createMockBackend("metricsForbidden");
+    const subscribe = vi.spyOn(backend, "subscribe");
+    const workbench = await mountKube(backend);
+    const first = running();
+    act(() => {
+      workbench.editors.open(first);
+    });
+    await trail();
+    const watch = subscribe.mock.calls.find(
+      ([command]) => command === "resources_watch",
+    ) as unknown as [string, string, (message: Discovered) => void] | undefined;
+    act(() => {
+      watch?.[2]({
+        state: "ready",
+        cluster: `mock://${watch[1]}`,
+        resources: RESOURCES,
+      });
+    });
+    act(() => {
+      workbench.editors.open(running(namespaceOf(first)));
+    });
+    expect((await trail()).filter((state) => state !== "none")).toEqual([
+      "empty",
+      "sentence",
+    ]);
   });
 
   test("where the API is stale, every pod's Overview has the sentence in its first paint, and no empty meters stand for it", async () => {

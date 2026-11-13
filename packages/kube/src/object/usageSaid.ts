@@ -1,27 +1,38 @@
 import { useEffect } from "react";
-import type { MetricsState, ShownUsage } from "@twigo/protocol";
+import type { MetricsState, Resource, ShownUsage } from "@twigo/protocol";
+import type { Discovery, Loaded } from "../discovery";
 
 /**
- * What each space's Metrics API last said of an open object's usage, for the
- * session, so the next object of the space draws a refusal's sentence at
- * once instead of the empty meters that wait for it.
+ * Whether each space's Metrics API refused the person, for the next object of
+ * the space, as long as the discovery it said so under stands: a new
+ * `Discovered` for the space, which `Discovery` stores as a new object, is
+ * another cluster or an API installed, removed or back, and forgets it. A
+ * grant of RBAC changes no discovery, so it is not seen (TODO.md).
  */
 export class UsageSaid {
-  readonly #said = new Map<string, MetricsState>();
+  readonly #refused = new Map<string, Loaded<readonly Resource[]>>();
 
-  get(space: string): MetricsState | undefined {
-    return this.#said.get(space);
+  constructor(private readonly discovery: Pick<Discovery, "last">) {}
+
+  refused(space: string): boolean {
+    const under = this.discovery.last(space);
+    return under !== undefined && this.#refused.get(space) === under;
   }
 
   say(space: string, state: MetricsState): void {
-    this.#said.set(space, state);
+    const under = this.discovery.last(space);
+    if (state === "forbidden" && under !== undefined) {
+      this.#refused.set(space, under);
+    } else {
+      this.#refused.delete(space);
+    }
   }
 }
 
 /**
  * The usage an Overview draws (ARCHITECTURE 4.3): what the core sent, but a
- * usage that waits for its first answer draws the sentence the space's API
- * last gave where that was a refusal, since the answer will say it again.
+ * usage that waits for its first answer draws the refusal's sentence where
+ * the space's API refused the person, since the answer will say it again.
  */
 export function useDrawnUsage(
   said: UsageSaid,
@@ -33,9 +44,8 @@ export function useDrawnUsage(
       said.say(space, usage.state);
     }
   }, [said, space, usage]);
-  const state = space === undefined ? undefined : said.get(space);
-  if (usage?.waiting && (state === "unavailable" || state === "forbidden")) {
-    return { ...usage, state, waiting: false, containers: [] };
+  if (usage?.waiting && space !== undefined && said.refused(space)) {
+    return { ...usage, state: "forbidden", waiting: false, containers: [] };
   }
   return usage;
 }
