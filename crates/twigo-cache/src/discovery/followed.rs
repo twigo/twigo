@@ -120,11 +120,13 @@ impl Followed {
                     let reached = follower.api();
                     // First, so whoever hears the resources reads what they serve.
                     served.send_if_modified(|served| std::mem::replace(served, reached) != reached);
-                    *slot.kept.lock().expect("kept lock") =
-                        follower.fingerprint().map(|fingerprint| Kept {
-                            fingerprint,
-                            api: reached,
-                        });
+                    if matches!(discovered, Discovered::Ready { .. }) {
+                        *slot.kept.lock().expect("kept lock") =
+                            follower.fingerprint().map(|fingerprint| Kept {
+                                fingerprint,
+                                api: reached,
+                            });
+                    }
                 }
                 found.send_if_modified(|found| {
                     let changed = found.as_ref() != Some(&discovered);

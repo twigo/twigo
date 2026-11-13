@@ -4,12 +4,13 @@ use std::time::Duration;
 use futures::FutureExt;
 use serde_json::json;
 use tokio::time::{Instant, sleep, timeout};
-use twigo_ipc::Discovered;
-use twigo_kube::client::Budgets;
+use twigo_ipc::{Discovered, IpcError};
+use twigo_kube::client::{Budgets, Clients};
 
 use super::*;
 use crate::discovery::RECHECKS;
 use crate::fake::{Fake, fingerprint};
+use crate::hub::{Connect, Hub};
 use crate::metrics::{GROUP, IN_FLIGHT, Kind, Poller, Scope};
 
 const APIS: &str = "/apis";
@@ -430,6 +431,50 @@ async fn a_follower_started_again_begins_from_what_its_predecessor_confirmed_and
         *moved.api().borrow(),
         Api::Absent,
         "nothing kept for another fingerprint is used"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_cannot_be_built_after_an_answer_leave_what_it_confirmed_kept() {
+    let fake = fake();
+    let current: Arc<std::sync::Mutex<Result<Arc<Clients>, IpcError>>> =
+        Arc::new(std::sync::Mutex::new(Ok(fake.clients(Budgets::default()))));
+    let connect: Connect = {
+        let current = Arc::clone(&current);
+        Arc::new(move |_context| {
+            let clients = current.lock().unwrap().clone();
+            Box::pin(async move { clients })
+        })
+    };
+    let cache = tempfile::tempdir().unwrap();
+    let followers = Followers::new(Hub::new(connect), Arc::new(Cache::new(cache.path())));
+    let (_edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));
+    let first = get_under(&followers, &entry).await;
+    let mut resources = first.follow();
+    assert!(matches!(
+        ready(&mut resources).await,
+        Discovered::Ready { .. }
+    ));
+    assert!(first.api().borrow().columns(Kind::Pods));
+
+    let broken = Err(IpcError::new(
+        twigo_ipc::ErrorKind::Unavailable,
+        "no such file: ca.pem".to_owned(),
+    ));
+    let replaced = std::mem::replace(&mut *current.lock().unwrap(), broken);
+    replaced.unwrap().connections().abandon();
+    assert!(matches!(
+        ready(&mut resources).await,
+        Discovered::Failed { .. }
+    ));
+    drop(resources);
+    drop(first);
+    sleep(Duration::from_secs(300)).await;
+
+    let second = get_under(&followers, &entry).await;
+    assert!(
+        second.api().borrow().columns(Kind::Pods),
+        "what the cluster last confirmed, not the failure that followed"
     );
 }
 
