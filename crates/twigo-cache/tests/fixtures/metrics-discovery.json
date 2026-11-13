@@ -1,0 +1,41 @@
+{
+  "metadata": {
+    "name": "metrics.k8s.io"
+  },
+  "versions": [
+    {
+      "freshness": "Current",
+      "resources": [
+        {
+          "resource": "nodes",
+          "responseKind": {
+            "group": "",
+            "kind": "NodeMetrics",
+            "version": ""
+          },
+          "scope": "Cluster",
+          "singularResource": "",
+          "verbs": [
+            "get",
+            "list"
+          ]
+        },
+        {
+          "resource": "pods",
+          "responseKind": {
+            "group": "",
+            "kind": "PodMetrics",
+            "version": ""
+          },
+          "scope": "Namespaced",
+          "singularResource": "",
+          "verbs": [
+            "get",
+            "list"
+          ]
+        }
+      ],
+      "version": "v1beta1"
+    }
+  ]
+}

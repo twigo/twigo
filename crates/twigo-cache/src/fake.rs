@@ -29,6 +29,9 @@ use crate::hub::{Connect, Hub};
 
 type Body = UnsyncBoxBody<Bytes, Infallible>;
 
+/// What the aggregator answers a list of an API whose server is down, recorded by `record_metrics`.
+pub const NO_ENDPOINTS: (&str, &str) = ("text/plain; charset=utf-8", "service unavailable\n");
+
 #[derive(Clone, Default)]
 pub struct Fake(Arc<Mutex<State>>);
 
@@ -429,7 +432,7 @@ impl Fake {
             return status(StatusCode::SERVICE_UNAVAILABLE, "ServiceUnavailable");
         }
         if state.no_endpoints.contains(&path) {
-            return text(StatusCode::SERVICE_UNAVAILABLE, "service unavailable\n");
+            return text(StatusCode::SERVICE_UNAVAILABLE);
         }
         if state.forbidden.contains(&path) {
             return status(StatusCode::FORBIDDEN, "Forbidden");
@@ -772,12 +775,13 @@ fn status(code: StatusCode, reason: &str) -> Response<Body> {
     )
 }
 
-fn text(code: StatusCode, body: &'static str) -> Response<Body> {
+fn text(code: StatusCode) -> Response<Body> {
+    let (content_type, body) = NO_ENDPOINTS;
     let mut response = Response::new(Full::new(Bytes::from_static(body.as_bytes())).boxed_unsync());
     *response.status_mut() = code;
     response.headers_mut().insert(
         http::header::CONTENT_TYPE,
-        http::HeaderValue::from_static("text/plain; charset=utf-8"),
+        http::HeaderValue::from_static(content_type),
     );
     response
 }

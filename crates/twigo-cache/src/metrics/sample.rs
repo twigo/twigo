@@ -218,6 +218,56 @@ mod tests {
         assert!(samples.get("b", "multi").is_none());
     }
 
+    const PODS: &[u8] = include_bytes!("../../tests/fixtures/metrics-pods.json");
+    const REAL_PODS: &[u8] = include_bytes!("../../tests/fixtures/metrics-pods-kube-system.json");
+    const NODES: &[u8] = include_bytes!("../../tests/fixtures/metrics-nodes.json");
+
+    fn items(list: &[u8]) -> usize {
+        let list: serde_json::Value = serde_json::from_slice(list).unwrap();
+        list["items"].as_array().unwrap().len()
+    }
+
+    #[test]
+    fn a_recorded_list_of_kwok_pods_reads_as_what_their_annotations_say() {
+        let samples = parse(PODS, Kind::Pods).unwrap();
+        assert_eq!(samples.len(), items(PODS));
+        let near = |value: i64, wanted: i64| (value - wanted).abs() < wanted / 100;
+        let web = samples.get("record-metrics", "web").unwrap();
+        assert!(near(web.cpu, 100_000_000), "{web:?}");
+        assert_eq!(web.memory, 40 * 1024 * 1024);
+        let multi = samples.get("record-metrics", "multi").unwrap();
+        let names: Vec<&str> = multi.containers.iter().map(|c| &*c.name).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert!(near(multi.cpu, 100_000_000), "the sum of two: {multi:?}");
+        assert_eq!(multi.memory, 2 * 20 * 1024 * 1024);
+        assert!(multi.sampled.is_some());
+    }
+
+    #[test]
+    fn a_recorded_list_of_real_pods_reads_all_its_items() {
+        let samples = parse(REAL_PODS, Kind::Pods).unwrap();
+        assert_eq!(samples.len(), items(REAL_PODS));
+        let etcd = samples
+            .iter()
+            .find(|(_, name, _)| name.starts_with("etcd-"))
+            .map(|(_, _, sample)| sample)
+            .expect("etcd, which runs on the node kind starts");
+        assert!(etcd.cpu > 0 && etcd.memory > 1024 * 1024, "{etcd:?}");
+    }
+
+    #[test]
+    fn a_recorded_list_of_nodes_reads_all_its_items_without_a_namespace() {
+        let samples = parse(NODES, Kind::Nodes).unwrap();
+        assert_eq!(samples.len(), items(NODES));
+        let kwok = samples.get("", "kwok-node-0").unwrap();
+        assert!(kwok.cpu > 0 && kwok.memory > 0 && kwok.containers.is_empty());
+        assert!(
+            samples
+                .iter()
+                .any(|(_, name, _)| name.ends_with("-control-plane"))
+        );
+    }
+
     #[test]
     fn a_node_has_its_own_usage_and_no_namespace() {
         let list = json!({

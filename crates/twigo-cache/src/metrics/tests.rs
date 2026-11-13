@@ -95,6 +95,18 @@ fn keys(update: &Update) -> Vec<(String, Option<i64>)> {
     keys
 }
 
+#[test]
+fn the_fake_answers_a_server_that_is_down_as_the_recorded_one_did() {
+    let recorded: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/metrics-unavailable.json"
+    ))
+    .unwrap();
+    let (content_type, body) = crate::fake::NO_ENDPOINTS;
+    assert_eq!(recorded["status"], 503);
+    assert_eq!(recorded["contentType"], content_type);
+    assert_eq!(recorded["body"], body);
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_scope_is_polled_at_once_and_every_interval_while_a_reader_wants_it_and_never_after() {
     let rig = rig().await;

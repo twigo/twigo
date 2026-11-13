@@ -122,6 +122,34 @@ mod tests {
         json!({ "version": version, "freshness": freshness, "resources": resources })
     }
 
+    fn recorded(entry: &[u8]) -> Discovery {
+        let entry: serde_json::Value = serde_json::from_slice(entry).unwrap();
+        serde_json::from_value(json!({
+            "core": { "etag": null, "list": { "items": [] } },
+            "groups": { "etag": null, "list": { "items": [entry] } },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_recorded_group_is_served_and_stale_while_metrics_server_is_down() {
+        let current = recorded(include_bytes!(
+            "../../tests/fixtures/metrics-discovery.json"
+        ));
+        assert_eq!(
+            Api::of(&current),
+            Api::Served {
+                version: "v1beta1",
+                pods: true,
+                nodes: true
+            }
+        );
+        let stale = recorded(include_bytes!(
+            "../../tests/fixtures/metrics-discovery-stale.json"
+        ));
+        assert_eq!(Api::of(&stale), Api::Stale { version: "v1beta1" });
+    }
+
     #[test]
     fn the_version_comes_from_discovery_v1_first() {
         let both = discovery(json!([
