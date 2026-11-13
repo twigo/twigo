@@ -173,6 +173,8 @@ struct Used {
     uid: Option<Box<str>>,
     state: MetricsState,
     served: bool,
+    /// The scope that serves the object has answered or failed once.
+    answered: bool,
     /// The context serves the resource, whether or not the object exists.
     api: bool,
     /// A usage was sent that the webview may still draw.
@@ -200,8 +202,10 @@ impl Used {
             (Some(_), true, Kind::Nodes) => HashSet::from([Scope::Cluster]),
             _ => HashSet::new(),
         };
+        let reading = !wants.is_empty();
         reader.want(wants);
-        let update = reader.drain();
+        let (settled, update) = reader.read();
+        let answered = reading && settled;
         let uid = object.and_then(|object| object.meta.uid.clone());
         let mut sample = self.sample.clone().filter(|_| uid == self.uid);
         if let Some((namespace, name)) = &key {
@@ -221,12 +225,16 @@ impl Used {
         } else {
             MetricsState::Ready
         });
-        let changed = sample != self.sample || state != self.state || served != self.served;
+        let changed = sample != self.sample
+            || state != self.state
+            || served != self.served
+            || answered != self.answered;
         *self = Self {
             sample,
             uid,
             state,
             served,
+            answered,
             api: serves,
             offered: self.offered,
         };
@@ -279,6 +287,7 @@ async fn run(
         uid: None,
         state: MetricsState::Ready,
         served: false,
+        answered: false,
         api: false,
         offered: false,
     };
@@ -424,7 +433,7 @@ async fn run(
         if let Some(reader) = &mut metrics {
             dirty.usage |= used.read(reader, current.as_deref(), parts.usage);
         }
-        let usage_shown = parts.usage && used.served;
+        let usage_shown = parts.usage && used.served && used.answered;
         let usage_withdrawn = parts.usage && used.offered && !used.api;
         let status_changed = status.as_ref() != Some(&state);
         let due = status_changed

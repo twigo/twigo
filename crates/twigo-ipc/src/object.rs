@@ -75,7 +75,10 @@ pub struct ObjectBatch {
     /// Present when it changed, while the related part is shown.
     pub related: Option<Related>,
     /// Present when it changed, while the usage part is shown, for a pod
-    /// or a node of a context that serves the Metrics API.
+    /// or a node of a context that serves the Metrics API, and not before
+    /// the scope that serves the object has answered or failed once: a
+    /// `ready` usage whose `used` is null says that an answer came without
+    /// the object.
     pub usage: Option<Usage>,
 }
 
