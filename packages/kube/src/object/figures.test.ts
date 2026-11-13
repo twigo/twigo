@@ -62,6 +62,42 @@ test("a measure is a warning from 90 % of its limit and an error at it, and neve
   expect(memory(95, { allocatable: 100 * MI })).toBe("warn");
 });
 
+test("a tone comes from the percent as printed, so a CPU within a millicore of 90 % or of its limit agrees with its text", () => {
+  const cpu = (used: number, rest: Partial<Measure> = {}) =>
+    figure("cpu", measure({ used, limit: 1_000_000_000, ...rest }));
+  const read = (used: number) => {
+    const { percent, tone } = cpu(used);
+    return [percent, tone];
+  };
+  expect(read(899_000_000)).toEqual([89, undefined]);
+  expect(read(899_000_001)).toEqual([90, "warn"]);
+  expect(read(899_999_999)).toEqual([90, "warn"]);
+  expect(read(999_000_000)).toEqual([99, "warn"]);
+  expect(read(999_000_001)).toEqual([100, "error"]);
+  expect(read(999_999_999)).toEqual([100, "error"]);
+  expect(read(1_000_000_001)).toEqual([100, "error"]);
+  expect(cpu(999_000_001).used).toBe("1000m");
+  expect(cpu(899_000_001).used).toBe("900m");
+  expect(
+    figure("cpu", measure({ used: 15_300_000_001, allocatable: 16e9 })).tone,
+  ).toBe("warn");
+  expect(read(999_000_001)[1]).toBe(read(1_000_000_000)[1]);
+});
+
+test("a memory is read by its bytes at the edges of 90 % and of its limit", () => {
+  const memory = (used: number) => {
+    const { percent, tone } = figure(
+      "memory",
+      measure({ used, limit: 100 * MI }),
+    );
+    return [percent, tone];
+  };
+  expect(memory(90 * MI - 1)).toEqual([89, undefined]);
+  expect(memory(90 * MI)).toEqual([90, "warn"]);
+  expect(memory(100 * MI - 1)).toEqual([99, "warn"]);
+  expect(memory(100 * MI)).toEqual([100, "error"]);
+});
+
 test("no sample is no figure at all: no text, no bar, no percent", () => {
   expect(figure("cpu", measure({ limit: 400_000_000 }))).toMatchObject({
     used: null,

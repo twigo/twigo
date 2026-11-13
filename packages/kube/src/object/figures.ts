@@ -4,10 +4,10 @@ import { formatCpu, formatMemory } from "@twigo/utils";
 
 export type Resource = "cpu" | "memory";
 
-/** The share of its limit, or of what a node can allocate, from which a measure is a warning. */
-const WARN_FROM = 0.9;
-/** The share at which it is an error: at the limit or past it. */
-const ERROR_FROM = 1;
+/** The printed percent of its limit, or of what a node can allocate, from which a measure is a warning. */
+const WARN_FROM = 90;
+/** The printed percent at which it is an error: at the limit or past it. */
+const ERROR_FROM = 100;
 const MILLI = 1_000_000;
 
 export function hasUsage({ group, resource }: Gvr): boolean {
@@ -25,7 +25,7 @@ export interface Figure {
   readonly base: Base | null;
   /** As kubectl computes it, truncated, and past 100 where a measure passes its base. */
   readonly percent: number | null;
-  /** Abnormal only against a limit or what a node can allocate; a request may be passed. */
+  /** Taken from the printed percent, so the two agree; abnormal only against a limit or what a node can allocate, since a request may be passed. */
   readonly tone: Tone | undefined;
   /** The bar: what it is the whole of, and where the request stands. */
   readonly bar: {
@@ -54,20 +54,20 @@ export function figure(resource: Resource, measure: Measure): Figure {
           ? ["request", request]
           : [null, 0];
   const held = used !== null && base !== null;
-  const share = held ? used / whole : null;
+  const printed = held ? percent(resource, used, whole) : null;
   return {
     used: text(used),
     request: text(request),
     limit: text(limit),
     allocatable: text(allocatable),
     base,
-    percent: held ? percent(resource, used, whole) : null,
+    percent: printed,
     tone:
-      share === null || base === "request"
+      printed === null || base === "request"
         ? undefined
-        : share >= ERROR_FROM
+        : printed >= ERROR_FROM
           ? "error"
-          : share >= WARN_FROM
+          : printed >= WARN_FROM
             ? "warn"
             : undefined,
     bar: held
