@@ -1,5 +1,14 @@
-import type { MetricsState, Row, Sort } from "@twigo/protocol";
+import type { Cell, MetricsState, Row, Sort } from "@twigo/protocol";
+import { formatCpu, formatMemory } from "@twigo/utils";
 import type { ShownColumn } from "./cells";
+
+export function measureText(
+  kind: "cpu" | "memory",
+  cell: Cell,
+): string | undefined {
+  if (typeof cell !== "number") return undefined;
+  return (kind === "cpu" ? formatCpu : formatMemory)(cell);
+}
 
 /**
  * Whether a list reads its metric columns (ARCHITECTURE 3.6): one is drawn

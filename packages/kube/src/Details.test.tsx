@@ -188,9 +188,36 @@ describe("in a narrow editor", () => {
     expect(shown().className).toContain("absolute");
     expect(headers()).toEqual(EVERY_COLUMN);
   });
+
+  test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {
+    const script = scriptedPods(true);
+    await openList(script.backend);
+    const send = async (batch: ListBatch) => {
+      act(() => {
+        script.send(batch);
+      });
+      await settle(1);
+    };
+    await send(measuredBatch(1, 206_115_138, 41_349_759, true));
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    const value = (label: string) =>
+      within(shown()).getByText(label, { selector: "dt" }).nextElementSibling
+        ?.textContent;
+    expect(value("CPU")).toBe("207m");
+    expect(value("Memory")).toBe("39Mi");
+
+    await send(measuredBatch(2, 1_500_000_000, 2 * 1024 * 1024 * 1024));
+    expect(value("CPU")).toBe("1500m");
+    expect(value("Memory")).toBe("2048Mi");
+
+    await send(measuredBatch(3, null, null));
+    expect(value("CPU")).toBe("–");
+    expect(value("Memory")).toBe("–");
+  });
 });
 
-function scriptedPods() {
+function scriptedPods(unread = false) {
   const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;
   const backend: Backend = {
@@ -199,6 +226,8 @@ function scriptedPods() {
         ? Promise.resolve(null as never)
         : mock.invoke(command, request),
     subscribe(command, request, onMessage) {
+      if (command === "object_open" && unread)
+        return new Promise<never>(() => undefined);
       if (command !== "list_subscribe")
         return mock.subscribe(command, request, onMessage);
       send = onMessage;
@@ -234,6 +263,35 @@ function podsBatch(
     counts: null,
     groups: null,
     metrics: null,
+  };
+}
+
+function measuredBatch(
+  seq: number,
+  cpu: number | null,
+  memory: number | null,
+  first = false,
+): ListBatch {
+  return {
+    ...podsBatch(seq, { "web-1": "Running" }, first),
+    total: 1,
+    columns: first
+      ? [
+          { name: "Name", kind: "string", priority: 0 },
+          { name: "Status", kind: "string", priority: 0 },
+          { name: "CPU", kind: "cpu", priority: 0 },
+          { name: "Memory", kind: "memory", priority: 0 },
+        ]
+      : null,
+    upserts: [
+      {
+        id: "prod-eu/default/web-1",
+        created: null,
+        generated: null,
+        cells: ["web-1", "Running", cpu, memory],
+      },
+    ],
+    metrics: first ? "ready" : null,
   };
 }
 

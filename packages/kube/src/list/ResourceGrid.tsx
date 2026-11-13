@@ -303,6 +303,9 @@ function Grid({
   useEffect(() => {
     if (changed) select(live);
   }, [changed, live, select]);
+  useEffect(() => {
+    if (live && !changed) selection.measure(uri, live);
+  }, [selection, uri, live, changed]);
 
   const register = useListRegistration({
     "resource.group": resource.gvr.group,

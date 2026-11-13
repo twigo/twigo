@@ -1,8 +1,9 @@
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot } from "@twigo/ui";
-import { formatCpu, formatMemory, humanDuration } from "@twigo/utils";
+import { humanDuration } from "@twigo/utils";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { useNow } from "../useNow";
+import { measureText } from "./metrics";
 
 /** A column as the grid draws it: where its cells are and how they read. */
 export interface ShownColumn {
@@ -31,11 +32,10 @@ function Age({ created }: { created: string }) {
 export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
-    const value = row.cells[column.index];
-    return typeof value === "number" ? (
-      (rule.cell === "cpu" ? formatCpu : formatMemory)(value)
-    ) : (
-      <span className="text-muted-foreground-2">–</span>
+    return (
+      measureText(rule.cell, row.cells[column.index] ?? null) ?? (
+        <span className="text-muted-foreground-2">–</span>
+      )
     );
   }
   if (rule.cell === "age") {

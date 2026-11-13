@@ -47,6 +47,7 @@ export class Selection {
   readonly #lists = new Map<string, Selected>();
   readonly #marks = new Map<string, ReadonlySet<RowId>>();
   readonly #filters = new Map<string, string>();
+  readonly #watchers = new Set<() => void>();
 
   get(uri: string): Selected | undefined {
     return this.#lists.get(uri);
@@ -57,6 +58,24 @@ export class Selection {
     this.#lists.set(uri, selected);
     this.changes.emit();
   }
+
+  /**
+   * Gives the selected row the measures a poll brought. Only the details
+   * print them, so it announces no other selection through `changes`.
+   */
+  measure(uri: string, row: Row): void {
+    const selected = this.#lists.get(uri);
+    if (selected?.row.id !== row.id || selected.row === row) return;
+    this.#lists.set(uri, { ...selected, row });
+    for (const listener of this.#watchers) listener();
+  }
+
+  readonly watch = (listener: () => void): (() => void) => {
+    this.#watchers.add(listener);
+    return () => {
+      this.#watchers.delete(listener);
+    };
+  };
 
   marks(uri: string): ReadonlySet<RowId> {
     return this.#marks.get(uri) ?? NONE;
