@@ -186,6 +186,27 @@ describe("the main list", () => {
     });
   });
 
+  test("a new query over namespaces no list reads keeps the header's mark while their scopes answer, when the context refuses metrics", async () => {
+    await openList(createMockBackend("metricsForbidden"));
+    const filter = screen.getByRole("textbox", { name: "Filter rows" });
+    fireEvent.change(filter, { target: { value: "auth-api" } });
+    await settle(30);
+    expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
+    const names = () => rows().map((row) => textOf(row, "Name"));
+    const before = names();
+    fireEvent.change(filter, { target: { value: "payments" } });
+    const marks: boolean[] = [];
+    for (let step = 0; step < 40; step++) {
+      await act(() => vi.advanceTimersByTimeAsync(5));
+      act(() => {
+        vi.advanceTimersToNextFrame();
+      });
+      marks.push(header("CPU").getAttribute("aria-describedby") !== null);
+    }
+    expect(names()).not.toEqual(before);
+    expect(marks).not.toContain(false);
+  });
+
   test("reads while a metric column is drawn, and a toggle says so at once without another subscription", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);

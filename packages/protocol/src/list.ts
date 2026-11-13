@@ -70,7 +70,18 @@ export class ListView {
   #metrics = false;
   #closed = false;
 
-  constructor(backend: Backend, query: ListQuery) {
+  /**
+   * `metrics` is what the list this one replaces last said, which a view of
+   * the same list starts with: Rust's view says none until a scope of its
+   * window has answered.
+   */
+  constructor(
+    backend: Backend,
+    query: ListQuery,
+    metrics: ServedMetrics | null = null,
+  ) {
+    this.#snapshot =
+      metrics === null ? INITIAL_SNAPSHOT : { ...INITIAL_SNAPSHOT, metrics };
     this.#backend = backend;
     backend
       .subscribe("list_subscribe", query, (batch) => {
