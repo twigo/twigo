@@ -570,6 +570,33 @@ async fn a_list_whose_rows_come_after_its_window_holds_the_first_batch_that_has_
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cold_list_sorted_by_a_metric_whose_window_reads_before_its_columns_has_its_first_rows_in_order()
+ {
+    let mut list = Metered::cold(cluster(true).await, cpu_descending()).await;
+    list.batcher().set_window(0, 6, true);
+    let listing = first(&mut list).await;
+    assert_eq!(listing.total, 0, "{:?}", listing.status);
+    assert_eq!(listing.columns, Some(Vec::new()), "no columns to read yet");
+
+    list.fake.release_initial();
+    let opened = loop {
+        let reads =
+            list.columns.is_empty() || list.columns.iter().any(|column| column.name == "CPU");
+        list.batcher().set_window(0, 6, reads);
+        let batch = first(&mut list).await;
+        if batch.total > 0 {
+            break batch;
+        }
+    };
+    assert_eq!(window_ids(&opened), BY_CPU);
+    assert_eq!(
+        cells_of(&opened, "CPU"),
+        [9, 6, 6, 4, 3, 2].map(|milli| Cell::Int(milli * 1_000_000))
+    );
+    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
 async fn no_batch_has_the_metric_columns_without_the_lists_own_and_they_come_with_them_before_age()
 {
     for stale in [false, true] {
