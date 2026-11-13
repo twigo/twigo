@@ -18,7 +18,10 @@ import { CRASH_LINE as LAST_LINE } from "./logs";
 import {
   ABSENT,
   containerSpecs,
+  nodesScope,
+  podsScope,
   type ContainerSpec,
+  type MetricsReader,
   type MockMetrics,
 } from "./metrics";
 import OBJECTS from "./objects.json";
@@ -98,7 +101,7 @@ export interface EditBinding {
  * once and again for each part shown later. Its live lists list what the
  * mock has of it: a Deployment's pods, a node's pods. A pod's containers
  * are the mock pod's, and its usage, as a node's, is what the list's rows
- * show.
+ * show, sent once the scope that serves it has answered.
  */
 export class MockObject {
   /** The recorded object it stands for. */
@@ -110,6 +113,13 @@ export class MockObject {
   readonly #onMessage: (batch: ObjectBatch) => void;
   readonly #subject: { pod: Pod } | { node: Node } | undefined;
   readonly #metrics: MockMetrics | undefined;
+  readonly #scope: string | undefined;
+  readonly #reader: MetricsReader = {
+    answer: () => {
+      if (this.#parts.usage) this.#send({ ...NONE, usage: true });
+      this.#followScrapes();
+    },
+  };
   #scrapes: ReturnType<typeof setTimeout> | undefined;
   /** A usage was sent that the webview may still draw. */
   #offered = false;
@@ -139,6 +149,12 @@ export class MockObject {
         : undefined;
     this.#subject = pod ? { pod } : node ? { node } : undefined;
     this.#metrics = metrics;
+    this.#scope =
+      pod && cluster
+        ? podsScope(cluster.context, pod.namespace)
+        : node && cluster
+          ? nodesScope(cluster.context)
+          : undefined;
     const name =
       resource === "pods" && group === ""
         ? podFixture(pod)
@@ -176,6 +192,7 @@ export class MockObject {
     };
     this.#onMessage = onMessage;
     this.#parts = parts;
+    this.#read();
     setTimeout(() => {
       this.#send(parts);
     }, 0);
@@ -184,6 +201,7 @@ export class MockObject {
     if (metrics) {
       this.#stops.push(
         metrics.watch(() => {
+          this.#read();
           this.#followScrapes();
           if (this.#offered && this.#parts.usage) {
             this.#send({ ...NONE, usage: true });
@@ -193,12 +211,27 @@ export class MockObject {
     }
   }
 
+  #read(): void {
+    if (this.#scope === undefined || !this.#metrics) return;
+    const reads = this.#parts.usage && this.#metrics.served;
+    this.#metrics.board.want(this.#reader, new Set(reads ? [this.#scope] : []));
+  }
+
+  #answered(): boolean {
+    return (
+      this.#scope !== undefined &&
+      this.#metrics?.board.answered(this.#scope) === true
+    );
+  }
+
   /** A scrape moves the samples, so a shown usage is sent again at each, and only while it is shown. */
   #followScrapes(): void {
     clearTimeout(this.#scrapes);
     this.#scrapes = undefined;
     const metrics = this.#metrics;
-    if (metrics?.state !== "ready" || !this.#parts.usage) return;
+    if (metrics?.state !== "ready" || !this.#parts.usage || !this.#answered()) {
+      return;
+    }
     this.#scrapes = setTimeout(() => {
       this.#send({ ...NONE, usage: true });
       this.#followScrapes();
@@ -213,6 +246,7 @@ export class MockObject {
       this.#offered = false;
       return withdraw ? ABSENT : null;
     }
+    if (!this.#answered()) return null;
     this.#offered = true;
     return "pod" in subject
       ? this.#metrics.podUsage(subject.pod)
@@ -249,6 +283,7 @@ export class MockObject {
     for (const stop of this.#stops) stop();
     this.#stops.length = 0;
     clearTimeout(this.#scrapes);
+    this.#metrics?.board.want(this.#reader, new Set());
   }
 
   setParts(parts: ObjectParts): void {
@@ -260,6 +295,7 @@ export class MockObject {
       usage: parts.usage && !this.#parts.usage,
     };
     this.#parts = parts;
+    this.#read();
     this.#send(shown);
     this.#followScrapes();
   }
@@ -297,6 +333,14 @@ export class MockObject {
   }
 
   #send(parts: ObjectParts): void {
+    const usage = parts.usage ? this.#usage() : null;
+    if (
+      parts.usage &&
+      usage === null &&
+      !(parts.overview || parts.manifest || parts.events || parts.related)
+    ) {
+      return;
+    }
     this.#seq += 1;
     this.#onMessage({
       seq: this.#seq,
@@ -306,7 +350,7 @@ export class MockObject {
       manifest: parts.manifest ? this.#manifest : null,
       events: parts.events ? events(this.#overview) : null,
       related: parts.related ? this.#related : null,
-      usage: parts.usage ? this.#usage() : null,
+      usage,
     });
   }
 }

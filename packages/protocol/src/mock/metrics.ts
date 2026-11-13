@@ -43,7 +43,7 @@ const YOUNG_MS = 30_000;
 /** A scrape changes the samples of a third of the pods. */
 const SHARES = 3;
 /** What a scope nobody read before takes to answer: one flush of a list. */
-const ANSWER_MS = 50;
+export const ANSWER_MS = 50;
 
 const MI = 1024 * 1024;
 const MILLI = 1_000_000;
@@ -320,17 +320,30 @@ export function metricsAt(columns: readonly Column[]): number {
   return age < 0 ? columns.length : age;
 }
 
+/** What reads a scope of the board and hears when the scope has answered. */
+export interface MetricsReader {
+  answer(): void;
+}
+
+export function nodesScope(context: string): string {
+  return `${context}/nodes`;
+}
+
+export function podsScope(context: string, namespace: string): string {
+  return `${context}/pods/${namespace}`;
+}
+
 /**
- * The scopes that open lists read, a namespace of a context's pods or its
- * nodes, as Rust's board holds them: a scope nobody read answers one flush
- * after a list first wants it, a scope that gains a reader has answered
- * already, and one that loses its last reader forgets its answer.
+ * The scopes that open lists and objects read, a namespace of a context's
+ * pods or its nodes, as Rust's board holds them: a scope nobody read answers
+ * one flush after a reader first wants it, a scope that gains a reader has
+ * answered already, and one that loses its last reader forgets its answer.
  */
 export class MetricsBoard {
   readonly #scopes = new Map<
     string,
     {
-      readonly readers: Set<MetricsJoin>;
+      readonly readers: Set<MetricsReader>;
       answered: boolean;
       readonly timer: ReturnType<typeof setTimeout>;
     }
@@ -341,7 +354,7 @@ export class MetricsBoard {
   }
 
   /** What `reader` wants from now on, in place of what it wanted. */
-  want(reader: MetricsJoin, wanted: ReadonlySet<string>): void {
+  want(reader: MetricsReader, wanted: ReadonlySet<string>): void {
     for (const [scope, entry] of this.#scopes) {
       if (wanted.has(scope) || !entry.readers.delete(reader)) continue;
       if (entry.readers.size === 0) {
@@ -374,8 +387,9 @@ export class MetricsBoard {
  * view joins it: the samples of the rows its window showed while it read,
  * or of every row while it sorts by a metric, from the scopes that have
  * answered. A list that stops reading keeps what it has, and a row without
- * a sample has null cells. It reports the state of the API once a scope it
- * reads has answered, and till then says `ready`, but for a stale API, which
+ * a sample has null cells. It reports the state of the API only from a scope
+ * that has answered, and keeps what it said when it stops reading, so a
+ * fresh list says none until its first answer, but for a stale API, which
  * discovery tells at once as `unavailable`.
  */
 export class MetricsJoin {
@@ -384,7 +398,7 @@ export class MetricsJoin {
   readonly #namespaces: ReadonlySet<string>;
   #reads = false;
   #wanted: ReadonlySet<string> = new Set();
-  #reported: MetricsState;
+  #reported: MetricsState | null;
   #listener: (() => void) | undefined;
   readonly #stop: () => void;
   #polled: { rows: readonly MockRow[]; scrape: number } | undefined;
@@ -399,13 +413,13 @@ export class MetricsJoin {
   ) {
     this.#metrics = metrics;
     this.#namespaces = new Set(namespaces);
-    this.#reported = metrics.stale ? "unavailable" : "ready";
+    this.#reported = metrics.stale ? "unavailable" : null;
     this.#stop = metrics.watch(() => {
       this.#listener?.();
     });
   }
 
-  get state(): MetricsState {
+  get state(): MetricsState | null {
     return this.#reported;
   }
 
@@ -510,12 +524,12 @@ export class MetricsJoin {
 
   #scope({ metric }: MockRow): string | undefined {
     if (metric === undefined) return undefined;
-    if (metric.kind === "node") return `${this.context}/nodes`;
+    if (metric.kind === "node") return nodesScope(this.context);
     const { namespace } = metric.pod;
     if (this.#namespaces.size > 0 && !this.#namespaces.has(namespace)) {
       return undefined;
     }
-    return `${this.context}/pods/${namespace}`;
+    return podsScope(this.context, namespace);
   }
 
   #want(scopes: ReadonlySet<string>): void {

@@ -259,6 +259,31 @@ describe("the main list", () => {
     expect(sent.reading()).toBe(true);
   });
 
+  test("a list that goes behind another tab and returns keeps the header's mark when the context refuses metrics", async () => {
+    const backend = createMockBackend("metricsForbidden");
+    const sent = spied(backend);
+    const workbench = await openList(backend);
+    await settle(30);
+    expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/apps/v1/deployments");
+    });
+    await settle();
+    expect(sent.reading()).toBe(false);
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/v1/pods");
+    });
+    for (let step = 0; step < 20; step++) {
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      act(() => {
+        vi.advanceTimersToNextFrame();
+      });
+      expect(sent.reading()).toBe(true);
+      expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
+      expect(rows().length).toBeGreaterThan(0);
+    }
+  });
+
   test("a list under a maximized panel reads nothing, and reads again once the panel gives way", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);
@@ -362,8 +387,9 @@ describe("a poll", () => {
 
   function poll(
     seq: number,
-    cpu: Record<string, number>,
+    cpu: Record<string, number | null>,
     restarts: Record<string, string> = {},
+    metrics: ListBatch["metrics"] = "ready",
   ): ListBatch {
     const first = seq === 1;
     return {
@@ -387,11 +413,11 @@ describe("a poll", () => {
       status: { state: "ready" },
       counts: null,
       groups: null,
-      metrics: "ready",
+      metrics,
     };
   }
 
-  const everyRow = (nanocores: number) =>
+  const everyRow = (nanocores: number | null) =>
     Object.fromEntries(IDS.map((id) => [id, nanocores]));
 
   function scripted() {
@@ -448,6 +474,20 @@ describe("a poll", () => {
     expect(gridRenders.count).toBe(renders + 1);
     expect(emits).not.toHaveBeenCalled();
     expect(document.querySelectorAll(".animate-flash")).toHaveLength(0);
+  });
+
+  test("a first batch with the columns and no state shows no mark and dashes, and the state after it adds the mark", async () => {
+    const script = scripted();
+    await openList(script.backend);
+    await script.send(poll(1, everyRow(null), {}, null));
+    expect(header("CPU").getAttribute("aria-describedby")).toBeNull();
+    expect(header("CPU").textContent).toBe("CPU");
+    expect(header("Memory").getAttribute("aria-describedby")).toBeNull();
+    expect(textOf(rowOf("a"), "CPU")).toBe("–");
+    await script.send(poll(2, {}, {}, "forbidden"));
+    expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
+    expect(header("CPU").textContent).toMatch(/may not read metrics/);
+    expect(textOf(rowOf("a"), "CPU")).toBe("–");
   });
 
   test("that moves every row's measures does not stop a restart's flash", async () => {

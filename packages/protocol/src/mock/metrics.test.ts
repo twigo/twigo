@@ -13,6 +13,7 @@ import type {
 import { Cluster, type Pod } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
 import {
+  ANSWER_MS,
   containerSpecs,
   METRIC_COLUMNS,
   MockMetrics,
@@ -131,7 +132,7 @@ test("pod and node lists carry CPU and Memory of priority 0 just before Age, fro
     "Readiness Gates",
   ]);
   expect(first?.columns?.slice(5, 7)).toEqual([...METRIC_COLUMNS]);
-  expect(first?.metrics).toBe("ready");
+  expect(first?.metrics).toBeNull();
   const nodes = await list("live", NODES);
   await nodes.window(0, 40, false);
   expect(
@@ -363,13 +364,13 @@ async function reader(backend: Backend, q: ListQuery) {
       ?.columns?.findIndex((column) => column.name === "CPU") ?? -1;
   return {
     batches,
-    read: async () => {
+    read: async (metrics = true) => {
       await call(
         backend.invoke("list_set_window", {
           id,
           start: 0,
           end: 60,
-          metrics: true,
+          metrics,
         }),
       );
       await vi.advanceTimersByTimeAsync(1);
@@ -398,14 +399,13 @@ test.each([
     const pods = await reader(createMockBackend(scenario), query());
     await pods.read();
     const [first] = pods.batches;
-    expect(first?.metrics).toBe("ready");
+    expect(first?.columns?.map((column) => column.name)).toContain("CPU");
+    expect(first?.metrics).toBeNull();
     expect(first?.upserts.length).toBeGreaterThan(0);
     expect(pods.cpu(first).every((cell) => cell === null)).toBe(true);
     await pods.next();
     const [, second] = pods.batches;
-    expect(second?.metrics ?? "ready").toBe(
-      state === "ready" ? "ready" : state,
-    );
+    expect(second?.metrics).toBe(state);
     expect(measured(pods.cpu(second))).toBe(scenario === "ready");
   },
 );
@@ -429,6 +429,28 @@ test("metricsDown has unavailable in the first batch that has the columns, and n
     ),
   ).toBe(true);
 });
+
+test.each([
+  ["ready", "ready"],
+  ["metricsForbidden", "forbidden"],
+] as const)(
+  "%s: a list that stops reading and reads again keeps the state it said, and says no other in between",
+  async (scenario, state) => {
+    const pods = await reader(createMockBackend(scenario), query());
+    await pods.read();
+    await pods.next();
+    const states = () => pods.batches.flatMap((batch) => batch.metrics ?? []);
+    expect(states()).toEqual([state]);
+    await pods.read(false);
+    await pods.next();
+    await pods.next(ANSWER_MS * 3);
+    await pods.read();
+    await pods.next(ANSWER_MS / 2);
+    await pods.next(ANSWER_MS * 3);
+    expect(states()).toEqual([state]);
+    expect(pods.batches.length).toBeGreaterThan(1);
+  },
+);
 
 test.each([
   ["ready", "ready"],
@@ -471,7 +493,7 @@ test.each([
     await second.close();
     const third = await reader(backend, query());
     await third.read();
-    expect(third.batches[0]?.metrics).toBe("ready");
+    expect(third.batches[0]?.metrics).toBeNull();
     expect(third.cpu(third.batches[0]).every((cell) => cell === null)).toBe(
       true,
     );
@@ -482,14 +504,14 @@ function usageOf(batches: ObjectBatch[]): Usage | null | undefined {
   return [...batches].reverse().find((batch) => batch.usage !== null)?.usage;
 }
 
-async function open(
-  scenario: MockScenario,
+async function openOn(
+  backend: Backend,
   gvr: { group: string; version: string; resource: string },
   namespace: string | null,
   name: string,
   parts: Partial<ObjectParts> = { usage: true },
+  wait = ANSWER_MS + 10,
 ) {
-  const backend = createMockBackend(scenario);
   const batches: ObjectBatch[] = [];
   const pending = backend.subscribe(
     "object_open",
@@ -514,8 +536,19 @@ async function open(
   );
   await vi.advanceTimersByTimeAsync(0);
   const id = await pending;
-  await vi.advanceTimersByTimeAsync(10);
+  await vi.advanceTimersByTimeAsync(wait);
   return { backend, batches, id };
+}
+
+function open(
+  scenario: MockScenario,
+  gvr: { group: string; version: string; resource: string },
+  namespace: string | null,
+  name: string,
+  parts?: Partial<ObjectParts>,
+  wait?: number,
+) {
+  return openOn(createMockBackend(scenario), gvr, namespace, name, parts, wait);
 }
 
 const PODS = { group: "", version: "v1", resource: "pods" };
@@ -562,11 +595,20 @@ test("an open pod answers its usage by container, and the pod's request and limi
   }
 });
 
-test("an open pod without a sample answers a usage with nothing used, in the state ready", async () => {
+test("an open pod without a sample says so only once its scope has answered, in the state ready", async () => {
   const cluster = new Cluster("staging", 800, Date.now());
   const pending = cluster.pods.find((pod) => pod.status === "Pending");
   if (!pending) throw new Error("no pending pod in the mock");
-  const { batches } = await open("live", PODS, pending.namespace, pending.name);
+  const { batches } = await open(
+    "live",
+    PODS,
+    pending.namespace,
+    pending.name,
+    undefined,
+    ANSWER_MS - 1,
+  );
+  expect(batches.every((batch) => batch.usage === null)).toBe(true);
+  await vi.advanceTimersByTimeAsync(1);
   expect(usageOf(batches)).toMatchObject({
     state: "ready",
     sampled: null,
@@ -585,6 +627,136 @@ test("an open node answers its usage against what it can allocate", async () => 
   expect(
     (usage?.memory.used ?? 0) / (usage?.memory.allocatable ?? 1),
   ).toBeGreaterThan(0.9);
+});
+
+test.each([
+  ["a pod", "pod"],
+  ["a node", "node"],
+] as const)(
+  "%s: no usage is sent before its scope has answered, and the first one carries the figures",
+  async (_, kind) => {
+    const pod = sampled();
+    const { batches } =
+      kind === "pod"
+        ? await open(
+            "live",
+            PODS,
+            pod.namespace,
+            pod.name,
+            undefined,
+            ANSWER_MS - 1,
+          )
+        : await open(
+            "live",
+            NODE_KIND,
+            null,
+            "staging-node-1",
+            undefined,
+            ANSWER_MS - 1,
+          );
+    expect(batches.length).toBeGreaterThan(0);
+    expect(batches.every((batch) => batch.usage === null)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    const sent = batches.filter((batch) => batch.usage !== null);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.usage?.state).toBe("ready");
+    expect(sent[0]?.usage?.cpu.used).toBeGreaterThan(0);
+    expect(sent[0]?.usage?.memory.used).toBeGreaterThan(0);
+  },
+);
+
+test.each([
+  ["metricsDown", "unavailable"],
+  ["metricsForbidden", "forbidden"],
+] as const)(
+  "%s: an open pod's first usage comes once its scope has answered, and says %s",
+  async (scenario, state) => {
+    const pod = sampled();
+    const { batches } = await open(
+      scenario,
+      PODS,
+      pod.namespace,
+      pod.name,
+      undefined,
+      ANSWER_MS - 1,
+    );
+    expect(batches.every((batch) => batch.usage === null)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
+    expect(usageOf(batches)).toMatchObject({ state, cpu: { used: null } });
+  },
+);
+
+test("an object whose namespace a list already reads has its usage in its first batch", async () => {
+  const backend = createMockBackend("live");
+  const pods = await reader(
+    backend,
+    query({ sort: { column: "CPU", descending: true } }),
+  );
+  await pods.read();
+  await pods.next();
+  const pod = sampled();
+  const { batches } = await openOn(
+    backend,
+    PODS,
+    pod.namespace,
+    pod.name,
+    undefined,
+    1,
+  );
+  expect(batches[0]?.usage?.state).toBe("ready");
+  expect(batches[0]?.usage?.cpu.used).toBeGreaterThan(0);
+  expect(batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
+});
+
+function showUsage(backend: Backend, id: number, usage: boolean) {
+  return call(
+    backend.invoke("object_set_parts", {
+      id,
+      parts: {
+        overview: true,
+        manifest: false,
+        events: false,
+        related: false,
+        usage,
+      },
+    }),
+  );
+}
+
+test("a usage part shown later has its usage at once when a list holds its scope, and after the scope answers when none does", async () => {
+  const pod = sampled();
+  const alone = await open(
+    "live",
+    PODS,
+    pod.namespace,
+    pod.name,
+    { usage: false },
+    1,
+  );
+  await showUsage(alone.backend, alone.id, true);
+  expect(alone.batches.every((batch) => batch.usage === null)).toBe(true);
+  await vi.advanceTimersByTimeAsync(ANSWER_MS);
+  expect(usageOf(alone.batches)?.state).toBe("ready");
+
+  const backend = createMockBackend("live");
+  const pods = await reader(
+    backend,
+    query({ sort: { column: "CPU", descending: true } }),
+  );
+  await pods.read();
+  await pods.next();
+  const held = await openOn(
+    backend,
+    PODS,
+    pod.namespace,
+    pod.name,
+    { usage: false },
+    1,
+  );
+  await showUsage(backend, held.id, true);
+  expect(usageOf(held.batches)?.state).toBe("ready");
+  expect(held.batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
 });
 
 test("usage is sent again at a scrape while the part is shown, and not once it is hidden", async () => {
