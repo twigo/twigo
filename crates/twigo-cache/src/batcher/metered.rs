@@ -282,6 +282,64 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     );
 }
 
+fn cells_of(batch: &ListBatch, column: &str) -> Vec<Cell> {
+    let at = batch
+        .columns
+        .as_ref()
+        .expect("the first batch has columns")
+        .iter()
+        .position(|candidate| candidate.name == column)
+        .expect("the column");
+    batch
+        .upserts
+        .iter()
+        .map(|row| row.cells[at].clone())
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_joins_a_scope_another_reads_has_its_values_and_state_in_its_first_batch() {
+    let mut list = Metered::start(cluster(true).await, None).await;
+    list.batcher().set_window(0, 3, true);
+    list.watch(Duration::from_secs(1)).await;
+    let asked = polls(&list.fake, "a");
+    assert_eq!(asked, 1);
+
+    let (second, mut batches) = open(&list.hub, &list.poller, &list.followers, &list.query).await;
+    second.set_window(0, 3, true);
+    let (_, joined) = batches.recv().await.expect("a first batch");
+    assert_eq!(
+        cells_of(&joined, "CPU"),
+        [2_000_000, 4_000_000, 6_000_000].map(Cell::Int)
+    );
+    assert_eq!(joined.metrics, Some(MetricsState::Ready));
+    assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 3, true);
+    let opened = list.watch(Duration::from_secs(1)).await;
+    assert_eq!(
+        opened.last().and_then(|batch| batch.metrics),
+        Some(MetricsState::Forbidden)
+    );
+    let asked = polls(&list.fake, "a");
+
+    let (second, mut batches) = open(&list.hub, &list.poller, &list.followers, &list.query).await;
+    second.set_window(0, 3, true);
+    let (_, joined) = batches.recv().await.expect("a first batch");
+    assert_eq!(joined.metrics, Some(MetricsState::Forbidden));
+    assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_list_opened_before_any_discovery_answered_gets_its_columns_once_it_does() {
     let mut list = Metered::of(cluster(true).await, query(None, false), false).await;
