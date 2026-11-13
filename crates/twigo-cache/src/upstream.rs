@@ -228,7 +228,7 @@ async fn start<D: Decode>(
     }
 }
 
-pub(crate) fn backoff() -> ExponentialBackoff {
+fn backoff() -> ExponentialBackoff {
     // Jitter adds up to the delay again: 0.5–5 s in all (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))

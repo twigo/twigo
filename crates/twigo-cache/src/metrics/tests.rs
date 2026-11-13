@@ -237,11 +237,11 @@ async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and
         "nothing on screen as a value"
     );
     let failed = polls(&rig.fake);
-    sleep(Duration::from_secs(14)).await;
-    assert!(
-        polls(&rig.fake) >= failed + 3,
-        "a failure retries on the backoff, not in 15 s: {} polls",
-        polls(&rig.fake) - failed
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        polls(&rig.fake),
+        failed + 3,
+        "a failure is asked again one interval later, not sooner"
     );
 
     rig.fake.state().no_endpoints.clear();
@@ -262,7 +262,11 @@ async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and
     );
     let polled = polls(&rig.fake);
     sleep(INTERVAL * 2 + Duration::from_secs(1)).await;
-    assert_eq!(polls(&rig.fake), polled + 2, "an answer resets the backoff");
+    assert_eq!(
+        polls(&rig.fake),
+        polled + 2,
+        "and an answer keeps the interval"
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -11,7 +11,6 @@ use super::fetch::{Failure, fetch};
 use super::sample::{Sample, Samples};
 use super::{Api, Context, INTERVAL, Kind, worse};
 use crate::hub::Hub;
-use crate::upstream;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Scope {
@@ -417,11 +416,11 @@ impl Board {
     }
 }
 
-/// Failures back off as the hub's upstreams do, and clients abandoned meanwhile are followed as
-/// theirs are. A credential failure ends the run until the clients are rebuilt or a reader asks
-/// for the scope anew, as the hub's upstreams are restarted by a new subscription.
+/// A scope is asked again one interval after its last answer, whatever it was: a server that
+/// refuses is not worth more requests than one that answers. Clients abandoned meanwhile are
+/// followed as the hub's upstreams follow them, and a credential failure ends the run until the
+/// clients are rebuilt or a reader asks for the scope anew, as a new subscription restarts one.
 async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
-    let mut backoff = upstream::backoff();
     let mut api = board.api.clone();
     loop {
         again.borrow_and_update();
@@ -443,7 +442,7 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
                     }
                     continue;
                 }
-                tokio::time::sleep(backoff.next().expect("the backoff has no limit")).await;
+                tokio::time::sleep(INTERVAL).await;
                 continue;
             }
         };
@@ -455,12 +454,8 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
                 .expect("the semaphore stays open");
             fetch(&clients, board.kind, version, &scope).await
         };
-        let delay = match fetched {
-            Ok(samples) => {
-                backoff = upstream::backoff();
-                board.land(&scope, MetricsState::Ready, samples);
-                INTERVAL
-            }
+        match fetched {
+            Ok(samples) => board.land(&scope, MetricsState::Ready, samples),
             Err(Failure::Unauthorized) => {
                 board.land(&scope, MetricsState::Unavailable, Samples::default());
                 let mut abandoned = clients.connections().abandoned();
@@ -476,12 +471,11 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
                     _ => MetricsState::Unavailable,
                 };
                 board.land(&scope, health, Samples::default());
-                backoff.next().expect("the backoff has no limit")
             }
-        };
+        }
         let mut abandoned = clients.connections().abandoned();
         tokio::select! {
-            () = tokio::time::sleep(delay) => {}
+            () = tokio::time::sleep(INTERVAL) => {}
             _ = abandoned.wait_for(|abandoned| *abandoned) => {}
         }
     }
