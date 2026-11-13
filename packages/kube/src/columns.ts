@@ -27,6 +27,8 @@ export interface ColumnRule {
   /** Takes the free width while the user has not sized it. */
   readonly grow: boolean;
   readonly align: "start" | "end";
+  /** A first click on the header sorts the largest first, as `kubectl top --sort-by` does. */
+  readonly descendFirst: boolean;
   /** Places a row rather than says what it is, so it reads quieter. */
   readonly quiet: boolean;
   /** The table can group its rows by the column's values. */
@@ -43,11 +45,19 @@ export interface ColumnRule {
 
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
-    cpu: { cell: "cpu", width: 72, align: "end", metric: true, flash: false },
+    cpu: {
+      cell: "cpu",
+      width: 72,
+      align: "end",
+      descendFirst: true,
+      metric: true,
+      flash: false,
+    },
     memory: {
       cell: "memory",
       width: 80,
       align: "end",
+      descendFirst: true,
       metric: true,
       flash: false,
     },
@@ -152,6 +162,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     width: age ? 64 : numeric ? 88 : 140,
     grow: false,
     align: age || numeric ? "end" : "start",
+    descendFirst: false,
     quiet: age,
     groups: false,
     health: false,

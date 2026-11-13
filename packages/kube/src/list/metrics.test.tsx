@@ -132,6 +132,33 @@ describe("the main list", () => {
     expect(last(sent.reads())).toBe(false);
   });
 
+  test("a first click on CPU or Memory sorts the largest first and the next ascends, while Name ascends first", async () => {
+    await openList();
+    const direction = (column: string) =>
+      header(column).getAttribute("aria-sort");
+    const measured = (column: string) =>
+      rows()
+        .map((row) => textOf(row, column))
+        .filter((text) => text !== "–")
+        .map((text) => Number.parseInt(text, 10));
+    const descending = (values: number[]) =>
+      values.every((value, at) => at === 0 || (values[at - 1] ?? 0) >= value);
+    for (const column of ["CPU", "Memory"]) {
+      await sortBy(column);
+      expect(direction(column)).toBe("descending");
+      const largest = measured(column);
+      expect(largest.length).toBeGreaterThan(1);
+      expect(descending(largest)).toBe(true);
+      await sortBy(column);
+      expect(direction(column)).toBe("ascending");
+      const smallest = measured(column);
+      expect(descending([...smallest].reverse())).toBe(true);
+      expect(smallest).not.toEqual(largest);
+    }
+    await sortBy("Name");
+    expect(direction("Name")).toBe("ascending");
+  });
+
   test("a hidden document reads nothing, and showing it reads at once", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);

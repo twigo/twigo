@@ -88,6 +88,42 @@ function scrollable(rows: number): HTMLElement {
   return element;
 }
 
+test("a column that descends first sorts descending on a first click and ascending on the next, and others ascend first", () => {
+  const columns = [
+    { id: "Name", title: "Name", width: 200, grow: true },
+    { id: "CPU", title: "CPU", width: 80, descendFirst: true },
+  ];
+  const sorter = (name: string) =>
+    within(screen.getByRole("columnheader", { name })).getByRole("button");
+  const { handlers, rerender } = grid({
+    columns,
+    sort: { column: "Name", descending: false },
+  });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: true,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: true } });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: false,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: false } });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: true,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: true } });
+  fireEvent.click(sorter("Name"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "Name",
+    descending: false,
+  });
+});
+
 function scroll(element: HTMLElement, top: number) {
   act(() => {
     element.scrollTop = top;

@@ -113,6 +113,20 @@ test("a sort is kept for the kind's next object", async () => {
   expect(states.sort("/nodes", "core.pods")).toMatchObject({ column: "Name" });
 });
 
+test("a first click on CPU sorts its list descending, as in the main list", async () => {
+  const states = new OverviewStates();
+  await shown(NODE_PODS, vi.fn(), states);
+  act(() => {
+    within(screen.getByRole("columnheader", { name: "CPU" }))
+      .getByRole("button")
+      .click();
+  });
+  expect(states.sort("/nodes", "core.pods")).toEqual({
+    column: "CPU",
+    descending: true,
+  });
+});
+
 function reads(invoke: { mock: { calls: unknown[][] } }): boolean | undefined {
   const sent = invoke.mock.calls
     .filter(([command]) => command === "list_set_window")

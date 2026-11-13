@@ -38,7 +38,7 @@ export function HeaderCell({
       onClick={() => {
         onSort({
           column: column.id,
-          descending: active && !sort.descending,
+          descending: active ? !sort.descending : column.descendFirst === true,
         });
       }}
       className={cn(
