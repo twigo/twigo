@@ -54,6 +54,7 @@ import { MockLogs } from "./logs";
 import {
   isMetricsScenario,
   METRIC_COLUMNS,
+  METRICS_GROUP,
   METRICS_SCENARIOS,
   metricsAt,
   MetricsJoin,
@@ -876,11 +877,17 @@ export function createMockBackend(
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
     resources_watch: (id, onMessage) => {
       space(id);
-      onMessage({
-        state: "ready",
-        cluster: `mock://${id}`,
-        resources: RESOURCES,
-      });
+      const send = () => {
+        onMessage({
+          state: "ready",
+          cluster: `mock://${id}`,
+          resources: metrics.served
+            ? RESOURCES
+            : RESOURCES.filter(({ gvr }) => gvr.group !== METRICS_GROUP),
+        });
+      };
+      send();
+      metrics.watch(send);
       return null;
     },
     context_auth_watch: (context, onMessage) => auth.watch(context, onMessage),

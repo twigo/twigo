@@ -3,6 +3,7 @@ import type { Backend } from "../backend";
 import type {
   Cell,
   Column,
+  Discovered,
   ListBatch,
   ListQuery,
   ObjectBatch,
@@ -17,6 +18,7 @@ import {
   containerSpecs,
   METRIC_COLUMNS,
   MockMetrics,
+  REMOVED_MS,
   SCRAPE_MS,
 } from "./metrics";
 import { compileQuery, natural, runQuery, type QueryRow } from "./query";
@@ -855,6 +857,51 @@ test("no usage is asked for, none is sent", async () => {
   const { batches } = await open("live", PODS, pod.namespace, pod.name, {});
   await vi.advanceTimersByTimeAsync(SCRAPE_MS * 2);
   expect(batches.every((batch) => batch.usage === null)).toBe(true);
+});
+
+async function discovered(scenario: MockScenario) {
+  const backend = createMockBackend(scenario);
+  const messages: Discovered[] = [];
+  const pending = backend.subscribe("resources_watch", "staging", (message) =>
+    messages.push(message),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  await pending;
+  return {
+    messages,
+    metrics: () =>
+      messages.map((message) =>
+        message.state === "ready"
+          ? message.resources
+              .filter(({ gvr }) => gvr.group === "metrics.k8s.io")
+              .map(({ gvr }) => gvr.resource)
+          : [],
+      ),
+  };
+}
+
+test("discovery lists the Metrics API's pods and nodes where the context serves it, even stale or refusing", async () => {
+  for (const scenario of [
+    "ready",
+    "metricsDown",
+    "metricsForbidden",
+  ] as const) {
+    const { metrics } = await discovered(scenario);
+    expect(metrics(), scenario).toEqual([["nodes", "pods"]]);
+  }
+});
+
+test("metricsNone's discovery has no Metrics API", async () => {
+  const { metrics, messages } = await discovered("metricsNone");
+  expect(messages).toHaveLength(1);
+  expect(metrics()).toEqual([[]]);
+});
+
+test("metricsRemoved's discovery loses the Metrics API when the context stops serving it", async () => {
+  const { metrics } = await discovered("metricsRemoved");
+  expect(metrics()).toEqual([["nodes", "pods"]]);
+  await vi.advanceTimersByTimeAsync(REMOVED_MS);
+  expect(metrics()).toEqual([["nodes", "pods"], []]);
 });
 
 test("metricsNone has no metric columns, no state and no usage", async () => {

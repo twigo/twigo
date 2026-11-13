@@ -8,6 +8,7 @@ import { ListStates } from "./listState";
 import { PinnedLists } from "./explorer/pinned";
 import { createEdits, type EditServices } from "./edit/services";
 import { OverviewStates } from "./object/overviewStates";
+import { UsageSaid } from "./object/usageSaid";
 import { ListPresets } from "./presets";
 import { Selection } from "./selection";
 
@@ -30,6 +31,8 @@ export interface ListServices {
   readonly pinned: PinnedLists;
   /** What the person chose in each kind's Overviews. */
   readonly overviews: OverviewStates;
+  /** What each space's Metrics API last said of an object's usage. */
+  readonly usageSaid: UsageSaid;
   /** What RBAC lets the person do, for the `capability.*` keys. */
   readonly capabilities: Capabilities;
   /** Each YAML editor's working copy, preview and schema. */
@@ -57,6 +60,7 @@ export function createServices(workbench: Workbench): ListServices {
     measures: new KnownMeasures(),
     pinned: new PinnedLists(workbench.spaces),
     overviews: new OverviewStates(),
+    usageSaid: new UsageSaid(),
     capabilities,
     edits: createEdits(workbench),
   };

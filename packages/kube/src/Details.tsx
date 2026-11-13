@@ -19,6 +19,7 @@ import { measureText } from "./list/metrics";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
+import { useExpectedUsage } from "./object/expectedUsage";
 import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
@@ -94,6 +95,7 @@ export function Details({
   }, [query]);
   const tab = states.detailsTab(uri);
   const visible = useVisible();
+  const asked = tab === "overview" && visible && hasUsage(gvr);
   const { snapshot, values, id } = useObject(
     backend,
     rested === query ? query : undefined,
@@ -102,10 +104,18 @@ export function Details({
       manifest: tab === "yaml",
       events: tab === "events",
       related: true,
-      usage: tab === "overview" && visible && hasUsage(gvr),
+      usage: asked,
     },
   );
   const reveal = useReveal(id);
+  const expected = useExpectedUsage({
+    said: services.usageSaid,
+    space,
+    gvr,
+    resources,
+    asked,
+    snapshot,
+  });
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
     const next = refUri(space, resources.value, target);
@@ -283,6 +293,7 @@ export function Details({
             snapshot={snapshot}
             values={values}
             reveal={reveal}
+            expected={expected}
             onOpen={open}
             {...(namespace !== undefined && {
               onLogs: (choice) => {

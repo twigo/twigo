@@ -16,8 +16,10 @@ import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
 import { ObjectContent } from "./ObjectContent";
 import type { OverviewStates } from "./overviewStates";
+import type { UsageSaid } from "./usageSaid";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
+import { useExpectedUsage } from "./expectedUsage";
 import { hasUsage } from "./figures";
 import { objectQuery, refUri, useObject } from "./useObject";
 
@@ -30,11 +32,13 @@ export function ObjectEditor({
   uri,
   discovery,
   overviews,
+  usageSaid,
   tabs,
   edits,
 }: EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
+  usageSaid: UsageSaid;
   tabs: ObjectTabs;
   edits: EditServices;
 }) {
@@ -51,18 +55,24 @@ export function ObjectEditor({
   // under it, whichever view is shown.
   const editing =
     edits.copies.get(uri) !== undefined || edits.copies.held(uri) !== undefined;
+  const asked =
+    tab === "overview" && visible && input !== undefined && hasUsage(input.gvr);
   const { snapshot, values, id } = useObject(backend, query, {
     overview: tab === "overview",
     manifest: tab === "yaml" || editing,
     events: tab === "events",
     related: tab === "related",
-    usage:
-      tab === "overview" &&
-      visible &&
-      input !== undefined &&
-      hasUsage(input.gvr),
+    usage: asked,
   });
   const reveal = useReveal(id);
+  const expected = useExpectedUsage({
+    said: usageSaid,
+    space: input?.space,
+    gvr: input?.gvr,
+    resources,
+    asked,
+    snapshot,
+  });
   const statusLocked = hasStatusSubresource(resources, input?.gvr);
   const manifest = snapshot.manifest;
   useEffect(() => {
@@ -86,6 +96,7 @@ export function ObjectEditor({
       snapshot={snapshot}
       values={values}
       reveal={reveal}
+      expected={expected}
       onOpen={open}
       yaml={(json) => (
         <YamlTab

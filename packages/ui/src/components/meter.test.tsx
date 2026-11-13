@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { Meter } from "./meter";
+import { EmptyMeter, Meter } from "./meter";
 
 afterEach(cleanup);
 
@@ -41,4 +41,19 @@ test("a meter reads its value as the words it is given, else as its numbers", ()
   );
   rerender(<Meter label="CPU" value={25} max={100} />);
   expect(screen.getByRole("meter").hasAttribute("aria-valuetext")).toBe(false);
+});
+
+test("an empty meter has the size of a meter and says loading, with no figure", () => {
+  const { container } = render(
+    <>
+      <Meter label="CPU" value={25} max={100} />
+      <EmptyMeter label="CPU of api" />
+    </>,
+  );
+  const empty = screen.getByRole("progressbar", { name: "CPU of api" });
+  expect(empty.getAttribute("aria-valuetext")).toBe("Loading");
+  expect(empty.hasAttribute("aria-valuenow")).toBe(false);
+  expect(empty.className).toBe(screen.getByRole("meter").className);
+  expect(empty.querySelectorAll("span > span")).toHaveLength(0);
+  expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
 });

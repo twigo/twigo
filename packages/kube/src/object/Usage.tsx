@@ -1,5 +1,5 @@
 import type { Measure, ShownUsage } from "@twigo/protocol";
-import { Meter, StatusDot, TonedText } from "@twigo/ui";
+import { EmptyMeter, Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
 import { figure, type Figure, type Resource } from "./figures";
 
@@ -11,11 +11,14 @@ const LABEL: Readonly<Record<Resource, string>> = {
 const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
+/** What the section shows before a usage comes: the figures' place, or what the API last said. */
+export type Expected = "loading" | Exclude<ShownUsage["state"], "ready">;
+
 interface Subject {
   /** What its meters are labelled with, and its heading when it has one. */
   readonly name: string | null;
-  readonly cpu: Measure;
-  readonly memory: Measure;
+  readonly cpu: Measure | null;
+  readonly memory: Measure | null;
 }
 
 /**
@@ -51,6 +54,31 @@ export function UsageView({
   );
 }
 
+/**
+ * What stands in the section until a usage comes: the rows it will have, as
+ * a pod's total and each container the Overview lists or a node's pair,
+ * with empty meters and no figures, so the answer moves nothing below it.
+ */
+export function ExpectedUsage({
+  expected,
+  node,
+  containers,
+}: {
+  expected: Expected;
+  node: boolean;
+  containers: readonly string[];
+}) {
+  if (expected !== "loading") return <Said state={expected} />;
+  const names = node ? [null] : ["Pod", ...containers];
+  return (
+    <div className={GRID}>
+      {names.map((name) => (
+        <Rows key={name ?? ""} subject={{ name, cpu: null, memory: null }} />
+      ))}
+    </div>
+  );
+}
+
 function Said({ state }: { state: Exclude<ShownUsage["state"], "ready"> }) {
   return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
 }
@@ -75,10 +103,21 @@ function Row({
   name,
 }: {
   resource: Resource;
-  measure: Measure;
+  measure: Measure | null;
   name: string | null;
 }) {
   const label = LABEL[resource];
+  if (measure === null) {
+    return (
+      <>
+        <span className="text-muted-foreground">{label}</span>
+        <EmptyMeter label={name === null ? label : `${label} of ${name}`} />
+        <span aria-hidden className="col-span-2">
+          {"\u00a0"}
+        </span>
+      </>
+    );
+  }
   const shown = figure(resource, measure);
   return (
     <>

@@ -30,6 +30,8 @@ export const METRICS_SCENARIOS: readonly MetricsScenario[] = [
 
 export const REMOVED_MS = 20_000;
 
+export const METRICS_GROUP = "metrics.k8s.io";
+
 export function isMetricsScenario(
   scenario: string,
 ): scenario is MetricsScenario {

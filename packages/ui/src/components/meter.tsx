@@ -1,6 +1,9 @@
 import { cn } from "../lib/cn";
 import type { Tone } from "../lib/tone";
 
+const FRAME = "relative h-2 w-full min-w-12";
+const TRACK = "absolute inset-0 overflow-hidden rounded-xs bg-foreground/12";
+
 const FILL: Readonly<Record<Tone, string>> = {
   error: "bg-error",
   warn: "bg-warn",
@@ -43,9 +46,9 @@ export function Meter({
       aria-valuemax={max}
       aria-valuenow={Math.min(value, max)}
       aria-valuetext={valueText}
-      className={cn("relative h-2 w-full min-w-12", className)}
+      className={cn(FRAME, className)}
     >
-      <span className="absolute inset-0 overflow-hidden rounded-xs bg-foreground/12">
+      <span className={TRACK}>
         <span
           className={cn("absolute inset-y-0 left-0", FILL[tone])}
           style={{ width: share(value) }}
@@ -58,6 +61,30 @@ export function Meter({
           style={{ left: share(mark) }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * A meter whose figures have not come, the size of one and with no fill,
+ * so what it stands for does not move when they do. A screen reader hears
+ * it loading, with no value.
+ */
+export function EmptyMeter({
+  label,
+  className,
+}: {
+  label: string;
+  className?: string;
+}) {
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuetext="Loading"
+      className={cn(FRAME, className)}
+    >
+      <span className={TRACK} />
     </div>
   );
 }

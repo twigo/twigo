@@ -126,6 +126,7 @@ export function registerKube(workbench: Workbench): void {
         uri={uri}
         discovery={services.discovery}
         overviews={services.overviews}
+        usageSaid={services.usageSaid}
         tabs={objectTabs}
         edits={services.edits}
       />
