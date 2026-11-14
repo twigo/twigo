@@ -8,6 +8,7 @@ use tokio::task::JoinHandle;
 use twigo_ipc::{ErrorKind, MetricsState};
 
 use super::fetch::{Failure, fetch};
+use super::refusals::Refusals;
 use super::sample::{Sample, Samples};
 use super::{Api, Context, INTERVAL, Kind, worse};
 use crate::hub::Hub;
@@ -70,8 +71,18 @@ pub struct Change {
 pub struct Update {
     /// None while the reader wants nothing, or none of its scopes has answered or failed yet.
     pub state: Option<MetricsState>,
+    /// What the scopes that have not answered yet last failed with, as the poller remembers it.
+    pub remembered: Option<MetricsState>,
     pub resets: Vec<Reset>,
     pub changes: Vec<Change>,
+}
+
+impl Update {
+    /// The state the reader knows: the answers' and, for the scopes still waiting for theirs, the
+    /// failures they ended in last.
+    pub fn said(&self) -> Option<MetricsState> {
+        self.state.into_iter().chain(self.remembered).reduce(worse)
+    }
 }
 
 pub(crate) struct Board {
@@ -81,6 +92,8 @@ pub(crate) struct Board {
     api: watch::Receiver<Api>,
     /// The context's, shared by its boards: one per request under way.
     turns: Arc<Semaphore>,
+    /// The poller's, which outlives the context.
+    refusals: Arc<Mutex<Refusals>>,
     state: Mutex<State>,
 }
 
@@ -197,12 +210,13 @@ struct Answer {
 }
 
 impl Board {
-    pub(crate) fn new(
+    pub(super) fn new(
         context: &str,
         kind: Kind,
         hub: Hub,
         api: watch::Receiver<Api>,
         turns: Arc<Semaphore>,
+        refusals: Arc<Mutex<Refusals>>,
     ) -> Self {
         Self {
             context: context.into(),
@@ -210,6 +224,7 @@ impl Board {
             hub,
             api,
             turns,
+            refusals,
             state: Mutex::default(),
         }
     }
@@ -346,12 +361,23 @@ impl Board {
         }
     }
 
-    pub(super) fn land(self: &Arc<Self>, scope: &Scope, health: MetricsState, samples: Samples) {
+    /// A request of `scope` ended in `health` over the clients that `over` follows, if it had any.
+    pub(super) fn land(
+        self: &Arc<Self>,
+        scope: &Scope,
+        health: MetricsState,
+        samples: Samples,
+        over: Option<&watch::Receiver<bool>>,
+    ) {
         let mut guard = self.state();
         let state = &mut *guard;
         let Some(request) = state.requests.get_mut(scope) else {
             return;
         };
+        self.refusals
+            .lock()
+            .expect("refusals lock")
+            .say(self.kind, scope, health, over);
         let samples = Arc::new(samples);
         let was_answering = request.answers();
         let previous = request.answer.replace(Answer {
@@ -401,6 +427,23 @@ impl Board {
         }
     }
 
+    /// The worst of what the scopes that have not answered yet last failed with. A reader that
+    /// wants the cluster and namespaces too is told by the namespaces, as when the cluster fails.
+    fn remembered(&self, state: &State, wants: &Wants) -> Option<MetricsState> {
+        let mut refusals = self.refusals.lock().expect("refusals lock");
+        wants
+            .scopes
+            .iter()
+            .filter(|want| !(**want == Scope::Cluster && wants.scopes.len() > 1))
+            .filter(|want| {
+                state
+                    .serving(want)
+                    .is_none_or(|request| request.answer.is_none())
+            })
+            .filter_map(|want| refusals.recall(self.kind, want))
+            .reduce(worse)
+    }
+
     /// The worst state among the scopes that have answered or failed once, none while none has:
     /// a scope still waiting for its first answer adds nothing. A reader that wants the cluster
     /// and namespaces too is told by the namespaces while the cluster does not answer.
@@ -445,7 +488,7 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
         let clients = match board.hub.clients(&board.context).await {
             Ok(clients) => clients,
             Err(error) => {
-                board.land(&scope, MetricsState::Unavailable, Samples::default());
+                board.land(&scope, MetricsState::Unavailable, Samples::default(), None);
                 if error.kind == ErrorKind::Unauthorized {
                     if again.changed().await.is_err() {
                         return;
@@ -456,6 +499,7 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
                 continue;
             }
         };
+        let mut abandoned = clients.connections().abandoned();
         let fetched = {
             let _turn = board
                 .turns
@@ -465,10 +509,14 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
             fetch(&clients, board.kind, version, &scope).await
         };
         match fetched {
-            Ok(samples) => board.land(&scope, MetricsState::Ready, samples),
+            Ok(samples) => board.land(&scope, MetricsState::Ready, samples, Some(&abandoned)),
             Err(Failure::Unauthorized) => {
-                board.land(&scope, MetricsState::Unavailable, Samples::default());
-                let mut abandoned = clients.connections().abandoned();
+                board.land(
+                    &scope,
+                    MetricsState::Unavailable,
+                    Samples::default(),
+                    Some(&abandoned),
+                );
                 tokio::select! {
                     asked = again.changed() => if asked.is_err() { return },
                     _ = abandoned.wait_for(|abandoned| *abandoned) => {}
@@ -480,10 +528,9 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
                     Failure::Forbidden => MetricsState::Forbidden,
                     _ => MetricsState::Unavailable,
                 };
-                board.land(&scope, health, Samples::default());
+                board.land(&scope, health, Samples::default(), Some(&abandoned));
             }
         }
-        let mut abandoned = clients.connections().abandoned();
         tokio::select! {
             () = tokio::time::sleep(INTERVAL) => {}
             _ = abandoned.wait_for(|abandoned| *abandoned) => {}
@@ -557,10 +604,10 @@ impl Reader {
         let state = board.state();
         let mut pending = self.feed.lock().expect("feed lock");
         let wants = state.members.get(&self.id).map(|member| &member.wants);
+        let wants = wants.filter(|wants| !wants.scopes.is_empty());
         Update {
-            state: wants
-                .filter(|wants| !wants.scopes.is_empty())
-                .and_then(|wants| board.health(&state, wants)),
+            state: wants.and_then(|wants| board.health(&state, wants)),
+            remembered: wants.and_then(|wants| board.remembered(&state, wants)),
             resets: std::mem::take(&mut pending.resets),
             changes: pending
                 .changes

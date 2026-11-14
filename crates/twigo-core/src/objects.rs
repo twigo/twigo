@@ -180,6 +180,8 @@ struct Used {
     api: bool,
     /// Its APIService exists and lists no resources: discovery knows it without a request.
     stale: bool,
+    /// What the scope that serves the object last failed with, said while no answer has come.
+    remembered: Option<MetricsState>,
     /// A usage was sent that the webview may still draw.
     offered: bool,
 }
@@ -231,7 +233,8 @@ impl Used {
             || state != self.state
             || served != self.served
             || answered != self.answered
-            || api.stale() != self.stale;
+            || api.stale() != self.stale
+            || update.remembered != self.remembered;
         *self = Self {
             sample,
             uid,
@@ -240,9 +243,21 @@ impl Used {
             answered,
             api: serves,
             stale: api.stale(),
+            remembered: update.remembered,
             offered: self.offered,
         };
         changed
+    }
+
+    /// The answer's usage, else what is known without one: a stale API's `unavailable`, then the
+    /// failure the scope ended in last, else that the figures are waited for.
+    fn said(&self, kind: Kind, object: &Value) -> Usage {
+        match (self.answered, self.stale, self.remembered) {
+            (true, _, _) => usage(kind, object, self.sample.as_deref(), self.state),
+            (false, true, _) => usage(kind, object, None, MetricsState::Unavailable),
+            (false, false, Some(refused)) => usage(kind, object, None, refused),
+            (false, false, None) => waiting(kind, object),
+        }
     }
 }
 
@@ -294,6 +309,7 @@ async fn run(
         answered: false,
         api: false,
         stale: false,
+        remembered: None,
         offered: false,
     };
     loop {
@@ -471,11 +487,7 @@ async fn run(
                 used_by
                     .zip(parsed.as_ref())
                     .filter(|_| usage_shown && dirty.usage)
-                    .map(|(kind, object)| match (used.answered, used.stale) {
-                        (true, _) => usage(kind, object, used.sample.as_deref(), used.state),
-                        (false, true) => usage(kind, object, None, MetricsState::Unavailable),
-                        (false, false) => waiting(kind, object),
-                    })
+                    .map(|(kind, object)| used.said(kind, object))
             },
         };
         let mut batch = shown.batch(seq, state.clone());

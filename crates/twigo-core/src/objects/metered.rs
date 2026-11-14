@@ -42,6 +42,14 @@ fn pod(containers: serde_json::Value) -> serde_json::Value {
     })
 }
 
+fn pod_of(namespace: &str, name: &str) -> serde_json::Value {
+    let mut pod = pod(json!([{ "name": "main" }]));
+    pod["metadata"]["namespace"] = json!(namespace);
+    pod["metadata"]["name"] = json!(name);
+    pod["metadata"]["uid"] = json!(format!("{name}-uid"));
+    pod
+}
+
 fn node() -> serde_json::Value {
     json!({
         "kind": "Node",
@@ -126,10 +134,24 @@ impl Rig {
     }
 
     fn open(&mut self, kind: Kind, parts: ObjectParts) -> Opened {
-        let (resource, namespace, name) = match kind {
-            Kind::Pods => ("pods", Some("a".to_owned()), "web-0"),
-            Kind::Nodes => ("nodes", None, "node-1"),
+        match kind {
+            Kind::Pods => self.open_object(kind, Some("a"), "web-0", parts),
+            Kind::Nodes => self.open_object(kind, None, "node-1", parts),
+        }
+    }
+
+    fn open_object(
+        &mut self,
+        kind: Kind,
+        namespace: Option<&str>,
+        name: &str,
+        parts: ObjectParts,
+    ) -> Opened {
+        let resource = match kind {
+            Kind::Pods => "pods",
+            Kind::Nodes => "nodes",
         };
+        let namespace = namespace.map(str::to_owned);
         let object = self
             .hub
             .object(
@@ -618,6 +640,127 @@ async fn a_replaced_request_that_fails_takes_the_figures_with_it() {
     assert_eq!(
         usage.cpu.used, None,
         "figures of an answer the failure ended"
+    );
+}
+
+fn with_overview(batches: &[ObjectBatch]) -> &ObjectBatch {
+    batches
+        .iter()
+        .find(|batch| batch.overview.is_some())
+        .expect("the Overview")
+}
+
+fn said(batch: &ObjectBatch) -> Option<(MetricsState, bool)> {
+    batch
+        .usage
+        .as_ref()
+        .map(|usage| (usage.state, usage.waiting))
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_of_a_namespace_that_refused_says_so_with_its_overview_and_the_answer_replaces_it() {
+    let overview = ObjectParts {
+        overview: true,
+        ..PARTS
+    };
+    let fake = Fake::default();
+    for (namespace, name) in [("a", "web-0"), ("a", "web-1"), ("b", "web-2")] {
+        fake.put("", "pods", Some(namespace), pod_of(namespace, name));
+        fake.pod_usage(namespace, name, &[("main", "10m", "1Mi")]);
+    }
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let first = rig.open_object(Kind::Pods, Some("a"), "web-0", overview);
+    let refused = rig.watch(&first, Duration::from_secs(10)).await;
+    assert_eq!(
+        refused.iter().filter_map(said).collect::<Vec<_>>(),
+        [
+            (MetricsState::Ready, true),
+            (MetricsState::Forbidden, false)
+        ],
+        "waiting, then the refusal"
+    );
+    drop(first);
+    sleep(Duration::from_millis(100)).await;
+
+    let second = rig.open_object(Kind::Pods, Some("a"), "web-1", overview);
+    let opened = rig.watch(&second, Duration::from_secs(1)).await;
+    assert_eq!(
+        said(with_overview(&opened)),
+        Some((MetricsState::Forbidden, false)),
+        "the refusal of its namespace, with its Overview"
+    );
+    assert_eq!(
+        with_overview(&opened).usage.as_ref().unwrap().cpu.used,
+        None
+    );
+
+    rig.fake.state().forbidden.clear();
+    let allowed = rig.watch(&second, Duration::from_secs(25)).await;
+    let usage = *usages(&allowed).last().expect("the answer");
+    assert_eq!(
+        (usage.state, usage.waiting, usage.cpu.used),
+        (MetricsState::Ready, false, Some(10_000_000)),
+        "the refusal ended, and the figures replace it"
+    );
+    drop(second);
+    sleep(Duration::from_millis(100)).await;
+
+    let elsewhere = rig.open_object(Kind::Pods, Some("b"), "web-2", overview);
+    let waiting = rig.watch(&elsewhere, Duration::from_secs(1)).await;
+    assert_eq!(
+        said(with_overview(&waiting)),
+        Some((MetricsState::Ready, true)),
+        "another namespace has refused nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_node_does_not_make_a_pod_say_it_and_a_node_says_it_with_its_overview() {
+    let overview = ObjectParts {
+        overview: true,
+        ..PARTS
+    };
+    let fake = Fake::default();
+    fake.put("", "nodes", None, node());
+    fake.put("", "pods", Some("b"), pod_of("b", "web-2"));
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/nodes".to_owned());
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let first = rig.open(Kind::Nodes, overview);
+    rig.watch(&first, Duration::from_secs(10)).await;
+    drop(first);
+    sleep(Duration::from_millis(100)).await;
+
+    let pod = rig.open_object(Kind::Pods, Some("b"), "web-2", overview);
+    let waiting = rig.watch(&pod, Duration::from_secs(1)).await;
+    assert_eq!(
+        said(with_overview(&waiting)),
+        Some((MetricsState::Ready, true))
+    );
+    drop(pod);
+    sleep(Duration::from_millis(100)).await;
+
+    let node = rig.open(Kind::Nodes, overview);
+    let refused = rig.watch(&node, Duration::from_secs(1)).await;
+    assert_eq!(
+        said(with_overview(&refused)),
+        Some((MetricsState::Forbidden, false))
+    );
+    assert_eq!(
+        with_overview(&refused)
+            .usage
+            .as_ref()
+            .unwrap()
+            .cpu
+            .allocatable,
+        Some(16_000_000_000),
+        "what the node allocates is known without a sample"
     );
 }
 
