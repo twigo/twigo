@@ -103,6 +103,34 @@ function scripted() {
   };
 }
 
+const NAMES = [
+  { name: "Name", kind: "string", priority: 0 },
+  { name: "Status", kind: "string", priority: 0 },
+  { name: "CPU", kind: "cpu", priority: 0 },
+  { name: "Memory", kind: "memory", priority: 0 },
+] as const;
+
+function batch(seq: number, known: boolean): ListBatch {
+  return {
+    seq,
+    total: known ? 2 : 0,
+    columns: known ? [...NAMES] : [],
+    window: { start: 0, ids: known ? ["a", "b"] : [] },
+    upserts: known
+      ? ["a", "b"].map((id) => ({
+          id,
+          created: null,
+          generated: null,
+          cells: [id, "Running", 10_000_000, 64 * 1024 * 1024],
+        }))
+      : [],
+    status: { state: known ? "ready" : "connecting" },
+    counts: null,
+    groups: null,
+    metrics: null,
+  };
+}
+
 async function choose(column: string) {
   fireEvent.pointerDown(
     screen.getByRole("button", { name: "Choose columns" }),
@@ -566,7 +594,10 @@ describe("a column named like a measure", () => {
     const script = scripted();
     const sent = spied(script.backend);
     await openList(script.backend, POOLS);
+    expect(last(sent.reads())).toBe(true);
     await script.send(pools());
+    const known = sent.reads().length;
+    expect(last(sent.reads())).toBe(false);
     expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
     await choose("CPU");
     expect(textOf(rows()[0], "CPU")).toBe("16");
@@ -581,7 +612,8 @@ describe("a column named like a measure", () => {
       column: "CPU",
       descending: false,
     });
-    expect(sent.reads()).not.toContain(true);
+    expect(sent.reads().slice(known)).not.toContain(true);
+    expect(last(sent.reads())).toBe(false);
   });
 
   test("is left out of a pod list's text filter once the list's columns say it is a measure, and from the first query of a kind seen before", async () => {
@@ -612,34 +644,6 @@ describe("a column named like a measure", () => {
 
 describe("a kind whose first batches do not know the columns", () => {
   withScreenSize(1000);
-
-  const NAMES = [
-    { name: "Name", kind: "string", priority: 0 },
-    { name: "Status", kind: "string", priority: 0 },
-    { name: "CPU", kind: "cpu", priority: 0 },
-    { name: "Memory", kind: "memory", priority: 0 },
-  ] as const;
-
-  function batch(seq: number, known: boolean): ListBatch {
-    return {
-      seq,
-      total: known ? 2 : 0,
-      columns: known ? [...NAMES] : [],
-      window: { start: 0, ids: known ? ["a", "b"] : [] },
-      upserts: known
-        ? ["a", "b"].map((id) => ({
-            id,
-            created: null,
-            generated: null,
-            cells: [id, "Running", 10_000_000, 64 * 1024 * 1024],
-          }))
-        : [],
-      status: { state: known ? "ready" : "connecting" },
-      counts: null,
-      groups: null,
-      metrics: null,
-    };
-  }
 
   function lateColumns() {
     const mock = createMockBackend("ready");
@@ -699,5 +703,164 @@ describe("a kind whose first batches do not know the columns", () => {
     );
     expect(asked(sent).length).toBeLessThanOrEqual(2);
     expect(rows().length).toBeGreaterThan(0);
+  });
+});
+
+describe("a list whose columns are not known yet", () => {
+  withScreenSize(1000);
+
+  const PODS = "k8s-list://prod-eu/v1/pods";
+  const DEPLOYMENTS = "k8s-list://prod-eu/apps/v1/deployments";
+
+  function plain(seq: number): ListBatch {
+    return {
+      ...batch(seq, true),
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+      ],
+      upserts: ["a", "b"].map((id) => ({
+        id,
+        created: null,
+        generated: null,
+        cells: [id, "Ready"],
+      })),
+    };
+  }
+
+  const windowsAfter = (sent: ReturnType<typeof spied>, count: number) =>
+    sent
+      .reads()
+      .slice(count)
+      .filter((reads, at, all) => at === 0 || reads !== all[at - 1]);
+
+  test("a pod list restored sorted by CPU says it reads with its first window, before any batch", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    const workbench = await openList(script.backend, PODS);
+    await script.send(batch(1, true));
+    await sortBy("CPU");
+    act(() => {
+      workbench.editors.close(PODS);
+    });
+    await settle();
+    const before = sent.reads().length;
+    act(() => {
+      workbench.editors.open(PODS);
+    });
+    await settle();
+    expect(windowsAfter(sent, before)).toEqual([true]);
+  });
+
+  test("a list of a resource without measures says it reads first and stops once its columns come", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    const workbench = await mountKube(script.backend);
+    const before = sent.reads().length;
+    act(() => {
+      workbench.editors.open(DEPLOYMENTS);
+    });
+    await settle();
+    expect(windowsAfter(sent, before)).toEqual([true]);
+    await script.send(plain(1));
+    expect(windowsAfter(sent, before)).toEqual([true, false]);
+  });
+
+  test("a resource the session knows to have no measures says it reads nothing from its first window", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    const workbench = await openList(script.backend, DEPLOYMENTS);
+    await script.send(plain(1));
+    act(() => {
+      workbench.editors.close(DEPLOYMENTS);
+    });
+    await settle();
+    const before = sent.reads().length;
+    act(() => {
+      workbench.editors.open(DEPLOYMENTS);
+    });
+    await settle();
+    expect(windowsAfter(sent, before)).toEqual([false]);
+  });
+
+  test("a new query whose first batch has no columns leaves a list sorted by CPU reading", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    await openList(script.backend, PODS);
+    await script.send(batch(1, true));
+    await sortBy("CPU");
+    await script.send(batch(2, true));
+    expect(last(sent.reads())).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "a" },
+    });
+    await settle(30);
+    const before = sent.reads().length;
+    await script.send(batch(3, false));
+    expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
+    await script.send(batch(4, true));
+    expect(windowsAfter(sent, before)).not.toContain(false);
+    expect(last(sent.reads())).toBe(true);
+  });
+
+  test("on the mock, a pod list sorted by CPU that moves to namespaces no list reads keeps saying it reads, and shows its first rows in CPU order with their values", async () => {
+    const backend = createMockBackend("live");
+    const sent = spied(backend);
+    const workbench = await mountKube(backend);
+    const namespaces = (names: string[]) => {
+      act(() => {
+        workbench.spaces.update("prod-eu", (state) => ({
+          ...state,
+          namespaces: names,
+        }));
+      });
+    };
+    namespaces(["ledger"]);
+    act(() => {
+      workbench.editors.open(PODS);
+    });
+    await settle(40);
+    await sortBy("CPU");
+    await settle(30);
+    const before = new Set(rows().map((row) => textOf(row, "Name")));
+    expect(before.size).toBeGreaterThan(1);
+    const windows = sent.reads().length;
+    namespaces(["payments"]);
+    let first: string[] = [];
+    for (let step = 0; step < 300 && first.length === 0; step++) {
+      await act(() => vi.advanceTimersByTimeAsync(10));
+      act(() => {
+        vi.advanceTimersToNextFrame();
+      });
+      first = rows()
+        .filter((row) => !before.has(textOf(row, "Name")))
+        .map((row) => textOf(row, "CPU"));
+    }
+    expect(windowsAfter(sent, windows)).not.toContain(false);
+    const values = first
+      .filter((text) => text !== "–")
+      .map((text) => Number.parseInt(text, 10));
+    expect(values.length).toBeGreaterThan(1);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+    expect(first.slice(0, values.length)).not.toContain("–");
+  });
+
+  test("the narrow list beside the details says it reads nothing, before its columns and after", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    await openList(script.backend, PODS);
+    await script.send(batch(1, true));
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle();
+    expect(last(sent.reads())).toBe(false);
+    const before = sent.reads().length;
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "a" },
+    });
+    await settle(30);
+    await script.send(batch(2, false));
+    await script.send(batch(3, true));
+    expect(windowsAfter(sent, before)).not.toContain(true);
+    expect(last(sent.reads())).toBe(false);
   });
 });

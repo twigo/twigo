@@ -124,8 +124,11 @@ export function EmbeddedList({
     };
   });
   const reads = readsMetrics({
-    columns: every,
-    shown: columns,
+    measures:
+      every.length > 0
+        ? every.filter((column) => column.rule.metric).map(({ name }) => name)
+        : undefined,
+    drawn: (name) => byName.has(name),
     sort,
     visible,
     narrow,

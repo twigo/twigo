@@ -10,6 +10,8 @@ const NONE: ReadonlySet<string> = new Set();
  * batch whose columns say `cpu` or `memory` adds to it and none takes from
  * it: a list's first batches may not know the columns yet, and a list
  * opened again for the kind leaves its measures out of its query at once.
+ * A kind whose columns came, with no measure among them, is known to have
+ * none.
  */
 export class KnownMeasures {
   readonly changes = new Changes();
@@ -19,12 +21,18 @@ export class KnownMeasures {
     return this.#known.get(key(gvr)) ?? NONE;
   }
 
+  /** Whether the columns of a list of the kind came, which says its measures, if it has any. */
+  knows(gvr: Gvr): boolean {
+    return this.#known.has(key(gvr));
+  }
+
   learn(gvr: Gvr, columns: readonly Column[]): void {
+    if (columns.length === 0) return;
     const known = this.get(gvr);
     const names = columns
       .filter((column) => columnRule(gvr, column).metric)
       .map((column) => column.name);
-    if (names.every((name) => known.has(name))) return;
+    if (this.knows(gvr) && names.every((name) => known.has(name))) return;
     this.#known.set(key(gvr), new Set([...known, ...names]));
     this.changes.emit();
   }

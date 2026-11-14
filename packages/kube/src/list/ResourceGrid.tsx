@@ -200,8 +200,15 @@ function Grid({
     };
   });
   const reads = readsMetrics({
-    columns: every,
-    shown: columns,
+    measures:
+      every.length > 0
+        ? every.filter((column) => column.rule.metric).map(({ name }) => name)
+        : measures.knows(gvr)
+          ? [...known]
+          : undefined,
+    drawn: (name) =>
+      byName.has(name) ||
+      (every.length === 0 && preset.columns[name] !== false),
     sort: query.sort,
     visible,
     narrow,

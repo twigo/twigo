@@ -979,7 +979,8 @@ class Subscription {
   #query: CompiledQuery;
   readonly #fields: FieldSelector;
   readonly #kind: MockKind;
-  readonly #key: string;
+  /** What the list reads of its kind, which syncs as its upstream does: every namespace, or these. */
+  readonly #listed: string;
   readonly #cluster: Cluster;
   #columns: Column[];
   #join: MetricsJoin | undefined;
@@ -1039,13 +1040,20 @@ class Subscription {
     this.#query = query;
     this.#fields = fields;
     this.#kind = kind;
-    this.#key = JSON.stringify(query.query.gvr);
+    const gvr = JSON.stringify(query.query.gvr);
+    this.#listed =
+      query.query.namespaces.length === 0
+        ? gvr
+        : `${gvr}${[...query.query.namespaces].sort().join(",")}`;
     this.#cluster = cluster;
     this.#columns = columns;
     this.#onMessage = onMessage;
     if (typeof scenario !== "string") {
       this.#status = scenario;
-    } else if (scenario === "live" && cluster.synced.has(this.#key)) {
+    } else if (
+      scenario === "live" &&
+      (cluster.synced.has(gvr) || cluster.synced.has(this.#listed))
+    ) {
       this.#status = { state: "ready" };
     } else if (scenario === "live") {
       this.#status = { state: "connecting" };
@@ -1057,7 +1065,7 @@ class Subscription {
         });
       });
       this.#later(1100, { state: "ready" }, () => {
-        cluster.synced.add(this.#key);
+        cluster.synced.add(this.#listed);
       });
     } else {
       this.#status = PINNED[scenario];

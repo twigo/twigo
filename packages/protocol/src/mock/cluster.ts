@@ -115,7 +115,11 @@ export class Cluster {
   version = 0;
   /** When the cluster last changed, which the times its events print count from. */
   now: number;
-  /** The kinds whose first subscription has synced; later ones start ready, as on a shared upstream. */
+  /**
+   * What lists have synced, by kind alone for every namespace, else with the
+   * namespaces after it: a list of the same namespaces, or of every one,
+   * starts ready, as on a shared upstream.
+   */
   readonly synced = new Set<string>();
   readonly #random: () => number;
   /** Rollouts draw from a stream of their own, so the churn stays as it was. */

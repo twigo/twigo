@@ -11,29 +11,31 @@ export function measureText(
 }
 
 /**
- * Whether a list reads its metric columns (ARCHITECTURE 3.6): one is drawn
- * or the list is sorted by one, the document is visible, and the list is
- * not the narrow one beside the details, which draws none of them.
+ * Whether a list reads its metric columns (ARCHITECTURE 3.6): the document
+ * is visible, its editor on screen, and the list is not the narrow one
+ * beside the details, which draws none of them; and either the names of its
+ * resource's measures are not known yet, so that a list sorted by one is
+ * held from its first rows, or one of them is drawn or sorted by.
  */
 export function readsMetrics({
-  columns,
-  shown,
+  measures,
+  drawn,
   sort,
   visible,
   narrow,
 }: {
-  /** Every column of the list. */
-  columns: readonly ShownColumn[];
-  /** The columns drawn. */
-  shown: readonly ShownColumn[];
+  /** The names of the resource's measures, once its columns are known. */
+  measures: readonly string[] | undefined;
+  /** Whether the column of that name is drawn. */
+  drawn: (name: string) => boolean;
   sort: Sort | null;
   visible: boolean;
   narrow: boolean;
 }): boolean {
   if (!visible || narrow) return false;
   return (
-    shown.some((column) => column.rule.metric) ||
-    columns.some((column) => column.rule.metric && column.name === sort?.column)
+    measures === undefined ||
+    measures.some((name) => drawn(name) || name === sort?.column)
   );
 }
 

@@ -198,6 +198,76 @@ test.each([
   },
 );
 
+async function opened(backend: Backend, q: ListQuery, metrics: boolean) {
+  const batches: ListBatch[] = [];
+  let id = 0;
+  const pending = backend.subscribe("list_subscribe", q, (batch) => {
+    batches.push(batch);
+    void backend.invoke("list_ack", { id, seq: batch.seq });
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  id = await pending;
+  await call(
+    backend.invoke("list_set_window", { id, start: 0, end: 60, metrics }),
+  );
+  await vi.advanceTimersByTimeAsync(2000);
+  return batches;
+}
+
+test("a list syncs by the namespaces it reads: one of the same namespaces or one of every namespace starts ready, another namespace starts cold", async () => {
+  const states = async (
+    first: readonly string[],
+    second: readonly string[],
+  ) => {
+    const backend = createMockBackend("live");
+    await opened(backend, query({ namespaces: [...first] }), false);
+    const [batch] = await opened(
+      backend,
+      query({ namespaces: [...second] }),
+      false,
+    );
+    return [batch?.status.state, batch?.columns?.length === 0];
+  };
+  expect(await states([], ["payments"])).toEqual(["ready", false]);
+  expect(await states(["payments"], ["payments"])).toEqual(["ready", false]);
+  expect(await states(["payments"], ["ledger"])).toEqual(["connecting", true]);
+  expect(await states(["payments"], [])).toEqual(["connecting", true]);
+});
+
+test("a list sorted by CPU whose first window says it reads has its first rows in CPU order with their values, cold too, and one whose window does not has them in name order with dashes", async () => {
+  const sorted = query({
+    namespaces: ["payments"],
+    sort: { column: "CPU", descending: true },
+  });
+  const firstRows = async (metrics: boolean) => {
+    const backend = createMockBackend("live");
+    await opened(backend, query({ namespaces: ["ledger"] }), false);
+    const batches = await opened(backend, sorted, metrics);
+    const columns = batches.find((batch) => batch.columns?.length)?.columns;
+    const rows = batches.find((batch) => batch.upserts.length > 0);
+    const at = (name: string) =>
+      columns?.findIndex((column) => column.name === name) ?? -1;
+    return {
+      status: batches[0]?.status.state,
+      names: rows?.upserts.map((row) => String(row.cells[at("Name")])) ?? [],
+      cpu: rows?.upserts.map((row) => row.cells[at("CPU")] ?? null) ?? [],
+    };
+  };
+  const reading = await firstRows(true);
+  expect(reading.status).toBe("connecting");
+  expect(reading.cpu.length).toBeGreaterThan(1);
+  const values = reading.cpu.filter(
+    (cell): cell is number => typeof cell === "number",
+  );
+  expect(values.length).toBeGreaterThan(1);
+  expect(values).toEqual([...values].sort((a, b) => b - a));
+  expect(reading.cpu.slice(0, values.length)).toEqual(values);
+
+  const idle = await firstRows(false);
+  expect(idle.cpu.every((cell) => cell === null)).toBe(true);
+  expect(idle.names).toEqual([...idle.names].sort(natural));
+});
+
 test("a list of a context that serves no Metrics API has no columns before its kind has synced, as after", async () => {
   const backend = createMockBackend("metricsNone");
   const batches: ListBatch[] = [];
