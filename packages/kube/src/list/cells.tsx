@@ -5,6 +5,7 @@ import { ageRole } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
+import { isTabular } from "../tabular";
 import { useNow } from "../useNow";
 import { measureText } from "./metrics";
 
@@ -87,12 +88,14 @@ export function CellView({
       );
     case "restarts":
       return <Restarts text={text} />;
-    case "text":
-      return rule.quiet || rule.identifier ? (
+    case "text": {
+      const tabular = !rule.figures && isTabular(text);
+      return rule.quiet || rule.identifier || tabular ? (
         <span
           className={cn(
             rule.quiet && "text-support",
             rule.identifier && "ident",
+            tabular && "tabular-nums",
           )}
         >
           {text}
@@ -100,6 +103,7 @@ export function CellView({
       ) : (
         text
       );
+    }
   }
 }
 

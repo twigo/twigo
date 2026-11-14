@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TreeNode } from "@twigo/protocol";
 import { Chip, PropertyList } from "@twigo/ui";
-import { isFigures } from "./numeric";
+import { isFigures } from "../tabular";
 
 /**
  * A part of an object as a property grid: its plain fields as rows, then

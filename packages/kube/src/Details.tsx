@@ -25,6 +25,7 @@ import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
+import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
 import { useNow } from "./useNow";
 import { useVisible } from "./useVisible";
@@ -347,19 +348,20 @@ function Cells({
       className={cn("p-3 text-body", LABEL_COLUMN)}
       items={columns.map((column, index) => {
         const { cell, figures } = columnRule(gvr, column);
+        const value =
+          cell === "age"
+            ? row.created
+              ? humanDuration(now - Date.parse(row.created))
+              : ""
+            : cell === "cpu" || cell === "memory"
+              ? (measureText(cell, row.cells[index] ?? null) ?? "–")
+              : String(row.cells[index] ?? "");
         return {
           key: column.name,
           label: column.name,
           title: column.name,
-          numeric: figures,
-          value:
-            cell === "age"
-              ? row.created
-                ? humanDuration(now - Date.parse(row.created))
-                : ""
-              : cell === "cpu" || cell === "memory"
-                ? (measureText(cell, row.cells[index] ?? null) ?? "–")
-                : String(row.cells[index] ?? ""),
+          numeric: figures || isTabular(value),
+          value,
         };
       })}
     />

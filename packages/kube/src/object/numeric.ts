@@ -1,14 +1,5 @@
 import type { Value } from "@twigo/protocol";
-
-const NUMBER = String.raw`\d+(?:\.\d+)?`;
-const FIGURES = new RegExp(
-  String.raw`^(?:${NUMBER} ?[A-Za-z]{0,2}(?: \(${NUMBER}%\))?|\d+/\d+)$`,
-);
-
-/** Whether text is a count, a quantity with or without its share (`970m (6%)`), or a ratio (`2/2`). */
-export function isFigures(text: string): boolean {
-  return FIGURES.test(text);
-}
+import { isFigures } from "../tabular";
 
 /** Whether a value is figures: a time, which is an age, or text that `isFigures`. */
 export function isNumeric(value: Value): boolean {
