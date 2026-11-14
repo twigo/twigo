@@ -1,12 +1,13 @@
 import type { Value } from "@twigo/protocol";
 import { isFigures } from "../tabular";
 
-/** Whether a value is figures: a time, which is an age, or text that `isFigures`. */
+/** Whether a value is figures: a time, which is an age, or text, toned or not, that `isFigures`. */
 export function isNumeric(value: Value): boolean {
   switch (value.type) {
     case "time":
       return true;
     case "text":
+    case "toned":
       return isFigures(value.text);
     case "list":
       return value.items.length > 0 && value.items.every(isNumeric);
