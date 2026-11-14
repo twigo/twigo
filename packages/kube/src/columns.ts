@@ -3,7 +3,7 @@ import type { Tone } from "@twigo/ui";
 
 /** How a cell draws its text (ARCHITECTURE 4.4). */
 export type CellKind =
-  /** An object's name, its generated part quieter. */
+  /** An object's name: what precedes its generated part, the hash, and the last segment. */
   | "name"
   /** A state: a dot in its tone, and the text coloured when abnormal. */
   | "status"
