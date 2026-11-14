@@ -32,18 +32,33 @@ export function outlineOf(text: string): readonly Entry[] {
       ...READING,
       lineCounter: lines,
     });
-    return entriesOf(document?.contents ?? null, lines);
+    return entriesOf(document?.contents ?? null, text, lines);
   } catch {
     // Text that nests past the stack has no outline.
     return [];
   }
 }
 
-function entriesOf(node: ParsedNode | null, lines: LineCounter): Entry[] {
-  const span = (start: number, end: number) => ({
-    from: lines.linePos(start).line,
-    to: lines.linePos(Math.max(start, end - 1)).line,
-  });
+function entriesOf(
+  node: ParsedNode | null,
+  text: string,
+  lines: LineCounter,
+): Entry[] {
+  const column = (offset: number) => lines.linePos(offset).col - 1;
+  const span = (start: number, nodeEnd: number, reach: number) => {
+    let end = nodeEnd;
+    for (;;) {
+      while (end > start && /\s/.test(text.charAt(end - 1))) end--;
+      const first = text.lastIndexOf("\n", end - 1) + 1;
+      const indent = /^( *)#/.exec(text.slice(first, end))?.[1]?.length;
+      if (indent === undefined || indent >= reach || first <= start) break;
+      end = first;
+    }
+    return {
+      from: lines.linePos(start).line,
+      to: lines.linePos(Math.max(start, end - 1)).line,
+    };
+  };
   if (isMap(node) && !node.flow) {
     return node.items.flatMap(({ key, value }) => {
       if (!isScalar(key)) return [];
@@ -51,9 +66,9 @@ function entriesOf(node: ParsedNode | null, lines: LineCounter): Entry[] {
       return [
         {
           label: key.source,
-          ...span(start, value ? value.range[1] : end),
+          ...span(start, value ? value.range[2] : end, column(start) + 1),
           key: [start, end] as const,
-          entries: entriesOf(value, lines),
+          entries: entriesOf(value, text, lines),
         },
       ];
     });
@@ -61,8 +76,8 @@ function entriesOf(node: ParsedNode | null, lines: LineCounter): Entry[] {
   if (isSeq(node) && !node.flow) {
     return node.items.map((item, index) => ({
       label: `[${String(index)}]`,
-      ...span(item.range[0], item.range[1]),
-      entries: entriesOf(item, lines),
+      ...span(item.range[0], item.range[2], column(item.range[0])),
+      entries: entriesOf(item, text, lines),
     }));
   }
   return [];
@@ -90,8 +105,8 @@ export function landmarksOf(outline: readonly Entry[]): {
  * The keys from the root to the line, in the order they are met: the keys of
  * the maps and, joined to the key they belong to, the items of the sequences,
  * as `containers[0]`. A line that no entry covers, a blank one between two
- * top-level keys or one past the end, has no path; a comment inside a block
- * has the path of the block.
+ * top-level keys or one past the end, has no path; a comment inside a block or
+ * at its end has the path of the block.
  */
 export function pathAt(outline: readonly Entry[], line: number): string[] {
   const covers = ({ from, to }: Entry) => from <= line && line <= to;

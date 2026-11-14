@@ -175,3 +175,46 @@ test("a key shows as written, not as the editor's YAML 1.1 reading parses it", (
     ["it's"],
   ]);
 });
+
+test("a comment at the end of a block has the path of the block, and a blank line after it none between top-level keys", () => {
+  const text = "spec:\n  a: 1\n  # about a\n\nstatus:\n  b: 2\n";
+  expect(at(text, 3)).toEqual(["spec"]);
+  expect(at(text, 4)).toEqual([]);
+  expect(at(text, 5)).toEqual(["status"]);
+});
+
+test("a comment at the end of a list item has the path of the item", () => {
+  const text =
+    "spec:\n  containers:\n    - name: a\n      # about a\n  other: 1\n";
+  expect(at(text, 4)).toEqual(["spec", "containers[0]"]);
+  expect(at(text, 5)).toEqual(["spec", "other"]);
+});
+
+test("a comment at the end of a nested map has the path of that map", () => {
+  const text = "spec:\n  template:\n    a: 1\n    # about a\n  b: 2\n";
+  expect(at(text, 4)).toEqual(["spec", "template"]);
+  expect(at(text, 5)).toEqual(["spec", "b"]);
+});
+
+test("a comment at the end of a block, indented no deeper than the block's own key or item, is on the path of the block around it", () => {
+  const text = [
+    "spec:",
+    "  template:",
+    "    spec:",
+    "      containers:",
+    "        - name: web",
+    "          image: web:1",
+    "          # about the image",
+    "      # end of containers",
+    "  # end of template",
+    "status:",
+    "  a: 1",
+    "",
+  ].join("\n");
+  expect(at(text, 7)).toEqual(["spec", "template", "spec", "containers[0]"]);
+  expect(at(text, 8)).toEqual(["spec", "template", "spec"]);
+  expect(at(text, 9)).toEqual(["spec"]);
+  expect(
+    at("spec:\n  containers:\n    - name: a\n    # - name: b\n  other: 1\n", 4),
+  ).toEqual(["spec", "containers"]);
+});
