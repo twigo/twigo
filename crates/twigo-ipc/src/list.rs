@@ -139,10 +139,12 @@ pub struct ListBatch {
     pub groups: Option<Vec<RowGroup>>,
     /// For a list with metric columns: whether their samples arrive,
     /// present once a scope has answered or failed, and whenever it
-    /// changes. A list says none before that, so its first batch with the
-    /// columns has none unless the API is stale, which says `unavailable`
-    /// with them, and it keeps the one it said while its scopes are asked
-    /// again.
+    /// changes. Before a scope has answered, a list says the failure its
+    /// last request ended in, if the core remembers one, so its first batch
+    /// with the columns has it, and the first answers correct it; with none
+    /// remembered it says none, but for a stale API, which says
+    /// `unavailable` with the columns. It keeps the state it said while its
+    /// scopes are asked again.
     pub metrics: Option<MetricsState>,
 }
 
@@ -152,7 +154,8 @@ pub struct ListBatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum MetricsState {
-    /// It answers; a row without a sample has none yet.
+    /// It answers, and a row without a sample has none yet; also what a
+    /// `waiting` usage says before any answer came.
     Ready,
     /// Served and not answering, as while metrics-server is down.
     Unavailable,

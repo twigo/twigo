@@ -774,10 +774,12 @@ groups: Array<RowGroup> | null,
 /**
  * For a list with metric columns: whether their samples arrive,
  * present once a scope has answered or failed, and whenever it
- * changes. A list says none before that, so its first batch with the
- * columns has none unless the API is stale, which says `unavailable`
- * with them, and it keeps the one it said while its scopes are asked
- * again.
+ * changes. Before a scope has answered, a list says the failure its
+ * last request ended in, if the core remembers one, so its first batch
+ * with the columns has it, and the first answers correct it; with none
+ * remembered it says none, but for a stale API, which says
+ * `unavailable` with the columns. It keeps the state it said while its
+ * scopes are asked again.
  */
 metrics: MetricsState | null, };
 
@@ -1119,11 +1121,14 @@ related: Related | null,
 /**
  * Present when it changed, while the usage part is shown, for a pod
  * or a node of a context that serves the Metrics API: in the batch that
- * brings the object, or in the next one when the part is asked for
- * later. Until the scope that serves the object has answered or failed
- * once it is `waiting`, or `unavailable` where the API is stale; after
- * that a `ready` usage whose `used` is null says that an answer came
- * without the object.
+ * brings the object once the context's discovery is known, else in a
+ * later one, which the usual order of events, resources first, makes
+ * rare; and in the next one when the part is asked for later. Until the
+ * scope that serves the object has answered once it is `waiting`, or
+ * says the failure its last request ended in, or `unavailable` where the
+ * API is stale; after that a `ready` usage whose `used` is null says
+ * that an answer came without the object. An object that had an answer
+ * keeps its figures while the request that serves it is asked anew.
  */
 usage: Usage | null, };
 
@@ -1668,7 +1673,9 @@ export type Usage = { state: MetricsState,
  * in the order the answer lists them and with their requests and
  * limits, so the webview draws the section at its height at once.
  * False for a stale API, which says `unavailable` at once since
- * discovery knows it without a request.
+ * discovery knows it without a request, and for a scope whose last
+ * request failed, which says that failure at once and is asked all the
+ * same.
  */
 waiting: boolean, 
 /**
