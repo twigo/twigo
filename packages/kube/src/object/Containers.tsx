@@ -107,8 +107,14 @@ function ContainerCard({
       </code>
       {fields.length > 0 && <Fields fields={fields} onOpen={onOpen} />}
       <Folded title="Details" fields={details} fold={fold} onOpen={onOpen} />
-      <Folded title="Environment" fields={env} fold={fold} onOpen={onOpen} />
-      <Folded title="Mounts" fields={mounts} fold={fold} onOpen={onOpen} />
+      <Folded
+        title="Environment"
+        fields={env}
+        fold={fold}
+        onOpen={onOpen}
+        cut
+      />
+      <Folded title="Mounts" fields={mounts} fold={fold} onOpen={onOpen} cut />
     </Card>
   );
 }
@@ -117,13 +123,16 @@ function Fields({
   fields,
   onOpen,
   mono = false,
+  cut = false,
 }: {
   fields: readonly Field[];
   onOpen: (target: ObjectRef) => void;
   mono?: boolean;
+  cut?: boolean;
 }) {
   return (
     <PropertyList
+      cut={cut}
       items={fields.map((field, index) => ({
         key: `${index}/${field.label}`,
         label: mono ? (
@@ -131,7 +140,7 @@ function Fields({
         ) : (
           field.label
         ),
-        title: field.label,
+        ...(cut && { title: field.label }),
         numeric: isNumeric(field.value),
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
@@ -139,17 +148,19 @@ function Fields({
   );
 }
 
-/** A container's variables or mounts, by name, folded until opened. */
+/** A container's details, variables or mounts, folded until opened; `cut` for the keys and paths of variables and mounts. */
 function Folded({
   title,
   fields,
   fold,
   onOpen,
+  cut = false,
 }: {
   title: string;
   fields: readonly Field[];
   fold: Fold;
   onOpen: (target: ObjectRef) => void;
+  cut?: boolean;
 }) {
   if (fields.length === 0) return null;
   const { open, onToggle } = fold(title);
@@ -160,7 +171,7 @@ function Folded({
       open={open}
       onToggle={onToggle}
     >
-      <Fields fields={fields} onOpen={onOpen} mono />
+      <Fields fields={fields} onOpen={onOpen} mono cut={cut} />
     </Section>
   );
 }
