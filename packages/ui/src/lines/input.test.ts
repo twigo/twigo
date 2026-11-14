@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { moveOf, pageOf, wheelDeltas } from "./input";
+import { moveOf, pageOf, ROW, wheelDeltas } from "./input";
 
 const chord = (
   key: string,
@@ -43,8 +43,8 @@ test.each([
 });
 
 test.each([
-  [600, 600 - 2 * 19],
-  [400, 400 - 2 * 19],
+  [600, 600 - 2 * ROW],
+  [400, 400 - 2 * ROW],
   [90, 78],
   [50, 43],
   [30, 26],
@@ -65,7 +65,7 @@ const wheel = (init: Partial<WheelEventInit>) => ({
   ...init,
 });
 
-const PAGE = 600 - 2 * 19;
+const PAGE = 600 - 2 * ROW;
 
 test.each([
   [
@@ -78,7 +78,7 @@ test.each([
     "of lines scrolls a row each",
     wheel({ deltaY: 3, deltaMode: WheelEvent.DOM_DELTA_LINE }),
     false,
-    { dx: 0, dy: 3 * 19 },
+    { dx: 0, dy: 3 * ROW },
   ],
   [
     "of pages scrolls a page of the list's height each",
@@ -90,7 +90,7 @@ test.each([
     "of lines sideways scrolls a row each",
     wheel({ deltaX: 2, deltaMode: WheelEvent.DOM_DELTA_LINE }),
     false,
-    { dx: 2 * 19, dy: 0 },
+    { dx: 2 * ROW, dy: 0 },
   ],
   [
     "of pages sideways scrolls a page of the list's width each",

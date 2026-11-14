@@ -1,5 +1,5 @@
 /** A line's height in px, which a line of a wheel's delta and a page's overlap count in. */
-export const ROW = 19;
+export const ROW = 20;
 
 /** Where a key sends the list: a page up or down, or an edge. */
 export type Move = "up" | "down" | "first" | "last";

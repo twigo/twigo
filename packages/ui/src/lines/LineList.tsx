@@ -555,7 +555,7 @@ export function LineList({
           event.preventDefault();
           move(event.currentTarget, to);
         }}
-        className="h-full overflow-auto py-1 font-mono text-xs leading-[19px] outline-none [overflow-anchor:none] focus-visible:shadow-[inset_var(--focus-ring)]"
+        className="h-full overflow-auto py-1 font-mono text-prose outline-none [overflow-anchor:none] focus-visible:shadow-[inset_var(--focus-ring)]"
       >
         <div
           className={cn("relative", !wrap && "w-max min-w-full")}
@@ -650,7 +650,10 @@ function Line({
 function Marker({ item }: { item: MarkerLine }) {
   const Icon = item.icon;
   return (
-    <div className="flex h-[19px] items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-support">
+    <div
+      style={{ height: ROW }}
+      className="flex items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-support"
+    >
       <Icon
         aria-hidden
         className={cn(
