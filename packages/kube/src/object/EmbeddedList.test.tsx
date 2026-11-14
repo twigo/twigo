@@ -21,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -160,6 +161,59 @@ test("a node's pods show CPU and Memory and read them while the document is visi
   expect(reads(invoke)).toBe(false);
   hidden.mockRestore();
 });
+
+function windows(invoke: { mock: { calls: unknown[][] } }): boolean[] {
+  return invoke.mock.calls
+    .filter(([command]) => command === "list_set_window")
+    .map(([, request]) => (request as RequestOf<"list_set_window">).metrics)
+    .filter((metrics, at, all) => at === 0 || metrics !== all[at - 1]);
+}
+
+function measuredLate(width: number, after: number) {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly report: ResizeObserverCallback) {}
+      observe(target: Element) {
+        setTimeout(() => {
+          this.report(
+            [
+              {
+                target,
+                contentRect: new DOMRectReadOnly(0, 0, width, 600),
+              } as ResizeObserverEntry,
+            ],
+            this,
+          );
+        }, after);
+      }
+      unobserve() {
+        return undefined;
+      }
+      disconnect() {
+        return undefined;
+      }
+    },
+  );
+}
+
+test.each([
+  ["wide", 1000, [true]],
+  ["narrow", 400, [true, false]],
+])(
+  "a node's pods sorted by CPU say they read from their first window, before their width is known, and a %s one goes on by it",
+  async (_, width, said) => {
+    measuredLate(width, 500);
+    const backend = createMockBackend("ready");
+    const invoke = vi.spyOn(backend, "invoke");
+    const states = new OverviewStates();
+    states.setSort("/nodes", "core.pods", { column: "CPU", descending: true });
+    await shown(NODE_PODS, vi.fn(), states, backend);
+    expect(windows(invoke)).toEqual([true]);
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(windows(invoke)).toEqual(said);
+  },
+);
 
 test("a node's pods read nothing while their editor is not shown", async () => {
   const backend = createMockBackend("ready");

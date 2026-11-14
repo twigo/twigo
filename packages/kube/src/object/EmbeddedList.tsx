@@ -98,7 +98,9 @@ export function EmbeddedList({
   );
   const visible = useVisible();
   const [element, setElement] = useState<HTMLElement | null>(null);
-  const narrow = useWidth(element) < WIDE;
+  // 0 until the first measure, which comes after the first window.
+  const width = useWidth(element);
+  const narrow = width > 0 && width < WIDE;
   const every = snapshot.columns.map((column, index) => ({
     name: column.name,
     index,
