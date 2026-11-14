@@ -1,7 +1,7 @@
 # Twigo architecture
 
 Twigo is an open-source desktop IDE for Kubernetes: native, fast and keyboard-first.
-It aims to match Lens feature for feature without its login wall, its weight or its slowness on large clusters.
+It aims to show the person who runs many clusters what is wrong, why, and what changed, from the keyboard, with every change guarded (D13).
 This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it wherever they measured otherwise.
 
 - Status: M0 in progress, steps 1 to 5 done, steps 6 and 7 in review, 2026-11-01
@@ -26,6 +26,16 @@ This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it
 | D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                                                      | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
 | D11 | Extension manifests are `extension.json`, checked against a published JSON Schema.                                                                                                                                                                           | Validation and completion in any editor. Section 5.4.                                                                                        |
 | D12 | Kubernetes 1.33 and later. 1.32 left upstream support on 2026-02-28 and will be out of date by the time Twigo ships; older releases come back only if users ask.                                                                                             | The test matrix runs from 1.33 to the newest release kind ships. Section 3.2.                                                                |
+
+Decisions taken with the owner on 2026-11-14, after the [strategic review](reviews/2026-11-fable-strategic-review.md):
+
+| #   | Decision                                                                                                                                                                                                          | Consequence                                                                                                                                                                                                              |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D13 | Twigo is not presented as an open Lens. It is for the person who runs many clusters and has to find what is wrong, why, and what changed, from the keyboard, with every change guarded.                           | The first lines of this document say so. "Performance is the product" stays an engineering principle (0.2).                                                                                                              |
+| D14 | The extension runtime (D3, D4, D11) moves to the end of the roadmap. D3 and D4 stand.                                                                                                                             | M3 and the first beta ship without extensions. Until then a provider's clusters come through the kubeconfig and its exec plugin. Sections 5.3, 7.1, 7.2 and 7.4.                                                         |
+| D15 | Agents read and propose, and the person applies. This is tried first and may change.                                                                                                                              | The MCP server gets no tool that writes, execs or forwards, and the grant `read + approved writes` of 6.6 is not built until this is revisited. The approval broker for child processes (6.4) is unchanged. Section 7.2. |
+| D16 | At the first write to a context nobody marked, Twigo asks once what the context is. Protection is lowered only by a confirmed command that the audit log records; a kubeconfig or a provider can only tighten it. | The `read-write` default for an unmarked context and the order of mode sources in 6.4 change with the code that builds this.                                                                                             |
+| D17 | macOS builds are signed with the maintainer's personal Apple Developer membership, not a company's.                                                                                                               | Section 6.7 and the release work.                                                                                                                                                                                        |
 
 ### 0.2 Principles
 
@@ -1532,12 +1542,12 @@ Four tiers.
 An extension uses only the tiers it needs.
 Every tier is declared in the manifest and granted at install time.
 
-| Tier                   | What                                                                                                                                         | Isolation                                                                                                                                                                                                      | Ships         |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| **0: manifest**        | Contributions as data: commands, menus, keybindings, settings schema, themes, keymaps, CRD schemas and snippets, declarative views and forms | Nothing executes.                                                                                                                                                                                              | MVP (private) |
-| **1: WASM component**  | Logic: cluster and credential providers, command handlers, data providers for trees and tables, form submit handlers, resource actions       | wasmtime, one store per extension. No ambient authority. Fuel or epoch limits for CPU and a `ResourceLimiter` for memory. Every import is checked against grants.                                              | MVP (private) |
-| **2: sandboxed frame** | Views that cannot be declared (charts, wizards with custom widgets)                                                                          | `<iframe sandbox="allow-scripts">` (no `allow-same-origin`) served from `twigo-ext://<id>/` with a deny-by-default CSP. postMessage only to the host frame, which relays to that extension's tier-1 component. | v1.x          |
-| **3: native process**  | k9s-style actions (shell, kubectl), MCP or LSP servers, helpers that must be native                                                          | None beyond the user's rights: shown as such and started only after explicit consent. Binaries are declared per OS with URL and SHA-256. Their cluster access goes through the policy proxy (6.4).             | v1.x          |
+| Tier                   | What                                                                                                                                         | Isolation                                                                                                                                                                                                      | Ships                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **0: manifest**        | Contributions as data: commands, menus, keybindings, settings schema, themes, keymaps, CRD schemas and snippets, declarative views and forms | Nothing executes.                                                                                                                                                                                              | Last in 7.2 (D14), private at first |
+| **1: WASM component**  | Logic: cluster and credential providers, command handlers, data providers for trees and tables, form submit handlers, resource actions       | wasmtime, one store per extension. No ambient authority. Fuel or epoch limits for CPU and a `ResourceLimiter` for memory. Every import is checked against grants.                                              | Last in 7.2 (D14), private at first |
+| **2: sandboxed frame** | Views that cannot be declared (charts, wizards with custom widgets)                                                                          | `<iframe sandbox="allow-scripts">` (no `allow-same-origin`) served from `twigo-ext://<id>/` with a deny-by-default CSP. postMessage only to the host frame, which relays to that extension's tier-1 component. | After tiers 0 and 1                 |
+| **3: native process**  | k9s-style actions (shell, kubectl), MCP or LSP servers, helpers that must be native                                                          | None beyond the user's rights: shown as such and started only after explicit consent. Binaries are declared per OS with URL and SHA-256. Their cluster access goes through the policy proxy (6.4).             | After tiers 0 and 1                 |
 
 Why WASM in the core rather than a Node host or a worker in the webview:
 
@@ -2171,7 +2181,6 @@ Their plans read the objects and what the garbage collector takes with them (eve
 | Workbench     | Parts, spaces, quick access with every prefix, command/menu/context-key/keybinding services, keybindings editor, settings UI with layers and policy, notifications, light and dark themes                                                                                                               |
 | Metrics, Helm | metrics-server CPU and memory in tables and the node/pod overview; Helm releases **read-only** (list, values, manifest, history, notes), decoded natively from release Secrets; values and Secret objects in manifests are secret-grade (3.6)                                                           |
 | AI            | MCP server with read-only tools, grants, redaction, audit                                                                                                                                                                                                                                               |
-| Extensions    | Tiers 0 and 1, the WIT API at `0.x` (unstable; release builds load allowlisted IDs only), cluster providers, the fixture extension. Private: the Segla extension is the first consumer; there is no public registry yet                                                                                 |
 | Release       | Auto-update, signing, notarization, the performance budgets checked in CI                                                                                                                                                                                                                               |
 
 ### 7.2 Later (rough order)
@@ -2180,17 +2189,20 @@ Their plans read the objects and what the garbage collector takes with them (eve
 2. **More resources and sessions:**
    - multi-context spaces with merged tables;
    - Helm upgrade, rollback, uninstall and install through the `helm` CLI and the policy proxy;
-   - approved writes over MCP, and the MCP gateway for remote servers that extensions contribute.
-3. **The public extension API:** the WIT freezes at `1.0`, plus the registry, tier 2 frames, tier 3 processes (including actions) and the k9s `plugins.yaml` importer.
-4. **The agent panel over ACP.**
-5. **Deeper views:**
+   - changes that an agent proposes over MCP and the person applies (D15).
+3. **The agent panel over ACP.**
+4. **Deeper views:**
    - Prometheus charts with auto-detection;
    - RBAC "who can" and effective permissions;
    - a resource graph;
    - Gateway API views;
    - node shell and debug containers.
-6. **Built-in extensions:** Flux, Argo CD, cert-manager, and NATS (D1).
-7. **Windows and access:** detached editor windows; hosts-file aliases for port-forwards (needs a privileged helper); Cluster Inventory `ClusterProfile`; MDM policy; accessibility audit.
+5. **Windows and access:** detached editor windows; hosts-file aliases for port-forwards (needs a privileged helper); Cluster Inventory `ClusterProfile`; MDM policy; accessibility audit.
+6. **Extensions** (D3, D4), last by D14:
+   - tiers 0 and 1, the WIT API at `0.x` (unstable; release builds load allowlisted IDs only), cluster providers and the fixture extension; private at first, with the Segla extension as the first consumer and no public registry yet;
+   - the public extension API: the WIT freezes at `1.0`, plus the registry, tier 2 frames, tier 3 processes (including actions) and the k9s `plugins.yaml` importer;
+   - built-in extensions: Flux, Argo CD, cert-manager, and NATS (D1);
+   - the MCP gateway for remote servers that extensions contribute.
 
 ### 7.3 Key risks
 
@@ -2221,7 +2233,7 @@ Their plans read the objects and what the garbage collector takes with them (eve
 - **M2, write path and sessions.**
   Policy and the policy proxy, the dry-run diff and apply, actions, exec, port-forward, terminal, metrics, Helm read.
 - **M3, MVP beta.**
-  MCP server, extension tiers 0 and 1 with the Segla extension, settings UI, keybindings editor, auto-update, signing, documentation.
+  MCP server, settings UI, keybindings editor, auto-update, signing, documentation.
 
 ## Appendix: references
 
