@@ -174,8 +174,11 @@ export function Details({
       <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2.5 pr-2 pb-2 pl-3.5">
         <div className="flex items-center gap-1.5">
           <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
-            <Name name={name} generated={row.generated} />
+          <h2 className="flex min-w-0 flex-1 items-baseline gap-1.5 text-title font-semibold text-strong">
+            <span className="shrink-0 text-xs text-support">{kind}</span>{" "}
+            <span className="min-w-0 truncate">
+              <Name name={name} generated={row.generated} />
+            </span>
           </h2>
           <IconButton
             icon={Copy}
