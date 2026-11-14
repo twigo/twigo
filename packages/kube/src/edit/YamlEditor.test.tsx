@@ -9,10 +9,22 @@ interface FakeModel {
   value: string;
   disposed: boolean;
   readonly uri: string;
+  edit(text: string): void;
+}
+
+interface Decoration {
+  readonly range: {
+    readonly startLineNumber: number;
+    readonly startColumn: number;
+    readonly endLineNumber: number;
+    readonly endColumn: number;
+  };
+  readonly options: { readonly inlineClassName: string };
 }
 
 interface FakeView {
   readonly model: FakeModel;
+  readonly decorations: Decoration[][];
   cursor: number;
   line: number;
   moved: (() => void) | undefined;
@@ -49,22 +61,39 @@ vi.mock("./monaco", () => {
           value,
           disposed: false,
           uri,
+          version: 1,
+          listeners: new Set<() => void>(),
           getValue() {
             return this.value;
           },
-          setValue(next: string) {
+          edit(next: string) {
             this.value = next;
+            this.version++;
+            for (const listener of [...this.listeners]) listener();
+          },
+          setValue(next: string) {
+            this.edit(next);
             for (const view of fake.views) {
               if (view.model === this) view.cursor = 0;
             }
           },
-          getVersionId: () => 1,
-          getPositionAt: (offset: number) => ({
-            lineNumber: 1,
-            column: offset + 1,
-          }),
-          getLineMaxColumn: () => 1,
-          onDidChangeContent: dispose,
+          getVersionId() {
+            return this.version;
+          },
+          getPositionAt(offset: number) {
+            const before = this.value.slice(0, offset).split("\n");
+            return {
+              lineNumber: before.length,
+              column: (before[before.length - 1]?.length ?? 0) + 1,
+            };
+          },
+          getLineMaxColumn(line: number) {
+            return (this.value.split("\n")[line - 1]?.length ?? 0) + 1;
+          },
+          onDidChangeContent(listener: () => void) {
+            this.listeners.add(listener);
+            return { dispose: () => this.listeners.delete(listener) };
+          },
           dispose() {
             this.disposed = true;
           },
@@ -97,8 +126,14 @@ vi.mock("./monaco", () => {
           dispose() {
             this.disposed = true;
           },
+          decorations: [] as Decoration[][],
           updateOptions: () => undefined,
-          createDecorationsCollection: () => ({ set: () => undefined }),
+          createDecorationsCollection(initial: Decoration[]) {
+            this.decorations.push(initial);
+            return {
+              set: (next: Decoration[]) => this.decorations.push(next),
+            };
+          },
           getPosition() {
             return { lineNumber: this.line, column: 1 };
           },
@@ -244,4 +279,46 @@ test("the path to the cursor's line shows above the editor and follows the curso
   expect(shown()).toBe("c");
   moveTo(9);
   expect(shown()).toBe("");
+});
+
+test("the decorations and the path follow an edit", () => {
+  const before = "kind: Pod\nmetadata:\n  name: web\n";
+  const after = `${before}  managedFields:\n    - manager: kubectl\nspec:\n  a: 1\n`;
+  const { container } = render(<YamlEditor uri="details:2" text={before} />);
+  const [model] = fake.models;
+  const [view] = fake.views;
+  if (!model || !view) throw new Error("no editor was made");
+  const landmarks = () =>
+    view.decorations[view.decorations.length - 1]?.map(
+      ({ range: r, options }) => [
+        options.inlineClassName,
+        r.startLineNumber,
+        r.startColumn,
+        r.endLineNumber,
+        r.endColumn,
+      ],
+    );
+  const shown = () => container.querySelector("[title]")?.getAttribute("title");
+
+  expect(landmarks()).toEqual([
+    ["twigo-yaml-top-key", 1, 1, 1, 5],
+    ["twigo-yaml-top-key", 2, 1, 2, 9],
+  ]);
+  act(() => {
+    view.line = 7;
+    view.moved?.();
+  });
+  expect(shown()).toBe("");
+
+  act(() => {
+    model.edit(after);
+  });
+
+  expect(landmarks()).toEqual([
+    ["twigo-yaml-top-key", 1, 1, 1, 5],
+    ["twigo-yaml-top-key", 2, 1, 2, 9],
+    ["twigo-yaml-top-key", 6, 1, 6, 5],
+    ["twigo-yaml-support", 4, 1, 5, 23],
+  ]);
+  expect(shown()).toBe("spec › a");
 });
