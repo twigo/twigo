@@ -723,6 +723,67 @@ async fn a_cluster_request_that_answered_and_then_fails_takes_no_figures_from_a_
     drop(cluster);
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_answer_between_the_check_and_the_drain_does_not_make_a_remembered_refusal_wait() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_of("a", "web-0"));
+    fake.put("", "pods", Some("a"), pod_of("a", "web-1"));
+    fake.state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
+    let mut rig = Rig::new(fake).await;
+    let first = rig.open_object(Kind::Pods, Some("a"), "web-0", PARTS);
+    rig.watch(&first, Duration::from_secs(10)).await;
+    drop(first);
+    sleep(Duration::from_millis(100)).await;
+
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let subscription = rig
+        .hub
+        .object(
+            "kind-test",
+            Resource {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "pods".to_owned(),
+                namespaced: true,
+            },
+            Some("a".to_owned()),
+            "web-1",
+        )
+        .unwrap();
+    let object = loop {
+        if let Delta::Reset { rows, .. } = subscription.drain()
+            && let Some(row) = rows.into_iter().next()
+        {
+            break row;
+        }
+        sleep(Duration::from_millis(10)).await;
+    };
+    let json: serde_json::Value = serde_json::from_str(object.json.get()).unwrap();
+    let mut reader = rig.context.reader(Kind::Pods);
+    let mut used = Used::new();
+    used.read(&mut reader, Some(&object), true);
+    let remembered = used.said(Kind::Pods, &json);
+    assert_eq!(
+        (remembered.state, remembered.waiting),
+        (MetricsState::Forbidden, false),
+        "the refusal of its namespace, before its request answers"
+    );
+
+    sleep(Duration::from_secs(4)).await;
+    used.read_from(&mut reader, Some(&object), true, |reader| {
+        let (_, update) = reader.read();
+        (false, update)
+    });
+    let answered = used.said(Kind::Pods, &json);
+    assert_eq!(
+        (answered.state, answered.waiting),
+        (MetricsState::Forbidden, false),
+        "an answer in the update that the check did not count"
+    );
+}
+
 fn with_overview(batches: &[ObjectBatch]) -> &ObjectBatch {
     batches
         .iter()

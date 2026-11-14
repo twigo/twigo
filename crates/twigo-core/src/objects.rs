@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
-use twigo_cache::metrics::{Kind, Opening, Reader, Sample, Scope};
+use twigo_cache::metrics::{Kind, Opening, Reader, Sample, Scope, Update};
 use twigo_cache::object::Object;
 use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
@@ -187,8 +187,34 @@ struct Used {
 }
 
 impl Used {
+    fn new() -> Self {
+        Self {
+            sample: None,
+            uid: None,
+            state: MetricsState::Ready,
+            served: false,
+            answered: false,
+            api: false,
+            stale: false,
+            remembered: None,
+            offered: false,
+        }
+    }
+
     /// Whether anything the batch carries changed.
     fn read(&mut self, reader: &mut Reader, object: Option<&Object>, shown: bool) -> bool {
+        self.read_from(reader, object, shown, Reader::read)
+    }
+
+    /// `read` is how the board is read once the reader's scopes are set, which a test replaces
+    /// to put an answer between the check and the drain.
+    fn read_from(
+        &mut self,
+        reader: &mut Reader,
+        object: Option<&Object>,
+        shown: bool,
+        read: impl FnOnce(&Reader) -> (bool, Update),
+    ) -> bool {
         let kind = reader.kind();
         let api = reader.api();
         let serves = api.columns(kind);
@@ -209,9 +235,11 @@ impl Used {
         };
         let reading = !wants.is_empty();
         reader.want(wants);
-        let (settled, update) = reader.read();
+        let (settled, update) = read(reader);
         let uid = object.and_then(|object| object.meta.uid.clone());
-        let answered = (served && self.answered && uid == self.uid) || (reading && settled);
+        // An answer that lands between the check and the drain is in the update, not in `settled`.
+        let answered = (served && self.answered && uid == self.uid)
+            || (reading && (settled || update.state.is_some()));
         let mut sample = self.sample.clone().filter(|_| uid == self.uid);
         if let Some((namespace, name)) = &key {
             for reset in &update.resets {
@@ -306,17 +334,7 @@ async fn run(
     let mut related = Related::default();
     let mut facts: Vec<Fact> = Vec::new();
     let mut last_lines = LastLines::new();
-    let mut used = Used {
-        sample: None,
-        uid: None,
-        state: MetricsState::Ready,
-        served: false,
-        answered: false,
-        api: false,
-        stale: false,
-        remembered: None,
-        offered: false,
-    };
+    let mut used = Used::new();
     loop {
         let ticked = tokio::select! {
             _ = interval.tick() => true,
