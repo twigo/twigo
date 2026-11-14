@@ -50,7 +50,7 @@ function entriesOf(node: ParsedNode | null, lines: LineCounter): Entry[] {
       const [start, end] = key.range;
       return [
         {
-          label: String(key.value),
+          label: key.source,
           ...span(start, value ? value.range[1] : end),
           key: [start, end] as const,
           entries: entriesOf(value, lines),

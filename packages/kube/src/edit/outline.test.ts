@@ -150,3 +150,28 @@ test("a position past the end, before the first line, or on a blank line between
   expect(at("a: 1\n\nb: 2\n", 2)).toEqual([]);
   expect(at("", 1)).toEqual([]);
 });
+
+test("a key shows as written, not as the editor's YAML 1.1 reading parses it", () => {
+  const text = [
+    "base: &base",
+    "  a: 1",
+    "spec:",
+    "  <<: *base",
+    "  no: true",
+    "  ~: 1",
+    "  1.10: x",
+    "  on: y",
+    '"kind": Pod',
+    "'it''s': 2",
+    "",
+  ].join("\n");
+  expect([4, 5, 6, 7, 8, 9, 10].map((line) => at(text, line))).toEqual([
+    ["spec", "<<"],
+    ["spec", "no"],
+    ["spec", "~"],
+    ["spec", "1.10"],
+    ["spec", "on"],
+    ["kind"],
+    ["it's"],
+  ]);
+});
