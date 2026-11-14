@@ -20,7 +20,7 @@
     "@xterm/addon-unicode11": "0.10.0-beta.331",
     "@xterm/addon-webgl": "0.20.0-beta.330",
     "@xterm/xterm": "6.1.0-beta.337",
-    "lucide-react": "^1.68.0",
+    "lucide-react": "^1.72.0",
     "monaco-editor": "^0.57.0",
     "monaco-yaml": "^5.5.1",
     "valibot": "^1.5.0",
