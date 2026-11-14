@@ -811,6 +811,47 @@ describe("a list whose columns are not known yet", () => {
     expect(windowsAfter(sent, before)).toEqual([true]);
   });
 
+  async function withMeasuresHidden() {
+    const script = scripted();
+    const sent = spied(script.backend);
+    const workbench = await openList(script.backend, PODS);
+    await script.send(batch(1, true));
+    await choose("CPU");
+    await choose("Memory");
+    return { script, sent, workbench };
+  }
+
+  test("a list whose measures are known and hidden says it reads nothing when it opens again, before and after its columns come", async () => {
+    const { script, sent, workbench } = await withMeasuresHidden();
+    act(() => {
+      workbench.editors.close(PODS);
+    });
+    await settle();
+    const before = sent.reads().length;
+    act(() => {
+      workbench.editors.open(PODS);
+    });
+    await settle();
+    expect(windowsAfter(sent, before)).toEqual([false]);
+    await script.send(batch(2, true));
+    expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
+    expect(windowsAfter(sent, before)).toEqual([false]);
+  });
+
+  test("a list whose measures are known and hidden says it reads nothing while a new query's first batch has no columns", async () => {
+    const { script, sent } = await withMeasuresHidden();
+    expect(last(sent.reads())).toBe(false);
+    const before = sent.reads().length;
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "a" },
+    });
+    await settle(30);
+    await script.send(batch(2, false));
+    expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
+    expect(windowsAfter(sent, before)).not.toContain(true);
+    expect(last(sent.reads())).toBe(false);
+  });
+
   test("a new query whose first batch has no columns leaves a list sorted by CPU reading", async () => {
     const script = scripted();
     const sent = spied(script.backend);
