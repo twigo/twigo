@@ -55,6 +55,11 @@ test("the menu bar lists the core's items, with accelerators only where the OS m
       ["Move Editor into New Group to the Right", "Cmd+\\"],
       ["Move Editor into New Group Below", undefined],
     ],
+    [
+      ["Zoom In", "Cmd+="],
+      ["Zoom Out", "Cmd+-"],
+      ["Reset Zoom", "Cmd+0"],
+    ],
   ]);
   expect(menus.find((menu) => menu.title === "Edit")?.groups).toEqual([]);
 });
