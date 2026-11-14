@@ -5,6 +5,17 @@ import { isNumeric, numericColumns } from "./numeric";
 const text = (value: string): Value => ({ type: "text", text: value });
 const time: Value = { type: "time", at: "2026-11-03T11:36:41Z" };
 const code = (value: string): Value => ({ type: "code", text: value });
+const link = (value: string): Value => ({
+  type: "link",
+  target: {
+    group: "",
+    version: "v1",
+    kind: "Node",
+    namespace: null,
+    name: value,
+  },
+  text: value,
+});
 const toned = (value: string): Value => ({
   type: "toned",
   text: value,
@@ -14,6 +25,7 @@ const toned = (value: string): Value => ({
 test("a time is figures, a code or a link is not, and a list is when every item is", () => {
   expect(isNumeric(time)).toBe(true);
   expect(isNumeric(code("10.244.0.8"))).toBe(false);
+  expect(isNumeric(link("2"))).toBe(false);
   expect(isNumeric({ type: "list", items: [text("1"), text("2")] })).toBe(true);
   expect(isNumeric({ type: "list", items: [text("1"), text("a")] })).toBe(
     false,
