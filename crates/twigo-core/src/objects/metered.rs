@@ -295,6 +295,50 @@ async fn a_context_that_stops_serving_the_resource_withdraws_the_usage_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_object_whose_api_came_back_waits_for_its_own_answer_and_shows_no_figures_from_before() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let shown = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(usages(&shown).last().unwrap().cpu.used, Some(10_000_000));
+
+    rig.fake.state().served.remove(twigo_cache::metrics::GROUP);
+    rig.fake.delete_from(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    let gone = rig.watch(&opened, Duration::from_secs(30)).await;
+    assert_eq!(
+        usages(&gone).last().map(|usage| usage.state),
+        Some(MetricsState::Absent)
+    );
+
+    rig.fake.pod_usage("a", "web-0", &[("main", "30m", "1Mi")]);
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    rig.fake.serve_metrics("v1beta1");
+    rig.fake
+        .put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let back = rig.watch(&opened, Duration::from_secs(30)).await;
+    assert_eq!(
+        figures(&back),
+        [(true, None), (false, Some(30_000_000))],
+        "the figures withdrawn with `absent` are not shown again, and its own answer replaces the wait"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_context_whose_stale_api_is_uninstalled_withdraws_the_usage_too() {
     let apiservice = || {
         json!({
