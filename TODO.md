@@ -127,3 +127,4 @@ Findings that belong to no step yet.
 - Tests that failed once in CI and passed on a rerun (2026-11-12, on a branch that touches neither):
   - `apply::a_status_write_during_a_preview_does_not_answer_stale` (`crates/twigo-core/tests/bus_live/apply.rs`) answered `Stale` on Kubernetes 1.33 and passed on 1.34 to 1.37 in the same run; the cause was not looked for.
   - `packages/kube/src/logs/logs.test.tsx` ended with an unhandled `requestAnimationFrame is not defined` from `FrameAcks` (`packages/protocol/src/acks.ts`): a timer of the mock's logs fired after the test's environment was gone, with every test passed.
+- The `roles` and `smoothing` switches (`?variant=` in the browser, two Design Variant commands in the app) are temporary: remove them, with their `@todo`s in `apps/desktop/src/variants.ts`, `apps/desktop/src/main.tsx`, `packages/ui/src/styles/theme.css` and `packages/ui/src/styles/index.css`, once the owner has chosen.

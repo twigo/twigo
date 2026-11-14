@@ -27,6 +27,11 @@
     }
   }
 
+  /* @todo: remove the smoothing switch once the owner has chosen at package 1's checkpoint */
+  :root[data-smoothing="system"][data-platform="mac"].dark body {
+    -webkit-font-smoothing: auto;
+  }
+
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }

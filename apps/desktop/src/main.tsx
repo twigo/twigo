@@ -6,6 +6,7 @@ import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
 import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
 import { StartupFailure } from "./App";
 import { installNativeMenu } from "./nativeMenu";
+import { installVariants } from "./variants";
 import { installZoom } from "./zoom";
 import "./index.css";
 
@@ -37,6 +38,9 @@ async function start() {
   );
   registerKube(workbench);
   await installZoom(workbench);
+  // @todo: remove the roles switch once the owner has chosen at package 1's checkpoint
+  // @todo: remove the smoothing switch once the owner has chosen at package 1's checkpoint
+  installVariants(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;
 }
