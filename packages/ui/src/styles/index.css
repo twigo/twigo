@@ -52,6 +52,13 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* SF's stylistic set 6 tells I, l and 1 apart. In Inter the same tag selects
+     other glyphs, and a Linux desktop's system-ui may be an Inter derivative,
+     so it is switched on by platform, not by @supports. */
+  [data-platform="mac"] .ident {
+    font-feature-settings: "ss06";
+  }
+
   [aria-selected="true"],
   [data-cursor] {
     --quiet: var(--support);

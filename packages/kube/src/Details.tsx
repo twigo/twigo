@@ -218,7 +218,7 @@ export function Details({
           )}
           {[
             namespace !== undefined && (
-              <span key="namespace" className="truncate">
+              <span key="namespace" className="ident truncate">
                 {namespace}
               </span>
             ),
@@ -233,7 +233,7 @@ export function Details({
                 {ownerGvr && (
                   <KindIcon gvr={ownerGvr} className="size-3 shrink-0" />
                 )}
-                <span className="truncate">
+                <span className="ident truncate">
                   {owner.target.kind} {owner.target.name}
                 </span>
               </LinkButton>

@@ -23,7 +23,9 @@ export function ObjectName({
   const { first, hash, last } = splitName(name, generated);
   if (last === "") {
     return (
-      <span className={cn("min-w-0 truncate text-content", IN_ROW, className)}>
+      <span
+        className={cn("ident min-w-0 truncate text-content", IN_ROW, className)}
+      >
         {name}
       </span>
     );
@@ -31,7 +33,7 @@ export function ObjectName({
   return (
     <span
       className={cn(
-        "inline-flex max-w-full min-w-0 align-bottom text-content",
+        "ident inline-flex max-w-full min-w-0 align-bottom text-content",
         IN_ROW,
         className,
       )}

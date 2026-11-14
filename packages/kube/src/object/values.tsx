@@ -49,7 +49,7 @@ export function ValueView({
           onClick={() => {
             onOpen(value.target);
           }}
-          className="break-all"
+          className="ident break-all"
         >
           {value.text}
         </LinkButton>

@@ -88,7 +88,18 @@ export function CellView({
     case "restarts":
       return <Restarts text={text} />;
     case "text":
-      return rule.quiet ? <span className="text-support">{text}</span> : text;
+      return rule.quiet || rule.identifier ? (
+        <span
+          className={cn(
+            rule.quiet && "text-support",
+            rule.identifier && "ident",
+          )}
+        >
+          {text}
+        </span>
+      ) : (
+        text
+      );
   }
 }
 

@@ -33,6 +33,8 @@ export interface ColumnRule {
   readonly quiet: boolean;
   /** Its cells are figures, which line up in tabular numerals. */
   readonly figures: boolean;
+  /** Its cells are names of objects, drawn so that I, l and 1 differ. */
+  readonly identifier: boolean;
   /** The table can group its rows by the column's values. */
   readonly groups: boolean;
   /** Rows take their health from this column: the list counts and filters by it. */
@@ -119,9 +121,9 @@ export const IN_FLIGHT =
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
   Name: { cell: "name", width: 160, grow: true },
-  Namespace: { width: 120, quiet: true, groups: true },
+  Namespace: { width: 120, quiet: true, identifier: true, groups: true },
   Context: { width: 120, quiet: true, groups: true },
-  Node: { width: 200, groups: true },
+  Node: { width: 200, identifier: true, groups: true },
 };
 
 /** Rules for one resource's column, by `group/resource/column`, over those by name. */
@@ -175,6 +177,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     align: age || numeric ? "end" : "start",
     descendFirst: false,
     quiet: age,
+    identifier: false,
     groups: false,
     health: false,
     metric: false,
