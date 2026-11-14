@@ -27,7 +27,7 @@ import "monaco-editor/features/wordOperations/register";
 import { configureMonacoYaml, type SchemasSettings } from "monaco-yaml";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import YamlWorker from "monaco-yaml/yaml.worker?worker";
-import "./monaco.css";
+import { followTheme } from "./theme";
 
 self.MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -85,16 +85,4 @@ export function setSchema(
 
 export { editor, KeyCode, MarkerSeverity, Uri };
 
-function theme(): string {
-  return document.documentElement.classList.contains("dark") ? "vs-dark" : "vs";
-}
-
-/** Keeps every Monaco editor on the app's light or dark theme, for as long as the app lives. */
-const watch = new MutationObserver(() => {
-  editor.setTheme(theme());
-});
-watch.observe(document.documentElement, {
-  attributes: true,
-  attributeFilter: ["class"],
-});
-editor.setTheme(theme());
+followTheme();
