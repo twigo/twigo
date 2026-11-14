@@ -39,6 +39,7 @@ vi.mock("./monaco", () => {
     KeyCode: {},
     Uri: { from: ({ path }: { path: string }) => path },
     setSchema: () => Promise.resolve(undefined),
+    textOptions: () => ({}),
     editor: {
       setModelMarkers: () => undefined,
       createModel: (value: string, _language: string, uri: string) => {

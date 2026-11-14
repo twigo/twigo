@@ -6,7 +6,14 @@ import type {
   IPosition,
   Selection,
 } from "monaco-editor/editor";
-import { editor, KeyCode, MarkerSeverity, setSchema, Uri } from "./monaco";
+import {
+  editor,
+  KeyCode,
+  MarkerSeverity,
+  setSchema,
+  textOptions,
+  Uri,
+} from "./monaco";
 import { statusLines } from "./object";
 import {
   refusesStatus,
@@ -167,7 +174,7 @@ function ShownYamlEditor({
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 12,
+      ...textOptions(),
       lineNumbersMinChars: 3,
       renderLineHighlight: "none",
       tabSize: 2,

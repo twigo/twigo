@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useEditorShown } from "@twigo/workbench";
-import { editor } from "./monaco";
+import { editor, textOptions } from "./monaco";
 
 export default function DiffView({
   original,
@@ -41,7 +41,7 @@ export default function DiffView({
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      fontSize: 12,
+      ...textOptions(),
       lineNumbersMinChars: 3,
       renderOverviewRuler: false,
       hideUnchangedRegions: { enabled: collapseUnchanged },

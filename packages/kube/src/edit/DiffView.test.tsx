@@ -17,6 +17,7 @@ const fake = vi.hoisted(() => ({
 }));
 
 vi.mock("./monaco", () => ({
+  textOptions: () => ({}),
   editor: {
     createModel: (value: string) => ({
       getValue: () => value,
