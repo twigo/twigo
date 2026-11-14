@@ -195,7 +195,7 @@ export function ConfirmDialog({
         >
           <div className="grid min-h-0 grid-cols-[minmax(0,1fr)] gap-3 overflow-y-auto px-[18px] pt-4 pb-1">
             {badge && <div className="flex items-center gap-2">{badge}</div>}
-            <DialogTitle className="text-[15px] leading-snug font-semibold wrap-anywhere">
+            <DialogTitle className="text-[15px] leading-[21px] font-semibold wrap-anywhere">
               {question}
             </DialogTitle>
             {consequences.length > 0 ? (
@@ -294,7 +294,7 @@ function Listed({ list }: { list: ConfirmList }) {
     <section aria-labelledby={heading} className="grid gap-1">
       <h3
         id={heading}
-        className="flex items-center gap-1.5 text-[11px] font-semibold text-support"
+        className="flex items-center gap-1.5 text-2xs font-semibold text-support"
       >
         {list.title}
         <span className="font-normal tabular-nums text-quiet">
@@ -324,7 +324,7 @@ function Listed({ list }: { list: ConfirmList }) {
 function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-[11px] leading-relaxed text-support">
+    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-2xs leading-[18px] text-support">
       <code className="min-w-0 flex-1 wrap-anywhere whitespace-pre-wrap select-text">
         {command}
       </code>

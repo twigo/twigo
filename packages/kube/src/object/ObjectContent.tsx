@@ -56,7 +56,7 @@ export function ObjectContent({
       className={cn(
         "h-full bg-editor",
         tab === "yaml" ? "overflow-hidden" : "overflow-auto",
-        (tab === "events" || tab === "related") && "p-3 text-[13px]",
+        (tab === "events" || tab === "related") && "p-3 text-body",
       )}
     >
       {tab === "overview" && (

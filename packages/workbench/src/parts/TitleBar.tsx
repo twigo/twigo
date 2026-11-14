@@ -75,7 +75,7 @@ function Crumb({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] hover:bg-row-hover"
+      className="flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-body hover:bg-row-hover"
     >
       {children}
       <ChevronDown aria-hidden className="size-3.5 shrink-0 text-support" />

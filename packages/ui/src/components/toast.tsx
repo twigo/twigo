@@ -140,9 +140,7 @@ export function CountdownToast({
       <Icon aria-hidden className="size-3.5 shrink-0 text-support" />
       <span className="grid min-w-0 flex-1 gap-0.5 leading-5">
         <span className="break-words text-content">{message}</span>
-        <span className="text-[11px] leading-4 text-support">
-          {detail(shown)}
-        </span>
+        <span className="text-2xs text-support">{detail(shown)}</span>
       </span>
       <button
         type="button"

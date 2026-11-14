@@ -342,7 +342,7 @@ function Cells({
   const { gvr, columns } = selected;
   return (
     <PropertyList
-      className="p-3 text-[13px]"
+      className="p-3 text-body"
       items={columns.map((column, index) => {
         const { cell } = columnRule(gvr, column);
         return {

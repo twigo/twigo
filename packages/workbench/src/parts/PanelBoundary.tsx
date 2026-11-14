@@ -52,7 +52,7 @@ export class PanelBoundary extends Component<Props, State> {
         className="h-full"
         action={{ label: "Try again", onClick: crash.retry }}
       >
-        <pre className="max-w-full overflow-auto rounded-md border border-border bg-muted p-2 text-left font-mono text-[11px]">
+        <pre className="max-w-full overflow-auto rounded-md border border-border bg-muted p-2 text-left font-mono text-2xs">
           {error.message}
         </pre>
       </EmptyState>

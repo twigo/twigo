@@ -38,7 +38,7 @@ export function TrustDialog() {
             className="mt-0.5 size-4 shrink-0 text-warn-foreground"
           />
           <div className="min-w-0 flex-1">
-            <DialogTitle className="text-[13px] font-semibold">
+            <DialogTitle className="text-body font-semibold">
               Run this command for {context}?
             </DialogTitle>
             <DialogDescription className="mt-1 text-xs text-support">
@@ -101,7 +101,7 @@ export function ReviewDialog() {
             className="mt-0.5 size-4 shrink-0 text-warn-foreground"
           />
           <div className="min-w-0 flex-1">
-            <DialogTitle className="text-[13px] font-semibold">
+            <DialogTitle className="text-body font-semibold">
               Trust the credential programs in your kubeconfig?
             </DialogTitle>
             <DialogDescription className="mt-1 text-xs text-support">
@@ -125,7 +125,7 @@ export function ReviewDialog() {
                 />
                 <div className="min-w-0 flex-1">
                   <Command plugin={plugin} />
-                  <p className="mt-1 text-[11px] text-support">
+                  <p className="mt-1 text-2xs text-support">
                     {contexts.join(", ")}
                   </p>
                 </div>
@@ -160,7 +160,7 @@ export function ReviewDialog() {
 
 function Command({ plugin }: { plugin: ExecPlugin }) {
   return (
-    <div className="mt-3 rounded-md border border-border bg-muted p-2 font-mono text-[11px] leading-relaxed">
+    <div className="mt-3 rounded-md border border-border bg-muted p-2 font-mono text-2xs leading-[18px]">
       <p className="break-all">
         <span className="font-semibold">{plugin.command}</span>{" "}
         {plugin.args.join(" ")}

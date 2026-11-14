@@ -43,7 +43,7 @@ export function Section({
           aria-expanded={open}
           onClick={onToggle}
           className={cn(
-            "flex h-full min-w-0 flex-1 items-center gap-1 text-left text-[11px] font-semibold text-support outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]",
+            "flex h-full min-w-0 flex-1 items-center gap-1 text-left text-2xs font-semibold text-support outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]",
             size === "sm" && "px-2",
           )}
         >

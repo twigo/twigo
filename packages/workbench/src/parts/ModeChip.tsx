@@ -75,7 +75,7 @@ function Chip({
         <button
           type="button"
           aria-label={`Mode of ${context}: ${label}`}
-          className="twigo-mode-chip mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-[11px] font-semibold whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]"
+          className="twigo-mode-chip mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-2xs font-semibold whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]"
         >
           {Icon && <Icon aria-hidden className="size-3" />}
           {label}

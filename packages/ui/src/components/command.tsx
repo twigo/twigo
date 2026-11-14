@@ -33,7 +33,7 @@ function CommandInput({
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full bg-transparent text-[13px] outline-none placeholder:text-support disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-10 w-full bg-transparent text-body outline-none placeholder:text-support disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         {...props}
@@ -79,7 +79,7 @@ function CommandGroup({
       data-slot="command-group"
       className={cn(
         "overflow-hidden px-1.5 text-popover-foreground",
-        "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-support",
+        "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-2xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-support",
         className,
       )}
       {...props}
@@ -95,7 +95,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex h-[26px] select-none items-center gap-2 rounded px-2 text-[13px] outline-none",
+        "relative flex h-[26px] select-none items-center gap-2 rounded px-2 text-body outline-none",
         "data-[selected=true]:bg-row-active",
         "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
         "[&_svg]:shrink-0",

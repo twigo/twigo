@@ -24,7 +24,7 @@ export function ContextBadge({
     <>
       {label && (
         <span
-          className="twigo-mode-chip flex h-5 items-center gap-1 rounded px-[7px] text-[11px] font-semibold"
+          className="twigo-mode-chip flex h-5 items-center gap-1 rounded px-[7px] text-2xs font-semibold"
           style={
             {
               "--twigo-context": contextAccent(color),

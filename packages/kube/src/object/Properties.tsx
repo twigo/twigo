@@ -122,9 +122,7 @@ function Card({
     <div className="rounded-md border border-border-subtle px-3 py-2">
       <div className="mb-1.5 text-xs text-support">
         {named ? (
-          <span className="text-[13px] font-medium text-content">
-            {item.key}
-          </span>
+          <span className="text-body font-medium text-content">{item.key}</span>
         ) : (
           `#${index + 1}`
         )}

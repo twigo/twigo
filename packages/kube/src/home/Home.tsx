@@ -249,7 +249,7 @@ export function Home({
         </section>
         <div className="grid items-start gap-6 @3xl:grid-cols-[1.6fr_1fr]">
           <section aria-label="Needs attention" className="grid gap-2">
-            <h2 className="text-[11px] font-semibold text-support">
+            <h2 className="text-2xs font-semibold text-support">
               Needs attention
             </h2>
             {attention.length > 0 ? (
@@ -310,7 +310,7 @@ export function Home({
           </section>
           <aside className="grid gap-2">
             <Recent space={id} resources={resources} />
-            <h2 className="text-[11px] font-semibold text-support">Keys</h2>
+            <h2 className="text-2xs font-semibold text-support">Keys</h2>
             <Keys />
           </aside>
         </div>
@@ -378,7 +378,7 @@ function Recent({
   const known = resources.state === "ready" ? resources.value : [];
   return (
     <section aria-label="Recent" className="mb-2.5 grid gap-2">
-      <h2 className="text-[11px] font-semibold text-support">Recent</h2>
+      <h2 className="text-2xs font-semibold text-support">Recent</h2>
       <ul className="grid">
         {entries.map((entry) => {
           const row = recentRow(entry, known);

@@ -105,7 +105,7 @@ export function Histogram({
           />
         )}
       </div>
-      <div className="flex h-4 items-center justify-between text-[10px] text-support tabular-nums">
+      <div className="flex h-4 items-center justify-between text-[10px] leading-[15px] text-support tabular-nums">
         {ticks.map((tick, index) => (
           <span key={index}>{tick}</span>
         ))}

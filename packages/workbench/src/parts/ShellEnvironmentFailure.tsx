@@ -13,7 +13,7 @@ type Failed = Extract<ShellEnvironment, { state: "failed" }>;
 export function ShellEnvironmentFailure({ failed }: { failed: Failed }) {
   return (
     <>
-      <p className="text-[13px] font-semibold text-content">
+      <p className="text-body font-semibold text-content">
         {SHELL_ENVIRONMENT_TITLE}
       </p>
       <p className="mt-1 text-support">
@@ -34,7 +34,7 @@ function Details({ failed }: { failed: Failed }) {
   return (
     <>
       {shown && (
-        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-[11px]">
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-2xs">
           {output === "" ? "The shell printed nothing." : output}
         </pre>
       )}

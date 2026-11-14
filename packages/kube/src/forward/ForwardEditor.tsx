@@ -202,7 +202,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     <div className="flex h-full min-h-0 flex-col bg-editor">
       <Notices forward={forward} />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="flex max-w-3xl flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+        <div className="flex max-w-3xl flex-col gap-4 px-3.5 pt-3 pb-4 text-body">
           <h2 className="truncate text-sm font-semibold">
             {forwardTitle(forward)}
           </h2>

@@ -125,7 +125,7 @@ export function Overview({
     );
   }
   return (
-    <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+    <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-body">
       <Announcer titles={titles} />
       {rendered}
     </div>

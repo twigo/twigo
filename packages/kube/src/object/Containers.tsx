@@ -85,7 +85,7 @@ function ContainerCard({
           <span className="text-xs text-support">{ROLE[role]}</span>
         )}
         {state && (
-          <Pill tone={TONE[state.tone]} className="h-[18px] text-[11px]">
+          <Pill tone={TONE[state.tone]} className="h-[18px] text-2xs">
             {state.text}
           </Pill>
         )}

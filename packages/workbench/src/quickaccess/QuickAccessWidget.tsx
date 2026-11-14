@@ -363,7 +363,7 @@ function Footer({
   return (
     <div
       aria-label="Keys"
-      className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-[11px] whitespace-nowrap text-support"
+      className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-2xs whitespace-nowrap text-support"
     >
       {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
       {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}

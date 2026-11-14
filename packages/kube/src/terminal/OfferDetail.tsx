@@ -26,7 +26,7 @@ function Line({ entry }: { entry: OfferName }) {
 
 export function OfferDetail({ words }: { words: OfferWords }) {
   return (
-    <div className="grid gap-1 text-[11px] leading-4">
+    <div className="grid gap-1 text-2xs">
       <div className="grid gap-0.5">
         {words.names.map((entry) => (
           <Line key={entry.name} entry={entry} />
@@ -41,7 +41,7 @@ export function OfferDetail({ words }: { words: OfferWords }) {
                 {words.more}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="left" className="grid gap-0.5 text-[11px]">
+            <TooltipContent side="left" className="grid gap-0.5 text-2xs">
               {words.all.map((entry) => (
                 <Line key={entry.name} entry={entry} />
               ))}

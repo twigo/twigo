@@ -38,8 +38,8 @@ export function Tile({
       className={cn(
         "relative flex shrink-0 items-center justify-center font-medium",
         size === "md"
-          ? "size-8 rounded-md text-[11px]"
-          : "size-5 rounded-[5px] text-[9px] font-bold",
+          ? "size-8 rounded-md text-2xs"
+          : "size-5 rounded-[5px] text-[9px] leading-[13px] font-bold",
         color ? `${TINT[color]} text-content` : "bg-card text-support",
         className,
       )}

@@ -10,7 +10,7 @@ import { contextAccent } from "../spaces/colors";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { ASK_GUARD_MS, describeAsk } from "./service";
 
-const MONO = "font-mono text-[11px] wrap-anywhere select-text";
+const MONO = "font-mono text-2xs wrap-anywhere select-text";
 
 /**
  * The dialog of the ask a process makes (ARCHITECTURE 6.4), one at a time

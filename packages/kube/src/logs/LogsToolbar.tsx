@@ -181,7 +181,7 @@ export function LogsToolbar({
         inputRef={search}
         trailing={
           <span className="flex shrink-0 items-center gap-0.5">
-            <span className="pr-0.5 text-[11px] whitespace-nowrap tabular-nums">
+            <span className="pr-0.5 text-2xs whitespace-nowrap tabular-nums">
               {match === undefined
                 ? "No results"
                 : `${match.atMost ? "≤ " : ""}${match.number.toLocaleString("en")} of ${matches.toLocaleString("en")}`}
@@ -438,9 +438,7 @@ function PodPicker({
                   <span className="flex-1">
                     All pods of {kind} {input.name}
                   </span>
-                  <span className="text-[11px] text-support">
-                    new pods join
-                  </span>
+                  <span className="text-2xs text-support">new pods join</span>
                 </CommandItem>
               </CommandGroup>
             )}
@@ -469,7 +467,7 @@ function PodPicker({
           </CommandList>
           {names.length > 0 && (
             <div className="border-t border-border px-3.5 py-2">
-              <div className="pb-1.5 text-[11px] font-medium text-support">
+              <div className="pb-1.5 text-2xs font-medium text-support">
                 Container
               </div>
               <Segmented<string>
@@ -500,7 +498,7 @@ function PodPicker({
             </div>
           )}
           {!single && (
-            <p className="border-t border-border px-3.5 py-2 text-[11.5px] text-support">
+            <p className="border-t border-border px-3.5 py-2 text-xs text-support">
               {streams >= TAB_STREAMS
                 ? `A tab follows at most ${String(TAB_STREAMS)} containers at once; untick some pods to follow others.`
                 : `A tab follows up to ${String(TAB_STREAMS)} containers at once.`}

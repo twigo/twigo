@@ -22,7 +22,7 @@ export function Table({
     <div className={cn("overflow-x-auto", className)}>
       <table aria-label={label} className="w-full border-collapse text-left">
         <thead>
-          <tr className="text-[11px] text-support">
+          <tr className="text-2xs text-support">
             {columns.map((column) => (
               <th
                 key={column}

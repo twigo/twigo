@@ -32,7 +32,7 @@ export function EmptyState({
     return (
       <p
         className={cn(
-          "flex items-start gap-1.5 px-2 py-3 text-xs leading-relaxed",
+          "flex items-start gap-1.5 px-2 py-3 text-xs leading-5",
           variant === "error" ? "text-error" : "text-support",
           className,
         )}

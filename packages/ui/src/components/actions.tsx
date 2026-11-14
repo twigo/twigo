@@ -51,7 +51,7 @@ function ItemBody({ action }: { action: Action }) {
       )}
       <span className="flex-1">{action.label}</span>
       {action.keys && (
-        <span className="pl-4 text-[11px] text-support">{action.keys}</span>
+        <span className="pl-4 text-2xs text-support">{action.keys}</span>
       )}
     </>
   );

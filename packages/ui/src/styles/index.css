@@ -12,9 +12,7 @@
     height: 100%;
   }
   body {
-    @apply bg-background font-sans text-content;
-    font-size: 13px;
-    line-height: 1.45;
+    @apply bg-background font-sans text-body text-content;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
     /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */

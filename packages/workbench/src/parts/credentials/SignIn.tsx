@@ -36,9 +36,9 @@ export function SignInBody({
           className={`mt-0.5 size-4 shrink-0 ${failed ? "text-error" : "text-brand"}`}
         />
         <div className="min-w-0">
-          <p className="text-[13px] font-semibold">{title}</p>
+          <p className="text-body font-semibold">{title}</p>
           <p
-            className="mt-0.5 truncate font-mono text-[11px] text-support"
+            className="mt-0.5 truncate font-mono text-2xs text-support"
             title={[plugin.command, ...plugin.args].join(" ")}
           >
             {[plugin.command, ...plugin.args].join(" ")}
@@ -139,7 +139,7 @@ function Link({ url }: { url: string }) {
     <div className="flex items-center gap-1">
       <button
         type="button"
-        className="min-w-0 truncate font-mono text-[11px] text-brand underline-offset-2 hover:underline"
+        className="min-w-0 truncate font-mono text-2xs text-brand underline-offset-2 hover:underline"
         title={`Open ${url}`}
         onClick={() => {
           workbench.openUrl(url);
@@ -195,7 +195,7 @@ function Output({ text, open }: { text: string; open: boolean }) {
         {shown ? "Hide output" : "Show output"}
       </button>
       {shown && (
-        <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-[11px]">
+        <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-2xs">
           {text}
         </pre>
       )}

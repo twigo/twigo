@@ -13,7 +13,7 @@ const DiffView = lazy(() => import("../edit/DiffView"));
 
 const DIFF_HEIGHT = 300;
 
-const CODE = "font-mono text-[11px] wrap-anywhere select-text";
+const CODE = "font-mono text-2xs wrap-anywhere select-text";
 
 export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
   switch (detail.kind) {
@@ -59,7 +59,7 @@ export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
           ))}
           {detail.body !== null && (
             <section aria-label="Request body" className="grid gap-1">
-              <h3 className="text-[11px] font-semibold text-support">
+              <h3 className="text-2xs font-semibold text-support">
                 Request body
               </h3>
               <pre

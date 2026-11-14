@@ -41,7 +41,7 @@ export function TabBar<V extends string>({
       role="tablist"
       aria-label={label}
       className={cn(
-        "flex h-8 shrink-0 items-stretch gap-4 px-3 text-[13px] shadow-[inset_0_-1px_0_var(--border)]",
+        "flex h-8 shrink-0 items-stretch gap-4 px-3 text-body shadow-[inset_0_-1px_0_var(--border)]",
         className,
       )}
     >
@@ -73,7 +73,7 @@ export function TabBar<V extends string>({
           {tab.count !== undefined && tab.count > 0 && (
             <span
               className={cn(
-                "inline-grid h-4 min-w-4 place-items-center rounded-full px-1 text-[11px]",
+                "inline-grid h-4 min-w-4 place-items-center rounded-full px-1 text-2xs",
                 tab.warn
                   ? "bg-warn/22 text-content"
                   : "bg-row-active text-support",
