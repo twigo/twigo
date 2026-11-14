@@ -35,14 +35,6 @@
     user-select: none;
   }
 
-  /* The screen's resolution, not `devicePixelRatio`: the webview's zoom
-     moves the ratio and leaves the media query alone. */
-  @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx) {
-    :root[data-platform="mac"].dark body {
-      -webkit-font-smoothing: antialiased;
-    }
-  }
-
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
