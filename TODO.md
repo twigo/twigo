@@ -39,6 +39,8 @@ Findings that belong to no step yet.
   - A CronJob shows its last schedule and last success but not its next run, which needs its schedule read in its time zone.
   - A claim's Used By follows the whole objects of every pod in its namespace while its Overview is shown, as kubectl lists them; a projection watch (3.3) that keeps only their volumes would cost less (decision 8 of M1).
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
+  - A node's Overview grows by 152 px within 5 to 20 ms of its first paint, below the Usage section, as its embedded Pods list loads (Chromium on the mock, 1280x760, review round 5, 2026-11-14).
+    While it loads the list is three rows high, and once loaded as high as its rows, up to eight (`packages/kube/src/object/EmbeddedList.tsx`).
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
     A metrics poll is such a batch every 15 s while a CPU or memory column is drawn: it renders the grid once, flashes nothing and selects nothing again, and renders each row of the window as any batch does.
