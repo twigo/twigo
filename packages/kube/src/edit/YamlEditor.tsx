@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditorShown } from "@twigo/workbench";
 import type { EditorBuffer } from "./copies";
 import type {
@@ -15,7 +15,7 @@ import {
   Uri,
 } from "./monaco";
 import { statusLines } from "./object";
-import { landmarksOf, outlineOf } from "./outline";
+import { landmarksOf, outlineOf, pathAt, type Entry } from "./outline";
 import {
   refusesStatus,
   type Place,
@@ -71,8 +71,11 @@ const spanOf = (selection: Selection): Span => ({
 });
 
 /** The top-level keys at weight 600 and the `managedFields` block in support, by their classes in `monaco.css`. */
-function landmarks(model: editor.ITextModel): editor.IModelDeltaDecoration[] {
-  const { keys, managed } = landmarksOf(outlineOf(model.getValue()));
+function landmarks(
+  outline: readonly Entry[],
+  model: editor.ITextModel,
+): editor.IModelDeltaDecoration[] {
+  const { keys, managed } = landmarksOf(outline);
   return [
     ...keys.map(([start, end]) => {
       const from = model.getPositionAt(start);
@@ -184,6 +187,7 @@ function ShownYamlEditor({
   const changed = useRef(onChange);
   const latest = useRef(text);
   const setting = useRef(false);
+  const [path, setPath] = useState<readonly string[]>([]);
   useEffect(() => {
     changed.current = onChange;
     latest.current = text;
@@ -235,16 +239,39 @@ function ShownYamlEditor({
     const content = created.onDidChangeContent(() => {
       if (!setting.current) changed.current?.(created.getValue());
     });
-    const marks = instance.createDecorationsCollection(landmarks(created));
+    let outlined: { version: number; entries: readonly Entry[] } | undefined;
+    const outline = () => {
+      const version = created.getVersionId();
+      if (outlined?.version !== version) {
+        outlined = { version, entries: outlineOf(created.getValue()) };
+      }
+      return outlined.entries;
+    };
+    const marks = instance.createDecorationsCollection(
+      landmarks(outline(), created),
+    );
+    const follow = () => {
+      const line = instance.getPosition()?.lineNumber;
+      const next = line === undefined ? [] : pathAt(outline(), line);
+      setPath((now) =>
+        now.length === next.length && now.every((key, i) => key === next[i])
+          ? now
+          : next,
+      );
+    };
+    follow();
     const marked = created.onDidChangeContent(() => {
-      marks.set(landmarks(created));
+      marks.set(landmarks(outline(), created));
+      follow();
     });
+    const moved = instance.onDidChangeCursorPosition(follow);
     return () => {
       const held = element.contains(element.ownerDocument.activeElement);
       buffer.view = instance.saveViewState();
       buffer.focus = undefined;
       content.dispose();
       marked.dispose();
+      moved.dispose();
       instance.dispose();
       if (!buffers) created.dispose();
       // A view replaced while it holds the focus hands it to the next.
@@ -371,5 +398,30 @@ function ShownYamlEditor({
     );
   }, [uri, readOnly, error]);
 
-  return <div ref={host} className="h-full w-full" />;
+  return (
+    <div className="flex h-full w-full flex-col">
+      <CursorPath path={path} />
+      <div ref={host} className="min-h-0 w-full flex-1" />
+    </div>
+  );
+}
+
+/** The path to the line under the cursor, in the place a sticky-scroll band would take; the last key stays whole when the rest is cut. */
+function CursorPath({ path }: { path: readonly string[] }) {
+  const last = path[path.length - 1];
+  const above = path.slice(0, -1);
+  return (
+    <div
+      className="flex h-6 flex-none items-center border-b border-border-subtle px-3 text-xs text-support"
+      title={path.join(" › ")}
+    >
+      {above.length > 0 && (
+        <>
+          <span className="truncate">{above.join(" › ")}</span>
+          <span className="flex-none px-1">›</span>
+        </>
+      )}
+      {last !== undefined && <span className="flex-none">{last}</span>}
+    </div>
+  );
 }

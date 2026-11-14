@@ -85,3 +85,20 @@ export function landmarksOf(outline: readonly Entry[]): {
     managed: managed && { from: managed.from, to: managed.to },
   };
 }
+
+/**
+ * The keys from the root to the line, in the order they are met: the keys of
+ * the maps and, joined to the key they belong to, the items of the sequences,
+ * as `containers[0]`. A line that no entry covers, a blank one between two
+ * top-level keys or one past the end, has no path; a comment inside a block
+ * has the path of the block.
+ */
+export function pathAt(outline: readonly Entry[], line: number): string[] {
+  const covers = ({ from, to }: Entry) => from <= line && line <= to;
+  const path: string[] = [];
+  for (let hit = outline.find(covers); hit; hit = hit.entries.find(covers)) {
+    const parent = hit.key === undefined ? path.pop() : undefined;
+    path.push(`${parent ?? ""}${hit.label}`);
+  }
+  return path;
+}

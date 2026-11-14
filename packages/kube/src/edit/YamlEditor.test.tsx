@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { EditorShownContext } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
@@ -14,6 +14,8 @@ interface FakeModel {
 interface FakeView {
   readonly model: FakeModel;
   cursor: number;
+  line: number;
+  moved: (() => void) | undefined;
   disposed: boolean;
   focused: boolean;
   focus(): void;
@@ -78,6 +80,8 @@ vi.mock("./monaco", () => {
         const view = {
           model,
           cursor: 0,
+          line: 1,
+          moved: undefined as (() => void) | undefined,
           disposed: false,
           focused: false,
           focus() {
@@ -95,6 +99,13 @@ vi.mock("./monaco", () => {
           },
           updateOptions: () => undefined,
           createDecorationsCollection: () => ({ set: () => undefined }),
+          getPosition() {
+            return { lineNumber: this.line, column: 1 };
+          },
+          onDidChangeCursorPosition(listener: () => void) {
+            this.moved = listener;
+            return dispose();
+          },
           onKeyDown: dispose,
           onDidCompositionStart: dispose,
           onDidCompositionEnd: dispose,
@@ -210,4 +221,27 @@ test("an editor that is not on screen has no view, so a key typed into the one t
 
   a.rerender(shown(URI, true));
   expect(fake.views[2]?.model).toBe(fake.models[0]);
+});
+
+test("the path to the cursor's line shows above the editor and follows the cursor", () => {
+  const { container } = render(
+    <YamlEditor uri="details:1" text={"a:\n  b: 1\nc: 2\n"} readOnly />,
+  );
+  const view = fake.views[0];
+  if (!view) throw new Error("no editor was made");
+  const shown = () => container.querySelector("[title]")?.getAttribute("title");
+  const moveTo = (line: number) => {
+    act(() => {
+      view.line = line;
+      view.moved?.();
+    });
+  };
+
+  expect(shown()).toBe("a");
+  moveTo(2);
+  expect(shown()).toBe("a › b");
+  moveTo(3);
+  expect(shown()).toBe("c");
+  moveTo(9);
+  expect(shown()).toBe("");
 });
