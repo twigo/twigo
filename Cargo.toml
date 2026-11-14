@@ -57,7 +57,7 @@ hyper = "1.12.0"
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "http2", "ring", "rustls-platform-verifier", "tls12"] }
 hyper-timeout = "0.5.2"
 hyper-util = { version = "0.1.21", features = ["client-legacy", "client-proxy", "http1", "http2", "tokio"] }
-indexset = "0.16.0"
+indexset = "0.18.0"
 ipnet = "2.12.2"
 jiff = "0.2.38"
 json-patch = "4.2.0"

@@ -2365,9 +2365,9 @@ dependencies = [
 
 [[package]]
 name = "indexset"
-version = "0.16.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38cade55ce06abcdbbc29e5f383d91b1744bc3ce18a508b065f9f8e71beec641"
+checksum = "1a95b1662bb5a46e6f3b2b440a9cc7005707a1a6401773deecef7ddb6aa34054"
 dependencies = [
  "ftree",
 ]
