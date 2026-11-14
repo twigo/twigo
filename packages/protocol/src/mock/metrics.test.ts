@@ -50,6 +50,9 @@ const NODES = query({
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(
+    Math.floor(Date.now() / SCRAPE_MS) * SCRAPE_MS + SCRAPE_MS / 2,
+  );
 });
 
 afterEach(() => {
