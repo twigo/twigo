@@ -217,8 +217,13 @@ impl Used {
             for reset in &update.resets {
                 sample = reset.samples.get(namespace, name).cloned();
             }
+            // A cluster-wide request that fails tells every key it held that it has none, which
+            // says nothing of an object whose own request, asked anew, has not answered.
             for change in &update.changes {
-                if change.namespace == *namespace && change.name == *name {
+                if change.namespace == *namespace
+                    && change.name == *name
+                    && (change.sample.is_some() || update.state.is_some())
+                {
                     sample = change.sample.clone();
                 }
             }

@@ -643,6 +643,86 @@ async fn a_replaced_request_that_fails_takes_the_figures_with_it() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_cluster_request_that_answered_and_then_fails_takes_no_figures_from_a_pod_that_asks_for_itself()
+ {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.pod_usage(
+        "a",
+        "web-0",
+        &[
+            ("debugger", "1m", "1Mi"),
+            ("web", "10m", "2Mi"),
+            ("api", "2m", "1Mi"),
+            ("proxy", "3m", "3Mi"),
+        ],
+    );
+    let mut rig = Rig::new(fake).await;
+    let overview = ObjectParts {
+        overview: true,
+        ..PARTS
+    };
+    let opened = rig.open(Kind::Pods, overview);
+    let alone = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert_eq!(
+        figures(&alone),
+        [(true, None), (false, Some(16_000_000))],
+        "waiting once, then the figures"
+    );
+
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let joined = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert!(
+        usages(&joined)
+            .iter()
+            .all(|usage| usage.cpu.used == Some(16_000_000)),
+        "the cluster's answer serves it: {:?}",
+        figures(&joined)
+    );
+    let own = own_requests(&rig.fake);
+
+    rig.fake
+        .state()
+        .forbidden
+        .insert("/apis/metrics.k8s.io/v1beta1/pods".to_owned());
+    rig.fake.state().metrics_takes = Duration::from_secs(2);
+    let failed = rig.watch(&opened, Duration::from_secs(20)).await;
+    assert!(
+        own_requests(&rig.fake) > own,
+        "the pod asks for itself again"
+    );
+    let usages_after = usages(&failed);
+    assert!(
+        usages_after.iter().all(|usage| !usage.waiting
+            && usage.state == MetricsState::Ready
+            && usage.cpu.used == Some(16_000_000)
+            && usage.containers.len() == 4),
+        "its figures stay while its own request is asked: {:?}",
+        usages_after
+            .iter()
+            .map(|usage| (
+                usage.state,
+                usage.waiting,
+                usage.cpu.used,
+                usage.containers.len()
+            ))
+            .collect::<Vec<_>>()
+    );
+
+    rig.fake
+        .delete_from(twigo_cache::metrics::GROUP, "pods", Some("a"), "web-0");
+    let lacking = rig.watch(&opened, Duration::from_secs(20)).await;
+    let usage = *usages(&lacking).last().expect("the answer without the pod");
+    assert_eq!(
+        (usage.state, usage.waiting, usage.cpu.used),
+        (MetricsState::Ready, false, None),
+        "an answer that serves it and lacks it says that it has no figures"
+    );
+    drop(cluster);
+}
+
 fn with_overview(batches: &[ObjectBatch]) -> &ObjectBatch {
     batches
         .iter()
