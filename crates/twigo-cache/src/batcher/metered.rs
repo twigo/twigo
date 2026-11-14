@@ -378,6 +378,46 @@ async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
     assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_list_opened_after_a_refusal_says_it_in_its_first_batch_with_columns_and_the_answer_corrects_it()
+ {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let refused = list.watch(Duration::from_secs(3)).await;
+    assert_eq!(
+        refused.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Forbidden)
+    );
+
+    list.fake.state().forbidden.clear();
+    list.fake.state().metrics_takes = Duration::from_secs(3);
+    list.reopen(None, Duration::from_secs(1)).await;
+    list.batcher().set_window(0, 6, true);
+    let opened = first(&mut list).await;
+    assert!(has_metric_columns(&opened));
+    assert_eq!(
+        opened.metrics,
+        Some(MetricsState::Forbidden),
+        "what the scopes of its window last said, before their requests answer"
+    );
+
+    let answered = list.watch(Duration::from_secs(5)).await;
+    assert_eq!(
+        answered
+            .iter()
+            .filter_map(|batch| batch.metrics)
+            .collect::<Vec<_>>(),
+        [MetricsState::Ready],
+        "the first answers correct it"
+    );
+}
+
 fn cpu_descending() -> Option<Sort> {
     Some(Sort {
         column: "CPU".to_owned(),

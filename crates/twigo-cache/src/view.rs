@@ -548,7 +548,7 @@ impl QueryView {
         let Some(metrics) = &mut self.metrics else {
             return;
         };
-        metrics.reported = update.state.or(metrics.reported);
+        metrics.reported = update.said().or(metrics.reported);
         for reset in update.resets {
             for (namespace, name, key) in self.named_in(&reset.scope) {
                 self.set_sample(&key, reset.samples.get(&namespace, &name).cloned());
@@ -642,9 +642,10 @@ impl QueryView {
         }
     }
 
-    /// The state its scopes last said, kept while it reads nothing; none until they say one,
-    /// but `unavailable` for a stale API, which discovery knows without a request, once the
-    /// server's columns are known: the metric columns, and so the state, come with them.
+    /// The state its scopes last said, or the failure they last ended in before their first
+    /// answer, kept while it reads nothing; none until there is one, but `unavailable` for a
+    /// stale API, which discovery knows without a request, once the server's columns are known:
+    /// the metric columns, and so the state, come with them.
     fn metrics_state(&self) -> Option<MetricsState> {
         let metrics = self.metrics.as_ref().filter(|_| self.layout.metrics)?;
         metrics

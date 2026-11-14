@@ -76,11 +76,14 @@ pub struct ObjectBatch {
     pub related: Option<Related>,
     /// Present when it changed, while the usage part is shown, for a pod
     /// or a node of a context that serves the Metrics API: in the batch that
-    /// brings the object, or in the next one when the part is asked for
-    /// later. Until the scope that serves the object has answered or failed
-    /// once it is `waiting`, or `unavailable` where the API is stale; after
-    /// that a `ready` usage whose `used` is null says that an answer came
-    /// without the object.
+    /// brings the object once the context's discovery is known, else in a
+    /// later one, which the usual order of events, resources first, makes
+    /// rare; and in the next one when the part is asked for later. Until the
+    /// scope that serves the object has answered once it is `waiting`, or
+    /// says the failure its last request ended in, or `unavailable` where the
+    /// API is stale; after that a `ready` usage whose `used` is null says
+    /// that an answer came without the object. An object that had an answer
+    /// keeps its figures while the request that serves it is asked anew.
     pub usage: Option<Usage>,
 }
 
@@ -94,7 +97,9 @@ pub struct Usage {
     /// in the order the answer lists them and with their requests and
     /// limits, so the webview draws the section at its height at once.
     /// False for a stale API, which says `unavailable` at once since
-    /// discovery knows it without a request.
+    /// discovery knows it without a request, and for a scope whose last
+    /// request failed, which says that failure at once and is asked all the
+    /// same.
     pub waiting: bool,
     /// RFC 3339, when the sample was taken; null without one, as for a
     /// pod that is not running or started a moment ago.

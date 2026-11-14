@@ -7,6 +7,7 @@
 mod api;
 mod board;
 mod fetch;
+mod refusals;
 mod sample;
 
 #[cfg(test)]
@@ -22,6 +23,7 @@ use twigo_ipc::MetricsState;
 use crate::discovery::Followed;
 use crate::hub::Hub;
 use board::Board;
+use refusals::Refusals;
 
 pub use api::{Api, GROUP, Kind};
 pub use board::{Change, Reader, Reset, Scope, Update};
@@ -47,7 +49,14 @@ pub struct Poller(Arc<Inner>);
 
 struct Inner {
     hub: Hub,
-    contexts: Mutex<HashMap<String, Weak<Context>>>,
+    contexts: Mutex<HashMap<String, Slot>>,
+}
+
+#[derive(Default)]
+struct Slot {
+    context: Weak<Context>,
+    /// The failures its scopes ended in, which outlive the context and so its last reader.
+    refusals: Arc<Mutex<Refusals>>,
 }
 
 /// The scopes polled for one context, alive while a reader holds it. What the context serves
@@ -71,11 +80,13 @@ impl Poller {
     /// gives one per context for as long as anything holds it.
     pub fn context(&self, name: &str, followed: &Arc<Followed>) -> Arc<Context> {
         let mut contexts = self.0.contexts.lock().expect("poller lock");
-        if let Some(held) = contexts.get(name).and_then(Weak::upgrade) {
+        let slot = contexts.entry(name.to_owned()).or_default();
+        if let Some(held) = slot.context.upgrade() {
             return held;
         }
         let turns = Arc::new(Semaphore::new(IN_FLIGHT));
         let api = followed.api();
+        slot.refusals.lock().expect("refusals lock").follow(&api);
         let board = |kind| {
             Arc::new(Board::new(
                 name,
@@ -83,6 +94,7 @@ impl Poller {
                 self.0.hub.clone(),
                 api.clone(),
                 Arc::clone(&turns),
+                Arc::clone(&slot.refusals),
             ))
         };
         let built = Arc::new(Context {
@@ -91,7 +103,7 @@ impl Poller {
             api,
             _followed: Arc::clone(followed),
         });
-        contexts.insert(name.to_owned(), Arc::downgrade(&built));
+        slot.context = Arc::downgrade(&built);
         built
     }
 }
