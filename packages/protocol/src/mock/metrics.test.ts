@@ -664,6 +664,41 @@ test("a list's first batch with columns says the refusal remembered for the scop
   expect((await first(NODES))?.metrics).toBeNull();
 });
 
+test("a cold list says the refusal remembered for its namespace with the first batch that has its columns, syncing ones included", async () => {
+  const backend = createMockBackend("metricsForbidden");
+  const pod = sampled();
+  const opened = await openOn(backend, PODS, pod.namespace, pod.name);
+  await call(backend.invoke("object_close", opened.id));
+  const batches: ListBatch[] = [];
+  const pending = backend.subscribe(
+    "list_subscribe",
+    query({ namespaces: [pod.namespace] }),
+    (batch) => batches.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  const id = await pending;
+  await call(
+    backend.invoke("list_set_window", { id, start: 0, end: 60, metrics: true }),
+  );
+  let acked = 0;
+  for (let step = 0; step < 30; step++) {
+    await vi.advanceTimersByTimeAsync(50);
+    for (const batch of batches.slice(acked)) {
+      await call(backend.invoke("list_ack", { id, seq: batch.seq }));
+    }
+    acked = batches.length;
+  }
+  const first = batches.find((batch) =>
+    batch.columns?.some((column) => column.name === "CPU"),
+  );
+  expect(first?.status.state).toBe("syncing");
+  expect(first?.metrics).toBe("forbidden");
+  expect(batches.flatMap((batch) => batch.metrics ?? [])).toEqual([
+    "forbidden",
+  ]);
+  expect(batches.some((batch) => batch.status.state === "ready")).toBe(true);
+});
+
 function usageOf(batches: ObjectBatch[]): Usage | null | undefined {
   return [...batches].reverse().find((batch) => batch.usage !== null)?.usage;
 }

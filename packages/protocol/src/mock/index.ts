@@ -1137,18 +1137,7 @@ class Subscription {
         groups: this.#query.group === null || !knows ? null : [],
       };
     }
-    const { version } = this.#cluster;
-    if (this.#base?.version !== version) {
-      const withNamespace = this.#columns.some((c) => c.name === "Namespace");
-      const rows = this.#kind
-        .rows(this.#cluster, withNamespace)
-        .filter((row) => this.#fields(row.fields))
-        .map((row) =>
-          this.#join ? { ...row, cells: this.#join.pad(row.cells) } : row,
-        );
-      this.#base = { version, rows };
-    }
-    const { rows } = this.#base;
+    const rows = this.#all();
     const join = this.#query.sort?.metric ? this.#join : undefined;
     join?.poll(rows, true);
     const samples = join?.version ?? 0;
@@ -1163,6 +1152,32 @@ class Subscription {
       };
     }
     return this.#cache.result;
+  }
+
+  #all(): MockRow[] {
+    const { version } = this.#cluster;
+    if (this.#base?.version !== version) {
+      const withNamespace = this.#columns.some((c) => c.name === "Namespace");
+      const rows = this.#kind
+        .rows(this.#cluster, withNamespace)
+        .filter((row) => this.#fields(row.fields))
+        .map((row) =>
+          this.#join ? { ...row, cells: this.#join.pad(row.cells) } : row,
+        );
+      this.#base = { version, rows };
+    }
+    return this.#base.rows;
+  }
+
+  /**
+   * The rows Rust's view holds while the list syncs, which it has from the
+   * first page on though it sends none: those of the window, or all of them
+   * while it sorts by a metric.
+   */
+  #held(start: number, end: number): readonly MockRow[] {
+    const rows = this.#all();
+    if (this.#query.sort?.metric) return rows;
+    return runQuery(rows, this.#query).readable.slice(start, end);
   }
 
   /** The context stopped serving the API: the columns go with it, as Rust's layout is built anew. */
@@ -1196,6 +1211,13 @@ class Subscription {
     }
     const total = rows.length;
     const [start, end] = this.#window;
+    if (
+      join &&
+      KNOWS_COLUMNS.has(this.#status.state) &&
+      !SHOWS_ROWS.has(this.#status.state)
+    ) {
+      join.recall(this.#held(start, end));
+    }
     let visible = readable.slice(start, end);
     if (join && !this.#query.sort?.metric) {
       join.poll(visible, false);

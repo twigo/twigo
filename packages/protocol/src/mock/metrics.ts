@@ -525,6 +525,19 @@ export class MetricsJoin {
   }
 
   /**
+   * The refusal the board remembers of the scopes of `rows`, for a list that
+   * knows its columns before it shows rows, and so reads nothing yet.
+   */
+  recall(rows: readonly MockRow[]): void {
+    const { board, state } = this.#metrics;
+    if (!this.#reads || state === null) return;
+    for (const row of rows) {
+      const scope = this.#scope(row);
+      if (scope !== undefined) this.#reported ??= board.refusal(scope) ?? null;
+    }
+  }
+
+  /**
    * Polls the scopes of `rows` if the list reads; with `sorting`, a sort
    * reads every row, and one that changed a sample is told by `version`.
    */
