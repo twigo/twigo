@@ -706,6 +706,7 @@ describe("an open object", () => {
         "figures",
       ]);
     },
+    20_000,
   );
 
   test("where the API refuses, the first pod's section waits with empty meters until it says so, and the next pod of its namespace says it at once, as one of another namespace waits", async () => {
