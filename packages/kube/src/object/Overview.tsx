@@ -125,7 +125,7 @@ export function Overview({
     );
   }
   return (
-    <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-body">
+    <div className="flex flex-col gap-6 px-3.5 pt-4 pb-4 text-body">
       <Announcer titles={titles} />
       {rendered}
     </div>
@@ -248,6 +248,7 @@ function Fields({
       items={fields.map((field) => ({
         key: field.label,
         label: field.label,
+        title: field.label,
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />
@@ -312,7 +313,9 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
             <span className="text-support"> · {condition.reason}</span>
           )}
           {condition.message && (
-            <span className="block text-support">{condition.message}</span>
+            <span className="block text-prose text-content">
+              {condition.message}
+            </span>
           )}
         </p>
       ))}
@@ -530,7 +533,9 @@ export function Events({ list }: { list: EventList }) {
                   <Age at={event.last} />
                 </span>
               </div>
-              <p className="break-words">{event.message}</p>
+              <p className="text-prose break-words text-content">
+                {event.message}
+              </p>
               <p className="text-xs text-support">
                 {event.source}
                 {event.fieldPath && ` · ${event.fieldPath}`}

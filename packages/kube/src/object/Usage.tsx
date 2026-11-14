@@ -9,7 +9,7 @@ const LABEL: Readonly<Record<Resource, string>> = {
 };
 
 const GRID =
-  "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
+  "grid grid-cols-[3.5rem_minmax(4rem,11rem)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
 interface Subject {
   /** What its meters are labelled with, and its heading when it has one. */
@@ -60,7 +60,7 @@ function Rows({ subject }: { subject: Subject }) {
   return (
     <>
       {subject.name !== null && (
-        <span className="col-span-4 mt-2 font-semibold first:mt-0">
+        <span className="col-span-4 mt-2 text-xs font-semibold text-support first:mt-0">
           {subject.name}
         </span>
       )}
@@ -83,7 +83,7 @@ function Row({
   if (measure === null) {
     return (
       <>
-        <span className="text-support">{label}</span>
+        <span className="text-label text-support">{label}</span>
         <EmptyMeter label={name === null ? label : `${label} of ${name}`} />
         <span aria-hidden className="col-span-2">
           {"\u00a0"}
@@ -94,7 +94,7 @@ function Row({
   const shown = figure(resource, measure);
   return (
     <>
-      <span className="text-support">{label}</span>
+      <span className="text-label text-support">{label}</span>
       {shown.used === null ? (
         <span className="col-span-3 text-support">No data yet</span>
       ) : (

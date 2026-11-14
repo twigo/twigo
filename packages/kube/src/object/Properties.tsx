@@ -77,12 +77,12 @@ function Group({ node, depth }: { node: TreeNode; depth: number }) {
         onClick={() => {
           setOpen(!open);
         }}
-        className="flex h-6 items-center gap-1 self-start text-left font-medium hover:text-content"
+        className="group/title flex h-6 items-center gap-1 self-start text-left text-xs font-semibold text-support"
       >
         {open ? (
-          <ChevronDown className="size-3.5 text-support" />
+          <ChevronDown className="size-3.5 group-hover/title:text-content" />
         ) : (
-          <ChevronRight className="size-3.5 text-support" />
+          <ChevronRight className="size-3.5 group-hover/title:text-content" />
         )}
         <span title={node.key}>{node.label}</span>
         {node.value.type === "list" && (

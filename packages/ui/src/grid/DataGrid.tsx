@@ -590,7 +590,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         <div
           role="row"
           aria-rowindex={1}
-          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-support"
+          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs font-semibold text-support"
           style={{
             gridTemplateColumns: template,
             minWidth,

@@ -12,6 +12,9 @@ import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
+/** The one label column of an object's page, which every property list in it reads. */
+export const LABEL_COLUMN = "[--label-column:112px]";
+
 /**
  * One view of an object (ARCHITECTURE 4.3): its Overview, YAML, events or
  * related objects, or why that view cannot show; the editor and the
@@ -55,6 +58,7 @@ export function ObjectContent({
       aria-label={OBJECT_TABS.find(({ id }) => id === tab)?.title}
       className={cn(
         "h-full bg-editor",
+        LABEL_COLUMN,
         tab === "yaml" ? "overflow-hidden" : "overflow-auto",
         (tab === "events" || tab === "related") && "p-3 text-body",
       )}

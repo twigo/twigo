@@ -16,7 +16,7 @@ import { cellTone, columnRule, statusColumn } from "./columns";
 import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
 import { measureText } from "./list/metrics";
-import { ObjectContent } from "./object/ObjectContent";
+import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
@@ -342,12 +342,13 @@ function Cells({
   const { gvr, columns } = selected;
   return (
     <PropertyList
-      className="p-3 text-body"
+      className={cn("p-3 text-body", LABEL_COLUMN)}
       items={columns.map((column, index) => {
         const { cell } = columnRule(gvr, column);
         return {
           key: column.name,
           label: column.name,
+          title: column.name,
           value:
             cell === "age"
               ? row.created

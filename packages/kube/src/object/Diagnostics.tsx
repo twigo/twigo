@@ -31,7 +31,7 @@ export function Diagnostics({
           title={finding.title}
         >
           {finding.detail.length > 0 && (
-            <p>
+            <p className="text-prose text-content">
               <Sentence spans={finding.detail} />
             </p>
           )}

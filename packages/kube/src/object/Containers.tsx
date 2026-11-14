@@ -154,6 +154,7 @@ function Folded({
   return (
     <Section
       title={`${title} ${fields.length}`}
+      size="group"
       open={open}
       onToggle={onToggle}
     >
