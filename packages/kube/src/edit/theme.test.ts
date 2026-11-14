@@ -91,7 +91,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const observer of watching.splice(0)) observer.disconnect();
   style.remove();
-  root.classList.remove("dark");
+  root.classList.remove("dark", "compact");
   fake.themes.length = 0;
   fake.set.length = 0;
 });
@@ -119,3 +119,28 @@ test.each([false, true])(
     expect(fake.set).toEqual([theme?.name]);
   },
 );
+
+test("the theme follows .dark on <html>, resolving the tokens anew each time, and ignores other classes", async () => {
+  await start();
+  expect(fake.set).toEqual(["twigo-light"]);
+
+  root.classList.add("dark");
+  await vi.waitFor(() => {
+    expect(fake.set).toEqual(["twigo-light", "twigo-dark"]);
+  });
+  expect(fake.themes[1]?.data.colors["editor.background"]).toBe(
+    value("editor", true),
+  );
+
+  root.classList.add("compact");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fake.set).toEqual(["twigo-light", "twigo-dark"]);
+
+  root.classList.remove("dark");
+  await vi.waitFor(() => {
+    expect(fake.set).toEqual(["twigo-light", "twigo-dark", "twigo-light"]);
+  });
+  expect(fake.themes[2]?.data.colors["editor.background"]).toBe(
+    value("editor", false),
+  );
+});
