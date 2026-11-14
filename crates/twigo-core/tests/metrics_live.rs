@@ -172,7 +172,7 @@ async fn a_pod_list_gets_the_cpu_and_memory_of_a_running_pod() {
     let (core, space) = core(dir.path(), &path, &context);
     let mut list = List::pods(&core, &space, None).await;
     list.until(|list| {
-        !list.columns.is_empty() && {
+        list.columns.iter().any(|column| column.name == "CPU") && {
             let (cpu, memory) = (list.column("CPU"), list.column("Memory"));
             cpu.iter()
                 .zip(&memory)
@@ -299,7 +299,7 @@ async fn a_list_sorted_by_memory_descending_holds_its_values_in_order() {
     };
     let mut list = List::pods(&core, &space, Some(sort)).await;
     list.until(|list| {
-        !list.columns.is_empty()
+        list.columns.iter().any(|column| column.name == "Memory")
             && list
                 .column("Memory")
                 .iter()
