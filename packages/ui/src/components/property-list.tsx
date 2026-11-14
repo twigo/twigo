@@ -5,17 +5,16 @@ export interface Property {
   readonly key: string;
   readonly label: ReactNode;
   readonly value: ReactNode;
-  /** The label in full, when it may be cut. */
+  /** What the tooltip of the label says, when the label does not say it all. */
   readonly title?: string;
   /** The value is figures, which line up in tabular numerals. */
   readonly numeric?: boolean;
 }
 
 /**
- * Labels and their values in two aligned columns, the label in support and
- * cut where it does not fit. The label column is as wide as its labels
- * unless a part sets `--label-column`, which every list in it then reads,
- * so their values share one axis.
+ * Labels and their values in two aligned columns, the label in support. A
+ * label wraps in the label column, which a part sets with `--label-column`
+ * so that every list in it shares one axis for its values.
  */
 export function PropertyList({
   items,
@@ -33,7 +32,10 @@ export function PropertyList({
     >
       {items.map((item) => (
         <div key={item.key} className="contents">
-          <dt className="truncate text-label text-support" title={item.title}>
+          <dt
+            className="text-label wrap-anywhere text-support"
+            title={item.title}
+          >
             {item.label}
           </dt>
           <dd

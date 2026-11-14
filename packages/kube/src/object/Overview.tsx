@@ -250,7 +250,6 @@ function Fields({
       items={fields.map((field) => ({
         key: field.label,
         label: field.label,
-        title: field.label,
         numeric: isNumeric(field.value),
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}

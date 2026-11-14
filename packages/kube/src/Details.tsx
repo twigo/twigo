@@ -361,7 +361,6 @@ function Cells({
         return {
           key: column.name,
           label: column.name,
-          title: column.name,
           numeric: figures || isTabular(value),
           value,
         };
