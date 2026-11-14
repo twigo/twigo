@@ -1,4 +1,4 @@
-import type { Column, Gvr, ValueCount } from "@twigo/protocol";
+import type { Cell, Column, Gvr, Row, ValueCount } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 
 /** How a cell draws its text (ARCHITECTURE 4.4). */
@@ -190,6 +190,19 @@ export function cellTone(
   text: string,
 ): Tone | undefined {
   return BY_RESOURCE[key(gvr, column)]?.tone?.(text);
+}
+
+/** The tone of a row's value in its resource's health column, if it is abnormal. */
+export function rowTone(
+  gvr: Gvr,
+  health: string | undefined,
+  columns: readonly Column[],
+  row: Row,
+): Tone | undefined {
+  if (health === undefined) return undefined;
+  const status: Cell | undefined =
+    row.cells[columns.findIndex((column) => column.name === health)];
+  return typeof status === "string" ? cellTone(gvr, health, status) : undefined;
 }
 
 /** A row's health by its status column: healthy, or the tone of an abnormal state. */

@@ -1,6 +1,7 @@
 import type { Measure, ShownUsage } from "@twigo/protocol";
 import { EmptyMeter, Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
+import { Quantity } from "../Quantity";
 import { figure, type Figure, type Resource } from "./figures";
 
 const LABEL: Readonly<Record<Resource, string>> = {
@@ -110,8 +111,10 @@ function Row({
             <span />
           )}
           <span className="tabular-nums">
-            {shown.used}
-            <span className="text-support">{details(shown)}</span>
+            <Quantity text={shown.used} />
+            <span className="text-support">
+              <Details shown={shown} />
+            </span>
           </span>
           <Percent shown={shown} />
         </>
@@ -120,12 +123,38 @@ function Row({
   );
 }
 
-function details({ base, limit, request, allocatable }: Figure): string {
-  if (base === "allocatable") return ` of ${allocatable ?? ""}`;
-  return [
-    ` · ${limit === null ? "no limit" : `limit ${limit}`}`,
-    request === null ? "" : ` · request ${request}`,
-  ].join("");
+function Details({
+  shown: { base, limit, request, allocatable },
+}: {
+  shown: Figure;
+}) {
+  if (base === "allocatable") {
+    return (
+      <>
+        {" of "}
+        <Quantity text={allocatable ?? ""} />
+      </>
+    );
+  }
+  return (
+    <>
+      {" · "}
+      {limit === null ? (
+        "no limit"
+      ) : (
+        <>
+          {"limit "}
+          <Quantity text={limit} />
+        </>
+      )}
+      {request !== null && (
+        <>
+          {" · request "}
+          <Quantity text={request} />
+        </>
+      )}
+    </>
+  );
 }
 
 const OF = { limit: "limit", request: "request", allocatable: "allocatable" };

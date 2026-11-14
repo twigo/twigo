@@ -17,3 +17,9 @@ export function formatCpu(nanocores: number): string {
 export function formatMemory(bytes: number): string {
   return `${String(Math.floor(bytes / MI))}Mi`;
 }
+
+/** A quantity as `formatCpu` and `formatMemory` print it, split into its number and its unit: `120m` is `120` and `m`. */
+export function splitQuantity(text: string): readonly [string, string] {
+  const [, number = text, unit = ""] = /^(\d+)(\D*)$/.exec(text) ?? [];
+  return [number, unit];
+}

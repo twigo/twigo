@@ -1,7 +1,10 @@
 import type { Cell, Row } from "@twigo/protocol";
-import { cn, StatusDot } from "@twigo/ui";
+import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
+import { ageRole } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
+import { ObjectName } from "../ObjectName";
+import { Quantity } from "../Quantity";
 import { useNow } from "../useNow";
 import { measureText } from "./metrics";
 
@@ -20,22 +23,31 @@ function cellText(cell: Cell): string {
 
 /** An Age from the row's creation: only it ticks, so its row does not render every second. */
 function Age({ created }: { created: string }) {
-  const now = useNow();
-  return (
-    <span className="text-support">
-      {humanDuration(now - Date.parse(created))}
-    </span>
-  );
+  const age = useNow() - Date.parse(created);
+  return <span className={ageRole(age)}>{humanDuration(age)}</span>;
 }
 
-/** A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome. */
-export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
+/**
+ * A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome.
+ * `tone` is the row's, from its health column: a row has one alarm, so a
+ * ratio beside a toned status is plain.
+ */
+export function CellView({
+  row,
+  column,
+  tone: rowTone,
+}: {
+  row: Row;
+  column: ShownColumn;
+  tone: Tone | undefined;
+}) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
-    return (
-      measureText(rule.cell, row.cells[column.index] ?? null) ?? (
-        <span className="text-quiet">–</span>
-      )
+    const measured = measureText(rule.cell, row.cells[column.index] ?? null);
+    return measured === undefined ? (
+      <span className="text-quiet">–</span>
+    ) : (
+      <Quantity text={measured} />
     );
   }
   if (rule.cell === "age") {
@@ -50,7 +62,7 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
     return <span className="text-quiet">{text}</span>;
   switch (rule.cell) {
     case "name":
-      return <Name name={text} generated={row.generated} />;
+      return <ObjectName name={text} generated={row.generated} />;
     case "status": {
       const tone = rule.tone?.(text);
       if (!tone) return text;
@@ -68,7 +80,7 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
       );
     }
     case "ratio":
-      return rule.tone?.(text) ? (
+      return rule.tone?.(text) && (rule.health || rowTone === undefined) ? (
         <span className="text-warn-foreground">{text}</span>
       ) : (
         text
@@ -78,22 +90,6 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
     case "text":
       return rule.quiet ? <span className="text-support">{text}</span> : text;
   }
-}
-
-/**
- * A name with its generated part quieter, which is also the part kept when
- * the name does not fit, since it tells siblings apart: `auth-api-` and a
- * quieter `7f9c8d6b5-x2kq9`.
- */
-function Name({ name, generated }: { name: string; generated: number | null }) {
-  if (generated === null || generated <= 0 || generated >= name.length)
-    return name;
-  return (
-    <span className="inline-flex max-w-full min-w-0 align-bottom">
-      <span className="truncate">{name.slice(0, generated)}</span>
-      <span className="shrink-0 text-quiet">{name.slice(generated)}</span>
-    </span>
-  );
 }
 
 /** A restart count and how long ago the last was, the count in a column of its own. */

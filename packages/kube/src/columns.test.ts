@@ -6,6 +6,7 @@ import {
   columnRule,
   healthValues,
   IN_FLIGHT,
+  rowTone,
   statusColumn,
   worstHealth,
 } from "./columns";
@@ -213,4 +214,22 @@ test("the worst health of counts is what a group or a list sums up to", () => {
   expect(worst(["Running"])).toBe("ok");
   expect(worst(["Running", "Pending"])).toBe("warn");
   expect(worst(["Pending", "Error"])).toBe("error");
+});
+
+test("a row's tone is the abnormal value of its resource's health column", () => {
+  const columns = [column("Name"), column("Ready"), column("Status")];
+  const row = (status: string) => ({
+    id: "r",
+    created: null,
+    generated: null,
+    cells: ["api", "0/1", status],
+  });
+  expect(rowTone(PODS, "Status", columns, row("CrashLoopBackOff"))).toBe(
+    "error",
+  );
+  expect(rowTone(PODS, "Status", columns, row("ContainerCreating"))).toBe(
+    "warn",
+  );
+  expect(rowTone(PODS, "Status", columns, row("Running"))).toBeUndefined();
+  expect(rowTone(PODS, undefined, columns, row("Error"))).toBeUndefined();
 });

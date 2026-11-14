@@ -20,7 +20,13 @@ import {
   useListRegistration,
   useWorkbench,
 } from "@twigo/workbench";
-import { cellTone, columnRule, statusColumn, type CellKind } from "../columns";
+import {
+  cellTone,
+  columnRule,
+  rowTone,
+  statusColumn,
+  type CellKind,
+} from "../columns";
 import { kindIcon } from "../kinds";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
@@ -138,18 +144,11 @@ export function EmbeddedList({
   useEffect(() => {
     setMetrics(reads);
   }, [setMetrics, reads]);
-  const statusAt = countBy
-    ? snapshot.columns.findIndex((column) => column.name === countBy)
-    : -1;
   const item = (index: number): GridItem<Row, never> | undefined => {
     const id = snapshot.ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const status = statusAt < 0 ? undefined : row.cells[statusAt];
-    const tone =
-      countBy && typeof status === "string"
-        ? cellTone(gvr, countBy, status)
-        : undefined;
+    const tone = rowTone(gvr, countBy, snapshot.columns, row);
     return {
       type: "row",
       id: row.id,
@@ -235,7 +234,15 @@ export function EmbeddedList({
           onRange={onRange}
           cell={(row, column) => {
             const shown = byName.get(column.id);
-            return shown && <CellView row={row} column={shown} />;
+            return (
+              shown && (
+                <CellView
+                  row={row}
+                  column={shown}
+                  tone={rowTone(gvr, countBy, snapshot.columns, row)}
+                />
+              )
+            );
           }}
           selected={selected}
           onSelect={(id) => {

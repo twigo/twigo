@@ -12,10 +12,12 @@ import {
 } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
+import { ageRole } from "./age";
 import { cellTone, columnRule, statusColumn } from "./columns";
 import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
 import { measureText } from "./list/metrics";
+import { ObjectName } from "./ObjectName";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
@@ -176,9 +178,11 @@ export function Details({
           <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
           <h2 className="flex min-w-0 flex-1 items-baseline gap-1.5 text-title font-semibold text-strong">
             <span className="shrink-0 text-xs text-support">{kind}</span>{" "}
-            <span className="min-w-0 truncate">
-              <Name name={name} generated={row.generated} />
-            </span>
+            <ObjectName
+              name={name}
+              generated={row.generated}
+              className="text-strong"
+            />
           </h2>
           <IconButton
             icon={Copy}
@@ -235,7 +239,13 @@ export function Details({
               </LinkButton>
             ),
             row.created && (
-              <span key="age" className="shrink-0 tabular-nums">
+              <span
+                key="age"
+                className={cn(
+                  "shrink-0 tabular-nums",
+                  ageRole(now - Date.parse(row.created)),
+                )}
+              >
                 {humanDuration(now - Date.parse(row.created))}
               </span>
             ),
@@ -319,17 +329,6 @@ function warningCount(
       .flatMap((section) => section.blocks)
       .flatMap((block) => (block.type === "events" ? block.events : []));
   return (listed ?? []).filter((event) => event.type === "Warning").length;
-}
-
-function Name({ name, generated }: { name: string; generated: number | null }) {
-  if (generated === null || generated <= 0 || generated >= name.length)
-    return name;
-  return (
-    <>
-      {name.slice(0, generated)}
-      <span className="font-normal text-quiet">{name.slice(generated)}</span>
-    </>
-  );
 }
 
 /** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */

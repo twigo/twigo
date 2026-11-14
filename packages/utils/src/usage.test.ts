@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatCpu, formatMemory } from "./usage";
+import { formatCpu, formatMemory, splitQuantity } from "./usage";
 
 test.each([
   [0, "0m"],
@@ -22,4 +22,15 @@ test.each([
   [1536 * 1024 * 1024, "1536Mi"],
 ])("%d bytes read %s", (bytes, text) => {
   expect(formatMemory(bytes)).toBe(text);
+});
+
+test.each([
+  ["120m", "120", "m"],
+  ["1250m", "1250", "m"],
+  ["51Mi", "51", "Mi"],
+  ["0m", "0", "m"],
+  ["7", "7", ""],
+  ["–", "–", ""],
+])("%s splits into the number %s and the unit %s", (text, number, unit) => {
+  expect(splitQuantity(text)).toEqual([number, unit]);
 });

@@ -299,9 +299,7 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
                 className={cn("size-3", className)}
               />
               {condition.type}
-              <span className="text-quiet">
-                <Age at={condition.lastTransition} />
-              </span>
+              <Age at={condition.lastTransition} />
             </li>
           );
         })}
@@ -529,7 +527,7 @@ export function Events({ list }: { list: EventList }) {
                 {event.count > 1 && (
                   <span className="text-xs text-support">×{event.count}</span>
                 )}
-                <span className="ml-auto shrink-0 text-xs text-support">
+                <span className="ml-auto shrink-0 text-xs">
                   <Age at={event.last} />
                 </span>
               </div>
