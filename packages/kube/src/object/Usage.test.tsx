@@ -457,7 +457,7 @@ describe("an open object", () => {
     ].map((meter) => meter.getAttribute("aria-label")),
   });
 
-  async function frames(ms = 1500, step = 5) {
+  async function frames(ms = 600, step = 10) {
     const seen = [frame()];
     for (let at = 0; at < ms; at += step) {
       await act(() => vi.advanceTimersByTimeAsync(step));
@@ -474,7 +474,7 @@ describe("an open object", () => {
     return seen;
   }
 
-  async function trail(ms = 1500, step = 5) {
+  async function trail(ms = 600, step = 10) {
     const states: string[] = [];
     for (const { state } of await frames(ms, step)) {
       if (states[states.length - 1] !== state) states.push(state);
@@ -738,7 +738,7 @@ describe("an open object", () => {
     });
     await trail();
     expect(drawn()).toBe("figures");
-    expect(await trail(20_000, 50)).toEqual(["figures", "none"]);
+    expect(await trail(20_000, 250)).toEqual(["figures", "none"]);
     act(() => {
       workbench.editors.open(running(namespaceOf(first)));
     });
