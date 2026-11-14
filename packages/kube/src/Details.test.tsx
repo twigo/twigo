@@ -16,6 +16,8 @@ import type {
 import { createMockBackend } from "@twigo/protocol/mock";
 import { openList, settle, withScreenSize } from "../test/workbench";
 
+vi.mock("./edit/YamlEditor", () => ({ default: () => <div /> }));
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
