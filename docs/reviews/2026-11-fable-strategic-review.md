@@ -1101,6 +1101,7 @@ Rows are in order of priority within each horizon.
 ## 4. Decisions to make
 
 Questions only the maintainer can answer, each with my recommended answer and what it costs.
+The answers given on 2026-11-14 to questions 1, 3, 4, 5, 6 and 9 are recorded as D13 to D17 in section 0.1 of [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 1. **What is Twigo's one position?**
    Recommended: triage for the operator of many clusters, from the keyboard, safely; "performance" as the proof, not the pitch.
