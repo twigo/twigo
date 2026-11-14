@@ -473,23 +473,6 @@ fn headless_rows_after_raw_objects_need_a_reconnect() {
 }
 
 #[test]
-fn metrics_server_rows_have_no_uid() {
-    let mut decoder = TableDecoder::new();
-    let page = decoder
-        .decode_list(include_bytes!("fixtures/metrics-table.json"))
-        .unwrap();
-    assert_eq!(
-        names(decoder.columns().unwrap()),
-        ["Name", "cpu", "memory", "Window"]
-    );
-    let row = &page.items[0];
-    assert_eq!(row.meta.name.as_ref(), "p1");
-    assert_eq!(row.meta.uid, None);
-    assert_eq!(row.meta.resource_version.as_ref(), "");
-    assert_eq!(row.cells[1], Cell::Text("1m".into()));
-}
-
-#[test]
 fn component_statuses_have_no_uid() {
     let page = TableDecoder::new()
         .decode_list(include_bytes!("fixtures/componentstatuses-list.json"))

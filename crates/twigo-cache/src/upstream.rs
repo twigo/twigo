@@ -34,8 +34,7 @@ const TIMEOUT_SECONDS: u32 = 290;
 pub(crate) const IDLE: Duration = Duration::from_secs(120);
 /// The longest an upstream waits after a failure before it tries again.
 pub const RETRY_WITHIN: Duration = Duration::from_secs(5);
-/// How often a resource the server cannot watch is listed again: the
-/// interval of metrics (ARCHITECTURE 3.6).
+/// How often a resource the server cannot watch is listed again.
 const POLL: Duration = Duration::from_secs(15);
 
 /// Gets a context's clients, or says why the upstream cannot have them.
@@ -295,8 +294,8 @@ struct Run<D: Decode> {
     backoff: ExponentialBackoff,
     watch_waiting: Waiting,
     list_waiting: Waiting,
-    /// The server answered a watch with 405, as for ComponentStatus and
-    /// metrics: the upstream lists again every [`POLL`].
+    /// The server answered a watch with 405, as for ComponentStatus: the
+    /// upstream lists again every [`POLL`].
     unwatchable: bool,
 }
 
@@ -688,7 +687,7 @@ impl Drop for Watching<'_> {
 }
 
 /// A watch resumes after the last change it saw; objects built without a
-/// `resourceVersion`, such as metrics, leave it be.
+/// `resourceVersion`, such as ComponentStatus, leave it be.
 fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
     if !meta.resource_version.is_empty() {
         from.clone_from(&meta.resource_version);

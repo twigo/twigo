@@ -7,10 +7,10 @@ use tokio::time::{Instant, sleep, timeout};
 use twigo_ipc::{Discovered, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
-use twigo_kube::kubeconfig::{Fingerprint, Sources};
+use twigo_kube::kubeconfig::Fingerprint;
 
 use super::*;
-use crate::fake::Fake;
+use crate::fake::{Fake, fingerprint};
 use crate::hub::Connect;
 
 const CRDS: &str = "/apis/apiextensions.k8s.io/v1/customresourcedefinitions";
@@ -108,7 +108,12 @@ async fn a_crd_shows_once_its_changes_settle() {
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 
     let start = Instant::now();
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     fake.state().serve("example.com", "gadgets", "Gadget");
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
     assert_eq!(start.elapsed(), SETTLE);
@@ -122,7 +127,12 @@ async fn discovery_that_lags_its_crd_comes_with_a_recheck() {
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 
     let start = Instant::now();
-    fake.add("apiservices", None, "v1.example.com");
+    fake.add_to(
+        "apiregistration.k8s.io",
+        "apiservices",
+        None,
+        "v1.example.com",
+    );
     tokio::spawn({
         let fake = fake.clone();
         async move {
@@ -229,7 +239,12 @@ async fn a_failed_refresh_keeps_the_resources_it_knew() {
     let start = Instant::now();
     fake.state().forbidden.insert("/apis".to_owned());
     fake.state().serve("example.com", "gadgets", "Gadget");
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     tokio::spawn({
         let fake = fake.clone();
         async move {
@@ -339,21 +354,6 @@ fn rebuild(current: &Current, next: Result<Arc<Clients>, IpcError>) {
     }
 }
 
-fn fingerprint(server: &str) -> Fingerprint {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("kubeconfig");
-    std::fs::write(
-        &file,
-        format!(
-            "clusters: [{{ name: c, cluster: {{ server: '{server}' }} }}]
-contexts: [{{ name: kind-test, context: {{ cluster: c }} }}]
-"
-        ),
-    )
-    .unwrap();
-    Sources::explicit(file).load().contexts[0].fingerprint
-}
-
 #[tokio::test(start_paused = true)]
 async fn a_stopped_follower_restarts_once_its_kubeconfig_entry_changes() {
     let fake = fake();
@@ -371,7 +371,12 @@ async fn a_stopped_follower_restarts_once_its_kubeconfig_entry_changes() {
 
     let start = Instant::now();
     fake.state().serve("example.com", "gadgets", "Gadget");
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     assert_eq!(names(&next(&mut follower).await), ["namespaces", "gadgets"]);
     assert!(start.elapsed() <= RECHECKS[1], "{:?}", start.elapsed());
 }
@@ -402,7 +407,12 @@ async fn a_change_that_lags_keeps_its_rechecks_across_a_restart() {
     assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 
     let start = Instant::now();
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     tokio::spawn({
         let fake = fake.clone();
         async move {
@@ -456,7 +466,12 @@ async fn a_change_untold_at_a_restart_still_gets_its_rechecks() {
     );
 
     let start = Instant::now();
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     sleep(Duration::from_millis(200)).await;
     edit.send_replace(Some(fingerprint("https://a.example:6443/kubens")));
     tokio::spawn({
@@ -505,7 +520,12 @@ async fn a_new_follower_rechecks_what_its_predecessor_saw() {
     let cache = tempfile::tempdir().unwrap();
     let mut first = over(hub.clone(), cache.path()).await;
     assert_eq!(names(&next(&mut first).await), ["namespaces"]);
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     assert!(
         timeout(Duration::from_millis(200), first.next())
             .await
@@ -545,7 +565,12 @@ async fn steady_changes_put_discovery_off_by_the_first_recheck_at_most() {
         let fake = fake.clone();
         async move {
             loop {
-                fake.add("customresourcedefinitions", None, "gadgets.example.com");
+                fake.add_to(
+                    "apiextensions.k8s.io",
+                    "customresourcedefinitions",
+                    None,
+                    "gadgets.example.com",
+                );
                 sleep(Duration::from_millis(400)).await;
             }
         }
@@ -614,7 +639,12 @@ async fn an_edit_interrupts_a_request_that_hangs() {
 
     let start = Instant::now();
     x.state().discovery_hangs = true;
-    x.add("customresourcedefinitions", None, "gadgets.example.com");
+    x.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     let y = fake();
     let moved = async {
         sleep(Duration::from_secs(1)).await;
@@ -650,7 +680,12 @@ async fn an_edit_that_drops_a_request_fetches_again_at_once() {
 
     let start = Instant::now();
     fake.state().discovery_hangs = true;
-    fake.add("customresourcedefinitions", None, "gadgets.example.com");
+    fake.add_to(
+        "apiextensions.k8s.io",
+        "customresourcedefinitions",
+        None,
+        "gadgets.example.com",
+    );
     let edited = async {
         sleep(Duration::from_secs(1)).await;
         {

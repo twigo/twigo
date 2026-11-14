@@ -97,6 +97,14 @@ pub struct SetWindow {
     pub start: u32,
     /// Exclusive.
     pub end: u32,
+    /// Whether the list reads its metric columns now, which takes the
+    /// document visible, the list's editor on screen, and the list not the
+    /// narrow one beside an object's details, which always says false.
+    /// Before the list's columns are known it says true, so that a list
+    /// sorted by a metric is held from its first rows; once they are known,
+    /// while a metric column is drawn or sorted by. Only then are the
+    /// namespaces of the window's rows polled (ARCHITECTURE 3.6).
+    pub metrics: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -129,6 +137,34 @@ pub struct ListBatch {
     /// disappears or moves, or its rows or counts change. Empty once the
     /// list no longer has the column.
     pub groups: Option<Vec<RowGroup>>,
+    /// For a list with metric columns: whether their samples arrive,
+    /// present once a scope has answered or failed, and whenever it
+    /// changes. Before a scope has answered, a list says the failure its
+    /// last request ended in, if the core remembers one, so its first batch
+    /// with the columns has it, and the first answers correct it; with none
+    /// remembered it says none, but for a stale API, which says
+    /// `unavailable` with the columns. It keeps the state it said while its
+    /// scopes are asked again.
+    pub metrics: Option<MetricsState>,
+}
+
+/// What the Metrics API of a context answers. A context that does not
+/// serve it has no metric columns and no usage, and so no state, but for
+/// the one `Absent` says to an open object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MetricsState {
+    /// It answers, and a row without a sample has none yet; also what a
+    /// `waiting` usage says before any answer came.
+    Ready,
+    /// Served and not answering, as while metrics-server is down.
+    Unavailable,
+    /// The person may not list these metrics.
+    Forbidden,
+    /// Said only in a `Usage`, once, when the context stops serving the
+    /// resource while the usage part is shown: the usage holds no figures
+    /// and the webview draws none.
+    Absent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -202,6 +238,10 @@ pub enum ColumnKind {
     Boolean,
     Date,
     Age,
+    /// Measured CPU, an integer of nanocores; null without a sample.
+    Cpu,
+    /// Measured memory, an integer of bytes; null without a sample.
+    Memory,
     Other,
 }
 

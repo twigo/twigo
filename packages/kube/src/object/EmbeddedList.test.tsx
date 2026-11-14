@@ -1,6 +1,13 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { EmbeddedList as Spec, ObjectRef } from "@twigo/protocol";
+import type {
+  Backend,
+  EmbeddedList as Spec,
+  ObjectRef,
+  RequestOf,
+} from "@twigo/protocol";
+import { createMockBackend } from "@twigo/protocol/mock";
+import { EditorShownContext } from "@twigo/workbench";
 import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import { settle, withScreenSize } from "../../test/workbench";
 import { EmbeddedList } from "./EmbeddedList";
@@ -14,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -30,8 +38,10 @@ async function shown(
   list: Spec,
   onOpen: (target: ObjectRef) => void,
   states = new OverviewStates(),
+  backend?: Backend,
+  editorShown = true,
 ) {
-  const pending = testWorkbench("ready");
+  const pending = testWorkbench("ready", backend);
   await vi.advanceTimersByTimeAsync(10);
   const workbench = await pending;
   render(
@@ -44,7 +54,16 @@ async function shown(
       onOpen={onOpen}
     />,
     {
-      wrapper: inWorkbench(workbench),
+      wrapper: ({ children }) => {
+        const Workbench = inWorkbench(workbench);
+        return (
+          <Workbench>
+            <EditorShownContext.Provider value={editorShown}>
+              {children}
+            </EditorShownContext.Provider>
+          </Workbench>
+        );
+      },
     },
   );
   await settle();
@@ -104,4 +123,114 @@ test("a sort is kept for the kind's next object", async () => {
       .click();
   });
   expect(states.sort("/nodes", "core.pods")).toMatchObject({ column: "Name" });
+});
+
+test("a first click on CPU sorts its list descending, as in the main list", async () => {
+  const states = new OverviewStates();
+  await shown(NODE_PODS, vi.fn(), states);
+  act(() => {
+    within(screen.getByRole("columnheader", { name: "CPU" }))
+      .getByRole("button")
+      .click();
+  });
+  expect(states.sort("/nodes", "core.pods")).toEqual({
+    column: "CPU",
+    descending: true,
+  });
+});
+
+function reads(invoke: { mock: { calls: unknown[][] } }): boolean | undefined {
+  const sent = invoke.mock.calls
+    .filter(([command]) => command === "list_set_window")
+    .map(([, request]) => (request as RequestOf<"list_set_window">).metrics);
+  return sent[sent.length - 1];
+}
+
+test("a node's pods show CPU and Memory and read them while the document is visible", async () => {
+  const backend = createMockBackend("ready");
+  const invoke = vi.spyOn(backend, "invoke");
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual(expect.arrayContaining(["CPU", "Memory"]));
+  expect(reads(invoke)).toBe(true);
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+  act(() => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  expect(reads(invoke)).toBe(false);
+  hidden.mockRestore();
+});
+
+function windows(invoke: { mock: { calls: unknown[][] } }): boolean[] {
+  return invoke.mock.calls
+    .filter(([command]) => command === "list_set_window")
+    .map(([, request]) => (request as RequestOf<"list_set_window">).metrics)
+    .filter((metrics, at, all) => at === 0 || metrics !== all[at - 1]);
+}
+
+function measuredLate(width: number, after: number) {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly report: ResizeObserverCallback) {}
+      observe(target: Element) {
+        setTimeout(() => {
+          this.report(
+            [
+              {
+                target,
+                contentRect: new DOMRectReadOnly(0, 0, width, 600),
+              } as ResizeObserverEntry,
+            ],
+            this,
+          );
+        }, after);
+      }
+      unobserve() {
+        return undefined;
+      }
+      disconnect() {
+        return undefined;
+      }
+    },
+  );
+}
+
+test.each([
+  ["wide", 1000, [true]],
+  ["narrow", 400, [true, false]],
+])(
+  "a node's pods sorted by CPU say they read from their first window, before their width is known, and a %s one goes on by it",
+  async (_, width, said) => {
+    measuredLate(width, 500);
+    const backend = createMockBackend("ready");
+    const invoke = vi.spyOn(backend, "invoke");
+    const states = new OverviewStates();
+    states.setSort("/nodes", "core.pods", { column: "CPU", descending: true });
+    await shown(NODE_PODS, vi.fn(), states, backend);
+    expect(windows(invoke)).toEqual([true]);
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(windows(invoke)).toEqual(said);
+  },
+);
+
+test("a node's pods read nothing while their editor is not shown", async () => {
+  const backend = createMockBackend("ready");
+  const invoke = vi.spyOn(backend, "invoke");
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend, false);
+  expect(reads(invoke)).toBe(false);
+});
+
+test("a Metrics API that does not answer is said in the header's mark", async () => {
+  await shown(
+    NODE_PODS,
+    vi.fn(),
+    new OverviewStates(),
+    createMockBackend("metricsDown"),
+  );
+  await settle(30);
+  expect(screen.getByRole("columnheader", { name: "CPU" }).textContent).toMatch(
+    /metrics-server does not answer/,
+  );
 });

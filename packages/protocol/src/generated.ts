@@ -235,7 +235,7 @@ export type Column = { name: string, kind: ColumnKind,
  */
 priority: number, };
 
-export type ColumnKind = "string" | "integer" | "number" | "boolean" | "date" | "age" | "other";
+export type ColumnKind = "string" | "integer" | "number" | "boolean" | "date" | "age" | "cpu" | "memory" | "other";
 
 export type ColumnValues = { 
 /**
@@ -295,6 +295,8 @@ export type ContainerState = {
  * "Running", "Waiting · CrashLoopBackOff", "Terminated · Completed".
  */
 text: string, tone: Tone, ready: boolean, restarts: number, };
+
+export type ContainerUsage = { name: string, cpu: Measure, memory: Measure, };
 
 /**
  * Which containers of each pod a session follows.
@@ -768,7 +770,18 @@ counts: Array<ValueCount> | null,
  * disappears or moves, or its rows or counts change. Empty once the
  * list no longer has the column.
  */
-groups: Array<RowGroup> | null, };
+groups: Array<RowGroup> | null, 
+/**
+ * For a list with metric columns: whether their samples arrive,
+ * present once a scope has answered or failed, and whenever it
+ * changes. Before a scope has answered, a list says the failure its
+ * last request ended in, if the core remembers one, so its first batch
+ * with the columns has it, and the first answers correct it; with none
+ * remembered it says none, but for a stale API, which says
+ * `unavailable` with the columns. It keeps the state it said while its
+ * scopes are asked again.
+ */
+metrics: MetricsState | null, };
 
 export type ListQuery = { space: string, gvr: Gvr, 
 /**
@@ -1024,6 +1037,36 @@ range: TimeRange | null, };
 export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, } | { "type": "around", id: number, before: number, after: number, };
 
 /**
+ * One resource, in nanocores for CPU and bytes for memory.
+ */
+export type Measure = { 
+/**
+ * Null without a sample.
+ */
+used: number | null, 
+/**
+ * A container's request, or a pod's when every container counted in
+ * `used` has one.
+ */
+request: number | null, 
+/**
+ * A container's limit, or a pod's when every container counted in
+ * `used` has one.
+ */
+limit: number | null, 
+/**
+ * A node's allocatable.
+ */
+allocatable: number | null, };
+
+/**
+ * What the Metrics API of a context answers. A context that does not
+ * serve it has no metric columns and no usage, and so no state, but for
+ * the one `Absent` says to an open object.
+ */
+export type MetricsState = "ready" | "unavailable" | "forbidden" | "absent";
+
+/**
  * How much a context lets through (ARCHITECTURE 6.4). Rust owns it, and the
  * webview only shows it.
  */
@@ -1074,7 +1117,20 @@ events: EventList | null,
 /**
  * Present when it changed, while the related part is shown.
  */
-related: Related | null, };
+related: Related | null, 
+/**
+ * Present when it changed, while the usage part is shown, for a pod
+ * or a node of a context that serves the Metrics API: in the batch that
+ * brings the object once the context's discovery is known, else in a
+ * later one, which the usual order of events, resources first, makes
+ * rare; and in the next one when the part is asked for later. Until the
+ * scope that serves the object has answered once it is `waiting`, or
+ * says the failure its last request ended in, or `unavailable` where the
+ * API is stale; after that a `ready` usage whose `used` is null says
+ * that an answer came without the object. An object that had an answer
+ * keeps its figures while the request that serves it is asked anew.
+ */
+usage: Usage | null, };
 
 export type ObjectEvent = { 
 /**
@@ -1121,7 +1177,12 @@ events: boolean,
 /**
  * Its owners and the objects it owns.
  */
-related: boolean, };
+related: boolean, 
+/**
+ * What a pod or a node uses, read while it is drawn and the document
+ * is visible.
+ */
+usage: boolean, };
 
 /**
  * Names one object of a space.
@@ -1413,7 +1474,17 @@ export type SetWindow = { id: SubscriptionId, start: number,
 /**
  * Exclusive.
  */
-end: number, };
+end: number, 
+/**
+ * Whether the list reads its metric columns now, which takes the
+ * document visible, the list's editor on screen, and the list not the
+ * narrow one beside an object's details, which always says false.
+ * Before the list's columns are known it says true, so that a list
+ * sorted by a metric is held from its first rows; once they are known,
+ * while a metric column is drawn or sorted by. Only then are the
+ * namespaces of the window's rows polled (ARCHITECTURE 3.6).
+ */
+metrics: boolean, };
 
 /**
  * How many bytes of output the terminal has parsed since the last ack.
@@ -1590,6 +1661,37 @@ key: string,
 label: string, value: TreeValue, };
 
 export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", entries: Array<TreeNode>, } | { "type": "list", items: Array<TreeNode>, };
+
+/**
+ * What a pod or a node uses, from the sample its list's rows show.
+ */
+export type Usage = { state: MetricsState, 
+/**
+ * True in a usage sent before the request that serves the object has
+ * answered once: the state is `ready`, the figures are null, and
+ * `containers` names the pod's running containers by its own status,
+ * in the order the answer lists them and with their requests and
+ * limits, so the webview draws the section at its height at once.
+ * False for a stale API, which says `unavailable` at once since
+ * discovery knows it without a request, and for a scope whose last
+ * request failed, which says that failure at once and is asked all the
+ * same.
+ */
+waiting: boolean, 
+/**
+ * RFC 3339, when the sample was taken; null without one, as for a
+ * pod that is not running or started a moment ago.
+ */
+sampled: string | null, 
+/**
+ * A pod's sum over its containers, or the node's own figures.
+ */
+cpu: Measure, memory: Measure, 
+/**
+ * A pod's containers that have a sample, or while `waiting` those that
+ * run, in the pod's order; empty for a node.
+ */
+containers: Array<ContainerUsage>, };
 
 export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, };
 

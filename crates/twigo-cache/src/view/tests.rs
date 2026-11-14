@@ -90,6 +90,13 @@ impl Rig {
     }
 
     fn flush(&mut self) -> Option<ListBatch> {
+        self.flush_with(|_, _| None)
+    }
+
+    fn flush_with(
+        &mut self,
+        held: impl Fn(&str, &str) -> Option<Arc<Sample>>,
+    ) -> Option<ListBatch> {
         let delta = match self.store.drain(&self.feed) {
             Drained::Reset { items, columns } => Delta::Reset {
                 rows: items,
@@ -107,6 +114,7 @@ impl Rig {
             }
         };
         self.view.apply(delta);
+        self.view.sample_entered(held);
         self.view.batch(ViewState::Ready)
     }
 }
@@ -636,7 +644,7 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
         a.is_empty().cmp(&b.is_empty()).then_with(|| natural(a, b))
     }
     let spec = Spec::new("kind-test", query).unwrap();
-    let layout = Layout::new(&spec, pod_columns());
+    let layout = Layout::new(&spec, pod_columns(), false);
     let mut kept = Vec::new();
     let mut counts: HashMap<String, u32> = HashMap::new();
     let mut groups: HashMap<String, (u32, HashMap<String, u32>)> = HashMap::new();
@@ -679,7 +687,7 @@ fn naive(rows: &HashMap<String, Row>, query: &ListQuery) -> Expected {
             row.meta.namespace.as_deref().unwrap(),
             row.meta.name
         );
-        kept.push((group, layout.sort_key(row), id));
+        kept.push((group, layout.sort_key(row, None), id));
     }
     kept.sort_by(|(g, a, x), (h, b, y)| {
         let order = a.cmp(b);
@@ -853,7 +861,7 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
             );
             for id in &mirror.ids {
                 let key = id.trim_start_matches("kind-test/");
-                let wire = rig.view.layout.wire_row(&rows[key], id);
+                let wire = rig.view.layout.wire_row(&rows[key], None, id);
                 assert_eq!(mirror.rows.get(id), Some(&wire.cells), "seed {seed}: {id}");
             }
         }
@@ -868,4 +876,426 @@ fn the_index_matches_a_full_sort_over_random_change_sets() {
 #[test]
 fn the_index_holds_across_nodes_of_a_thousand_rows() {
     random_change_sets(0..3, 2_000, 10, 2_500);
+}
+
+fn served() -> Api {
+    Api::Served {
+        version: "v1beta1",
+        pods: true,
+        nodes: true,
+    }
+}
+
+fn used(cpu: i64, memory: i64) -> Option<Arc<Sample>> {
+    Some(Arc::new(Sample {
+        sampled: None,
+        cpu,
+        memory,
+        containers: Box::default(),
+    }))
+}
+
+fn samples(namespace: &str, name: &str, sample: Option<Arc<Sample>>) -> metrics::Update {
+    metrics::Update {
+        changes: vec![metrics::Change {
+            namespace: namespace.into(),
+            name: name.into(),
+            sample,
+        }],
+        ..metrics::Update::default()
+    }
+}
+
+fn sorted_by(column: &str, descending: bool) -> ListQuery {
+    ListQuery {
+        sort: Some(Sort {
+            column: column.to_owned(),
+            descending,
+        }),
+        ..query()
+    }
+}
+
+fn cpu_of(batch: &ListBatch, id: &str) -> Option<ipc::Cell> {
+    batch
+        .upserts
+        .iter()
+        .find(|row| row.id.0 == id)
+        .map(|row| row.cells[5].clone())
+}
+
+#[test]
+fn a_sample_goes_with_its_row_and_a_new_uid_has_none() {
+    let mut rig = Rig::new(&query());
+    rig.view.set_api(served());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    let first = rig.flush().unwrap();
+    let names: Vec<&str> = first
+        .columns
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Name",
+            "Namespace",
+            "Ready",
+            "Status",
+            "Restarts",
+            "CPU",
+            "Memory",
+            "Age",
+            "IP"
+        ],
+        "just before Age"
+    );
+    rig.view.samples(samples("a", "web-1", used(50, 7)));
+    let sampled = rig.view.batch(ViewState::Ready).unwrap();
+    assert_eq!(sampled.upserts.len(), 1);
+    assert_eq!(sampled.upserts[0].cells[5], ipc::Cell::Int(50));
+    assert_eq!(sampled.upserts[0].cells[6], ipc::Cell::Int(7));
+
+    rig.store.upsert(pod("a", "web-1", "Running", "1"));
+    let changed = rig.flush().unwrap();
+    assert_eq!(
+        changed.upserts[0].cells[5],
+        ipc::Cell::Int(50),
+        "a new version of the row keeps its sample"
+    );
+
+    let mut recreated = pod("a", "web-1", "Running", "0");
+    recreated.meta.uid = Some("new-uid".into());
+    rig.store.delete(&pod("a", "web-1", "Running", "1"));
+    rig.store.upsert(recreated);
+    let again = rig.flush().unwrap();
+    assert_eq!(
+        again.upserts[0].cells[5],
+        ipc::Cell::Null,
+        "the pod's sample is not its successor's"
+    );
+    assert_eq!(
+        cpu_of(&again, "kind-test/a/web-1"),
+        Some(ipc::Cell::Null),
+        "no data, no zero"
+    );
+}
+
+#[test]
+fn a_row_that_enters_the_filters_takes_the_sample_the_poller_holds_at_once() {
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    let mut rig = Rig::new(&asked);
+    rig.view.set_api(served());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    rig.store.upsert(pod("a", "web-2", "Running", "0"));
+    rig.flush();
+    let held = |namespace: &str, name: &str| match (namespace, name) {
+        ("a", "web-1") => used(50, 7),
+        _ => None,
+    };
+
+    rig.store.upsert(pod("a", "web-1", "CrashLoopBackOff", "0"));
+    rig.store.upsert(pod("a", "web-2", "CrashLoopBackOff", "0"));
+    let entered = rig.flush_with(held).unwrap();
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-1"),
+        Some(ipc::Cell::Int(50)),
+        "the poller's sample, though it holds still and is told no more"
+    );
+    assert_eq!(
+        cpu_of(&entered, "kind-test/a/web-2"),
+        Some(ipc::Cell::Null),
+        "no sample, no zero"
+    );
+}
+
+#[test]
+fn a_row_does_not_take_a_sample_that_was_taken_before_it_was_created() {
+    let at = |text: &str| -> jiff::Timestamp { text.parse().unwrap() };
+    let held = |namespace: &str, name: &str| {
+        (namespace == "a" && name == "web-1").then(|| {
+            Arc::new(Sample {
+                sampled: Some(at("2026-11-13T16:00:10Z")),
+                cpu: 50,
+                memory: 7,
+                containers: Box::default(),
+            })
+        })
+    };
+    let mut asked = query();
+    asked.text = Some("Crash".to_owned());
+    for (created, wanted) in [
+        ("2026-11-13T16:00:00Z", ipc::Cell::Int(50)),
+        ("2026-11-13T16:00:20Z", ipc::Cell::Null),
+    ] {
+        let mut rig = Rig::new(&asked);
+        rig.view.set_api(served());
+        let mut entered = pod("a", "web-1", "CrashLoopBackOff", "0");
+        entered.meta.created = Some(at(created));
+        rig.store.upsert(entered);
+        let batch = rig.flush_with(held).unwrap();
+        assert_eq!(
+            cpu_of(&batch, "kind-test/a/web-1"),
+            Some(wanted),
+            "created {created}: a pod made after the sample is another one by the name"
+        );
+    }
+}
+
+#[test]
+fn sorted_by_a_metric_rows_without_a_sample_come_last_either_way_and_a_sample_moves_its_row() {
+    for descending in [false, true] {
+        let mut rig = Rig::new(&sorted_by("CPU", descending));
+        rig.view.set_api(served());
+        for name in ["a-1", "a-2", "a-3", "a-4"] {
+            rig.store.upsert(pod("a", name, "Running", "0"));
+        }
+        rig.flush();
+        for (name, cpu) in [("a-1", 30), ("a-2", 10), ("a-4", 0)] {
+            rig.view.samples(samples("a", name, used(cpu, 1)));
+        }
+        let batch = rig.view.batch(ViewState::Ready).unwrap();
+        let expected = if descending {
+            ["a-1", "a-2", "a-4", "a-3"]
+        } else {
+            ["a-4", "a-2", "a-1", "a-3"]
+        };
+        assert_eq!(
+            ids(&batch),
+            expected.map(|name| format!("kind-test/a/{name}")),
+            "descending: {descending}"
+        );
+        rig.view.samples(samples("a", "a-3", used(20, 1)));
+        let moved = rig.view.batch(ViewState::Ready).unwrap();
+        let expected = if descending {
+            ["a-1", "a-3", "a-2", "a-4"]
+        } else {
+            ["a-4", "a-2", "a-3", "a-1"]
+        };
+        assert_eq!(
+            ids(&moved),
+            expected.map(|name| format!("kind-test/a/{name}")),
+            "a sample moves its row, descending: {descending}"
+        );
+        assert_eq!(moved.upserts.len(), 1, "and sends only that row");
+    }
+}
+
+#[test]
+fn a_list_reads_the_namespaces_of_its_window_and_all_of_them_when_sorted_by_a_metric() {
+    let mut rig = Rig::new(&query());
+    rig.view.set_api(served());
+    for (namespace, names) in [
+        ("a", ["x1", "x2"]),
+        ("b", ["x3", "x4"]),
+        ("c", ["x5", "x6"]),
+    ] {
+        for name in names {
+            rig.store.upsert(pod(namespace, name, "Running", "0"));
+        }
+    }
+    rig.flush();
+    let scopes = |namespaces: &[&str]| -> HashSet<Scope> {
+        namespaces
+            .iter()
+            .map(|name| Scope::Namespace((*name).into()))
+            .collect()
+    };
+    rig.view.set_window(0, 3);
+    assert_eq!(rig.view.wants(true), scopes(&["a", "b"]), "a, a, b");
+    assert!(rig.view.wants(false).is_empty(), "not read");
+    rig.view.set_window(4, 6);
+    assert_eq!(rig.view.wants(true), scopes(&["c"]), "as the window moves");
+    rig.view.set_window(5, 5);
+    assert!(rig.view.wants(true).is_empty(), "no row in view");
+
+    let mut rig = Rig::new(&sorted_by("Memory", false));
+    rig.view.set_api(served());
+    for namespace in ["a", "b", "c"] {
+        rig.store.upsert(pod(namespace, "x", "Running", "0"));
+    }
+    rig.flush();
+    rig.view.set_window(0, 1);
+    assert_eq!(
+        rig.view.wants(true),
+        scopes(&["a", "b", "c"])
+            .into_iter()
+            .chain([Scope::Cluster])
+            .collect(),
+        "every namespace, and the cluster for a list of all of them"
+    );
+}
+
+#[test]
+fn only_a_list_of_all_namespaces_sorted_by_a_metric_asks_for_the_cluster_and_never_for_the_count() {
+    let namespaces: Vec<String> = (0..30).map(|n| format!("ns-{n:02}")).collect();
+    let each = |names: &[String]| -> HashSet<Scope> {
+        names
+            .iter()
+            .map(|name| Scope::Namespace(name.as_str().into()))
+            .collect()
+    };
+    for (chosen, sorted) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut asked = if sorted {
+            sorted_by("Memory", true)
+        } else {
+            query()
+        };
+        if chosen {
+            asked.namespaces = namespaces.clone();
+        }
+        let mut rig = Rig::new(&asked);
+        rig.view.set_api(served());
+        for namespace in &namespaces {
+            rig.store.upsert(pod(namespace, "x", "Running", "0"));
+        }
+        rig.flush();
+        let mut wants = each(&namespaces);
+        if sorted && !chosen {
+            wants.insert(Scope::Cluster);
+        }
+        assert_eq!(
+            rig.view.wants(true),
+            wants,
+            "chosen: {chosen}, sorted by a metric: {sorted}: one request per namespace, \
+             and the cluster's, to fall back from, only for all of them sorted"
+        );
+    }
+}
+
+#[test]
+fn the_state_of_the_columns_is_the_pollers_or_else_the_apis() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "x", "Running", "0"));
+    let plain = rig.flush().unwrap();
+    assert_eq!(plain.metrics, None, "no columns, no state");
+
+    rig.view.set_api(Api::Stale { version: "v1beta1" });
+    let stale = rig.view.batch(ViewState::Ready).unwrap();
+    assert!(stale.columns.is_some(), "the columns come");
+    assert_eq!(stale.metrics, Some(MetricsState::Unavailable));
+    assert!(rig.view.batch(ViewState::Ready).is_none(), "once");
+
+    rig.view.samples(metrics::Update {
+        state: Some(MetricsState::Forbidden),
+        ..metrics::Update::default()
+    });
+    let forbidden = rig.view.batch(ViewState::Ready).unwrap();
+    assert_eq!(forbidden.metrics, Some(MetricsState::Forbidden));
+    assert_eq!(forbidden.columns, None);
+    rig.view.samples(metrics::Update::default());
+    assert!(
+        rig.view.batch(ViewState::Ready).is_none(),
+        "a list that reads nothing keeps what the poller last said"
+    );
+
+    rig.view.set_api(Api::Absent);
+    let gone = rig.view.batch(ViewState::Ready).unwrap();
+    assert!(gone.columns.is_some(), "the columns go");
+    assert_eq!(gone.metrics, None);
+}
+
+#[test]
+fn a_list_that_has_heard_nothing_says_no_state_and_keeps_what_it_said() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "x", "Running", "0"));
+    rig.view.set_api(served());
+    let opened = rig.flush().unwrap();
+    assert!(opened.columns.is_some());
+    assert_eq!(opened.metrics, None, "no scope has answered");
+
+    rig.view.samples(metrics::Update::default());
+    assert!(
+        rig.view.batch(ViewState::Ready).is_none(),
+        "and nothing changes"
+    );
+    rig.view.samples(metrics::Update {
+        state: Some(MetricsState::Forbidden),
+        ..metrics::Update::default()
+    });
+    assert_eq!(
+        rig.view.batch(ViewState::Ready).unwrap().metrics,
+        Some(MetricsState::Forbidden)
+    );
+    rig.view.samples(metrics::Update::default());
+    assert!(
+        rig.view.batch(ViewState::Ready).is_none(),
+        "it keeps the state while its scopes are asked anew"
+    );
+}
+
+#[test]
+fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
+    let names = |batch: &ListBatch| -> Vec<String> {
+        batch
+            .columns
+            .iter()
+            .flatten()
+            .map(|column| column.name.clone())
+            .collect()
+    };
+    for (api, said) in [
+        (served(), None),
+        (
+            Api::Stale { version: "v1beta1" },
+            Some(MetricsState::Unavailable),
+        ),
+    ] {
+        let mut view = QueryView::new(Spec::new("kind-test", &query()).unwrap());
+        view.set_window(0, 100);
+        view.set_api(api);
+        let before = view.batch(ViewState::Connecting).unwrap();
+        assert_eq!(names(&before), Vec::<String>::new());
+        assert_eq!(before.metrics, None, "no columns, no state");
+
+        view.apply(Delta::Reset {
+            rows: vec![Arc::new(pod("a", "web-1", "Running", "0"))],
+            columns: Some(pod_columns()),
+        });
+        let after = view.batch(ViewState::Ready).unwrap();
+        assert_eq!(
+            names(&after),
+            [
+                "Name",
+                "Namespace",
+                "Ready",
+                "Status",
+                "Restarts",
+                "CPU",
+                "Memory",
+                "Age",
+                "IP"
+            ],
+            "with the server's, just before Age"
+        );
+        assert_eq!(after.metrics, said, "and the state with them");
+    }
+}
+
+#[test]
+fn a_node_list_reads_the_one_scope_of_nodes() {
+    let mut nodes = query();
+    nodes.gvr.resource = "nodes".to_owned();
+    nodes.namespaced = false;
+    let mut rig = Rig::new(&nodes);
+    rig.view.set_api(Api::Served {
+        version: "v1beta1",
+        pods: true,
+        nodes: false,
+    });
+    rig.store.upsert(pod("", "node-1", "Ready", "0"));
+    let without = rig.flush().unwrap();
+    assert!(
+        without
+            .columns
+            .unwrap()
+            .iter()
+            .all(|column| column.name != "CPU"),
+        "a Metrics API that serves no nodes gives their list no columns"
+    );
+    rig.view.set_api(served());
+    assert_eq!(rig.view.wants(true), HashSet::from([Scope::Cluster]));
 }

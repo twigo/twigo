@@ -3,7 +3,13 @@
 //! APIServices the hub lists change, every minute while the person may not
 //! list them, after the hub's longest backoff while it fails, which keeps
 //! the resources the server last answered, and once the context's entry in
-//! the kubeconfig changes, even after a failed credential stopped it.
+//! the kubeconfig changes, even after a failed credential stopped it. It
+//! lasts as long as something follows the context, with a follower shared by
+//! all that do.
+
+mod followed;
+
+pub use followed::{Followed, Followers, Resources};
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -16,6 +22,7 @@ use twigo_kube::discovery::{Cache, Discovery, Error};
 use twigo_kube::kubeconfig::Fingerprint;
 
 use crate::hub::{Hub, Query, RETRY_WITHIN, Resource, RowFormat, Subscription};
+use crate::metrics::Api;
 use crate::table::Row;
 
 /// The API server updates its discovery from a change of a CRD or an
@@ -56,6 +63,11 @@ pub struct Follower {
     /// The cluster the last `Pending` named.
     named: Option<String>,
     last: Option<Discovered>,
+    /// What the context served of the Metrics API when `last` was sent.
+    served: Api,
+    asked: Arc<watch::Sender<()>>,
+    /// Whether it was asked since the last fetch began.
+    heard: watch::Receiver<()>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,8 +75,18 @@ enum Failed {
     Retry,
     /// The context's credential failed: retrying would run its plugin by
     /// itself, so it asks again once the person changes the context's
-    /// entry, or the next follower does (ARCHITECTURE 3.2).
+    /// entry, or whoever follows the context again asks it to
+    /// (ARCHITECTURE 3.2).
     Stop,
+}
+
+#[derive(Clone)]
+pub struct Retry(Arc<watch::Sender<()>>);
+
+impl Retry {
+    pub fn ask(&self) {
+        self.0.send_replace(());
+    }
 }
 
 /// CRDs or APIServices, as the hub lists their metadata.
@@ -84,6 +106,7 @@ impl Follower {
         entry.borrow_and_update();
         let indexes = indexes(&hub, &context).await;
         let listed = indexes.iter().any(|index| index.seen.is_some());
+        let (asked, heard) = watch::channel(());
         let mut follower = Self {
             hub,
             cache,
@@ -99,6 +122,9 @@ impl Follower {
             failed: None,
             named: None,
             last: None,
+            served: Api::Absent,
+            asked: Arc::new(asked),
+            heard,
         };
         // Indexes that another follower left listed have told it changes
         // whose discovery may still lag.
@@ -109,9 +135,10 @@ impl Follower {
     }
 
     /// The cluster the context reaches at first, as soon as its clients
-    /// are built, then its resources, then each time they change, with the
-    /// cluster named first again whenever an edit moves the context to
-    /// another.
+    /// are built, then its resources, then each time they change or what
+    /// they say of the Metrics API does, which a stale version and an absent
+    /// group both leave out of the resources, with the cluster named first
+    /// again whenever an edit moves the context to another.
     pub async fn next(&mut self) -> Discovered {
         let mut wait = !matches!(self.last, None | Some(Discovered::Pending { .. }));
         loop {
@@ -125,16 +152,48 @@ impl Follower {
                 continue;
             };
             self.poll = Instant::now() + POLL;
-            if self.last.as_ref() != Some(&discovered) {
+            let served = match discovered {
+                Discovered::Ready { .. } => self.confirmed().map_or(Api::Absent, Api::of),
+                Discovered::Pending { .. } | Discovered::Failed { .. } => Api::Absent,
+            };
+            if self.last.as_ref() != Some(&discovered) || self.served != served {
                 self.last = Some(discovered.clone());
+                self.served = served;
                 return discovered;
             }
         }
     }
 
+    /// Asks it to fetch again, as a new follower would, when a failed credential stopped it or
+    /// stops the fetch under way, without waiting for the context's entry to change.
+    pub fn retry(&self) -> Retry {
+        Retry(Arc::clone(&self.asked))
+    }
+
+    /// The discovery the cluster last answered to this follower, or
+    /// confirmed against its ETags, as the last [`Self::next`] sent it.
+    pub fn confirmed(&self) -> Option<&Discovery> {
+        self.known
+            .as_ref()
+            .filter(|_| self.confirmed)
+            .map(|(_, discovery)| discovery)
+    }
+
+    /// What the context serves of the Metrics API, as the last [`Self::next`] sent it.
+    pub fn api(&self) -> Api {
+        self.served
+    }
+
+    pub fn fingerprint(&self) -> Option<Fingerprint> {
+        *self.entry.borrow()
+    }
+
     async fn wait(&mut self) {
         if self.failed == Some(Failed::Stop) {
-            edited(&mut self.entry).await;
+            tokio::select! {
+                () = edited(&mut self.entry) => {}
+                _ = self.heard.changed() => {}
+            }
             return self.restart().await;
         }
         let retry = (self.failed == Some(Failed::Retry)).then(|| Instant::now() + RETRY_WITHIN);
@@ -194,6 +253,7 @@ impl Follower {
     /// The cluster when the clients reach another than the one named last,
     /// else discovery; none when an edit came while it was asked.
     async fn fetch(&mut self) -> Option<Discovered> {
+        self.heard.borrow_and_update();
         let clients = match self.hub.clients(&self.context).await {
             Ok(clients) => clients,
             Err(error) => {

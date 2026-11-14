@@ -13,16 +13,22 @@ export type CellKind =
   | "restarts"
   /** The time since `created`. */
   | "age"
+  /** Measured CPU, nanocores, as kubectl prints it. */
+  | "cpu"
+  /** Measured memory, bytes, as kubectl prints it. */
+  | "memory"
   | "text";
 
 /** What a column of a resource's table does, as data. */
 export interface ColumnRule {
   readonly cell: CellKind;
-  /** The starting width in px. */
+  /** The starting width in px, and the least a growing column takes. */
   readonly width: number;
-  /** Takes the free width while the user has not sized it. */
+  /** Takes the free width while the user has not sized it, so it is the column that gives way. */
   readonly grow: boolean;
   readonly align: "start" | "end";
+  /** A first click on the header sorts the largest first, as `kubectl top --sort-by` does. */
+  readonly descendFirst: boolean;
   /** Places a row rather than says what it is, so it reads quieter. */
   readonly quiet: boolean;
   /** The table can group its rows by the column's values. */
@@ -31,7 +37,31 @@ export interface ColumnRule {
   readonly health: boolean;
   /** The tone of an abnormal value; healthy values have none. */
   readonly tone?: (text: string) => Tone | undefined;
+  /** A measure of the Metrics API: the list reads it only while it is drawn or sorted by. */
+  readonly metric: boolean;
+  /** A changed value flashes; a measure that moves at every poll does not. */
+  readonly flash: boolean;
 }
+
+const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
+  {
+    cpu: {
+      cell: "cpu",
+      width: 72,
+      align: "end",
+      descendFirst: true,
+      metric: true,
+      flash: false,
+    },
+    memory: {
+      cell: "memory",
+      width: 80,
+      align: "end",
+      descendFirst: true,
+      metric: true,
+      flash: false,
+    },
+  };
 
 /**
  * A pod's Status as Kubernetes prints it (printPod in kubernetes v1.37.1
@@ -86,7 +116,7 @@ export const IN_FLIGHT =
 
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
-  Name: { cell: "name", width: 280, grow: true },
+  Name: { cell: "name", width: 160, grow: true },
   Namespace: { width: 120, quiet: true, groups: true },
   Context: { width: 120, quiet: true, groups: true },
   Node: { width: 200, groups: true },
@@ -132,9 +162,13 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     width: age ? 64 : numeric ? 88 : 140,
     grow: false,
     align: age || numeric ? "end" : "start",
+    descendFirst: false,
     quiet: age,
     groups: false,
     health: false,
+    metric: false,
+    flash: true,
+    ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
   };

@@ -1,18 +1,36 @@
 import { IpcError } from "../error";
 import type {
   Block,
+  Container,
   EventList,
+  MetricsState,
   ObjectBatch,
   ObjectParts,
   ObjectQuery,
   Overview,
   Related,
   RelatedObject,
+  Usage,
   Value,
 } from "../generated";
-import { replicaSetUid, type Cluster, type Pod } from "./cluster";
+import {
+  hash,
+  replicaSetUid,
+  type Cluster,
+  type Node,
+  type Pod,
+} from "./cluster";
 import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
 import { CRASH_LINE as LAST_LINE } from "./logs";
+import {
+  ABSENT,
+  containerSpecs,
+  nodesScope,
+  podsScope,
+  type ContainerSpec,
+  type MetricsReader,
+  type MockMetrics,
+} from "./metrics";
 import OBJECTS from "./objects.json";
 import REVEALED from "./revealed.json";
 
@@ -88,7 +106,12 @@ export interface EditBinding {
  * An open object of the mock backend: the recorded object of its resource
  * under the name asked for, a pod's in the state of the mock's pod, sent
  * once and again for each part shown later. Its live lists list what the
- * mock has of it: a Deployment's pods, a node's pods.
+ * mock has of it: a Deployment's pods, a node's pods. A pod's containers
+ * are the mock pod's, and its usage, as a node's, is what the list's rows
+ * show, sent with the Overview: with no figure while the scope that serves it
+ * has said nothing, with the state the scope last refused in, and with the
+ * figures once it has answered. A usage that has had its figures keeps them
+ * while its scope is asked anew.
  */
 export class MockObject {
   /** The recorded object it stands for. */
@@ -98,6 +121,20 @@ export class MockObject {
   readonly #related: Related;
   readonly #stops: (() => void)[] = [];
   readonly #onMessage: (batch: ObjectBatch) => void;
+  readonly #subject: { pod: Pod } | { node: Node } | undefined;
+  readonly #metrics: MockMetrics | undefined;
+  readonly #scope: string | undefined;
+  readonly #reader: MetricsReader = {
+    answer: () => {
+      if (this.#parts.usage) this.#send({ ...NONE, usage: true });
+      this.#followScrapes();
+    },
+  };
+  #scrapes: ReturnType<typeof setTimeout> | undefined;
+  /** A usage was sent that the webview may still draw. */
+  #offered = false;
+  /** The last usage that did not wait, which stays until its scope answers again. */
+  #kept: Usage | undefined;
   #parts: ObjectParts;
   #seq = 0;
 
@@ -106,14 +143,30 @@ export class MockObject {
     parts: ObjectParts,
     cluster: Cluster | undefined,
     onMessage: (batch: ObjectBatch) => void,
+    metrics?: MockMetrics,
     binding?: EditBinding,
   ) {
     const { group, version, resource } = query.gvr;
-    const pod = cluster?.pods.find(
-      (candidate) =>
-        candidate.namespace === query.namespace &&
-        candidate.name === query.name,
-    );
+    const pod =
+      resource === "pods" && group === ""
+        ? cluster?.pods.find(
+            (candidate) =>
+              candidate.namespace === query.namespace &&
+              candidate.name === query.name,
+          )
+        : undefined;
+    const node =
+      resource === "nodes" && group === ""
+        ? cluster?.nodes.find((candidate) => candidate.name === query.name)
+        : undefined;
+    this.#subject = pod ? { pod } : node ? { node } : undefined;
+    this.#metrics = metrics;
+    this.#scope =
+      pod && cluster
+        ? podsScope(cluster.context, pod.namespace)
+        : node && cluster
+          ? nodesScope(cluster.context)
+          : undefined;
     const name =
       resource === "pods" && group === ""
         ? podFixture(pod)
@@ -127,7 +180,14 @@ export class MockObject {
     }
     this.#fixture = name;
     this.#overview = withLastLines(
-      listing(renamed(recorded.overview, query), query, cluster),
+      listing(
+        renamed(
+          pod ? withContainers(recorded.overview, pod) : recorded.overview,
+          query,
+        ),
+        query,
+        cluster,
+      ),
     );
     const manifest = JSON.parse(recorded.manifest) as {
       metadata: Record<string, unknown>;
@@ -144,10 +204,75 @@ export class MockObject {
     };
     this.#onMessage = onMessage;
     this.#parts = parts;
+    this.#read();
     setTimeout(() => {
       this.#send(parts);
     }, 0);
     if (binding) this.#follow(binding);
+    this.#followScrapes();
+    if (metrics) {
+      this.#stops.push(
+        metrics.watch(() => {
+          this.#read();
+          this.#followScrapes();
+          if (this.#offered && this.#parts.usage) {
+            this.#send({ ...NONE, usage: true });
+          }
+        }),
+      );
+    }
+  }
+
+  #read(): void {
+    if (this.#scope === undefined || !this.#metrics) return;
+    const reads =
+      this.#parts.usage && this.#metrics.served && !this.#metrics.stale;
+    this.#metrics.board.want(this.#reader, new Set(reads ? [this.#scope] : []));
+  }
+
+  #answered(): boolean {
+    return (
+      this.#scope !== undefined &&
+      this.#metrics?.board.answered(this.#scope) === true
+    );
+  }
+
+  #said(): MetricsState | null {
+    return this.#scope === undefined
+      ? null
+      : (this.#metrics?.said(this.#scope) ?? null);
+  }
+
+  /** A scrape moves the samples, so a shown usage is sent again at each, and only while it is shown. */
+  #followScrapes(): void {
+    clearTimeout(this.#scrapes);
+    this.#scrapes = undefined;
+    const metrics = this.#metrics;
+    if (metrics?.state !== "ready" || !this.#parts.usage || !this.#answered()) {
+      return;
+    }
+    this.#scrapes = setTimeout(() => {
+      this.#send({ ...NONE, usage: true });
+      this.#followScrapes();
+    }, metrics.untilScrape);
+  }
+
+  #usage(): Usage | null {
+    const subject = this.#subject;
+    if (!subject || !this.#metrics) return null;
+    if (!this.#metrics.served) {
+      const withdraw = this.#offered;
+      this.#offered = false;
+      return withdraw ? ABSENT : null;
+    }
+    this.#offered = true;
+    const said = this.#said();
+    const usage =
+      "pod" in subject
+        ? this.#metrics.podUsage(subject.pod, said)
+        : this.#metrics.nodeUsage(subject.node, said);
+    if (!usage.waiting) this.#kept = usage;
+    return usage.waiting ? (this.#kept ?? usage) : usage;
   }
 
   /** Follows what edits leave of the object, and makes the changes a scenario asks for. */
@@ -179,6 +304,8 @@ export class MockObject {
   close(): void {
     for (const stop of this.#stops) stop();
     this.#stops.length = 0;
+    clearTimeout(this.#scrapes);
+    this.#metrics?.board.want(this.#reader, new Set());
   }
 
   setParts(parts: ObjectParts): void {
@@ -187,9 +314,12 @@ export class MockObject {
       manifest: parts.manifest && !this.#parts.manifest,
       events: parts.events && !this.#parts.events,
       related: parts.related && !this.#parts.related,
+      usage: parts.usage && !this.#parts.usage,
     };
     this.#parts = parts;
+    this.#read();
     this.#send(shown);
+    this.#followScrapes();
   }
 
   values(keys: readonly string[]): (string | null)[] {
@@ -225,6 +355,14 @@ export class MockObject {
   }
 
   #send(parts: ObjectParts): void {
+    const usage = parts.usage ? this.#usage() : null;
+    if (
+      parts.usage &&
+      usage === null &&
+      !(parts.overview || parts.manifest || parts.events || parts.related)
+    ) {
+      return;
+    }
     this.#seq += 1;
     this.#onMessage({
       seq: this.#seq,
@@ -234,6 +372,7 @@ export class MockObject {
       manifest: parts.manifest ? this.#manifest : null,
       events: parts.events ? events(this.#overview) : null,
       related: parts.related ? this.#related : null,
+      usage,
     });
   }
 }
@@ -245,6 +384,7 @@ const NONE: ObjectParts = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 /** What a colleague or a controller wrote: a label and an annotation, or a tick in the status. */
@@ -274,6 +414,108 @@ function changed(
         "edited-by": `colleague-${String(count)}`,
       },
     },
+  };
+}
+
+function resourcesText({ cpu, memory }: ContainerSpec["request"]): string {
+  return [
+    cpu !== null && `cpu ${String(cpu / 1_000_000)}m`,
+    memory !== null && `memory ${String(memory / (1024 * 1024))}Mi`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** One running pod in four has finished an init container, which its Overview lists and its usage does not. */
+export function finishedInit(pod: Pod): boolean {
+  return (
+    (pod.status === "Running" || pod.status === "CrashLoopBackOff") &&
+    hash(`${pod.id}/init`) % 4 === 0
+  );
+}
+
+/**
+ * The recorded pod's first container as the cards of the mock pod's own
+ * containers, each asking for what its spec says, so that its usage has a
+ * card to be shown on.
+ */
+function withContainers(overview: Overview, pod: Pod): Overview {
+  const specs = containerSpecs(pod);
+  const init = (first: Container): Container[] =>
+    finishedInit(pod)
+      ? [
+          {
+            ...first,
+            name: "init-config",
+            role: "init",
+            image: `registry.example.com/${pod.namespace}/init-config:1.42.0`,
+            state: {
+              text: "Terminated · Completed",
+              tone: "neutral",
+              ready: true,
+              restarts: 0,
+            },
+            ports: [],
+            fields: [],
+            details: [],
+            env: [],
+            mounts: [],
+          },
+        ]
+      : [];
+  const card = (first: Container, spec: ContainerSpec, index: number) => {
+    const asks: [string, ContainerSpec["request"]][] = [
+      ["Requests", spec.request],
+      ["Limits", spec.limit],
+    ];
+    const asked: Container["fields"] = [
+      ...first.fields.filter(
+        ({ label }) => label !== "Requests" && label !== "Limits",
+      ),
+      ...asks.flatMap(([label, resources]) => {
+        const text = resourcesText(resources);
+        return text === ""
+          ? []
+          : [{ label, value: { type: "text" as const, text } }];
+      }),
+    ];
+    return index === 0
+      ? { ...first, name: spec.name, fields: asked }
+      : {
+          ...first,
+          name: spec.name,
+          image: `registry.example.com/${pod.namespace}/${spec.name}:1.42.0`,
+          state: {
+            text: "Running",
+            tone: "success" as const,
+            ready: true,
+            restarts: 0,
+          },
+          ports: [],
+          fields: asked.filter(
+            ({ label }) => label !== "Last state" && label !== "Last finished",
+          ),
+          details: [],
+          env: [],
+          mounts: [],
+        };
+  };
+  return {
+    sections: overview.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) => {
+        const [first] = block.type === "containers" ? block.containers : [];
+        return block.type === "containers" && first
+          ? {
+              ...block,
+              containers: [
+                ...init(first),
+                ...specs.map((spec, index) => card(first, spec, index)),
+              ],
+            }
+          : block;
+      }),
+    })),
   };
 }
 

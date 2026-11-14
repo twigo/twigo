@@ -7,6 +7,7 @@ import {
   deploymentOf,
   replicaSetUid,
   type Cluster,
+  type Node,
   type Pod,
 } from "./cluster";
 import {
@@ -28,6 +29,10 @@ import type { QueryRow } from "./query";
 export interface MockRow extends QueryRow {
   readonly generated: number | null;
   readonly fields: Readonly<Record<string, string>>;
+  /** What the Metrics API samples for the row, which lists of pods and nodes join. */
+  readonly metric?:
+    | { readonly kind: "pod"; readonly pod: Pod }
+    | { readonly kind: "node"; readonly node: Node };
 }
 
 /** A kind the mock serves: the columns kube-apiserver sends for it, and its objects as rows. */
@@ -37,6 +42,7 @@ export interface MockKind {
   readonly fields: readonly string[];
   /** Old names of fields, as conversion maps them. */
   readonly aliases?: Readonly<Record<string, string>>;
+  readonly metrics?: true;
   /** The cells follow `queryColumns(columns, query)`: Namespace second when the list shows it. */
   rows(cluster: Cluster, withNamespace: boolean): MockRow[];
 }
@@ -64,6 +70,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
       "status.nominatedNodeName",
     ],
     aliases: { "spec.host": "spec.nodeName" },
+    metrics: true,
     rows: (cluster, withNamespace) =>
       cluster.pods.map((pod) => ({
         id: pod.id,
@@ -78,11 +85,13 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         cells: podCells(pod, withNamespace),
         generated: podGenerated(pod),
         fields: podFields(pod),
+        metric: { kind: "pod", pod },
       })),
   },
   "/v1/nodes": {
     columns: NODE_COLUMNS,
     fields: ["metadata.name", "spec.unschedulable"],
+    metrics: true,
     rows: (cluster) =>
       cluster.nodes.map((node) => ({
         id: node.id,
@@ -109,6 +118,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
             node.status.includes("SchedulingDisabled"),
           ),
         },
+        metric: { kind: "node", node },
       })),
   },
   "apps/v1/deployments": {

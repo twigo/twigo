@@ -1074,5 +1074,29 @@
     "subresources": [
       "status"
     ]
+  },
+  {
+    "gvr": {
+      "group": "metrics.k8s.io",
+      "version": "v1beta1",
+      "resource": "nodes"
+    },
+    "kind": "NodeMetrics",
+    "singular": "nodemetrics",
+    "shortNames": [],
+    "namespaced": false,
+    "subresources": []
+  },
+  {
+    "gvr": {
+      "group": "metrics.k8s.io",
+      "version": "v1beta1",
+      "resource": "pods"
+    },
+    "kind": "PodMetrics",
+    "singular": "podmetrics",
+    "shortNames": [],
+    "namespaced": true,
+    "subresources": []
   }
 ]

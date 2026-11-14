@@ -90,7 +90,7 @@ impl Resource {
     }
 
     /// Its collection's path, each name escaped.
-    fn path(&self, scope: &Scope) -> String {
+    pub(crate) fn path(&self, scope: &Scope) -> String {
         let segment = |name: &str| utf8_percent_encode(name, SEGMENT).to_string();
         let base = if self.group.is_empty() {
             format!("/api/{}", segment(&self.version))

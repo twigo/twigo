@@ -11,6 +11,7 @@ import type {
   SubscriptionId,
   ViewState,
 } from "./generated";
+import { isShown, type ShownUsage } from "./metrics";
 
 export interface ObjectSnapshot {
   readonly seq: number;
@@ -22,6 +23,12 @@ export interface ObjectSnapshot {
   readonly manifest: string | undefined;
   readonly events: EventList | undefined;
   readonly related: Related | undefined;
+  /**
+   * What a pod or a node uses, while the usage part is shown and the context
+   * serves the Metrics API, with no figure while it `waits` for its first
+   * answer; an `absent` usage withdraws it, until another comes.
+   */
+  readonly usage: ShownUsage | undefined;
 }
 
 export const INITIAL_OBJECT: ObjectSnapshot = {
@@ -32,6 +39,7 @@ export const INITIAL_OBJECT: ObjectSnapshot = {
   manifest: undefined,
   events: undefined,
   related: undefined,
+  usage: undefined,
 };
 
 /**
@@ -150,6 +158,7 @@ export class ObjectView {
         : undefined,
       events: batch.events ?? previous.events,
       related: batch.related ?? previous.related,
+      usage: usageAfter(batch, previous.usage),
     });
     this.#acks.took(batch.seq);
   }
@@ -168,11 +177,21 @@ export class ObjectView {
   }
 }
 
+function usageAfter(
+  batch: ObjectBatch,
+  previous: ShownUsage | undefined,
+): ShownUsage | undefined {
+  if (!batch.exists) return undefined;
+  if (batch.usage === null) return previous;
+  return isShown(batch.usage) ? batch.usage : undefined;
+}
+
 function sameParts(a: ObjectParts, b: ObjectParts): boolean {
   return (
     a.overview === b.overview &&
     a.manifest === b.manifest &&
     a.events === b.events &&
-    a.related === b.related
+    a.related === b.related &&
+    a.usage === b.usage
   );
 }

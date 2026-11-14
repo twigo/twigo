@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, ListBatch } from "@twigo/protocol";
+import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   mountKube,
@@ -72,6 +72,8 @@ test("rows from the window render with the server's priority-0 columns", async (
     "Ready",
     "Status",
     "Restarts",
+    "CPU",
+    "Memory",
     "Age",
     "",
   ]);
@@ -168,6 +170,37 @@ test("under StrictMode the list subscribes once and shows rows", async () => {
   expect(screen.getAllByRole("gridcell").length).toBeGreaterThan(10);
 });
 
+test("a new query's subscription opens before the old one closes, and unmounting leaves none open", async () => {
+  const backend = createMockBackend("ready");
+  const subscribe = vi.spyOn(backend, "subscribe");
+  const invoke = vi.spyOn(backend, "invoke");
+  await openList(backend);
+  const closed = () =>
+    invoke.mock.calls.flatMap(([command], at) =>
+      command === "list_unsubscribe" ? [at] : [],
+    );
+  const before = closed().length;
+  fireEvent.click(within(header("Ready")).getByRole("button"));
+  await settle();
+  const sorted = subscribe.mock.calls.findIndex(
+    ([command, query]) =>
+      command === "list_subscribe" && (query as ListQuery).sort !== null,
+  );
+  const closes = closed().slice(before);
+  expect(sorted).toBeGreaterThan(-1);
+  expect(closes).toHaveLength(1);
+  expect(subscribe.mock.invocationCallOrder[sorted]).toBeLessThan(
+    invoke.mock.invocationCallOrder[closes[0] ?? 0] ?? 0,
+  );
+  cleanup();
+  await settle(1);
+  const count = (calls: readonly (readonly unknown[])[], name: string) =>
+    calls.filter(([command]) => command === name).length;
+  expect(count(invoke.mock.calls, "list_unsubscribe")).toBe(
+    count(subscribe.mock.calls, "list_subscribe"),
+  );
+});
+
 function scriptedBackend() {
   const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;
@@ -212,6 +245,7 @@ function batch(
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   };
 }
 
@@ -290,14 +324,14 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   const backend = createMockBackend("ready");
   await openList(backend);
   expect(template()).toBe(
-    "28px minmax(280px, 1fr) 120px 56px 160px 132px 64px 32px",
+    "28px minmax(160px, 1fr) 120px 56px 160px 132px 72px 80px 64px 32px",
   );
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
   expect(template()).toBe(
-    "28px 380px 120px 56px 160px 132px 64px minmax(0, 1fr) 32px",
+    "28px 260px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px",
   );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
@@ -309,6 +343,37 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   await openList(backend);
   expect(template().startsWith("28px 48px ")).toBe(true);
 });
+
+const GRID_WIDTH_AT_1280_WITH_EXPLORER = 972;
+
+test.each([
+  ["the pods of every namespace", "prod-eu", "k8s-list://prod-eu/v1/pods"],
+  [
+    "the pods of one namespace",
+    "prod-eu",
+    "k8s-list://prod-eu/v1/pods?ns=auth",
+  ],
+  ["the nodes", "staging", "k8s-list://staging/v1/nodes"],
+])(
+  "%s need no horizontal scroll at 1280 px with the explorer open, Age whole",
+  async (_, space, uri) => {
+    const workbench = await mountKube(createMockBackend("ready"));
+    act(() => {
+      workbench.spaces.select(space);
+    });
+    await settle();
+    act(() => {
+      workbench.editors.open(uri);
+    });
+    await settle();
+    for (const name of ["CPU", "Memory", "Age"]) {
+      expect(header(name)).toBeTruthy();
+    }
+    expect(
+      Number.parseInt(screen.getAllByRole("row")[0]?.style.minWidth ?? "", 10),
+    ).toBeLessThanOrEqual(GRID_WIDTH_AT_1280_WITH_EXPLORER);
+  },
+);
 
 test("a double click on a header's edge fits the column to its widest text or its title, narrowing it too", async () => {
   const measured = (element: Element) => element.textContent.length * 10;
@@ -323,16 +388,19 @@ test("a double click on a header's edge fits the column to its widest text or it
   });
   try {
     await openList();
+    const edge = screen.getByRole("separator", { name: "Resize Name" });
+    fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(edge, { clientX: 700, pointerId: 1 });
+    fireEvent.pointerUp(edge, { pointerId: 1 });
+    expect(template().startsWith("28px 560px ")).toBe(true);
     const name = Math.max(
       ...rows().map((row) => textOf(row, "Name").length * 10 + 16),
     );
-    expect(name).toBeLessThan(280);
-    fireEvent.doubleClick(
-      screen.getByRole("separator", { name: "Resize Name" }),
-    );
+    expect(name).toBeLessThan(560);
+    fireEvent.doubleClick(edge);
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 56px 160px 132px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
     );
 
     const ready = Math.max(
@@ -344,7 +412,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 83px 160px 132px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");

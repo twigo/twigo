@@ -22,6 +22,7 @@ function batch(rest: Partial<ListBatch>): ListBatch {
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
     ...rest,
   };
 }

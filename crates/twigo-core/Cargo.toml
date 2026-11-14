@@ -47,6 +47,7 @@ twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-netmon.workspace = true
 twigo-policy.workspace = true
+twigo-quantity.workspace = true
 twigo-sessions.workspace = true
 
 [dev-dependencies]

@@ -5890,6 +5890,7 @@ dependencies = [
  "bytes",
  "dhat",
  "fastrand",
+ "flate2",
  "form_urlencoded",
  "futures",
  "http",
@@ -5909,6 +5910,7 @@ dependencies = [
  "tower",
  "twigo-ipc",
  "twigo-kube",
+ "twigo-quantity",
 ]
 
 [[package]]
@@ -5951,6 +5953,7 @@ dependencies = [
  "twigo-kube",
  "twigo-netmon",
  "twigo-policy",
+ "twigo-quantity",
  "twigo-sessions",
 ]
 
@@ -5964,6 +5967,7 @@ dependencies = [
  "serde_json",
  "twigo-ipc",
  "twigo-policy",
+ "twigo-quantity",
 ]
 
 [[package]]
@@ -6104,6 +6108,10 @@ dependencies = [
  "tower",
  "twigo-ipc",
 ]
+
+[[package]]
+name = "twigo-quantity"
+version = "0.1.0"
 
 [[package]]
 name = "twigo-sessions"

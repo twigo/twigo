@@ -1,0 +1,1357 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde_json::json;
+use tempfile::TempDir;
+use tokio::sync::watch;
+use tokio::time::{Instant, sleep, timeout};
+use twigo_ipc::MetricsState;
+use twigo_kube::client::{Budgets, Clients};
+use twigo_kube::discovery::Cache;
+
+use super::*;
+use crate::discovery::Followers;
+use crate::fake::Fake;
+use crate::hub::Connect;
+
+const PODS: &str = "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods";
+const CLUSTER_PODS: &str = "/apis/metrics.k8s.io/v1beta1/pods";
+const APISERVICES: &str = "apiservices";
+
+struct Rig {
+    fake: Fake,
+    context: Arc<Context>,
+    _hub: (Hub, Arc<Clients>, TempDir, Followers),
+}
+
+async fn context_of(hub: &Hub, directory: &TempDir) -> (Followers, Arc<Context>) {
+    let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
+    let followed = followers
+        .get("kind-test", async { watch::channel(None).1 })
+        .await;
+    (
+        followers,
+        Poller::new(hub.clone()).context("kind-test", &followed),
+    )
+}
+
+async fn rig() -> Rig {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "50172044n", "204Ki")]);
+    fake.pod_usage("a", "p2", &[("main", "1", "40Mi")]);
+    followed(fake).await
+}
+
+async fn followed(fake: Fake) -> Rig {
+    let (hub, clients) = fake.hub(Budgets::default());
+    let directory = tempfile::tempdir().unwrap();
+    let (followers, context) = context_of(&hub, &directory).await;
+    let rig = Rig {
+        fake,
+        context,
+        _hub: (hub, clients, directory, followers),
+    };
+    until(|| rig.context.api().columns(Kind::Pods)).await;
+    rig
+}
+
+async fn until(mut reached: impl FnMut() -> bool) {
+    let waited = async {
+        while !reached() {
+            sleep(Duration::from_millis(10)).await;
+        }
+    };
+    timeout(Duration::from_secs(600), waited)
+        .await
+        .expect("it within ten minutes");
+}
+
+fn polls(fake: &Fake) -> usize {
+    fake.count("/apis/metrics.k8s.io/")
+}
+
+fn namespace(name: &str) -> HashSet<Scope> {
+    HashSet::from([Scope::Namespace(name.into())])
+}
+
+fn named(namespace: &str, name: &str) -> Scope {
+    Scope::Named {
+        namespace: namespace.into(),
+        name: name.into(),
+    }
+}
+
+fn times(fake: &Fake, start: Instant) -> Vec<u64> {
+    fake.state()
+        .requests
+        .iter()
+        .filter(|(_, uri)| uri.contains("/apis/metrics.k8s.io/"))
+        .map(|(at, _)| (*at - start).as_secs())
+        .collect()
+}
+
+fn keys(update: &Update) -> Vec<(String, Option<i64>)> {
+    let mut keys: Vec<_> = update
+        .changes
+        .iter()
+        .map(|change| {
+            (
+                format!("{}/{}", change.namespace, change.name),
+                change.sample.as_ref().map(|sample| sample.cpu),
+            )
+        })
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[test]
+fn the_fake_answers_a_server_that_is_down_as_the_recorded_one_did() {
+    let recorded: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/metrics-unavailable.json"
+    ))
+    .unwrap();
+    let (content_type, body) = crate::fake::NO_ENDPOINTS;
+    assert_eq!(recorded["status"], 503);
+    assert_eq!(recorded["contentType"], content_type);
+    assert_eq!(recorded["body"], body);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_is_polled_at_once_and_every_interval_while_a_reader_wants_it_and_never_after() {
+    let rig = rig().await;
+    let start = Instant::now();
+    sleep(INTERVAL * 4).await;
+    assert_eq!(polls(&rig.fake), 0, "no request before a reader");
+
+    let mut reader = rig.context.reader(Kind::Pods);
+    let wanted = Instant::now();
+    reader.want(namespace("a"));
+    until(|| polls(&rig.fake) > 0).await;
+    let first_poll = rig
+        .fake
+        .state()
+        .requests
+        .iter()
+        .find(|(_, uri)| uri.contains("/apis/metrics.k8s.io/"))
+        .map(|(at, _)| *at);
+    assert_eq!(first_poll, Some(wanted), "the first poll comes at once");
+    sleep(INTERVAL * 4 + Duration::from_secs(1)).await;
+    let first = (wanted - start).as_secs();
+    assert_eq!(
+        times(&rig.fake, start),
+        (0..=4)
+            .map(|n| first + INTERVAL.as_secs() * n)
+            .collect::<Vec<_>>(),
+        "one per interval"
+    );
+
+    drop(reader);
+    let after = polls(&rig.fake);
+    sleep(INTERVAL * 20).await;
+    assert_eq!(polls(&rig.fake), after, "none once the last reader let go");
+}
+
+#[tokio::test(start_paused = true)]
+async fn two_readers_of_a_scope_share_one_request_per_interval() {
+    let rig = rig().await;
+    let (mut one, mut two) = (
+        rig.context.reader(Kind::Pods),
+        rig.context.reader(Kind::Pods),
+    );
+    one.want(namespace("a"));
+    two.want(namespace("a"));
+    sleep(INTERVAL * 4 + Duration::from_secs(1)).await;
+    assert_eq!(polls(&rig.fake), 5);
+    for reader in [&one, &two] {
+        assert_eq!(
+            keys(&reader.drain()).len(),
+            0,
+            "told by a reset, not by changes"
+        );
+    }
+    drop(one);
+    sleep(INTERVAL * 2).await;
+    assert_eq!(polls(&rig.fake), 7, "the other still wants it");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
+    let rig = rig().await;
+    rig.fake
+        .pod_usage("a", "multi", &[("b", "1m", "1Mi"), ("a", "2m", "1Mi")]);
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| polls(&rig.fake) > 0).await;
+    sleep(Duration::from_millis(1)).await;
+    let first = reader.drain();
+    assert_eq!(first.state, Some(MetricsState::Ready));
+    let [reset] = &first.resets[..] else {
+        panic!("one reset: {first:?}");
+    };
+    assert_eq!(reset.scope, Scope::Namespace("a".into()));
+    assert_eq!(reset.samples.len(), 3);
+    assert!(first.changes.is_empty());
+
+    sleep(INTERVAL * 3).await;
+    let quiet = reader.drain();
+    assert!(
+        quiet.resets.is_empty() && quiet.changes.is_empty(),
+        "the containers came in another order and the request's time moved: {quiet:?}"
+    );
+
+    rig.fake.pod_usage("a", "p1", &[("main", "60m", "204Ki")]);
+    rig.fake.pod_usage("a", "new", &[("main", "3m", "1Mi")]);
+    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
+    sleep(INTERVAL).await;
+    let changed = reader.drain();
+    assert_eq!(
+        keys(&changed),
+        [
+            ("a/new".to_owned(), Some(3_000_000)),
+            ("a/p1".to_owned(), Some(60_000_000)),
+            ("a/p2".to_owned(), None),
+        ],
+        "a pod that left the answer has no sample, and no zero"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and_recovers() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(reader.drain().state, Some(MetricsState::Ready));
+
+    rig.fake.state().no_endpoints.insert(PODS.to_owned());
+    sleep(INTERVAL + Duration::from_secs(1)).await;
+    let down = reader.drain();
+    assert_eq!(down.state, Some(MetricsState::Unavailable));
+    assert_eq!(
+        keys(&down),
+        [("a/p1".to_owned(), None), ("a/p2".to_owned(), None)],
+        "nothing on screen as a value"
+    );
+    let failed = polls(&rig.fake);
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        polls(&rig.fake),
+        failed + 3,
+        "a failure is asked again one interval later, not sooner"
+    );
+
+    rig.fake.state().no_endpoints.clear();
+    let mut back = Update::default();
+    until(|| {
+        let update = reader.drain();
+        back.changes.extend(update.changes);
+        update.state == Some(MetricsState::Ready)
+    })
+    .await;
+    assert_eq!(
+        keys(&back),
+        [
+            ("a/p1".to_owned(), Some(50_172_044)),
+            ("a/p2".to_owned(), Some(1_000_000_000))
+        ],
+        "its values come back"
+    );
+    let polled = polls(&rig.fake);
+    sleep(INTERVAL * 2 + Duration::from_secs(1)).await;
+    assert_eq!(
+        polls(&rig.fake),
+        polled + 2,
+        "and an answer keeps the interval"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_person_is_forbidden_and_the_scope_recovers_when_allowed() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(PODS.to_owned());
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    let mut other = rig.context.reader(Kind::Pods);
+    other.want(namespace("b"));
+    until(|| reader.drain().state == Some(MetricsState::Forbidden)).await;
+    assert_eq!(
+        other.drain().state,
+        Some(MetricsState::Ready),
+        "only the scope refused"
+    );
+    let mut both = rig.context.reader(Kind::Pods);
+    both.want(namespace("a").into_iter().chain(namespace("b")).collect());
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(
+        both.drain().state,
+        Some(MetricsState::Forbidden),
+        "forbidden outranks ready over several scopes"
+    );
+
+    rig.fake.state().forbidden.clear();
+    until(|| reader.drain().state == Some(MetricsState::Ready)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_alone_asks_for_itself_and_none_when_a_list_reads_its_namespace() {
+    let rig = rig().await;
+    let start = Instant::now();
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(
+        rig.fake
+            .count("namespaces/a/pods?fieldSelector=metadata.name%3Dp1"),
+        1
+    );
+    let heard = alone.drain();
+    let [reset] = &heard.resets[..] else {
+        panic!("{heard:?}");
+    };
+    assert_eq!(reset.samples.len(), 1, "its own pod only");
+
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    let polled = polls(&rig.fake);
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        polls(&rig.fake),
+        polled + 3,
+        "one request for the list, none of its own for the pod: {:?}",
+        times(&rig.fake, start)
+    );
+    assert_eq!(
+        rig.fake.count("fieldSelector"),
+        1,
+        "the pod's own request ended"
+    );
+    rig.fake.pod_usage("a", "p1", &[("main", "70m", "1Mi")]);
+    rig.fake.pod_usage("a", "p2", &[("main", "80m", "1Mi")]);
+    sleep(INTERVAL).await;
+    assert_eq!(
+        keys(&alone.drain()),
+        [("a/p1".to_owned(), Some(70_000_000))],
+        "the pod hears its own key from the list's answer"
+    );
+
+    let before = polls(&rig.fake);
+    let mut late = rig.context.reader(Kind::Pods);
+    late.want(HashSet::from([named("a", "p2")]));
+    let heard = late.drain();
+    assert_eq!(
+        heard
+            .resets
+            .iter()
+            .map(|reset| &reset.scope)
+            .collect::<Vec<_>>(),
+        [&Scope::Namespace("a".into())],
+        "a pod wanted while its namespace is polled is told from that answer"
+    );
+    assert_eq!(polls(&rig.fake), before, "with no request of its own");
+    drop(late);
+
+    drop(list);
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(
+        rig.fake.count("fieldSelector"),
+        2,
+        "alone again, it asks for itself at once"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reader_can_ask_for_the_sample_of_a_key_it_wants_and_of_no_other() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    assert!(reader.sample("a", "p1").is_none(), "it wants nothing yet");
+    reader.want(namespace("a"));
+    let mut other = rig.context.reader(Kind::Pods);
+    other.want(namespace("b"));
+    rig.fake.pod_usage("b", "q1", &[("main", "3m", "1Mi")]);
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(reader.sample("a", "p1").map(|s| s.cpu), Some(50_172_044));
+    assert!(reader.sample("a", "gone").is_none());
+    assert!(
+        reader.sample("b", "q1").is_none(),
+        "another reader's namespace is no concern of this one, which would hear no change of it"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn nodes_have_one_scope_and_the_cluster_one_covers_the_namespaces() {
+    let rig = rig().await;
+    rig.fake.node_usage("n1", "277147502n", "2509700Ki");
+    let mut nodes = rig.context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    sleep(Duration::from_millis(1)).await;
+    let heard = nodes.drain();
+    let sample = heard.resets[0].samples.get("", "n1").unwrap().clone();
+    assert_eq!((sample.cpu, sample.memory), (277_147_502, 2_569_932_800));
+    assert_eq!(rig.fake.count("/apis/metrics.k8s.io/v1beta1/nodes"), 1);
+
+    let mut pods = rig.context.reader(Kind::Pods);
+    pods.want(
+        namespace("a")
+            .into_iter()
+            .chain([Scope::Namespace("b".into())])
+            .collect(),
+    );
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    sleep(Duration::from_millis(1)).await;
+    let before = polls(&rig.fake);
+    sleep(INTERVAL * 2).await;
+    assert_eq!(
+        polls(&rig.fake) - before,
+        2 + 2,
+        "the cluster's and the nodes', every interval, none per namespace"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_context_has_at_most_its_limit_of_requests_in_flight_whatever_its_readers_want() {
+    let rig = rig().await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let namespaces: Vec<String> = (0..12).map(|n| format!("ns-{n:02}")).collect();
+    for namespace in &namespaces {
+        rig.fake.pod_usage(namespace, "p", &[("main", "1m", "1Mi")]);
+    }
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(
+        namespaces
+            .iter()
+            .map(|namespace| Scope::Namespace(namespace.as_str().into()))
+            .collect(),
+    );
+    let mut nodes = rig.context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    sleep(INTERVAL * 2).await;
+    assert_eq!(
+        rig.fake.state().metrics_overlap,
+        IN_FLIGHT,
+        "the pods' and the nodes' requests take turns together"
+    );
+    assert!(
+        polls(&rig.fake) >= 2 * (namespaces.len() + 1),
+        "every scope is still polled each interval: {} polls",
+        polls(&rig.fake)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cluster_covers_a_namespace_only_while_it_answers_and_the_namespace_then_speaks_for_itself()
+ {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut heard = Update::default();
+    until(|| {
+        let update = list.drain();
+        heard.state = update.state.or(heard.state);
+        heard.resets.extend(update.resets);
+        !heard.resets.is_empty()
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "its own namespace answers"
+    );
+    assert_eq!(heard.resets[0].scope, Scope::Namespace("a".into()));
+    assert_eq!(heard.resets[0].samples.len(), 2);
+    until(|| cluster.drain().state == Some(MetricsState::Forbidden)).await;
+    let before = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 2).await;
+    assert!(
+        rig.fake.count("namespaces/a/pods") >= before + 2,
+        "the namespace is polled for itself every interval"
+    );
+
+    rig.fake.delete_from(GROUP, "pods", Some("a"), "p2");
+    rig.fake.state().forbidden.clear();
+    let mut back = Update::default();
+    until(|| {
+        let update = list.drain();
+        back.resets.extend(update.resets);
+        back.changes.extend(update.changes);
+        back.resets
+            .iter()
+            .any(|reset| reset.scope == Scope::Cluster)
+    })
+    .await;
+    let reset = back
+        .resets
+        .iter()
+        .find(|reset| reset.scope == Scope::Cluster)
+        .unwrap();
+    assert!(
+        reset.samples.get("a", "p2").is_none(),
+        "the cluster's answer is the whole one, a pod it lacks has no sample"
+    );
+    sleep(Duration::from_secs(1)).await;
+    let covered = rig.fake.count("namespaces/a/pods");
+    sleep(INTERVAL * 3).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        covered,
+        "the cluster covers it again"
+    );
+    assert_eq!(list.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_alone_asks_for_itself_when_the_cluster_does_not_answer_for_it() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut cluster = rig.context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(INTERVAL).await;
+    assert!(
+        rig.fake
+            .count("namespaces/a/pods?fieldSelector=metadata.name%3Dp1")
+            >= 1,
+        "the pod's own request"
+    );
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_answer_that_lands_between_the_check_and_the_drain_is_in_the_update_and_counted_next() {
+    let rig = rig().await;
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    let answer =
+        br#"{"items":[{"metadata":{"name":"p1","namespace":"a"},"timestamp":"2026-11-13T16:19:28Z",
+        "containers":[{"name":"main","usage":{"cpu":"7m","memory":"1Mi"}}]}]}"#;
+    let (settled, update) = reader.read_with(|| {
+        rig.context.board(Kind::Pods).land(
+            &Scope::Namespace("a".into()),
+            MetricsState::Ready,
+            sample::parse(answer, Kind::Pods).unwrap(),
+            None,
+        );
+    });
+    assert!(!settled, "nothing had answered when it was checked");
+    let [reset] = &update.resets[..] else {
+        panic!("the answer is in the update: {update:?}");
+    };
+    assert_eq!(
+        reset.samples.get("a", "p1").map(|sample| sample.cpu),
+        Some(7_000_000)
+    );
+    assert!(reader.read().0, "and the next check counts it");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_open_pod_beside_a_list_that_fell_back_to_its_namespaces_has_its_namespaces_state() {
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([
+        Scope::Cluster,
+        Scope::Namespace("a".into()),
+    ]));
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(list.drain().state, Some(MetricsState::Ready));
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
+    assert_eq!(
+        alone.sample("a", "p1").map(|sample| sample.cpu),
+        Some(50_172_044)
+    );
+    assert_eq!(rig.fake.count("namespaces/a/pods"), 1);
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods?fieldSelector"),
+        0,
+        "no request of its own beside its namespace's"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_open_pod_restarts_the_namespace_request_a_401_stopped_when_the_cluster_does_not_answer()
+{
+    let rig = rig().await;
+    rig.fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    rig.fake.state().unauthorized.insert(PODS.to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([
+        Scope::Cluster,
+        Scope::Namespace("a".into()),
+    ]));
+    until(|| list.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = rig.fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(rig.fake.count("namespaces/a/pods"), stopped);
+
+    rig.fake.state().unauthorized.clear();
+    let mut alone = rig.context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p1")]));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(rig.fake.count("namespaces/a/pods"), stopped + 1);
+    assert_eq!(alone.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn what_a_context_serves_follows_the_cluster_and_a_stale_api_keeps_its_columns() {
+    let fake = Fake::default();
+    let apiservice = |name: &str| {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": name },
+        })
+    };
+    let rig = followed_without_metrics(fake.clone()).await;
+    assert_eq!(rig.context.api(), Api::Absent, "no metrics-server");
+    assert!(!rig.context.api().columns(Kind::Pods));
+
+    fake.serve_metrics("v1beta1");
+    fake.put(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        apiservice("v1beta1.metrics.k8s.io"),
+    );
+    until(|| rig.context.api().columns(Kind::Nodes)).await;
+    assert_eq!(
+        rig.context.api(),
+        Api::Served {
+            version: "v1beta1",
+            pods: true,
+            nodes: true
+        }
+    );
+
+    fake.stale_metrics("v1beta1");
+    fake.put(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        apiservice("v1beta1.metrics.k8s.io"),
+    );
+    until(|| rig.context.api().stale()).await;
+    assert!(
+        rig.context.api().columns(Kind::Pods),
+        "stale counts as served"
+    );
+    assert!(rig.context.api().columns(Kind::Nodes));
+
+    fake.serve_metrics("v1beta1");
+    fake.put(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        apiservice("v1beta1.metrics.k8s.io"),
+    );
+    until(|| !rig.context.api().stale()).await;
+
+    fake.state().served.remove(GROUP);
+    fake.delete_from(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    until(|| rig.context.api() == Api::Absent).await;
+}
+
+async fn followed_without_metrics(fake: Fake) -> Rig {
+    let (hub, clients) = fake.hub(Budgets::default());
+    let directory = tempfile::tempdir().unwrap();
+    let (followers, context) = context_of(&hub, &directory).await;
+    sleep(Duration::from_secs(1)).await;
+    Rig {
+        fake,
+        context,
+        _hub: (hub, clients, directory, followers),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn v1_comes_before_v1beta1() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1");
+    let rig = followed(fake).await;
+    assert_eq!(
+        rig.context.api(),
+        Api::Served {
+            version: "v1",
+            pods: true,
+            nodes: true
+        }
+    );
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(
+        rig.fake.count("/apis/metrics.k8s.io/v1/namespaces/a/pods"),
+        1
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_poll_follows_clients_abandoned_meanwhile() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    let polled = polls(&fake);
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        polls(&fake),
+        polled + 1,
+        "it listed over the new clients without waiting out its 15 s"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_failed_credential_stopped_starts_again_when_a_reader_asks_for_it_anew() {
+    let rig = rig().await;
+    rig.fake.state().unauthorized.insert(PODS.to_owned());
+    let mut first = rig.context.reader(Kind::Pods);
+    first.want(namespace("a"));
+    until(|| first.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = rig.fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "nothing asks again by itself, which would run the credential plugin again"
+    );
+
+    rig.fake.state().unauthorized.clear();
+    let mut elsewhere = rig.context.reader(Kind::Pods);
+    elsewhere.want(namespace("b"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped,
+        "a reader of another scope does not"
+    );
+
+    let mut second = rig.context.reader(Kind::Pods);
+    second.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        rig.fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "a reader that comes later does, at once"
+    );
+    assert_eq!(second.drain().state, Some(MetricsState::Ready));
+    let mut heard = Update::default();
+    until(|| {
+        let update = first.drain();
+        heard.state = update.state;
+        heard.changes.extend(update.changes);
+        heard.changes.len() >= 2
+    })
+    .await;
+    assert_eq!(
+        heard.state,
+        Some(MetricsState::Ready),
+        "and so does the first"
+    );
+    assert_eq!(
+        keys(&heard),
+        [
+            ("a/p1".to_owned(), Some(50_172_044)),
+            ("a/p2".to_owned(), Some(1_000_000_000))
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_scope_a_401_stopped_starts_again_once_the_clients_are_rebuilt() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    fake.state().unauthorized.insert(PODS.to_owned());
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+    let stopped = fake.count("namespaces/a/pods");
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), stopped);
+
+    fake.state().unauthorized.clear();
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        stopped + 1,
+        "it asked over the rebuilt clients, with no reader asking again"
+    );
+    assert_eq!(reader.drain().state, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn clients_that_a_failed_credential_could_not_build_come_with_the_next_reader() {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "1m", "1Mi")]);
+    let clients = fake.clients(Budgets::default());
+    let refusing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let refusing = Arc::clone(&refusing);
+        Arc::new(move |_context| {
+            let clients = Arc::clone(&clients);
+            let refused = refusing.load(std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if refused {
+                    return Err(twigo_ipc::IpcError::new(
+                        twigo_ipc::ErrorKind::Unauthorized,
+                        "Twigo runs aws only once you trust it".to_owned(),
+                    ));
+                }
+                Ok(clients)
+            })
+        })
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let hub = Hub::new(connect);
+    let (_followers, context) = context_of(&hub, &directory).await;
+    until(|| context.api().columns(Kind::Pods)).await;
+    refusing.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    until(|| reader.drain().state == Some(MetricsState::Unavailable)).await;
+
+    refusing.store(false, std::sync::atomic::Ordering::Relaxed);
+    sleep(Duration::from_secs(600)).await;
+    assert_eq!(
+        fake.count("namespaces/a/pods"),
+        0,
+        "it does not try again by itself"
+    );
+    let mut next = context.reader(Kind::Pods);
+    next.want(namespace("a"));
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(fake.count("namespaces/a/pods"), 1);
+    assert_eq!(next.drain().state, Some(MetricsState::Ready));
+}
+
+const NODES: &str = "/apis/metrics.k8s.io/v1beta1/nodes";
+
+struct Kept {
+    fake: Fake,
+    poller: Poller,
+    followers: Followers,
+    _held: (Hub, TempDir),
+}
+
+impl Kept {
+    fn over(fake: Fake, hub: Hub) -> Self {
+        let directory = tempfile::tempdir().unwrap();
+        Self {
+            fake,
+            poller: Poller::new(hub.clone()),
+            followers: Followers::new(hub.clone(), Arc::new(Cache::new(directory.path()))),
+            _held: (hub, directory),
+        }
+    }
+
+    fn new(fake: Fake) -> (Self, Arc<Clients>) {
+        let (hub, clients) = fake.hub(Budgets::default());
+        (Self::over(fake, hub), clients)
+    }
+
+    async fn context(&self) -> Arc<Context> {
+        let followed = self
+            .followers
+            .get("kind-test", async {
+                watch::channel(Some(crate::fake::fingerprint("https://a.example:6443"))).1
+            })
+            .await;
+        let context = self.poller.context("kind-test", &followed);
+        until(|| context.api().columns(Kind::Pods)).await;
+        context
+    }
+}
+
+fn remembered(reader: &Reader) -> Option<MetricsState> {
+    reader.drain().remembered
+}
+
+fn refusing_fake() -> Fake {
+    let fake = Fake::default();
+    fake.serve_metrics("v1beta1");
+    fake.pod_usage("a", "p1", &[("main", "50172044n", "204Ki")]);
+    fake.node_usage("n1", "277147502n", "2509700Ki");
+    fake
+}
+
+async fn refused(context: &Arc<Context>, kind: Kind, scope: Scope, state: MetricsState) {
+    let mut reader = context.reader(kind);
+    reader.want(HashSet::from([scope]));
+    until(|| reader.drain().state == Some(state)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_outlives_its_readers_and_the_context_and_is_read_by_its_scope_alone() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let context = kept.context().await;
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    let heard = list.drain();
+    assert_eq!(heard.state, None, "nothing has answered yet");
+    assert_eq!(heard.remembered, Some(MetricsState::Forbidden));
+    assert_eq!(heard.said(), Some(MetricsState::Forbidden));
+
+    let mut alone = context.reader(Kind::Pods);
+    alone.want(HashSet::from([named("a", "p2")]));
+    assert_eq!(
+        remembered(&alone),
+        Some(MetricsState::Forbidden),
+        "a pod of the namespace, by its namespace"
+    );
+    let mut elsewhere = context.reader(Kind::Pods);
+    elsewhere.want(namespace("b"));
+    assert_eq!(remembered(&elsewhere), None, "another namespace");
+    let mut nodes = context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    assert_eq!(remembered(&nodes), None, "another resource");
+
+    sleep(Duration::from_secs(4)).await;
+    let answered = list.drain();
+    assert_eq!(answered.state, Some(MetricsState::Forbidden));
+    assert_eq!(answered.remembered, None, "the answer says it now");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_node_does_not_make_a_pod_say_it() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(NODES.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Nodes,
+        Scope::Cluster,
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let context = kept.context().await;
+    let mut nodes = context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    assert_eq!(remembered(&nodes), Some(MetricsState::Forbidden));
+    let mut pods = context.reader(Kind::Pods);
+    pods.want(namespace("a"));
+    assert_eq!(remembered(&pods), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_a_request_of_its_scope_answers() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+
+    kept.fake.state().forbidden.clear();
+    let mut reader = context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    assert_eq!(remembered(&reader), Some(MetricsState::Forbidden));
+    until(|| reader.drain().state == Some(MetricsState::Ready)).await;
+    drop(reader);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut next = context.reader(Kind::Pods);
+    next.want(namespace("a"));
+    assert_eq!(remembered(&next), None, "the answer was ready");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_cluster_answering_forgets_the_refusals_of_the_namespaces_it_covers() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+
+    kept.fake.state().forbidden.clear();
+    let mut cluster = context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    until(|| cluster.drain().state == Some(MetricsState::Ready)).await;
+    drop(cluster);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(remembered(&list), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_the_clients_are_rebuilt() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, second, switched) = (
+            Arc::clone(&first),
+            Arc::clone(&second),
+            Arc::clone(&switched),
+        );
+        Arc::new(move |_context| {
+            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
+            let clients = Arc::clone(if now { &second } else { &first });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    let kept = Kept::over(fake, Hub::new(connect));
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut same = context.reader(Kind::Pods);
+    same.want(namespace("a"));
+    assert_eq!(remembered(&same), Some(MetricsState::Forbidden));
+    drop(same);
+
+    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    first.connections().abandon();
+    let mut rebuilt = context.reader(Kind::Pods);
+    rebuilt.want(namespace("a"));
+    assert_eq!(remembered(&rebuilt), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_what_the_context_serves_changes() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = refusing_fake();
+    fake.put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut same = context.reader(Kind::Pods);
+    same.want(namespace("a"));
+    assert_eq!(remembered(&same), Some(MetricsState::Forbidden));
+    drop(same);
+
+    kept.fake.stale_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    until(|| context.api().stale()).await;
+    let mut stale = context.reader(Kind::Pods);
+    stale.want(namespace("a"));
+    assert_eq!(remembered(&stale), None, "metrics-server went down");
+    drop(stale);
+    kept.fake.serve_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    until(|| !context.api().stale()).await;
+
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    kept.fake.state().served.remove(GROUP);
+    kept.fake.delete_from(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    until(|| context.api() == Api::Absent).await;
+    kept.fake.serve_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    until(|| context.api().columns(Kind::Pods)).await;
+    let mut back = context.reader(Kind::Pods);
+    back.want(namespace("a"));
+    assert_eq!(
+        remembered(&back),
+        None,
+        "removed and installed again, as it was before"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_the_cluster_changed_while_nobody_followed_it() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = refusing_fake();
+    fake.put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.stale_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let context = kept.context().await;
+    assert_eq!(
+        context.api(),
+        Api::Served {
+            version: "v1beta1",
+            pods: true,
+            nodes: true
+        },
+        "it begins from what was kept"
+    );
+    until(|| context.api().stale()).await;
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(remembered(&list), None);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_the_api_was_removed_and_installed_again_while_only_its_follower_lived()
+ {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = refusing_fake();
+    fake.put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let followed = kept
+        .followers
+        .get("kind-test", async {
+            watch::channel(Some(crate::fake::fingerprint("https://a.example:6443"))).1
+        })
+        .await;
+    let api = followed.api();
+    let context = kept.poller.context("kind-test", &followed);
+    until(|| context.api().columns(Kind::Pods)).await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().served.remove(GROUP);
+    kept.fake.delete_from(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    until(|| *api.borrow() == Api::Absent).await;
+    kept.fake.serve_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    until(|| api.borrow().columns(Kind::Pods)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let context = kept.poller.context("kind-test", &followed);
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(
+        remembered(&list),
+        None,
+        "removed and installed again while nothing but its follower lived"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_for_another_cluster_at_once() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let other = kept
+        .followers
+        .get("kind-test", async {
+            watch::channel(Some(crate::fake::fingerprint("https://b.example:6443"))).1
+        })
+        .await;
+    let context = kept.poller.context("kind-test", &other);
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(remembered(&list), None, "its discovery has not answered");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_nodes_answering_forgets_no_refusal_of_a_pod() {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    let mut nodes = context.reader(Kind::Nodes);
+    nodes.want(HashSet::from([Scope::Cluster]));
+    until(|| nodes.drain().state == Some(MetricsState::Ready)).await;
+    drop(nodes);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(remembered(&list), Some(MetricsState::Forbidden));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reader_of_the_cluster_and_its_namespaces_is_told_by_the_namespaces_while_the_cluster_is_refused()
+ {
+    let fake = refusing_fake();
+    fake.state().forbidden.insert(CLUSTER_PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let context = kept.context().await;
+    let wants = || HashSet::from([Scope::Cluster, Scope::Namespace("a".into())]);
+    let mut list = context.reader(Kind::Pods);
+    list.want(wants());
+    until(|| list.drain().state == Some(MetricsState::Ready)).await;
+    drop(list);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let mut again = context.reader(Kind::Pods);
+    again.want(wants());
+    assert_eq!(
+        remembered(&again),
+        None,
+        "the namespace fell back and was not refused"
+    );
+    let mut cluster = context.reader(Kind::Pods);
+    cluster.want(HashSet::from([Scope::Cluster]));
+    assert_eq!(remembered(&cluster), Some(MetricsState::Forbidden));
+}

@@ -47,6 +47,26 @@ test("a column's rule comes from its kind, then its name, then its resource", ()
   });
 });
 
+test("CPU and Memory are numbers of their own kind: end-aligned, sorted largest first, read only while shown, and never flashed", () => {
+  for (const [kind, cell] of [
+    ["cpu", "cpu"],
+    ["memory", "memory"],
+  ] as const) {
+    expect(columnRule(PODS, column("Any", kind))).toMatchObject({
+      cell,
+      align: "end",
+      descendFirst: true,
+      metric: true,
+      flash: false,
+    });
+  }
+  expect(columnRule(PODS, column("Restarts", "integer"))).toMatchObject({
+    descendFirst: false,
+    metric: false,
+    flash: true,
+  });
+});
+
 test("a pod's status column is Status, and its abnormal values have tones", () => {
   expect(statusColumn(PODS)).toBe("Status");
   expect(statusColumn({ ...PODS, resource: "services" })).toBeUndefined();

@@ -2,11 +2,16 @@
 # Usage: bench/cluster.sh up|down <name> [kubernetes minor, default 1.37]
 #
 # A kind cluster with kwok and its fake nodes, $TWIGO_BENCH_NODES of them
-# (default 10). The kubeconfig lives in $TWIGO_BENCH_DIR/<name>/kubeconfig,
-# never in ~/.kube/config, and every kubectl call passes it explicitly.
+# (default 10), and metrics-server, which reads the nodes' simulated usage
+# from kwok: a pod's own comes from its annotations kwok.x-k8s.io/usage-cpu
+# and usage-memory (bench/pods.sh sets them). The metrics-server release is
+# the one whose README lists the cluster's Kubernetes minor. The kubeconfig lives in
+# $TWIGO_BENCH_DIR/<name>/kubeconfig, never in ~/.kube/config, and every
+# kubectl call passes it explicitly.
 set -euo pipefail
 
 KWOK_VERSION=v0.8.0
+KWOK_USAGE_SHA256=880e46f117cc83587a210aaacc9c6b49ff55aaf455648f497281634377d09437
 NODES=${TWIGO_BENCH_NODES:-10}
 
 usage() {
@@ -25,6 +30,27 @@ node_image() {
   esac
 }
 
+# The release of metrics-server that supports a Kubernetes minor, with the checksum of its
+# components.yaml, from the compatibility matrix of its README at each tag: 0.8 serves 1.31 and
+# later and 0.9 serves 1.34 and later, so 1.33 takes the latest 0.8.
+metrics_server() {
+  case "$1" in
+    1.33) echo "v0.8.1 4a672c4891902573a3ff753cece5de1bf1f55dd053403dfec39df9d1636b7ff1" ;;
+    1.34|1.35|1.36|1.37) echo "v0.9.1 3c7f57cdbee0f57fb0259a150e8f6d6cb4f29d72d1aa5dce8803151dd6d4c2a1" ;;
+    *) echo "no metrics-server release for Kubernetes $1" >&2; exit 2 ;;
+  esac
+}
+
+sha256() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
+}
+
+# Downloads <url> to <file>, which must have the checksum <sha256>.
+fetch() {
+  curl -fsSL "$1" -o "$3"
+  [ "$(sha256 "$3")" = "$2" ] || { echo "$1 is not the release this script pins" >&2; exit 1; }
+}
+
 [ $# -ge 2 ] || usage
 action=$1
 name=$2
@@ -38,6 +64,7 @@ k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
 case "$action" in
   up)
     image=$(node_image "$version")
+    metrics_server=$(metrics_server "$version")
     mkdir -p "$dir"
     cat > "$dir/kind.yaml" <<YAML
 kind: Cluster
@@ -79,6 +106,7 @@ metadata:
   annotations:
     kwok.x-k8s.io/node: fake
     node.alpha.kubernetes.io/ttl: "0"
+    metrics.k8s.io/resource-metrics-path: /metrics/nodes/kwok-node-$i/metrics/resource
   labels:
     kubernetes.io/hostname: kwok-node-$i
     kubernetes.io/os: linux
@@ -94,6 +122,25 @@ status:
 YAML
     done | k apply -f - >/dev/null
     k wait --for=condition=Ready node -l type=kwok --timeout=120s >/dev/null
+    fetch "https://github.com/kubernetes-sigs/kwok/releases/download/$KWOK_VERSION/metrics-usage.yaml" \
+      "$KWOK_USAGE_SHA256" "$dir/metrics-usage.yaml"
+    k apply -f "$dir/metrics-usage.yaml" >/dev/null
+    fetch "https://github.com/kubernetes-sigs/metrics-server/releases/download/${metrics_server% *}/components.yaml" \
+      "${metrics_server#* }" "$dir/metrics-server.yaml"
+    k apply -f "$dir/metrics-server.yaml" >/dev/null
+    k -n kube-system patch deployment metrics-server --type=json >/dev/null \
+      -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+    k -n kube-system rollout status deployment/metrics-server --timeout=180s >/dev/null
+    k wait --for=condition=Available apiservice/v1beta1.metrics.k8s.io --timeout=180s >/dev/null
+    # What `kubectl top node` prints needs two scrapes of every node.
+    served=0
+    for _ in $(seq 1 90); do
+      served=$(k get --raw /apis/metrics.k8s.io/v1beta1/nodes 2>/dev/null |
+        grep -o '"name":"kwok-node-' | wc -l | tr -d ' ' || true)
+      [ "$served" -ge "$NODES" ] && break
+      sleep 2
+    done
+    [ "$served" -ge "$NODES" ] || { echo "metrics-server serves the usage of $served of $NODES kwok nodes" >&2; exit 1; }
     echo "$kubeconfig"
     ;;
   down)

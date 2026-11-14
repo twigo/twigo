@@ -214,6 +214,7 @@ test("a Reveal whose Secret closed before it ran fails, and says so", async () =
           manifest: false,
           events: false,
           related: false,
+          usage: false,
         },
       },
       () => undefined,

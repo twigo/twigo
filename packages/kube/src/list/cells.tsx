@@ -3,6 +3,7 @@ import { cn, StatusDot } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { useNow } from "../useNow";
+import { measureText } from "./metrics";
 
 /** A column as the grid draws it: where its cells are and how they read. */
 export interface ShownColumn {
@@ -30,6 +31,13 @@ function Age({ created }: { created: string }) {
 /** A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome. */
 export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
   const { rule } = column;
+  if (rule.cell === "cpu" || rule.cell === "memory") {
+    return (
+      measureText(rule.cell, row.cells[column.index] ?? null) ?? (
+        <span className="text-muted-foreground-2">–</span>
+      )
+    );
+  }
   if (rule.cell === "age") {
     return row.created ? (
       <Age created={row.created} />

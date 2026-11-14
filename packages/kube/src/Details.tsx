@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef, Overview } from "@twigo/protocol";
+import type { ObjectQuery, ObjectRef, Overview, Row } from "@twigo/protocol";
 import {
   ActionBar,
   cn,
@@ -12,17 +12,20 @@ import {
 } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import { cellTone, statusColumn } from "./columns";
+import { cellTone, columnRule, statusColumn } from "./columns";
 import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
+import { measureText } from "./list/metrics";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
+import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
 import { objectUri } from "./uri";
 import { useNow } from "./useNow";
+import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
 const MIN_WIDTH = 320;
@@ -60,7 +63,7 @@ export function Details({
 }) {
   const workbench = useWorkbench();
   const { backend, keys, menus } = workbench;
-  const { discovery, states } = services;
+  const { discovery, selection, states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
@@ -90,6 +93,8 @@ export function Details({
     };
   }, [query]);
   const tab = states.detailsTab(uri);
+  const visible = useVisible();
+  const asked = tab === "overview" && visible && hasUsage(gvr);
   const { snapshot, values, id } = useObject(
     backend,
     rested === query ? query : undefined,
@@ -98,6 +103,7 @@ export function Details({
       manifest: tab === "yaml",
       events: tab === "events",
       related: true,
+      usage: asked,
     },
   );
   const reveal = useReveal(id);
@@ -124,6 +130,10 @@ export function Details({
   const warnings = warningCount(snapshot.overview, snapshot.events?.events);
   const now = useNow();
   const lookup = keys.lookup(element);
+  const measured = useSyncExternalStore(selection.watch, () =>
+    selection.get(uri),
+  );
+  const cells = measured?.row.id === row.id ? measured.row : row;
 
   return (
     <aside
@@ -290,7 +300,7 @@ export function Details({
         ) : (
           <>
             <ViewStatus status={snapshot.status} what="the object" inline />
-            <Cells selected={selected} now={now} />
+            <Cells selected={selected} row={cells} now={now} />
           </>
         )}
       </div>
@@ -324,22 +334,35 @@ function Name({ name, generated }: { name: string; generated: number | null }) {
   );
 }
 
-/** The row's cells, wide columns included, until the object comes. */
-function Cells({ selected, now }: { selected: Selected; now: number }) {
-  const { columns, row } = selected;
+/** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */
+function Cells({
+  selected,
+  row,
+  now,
+}: {
+  selected: Selected;
+  row: Row;
+  now: number;
+}) {
+  const { gvr, columns } = selected;
   return (
     <PropertyList
       className="p-3 text-[13px]"
-      items={columns.map((column, index) => ({
-        key: column.name,
-        label: column.name,
-        value:
-          column.kind === "age"
-            ? row.created
-              ? humanDuration(now - Date.parse(row.created))
-              : ""
-            : String(row.cells[index] ?? ""),
-      }))}
+      items={columns.map((column, index) => {
+        const { cell } = columnRule(gvr, column);
+        return {
+          key: column.name,
+          label: column.name,
+          value:
+            cell === "age"
+              ? row.created
+                ? humanDuration(now - Date.parse(row.created))
+                : ""
+              : cell === "cpu" || cell === "memory"
+                ? (measureText(cell, row.cells[index] ?? null) ?? "–")
+                : String(row.cells[index] ?? ""),
+        };
+      })}
     />
   );
 }

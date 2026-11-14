@@ -88,6 +88,42 @@ function scrollable(rows: number): HTMLElement {
   return element;
 }
 
+test("a column that descends first sorts descending on a first click and ascending on the next, and others ascend first", () => {
+  const columns = [
+    { id: "Name", title: "Name", width: 200, grow: true },
+    { id: "CPU", title: "CPU", width: 80, descendFirst: true },
+  ];
+  const sorter = (name: string) =>
+    within(screen.getByRole("columnheader", { name })).getByRole("button");
+  const { handlers, rerender } = grid({
+    columns,
+    sort: { column: "Name", descending: false },
+  });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: true,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: true } });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: false,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: false } });
+  fireEvent.click(sorter("CPU"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "CPU",
+    descending: true,
+  });
+  rerender({ columns, sort: { column: "CPU", descending: true } });
+  fireEvent.click(sorter("Name"));
+  expect(handlers.onSort).toHaveBeenLastCalledWith({
+    column: "Name",
+    descending: false,
+  });
+});
+
 function scroll(element: HTMLElement, top: number) {
   act(() => {
     element.scrollTop = top;
@@ -744,4 +780,63 @@ test("a selected or marked row keeps its tint under the pointer, the others take
   expect(row("api-1")).not.toContain("hover:bg-row-hover");
   expect(row("gateway-1")).not.toContain("hover:bg-row-hover");
   expect(row("api-2")).toContain("hover:bg-row-hover");
+});
+
+test("a column's note is a quiet mark on its header, said in words to a screen reader, and its click still sorts", () => {
+  const { handlers } = grid({
+    columns: [
+      { id: "Name", title: "Name", width: 200, grow: true },
+      { id: "CPU", title: "CPU", width: 80, note: "metrics-server is down" },
+    ],
+  });
+  const cpu = screen.getByRole("columnheader", { name: "CPU" });
+  const described = cpu.getAttribute("aria-describedby");
+  expect(described).not.toBeNull();
+  expect(document.getElementById(described ?? "")?.textContent).toBe(
+    "metrics-server is down",
+  );
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Name" })
+      .hasAttribute("aria-describedby"),
+  ).toBe(false);
+  fireEvent.click(within(cpu).getByRole("button"));
+  expect(handlers.onSort).toHaveBeenCalledWith({
+    column: "CPU",
+    descending: false,
+  });
+});
+
+test("a header's sort button is the same element with and without a note, so its focus stays", () => {
+  const columns = (note?: string) => [
+    { id: "Name", title: "Name", width: 200, grow: true },
+    { id: "CPU", title: "CPU", width: 80, ...(note && { note }) },
+  ];
+  const { rerender } = grid({ columns: columns("metrics-server is down") });
+  const button = () =>
+    within(screen.getByRole("columnheader", { name: "CPU" })).getByRole(
+      "button",
+    );
+  const sorter = button();
+  act(() => {
+    sorter.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "metrics-server is down",
+  );
+  rerender({ columns: columns() });
+  expect(button()).toBe(sorter);
+  expect(document.activeElement).toBe(sorter);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(
+    screen
+      .getByRole("columnheader", { name: "CPU" })
+      .hasAttribute("aria-describedby"),
+  ).toBe(false);
+  rerender({ columns: columns("you may not read metrics") });
+  expect(button()).toBe(sorter);
+  expect(document.activeElement).toBe(sorter);
+  expect(
+    screen.getByRole("columnheader", { name: "CPU" }).textContent,
+  ).toContain("you may not read metrics");
 });

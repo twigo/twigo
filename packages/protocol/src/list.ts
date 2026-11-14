@@ -1,6 +1,6 @@
 import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
-import { toIpcError } from "./error";
+import { IpcError, toIpcError } from "./error";
 import type {
   Cell,
   Column,
@@ -13,6 +13,7 @@ import type {
   ValueCount,
   ViewState,
 } from "./generated";
+import type { ServedMetrics } from "./metrics";
 
 export interface ListSnapshot {
   readonly seq: number;
@@ -29,6 +30,8 @@ export interface ListSnapshot {
   readonly groups: readonly RowGroup[];
   /** Column indexes of the cells the latest batch changed, by row. */
   readonly changed: ReadonlyMap<RowId, readonly number[]>;
+  /** Whether the Metrics API answers, once the list has metric columns. */
+  readonly metrics: ServedMetrics | null;
 }
 
 /** Before the first batch. */
@@ -43,6 +46,7 @@ export const INITIAL_SNAPSHOT: ListSnapshot = {
   counts: [],
   groups: [],
   changed: new Map(),
+  metrics: null,
 };
 
 /**
@@ -63,9 +67,21 @@ export class ListView {
     },
   );
   #window: [number, number] | undefined;
+  #metrics = false;
   #closed = false;
 
-  constructor(backend: Backend, query: ListQuery) {
+  /**
+   * `metrics` is what the list this one replaces last said, which a view of
+   * the same list starts with: Rust's view says none until a scope of its
+   * window has answered.
+   */
+  constructor(
+    backend: Backend,
+    query: ListQuery,
+    metrics: ServedMetrics | null = null,
+  ) {
+    this.#snapshot =
+      metrics === null ? INITIAL_SNAPSHOT : { ...INITIAL_SNAPSHOT, metrics };
     this.#backend = backend;
     backend
       .subscribe("list_subscribe", query, (batch) => {
@@ -103,6 +119,18 @@ export class ListView {
     if (this.#id !== undefined) this.#sendWindow(start, end);
   }
 
+  /**
+   * Whether the list reads its metric columns now (ARCHITECTURE 3.6). It
+   * rides with the window, so a change sends the window again and never
+   * opens a new subscription.
+   */
+  setMetrics(metrics: boolean): void {
+    if (this.#closed || metrics === this.#metrics) return;
+    this.#metrics = metrics;
+    if (this.#id !== undefined && this.#window)
+      this.#sendWindow(...this.#window);
+  }
+
   close(): void {
     this.#closed = true;
     this.#listeners.clear();
@@ -114,7 +142,12 @@ export class ListView {
   #sendWindow(start: number, end: number): void {
     if (this.#id === undefined) return;
     this.#backend
-      .invoke("list_set_window", { id: this.#id, start, end })
+      .invoke("list_set_window", {
+        id: this.#id,
+        start,
+        end,
+        metrics: this.#metrics,
+      })
       .catch((error: unknown) => {
         this.#fail(error);
       });
@@ -122,6 +155,12 @@ export class ListView {
 
   #apply(batch: ListBatch): void {
     if (this.#closed) return;
+    if (batch.metrics === "absent") {
+      this.#fail(
+        new IpcError("internal", "a list was told metrics are absent"),
+      );
+      return;
+    }
     const previous = this.#snapshot;
     const ids = batch.window?.ids ?? previous.ids;
     const rows = new Map<RowId, Row>();
@@ -153,6 +192,7 @@ export class ListView {
       counts: batch.counts ?? previous.counts,
       groups: batch.groups ?? previous.groups,
       changed,
+      metrics: batch.metrics ?? previous.metrics,
     });
     this.#acks.took(batch.seq);
   }

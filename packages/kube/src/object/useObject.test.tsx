@@ -30,6 +30,7 @@ const PARTS = {
   manifest: false,
   events: false,
   related: false,
+  usage: false,
 };
 
 function document(name: string): Overview {
@@ -60,6 +61,7 @@ function backend() {
         manifest: null,
         events: null,
         related: null,
+        usage: null,
       });
     });
   };

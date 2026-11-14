@@ -22,6 +22,17 @@ Findings that belong to no step yet.
   - A resumed watch reports `ready` on its `200`, before a `410 Gone` in its body turns it to `relisting`, so a view can flash ready for a moment.
   - When a watch reconnects with other column definitions, as a CRD's edited printer columns might bring (not verified that the API server sends them on a re-watch), the rows stored before keep their old cells, which the query view reads by the new columns until each row changes or a relist; the per-namespace upstreams of one list may disagree on columns meanwhile.
   - Listing and storing 5,000 pods by a streaming list allocates 44.2 MiB in all, HTTP/2 reads and body chunks included, to keep 4.0 MiB (`examples/hub_memory.rs`, kind 1.37 with `bench/pods.sh` at 5,000, 2026-11-02); a paged list of the same pods was not measured the same way, and step 11's budgets say whether it matters.
+- Metrics (`twigo_cache::metrics`, ARCHITECTURE 3.6):
+  - A pod deleted and created again under one name, with the same values at the next scrape, shows no sample until its values change: the view drops a sample with its row's uid, and the poller tells only what changed, since the API carries no uid.
+  - A view keeps its last samples while it reads none, as a hidden window does, so they show for as long as the first answer takes when the window comes back; nothing marks them as old.
+  - An open pod's requests and limits come from its containers: a pod-level `spec.resources` is not read.
+  - The bench's Core RSS is over its budget of 150 MB with the metric columns shown: 161 to 166 MB against 145 to 146 MB on the commit before them, and 152 MB with the Metrics API removed (`bench/harness.sh`, kind 1.37, 2026-11-14).
+    The live heap grew by 2.8 MB; the rest is pages malloc keeps.
+    A sort keeps the old subscription until the new one's first batch, so two views of 5,000 rows are alive at once (`packages/kube/src/list/useListView.ts`); every poll parses the cluster's list into a `Vec` of items and a whole new set of samples, 20,000 allocations at 5,000 pods (`crates/twigo-cache/src/metrics/fetch.rs`, `sample.rs`).
+    To fix at M2's close, with the budgets: parse the answer as a stream and keep the samples that did not change, and sort the view in place.
+  - A context's follower that a list or an object holds while no watch does, or while the watch is replaced, keeps a CRD or APIService upstream that a `401` ended: following again asks only a follower that a failed credential stopped to fetch again, so a CRD installed since goes unseen until nothing holds the follower or the context's fingerprint changes (ARCHITECTURE 3.6).
+  - A refusal the poller remembers survives the Metrics API being removed and installed again when the context's follower ended between that change and the next reader: the follower's channel is closed by then, and the value it held last equals the one it holds again.
+  - `tests::twenty_five_plugins_that_never_answer_run_only_for_the_space_opened` in `twigo-core` failed once in three full runs of its library tests on 2026-11-13 and passed alone every time; nothing in it reads metrics.
 - OpenAPI documents (`twigo_kube::openapi`, ARCHITECTURE 3.6):
   - The cache keeps every hash a group/version has had for good, so a CRD that is edited often leaves a file for each edit in the cache directory: nothing evicts them yet.
   - The server converts a CRD that has `spec.preserveUnknownFields: true` as preserving unknown fields everywhere ([`NewTypeConverter`'s flag](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go#L695)); the merge shapes read every schema as if it were false, and not verified whether the document says otherwise.
@@ -32,8 +43,11 @@ Findings that belong to no step yet.
   - A CronJob shows its last schedule and last success but not its next run, which needs its schedule read in its time zone.
   - A claim's Used By follows the whole objects of every pod in its namespace while its Overview is shown, as kubectl lists them; a projection watch (3.3) that keeps only their volumes would cost less (decision 8 of M1).
   - A node's Overview asks for `resource.k8s.io/v1` ResourceSlices, which Kubernetes 1.33 does not serve: there the need fails and retries while the Overview is shown, and the section stays out, as kubectl leaves it out.
+  - A node's Overview grows by 152 px within 5 to 20 ms of its first paint, below the Usage section, as its embedded Pods list loads (Chromium on the mock, 1280x760, review round 5, 2026-11-14).
+    While it loads the list is three rows high, and once loaded as high as its rows, up to eight (`packages/kube/src/object/EmbeddedList.tsx`).
 - The visible window ([bench](docs/bench.md#the-visible-window)):
   - A row memo in `DataGrid`, since each batch renders every row of the window; JavaScript is about half of WebContent's main thread under churn, which is 2.1 % of a core by Name.
+    A metrics poll is such a batch every 15 s while a CPU or memory column is drawn: it renders the grid once, flashes nothing and selects nothing again, and renders each row of the window as any batch does.
 - Applying an edit (`twigo_core::actions::apply`, ARCHITECTURE 6.5):
   - A window reloaded during a recreate's wait stops it with the object gone and nothing created, which the audit log records but the page cannot show.
 - Modes (`twigo_policy`, ARCHITECTURE 6.4):
@@ -60,6 +74,8 @@ Findings that belong to no step yet.
   - The menu key and Shift+F10 on the focused grid open no row menu: the context-menu trigger wraps only the rows' container inside the grid (`ActionContextMenu` in `DataGrid.tsx`), and the key's `contextmenu` event is aimed at the focused element, the grid.
     Tab to the cursor row's ⋯ and Enter open it.
     A `contextmenu` event dispatched at the grid opened no menu and one dispatched at a row did, in headless Chrome on the mock (2026-11-12); the key itself was not pressed in any browser.
+- The lists' columns (`packages/kube/src/columns.ts`, ARCHITECTURE 4.4):
+  - Only the name column gives way, so the pods of every namespace scroll sideways again in a window narrower than 1212 px with the explorer open: none at 1212 px, 1 px of it at 1211 (Chrome on the mock, 2026-11-13).
 - The YAML editor (`packages/kube/src/edit`, ARCHITECTURE 4.3, 4.6):
   - monaco-yaml's worker was built and run in a browser on the mock, not in the app: Tauri's CSP has not met it, and the built file was only searched for `eval` and `new Function`.
   - The alias in `apps/desktop/vite.config.ts` and the `createWebWorker` in `monaco.ts` carry `@todo`s for monaco-worker-manager to follow Monaco 0.56 and later; a newer monaco-yaml or monaco-worker-manager than 5.5.1 and 2.0.1 may make both go (not published on 2026-11-08).

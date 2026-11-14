@@ -81,6 +81,7 @@ test("the list's first rows are named as the screen's are, once its window start
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   });
   expect(topRows(list)).toEqual(["payments/api-2", "payments/api-1"]);
   list.record(1, {
@@ -92,6 +93,7 @@ test("the list's first rows are named as the screen's are, once its window start
     status: { state: "ready" },
     counts: null,
     groups: null,
+    metrics: null,
   });
   expect(topRows(list)).toBeUndefined();
 });

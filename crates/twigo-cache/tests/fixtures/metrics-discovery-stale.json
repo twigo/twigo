@@ -1,0 +1,11 @@
+{
+  "metadata": {
+    "name": "metrics.k8s.io"
+  },
+  "versions": [
+    {
+      "freshness": "Stale",
+      "version": "v1beta1"
+    }
+  ]
+}

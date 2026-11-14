@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use twigo_ipc::{Block, EmbeddedList, Finding, Gvr, Section, Span, Tone, Value as Shown};
 
-use crate::quantity::Quantity;
 use crate::show::{Fields, POD, code, link, list, plain, toned};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
+use twigo_quantity::Quantity;
 
 const ROLE: &str = "node-role.kubernetes.io/";
 
@@ -379,7 +379,15 @@ fn order(name: &str) -> u8 {
 /// anything else in the largest binary unit it is a whole of.
 fn show(name: &str, quantity: Quantity) -> String {
     if name == "cpu" {
-        let milli = quantity.milli();
+        let nano = quantity.nano();
+        if nano % 1_000_000 != 0 {
+            return if nano % 1000 == 0 {
+                format!("{}u", nano / 1000)
+            } else {
+                format!("{nano}n")
+            };
+        }
+        let milli = nano / 1_000_000;
         return if milli % 1000 == 0 {
             (milli / 1000).to_string()
         } else {
@@ -691,6 +699,30 @@ mod tests {
 
     fn milli(totals: &BTreeMap<String, Quantity>, name: &str) -> i128 {
         totals.get(name).map_or(0, |quantity| quantity.milli())
+    }
+
+    #[test]
+    fn a_node_adds_what_its_pods_request_exactly_and_prints_the_sum_as_kubectl_does() {
+        let pod = json!({
+            "spec": { "containers": [{ "name": "a", "resources": { "requests": { "cpu": "100u" } } }] },
+        });
+        let mut totals = BTreeMap::new();
+        for _ in 0..3 {
+            add(&mut totals, pod_requests(&pod, false));
+        }
+        assert_eq!(
+            milli(&totals, "cpu"),
+            1,
+            "rounded once, where each one was 1m"
+        );
+        assert_eq!(show("cpu", totals["cpu"]), "300u");
+        let more = json!({
+            "spec": { "containers": [{ "name": "a", "resources": { "requests": { "cpu": "1500m" } } }] },
+        });
+        add(&mut totals, pod_requests(&more, false));
+        assert_eq!(show("cpu", totals["cpu"]), "1500300u");
+        assert_eq!(show("cpu", Quantity::parse("1500m").unwrap()), "1500m");
+        assert_eq!(show("cpu", Quantity::parse("2").unwrap()), "2");
     }
 
     #[test]

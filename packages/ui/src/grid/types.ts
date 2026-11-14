@@ -8,6 +8,10 @@ export interface GridColumn {
   /** Takes the free width while the user has not sized it: a name column. */
   readonly grow?: boolean;
   readonly align?: "start" | "end";
+  /** A first click on its header sorts it descending, and the second ascending. */
+  readonly descendFirst?: boolean;
+  /** A quiet mark beside the title, whose tooltip says this. */
+  readonly note?: string;
 }
 
 export interface GridSort {

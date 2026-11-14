@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Columns3 } from "lucide-react";
-import type { ListQuery, Resource, Row, RowGroup, Sort } from "@twigo/protocol";
+import {
+  type ListQuery,
+  type Resource,
+  type Row,
+  type RowGroup,
+  type Sort,
+} from "@twigo/protocol";
 import {
   ActionDropdown,
   Count,
@@ -27,9 +33,11 @@ import {
 import { kindIcon } from "../kinds";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
+import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { CellView, type ShownColumn } from "./cells";
 import { SHOWS_ROWS } from "./listStatus";
+import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -87,13 +95,14 @@ function Grid({
 }) {
   const workbench = useWorkbench();
   const { backend, spaces, menus, keys } = workbench;
-  const { presets, states, selection, statuses, grids } = services;
+  const { presets, states, selection, statuses, grids, measures } = services;
   useChanges(spaces.changes);
   useChanges(presets.changes);
   useChanges(states.changes);
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(measures.changes);
   const { gvr } = input;
   const preset = presets.get(gvr);
   const countBy = statusColumn(gvr);
@@ -101,6 +110,10 @@ function Grid({
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
   const collapsed = states.collapsed(uri);
+  const known = measures.get(input.space, gvr);
+  const choices = Object.fromEntries(
+    Object.entries(preset.columns).filter(([name]) => !known.has(name)),
+  );
   const query: ListQuery = {
     space: input.space,
     gvr,
@@ -111,11 +124,10 @@ function Grid({
     owners: null,
     text: text === "" ? null : text,
     // Without a text the choices change no rows, so they stay out of the
-    // query and a column toggle does not resubscribe.
-    columns:
-      text !== "" && Object.keys(preset.columns).length > 0
-        ? { ...preset.columns }
-        : null,
+    // query and a column toggle does not resubscribe, and the filter never
+    // reads a column of a measure's kind, so once a list of the kind has
+    // said which those are, their choices stay out too.
+    columns: text !== "" && Object.keys(choices).length > 0 ? choices : null,
     sort: states.sort(uri) ?? null,
     countBy: countBy ?? null,
     groupBy: preset.group
@@ -131,7 +143,12 @@ function Grid({
     flash,
     query: shown,
     setWindow,
+    setMetrics,
   } = useListView(backend, query);
+  useEffect(() => {
+    measures.learn(input.space, gvr, snapshot.columns);
+  }, [measures, input.space, gvr, snapshot.columns]);
+  const visible = useVisible();
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.
   const showing = JSON.stringify(
@@ -156,28 +173,49 @@ function Grid({
   const grouping =
     shown?.groupBy && snapshot.groups.length > 0 ? shown.groupBy : undefined;
 
-  const columns: readonly ShownColumn[] = snapshot.columns
-    .map((column, index) => ({
-      name: column.name,
-      index,
-      rule: columnRule(gvr, column),
-      priority: column.priority,
-    }))
-    .filter(
-      (column) =>
-        column.name === "Name" ||
-        (column.name !== grouping?.column &&
-          (preset.columns[column.name] ?? column.priority === 0) &&
-          (!narrow || NARROW.has(column.rule.cell))),
-    );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const gridColumns: readonly GridColumn[] = columns.map((column) => ({
-    id: column.name,
-    title: column.name,
-    width: column.rule.width,
-    grow: column.rule.grow,
-    align: column.rule.align,
+  const every = snapshot.columns.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(gvr, column),
+    priority: column.priority,
   }));
+  const columns: readonly ShownColumn[] = every.filter(
+    (column) =>
+      column.name === "Name" ||
+      (column.name !== grouping?.column &&
+        (preset.columns[column.name] ?? column.priority === 0) &&
+        (!narrow || NARROW.has(column.rule.cell))),
+  );
+  const byName = new Map(columns.map((column) => [column.name, column]));
+  const gridColumns: readonly GridColumn[] = columns.map((column) => {
+    const note = metricsNote(snapshot.metrics, column);
+    return {
+      id: column.name,
+      title: column.name,
+      width: column.rule.width,
+      grow: column.rule.grow,
+      align: column.rule.align,
+      descendFirst: column.rule.descendFirst,
+      ...(note !== undefined && { note }),
+    };
+  });
+  const reads = readsMetrics({
+    measures:
+      every.length > 0
+        ? every.filter((column) => column.rule.metric).map(({ name }) => name)
+        : measures.knows(input.space, gvr)
+          ? [...known]
+          : undefined,
+    drawn: (name) =>
+      byName.has(name) ||
+      (every.length === 0 && preset.columns[name] !== false),
+    sort: query.sort,
+    visible,
+    narrow,
+  });
+  useEffect(() => {
+    setMetrics(reads);
+  }, [setMetrics, reads]);
 
   const items = useMemo(
     () =>
@@ -280,10 +318,14 @@ function Grid({
   const live = current && snapshot.rows.get(current.row.id);
   const changed =
     live !== undefined &&
-    (live !== current?.row || snapshot.columns !== current.columns);
+    (!sameBesidesMetrics(live, current?.row, every) ||
+      snapshot.columns !== current?.columns);
   useEffect(() => {
     if (changed) select(live);
   }, [changed, live, select]);
+  useEffect(() => {
+    if (live && !changed) selection.measure(uri, live);
+  }, [selection, uri, live, changed]);
 
   const register = useListRegistration({
     "resource.group": resource.gvr.group,
