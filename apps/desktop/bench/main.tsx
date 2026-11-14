@@ -10,6 +10,7 @@ import {
   type Workbench,
 } from "@twigo/workbench";
 import { installNativeMenu } from "../src/nativeMenu";
+import { installZoom } from "../src/zoom";
 import { drive } from "./driver";
 import { Probe } from "./probe";
 import "../src/index.css";
@@ -78,6 +79,7 @@ async function run(container: HTMLElement) {
     platformOf(navigator.userAgent),
   );
   registerKube(workbench);
+  await installZoom(workbench);
   if (workbench.platform === "mac") installNativeMenu(workbench);
   createRoot(container).render(
     <StrictMode>
