@@ -2,6 +2,7 @@
   font-weight: 600;
 }
 
-.monaco-editor .twigo-yaml-support {
+/* Monaco colours brackets with `.monaco-editor .bracket-highlighting-N`, later and as specific. */
+.monaco-editor .view-line .twigo-yaml-support:not(.unexpected-closing-bracket) {
   color: var(--support);
 }
