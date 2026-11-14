@@ -27,6 +27,7 @@ const COLOURS = {
   "editor.findMatchBackground": "mark-current",
   "editor.findMatchHighlightBackground": "mark",
   "editor.findMatchHighlightForeground": "mark-current-foreground",
+  "editor.findMatchForeground": "content",
 };
 const COMMENT = "support";
 const TOKENS = [...new Set([...Object.values(COLOURS), COMMENT])];

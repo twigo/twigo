@@ -47,6 +47,7 @@ function themeData(
       "editor.findMatchBackground": hex("mark-current"),
       // Monaco 0.57 swaps the two foregrounds: this one colours the current match.
       "editor.findMatchHighlightForeground": hex("mark-current-foreground"),
+      "editor.findMatchForeground": hex("content"),
       "editor.findMatchHighlightBackground": hex("mark"),
       "editor.rangeHighlightBackground": hex("row-hover"),
       "editorError.foreground": hex("error"),
