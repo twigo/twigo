@@ -2,7 +2,7 @@ import { cn } from "@twigo/ui";
 import { splitName } from "./names";
 
 const IN_ROW =
-  "group-data-[cursor]/row:text-strong group-aria-selected/row:text-strong";
+  "in-[[role=row][data-cursor]]:text-strong in-[[role=row][aria-selected=true]]:text-strong";
 
 /**
  * A name as a list draws it and the details title it: the part before the
