@@ -28,13 +28,12 @@ fn key(scope: &Scope) -> Scope {
 }
 
 impl Refusals {
-    /// For a context built now, whose follower may serve another API than the last one did.
+    /// For a context built now, whose follower may serve another API than the last one did, or
+    /// have changed it and back while no context lived.
     pub(super) fn follow(&mut self, api: &watch::Receiver<Api>) {
-        if self
-            .api
-            .as_ref()
-            .is_none_or(|kept| *kept.borrow() != *api.borrow())
-        {
+        if self.api.as_ref().is_none_or(|kept| {
+            kept.has_changed().unwrap_or(false) || *kept.borrow() != *api.borrow()
+        }) {
             self.failed.clear();
         }
         let mut api = api.clone();

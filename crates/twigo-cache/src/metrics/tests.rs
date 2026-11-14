@@ -1219,6 +1219,63 @@ async fn a_refusal_is_forgotten_when_the_cluster_changed_while_nobody_followed_i
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_refusal_is_forgotten_when_the_api_was_removed_and_installed_again_while_only_its_follower_lived()
+ {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = refusing_fake();
+    fake.put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    fake.state().forbidden.insert(PODS.to_owned());
+    let (kept, _clients) = Kept::new(fake);
+    let followed = kept
+        .followers
+        .get("kind-test", async {
+            watch::channel(Some(crate::fake::fingerprint("https://a.example:6443"))).1
+        })
+        .await;
+    let api = followed.api();
+    let context = kept.poller.context("kind-test", &followed);
+    until(|| context.api().columns(Kind::Pods)).await;
+    refused(
+        &context,
+        Kind::Pods,
+        Scope::Namespace("a".into()),
+        MetricsState::Forbidden,
+    )
+    .await;
+    drop(context);
+    sleep(Duration::from_millis(1)).await;
+
+    kept.fake.state().served.remove(GROUP);
+    kept.fake.delete_from(
+        "apiregistration.k8s.io",
+        APISERVICES,
+        None,
+        "v1beta1.metrics.k8s.io",
+    );
+    until(|| *api.borrow() == Api::Absent).await;
+    kept.fake.serve_metrics("v1beta1");
+    kept.fake
+        .put("apiregistration.k8s.io", APISERVICES, None, apiservice());
+    until(|| api.borrow().columns(Kind::Pods)).await;
+
+    kept.fake.state().metrics_takes = Duration::from_secs(3);
+    let context = kept.poller.context("kind-test", &followed);
+    let mut list = context.reader(Kind::Pods);
+    list.want(namespace("a"));
+    assert_eq!(
+        remembered(&list),
+        None,
+        "removed and installed again while nothing but its follower lived"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_refusal_is_forgotten_for_another_cluster_at_once() {
     let fake = refusing_fake();
     fake.state().forbidden.insert(PODS.to_owned());
