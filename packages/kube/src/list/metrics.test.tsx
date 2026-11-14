@@ -783,6 +783,34 @@ describe("a list whose columns are not known yet", () => {
     expect(windowsAfter(sent, before)).toEqual([false]);
   });
 
+  test("a pod list of a space whose pods have no measures leaves another space's cold pod list reading from its first window", async () => {
+    const script = scripted();
+    const sent = spied(script.backend);
+    const workbench = await mountKube(script.backend);
+    act(() => {
+      workbench.spaces.select("staging");
+    });
+    await settle();
+    act(() => {
+      workbench.editors.open("k8s-list://staging/v1/pods");
+    });
+    await settle();
+    await script.send(plain(1));
+    expect(last(sent.reads())).toBe(false);
+    act(() => {
+      workbench.spaces.select("prod-eu");
+    });
+    await settle();
+    const before = sent.reads().length;
+    act(() => {
+      workbench.editors.open(PODS);
+    });
+    await settle();
+    expect(windowsAfter(sent, before)).toEqual([true]);
+    await script.send(batch(2, true));
+    expect(windowsAfter(sent, before)).toEqual([true]);
+  });
+
   test("a new query whose first batch has no columns leaves a list sorted by CPU reading", async () => {
     const script = scripted();
     const sent = spied(script.backend);

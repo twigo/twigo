@@ -110,7 +110,7 @@ function Grid({
   const health = states.health(uri);
   const picked = health === null ? undefined : (health?.health ?? input.health);
   const collapsed = states.collapsed(uri);
-  const known = measures.get(gvr);
+  const known = measures.get(input.space, gvr);
   const choices = Object.fromEntries(
     Object.entries(preset.columns).filter(([name]) => !known.has(name)),
   );
@@ -146,8 +146,8 @@ function Grid({
     setMetrics,
   } = useListView(backend, query);
   useEffect(() => {
-    measures.learn(gvr, snapshot.columns);
-  }, [measures, gvr, snapshot.columns]);
+    measures.learn(input.space, gvr, snapshot.columns);
+  }, [measures, input.space, gvr, snapshot.columns]);
   const visible = useVisible();
   // The rows on screen as one string: churn refreshes a picked health's
   // values without reordering anything, so they stand as their healths.
@@ -203,7 +203,7 @@ function Grid({
     measures:
       every.length > 0
         ? every.filter((column) => column.rule.metric).map(({ name }) => name)
-        : measures.knows(gvr)
+        : measures.knows(input.space, gvr)
           ? [...known]
           : undefined,
     drawn: (name) =>
