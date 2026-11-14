@@ -195,6 +195,7 @@ function Grid({
       width: column.rule.width,
       grow: column.rule.grow,
       align: column.rule.align,
+      numeric: column.rule.figures,
       descendFirst: column.rule.descendFirst,
       ...(note !== undefined && { note }),
     };

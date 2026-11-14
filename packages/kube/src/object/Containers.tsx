@@ -7,6 +7,7 @@ import type {
 import { Card, Pill, PropertyList, Section } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import type { OverviewStates } from "./overviewStates";
+import { isNumeric } from "./numeric";
 import { TONE } from "./tone";
 import { ValueView } from "./values";
 
@@ -131,6 +132,7 @@ function Fields({
           field.label
         ),
         title: field.label,
+        numeric: isNumeric(field.value),
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />

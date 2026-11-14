@@ -31,6 +31,7 @@ import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
 import type { Reveal } from "./reveal";
+import { isNumeric, numericColumns } from "./numeric";
 import { UsageView } from "./Usage";
 import { Age, ValueView } from "./values";
 
@@ -215,6 +216,7 @@ function BlockView({
         <Table
           label={section.title}
           columns={block.columns}
+          numeric={numericColumns(block.columns, block.rows)}
           rows={block.rows.map((row) =>
             row.map((value, index) => (
               <ValueView key={index} value={value} onOpen={onOpen} compact />
@@ -249,6 +251,7 @@ function Fields({
         key: field.label,
         label: field.label,
         title: field.label,
+        numeric: isNumeric(field.value),
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />

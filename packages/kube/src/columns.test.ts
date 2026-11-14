@@ -233,3 +233,17 @@ test("a row's tone is the abnormal value of its resource's health column", () =>
   expect(rowTone(PODS, "Status", columns, row("Running"))).toBeUndefined();
   expect(rowTone(PODS, undefined, columns, row("Error"))).toBeUndefined();
 });
+
+test("a column's cells are figures by their cell kind, or by a numeric column kind", () => {
+  const figures = (name: string, kind: Column["kind"] = "string") =>
+    columnRule(PODS, column(name, kind)).figures;
+  expect(figures("Ready")).toBe(true);
+  expect(figures("Restarts")).toBe(true);
+  expect(figures("Age", "age")).toBe(true);
+  expect(figures("CPU", "cpu")).toBe(true);
+  expect(figures("Memory", "memory")).toBe(true);
+  expect(figures("Priority", "integer")).toBe(true);
+  expect(figures("Name")).toBe(false);
+  expect(figures("Status")).toBe(false);
+  expect(figures("Node")).toBe(false);
+});

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TreeNode } from "@twigo/protocol";
 import { Chip, PropertyList } from "@twigo/ui";
+import { isFigures } from "./numeric";
 
 /**
  * A part of an object as a property grid: its plain fields as rows, then
@@ -30,6 +31,7 @@ export function Properties({
             key: node.key,
             label: node.label,
             title: node.key,
+            numeric: node.value.type === "scalar" && isFigures(node.value.text),
             value: (
               <span className="whitespace-pre-wrap">
                 <Plain node={node} />

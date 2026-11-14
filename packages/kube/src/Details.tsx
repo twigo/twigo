@@ -346,11 +346,12 @@ function Cells({
     <PropertyList
       className={cn("p-3 text-body", LABEL_COLUMN)}
       items={columns.map((column, index) => {
-        const { cell } = columnRule(gvr, column);
+        const { cell, figures } = columnRule(gvr, column);
         return {
           key: column.name,
           label: column.name,
           title: column.name,
+          numeric: figures,
           value:
             cell === "age"
               ? row.created

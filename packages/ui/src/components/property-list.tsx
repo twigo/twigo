@@ -7,6 +7,8 @@ export interface Property {
   readonly value: ReactNode;
   /** The label in full, when it may be cut. */
   readonly title?: string;
+  /** The value is figures, which line up in tabular numerals. */
+  readonly numeric?: boolean;
 }
 
 /**
@@ -34,7 +36,12 @@ export function PropertyList({
           <dt className="truncate text-label text-support" title={item.title}>
             {item.label}
           </dt>
-          <dd className="min-w-0 text-body break-words text-content tabular-nums">
+          <dd
+            className={cn(
+              "min-w-0 text-body break-words text-content",
+              item.numeric && "tabular-nums",
+            )}
+          >
             {item.value}
           </dd>
         </div>

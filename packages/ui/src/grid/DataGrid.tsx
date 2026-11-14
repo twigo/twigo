@@ -515,7 +515,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         }}
         onContextMenu={select}
         className={cn(
-          "group/row absolute inset-x-0 top-0 grid items-center border-b border-border-subtle tabular-nums",
+          "group/row absolute inset-x-0 top-0 grid items-center border-b border-border-subtle",
           tint ?? "hover:bg-row-hover",
           target.tone === "error" && "shadow-[inset_2px_0_0_var(--error)]",
           target.tone === "warn" && "shadow-[inset_2px_0_0_var(--warn)]",
@@ -551,6 +551,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               className={cn(
                 "truncate px-2",
                 column.align === "end" && "text-right",
+                column.numeric && "tabular-nums",
               )}
             >
               <span

@@ -31,6 +31,8 @@ export interface ColumnRule {
   readonly descendFirst: boolean;
   /** Places a row rather than says what it is, so it reads quieter. */
   readonly quiet: boolean;
+  /** Its cells are figures, which line up in tabular numerals. */
+  readonly figures: boolean;
   /** The table can group its rows by the column's values. */
   readonly groups: boolean;
   /** Rows take their health from this column: the list counts and filters by it. */
@@ -153,11 +155,20 @@ function key(gvr: Gvr, column: string): string {
   return `${gvr.group}/${gvr.resource}/${column}`;
 }
 
+/** The cells whose text is figures, whatever the resource. */
+const FIGURE_CELLS: ReadonlySet<CellKind> = new Set([
+  "ratio",
+  "restarts",
+  "age",
+  "cpu",
+  "memory",
+]);
+
 /** A column's rule: its kind's defaults, then its name's, then its resource's. */
 export function columnRule(gvr: Gvr, column: Column): ColumnRule {
   const numeric = column.kind === "integer" || column.kind === "number";
   const age = column.kind === "age";
-  return {
+  const rule: Omit<ColumnRule, "figures"> = {
     cell: age ? "age" : "text",
     width: age ? 64 : numeric ? 88 : 140,
     grow: false,
@@ -172,6 +183,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
   };
+  return { ...rule, figures: numeric || FIGURE_CELLS.has(rule.cell) };
 }
 
 /** The column that carries a resource's health, which its list counts and filters by. */

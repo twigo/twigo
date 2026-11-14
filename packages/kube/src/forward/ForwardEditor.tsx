@@ -166,6 +166,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "connections",
+      numeric: true,
       label: "Connections",
       value:
         queued > 0
@@ -174,6 +175,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "sent",
+      numeric: true,
       label: "Sent",
       value: (
         <>
@@ -184,6 +186,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "received",
+      numeric: true,
       label: "Received",
       value: (
         <>
