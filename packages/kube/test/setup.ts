@@ -44,5 +44,6 @@ window.matchMedia = (query: string) =>
 
 // jsdom loads no fonts: every face is in.
 Object.defineProperty(document, "fonts", {
+  configurable: true,
   value: { check: () => true, load: () => Promise.resolve([]) },
 });
