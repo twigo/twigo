@@ -173,7 +173,8 @@ struct Used {
     uid: Option<Box<str>>,
     state: MetricsState,
     served: bool,
-    /// The scope that serves the object has answered or failed once.
+    /// The scope that serves the object has answered or failed once, and the object has stayed
+    /// served since: a replaced request leaves it answered, so its figures wait for the new one.
     answered: bool,
     /// The context serves the resource, whether or not the object exists.
     api: bool,
@@ -207,8 +208,8 @@ impl Used {
         let reading = !wants.is_empty();
         reader.want(wants);
         let (settled, update) = reader.read();
-        let answered = reading && settled;
         let uid = object.and_then(|object| object.meta.uid.clone());
+        let answered = (served && self.answered && uid == self.uid) || (reading && settled);
         let mut sample = self.sample.clone().filter(|_| uid == self.uid);
         if let Some((namespace, name)) = &key {
             for reset in &update.resets {
@@ -223,6 +224,9 @@ impl Used {
             sample = None;
         }
         let state = update.state.unwrap_or(self.state);
+        if update.state.is_some_and(|said| said != MetricsState::Ready) {
+            sample = None;
+        }
         let changed = sample != self.sample
             || state != self.state
             || served != self.served

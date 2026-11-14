@@ -484,6 +484,143 @@ async fn closing_the_object_stops_its_requests_and_a_list_of_its_namespace_serve
     assert_eq!(requests(&rig.fake), polled, "closed, it asks for nothing");
 }
 
+fn figures(batches: &[ObjectBatch]) -> Vec<(bool, Option<i64>)> {
+    usages(batches)
+        .iter()
+        .map(|usage| (usage.waiting, usage.cpu.used))
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_usage_that_has_figures_never_goes_back_to_waiting_while_its_request_is_replaced() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.pod_usage(
+        "a",
+        "web-0",
+        &[
+            ("debugger", "1m", "1Mi"),
+            ("web", "10m", "2Mi"),
+            ("api", "2m", "1Mi"),
+            ("proxy", "3m", "3Mi"),
+        ],
+    );
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let overview = ObjectParts {
+        overview: true,
+        ..PARTS
+    };
+    let opened = rig.open(Kind::Pods, overview);
+    let alone = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert_eq!(
+        figures(&alone),
+        [(true, None), (false, Some(16_000_000))],
+        "waiting once, then the figures"
+    );
+
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([Scope::Namespace("a".into())]));
+    let joined = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert!(
+        usages(&joined).iter().all(|usage| !usage.waiting),
+        "a list reads its namespace, so its request replaces the pod's own: {:?}",
+        figures(&joined)
+    );
+
+    list.want(HashSet::new());
+    let left = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert!(
+        usages(&left).iter().all(|usage| !usage.waiting),
+        "the list's window leaves the namespace, and the pod asks for itself again: {:?}",
+        figures(&left)
+    );
+    drop(list);
+
+    opened.set_parts(ObjectParts {
+        usage: false,
+        ..overview
+    });
+    rig.watch(&opened, Duration::from_secs(5)).await;
+    opened.set_parts(overview);
+    let back = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert_eq!(
+        figures(&back),
+        [(false, Some(16_000_000))],
+        "the part shown again has the figures at once, and the new request changes none"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_node_that_has_figures_keeps_them_when_the_part_is_hidden_and_shown() {
+    let fake = Fake::default();
+    fake.put("", "nodes", None, node());
+    fake.node_usage("node-1", "277147502n", "2509700Ki");
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let opened = rig.open(Kind::Nodes, PARTS);
+    rig.watch(&opened, Duration::from_secs(5)).await;
+
+    opened.set_parts(ObjectParts {
+        usage: false,
+        ..PARTS
+    });
+    rig.watch(&opened, Duration::from_secs(5)).await;
+    opened.set_parts(PARTS);
+    let back = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert_eq!(figures(&back), [(false, Some(277_147_502))]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pod_replaced_under_its_name_while_its_request_is_replaced_waits_for_its_own_answer() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(1);
+    let opened = rig.open(Kind::Pods, PARTS);
+    rig.watch(&opened, Duration::from_secs(5)).await;
+
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([Scope::Namespace("a".into())]));
+    let mut replaced = pod(json!([{ "name": "main" }]));
+    replaced["metadata"]["uid"] = json!("new-uid");
+    rig.fake.put("", "pods", Some("a"), replaced);
+    let after = rig.watch(&opened, Duration::from_millis(500)).await;
+    assert_eq!(
+        figures(&after),
+        [(true, None)],
+        "no answer has come for the new pod"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_replaced_request_that_fails_takes_the_figures_with_it() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
+    let mut rig = Rig::new(fake).await;
+    let opened = rig.open(Kind::Pods, PARTS);
+    let shown = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert_eq!(usages(&shown).last().unwrap().cpu.used, Some(10_000_000));
+
+    rig.fake
+        .state()
+        .no_endpoints
+        .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([Scope::Namespace("a".into())]));
+    list.want(HashSet::new());
+    let failed = rig.watch(&opened, Duration::from_secs(5)).await;
+    let usage = *usages(&failed).last().expect("the failure is said");
+    assert_eq!(usage.state, MetricsState::Unavailable);
+    assert!(!usage.waiting);
+    assert_eq!(
+        usage.cpu.used, None,
+        "figures of an answer the failure ended"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_node_uses_what_it_allocates_of() {
     let fake = Fake::default();
