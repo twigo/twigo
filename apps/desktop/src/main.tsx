@@ -17,6 +17,7 @@ const applyTheme = () =>
   document.documentElement.classList.toggle("dark", dark.matches);
 applyTheme();
 dark.addEventListener("change", applyTheme);
+document.documentElement.dataset.platform = platformOf(navigator.userAgent);
 
 async function browserBackend(): Promise<Backend> {
   const { createMockBackend, MOCK_LAYOUTS, MOCK_SCENARIOS } =
