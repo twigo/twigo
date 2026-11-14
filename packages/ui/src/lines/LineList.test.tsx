@@ -73,11 +73,15 @@ afterEach(() => {
   shown = 600;
 });
 
-const line = (key: number, text = `line ${String(key)}`): LineItem => ({
+const line = (
+  key: number,
+  text = `line ${String(key)}`,
+  time = "10:41:02.402",
+): LineItem => ({
   kind: "line",
   key: String(key),
   tag: "h8lbx",
-  time: "10:41:02.402",
+  time,
   text,
   runs: [],
   marks: [],
@@ -1169,6 +1173,40 @@ test("a list paused while hidden holds the line it stood at, not the top it show
   show(log);
   expect(log.scrollTop).toBe(ROW * 300 - 600);
   expect(onPlace).toHaveBeenLastCalledWith({ key: "270", offset: 0 });
+});
+
+test("a line's time shows from the field that moved since the line above, none of it carried across a marker, and a stack trace's lines are in the supporting tone", () => {
+  const at = (key: number, time: string, text: string) => line(key, text, time);
+  const { log } = mount({
+    total: 5,
+    items: [
+      at(0, "12:04:04.987", "panic: boom"),
+      at(1, "12:04:05.123", "goroutine 1 [running]:"),
+      at(2, "12:04:05.123", "\tmain.main()"),
+      {
+        kind: "marker",
+        key: "m",
+        icon: ScrollText,
+        text: "Container api exited",
+      },
+      at(4, "12:04:05.200", "starting"),
+    ],
+  });
+  const cell = (index: number, column: number) =>
+    log.querySelector(`[data-index="${String(index)}"]`)?.firstElementChild
+      ?.children[column];
+  const moved = (index: number) =>
+    cell(index, 1)?.querySelector(".text-support")?.textContent;
+  const supporting = (index: number) =>
+    cell(index, 2)?.classList.contains("text-support");
+
+  expect([0, 1, 2, 4].map(moved)).toEqual([
+    "12:04:04.987",
+    "05.123",
+    "",
+    "12:04:05.200",
+  ]);
+  expect([0, 1, 2, 4].map(supporting)).toEqual([false, false, true, false]);
 });
 
 test("a marker draws its icon, tag and words", () => {

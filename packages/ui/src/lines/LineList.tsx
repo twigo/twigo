@@ -11,6 +11,7 @@ import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
 import type { Tone } from "../lib/tone";
 import { moveOf, pageOf, ROW, wheelDeltas, type Move } from "./input";
+import { continues, timeAfter } from "./roles";
 import { useKeptSizes, useRowKeys } from "./rows";
 import { StyledText, type TextMark, type TextRun } from "./StyledText";
 
@@ -578,6 +579,7 @@ export function LineList({
                 ) : (
                   <Line
                     item={item}
+                    above={items[row.index - start - 1]}
                     wrap={wrap}
                     timestamps={timestamps}
                     tagWidth={tagWidth}
@@ -606,15 +608,18 @@ export function LineList({
 
 function Line({
   item,
+  above,
   wrap,
   timestamps,
   tagWidth,
 }: {
   item: TextLine;
+  above: LineItem | undefined;
   wrap: boolean;
   timestamps: boolean;
   tagWidth: number;
 }) {
+  const { same, changed } = timeAfter(item.time, above);
   return (
     <div
       style={{
@@ -636,10 +641,16 @@ function Line({
         {item.tag}
       </span>
       {timestamps && (
-        <span className="text-quiet tabular-nums">{item.time}</span>
+        <span className="text-quiet tabular-nums">
+          {same}
+          <span className="text-support">{changed}</span>
+        </span>
       )}
       <span
-        className={wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre"}
+        className={cn(
+          wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
+          continues(item.text) ? "text-support" : "text-content",
+        )}
       >
         <StyledText text={item.text} runs={item.runs} marks={item.marks} />
       </span>
