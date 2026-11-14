@@ -6,6 +6,7 @@ import type {
   Discovered,
   ListBatch,
   ListQuery,
+  MetricsState,
   ObjectBatch,
   ObjectParts,
   Row,
@@ -18,7 +19,10 @@ import {
   ANSWER_MS,
   containerSpecs,
   METRIC_COLUMNS,
+  MetricsBoard,
   MockMetrics,
+  nodesScope,
+  podsScope,
   REMOVED_MS,
   SCRAPE_MS,
 } from "./metrics";
@@ -396,7 +400,7 @@ test("some container has no limit, some pod no sample, and one node is over 90 %
   expect(cluster.pods.some((pod) => metrics.containers(pod) === null)).toBe(
     true,
   );
-  const usages = cluster.nodes.map((node) => metrics.nodeUsage(node, true));
+  const usages = cluster.nodes.map((node) => metrics.nodeUsage(node, "ready"));
   const over = usages.filter(
     ({ memory }) => (memory.used ?? 0) > (memory.allocatable ?? 0) * 0.9,
   );
@@ -615,7 +619,7 @@ test.each([
   ["ready", "ready"],
   ["metricsForbidden", "forbidden"],
 ] as const)(
-  "%s: a list that joins a scope another list reads has the values and the state in its first batch, and the scope forgets its answer with its last reader",
+  "%s: a list that joins a scope another list reads has the values and the state in its first batch, and the scope forgets its answer with its last reader, but not a refusal",
   async (scenario, state) => {
     const backend = createMockBackend(scenario);
     const first = await reader(backend, query());
@@ -630,12 +634,35 @@ test.each([
     await second.close();
     const third = await reader(backend, query());
     await third.read();
-    expect(third.batches[0]?.metrics).toBeNull();
+    expect(third.batches[0]?.metrics).toBe(scenario === "ready" ? null : state);
     expect(third.cpu(third.batches[0]).every((cell) => cell === null)).toBe(
       true,
     );
   },
 );
+
+test("a list's first batch with columns says the refusal remembered for the scopes of its window, and not another namespace's or the nodes'", async () => {
+  const backend = createMockBackend("metricsForbidden");
+  const [ns, elsewhere] = [
+    ...new Set(new Cluster("staging", 800, 0).pods.map((pod) => pod.namespace)),
+  ];
+  const refused = await reader(backend, query({ namespaces: [ns ?? ""] }));
+  await refused.read();
+  await refused.next();
+  await refused.close();
+  const first = (q: ListQuery) =>
+    reader(backend, q).then(async (opened) => {
+      await opened.read();
+      return opened.batches[0];
+    });
+  const again = await first(query({ namespaces: [ns ?? ""] }));
+  expect(again?.columns?.map((column) => column.name)).toContain("CPU");
+  expect(again?.metrics).toBe("forbidden");
+  expect(
+    (await first(query({ namespaces: [elsewhere ?? ""] })))?.metrics,
+  ).toBeNull();
+  expect((await first(NODES))?.metrics).toBeNull();
+});
 
 function usageOf(batches: ObjectBatch[]): Usage | null | undefined {
   return [...batches].reverse().find((batch) => batch.usage !== null)?.usage;
@@ -825,8 +852,8 @@ test("a pod's waiting usage names the containers that run with their requests an
   if (!crashing || !running) throw new Error("no such pods in the mock");
   expect(crashing.ready).toBeLessThan(crashing.containers);
   for (const pod of [running, crashing]) {
-    const waiting = metrics.podUsage(pod, false);
-    const answer = metrics.podUsage(pod, true);
+    const waiting = metrics.podUsage(pod, null);
+    const answer = metrics.podUsage(pod, "ready");
     const names = (usage: Usage) =>
       usage.containers.map((container) => container.name);
     expect(waiting.waiting).toBe(true);
@@ -998,6 +1025,142 @@ test("a usage part shown later has its figures at once when a list holds its sco
     waiting: false,
   });
   expect(held.batches.filter((batch) => batch.usage !== null)).toHaveLength(1);
+});
+
+test.each([
+  ["a pod", "pod"],
+  ["a node", "node"],
+] as const)(
+  "%s: a usage that has its figures never goes back to waiting when its scope is asked anew, and the answer replaces them",
+  async (_, kind) => {
+    const { backend, batches, id } =
+      kind === "pod"
+        ? await open("live", PODS, sampled().namespace, sampled().name)
+        : await open("live", NODE_KIND, null, "staging-node-1");
+    const figures = usageOf(batches);
+    expect(figures?.waiting).toBe(false);
+    expect(figures?.cpu.used).toBeGreaterThan(0);
+    await showUsage(backend, id, false);
+    const before = batches.length;
+    await showUsage(backend, id, true);
+    const usages = () => batches.slice(before).flatMap((b) => b.usage ?? []);
+    expect(usages()).toEqual([figures]);
+    await vi.advanceTimersByTimeAsync(ANSWER_MS);
+    expect(usages()).toEqual([figures, figures]);
+  },
+);
+
+test("a scope that refused is remembered after its readers leave, for its namespace and no other, and the nodes apart from the pods", async () => {
+  const backend = createMockBackend("metricsForbidden");
+  const first = sampled();
+  const same = sampled(
+    (pod) => pod.namespace === first.namespace && pod.name !== first.name,
+  );
+  const other = sampled((pod) => pod.namespace !== first.namespace);
+  const said = (opened: { batches: ObjectBatch[] }) => opened.batches[0]?.usage;
+  const pods = await openOn(backend, PODS, first.namespace, first.name);
+  expect(usageOf(pods.batches)).toMatchObject({
+    state: "forbidden",
+    waiting: false,
+  });
+  await call(backend.invoke("object_close", pods.id));
+  expect(vi.getTimerCount()).toBe(0);
+
+  const next = await openOn(
+    backend,
+    PODS,
+    same.namespace,
+    same.name,
+    undefined,
+    1,
+  );
+  expect(next.batches[0]?.overview).not.toBeNull();
+  expect(said(next)).toMatchObject({ state: "forbidden", waiting: false });
+  const elsewhere = await openOn(
+    backend,
+    PODS,
+    other.namespace,
+    other.name,
+    undefined,
+    1,
+  );
+  expect(said(elsewhere)).toMatchObject({ state: "ready", waiting: true });
+  const node = await openOn(
+    backend,
+    NODE_KIND,
+    null,
+    "staging-node-1",
+    undefined,
+    1,
+  );
+  expect(said(node)).toMatchObject({ state: "ready", waiting: true });
+});
+
+test("a refusal the mock remembered says itself with the Overview, asks all the same, and the answer says it again", async () => {
+  const backend = createMockBackend("metricsForbidden");
+  const first = sampled();
+  const same = sampled(
+    (pod) => pod.namespace === first.namespace && pod.name !== first.name,
+  );
+  const pods = await openOn(backend, PODS, first.namespace, first.name);
+  await call(backend.invoke("object_close", pods.id));
+  const next = await openOn(backend, PODS, same.namespace, same.name);
+  const usages = next.batches.flatMap((batch) => batch.usage ?? []);
+  expect(usages.map(({ state, waiting }) => [state, waiting])).toEqual([
+    ["forbidden", false],
+    ["forbidden", false],
+  ]);
+});
+
+test("a node that refused is remembered apart from the pods, and a pod's scope is its namespace's", async () => {
+  const backend = createMockBackend("metricsForbidden");
+  const node = await openOn(backend, NODE_KIND, null, "staging-node-1");
+  await call(backend.invoke("object_close", node.id));
+  const pod = sampled();
+  const next = await openOn(
+    backend,
+    PODS,
+    pod.namespace,
+    pod.name,
+    undefined,
+    1,
+  );
+  expect(next.batches[0]?.usage).toMatchObject({
+    state: "ready",
+    waiting: true,
+  });
+  const again = await openOn(
+    backend,
+    NODE_KIND,
+    null,
+    "staging-node-2",
+    undefined,
+    1,
+  );
+  expect(again.batches[0]?.usage).toMatchObject({
+    state: "forbidden",
+    waiting: false,
+  });
+});
+
+test("the board forgets a refusal when a request of its scope answers, and remembers nothing of a scope that answered", async () => {
+  let outcome: MetricsState = "forbidden";
+  const board = new MetricsBoard(() => outcome);
+  const scope = podsScope("staging", "payments");
+  const reader = { answer: () => undefined };
+  board.want(reader, new Set([scope]));
+  await vi.advanceTimersByTimeAsync(ANSWER_MS);
+  expect(board.refusal(scope)).toBe("forbidden");
+  board.want(reader, new Set());
+  expect(board.refusal(scope)).toBe("forbidden");
+  outcome = "ready";
+  board.want(reader, new Set([scope]));
+  expect(board.refusal(scope)).toBe("forbidden");
+  await vi.advanceTimersByTimeAsync(ANSWER_MS);
+  expect(board.refusal(scope)).toBeUndefined();
+  board.want(reader, new Set([nodesScope("staging")]));
+  await vi.advanceTimersByTimeAsync(ANSWER_MS);
+  expect(board.refusal(nodesScope("staging"))).toBeUndefined();
 });
 
 test("usage is sent again at a scrape while the part is shown, and not once it is hidden", async () => {

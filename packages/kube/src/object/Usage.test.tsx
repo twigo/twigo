@@ -10,15 +10,14 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   Backend,
   Container,
-  Discovered,
   Measure,
+  ObjectBatch,
   Overview as Document,
   RequestOf,
   ShownUsage,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { Cluster, type Pod } from "../../../protocol/src/mock/cluster";
-import RESOURCES from "../../../protocol/src/mock/resources.json";
 import { finishedInit } from "../../../protocol/src/mock/objects";
 import {
   mountKube,
@@ -422,21 +421,29 @@ describe("an open object", () => {
     };
   }
 
-  const pod = (pick: (candidate: Pod) => boolean, outside?: string) => {
+  interface Where {
+    readonly outside?: string;
+    readonly inside?: string;
+    readonly not?: string;
+  }
+  const pod = (pick: (candidate: Pod) => boolean, where: Where = {}) => {
     const found = new Cluster("prod-eu", 5000, Date.now()).pods.find(
       (candidate) =>
         Date.now() - candidate.created > 120_000 &&
-        candidate.namespace !== outside &&
+        candidate.namespace !== where.outside &&
+        (where.inside === undefined || candidate.namespace === where.inside) &&
+        `k8s://prod-eu//v1/pods/${candidate.namespace}/${candidate.name}` !==
+          where.not &&
         pick(candidate),
     );
     if (!found) throw new Error("no such pod in the mock");
     return `k8s://prod-eu//v1/pods/${found.namespace}/${found.name}`;
   };
-  const running = (outside?: string) =>
+  const running = (where?: Where) =>
     pod(
       (candidate) =>
         candidate.status === "Running" && candidate.containers === 2,
-      outside,
+      where,
     );
   const namespaceOf = (uri: string) => uri.split("/")[6];
 
@@ -662,7 +669,46 @@ describe("an open object", () => {
     expect(within(usageSection()).getAllByRole("meter")).toHaveLength(2);
   });
 
-  test("where the API refuses, the first pod's section waits with empty meters until it says so, and the next pod of the space says it at once", async () => {
+  test.each([
+    ["a pod", () => running()],
+    ["a node", () => "k8s://prod-eu//v1/nodes/prod-eu-node-1"],
+  ])(
+    "%s's figures stay while its tab returns and while the document shows again, until the answer replaces them",
+    async (_, uri) => {
+      const workbench = await mountKube(createMockBackend("ready"));
+      const open = uri();
+      act(() => {
+        workbench.editors.open(open);
+      });
+      await trail();
+      expect(drawn()).toBe("figures");
+      act(() => {
+        workbench.editors.open("k8s-list://prod-eu/apps/v1/deployments");
+      });
+      await settle();
+      act(() => {
+        workbench.editors.activate(open);
+      });
+      expect((await trail()).filter((state) => state !== "none")).toEqual([
+        "figures",
+      ]);
+
+      const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await settle(2);
+      hidden.mockReturnValue(false);
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((await trail()).filter((state) => state !== "none")).toEqual([
+        "figures",
+      ]);
+    },
+  );
+
+  test("where the API refuses, the first pod's section waits with empty meters until it says so, and the next pod of its namespace says it at once, as one of another namespace waits", async () => {
     const workbench = await mountKube(createMockBackend("metricsForbidden"));
     const first = running();
     act(() => {
@@ -673,34 +719,15 @@ describe("an open object", () => {
       "sentence",
     ]);
     act(() => {
-      workbench.editors.open(running(namespaceOf(first)));
+      workbench.editors.open(
+        running({ inside: namespaceOf(first), not: first }),
+      );
     });
-    const next = await trail();
-    expect(next).not.toContain("empty");
-    expect(next[next.length - 1]).toBe("sentence");
-  });
-
-  test("a new discovery of the space forgets the refusal, so the next pod waits with empty meters again", async () => {
-    const backend = createMockBackend("metricsForbidden");
-    const subscribe = vi.spyOn(backend, "subscribe");
-    const workbench = await mountKube(backend);
-    const first = running();
+    expect((await trail()).filter((state) => state !== "none")).toEqual([
+      "sentence",
+    ]);
     act(() => {
-      workbench.editors.open(first);
-    });
-    await trail();
-    const watch = subscribe.mock.calls.find(
-      ([command]) => command === "resources_watch",
-    ) as unknown as [string, string, (message: Discovered) => void] | undefined;
-    act(() => {
-      watch?.[2]({
-        state: "ready",
-        cluster: `mock://${watch[1]}`,
-        resources: RESOURCES,
-      });
-    });
-    act(() => {
-      workbench.editors.open(running(namespaceOf(first)));
+      workbench.editors.open(running({ outside: namespaceOf(first) }));
     });
     expect((await trail()).filter((state) => state !== "none")).toEqual([
       "empty",
@@ -708,10 +735,75 @@ describe("an open object", () => {
     ]);
   });
 
+  test("a refusal outlives the space being shown again: the next pod of its namespace says it at once", async () => {
+    const workbench = await mountKube(createMockBackend("metricsForbidden"));
+    const first = running();
+    act(() => {
+      workbench.editors.open(first);
+    });
+    await trail();
+    act(() => {
+      workbench.editors.close(first);
+    });
+    await trail(100);
+    act(() => {
+      workbench.spaces.select("staging");
+    });
+    await trail(200);
+    act(() => {
+      workbench.spaces.select("prod-eu");
+    });
+    await trail(200);
+    act(() => {
+      workbench.editors.open(
+        running({ inside: namespaceOf(first), not: first }),
+      );
+    });
+    expect((await trail()).filter((state) => state !== "none")).toEqual([
+      "sentence",
+    ]);
+  });
+
+  test("a node the person may not read the metrics of says nothing of a pod whose metrics they may", async () => {
+    const mock = createMockBackend("ready");
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe: (command, request, onMessage) => {
+        const nodes =
+          command === "object_open" &&
+          (request as RequestOf<"object_open">).object.gvr.resource === "nodes";
+        return mock.subscribe(command, request, (message) => {
+          const batch = message as ObjectBatch;
+          const { usage } = batch;
+          onMessage(
+            nodes && usage && !usage.waiting
+              ? { ...batch, usage: { ...usage, state: "forbidden" } }
+              : message,
+          );
+        });
+      },
+    };
+    const workbench = await mountKube(backend);
+    act(() => {
+      workbench.editors.open("k8s://prod-eu//v1/nodes/prod-eu-node-1");
+    });
+    expect((await trail()).filter((state) => state !== "none")).toEqual([
+      "empty",
+      "sentence",
+    ]);
+    act(() => {
+      workbench.editors.open(running());
+    });
+    expect((await trail()).filter((state) => state !== "none")).toEqual([
+      "empty",
+      "figures",
+    ]);
+  });
+
   test("where the API is stale, every pod's Overview has the sentence in its first paint, and no empty meters stand for it", async () => {
     const workbench = await mountKube(createMockBackend("metricsDown"));
     const first = running();
-    for (const uri of [first, running(namespaceOf(first))]) {
+    for (const uri of [first, running({ outside: namespaceOf(first) })]) {
       act(() => {
         workbench.editors.open(uri);
       });
@@ -740,7 +832,7 @@ describe("an open object", () => {
     expect(drawn()).toBe("figures");
     expect(await trail(20_000, 250)).toEqual(["figures", "none"]);
     act(() => {
-      workbench.editors.open(running(namespaceOf(first)));
+      workbench.editors.open(running({ outside: namespaceOf(first) }));
     });
     expect(await trail()).toEqual(["none"]);
   });

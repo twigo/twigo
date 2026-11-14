@@ -19,7 +19,6 @@ import { measureText } from "./list/metrics";
 import { ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
-import { useDrawnUsage } from "./object/usageSaid";
 import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
@@ -108,7 +107,6 @@ export function Details({
     },
   );
   const reveal = useReveal(id);
-  const usage = useDrawnUsage(services.usageSaid, space, snapshot.usage);
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
     const next = refUri(space, resources.value, target);
@@ -286,7 +284,6 @@ export function Details({
             snapshot={snapshot}
             values={values}
             reveal={reveal}
-            usage={usage}
             onOpen={open}
             {...(namespace !== undefined && {
               onLogs: (choice) => {

@@ -138,7 +138,7 @@ function allOrNone(values: readonly (number | null)[]): number | null {
  * scrapes. One node is over 90 % of its memory and one over its CPUs.
  */
 export class MockMetrics {
-  readonly board = new MetricsBoard();
+  readonly board = new MetricsBoard(() => this.state);
   readonly #scenario: MetricsScenario | undefined;
   readonly #clock: () => number;
   readonly #watchers = new Set<() => void>();
@@ -208,15 +208,23 @@ export class MockMetrics {
   }
 
   /**
-   * What an open pod is told: the state of its scope once that has answered,
-   * and before it the running containers with no figure, as Rust says them
-   * with the Overview. A stale API is known without a request, so it says
-   * `unavailable` at once.
+   * What a scope has said that an open pod or node is told: its state once
+   * it has answered, the state a request of it last failed in while it has
+   * none open, and a stale API's at once, since discovery knows it without a
+   * request. Null before any of these.
    */
-  podUsage(pod: Pod, answered: boolean): Usage {
-    const state = this.state;
-    if (state === null) throw new Error("the context serves no metrics");
-    if (!answered && !this.stale) {
+  said(scope: string): MetricsState | null {
+    if (this.stale || this.board.answered(scope)) return this.state;
+    return this.board.refusal(scope) ?? null;
+  }
+
+  /**
+   * What an open pod is told of what its scope `said`: the running
+   * containers with no figure while it has said nothing, as Rust says them
+   * with the Overview, else its figures or the state alone.
+   */
+  podUsage(pod: Pod, said: MetricsState | null): Usage {
+    if (said === null) {
       return {
         state: "ready",
         waiting: true,
@@ -230,10 +238,10 @@ export class MockMetrics {
         })),
       };
     }
-    const containers = state === "ready" ? this.containers(pod) : null;
+    const containers = said === "ready" ? this.containers(pod) : null;
     if (containers === null) {
       return {
-        state,
+        state: said,
         waiting: false,
         sampled: null,
         cpu: NOTHING,
@@ -250,7 +258,7 @@ export class MockMetrics {
       );
     };
     return {
-      state,
+      state: said,
       waiting: false,
       sampled: new Date(this.scrape * SCRAPE_MS).toISOString(),
       cpu: total((container) => container.cpu),
@@ -259,14 +267,12 @@ export class MockMetrics {
     };
   }
 
-  nodeUsage(node: Node, answered: boolean): Usage {
-    const state = this.state;
-    if (state === null) throw new Error("the context serves no metrics");
-    const waiting = !answered && !this.stale;
-    const ready = state === "ready" && !waiting;
+  nodeUsage(node: Node, said: MetricsState | null): Usage {
+    const waiting = said === null;
+    const ready = said === "ready";
     const sample = this.nodeSample(node);
     return {
-      state: waiting ? "ready" : state,
+      state: said ?? "ready",
       waiting,
       sampled: ready ? new Date(this.scrape * SCRAPE_MS).toISOString() : null,
       cpu: measure(ready ? sample.cpu : null, null, null, ALLOCATABLE.cpu),
@@ -373,6 +379,8 @@ export function podsScope(context: string, namespace: string): string {
  * pods or its nodes, as Rust's board holds them: a scope nobody read answers
  * one flush after a reader first wants it, a scope that gains a reader has
  * answered already, and one that loses its last reader forgets its answer.
+ * What a scope's request last ended in, when it failed, stays after its
+ * readers leave, until a request of that scope answers.
  */
 export class MetricsBoard {
   readonly #scopes = new Map<
@@ -383,9 +391,17 @@ export class MetricsBoard {
       readonly timer: ReturnType<typeof setTimeout>;
     }
   >();
+  readonly #refused = new Map<string, MetricsState>();
+
+  /** `outcome` is what a request of any scope ends in, null where the context serves none. */
+  constructor(private readonly outcome: () => MetricsState | null) {}
 
   answered(scope: string): boolean {
     return this.#scopes.get(scope)?.answered === true;
+  }
+
+  refusal(scope: string): MetricsState | undefined {
+    return this.#refused.get(scope);
   }
 
   /** What `reader` wants from now on, in place of what it wanted. */
@@ -409,10 +425,20 @@ export class MetricsBoard {
         answered: false,
         timer: setTimeout(() => {
           entry.answered = true;
+          this.#remember(scope);
           for (const each of readers) each.answer();
         }, ANSWER_MS),
       };
       this.#scopes.set(scope, entry);
+    }
+  }
+
+  #remember(scope: string): void {
+    const outcome = this.outcome();
+    if (outcome === null || outcome === "ready") {
+      this.#refused.delete(scope);
+    } else {
+      this.#refused.set(scope, outcome);
     }
   }
 }
@@ -423,9 +449,10 @@ export class MetricsBoard {
  * or of every row while it sorts by a metric, from the scopes that have
  * answered. A list that stops reading keeps what it has, and a row without
  * a sample has null cells. It reports the state of the API only from a scope
- * that has answered, and keeps what it said when it stops reading, so a
- * fresh list says none until its first answer, but for a stale API, which
- * discovery tells at once as `unavailable`.
+ * that has answered, or has refused before and not answered since, and keeps
+ * what it said when it stops reading, so a fresh list says none until its
+ * first answer, but for a stale API, which discovery tells at once as
+ * `unavailable`.
  */
 export class MetricsJoin {
   readonly #metrics: MockMetrics;
@@ -525,6 +552,10 @@ export class MetricsJoin {
     };
     if ([...this.#wanted].some((scope) => board.answered(scope))) {
       this.#reported = state;
+    } else {
+      for (const scope of this.#wanted) {
+        this.#reported ??= board.refusal(scope) ?? null;
+      }
     }
     if (state !== "ready") return;
     let changed = false;

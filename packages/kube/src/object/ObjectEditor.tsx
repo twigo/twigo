@@ -16,7 +16,6 @@ import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
 import { ObjectContent } from "./ObjectContent";
 import type { OverviewStates } from "./overviewStates";
-import { useDrawnUsage, type UsageSaid } from "./usageSaid";
 import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
 import { hasUsage } from "./figures";
@@ -31,13 +30,11 @@ export function ObjectEditor({
   uri,
   discovery,
   overviews,
-  usageSaid,
   tabs,
   edits,
 }: EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
-  usageSaid: UsageSaid;
   tabs: ObjectTabs;
   edits: EditServices;
 }) {
@@ -64,7 +61,6 @@ export function ObjectEditor({
     usage: asked,
   });
   const reveal = useReveal(id);
-  const usage = useDrawnUsage(usageSaid, input?.space, snapshot.usage);
   const statusLocked = hasStatusSubresource(resources, input?.gvr);
   const manifest = snapshot.manifest;
   useEffect(() => {
@@ -88,7 +84,6 @@ export function ObjectEditor({
       snapshot={snapshot}
       values={values}
       reveal={reveal}
-      usage={usage}
       onOpen={open}
       yaml={(json) => (
         <YamlTab

@@ -25,7 +25,6 @@ export function ObjectContent({
   snapshot,
   values,
   reveal,
-  usage,
   yaml,
   kept,
   onOpen,
@@ -40,8 +39,6 @@ export function ObjectContent({
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   reveal?: OverviewProps["reveal"];
-  /** What the Overview's Usage section draws, from `useDrawnUsage`. */
-  usage?: OverviewProps["usage"];
   /** The YAML tab of an editor that edits; without it the tab is read-only, as the details show it. */
   yaml?: (json: string) => ReactNode;
   /**
@@ -74,7 +71,7 @@ export function ObjectContent({
               values={values}
               reveal={reveal}
               onLogs={onLogs}
-              usage={usage}
+              usage={snapshot.usage}
             />
           )}
         </Shown>

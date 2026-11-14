@@ -3,6 +3,7 @@ import type {
   Block,
   Container,
   EventList,
+  MetricsState,
   ObjectBatch,
   ObjectParts,
   ObjectQuery,
@@ -108,7 +109,9 @@ export interface EditBinding {
  * mock has of it: a Deployment's pods, a node's pods. A pod's containers
  * are the mock pod's, and its usage, as a node's, is what the list's rows
  * show, sent with the Overview: with no figure while the scope that serves it
- * has not answered, and with them once it has.
+ * has said nothing, with the state the scope last refused in, and with the
+ * figures once it has answered. A usage that has had its figures keeps them
+ * while its scope is asked anew.
  */
 export class MockObject {
   /** The recorded object it stands for. */
@@ -130,6 +133,8 @@ export class MockObject {
   #scrapes: ReturnType<typeof setTimeout> | undefined;
   /** A usage was sent that the webview may still draw. */
   #offered = false;
+  /** The last usage that did not wait, which stays until its scope answers again. */
+  #kept: Usage | undefined;
   #parts: ObjectParts;
   #seq = 0;
 
@@ -232,6 +237,12 @@ export class MockObject {
     );
   }
 
+  #said(): MetricsState | null {
+    return this.#scope === undefined
+      ? null
+      : (this.#metrics?.said(this.#scope) ?? null);
+  }
+
   /** A scrape moves the samples, so a shown usage is sent again at each, and only while it is shown. */
   #followScrapes(): void {
     clearTimeout(this.#scrapes);
@@ -255,10 +266,13 @@ export class MockObject {
       return withdraw ? ABSENT : null;
     }
     this.#offered = true;
-    const answered = this.#answered();
-    return "pod" in subject
-      ? this.#metrics.podUsage(subject.pod, answered)
-      : this.#metrics.nodeUsage(subject.node, answered);
+    const said = this.#said();
+    const usage =
+      "pod" in subject
+        ? this.#metrics.podUsage(subject.pod, said)
+        : this.#metrics.nodeUsage(subject.node, said);
+    if (!usage.waiting) this.#kept = usage;
+    return usage.waiting ? (this.#kept ?? usage) : usage;
   }
 
   /** Follows what edits leave of the object, and makes the changes a scenario asks for. */
