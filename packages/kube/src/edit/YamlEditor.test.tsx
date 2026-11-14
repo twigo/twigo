@@ -57,6 +57,11 @@ vi.mock("./monaco", () => {
             }
           },
           getVersionId: () => 1,
+          getPositionAt: (offset: number) => ({
+            lineNumber: 1,
+            column: offset + 1,
+          }),
+          getLineMaxColumn: () => 1,
           onDidChangeContent: dispose,
           dispose() {
             this.disposed = true;
@@ -89,6 +94,7 @@ vi.mock("./monaco", () => {
             this.disposed = true;
           },
           updateOptions: () => undefined,
+          createDecorationsCollection: () => ({ set: () => undefined }),
           onKeyDown: dispose,
           onDidCompositionStart: dispose,
           onDidCompositionEnd: dispose,

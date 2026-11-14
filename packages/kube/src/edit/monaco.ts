@@ -28,6 +28,7 @@ import { configureMonacoYaml, type SchemasSettings } from "monaco-yaml";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import YamlWorker from "monaco-yaml/yaml.worker?worker";
 import { followTheme } from "./theme";
+import "./monaco.css";
 
 self.MonacoEnvironment = {
   getWorker: () => new EditorWorker(),

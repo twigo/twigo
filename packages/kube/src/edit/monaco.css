@@ -1,0 +1,7 @@
+.twigo-yaml-top-key {
+  font-weight: 600;
+}
+
+.monaco-editor .twigo-yaml-support {
+  color: var(--support);
+}

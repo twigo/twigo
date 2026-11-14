@@ -15,6 +15,7 @@ import {
   Uri,
 } from "./monaco";
 import { statusLines } from "./object";
+import { landmarksOf, outlineOf } from "./outline";
 import {
   refusesStatus,
   type Place,
@@ -68,6 +69,39 @@ const spanOf = (selection: Selection): Span => ({
   start: placeOf(selection.getStartPosition()),
   end: placeOf(selection.getEndPosition()),
 });
+
+/** The top-level keys at weight 600 and the `managedFields` block in support, by their classes in `monaco.css`. */
+function landmarks(model: editor.ITextModel): editor.IModelDeltaDecoration[] {
+  const { keys, managed } = landmarksOf(outlineOf(model.getValue()));
+  return [
+    ...keys.map(([start, end]) => {
+      const from = model.getPositionAt(start);
+      const to = model.getPositionAt(end);
+      return {
+        range: {
+          startLineNumber: from.lineNumber,
+          startColumn: from.column,
+          endLineNumber: to.lineNumber,
+          endColumn: to.column,
+        },
+        options: { inlineClassName: "twigo-yaml-top-key" },
+      };
+    }),
+    ...(managed
+      ? [
+          {
+            range: {
+              startLineNumber: managed.from,
+              startColumn: 1,
+              endLineNumber: managed.to,
+              endColumn: model.getLineMaxColumn(managed.to),
+            },
+            options: { inlineClassName: "twigo-yaml-support" },
+          },
+        ]
+      : []),
+  ];
+}
 
 function undoes(event: IKeyboardEvent): boolean {
   return (
@@ -201,11 +235,16 @@ function ShownYamlEditor({
     const content = created.onDidChangeContent(() => {
       if (!setting.current) changed.current?.(created.getValue());
     });
+    const marks = instance.createDecorationsCollection(landmarks(created));
+    const marked = created.onDidChangeContent(() => {
+      marks.set(landmarks(created));
+    });
     return () => {
       const held = element.contains(element.ownerDocument.activeElement);
       buffer.view = instance.saveViewState();
       buffer.focus = undefined;
       content.dispose();
+      marked.dispose();
       instance.dispose();
       if (!buffers) created.dispose();
       // A view replaced while it holds the focus hands it to the next.
