@@ -8,6 +8,11 @@ use twigo_ipc::{ContainerUsage, Measure, MetricsState, Usage};
 use twigo_quantity::Quantity;
 
 const DECLARED: [&str; 3] = ["initContainers", "containers", "ephemeralContainers"];
+const RUNNING: [&str; 3] = [
+    "initContainerStatuses",
+    "containerStatuses",
+    "ephemeralContainerStatuses",
+];
 
 /// A pod without a sample uses nothing known, which is no zero.
 pub fn usage(kind: Kind, object: &Value, sample: Option<&Sample>, state: MetricsState) -> Usage {
@@ -68,41 +73,26 @@ fn node(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<Conta
     )
 }
 
-/// The pod's request and limit are sums only where every container counted in its usage has
-/// one, since a sum over some would put the pod's whole usage against part of what it may use.
-fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<ContainerUsage>) {
-    let Some(sample) = sample else {
-        return (Measure::default(), Measure::default(), Vec::new());
-    };
-    let spec = &object["spec"];
-    let declared: Vec<&Value> = DECLARED
+fn declared(object: &Value) -> Vec<&Value> {
+    DECLARED
         .iter()
-        .flat_map(|list| spec[list].as_array().into_iter().flatten())
-        .collect();
-    let mut sampled: Vec<(&Container, Option<&Value>)> = sample
-        .containers
-        .iter()
-        .map(|container| {
-            let found = declared
-                .iter()
-                .find(|declared| declared["name"] == *container.name)
-                .copied();
-            (container, found)
-        })
-        .collect();
-    let position = |name: &str| {
-        declared
-            .iter()
-            .position(|declared| declared["name"] == name)
-            .unwrap_or(declared.len())
-    };
-    sampled.sort_by_key(|(container, _)| (position(&container.name), container.name.clone()));
+        .flat_map(|list| object["spec"][list].as_array().into_iter().flatten())
+        .collect()
+}
 
-    let measure = |used: i64,
-                   from: Option<&Value>,
-                   resource: &str,
-                   read: fn(Quantity) -> Option<i64>| Measure {
-        used: Some(used),
+/// The order a sample lists a pod's containers in: the spec's, and those it lacks last, by name.
+fn order(declared: &[&Value], name: &str) -> (usize, String) {
+    let position = declared
+        .iter()
+        .position(|declared| declared["name"] == name)
+        .unwrap_or(declared.len());
+    (position, name.to_owned())
+}
+
+fn container(declared: &[&Value], name: &str, used: Option<(i64, i64)>) -> ContainerUsage {
+    let from = declared.iter().find(|declared| declared["name"] == name);
+    let measure = |used: Option<i64>, resource: &str, read: fn(Quantity) -> Option<i64>| Measure {
+        used,
         request: from
             .and_then(|from| quantity(&from["resources"], "requests", resource))
             .and_then(read),
@@ -111,12 +101,30 @@ fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<Contai
             .and_then(read),
         allocatable: None,
     };
+    ContainerUsage {
+        name: name.to_owned(),
+        cpu: measure(used.map(|(cpu, _)| cpu), "cpu", nanocores),
+        memory: measure(used.map(|(_, memory)| memory), "memory", bytes),
+    }
+}
+
+/// The pod's request and limit are sums only where every container counted in its usage has
+/// one, since a sum over some would put the pod's whole usage against part of what it may use.
+fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<ContainerUsage>) {
+    let Some(sample) = sample else {
+        return (Measure::default(), Measure::default(), Vec::new());
+    };
+    let declared = declared(object);
+    let mut sampled: Vec<&Container> = sample.containers.iter().collect();
+    sampled.sort_by_key(|container| order(&declared, &container.name));
     let containers: Vec<ContainerUsage> = sampled
         .iter()
-        .map(|(container, from)| ContainerUsage {
-            name: container.name.to_string(),
-            cpu: measure(container.cpu, *from, "cpu", nanocores),
-            memory: measure(container.memory, *from, "memory", bytes),
+        .map(|sampled| {
+            container(
+                &declared,
+                &sampled.name,
+                Some((sampled.cpu, sampled.memory)),
+            )
         })
         .collect();
     let total = |used: i64, pick: fn(&ContainerUsage) -> Measure| {
@@ -137,6 +145,38 @@ fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<Contai
         total(sample.memory, |container| container.memory),
         containers,
     )
+}
+
+/// What a pod or a node is told before the request that serves it has answered once: no figure,
+/// and for a pod the containers that run by its own status, in the order a sample lists them,
+/// each against its request and limit. The kubelet's resource metrics hold only running
+/// containers, so the answer lists these (ARCHITECTURE 3.6).
+pub fn waiting(kind: Kind, object: &Value) -> Usage {
+    let containers = match kind {
+        Kind::Pods => {
+            let declared = declared(object);
+            let mut running: Vec<&str> = RUNNING
+                .iter()
+                .flat_map(|list| object["status"][list].as_array().into_iter().flatten())
+                .filter(|status| status["state"]["running"].is_object())
+                .filter_map(|status| status["name"].as_str())
+                .collect();
+            running.sort_by_key(|name| order(&declared, name));
+            running
+                .into_iter()
+                .map(|name| container(&declared, name, None))
+                .collect()
+        }
+        Kind::Nodes => Vec::new(),
+    };
+    Usage {
+        state: MetricsState::Ready,
+        waiting: true,
+        sampled: None,
+        cpu: Measure::default(),
+        memory: Measure::default(),
+        containers,
+    }
 }
 
 #[cfg(test)]

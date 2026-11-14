@@ -1118,10 +1118,12 @@ events: EventList | null,
 related: Related | null, 
 /**
  * Present when it changed, while the usage part is shown, for a pod
- * or a node of a context that serves the Metrics API, and not before
- * the scope that serves the object has answered or failed once: a
- * `ready` usage whose `used` is null says that an answer came without
- * the object.
+ * or a node of a context that serves the Metrics API: in the batch that
+ * brings the object, or in the next one when the part is asked for
+ * later. Until the scope that serves the object has answered or failed
+ * once it is `waiting`, or `unavailable` where the API is stale; after
+ * that a `ready` usage whose `used` is null says that an answer came
+ * without the object.
  */
 usage: Usage | null, };
 
@@ -1469,10 +1471,13 @@ export type SetWindow = { id: SubscriptionId, start: number,
  */
 end: number, 
 /**
- * Whether the list reads its metric columns now: one of them is
- * drawn or sorted by, the document is visible, and the list's editor
- * is on screen. Only then are the namespaces of the window's rows
- * polled (ARCHITECTURE 3.6).
+ * Whether the list reads its metric columns now, which takes the
+ * document visible, the list's editor on screen, and the list not the
+ * narrow one beside an object's details, which always says false.
+ * Before the list's columns are known it says true, so that a list
+ * sorted by a metric is held from its first rows; once they are known,
+ * while a metric column is drawn or sorted by. Only then are the
+ * namespaces of the window's rows polled (ARCHITECTURE 3.6).
  */
 metrics: boolean, };
 
@@ -1657,10 +1662,13 @@ export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", e
  */
 export type Usage = { state: MetricsState, 
 /**
- * True in the usage sent with the Overview, before the request that
- * serves the object has answered once: the figures are null, and
- * `containers` names the pod's running containers, which the answer
- * will hold, so the webview draws the section at its height at once.
+ * True in a usage sent before the request that serves the object has
+ * answered once: the state is `ready`, the figures are null, and
+ * `containers` names the pod's running containers by its own status,
+ * in the order the answer lists them and with their requests and
+ * limits, so the webview draws the section at its height at once.
+ * False for a stale API, which says `unavailable` at once since
+ * discovery knows it without a request.
  */
 waiting: boolean, 
 /**
@@ -1673,8 +1681,8 @@ sampled: string | null,
  */
 cpu: Measure, memory: Measure, 
 /**
- * A pod's containers that have a sample, in the pod's order; empty
- * for a node.
+ * A pod's containers that have a sample, or while `waiting` those that
+ * run, in the pod's order; empty for a node.
  */
 containers: Array<ContainerUsage>, };
 

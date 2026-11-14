@@ -52,8 +52,8 @@ impl Followers {
 
     /// The context's follower, a new one when nobody holds it; `entry` is awaited only to
     /// start it. A new follower begins from the Metrics API's state its predecessor last
-    /// confirmed under the same fingerprint, so a list opened again has its columns in its
-    /// first batch, and its first answer corrects it.
+    /// confirmed under the same fingerprint, so a list opened again has the metric columns in
+    /// the batch that brings its own, and its first answer corrects it.
     /// Askers that find none at once each build one, and the first to finish keeps its own:
     /// the others' are dropped before they run.
     pub async fn get(

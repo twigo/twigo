@@ -75,10 +75,12 @@ pub struct ObjectBatch {
     /// Present when it changed, while the related part is shown.
     pub related: Option<Related>,
     /// Present when it changed, while the usage part is shown, for a pod
-    /// or a node of a context that serves the Metrics API, and not before
-    /// the scope that serves the object has answered or failed once: a
-    /// `ready` usage whose `used` is null says that an answer came without
-    /// the object.
+    /// or a node of a context that serves the Metrics API: in the batch that
+    /// brings the object, or in the next one when the part is asked for
+    /// later. Until the scope that serves the object has answered or failed
+    /// once it is `waiting`, or `unavailable` where the API is stale; after
+    /// that a `ready` usage whose `used` is null says that an answer came
+    /// without the object.
     pub usage: Option<Usage>,
 }
 
@@ -86,10 +88,13 @@ pub struct ObjectBatch {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Usage {
     pub state: MetricsState,
-    /// True in the usage sent with the Overview, before the request that
-    /// serves the object has answered once: the figures are null, and
-    /// `containers` names the pod's running containers, which the answer
-    /// will hold, so the webview draws the section at its height at once.
+    /// True in a usage sent before the request that serves the object has
+    /// answered once: the state is `ready`, the figures are null, and
+    /// `containers` names the pod's running containers by its own status,
+    /// in the order the answer lists them and with their requests and
+    /// limits, so the webview draws the section at its height at once.
+    /// False for a stale API, which says `unavailable` at once since
+    /// discovery knows it without a request.
     pub waiting: bool,
     /// RFC 3339, when the sample was taken; null without one, as for a
     /// pod that is not running or started a moment ago.
@@ -97,8 +102,8 @@ pub struct Usage {
     /// A pod's sum over its containers, or the node's own figures.
     pub cpu: Measure,
     pub memory: Measure,
-    /// A pod's containers that have a sample, in the pod's order; empty
-    /// for a node.
+    /// A pod's containers that have a sample, or while `waiting` those that
+    /// run, in the pod's order; empty for a node.
     pub containers: Vec<ContainerUsage>,
 }
 

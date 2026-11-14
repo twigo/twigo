@@ -11,6 +11,7 @@ use twigo_cache::discovery::Followers;
 use twigo_cache::fake::Fake;
 use twigo_cache::hub::Resource;
 use twigo_cache::metrics::{Context, Poller, Scope};
+use twigo_ipc::Measure;
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 
@@ -50,6 +51,39 @@ fn node() -> serde_json::Value {
     })
 }
 
+fn started() -> serde_json::Value {
+    json!({ "running": { "startedAt": "2026-11-13T16:00:00Z" } })
+}
+
+fn pod_in_every_state() -> serde_json::Value {
+    let mut pod = pod(json!([
+        { "name": "worker", "resources": { "requests": { "cpu": "100m" } } },
+        { "name": "api" },
+        { "name": "web", "resources": {
+            "requests": { "cpu": "200m", "memory": "64Mi" },
+            "limits": { "cpu": "1", "memory": "128Mi" },
+        } },
+    ]));
+    pod["spec"]["initContainers"] = json!([
+        { "name": "migrate" },
+        { "name": "proxy", "restartPolicy": "Always", "resources": { "limits": { "memory": "32Mi" } } },
+    ]);
+    pod["spec"]["ephemeralContainers"] = json!([{ "name": "debugger" }]);
+    pod["status"] = json!({
+        "containerStatuses": [
+            { "name": "web", "state": started() },
+            { "name": "worker", "state": { "waiting": { "reason": "CrashLoopBackOff" } } },
+            { "name": "api", "state": started() },
+        ],
+        "initContainerStatuses": [
+            { "name": "proxy", "state": started() },
+            { "name": "migrate", "state": { "terminated": { "exitCode": 0, "reason": "Completed" } } },
+        ],
+        "ephemeralContainerStatuses": [{ "name": "debugger", "state": started() }],
+    });
+    pod
+}
+
 struct Rig {
     fake: Fake,
     hub: Hub,
@@ -60,7 +94,13 @@ struct Rig {
 
 impl Rig {
     async fn new(fake: Fake) -> Self {
-        fake.serve_metrics("v1beta1");
+        if !fake
+            .state()
+            .served
+            .contains_key(twigo_cache::metrics::GROUP)
+        {
+            fake.serve_metrics("v1beta1");
+        }
         let (hub, clients) = fake.hub(Budgets::default());
         let directory = tempfile::tempdir().unwrap();
         let followers = Followers::new(hub.clone(), Arc::new(Cache::new(directory.path())));
@@ -276,7 +316,7 @@ async fn a_context_whose_stale_api_is_uninstalled_withdraws_the_usage_too() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_first_usage_of_a_pod_alone_has_its_figures_and_no_batch_says_ready_before_it() {
+async fn a_pod_alone_says_that_it_waits_until_its_scope_answers_and_the_answer_replaces_it() {
     let fake = Fake::default();
     fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
     fake.pod_usage("a", "web-0", &[("main", "10m", "1Mi")]);
@@ -285,37 +325,47 @@ async fn the_first_usage_of_a_pod_alone_has_its_figures_and_no_batch_says_ready_
     let opened = rig.open(Kind::Pods, PARTS);
     let early = rig.watch(&opened, Duration::from_secs(2)).await;
     assert!(!early.is_empty(), "the object itself is sent");
-    assert!(
-        usages(&early).is_empty(),
-        "no usage before its scope answered"
-    );
+    let [waiting] = &usages(&early)[..] else {
+        panic!("one usage: {:?}", usages(&early));
+    };
+    assert!(waiting.waiting, "no figure before its scope answered");
+    assert_eq!(waiting.state, MetricsState::Ready);
+    assert_eq!(waiting.cpu.used, None);
 
     let after = rig.watch(&opened, Duration::from_secs(5)).await;
     let [first] = &usages(&after)[..] else {
         panic!("one usage: {:?}", usages(&after));
     };
+    assert!(!first.waiting);
     assert_eq!(first.state, MetricsState::Ready);
     assert_eq!(first.cpu.used, Some(10_000_000));
     assert_eq!(first.memory.used, Some(1_048_576));
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_scope_that_refuses_says_forbidden_in_the_first_usage() {
+async fn a_scope_that_refuses_is_waited_for_and_then_says_forbidden_and_never_ready_again() {
     let fake = Fake::default();
     fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
     fake.state()
         .forbidden
         .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
     let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
     let opened = rig.open(Kind::Pods, PARTS);
     let batches = rig.watch(&opened, Duration::from_secs(40)).await;
-    let states: Vec<MetricsState> = usages(&batches).iter().map(|usage| usage.state).collect();
+    let said: Vec<(MetricsState, bool)> = usages(&batches)
+        .iter()
+        .map(|usage| (usage.state, usage.waiting))
+        .collect();
     assert_eq!(
-        states,
-        [MetricsState::Forbidden],
-        "never ready, and said once"
+        said,
+        [
+            (MetricsState::Ready, true),
+            (MetricsState::Forbidden, false)
+        ],
+        "waiting, then the refusal, once"
     );
-    assert_eq!(usages(&batches)[0].cpu.used, None);
+    assert_eq!(usages(&batches)[1].cpu.used, None);
 }
 
 #[tokio::test(start_paused = true)]
@@ -384,9 +434,13 @@ async fn a_pod_missing_from_an_answer_says_used_null_and_ready_once_the_answer_c
     rig.fake.state().metrics_takes = Duration::from_secs(3);
     let opened = rig.open(Kind::Pods, PARTS);
     let early = rig.watch(&opened, Duration::from_secs(2)).await;
-    assert!(usages(&early).is_empty(), "nothing is known before it");
+    assert!(
+        usages(&early).iter().all(|usage| usage.waiting),
+        "nothing is known before it"
+    );
     let batches = rig.watch(&opened, Duration::from_secs(40)).await;
     let usage = *usages(&batches).last().expect("a usage");
+    assert!(!usage.waiting);
     assert_eq!(usage.state, MetricsState::Ready);
     assert_eq!(usage.cpu.used, None);
     assert_eq!(usage.memory.used, None);
@@ -465,9 +519,258 @@ async fn a_cluster_without_the_api_never_gets_a_usage() {
         _held: (clients, directory, followers),
         batches: mpsc::unbounded_channel().1,
     };
-    let opened = rig.open(Kind::Pods, PARTS);
+    let opened = rig.open(
+        Kind::Pods,
+        ObjectParts {
+            overview: true,
+            ..PARTS
+        },
+    );
     let batches = rig.watch(&opened, Duration::from_secs(60)).await;
-    assert!(!batches.is_empty());
+    assert!(batches.iter().any(|batch| batch.overview.is_some()));
     assert!(usages(&batches).is_empty(), "no part, and no request");
     assert_eq!(requests(&rig.fake), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_overview_comes_with_a_usage_that_names_the_containers_that_run() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.pod_usage(
+        "a",
+        "web-0",
+        &[
+            ("debugger", "1m", "1Mi"),
+            ("web", "10m", "2Mi"),
+            ("api", "2m", "1Mi"),
+            ("proxy", "3m", "3Mi"),
+        ],
+    );
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let opened = rig.open(
+        Kind::Pods,
+        ObjectParts {
+            overview: true,
+            ..PARTS
+        },
+    );
+    let early = rig.watch(&opened, Duration::from_secs(2)).await;
+    let with = early
+        .iter()
+        .find(|batch| batch.overview.is_some())
+        .expect("the Overview");
+    let waiting = with
+        .usage
+        .as_ref()
+        .expect("a usage in the Overview's batch");
+    assert!(waiting.waiting);
+    assert_eq!(waiting.state, MetricsState::Ready);
+    assert_eq!(waiting.cpu, Measure::default());
+    assert_eq!(waiting.memory, Measure::default());
+    assert_eq!(waiting.sampled, None);
+    let names = |usage: &Usage| -> Vec<String> {
+        usage.containers.iter().map(|c| c.name.clone()).collect()
+    };
+    assert_eq!(
+        names(waiting),
+        ["proxy", "api", "web", "debugger"],
+        "those that run, the finished and the crash-looping left out, in the spec's order"
+    );
+    let web = &waiting.containers[2];
+    assert_eq!(web.cpu.used, None);
+    assert_eq!(web.cpu.request, Some(200_000_000));
+    assert_eq!(web.cpu.limit, Some(1_000_000_000));
+    assert_eq!(web.memory.limit, Some(128 * 1024 * 1024));
+    assert_eq!(waiting.containers[0].memory.limit, Some(32 * 1024 * 1024));
+    assert_eq!(usages(&early).len(), 1, "said once");
+
+    let after = rig.watch(&opened, Duration::from_secs(5)).await;
+    let [answer] = &usages(&after)[..] else {
+        panic!("one usage: {:?}", usages(&after));
+    };
+    assert!(!answer.waiting);
+    assert_eq!(answer.cpu.used, Some(16_000_000));
+    assert_eq!(
+        names(answer),
+        names(waiting),
+        "the answer lists the containers the waiting usage named"
+    );
+    assert!(answer.containers.iter().all(|c| c.cpu.used.is_some()));
+    assert_eq!(answer.containers[2].cpu.request, web.cpu.request);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_node_waits_with_no_containers_and_its_answer_replaces_it() {
+    let fake = Fake::default();
+    fake.put("", "nodes", None, node());
+    fake.node_usage("node-1", "277147502n", "2509700Ki");
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let opened = rig.open(
+        Kind::Nodes,
+        ObjectParts {
+            overview: true,
+            ..PARTS
+        },
+    );
+    let early = rig.watch(&opened, Duration::from_secs(2)).await;
+    let with = early
+        .iter()
+        .find(|batch| batch.overview.is_some())
+        .expect("the Overview");
+    let waiting = with
+        .usage
+        .as_ref()
+        .expect("a usage in the Overview's batch");
+    assert!(waiting.waiting);
+    assert_eq!(waiting.state, MetricsState::Ready);
+    assert_eq!(waiting.cpu, Measure::default());
+    assert_eq!(waiting.memory, Measure::default());
+    assert!(waiting.containers.is_empty());
+
+    let after = rig.watch(&opened, Duration::from_secs(5)).await;
+    let [answer] = &usages(&after)[..] else {
+        panic!("one usage: {:?}", usages(&after));
+    };
+    assert!(!answer.waiting);
+    assert_eq!(answer.cpu.used, Some(277_147_502));
+    assert_eq!(answer.cpu.allocatable, Some(16_000_000_000));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_api_says_unavailable_with_the_overview_before_any_request_answers() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.stale_metrics("v1beta1");
+    fake.state()
+        .no_endpoints
+        .insert("/apis/metrics.k8s.io/v1beta1/namespaces/a/pods".to_owned());
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let opened = rig.open(
+        Kind::Pods,
+        ObjectParts {
+            overview: true,
+            ..PARTS
+        },
+    );
+    let early = rig.watch(&opened, Duration::from_secs(2)).await;
+    let with = early
+        .iter()
+        .find(|batch| batch.overview.is_some())
+        .expect("the Overview");
+    let first = with
+        .usage
+        .as_ref()
+        .expect("a usage in the Overview's batch");
+    assert_eq!(first.state, MetricsState::Unavailable);
+    assert!(!first.waiting, "discovery knows it without a request");
+    assert_eq!(first.cpu.used, None);
+
+    let after = rig.watch(&opened, Duration::from_secs(5)).await;
+    assert!(
+        usages(&after)
+            .iter()
+            .all(|usage| usage.state == MetricsState::Unavailable && !usage.waiting),
+        "the failure says the same"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_part_asked_for_later_has_the_waiting_usage_in_the_next_batch() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.pod_usage("a", "web-0", &[("web", "10m", "2Mi")]);
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let opened = rig.open(
+        Kind::Pods,
+        ObjectParts {
+            overview: true,
+            usage: false,
+            ..PARTS
+        },
+    );
+    let before = rig.watch(&opened, Duration::from_secs(2)).await;
+    assert!(usages(&before).is_empty());
+
+    opened.set_parts(ObjectParts {
+        overview: true,
+        ..PARTS
+    });
+    let next = rig.watch(&opened, Duration::from_millis(500)).await;
+    let [batch] = &next[..] else {
+        panic!("one batch: {next:?}");
+    };
+    let waiting = batch.usage.as_ref().expect("the usage in the next batch");
+    assert!(waiting.waiting);
+    assert_eq!(waiting.containers.len(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_part_asked_for_later_has_the_figures_in_the_next_batch_where_a_list_read_the_scope() {
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod_in_every_state());
+    fake.pod_usage("a", "web-0", &[("web", "10m", "2Mi")]);
+    let mut rig = Rig::new(fake).await;
+    let mut list = rig.context.reader(Kind::Pods);
+    list.want(HashSet::from([Scope::Namespace("a".into())]));
+    sleep(Duration::from_secs(1)).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3);
+    let opened = rig.open(
+        Kind::Pods,
+        ObjectParts {
+            overview: true,
+            usage: false,
+            ..PARTS
+        },
+    );
+    let before = rig.watch(&opened, Duration::from_secs(1)).await;
+    assert!(usages(&before).is_empty());
+
+    opened.set_parts(ObjectParts {
+        overview: true,
+        ..PARTS
+    });
+    let next = rig.watch(&opened, Duration::from_millis(500)).await;
+    let [batch] = &next[..] else {
+        panic!("one batch: {next:?}");
+    };
+    let usage = batch.usage.as_ref().expect("the usage in the next batch");
+    assert!(!usage.waiting, "the list's answer is held already");
+    assert_eq!(usage.cpu.used, Some(10_000_000));
+    assert_eq!(usage.containers.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_api_that_turns_stale_while_the_usage_waits_is_said_at_once() {
+    let apiservice = || {
+        json!({
+            "kind": "PartialObjectMetadata",
+            "apiVersion": "meta.k8s.io/v1",
+            "metadata": { "name": "v1beta1.metrics.k8s.io" },
+        })
+    };
+    let fake = Fake::default();
+    fake.put("", "pods", Some("a"), pod(json!([{ "name": "main" }])));
+    fake.put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let mut rig = Rig::new(fake).await;
+    rig.fake.state().metrics_takes = Duration::from_secs(3600);
+    let opened = rig.open(Kind::Pods, PARTS);
+    let early = rig.watch(&opened, Duration::from_secs(2)).await;
+    let [waiting] = &usages(&early)[..] else {
+        panic!("one usage: {:?}", usages(&early));
+    };
+    assert!(waiting.waiting);
+
+    rig.fake.stale_metrics("v1beta1");
+    rig.fake
+        .put("apiregistration.k8s.io", "apiservices", None, apiservice());
+    let after = rig.watch(&opened, Duration::from_secs(30)).await;
+    let [stale] = &usages(&after)[..] else {
+        panic!("one usage: {:?}", usages(&after));
+    };
+    assert_eq!(stale.state, MetricsState::Unavailable);
+    assert!(!stale.waiting);
 }

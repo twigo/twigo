@@ -643,7 +643,8 @@ impl QueryView {
     }
 
     /// The state its scopes last said, kept while it reads nothing; none until they say one,
-    /// but `unavailable` for a stale API, which discovery knows without a request.
+    /// but `unavailable` for a stale API, which discovery knows without a request, once the
+    /// server's columns are known: the metric columns, and so the state, come with them.
     fn metrics_state(&self) -> Option<MetricsState> {
         let metrics = self.metrics.as_ref().filter(|_| self.layout.metrics)?;
         metrics

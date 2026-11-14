@@ -13,7 +13,7 @@ use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig::Fingerprint;
 
 use super::*;
-use crate::discovery::Followers;
+use crate::discovery::{Followed, Followers};
 use crate::fake::{Fake, fingerprint};
 use crate::hub::{Hub, Query, Resource, RowFormat};
 use crate::metrics::{FIRST_ANSWER, Kind, Poller};
@@ -93,13 +93,14 @@ fn opening(poller: &Poller, followers: &Arc<Followers>) -> Opening {
     })
 }
 
-async fn discovered(followers: &Followers) {
+async fn discovered(followers: &Followers) -> Arc<Followed> {
     let followed = followers.get("kind-test", async { entry() }).await;
     let mut resources = followed.follow();
     let waited = async { while !matches!(resources.next().await, Discovered::Ready { .. }) {} };
     timeout_at(Instant::now() + Duration::from_secs(600), waited)
         .await
         .expect("discovery within ten minutes");
+    followed
 }
 
 async fn open(
@@ -444,7 +445,7 @@ async fn a_list_that_finds_the_follower_there_has_its_columns_and_its_order_besi
     });
     assert!(stuck.as_mut().now_or_never().is_none(), "polled once");
 
-    timeout(Duration::from_secs(600), discovered(&list.followers))
+    let held = timeout(Duration::from_secs(600), discovered(&list.followers))
         .await
         .expect("the context's discovery, whoever else waits");
     let (sorted, mut batches) = open(
@@ -464,7 +465,7 @@ async fn a_list_that_finds_the_follower_there_has_its_columns_and_its_order_besi
         [9, 6, 6, 4, 3, 2].map(|milli| Cell::Int(milli * 1_000_000))
     );
     assert_eq!(opened.metrics, Some(MetricsState::Ready));
-    drop(stuck);
+    drop((stuck, held));
 }
 
 #[tokio::test(start_paused = true)]
@@ -569,6 +570,33 @@ async fn a_list_whose_rows_come_after_its_window_holds_the_first_batch_that_has_
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cold_list_sorted_by_a_metric_whose_window_reads_before_its_columns_has_its_first_rows_in_order()
+ {
+    let mut list = Metered::cold(cluster(true).await, cpu_descending()).await;
+    list.batcher().set_window(0, 6, true);
+    let listing = first(&mut list).await;
+    assert_eq!(listing.total, 0, "{:?}", listing.status);
+    assert_eq!(listing.columns, Some(Vec::new()), "no columns to read yet");
+
+    list.fake.release_initial();
+    let opened = loop {
+        let reads =
+            list.columns.is_empty() || list.columns.iter().any(|column| column.name == "CPU");
+        list.batcher().set_window(0, 6, reads);
+        let batch = first(&mut list).await;
+        if batch.total > 0 {
+            break batch;
+        }
+    };
+    assert_eq!(window_ids(&opened), BY_CPU);
+    assert_eq!(
+        cells_of(&opened, "CPU"),
+        [9, 6, 6, 4, 3, 2].map(|milli| Cell::Int(milli * 1_000_000))
+    );
+    assert_eq!(opened.metrics, Some(MetricsState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
 async fn no_batch_has_the_metric_columns_without_the_lists_own_and_they_come_with_them_before_age()
 {
     for stale in [false, true] {
@@ -620,8 +648,15 @@ async fn no_batch_has_the_metric_columns_without_the_lists_own_and_they_come_wit
 #[tokio::test(start_paused = true)]
 async fn a_list_opened_before_any_discovery_answered_gets_its_columns_once_it_does() {
     let mut list = Metered::of(cluster(true).await, query(None, false), false).await;
+    sleep(Duration::from_secs(1)).await;
     list.batcher().set_window(0, 6, true);
     let before = first(&mut list).await;
+    assert_eq!(before.total, 6, "its rows are listed");
+    assert_eq!(
+        cells_of(&before, "Name").len(),
+        6,
+        "and its own columns are there"
+    );
     assert!(
         !has_metric_columns(&before),
         "nothing is known of the context yet"
