@@ -29,19 +29,33 @@
   --primary: oklch(0.3 0.006 250);
   --primary-foreground: oklch(0.985 0.002 250);
   --secondary: oklch(0.955 0.002 250);
-  --secondary-foreground: oklch(0.3 0.006 250);
+  --secondary-foreground: var(--content);
   --muted: oklch(0.955 0.002 250);
-  /* Text roles. Content, support and quiet are each at 4.5:1 or more on the
-     shell and the editor (WCAG 1.4.3): support for what places a row, quiet
-     for units, timestamps, hints and empty values. A selected row's tint
-     takes quiet below that, so there it reads as support. Strong is for
-     titles. */
+  /* Four text roles; a component names the role of what it shows.
+       strong   an object's title, section titles, the name in the row under
+                the cursor
+       content  names, values, messages, log lines
+       support  property labels, table headers, healthy states, defaults,
+                secondary columns
+       quiet    timestamps, units, a zero count, placeholders, hints
+     Two adjacent pieces of text in different roles differ by 25 Lc or more,
+     or by a second cue: a size step or the other weight.
+     WCAG 2 ratio / APCA Lc (0.0.98G) of the 8-bit sRGB colours, on the shell
+     and the editor; every role is 4.5:1 or more on the card, the popover and
+     a selected row as well (WCAG 1.4.3):
+                dark shell   dark editor  light shell  light editor
+       strong   15.5 / 98    16.6 / 99    17.5 / 100   18.8 / 105
+       content  12.9 / 85    13.8 / 86    14.9 / 98    16.0 / 103
+       support   7.8 / 57     8.4 / 58     6.1 / 78     6.5 / 82
+       quiet     5.4 / 41     5.7 / 41     4.5 / 69     4.8 / 74
+     A selected row's tint takes quiet below 4.5:1, so there it reads as
+     support (index.css). */
   --strong: oklch(0.18 0.004 250);
-  --content: oklch(0.32 0.004 250);
-  --support: oklch(0.47 0.006 250);
+  --content: oklch(0.25 0.004 250);
+  --support: oklch(0.48 0.006 250);
   --quiet: oklch(0.55 0.005 250);
   --accent: oklch(0.945 0.003 250);
-  --accent-foreground: oklch(0.3 0.006 250);
+  --accent-foreground: var(--content);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.915 0.003 250);
@@ -163,17 +177,18 @@
   --background: oklch(0.218 0.002 250);
   --card: oklch(0.25 0.003 250);
   --popover: oklch(0.27 0.003 250);
+  --popover-foreground: var(--content);
   --primary: oklch(0.87 0.002 250);
   --primary-foreground: oklch(0.218 0.002 250);
   --secondary: oklch(0.28 0.003 250);
-  --secondary-foreground: oklch(0.87 0.002 250);
+  --secondary-foreground: var(--content);
   --muted: oklch(0.28 0.003 250);
   --strong: oklch(0.96 0.002 250);
-  --content: oklch(0.87 0.002 250);
+  --content: oklch(0.9 0.002 250);
   --support: oklch(0.75 0.003 250);
   --quiet: oklch(0.65 0.003 250);
   --accent: oklch(0.3 0.003 250);
-  --accent-foreground: oklch(0.87 0.002 250);
+  --accent-foreground: var(--content);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 8%);
