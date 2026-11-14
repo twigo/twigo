@@ -373,6 +373,8 @@
   --font-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     monospace;
+  /* JetBrains Mono's code ligatures are contextual alternates. */
+  --font-mono--font-feature-settings: "liga" 0, "calt" 0;
 }
 
 @theme {
