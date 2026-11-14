@@ -41,7 +41,7 @@ export function TrustDialog() {
             <DialogTitle className="text-[13px] font-semibold">
               Run this command for {context}?
             </DialogTitle>
-            <DialogDescription className="mt-1 text-xs text-muted-foreground">
+            <DialogDescription className="mt-1 text-xs text-support">
               Your kubeconfig gets this cluster's credentials from a program.
               Twigo runs it only if you trust it, and asks again if it changes.
             </DialogDescription>
@@ -104,7 +104,7 @@ export function ReviewDialog() {
             <DialogTitle className="text-[13px] font-semibold">
               Trust the credential programs in your kubeconfig?
             </DialogTitle>
-            <DialogDescription className="mt-1 text-xs text-muted-foreground">
+            <DialogDescription className="mt-1 text-xs text-support">
               These clusters get their credentials from programs your kubeconfig
               names. Twigo runs one only if you trust it; any you leave out ask
               when you open their cluster.
@@ -125,7 +125,7 @@ export function ReviewDialog() {
                 />
                 <div className="min-w-0 flex-1">
                   <Command plugin={plugin} />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
+                  <p className="mt-1 text-[11px] text-support">
                     {contexts.join(", ")}
                   </p>
                 </div>
@@ -166,7 +166,7 @@ function Command({ plugin }: { plugin: ExecPlugin }) {
         {plugin.args.join(" ")}
       </p>
       {plugin.env.length > 0 && (
-        <ul className="mt-1 text-muted-foreground">
+        <ul className="mt-1 text-support">
           {plugin.env.map(({ name, value }) => (
             <li key={name} className="break-all">
               {name}={value}

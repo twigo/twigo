@@ -279,7 +279,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       {params && provider?.icon && (
         <provider.icon
           uri={params.uri}
-          className="size-4 shrink-0 text-muted-foreground"
+          className="size-4 shrink-0 text-support"
         />
       )}
       <span data-preview={params?.preview ?? false} className="truncate">

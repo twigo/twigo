@@ -7,7 +7,7 @@ export function UnsavedMark({ className }: { className?: string }) {
       role="img"
       aria-label="Unsaved changes"
       className={cn(
-        "inline-block size-2 shrink-0 rounded-full bg-foreground",
+        "inline-block size-2 shrink-0 rounded-full bg-content",
         className,
       )}
     />

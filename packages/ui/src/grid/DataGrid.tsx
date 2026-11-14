@@ -431,10 +431,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             role="gridcell"
             className="flex min-w-0 flex-1 items-center gap-2 px-2"
           >
-            <Chevron
-              aria-hidden
-              className="size-3.5 shrink-0 text-muted-foreground"
-            />
+            <Chevron aria-hidden className="size-3.5 shrink-0 text-support" />
             {group?.(target.data)}
           </div>
         </div>
@@ -475,7 +472,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     event.stopPropagation();
                   }}
                   className={cn(
-                    "flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
+                    "flex size-6 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover",
                     !overlayMenu &&
                       "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
                     !overlayMenu && isCursor && "opacity-100",
@@ -593,7 +590,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         <div
           role="row"
           aria-rowindex={1}
-          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-muted-foreground"
+          className="group/header sticky top-0 z-10 grid items-center border-b border-border bg-editor text-xs text-support"
           style={{
             gridTemplateColumns: template,
             minWidth,

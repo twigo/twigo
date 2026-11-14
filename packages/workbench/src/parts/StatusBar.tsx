@@ -30,7 +30,7 @@ export function StatusBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-muted-foreground shadow-[inset_0_1px_0_var(--border)]"
+      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-support shadow-[inset_0_1px_0_var(--border)]"
     >
       <Side alignment="left" />
       <Side alignment="right" />
@@ -89,7 +89,7 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   const className = cn(
     "flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums",
     (entry.run !== undefined || entry.popover !== undefined) &&
-      "outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)]",
+      "outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[inset_var(--focus-ring)]",
     entry.accent && ["-ml-0.5 px-2.5", ACCENT[entry.accent]],
   );
   if (entry.popover) {

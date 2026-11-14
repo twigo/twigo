@@ -36,7 +36,7 @@ export function ContextBadge({
           {label}
         </span>
       )}
-      <span className="text-muted-foreground">{context}</span>
+      <span className="text-support">{context}</span>
     </>
   );
 }

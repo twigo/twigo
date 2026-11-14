@@ -35,7 +35,7 @@ export function IconButton({
             onClick();
           }}
           className={cn(
-            "inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] aria-pressed:bg-row-active aria-pressed:text-foreground",
+            "inline-flex shrink-0 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] aria-pressed:bg-row-active aria-pressed:text-content",
             size === "sm" ? "size-6 [&_svg]:size-3.5" : "size-7 [&_svg]:size-4",
             className,
           )}
@@ -45,7 +45,7 @@ export function IconButton({
       </TooltipTrigger>
       <TooltipContent className="flex items-center gap-2">
         <span>{label}</span>
-        {keys && <span className="text-muted-foreground">{keys}</span>}
+        {keys && <span className="text-support">{keys}</span>}
       </TooltipContent>
     </Tooltip>
   );

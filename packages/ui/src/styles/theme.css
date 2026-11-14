@@ -23,22 +23,23 @@
   /* Neutral greys with a trace of the brand hue: an app's chrome, not a
      tinted dashboard. Content surfaces stay white so data reads on paper. */
   --background: oklch(0.975 0.002 250);
-  --foreground: oklch(0.32 0.004 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.32 0.004 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.32 0.004 250);
+  --popover-foreground: var(--content);
   --primary: oklch(0.3 0.006 250);
   --primary-foreground: oklch(0.985 0.002 250);
   --secondary: oklch(0.955 0.002 250);
   --secondary-foreground: oklch(0.3 0.006 250);
   --muted: oklch(0.955 0.002 250);
-  /* Three text tiers, each at 4.5:1 or more on the shell and the editor
-     (WCAG 1.4.3): secondary for what places a row, tertiary for units,
-     timestamps, hints and empty values. A selected row's tint takes
-     tertiary below that, so there it reads as secondary. */
-  --muted-foreground: oklch(0.47 0.006 250);
-  --muted-foreground-2: oklch(0.55 0.005 250);
+  /* Text roles. Content, support and quiet are each at 4.5:1 or more on the
+     shell and the editor (WCAG 1.4.3): support for what places a row, quiet
+     for units, timestamps, hints and empty values. A selected row's tint
+     takes quiet below that, so there it reads as support. Strong is for
+     titles. */
+  --strong: oklch(0.18 0.004 250);
+  --content: oklch(0.32 0.004 250);
+  --support: oklch(0.47 0.006 250);
+  --quiet: oklch(0.55 0.005 250);
   --accent: oklch(0.945 0.003 250);
   --accent-foreground: oklch(0.3 0.006 250);
   --destructive: oklch(0.577 0.245 27.325);
@@ -75,7 +76,6 @@
   --editor: oklch(1 0 0);
 
   --sidebar: oklch(0.975 0.002 250);
-  --sidebar-foreground: oklch(0.32 0.004 250);
   --sidebar-border: oklch(0.915 0.003 250);
   --panel: oklch(0.975 0.002 250);
 
@@ -161,18 +161,17 @@
   --shell: oklch(0.218 0.002 250);
   --editor: oklch(0.185 0.002 250);
   --background: oklch(0.218 0.002 250);
-  --foreground: oklch(0.87 0.002 250);
   --card: oklch(0.25 0.003 250);
-  --card-foreground: oklch(0.87 0.002 250);
   --popover: oklch(0.27 0.003 250);
-  --popover-foreground: oklch(0.87 0.002 250);
   --primary: oklch(0.87 0.002 250);
   --primary-foreground: oklch(0.218 0.002 250);
   --secondary: oklch(0.28 0.003 250);
   --secondary-foreground: oklch(0.87 0.002 250);
   --muted: oklch(0.28 0.003 250);
-  --muted-foreground: oklch(0.75 0.003 250);
-  --muted-foreground-2: oklch(0.65 0.003 250);
+  --strong: oklch(0.96 0.002 250);
+  --content: oklch(0.87 0.002 250);
+  --support: oklch(0.75 0.003 250);
+  --quiet: oklch(0.65 0.003 250);
   --accent: oklch(0.3 0.003 250);
   --accent-foreground: oklch(0.87 0.002 250);
   --destructive: oklch(0.704 0.191 22.216);
@@ -191,7 +190,6 @@
   --border-subtle: oklch(1 0 0 / 5%);
 
   --sidebar: oklch(0.218 0.002 250);
-  --sidebar-foreground: oklch(0.87 0.002 250);
   --sidebar-border: oklch(1 0 0 / 8%);
   --panel: oklch(0.218 0.002 250);
 
@@ -250,9 +248,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
@@ -260,8 +256,10 @@
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted-foreground-2: var(--muted-foreground-2);
+  --color-strong: var(--strong);
+  --color-content: var(--content);
+  --color-support: var(--support);
+  --color-quiet: var(--quiet);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-editor: var(--editor);
@@ -280,7 +278,6 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-panel: var(--panel);
   --color-ok: var(--ok);

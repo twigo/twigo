@@ -77,18 +77,16 @@ function Group({ node, depth }: { node: TreeNode; depth: number }) {
         onClick={() => {
           setOpen(!open);
         }}
-        className="flex h-6 items-center gap-1 self-start text-left font-medium hover:text-foreground"
+        className="flex h-6 items-center gap-1 self-start text-left font-medium hover:text-content"
       >
         {open ? (
-          <ChevronDown className="size-3.5 text-muted-foreground" />
+          <ChevronDown className="size-3.5 text-support" />
         ) : (
-          <ChevronRight className="size-3.5 text-muted-foreground" />
+          <ChevronRight className="size-3.5 text-support" />
         )}
         <span title={node.key}>{node.label}</span>
         {node.value.type === "list" && (
-          <span className="ml-1 text-xs font-normal text-muted-foreground">
-            {count}
-          </span>
+          <span className="ml-1 text-xs font-normal text-support">{count}</span>
         )}
       </button>
       {open && (
@@ -122,9 +120,9 @@ function Card({
   const named = item.key !== String(index);
   return (
     <div className="rounded-md border border-border-subtle px-3 py-2">
-      <div className="mb-1.5 text-xs text-muted-foreground">
+      <div className="mb-1.5 text-xs text-support">
         {named ? (
-          <span className="text-[13px] font-medium text-foreground">
+          <span className="text-[13px] font-medium text-content">
             {item.key}
           </span>
         ) : (

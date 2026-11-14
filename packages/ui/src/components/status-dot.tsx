@@ -5,10 +5,10 @@ const SHAPE: Readonly<Record<Tone, string>> = {
   error: "bg-error",
   warn: "shadow-[inset_0_0_0_1.5px_var(--warn)]",
   ok: "bg-ok",
-  idle: "bg-muted-foreground-2",
+  idle: "bg-quiet",
 };
 
-const HOLLOW = "shadow-[inset_0_0_0_1.5px_var(--muted-foreground-2)]";
+const HOLLOW = "shadow-[inset_0_0_0_1.5px_var(--quiet)]";
 
 /**
  * A state as a dot: error filled, warn a ring, ok filled green, idle grey.

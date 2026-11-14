@@ -18,7 +18,7 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive text-destructive-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.15)] hover:bg-destructive/90",
         outline:
-          "bg-transparent shadow-[inset_0_0_0_1px_var(--border)] hover:bg-accent hover:text-accent-foreground hover:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_22%,transparent)]",
+          "bg-transparent shadow-[inset_0_0_0_1px_var(--border)] hover:bg-accent hover:text-accent-foreground hover:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--content)_22%,transparent)]",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",

@@ -222,11 +222,9 @@ test("a state that is off draws a ring, and one that waits a filled dot", async 
   await opened(workbench, "!");
   const dot = (words: string) =>
     screen.getByText(words).previousElementSibling?.className ?? "";
-  expect(dot("Stopped")).toContain(
-    "inset_0_0_0_1.5px_var(--muted-foreground-2)",
-  );
-  expect(dot("Stopped")).not.toContain("bg-muted-foreground-2");
-  expect(dot("Restored")).toContain("bg-muted-foreground-2");
+  expect(dot("Stopped")).toContain("inset_0_0_0_1.5px_var(--quiet)");
+  expect(dot("Stopped")).not.toContain("bg-quiet");
+  expect(dot("Restored")).toContain("bg-quiet");
   expect(dot("Restored")).not.toContain("inset_0_0_0");
 });
 

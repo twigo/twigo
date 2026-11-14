@@ -139,7 +139,7 @@ export function ListActions({
         >
           <button
             type="button"
-            className="inline-flex h-6.5 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
+            className="inline-flex h-6.5 items-center gap-1.5 rounded-md px-2 text-xs text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
           >
             <ListTree aria-hidden className="size-3.5" />
             {groupable.some((candidate) => candidate.name === preset.group)

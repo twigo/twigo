@@ -630,15 +630,13 @@ function Line({
       <span
         className={cn(
           "truncate",
-          item.tagAccent ? "text-brand" : "text-muted-foreground",
+          item.tagAccent ? "text-brand" : "text-support",
         )}
       >
         {item.tag}
       </span>
       {timestamps && (
-        <span className="text-muted-foreground-2 tabular-nums">
-          {item.time}
-        </span>
+        <span className="text-quiet tabular-nums">{item.time}</span>
       )}
       <span
         className={wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre"}
@@ -652,7 +650,7 @@ function Line({
 function Marker({ item }: { item: MarkerLine }) {
   const Icon = item.icon;
   return (
-    <div className="flex h-[19px] items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-muted-foreground">
+    <div className="flex h-[19px] items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-support">
       <Icon
         aria-hidden
         className={cn(

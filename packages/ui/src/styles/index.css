@@ -12,7 +12,7 @@
     height: 100%;
   }
   body {
-    @apply bg-background font-sans text-foreground;
+    @apply bg-background font-sans text-content;
     font-size: 13px;
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
@@ -28,7 +28,7 @@
 
   [aria-selected="true"],
   [data-cursor] {
-    --muted-foreground-2: var(--muted-foreground);
+    --quiet: var(--support);
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset
@@ -65,7 +65,7 @@
   /* IDE-style scrollbars: thin, overlay, brighten on hover. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent)
+    scrollbar-color: color-mix(in oklab, var(--content) 22%, transparent)
       transparent;
   }
   ::-webkit-scrollbar {

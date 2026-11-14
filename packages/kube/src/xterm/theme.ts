@@ -30,8 +30,8 @@ export function terminalTheme(
   const style = getComputedStyle(root);
   const slots: readonly (readonly [string, string])[] = [
     ["background", "editor"],
-    ["foreground", "foreground"],
-    ["cursor", "foreground"],
+    ["foreground", "content"],
+    ["cursor", "content"],
     ["cursorAccent", "editor"],
     ["selectionBackground", "brand"],
     ...ANSI.flatMap((name) => [

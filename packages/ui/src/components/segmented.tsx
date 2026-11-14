@@ -46,7 +46,7 @@ export function Segmented<V extends string>({
             onChange(item.value);
           }}
           className={cn(
-            "inline-flex items-center gap-1.5 px-2 whitespace-nowrap text-muted-foreground outline-none hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-row-active aria-pressed:text-foreground",
+            "inline-flex items-center gap-1.5 px-2 whitespace-nowrap text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-row-active aria-pressed:text-content",
             index > 0 && "border-l border-border",
           )}
         >

@@ -82,7 +82,7 @@ function ContainerCard({
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-semibold">{name}</span>
         {ROLE[role] && (
-          <span className="text-xs text-muted-foreground">{ROLE[role]}</span>
+          <span className="text-xs text-support">{ROLE[role]}</span>
         )}
         {state && (
           <Pill tone={TONE[state.tone]} className="h-[18px] text-[11px]">
@@ -90,19 +90,19 @@ function ContainerCard({
           </Pill>
         )}
         {state && state.restarts > 0 && (
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="text-xs text-support tabular-nums">
             {state.restarts === 1 ? "1 restart" : `${state.restarts} restarts`}
           </span>
         )}
         {ports.length > 0 && (
-          <span className="ml-auto text-xs text-muted-foreground">
+          <span className="ml-auto text-xs text-support">
             {ports.join(", ")}
           </span>
         )}
       </div>
-      <code className="font-mono text-xs break-all text-muted-foreground">
+      <code className="font-mono text-xs break-all text-support">
         {repository}
-        <span className="text-foreground">{version}</span>
+        <span className="text-content">{version}</span>
       </code>
       {fields.length > 0 && <Fields fields={fields} onOpen={onOpen} />}
       <Folded title="Details" fields={details} fold={fold} onOpen={onOpen} />

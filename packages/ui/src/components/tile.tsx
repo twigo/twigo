@@ -40,9 +40,7 @@ export function Tile({
         size === "md"
           ? "size-8 rounded-md text-[11px]"
           : "size-5 rounded-[5px] text-[9px] font-bold",
-        color
-          ? `${TINT[color]} text-foreground`
-          : "bg-card text-muted-foreground",
+        color ? `${TINT[color]} text-content` : "bg-card text-support",
         className,
       )}
     >

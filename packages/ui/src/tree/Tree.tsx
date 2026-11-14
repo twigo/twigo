@@ -129,7 +129,7 @@ export function Tree({
             key={row.id}
             id={rowId(index)}
             role="presentation"
-            className="flex h-6 items-end px-3 pb-1 text-[11px] font-semibold text-muted-foreground"
+            className="flex h-6 items-end px-3 pb-1 text-[11px] font-semibold text-support"
           >
             {row.label}
           </div>
@@ -198,16 +198,10 @@ function TreeItem({
         />
       ))}
       {folds && (
-        <Chevron
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
+        <Chevron aria-hidden className="size-4 shrink-0 text-support" />
       )}
       {row.icon && (
-        <row.icon
-          aria-hidden
-          className="mr-0.5 size-4 shrink-0 text-muted-foreground"
-        />
+        <row.icon aria-hidden className="mr-0.5 size-4 shrink-0 text-support" />
       )}
       <span className="min-w-0 flex-1 truncate">{row.label}</span>
       {row.trailing}

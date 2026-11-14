@@ -8,11 +8,11 @@ const dot = () => document.querySelector(".rounded-full")?.className ?? "";
 
 test("an idle dot is filled grey, and a hollow one is the same grey as a ring", () => {
   render(<StatusDot tone="idle" />);
-  expect(dot()).toContain("bg-muted-foreground-2");
+  expect(dot()).toContain("bg-quiet");
   cleanup();
   render(<StatusDot tone="idle" hollow />);
-  expect(dot()).toContain("inset_0_0_0_1.5px_var(--muted-foreground-2)");
-  expect(dot()).not.toContain("bg-muted-foreground-2");
+  expect(dot()).toContain("inset_0_0_0_1.5px_var(--quiet)");
+  expect(dot()).not.toContain("bg-quiet");
 });
 
 test("hollow means an idle state that is off, so it changes no other tone's shape", () => {

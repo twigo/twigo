@@ -697,8 +697,8 @@ test("a failing row has an edge, a name's generated part reads quieter, and rest
     whole.slice(cut),
   ]);
   expect(name[1]?.textContent).toMatch(/^[0-9a-z]+-[0-9a-z]{5}$/);
-  expect(name[0]?.className).not.toContain("text-muted-foreground");
-  expect(name[1]?.className).toContain("text-muted-foreground-2");
+  expect(name[0]?.className).not.toContain("text-support");
+  expect(name[1]?.className).toContain("text-quiet");
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");

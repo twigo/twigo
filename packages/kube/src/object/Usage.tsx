@@ -53,7 +53,7 @@ export function UsageView({
 }
 
 function Said({ state }: { state: Exclude<ShownUsage["state"], "ready"> }) {
-  return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
+  return <p className="text-support">{METRICS_NOTES[state]}</p>;
 }
 
 function Rows({ subject }: { subject: Subject }) {
@@ -83,7 +83,7 @@ function Row({
   if (measure === null) {
     return (
       <>
-        <span className="text-muted-foreground">{label}</span>
+        <span className="text-support">{label}</span>
         <EmptyMeter label={name === null ? label : `${label} of ${name}`} />
         <span aria-hidden className="col-span-2">
           {"\u00a0"}
@@ -94,9 +94,9 @@ function Row({
   const shown = figure(resource, measure);
   return (
     <>
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-support">{label}</span>
       {shown.used === null ? (
-        <span className="col-span-3 text-muted-foreground">No data yet</span>
+        <span className="col-span-3 text-support">No data yet</span>
       ) : (
         <>
           {shown.bar ? (
@@ -111,7 +111,7 @@ function Row({
           )}
           <span className="tabular-nums">
             {shown.used}
-            <span className="text-muted-foreground">{details(shown)}</span>
+            <span className="text-support">{details(shown)}</span>
           </span>
           <Percent shown={shown} />
         </>

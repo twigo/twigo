@@ -30,7 +30,7 @@ export function TriggerChip({
         type="button"
         aria-label={clearLabel}
         onClick={onClear}
-        className="-mr-1 flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-row-hover hover:text-foreground"
+        className="-mr-1 flex size-4 items-center justify-center rounded text-support hover:bg-row-hover hover:text-content"
       >
         <X aria-hidden className="size-3" />
       </button>

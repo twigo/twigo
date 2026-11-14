@@ -22,7 +22,7 @@ function cellText(cell: Cell): string {
 function Age({ created }: { created: string }) {
   const now = useNow();
   return (
-    <span className="text-muted-foreground">
+    <span className="text-support">
       {humanDuration(now - Date.parse(created))}
     </span>
   );
@@ -34,7 +34,7 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
   if (rule.cell === "cpu" || rule.cell === "memory") {
     return (
       measureText(rule.cell, row.cells[column.index] ?? null) ?? (
-        <span className="text-muted-foreground-2">–</span>
+        <span className="text-quiet">–</span>
       )
     );
   }
@@ -42,12 +42,12 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
     return row.created ? (
       <Age created={row.created} />
     ) : (
-      <span className="text-muted-foreground-2" />
+      <span className="text-quiet" />
     );
   }
   const text = cellText(row.cells[column.index] ?? null);
   if (text === "<none>" || text === "")
-    return <span className="text-muted-foreground-2">{text}</span>;
+    return <span className="text-quiet">{text}</span>;
   switch (rule.cell) {
     case "name":
       return <Name name={text} generated={row.generated} />;
@@ -76,11 +76,7 @@ export function CellView({ row, column }: { row: Row; column: ShownColumn }) {
     case "restarts":
       return <Restarts text={text} />;
     case "text":
-      return rule.quiet ? (
-        <span className="text-muted-foreground">{text}</span>
-      ) : (
-        text
-      );
+      return rule.quiet ? <span className="text-support">{text}</span> : text;
   }
 }
 
@@ -95,9 +91,7 @@ function Name({ name, generated }: { name: string; generated: number | null }) {
   return (
     <span className="inline-flex max-w-full min-w-0 align-bottom">
       <span className="truncate">{name.slice(0, generated)}</span>
-      <span className="shrink-0 text-muted-foreground-2">
-        {name.slice(generated)}
-      </span>
+      <span className="shrink-0 text-quiet">{name.slice(generated)}</span>
     </span>
   );
 }
@@ -111,12 +105,12 @@ function Restarts({ text }: { text: string }) {
       <span
         className={cn(
           "inline-block w-[3ch] text-right",
-          count === "0" && "text-muted-foreground-2",
+          count === "0" && "text-quiet",
         )}
       >
         {count}
       </span>
-      {ago && <span className="ml-2 text-muted-foreground">{ago} ago</span>}
+      {ago && <span className="ml-2 text-support">{ago} ago</span>}
     </>
   );
 }

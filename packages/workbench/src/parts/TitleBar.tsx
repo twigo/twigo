@@ -51,10 +51,7 @@ function Breadcrumb({ space }: { space: Space }) {
         </span>
       </Crumb>
       <ModeChip />
-      <ChevronRight
-        aria-hidden
-        className="size-3.5 shrink-0 text-muted-foreground-2"
-      />
+      <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb label="Select namespace" onClick={() => quickAccess.show("ns ")}>
         <span className="truncate">
           {namespaces.length === 0 ? "All namespaces" : namespaces.join(", ")}
@@ -81,10 +78,7 @@ function Crumb({
       className="flex h-6 min-w-0 items-center gap-1.5 rounded-md px-1.5 text-[13px] hover:bg-row-hover"
     >
       {children}
-      <ChevronDown
-        aria-hidden
-        className="size-3.5 shrink-0 text-muted-foreground"
-      />
+      <ChevronDown aria-hidden className="size-3.5 shrink-0 text-support" />
     </button>
   );
 }
@@ -101,7 +95,7 @@ function CommandCenter({ space }: { space: Space | undefined }) {
       onClick={() => {
         quickAccess.show("");
       }}
-      className="flex h-6 w-[min(36vw,300px)] items-center gap-2 rounded-md bg-foreground/5 pr-1 pl-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
+      className="flex h-6 w-[min(36vw,300px)] items-center gap-2 rounded-md bg-content/5 pr-1 pl-2 text-xs text-support shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]"
     >
       <Search aria-hidden className="size-3.5 shrink-0" />
       <span className="flex-1 truncate text-left">{label}</span>

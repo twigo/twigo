@@ -29,11 +29,11 @@ function CommandInput({
       data-slot="command-input-wrapper"
       className="flex items-center gap-2 border-b border-border px-2.5"
     >
-      <Search className="size-3.5 shrink-0 text-muted-foreground" />
+      <Search className="size-3.5 shrink-0 text-support" />
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-10 w-full bg-transparent text-[13px] outline-none placeholder:text-support disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         {...props}
@@ -64,7 +64,7 @@ function CommandEmpty(
   return (
     <CommandPrimitive.Empty
       data-slot="command-empty"
-      className="py-4 text-center text-xs text-muted-foreground"
+      className="py-4 text-center text-xs text-support"
       {...props}
     />
   );
@@ -79,7 +79,7 @@ function CommandGroup({
       data-slot="command-group"
       className={cn(
         "overflow-hidden px-1.5 text-popover-foreground",
-        "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
+        "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-support",
         className,
       )}
       {...props}

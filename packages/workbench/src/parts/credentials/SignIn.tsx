@@ -38,7 +38,7 @@ export function SignInBody({
         <div className="min-w-0">
           <p className="text-[13px] font-semibold">{title}</p>
           <p
-            className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground"
+            className="mt-0.5 truncate font-mono text-[11px] text-support"
             title={[plugin.command, ...plugin.args].join(" ")}
           >
             {[plugin.command, ...plugin.args].join(" ")}
@@ -56,16 +56,14 @@ export function SignInBody({
             </p>
           )}
           {status.installHint && (
-            <p className="whitespace-pre-wrap text-muted-foreground">
+            <p className="whitespace-pre-wrap text-support">
               {status.installHint}
             </p>
           )}
         </div>
       ) : code ? (
         <div className="mt-3 space-y-2">
-          <p className="text-muted-foreground">
-            Enter this code on the sign-in page:
-          </p>
+          <p className="text-support">Enter this code on the sign-in page:</p>
           <div className="flex items-center gap-2">
             <span className="select-all rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-base tracking-[0.2em]">
               {code}
@@ -76,13 +74,11 @@ export function SignInBody({
         </div>
       ) : url ? (
         <div className="mt-3 space-y-2">
-          <p className="text-muted-foreground">
-            If no browser opened, open this link:
-          </p>
+          <p className="text-support">If no browser opened, open this link:</p>
           <Link url={url} />
         </div>
       ) : (
-        <p className="mt-3 flex items-center gap-2 text-muted-foreground">
+        <p className="mt-3 flex items-center gap-2 text-support">
           <Loader2 aria-hidden className="size-3.5 animate-spin" />
           {plugin.signsIn
             ? "Finish signing in in your browser."
@@ -95,7 +91,7 @@ export function SignInBody({
       )}
 
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="tabular-nums text-muted-foreground">
+        <span className="tabular-nums text-support">
           {status.state === "running" && <Elapsed since={status.since} />}
         </span>
         <div className="flex gap-2">
@@ -191,7 +187,7 @@ function Output({ text, open }: { text: string; open: boolean }) {
     <div className="mt-2">
       <button
         type="button"
-        className="text-muted-foreground underline-offset-2 hover:underline"
+        className="text-support underline-offset-2 hover:underline"
         onClick={() => {
           setShown(!shown);
         }}

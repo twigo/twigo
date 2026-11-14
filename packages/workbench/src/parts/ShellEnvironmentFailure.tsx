@@ -13,10 +13,10 @@ type Failed = Extract<ShellEnvironment, { state: "failed" }>;
 export function ShellEnvironmentFailure({ failed }: { failed: Failed }) {
   return (
     <>
-      <p className="text-[13px] font-semibold text-foreground">
+      <p className="text-[13px] font-semibold text-content">
         {SHELL_ENVIRONMENT_TITLE}
       </p>
-      <p className="mt-1 text-muted-foreground">
+      <p className="mt-1 text-support">
         <span className="font-mono">{failed.shell}</span> {failed.reason}, so
         Twigo runs tools with its own environment. Credential plugins on your
         shell's <span className="font-mono">PATH</span>, such as kubelogin or

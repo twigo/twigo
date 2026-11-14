@@ -145,7 +145,7 @@ test("the dot keeps the state's tone, and pulses while the state is in flight", 
   const { backend } = await mounted();
   vi.setTimerTickMode("manual");
   const tones = () => rows().map((row) => dot(row)?.className ?? "");
-  expect(tones()[0]).toContain("bg-muted-foreground-2");
+  expect(tones()[0]).toContain("bg-quiet");
   expect(tones()[2]).toContain("bg-error");
   expect(tones()[2]).not.toContain("animate-pulse");
 
@@ -173,9 +173,9 @@ test("the dot keeps the state's tone, and pulses while the state is in flight", 
 test("a stopped forward's dot is a ring in the list and in its tab, and a restored one's is filled in both", async () => {
   const { workbench } = await mounted();
   const shape = (dot: Element | null | undefined) =>
-    dot?.className.includes("inset_0_0_0_1.5px_var(--muted-foreground-2)")
+    dot?.className.includes("inset_0_0_0_1.5px_var(--quiet)")
       ? "ring"
-      : dot?.className.includes("bg-muted-foreground-2")
+      : dot?.className.includes("bg-quiet")
         ? "filled"
         : "other";
   expect(rows().map((row) => shape(dot(row)))).toEqual([

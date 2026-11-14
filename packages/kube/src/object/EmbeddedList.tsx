@@ -195,7 +195,7 @@ export function EmbeddedList({
   return (
     <div ref={setElement} className="flex flex-col gap-1.5">
       {snapshot.counts.length > 0 && (
-        <p className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+        <p className="flex flex-wrap gap-x-3 text-xs text-support">
           {snapshot.counts.map((count) => {
             const tone = countBy
               ? cellTone(gvr, countBy, count.value)

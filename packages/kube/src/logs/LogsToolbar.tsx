@@ -228,7 +228,7 @@ export function LogsToolbar({
               tabs.setView(uri, { range: null });
             }}
           >
-            <Clock aria-hidden className="size-3.5 text-muted-foreground" />
+            <Clock aria-hidden className="size-3.5 text-support" />
             <span className="tabular-nums">
               {clock(range.from).slice(0, 8)} – {clock(range.to).slice(0, 8)}
             </span>
@@ -249,12 +249,9 @@ export function LogsToolbar({
             ]}
           >
             <TriggerButton>
-              <Clock aria-hidden className="size-3.5 text-muted-foreground" />
+              <Clock aria-hidden className="size-3.5 text-support" />
               {rangeLabel(source.since, narrow)}
-              <ChevronDown
-                aria-hidden
-                className="size-3 text-muted-foreground"
-              />
+              <ChevronDown aria-hidden className="size-3 text-support" />
             </TriggerButton>
           </ActionDropdown>
         )}
@@ -420,9 +417,9 @@ function PodPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <TriggerButton>
-          <Box aria-hidden className="size-3.5 text-muted-foreground" />
+          <Box aria-hidden className="size-3.5 text-support" />
           {label}
-          <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
+          <ChevronDown aria-hidden className="size-3 text-support" />
         </TriggerButton>
       </PopoverTrigger>
       <PopoverContent className="w-[420px] p-0">
@@ -441,7 +438,7 @@ function PodPicker({
                   <span className="flex-1">
                     All pods of {kind} {input.name}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-[11px] text-support">
                     new pods join
                   </span>
                 </CommandItem>
@@ -458,9 +455,9 @@ function PodPicker({
                     }}
                   >
                     <Tick on={chosen(pod.name)} />
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-support">
                       {pod.name.slice(0, pod.generated ?? 0)}
-                      <span className="text-foreground">
+                      <span className="text-content">
                         {pod.name.slice(pod.generated ?? 0)}
                       </span>
                     </span>
@@ -472,7 +469,7 @@ function PodPicker({
           </CommandList>
           {names.length > 0 && (
             <div className="border-t border-border px-3.5 py-2">
-              <div className="pb-1.5 text-[11px] font-medium text-muted-foreground">
+              <div className="pb-1.5 text-[11px] font-medium text-support">
                 Container
               </div>
               <Segmented<string>
@@ -503,7 +500,7 @@ function PodPicker({
             </div>
           )}
           {!single && (
-            <p className="border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground">
+            <p className="border-t border-border px-3.5 py-2 text-[11.5px] text-support">
               {streams >= TAB_STREAMS
                 ? `A tab follows at most ${String(TAB_STREAMS)} containers at once; untick some pods to follow others.`
                 : `A tab follows up to ${String(TAB_STREAMS)} containers at once.`}

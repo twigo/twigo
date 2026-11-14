@@ -636,8 +636,11 @@ test("a link opens only on a modifier click, and only as http or https", async (
 test("the theme follows the document's tokens, in sRGB hex, as the app toggles its theme", async () => {
   const { mounted } = setup();
   document.documentElement.style.setProperty("--editor", "first");
+  document.documentElement.style.setProperty("--content", "text");
   const tab = await mounted();
   expect(tab.term.options.theme?.background).toBe(srgbHex("first"));
+  expect(tab.term.options.theme?.foreground).toBe(srgbHex("text"));
+  expect(tab.term.options.theme?.cursor).toBe(srgbHex("text"));
   expect(srgbHex("first")).not.toBe("first");
   document.documentElement.style.setProperty("--editor", "second");
   document.documentElement.classList.toggle("dark");

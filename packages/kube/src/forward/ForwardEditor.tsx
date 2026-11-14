@@ -215,7 +215,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
 }
 
 function Quiet({ children }: { children: ReactNode }) {
-  return <span className="text-muted-foreground">{children}</span>;
+  return <span className="text-support">{children}</span>;
 }
 
 /** The bars over the tab, for what holds of the forward as a whole. */
@@ -254,7 +254,7 @@ function Problem({ forward }: { forward: Forward }) {
     return (
       <Callout tone="warn" title="Reconnecting">
         <p>{state.reason}</p>
-        <p className="text-muted-foreground">
+        <p className="text-support">
           It looks again while it has connections, and at its next one.
         </p>
       </Callout>
@@ -270,7 +270,7 @@ function Problem({ forward }: { forward: Forward }) {
   return (
     <Callout tone={tone} title={title}>
       <p className="break-words">{error.message}</p>
-      <p className="text-muted-foreground">
+      <p className="text-support">
         {!listens
           ? `Nothing listens on ${where}. Change Local Port… moves it to another port, and Start tries this one again.`
           : error.blocked

@@ -26,7 +26,7 @@ export function PropertyList({
     >
       {items.map((item) => (
         <div key={item.key} className="contents">
-          <dt className="truncate text-muted-foreground" title={item.title}>
+          <dt className="truncate text-support" title={item.title}>
             {item.label}
           </dt>
           <dd className="min-w-0 break-words tabular-nums">{item.value}</dd>

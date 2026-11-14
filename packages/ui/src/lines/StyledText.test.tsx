@@ -55,6 +55,6 @@ test("on a background, black and no colour are the theme's text", () => {
     </p>,
   );
   expect(screen.getByText("FAIL").className).toBe(
-    "text-foreground bg-ansi-yellow/25",
+    "text-content bg-ansi-yellow/25",
   );
 });

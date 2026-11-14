@@ -67,7 +67,7 @@ export function TabBar<V extends string>({
               ?.querySelectorAll<HTMLElement>('[role="tab"]')
               [to]?.focus();
           }}
-          className="flex items-center gap-1.5 text-muted-foreground outline-none hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)] aria-selected:text-foreground aria-selected:shadow-[inset_0_-2px_0_var(--foreground)]"
+          className="flex items-center gap-1.5 text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-selected:text-content aria-selected:shadow-[inset_0_-2px_0_var(--content)]"
         >
           {tab.label}
           {tab.count !== undefined && tab.count > 0 && (
@@ -75,8 +75,8 @@ export function TabBar<V extends string>({
               className={cn(
                 "inline-grid h-4 min-w-4 place-items-center rounded-full px-1 text-[11px]",
                 tab.warn
-                  ? "bg-warn/22 text-foreground"
-                  : "bg-row-active text-muted-foreground",
+                  ? "bg-warn/22 text-content"
+                  : "bg-row-active text-support",
               )}
             >
               <Count value={tab.count} />

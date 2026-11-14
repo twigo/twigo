@@ -92,7 +92,7 @@ const PLAIN: ReadonlySet<AnsiColor> = new Set([
  * not, so they become the theme's text, as does a run with no colour.
  */
 function textOf(run: TextRun): string | undefined {
-  if (run.bg && (!run.fg || PLAIN.has(run.fg))) return "text-foreground";
+  if (run.bg && (!run.fg || PLAIN.has(run.fg))) return "text-content";
   return run.fg ? FG[run.fg] : undefined;
 }
 
@@ -141,7 +141,7 @@ export function StyledText({
           mark &&
             (mark.current
               ? "rounded-xs bg-mark-current text-mark-current-foreground"
-              : "rounded-xs bg-mark text-foreground"),
+              : "rounded-xs bg-mark text-content"),
         )}
       >
         {piece}

@@ -429,7 +429,7 @@ function Grid({
         >
           <button
             type="button"
-            className="flex size-6 items-center justify-center rounded-md outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
+            className="flex size-6 items-center justify-center rounded-md outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
           >
             <Columns3 aria-hidden className="size-3.5" />
           </button>
@@ -492,10 +492,10 @@ function GroupHeader({
     : undefined;
   return (
     <>
-      <span className="truncate font-semibold text-foreground">
+      <span className="truncate font-semibold text-content">
         {group.value === "" ? "None" : group.value}
       </span>
-      <span className="text-muted-foreground">
+      <span className="text-support">
         <Count value={group.rows} /> {gvrTitle.toLowerCase()}
       </span>
       {counts &&

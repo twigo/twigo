@@ -6,8 +6,8 @@ import { StatusDot } from "./status-dot";
 const TINT: Readonly<Record<Tone, string>> = {
   error: "bg-error/12 text-error",
   warn: "bg-warn/16 text-warn-foreground",
-  ok: "bg-ok/14 text-foreground",
-  idle: "bg-row-active text-muted-foreground",
+  ok: "bg-ok/14 text-content",
+  idle: "bg-row-active text-support",
 };
 
 /** A state in words on its tone's tint, with its dot or an icon in its place: an object's status. */

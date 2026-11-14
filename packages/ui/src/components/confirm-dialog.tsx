@@ -200,7 +200,7 @@ export function ConfirmDialog({
             </DialogTitle>
             {consequences.length > 0 ? (
               <DialogDescription asChild>
-                <ul className="grid gap-1 text-muted-foreground">
+                <ul className="grid gap-1 text-support">
                   {consequences.map((consequence) => (
                     <li key={consequence}>{consequence}</li>
                   ))}
@@ -294,22 +294,22 @@ function Listed({ list }: { list: ConfirmList }) {
     <section aria-labelledby={heading} className="grid gap-1">
       <h3
         id={heading}
-        className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground"
+        className="flex items-center gap-1.5 text-[11px] font-semibold text-support"
       >
         {list.title}
-        <span className="font-normal tabular-nums text-muted-foreground-2">
+        <span className="font-normal tabular-nums text-quiet">
           {list.items.length.toLocaleString("en")}
         </span>
       </h3>
       <ul className="max-h-[132px] overflow-y-auto rounded-md py-1 shadow-[inset_0_0_0_1px_var(--border)]">
         {list.items.map((item) => (
           <li key={item.key} className="flex h-[22px] items-center gap-2 px-2">
-            <span className="w-[88px] shrink-0 truncate text-muted-foreground-2">
+            <span className="w-[88px] shrink-0 truncate text-quiet">
               {item.kind}
             </span>
             <span className="min-w-0 flex-1 truncate">{item.name}</span>
             {item.detail && (
-              <span className="min-w-0 shrink-[2] truncate text-muted-foreground">
+              <span className="min-w-0 shrink-[2] truncate text-support">
                 {item.detail}
               </span>
             )}
@@ -324,7 +324,7 @@ function Listed({ list }: { list: ConfirmList }) {
 function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-[11px] leading-relaxed text-support">
       <code className="min-w-0 flex-1 wrap-anywhere whitespace-pre-wrap select-text">
         {command}
       </code>

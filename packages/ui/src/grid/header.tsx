@@ -43,18 +43,16 @@ export function HeaderCell({
         });
       }}
       className={cn(
-        "flex h-full w-full items-center gap-1 px-2 text-left outline-none hover:text-foreground focus-visible:shadow-[inset_var(--focus-ring)]",
+        "flex h-full w-full items-center gap-1 px-2 text-left outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)]",
         end && "flex-row-reverse text-right",
-        active && "text-foreground",
+        active && "text-content",
       )}
     >
       <span id={title} data-fit-header={column.id} className="truncate">
         {column.title}
       </span>
       {active && <Arrow aria-hidden className="size-3 shrink-0" />}
-      {note && (
-        <Info aria-hidden className="size-3 shrink-0 text-muted-foreground-2" />
-      )}
+      {note && <Info aria-hidden className="size-3 shrink-0 text-quiet" />}
     </button>
   );
   return (

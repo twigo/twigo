@@ -80,7 +80,7 @@ function LabelChip({ name, value }: { name: string; value: string }) {
   const [open, setOpen] = useState(false);
   const chip = (
     <>
-      <span className="text-muted-foreground">{name}</span>
+      <span className="text-support">{name}</span>
       {value !== "" && <span>={value}</span>}
     </>
   );
@@ -117,7 +117,7 @@ function Time({ at }: { at: string }) {
   return (
     <span title={date}>
       {humanDuration(Math.max(0, now - when))} ago
-      <span className="ml-2 text-muted-foreground">{date}</span>
+      <span className="ml-2 text-support">{date}</span>
     </span>
   );
 }

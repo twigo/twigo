@@ -109,7 +109,7 @@ function AskDialog({
             mode={access?.mode ?? "read-write"}
           />
           {waiting > 1 && (
-            <span className="ml-auto text-muted-foreground tabular-nums">
+            <span className="ml-auto text-support tabular-nums">
               1 of {waiting}
             </span>
           )}

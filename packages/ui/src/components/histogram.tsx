@@ -76,7 +76,7 @@ export function Histogram({
         {buckets.map((bucket, index) => (
           <span
             key={index}
-            className="flex min-w-0 flex-1 flex-col-reverse overflow-hidden rounded-[1px] bg-foreground/16"
+            className="flex min-w-0 flex-1 flex-col-reverse overflow-hidden rounded-[1px] bg-content/16"
             style={{
               height: `${String(bucket.total === 0 ? 0 : Math.max(8, (bucket.total / peak) * 100))}%`,
             }}
@@ -105,7 +105,7 @@ export function Histogram({
           />
         )}
       </div>
-      <div className="flex h-4 items-center justify-between text-[10px] text-muted-foreground tabular-nums">
+      <div className="flex h-4 items-center justify-between text-[10px] text-support tabular-nums">
         {ticks.map((tick, index) => (
           <span key={index}>{tick}</span>
         ))}
