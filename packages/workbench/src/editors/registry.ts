@@ -77,6 +77,10 @@ export const EDITOR_TAB = "editor-tab";
 
 const CLOSED_LIMIT = 20;
 
+/** Layers that give the focus back themselves when they go, and so are not where it returns to. */
+const LAYERS =
+  "[cmdk-root], [role=dialog], [role=alertdialog], [role=menu], [data-sonner-toaster]";
+
 /** An editor the person closed, as {@link Editors.dismiss} remembers it. */
 interface Closed {
   readonly uri: string;
@@ -215,7 +219,11 @@ export class Editors {
         : undefined;
     const focusin = (event: FocusEvent) => {
       const { target } = event;
-      if (target instanceof HTMLElement && !this.#inArea("panel", target)) {
+      if (
+        target instanceof HTMLElement &&
+        !this.#inArea("panel", target) &&
+        !target.closest(LAYERS)
+      ) {
         this.#outside = target;
       }
     };
