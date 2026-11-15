@@ -17,7 +17,7 @@ import { canShell } from "./exec/kinds";
 import { canForward } from "./forward/kinds";
 import { logsKind } from "./logs/entries";
 
-withScreenSize(1400);
+const screenSize = withScreenSize(1400);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -694,7 +694,7 @@ test("a hovered row's verb that another resource as a whole refuses draws disabl
   );
 });
 
-test("a hovered row is asked about only while its icons show: never beside the docked details, which leave them no room, and no more once the pointer leaves", async () => {
+test("a hovered row is asked about only while its icons show: never where the list leaves them no room, as beside docked details, and no more once the pointer leaves", async () => {
   const workbench = await openInStaging(
     "ready",
     "k8s-list://staging/apps/v1/deployments",
@@ -737,6 +737,14 @@ test("a hovered row is asked about only while its icons show: never beside the d
   expect(
     screen.getByRole("complementary", { name: "Deployment details" }).className,
   ).not.toContain("absolute");
+  const list = screen.getByRole("grid", { name: "Deployments" });
+  screenSize.resize(list, 300);
+  await settle(2);
+  expect(
+    within(list)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent),
+  ).toEqual(["", "Name", "Ready", ""]);
   const before = asked.length;
   for (const row of rows().slice(1, 9)) {
     fireEvent.pointerEnter(row);
