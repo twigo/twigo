@@ -212,3 +212,35 @@ test("the row is one tab stop, and the arrows, Home and End move along it, past 
   expect(focused()).toBe("Logs");
   expect(stops()).toEqual(["Logs"]);
 });
+
+test("a pinned action's tooltip stays shut while it has nothing to tell, and opens only once it has, never switching between controlled and uncontrolled", () => {
+  const warn = vi.spyOn(console, "warn");
+  const row = (reason?: string) => (
+    <ActionRow
+      label="Pod actions"
+      actions={pod({
+        Shell: reason === undefined ? {} : { disabled: true, reason },
+      })}
+    />
+  );
+  const { rerender } = render(row());
+  const shell = () => within(toolbar()).getByRole("button", { name: "Shell" });
+  act(() => {
+    shell().focus();
+  });
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  act(() => {
+    shell().blur();
+  });
+  rerender(row("No container runs"));
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  act(() => {
+    shell().focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "No container runs",
+  );
+  rerender(row());
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  expect(warn).not.toHaveBeenCalled();
+});

@@ -368,8 +368,12 @@ function ButtonTooltip({
   told: boolean;
   children: ReactNode;
 }) {
+  const [open, setOpen] = useState(false);
+  // Radix reports no close while `open` is false, so an open it reports
+  // with nothing to tell would outlast the hover.
+  if (open && !told) setOpen(false);
   return (
-    <Tooltip {...(!told && { open: false })}>
+    <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent className="flex flex-col gap-0.5">
         <ButtonTip
