@@ -538,6 +538,38 @@ test("the panel maximizes, restores and hides by its commands, and its menu offe
   expect(panel()).toEqual({ visible: false, maximized: true });
 });
 
+test("Maximize Panel Size is neither listed nor run while the panel holds no editor", async () => {
+  const { workbench, editors, panel } = await mounted();
+  const lookup = () => workbench.keys.lookup(null);
+  const listed = async () => {
+    await act(async () => {
+      workbench.quickAccess.show(">Maximize Panel");
+      await Promise.resolve();
+    });
+    const rows = [...document.querySelectorAll("[cmdk-item]")].map(
+      (row) => row.textContent,
+    );
+    act(() => {
+      workbench.quickAccess.hide();
+    });
+    return rows.some((row) => row.includes("Maximize Panel Size"));
+  };
+  await act(() =>
+    workbench.commands.execute("workbench.action.togglePanel", lookup()),
+  );
+  expect(panel().visible).toBe(true);
+  expect(await listed()).toBe(false);
+  await act(() => maximize(workbench));
+  expect(panel().maximized).toBe(false);
+
+  act(() => {
+    editors.open("session://x");
+  });
+  expect(await listed()).toBe(true);
+  await act(() => maximize(workbench));
+  expect(panel().maximized).toBe(true);
+});
+
 test("the panel's layout comes back with its space", async () => {
   const { workbench, editors, space } = await mounted();
   act(() => {

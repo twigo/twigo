@@ -212,7 +212,8 @@ export function registerCore(workbench: Workbench): void {
       title: "Maximize Panel Size",
       icon: ChevronUp,
       when: "!panelMaximized && panelHasEditor",
-      // Maximizing a maximized panel changes nothing, so it waits for no state.
+      // Maximizing a maximized panel changes nothing, so it waits only for an editor to maximize.
+      enablement: "panelHasEditor",
       part: { visible: true, maximized: true },
     },
     {
