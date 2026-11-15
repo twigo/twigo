@@ -173,7 +173,8 @@ function Actions({
   // A stage's width is read as it shows, before it paints. While the field
   // or its Clear button has the focus no stage moves, since the text changes
   // the counts' width and a stage that moved would shift the field under the
-  // caret, or replace it and take the focus with it.
+  // caret, or replace it and take the focus with it. While the filter's
+  // popover is open the filter stays an icon, wherever the focus is in it.
   // The last stage's width is the least a list beside docked details keeps
   // for its strip, so it is read as soon as the row shows what it will, on a
   // turn to that stage and back that never paints, once nothing in the row
@@ -202,7 +203,11 @@ function Actions({
       room - inspector,
       STAGES.health,
     );
-    const settled = focused ? stage : next;
+    const settled = focused
+      ? stage
+      : filtering
+        ? Math.max(next, STAGES.filter)
+        : next;
     if (settled !== stage) setStage(settled);
   }, [
     row,
@@ -212,6 +217,7 @@ function Actions({
     taken,
     fit,
     focusMoves,
+    filtering,
     shows,
     last,
     wanted,
@@ -219,7 +225,6 @@ function Actions({
     uri,
   ]);
   if (wanted && iconFilter && !filtering) setFiltering(true);
-  if (!iconFilter && filtering) setFiltering(false);
   useEffect(() => {
     if (!wanted) return;
     if (!iconFilter) field.current?.focus();

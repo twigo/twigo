@@ -295,6 +295,25 @@ test("a list opened with a text in its URI, whose counts were never seen without
   expect(grouped()).toBe(false);
 });
 
+test("the popover keeps its place while its own padding has the focus, which a strip that widens would take with it", async () => {
+  laidOut();
+  await openList();
+  withRoom(500);
+  fireEvent.click(screen.getByRole("button", { name: "Filter rows" }));
+  await settle(1);
+  const dialog = screen.getByRole("dialog");
+  act(() => {
+    dialog.focus();
+  });
+  expect(document.activeElement).toBe(dialog);
+
+  withRoom(900);
+  await settle(1);
+  expect(stageOf(actions())).toBe(3);
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  expect(document.activeElement).toBe(dialog);
+});
+
 test("the popover keeps its field and its focus when the strip widens, and Escape clears the text before it closes", async () => {
   laidOut();
   await openList();
@@ -359,28 +378,34 @@ test("the filter keeps its place while its Clear button has the focus, inline or
   expect(document.activeElement).toBe(popped);
 });
 
-test("a popover the strip leaves behind does not open again by itself when the strip narrows", async () => {
+test("a popover stays open, and the filter an icon, while the focus is on its trigger and the strip widens; closed, it does not open again by itself", async () => {
   laidOut();
   await openList();
   withRoom(500);
   fireEvent.click(screen.getByRole("button", { name: "Filter rows" }));
   await settle(1);
-  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
-    target: { value: "api" },
-  });
-  await settle();
+  const trigger = screen.getByRole("button", { name: "Filter rows" });
   act(() => {
-    screen.getByRole("button", { name: "Filter rows" }).focus();
+    trigger.focus();
   });
   expect(
     document.querySelector("[data-radix-popper-content-wrapper]"),
   ).not.toBeNull();
   withRoom(900);
   await settle(1);
-  expect(screen.queryByRole("button", { name: "Filter rows" })).toBeNull();
+  expect(stageOf(actions())).toBe(3);
+  expect(screen.getByRole("button", { name: "Filter rows" })).toBe(trigger);
+  expect(
+    document.querySelector("[data-radix-popper-content-wrapper]"),
+  ).not.toBeNull();
+  expect(document.activeElement).toBe(trigger);
+
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  await settle(1);
   expect(
     document.querySelector("[data-radix-popper-content-wrapper]"),
   ).toBeNull();
+  expect(stageOf(actions())).toBe(0);
   withRoom(500);
   await settle(1);
   expect(screen.getByRole("button", { name: "Filter rows" })).toBeTruthy();
