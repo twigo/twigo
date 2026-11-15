@@ -70,7 +70,9 @@ export function CellView({
       const tone = rule.tone?.(text);
       const merged = column.merged && (
         <>
-          <CellView row={row} column={column.merged} tone={rowTone} />{" "}
+          <span className={cn(column.merged.rule.figures && "tabular-nums")}>
+            <CellView row={row} column={column.merged} tone={rowTone} />
+          </span>{" "}
         </>
       );
       if (!tone)
@@ -89,8 +91,10 @@ export function CellView({
           )}
         >
           <StatusDot tone={tone} pulse={IN_FLIGHT.test(text)} />
-          {merged}
-          {text}
+          <span>
+            {merged}
+            {text}
+          </span>
         </span>
       );
     }
