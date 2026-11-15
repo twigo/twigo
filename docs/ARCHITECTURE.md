@@ -733,7 +733,7 @@ A list the credentials may not read shows "–" and why, never 0.
 The layout per space is persisted (dockview `toJSON` and which parts show); part sizes are the app's (4.8).
 
 The title bar gives way in a fixed order where it is too narrow, by the widths of hidden copies of its parts at their natural size ([decision](decisions/parts-give-way-by-width.md)).
-First the search field folds to an icon that keeps its key, ⌘P, and still opens quick access; then the search leaves the middle for the bar's right end; then the mode chip folds to its icon, its words in its tooltip; only then are the crumbs cut.
+First the search field folds to an icon that keeps its key, ⌘P, and still opens quick access; then the search leaves the middle for the bar's right end; then the mode chip folds to its icon, a 20 px square, its words in its tooltip; only then are the crumbs cut.
 Each crumb is cut in the middle, a fixed head and tail around a middle that shrinks to no less than 2em, so that a whole glyph and the ellipsis always show, the scope first and the name only once the scope is at its floor.
 The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` where that is 16 characters or fewer, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, so `All namespaces` is never cut, and no text as short as its floor is.
 A stage counts half a pixel for each rounded width it adds up, so that a part stays whole only where it fits whichever way the widths were rounded.
@@ -743,7 +743,7 @@ The panel hides when a person's close takes its last tab (`Editors.dismiss`, 4.3
 It leaves maximize and hides in one step, and gives the focus back (4.3).
 The app's own close of a tab, a session that ends by itself and keeps its tab, a move between groups, a switch of spaces and a restart that reuses a tab hide nothing.
 Its dockview keeps its last group as it empties (`noPanelsOverlay: 'emptyGroup'`, [`doClose`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/dockviewGroupPanelModel.ts#L1644-L1655) at dockview 8.8.3) and makes one for a space that has none, so its strip keeps Hide in every state, the empty one included; Maximize Panel Size shows and runs only while it holds an editor (`panelHasEditor`).
-Opened with nothing in it, as by ⌘J, it names the space, `No sessions in prod-eu`, and offers the `panel/empty` menu: New Terminal, and Reopen Logs while the space has a closed logs tab to bring back (4.3).
+Opened with nothing in it, as by ⌘J, it names the space, `No sessions in prod-eu`, and offers the `panel/empty` menu as the outline buttons an empty state draws for its action, each with its key where it has one: New Terminal, and Reopen Logs while the space has a closed logs tab to bring back (4.3).
 Its sash snaps it shut: allotment's `snap` hides the pane once a drag takes it half its 80 px minimum past that minimum ([split-view.ts at v1.20.6](https://github.com/johnwalley/allotment/blob/v1.20.6/src/split-view/split-view.ts#L868-L879)), a drag that brings it back shows it unmaximized, and a double click on the sash restores the default height of 340 px while the panel shows, as allotment resets no pane that its snap hid ([the reset](https://github.com/johnwalley/allotment/blob/v1.20.6/src/split-view/split-view.ts#L504-L525)).
 A height is remembered only from a drag that ends with the panel not maximized.
 While the panel is hidden, the status bar counts the space's sessions, `2 sessions`, and a click shows the panel: shells and terminals that have not ended, and logs tabs whose target is not down (an error, forbidden or unauthorized) and that, once their pods are known, have a stream queued, connecting, following or waiting, or no pods at all, as a workload at zero replicas, whose pods they wait for.
@@ -945,7 +945,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether its text cells are secondary and read in support, whether rows group by it, which way its first click sorts, the tone of its abnormal values, where it goes as the list narrows, and whether a hovered row's icons may lie over it.
   Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
   As the grid narrows the name column first gives up the free width it takes, down to its starting width of 160 px; then columns leave one at a time, by their rule's drop order, until the rest fit ([decision](decisions/parts-give-way-by-width.md)).
-  The order is Node, Memory, CPU, Age, Namespace and Context, Restarts, then Ready, which goes into Status and reads before its text, `0/1 CrashLoopBackOff`, giving it 24 px more, and Status last; among equals the right-hand one goes first, a column no rule ranks goes before every ranked one, and the name column never goes.
+  The order is Node, Memory, CPU, Age, Namespace and Context, Restarts, then Ready, which goes into Status and reads before its text, `0/1 CrashLoopBackOff`, in tabular figures as in its own column, giving it 24 px more, and Status last; among equals the right-hand one goes first, a column no rule ranks goes before every ranked one, and the name column never goes.
   What shows is worked out from the widths in effect, the user's or the rule's, against the grid's measured width, so a width shows the same columns whichever way the grid came to it, and a wider one brings back the last gone first.
   A column that leaves is only hidden: the preset keeps the user's choices and widths, and a sort by it holds, with a note on the Name header that the column has no room at this width.
   A grid's first column stays at its left edge while the grid scrolls sideways, and only where it leaves the actions column its room beside it, so that it never lies over a row's ⋯ or the choice of columns.
@@ -973,10 +973,13 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): its health as one control of All, Failing, Pending and Healthy with their counts, for kinds with a health column, a pod's or a node's Status or a Deployment's Ready; the text field, which names its syntax and its key; the grouping; and a pin.
   They take no row of their own, so a table sits under three bars: title, tabs, header.
   Each open list keeps its own; a count in the status bar picks the same health.
-  The tabs come first: the actions take what the strip leaves beside its tabs, each at its title's width up to 220 px, and dockview's overflow button.
+  The tabs come first: the actions take what the strip leaves beside its tabs, each at its title's width up to an editor tab's 220 px (4.9), and dockview's overflow button.
   Where that is too little they give way one stage at a time ([decision](decisions/parts-give-way-by-width.md)): the field's key hint, the Group button's label, the field for an icon that opens it in a popover, which `/` opens too and whose first Escape clears the text and the next closes it, and the health control for a menu named by its choice.
-  Each health count keeps room for the most characters it had while the text was empty, so typing moves no stage, and while the field or its Clear button has the focus the filter keeps its form, a field or an icon, and only the other stages move.
+  Each health count keeps room for the most digits it had while the text was empty, with an invisible copy of that many figures, written in zeros and grouped as the count is (`data-reserve`), so a text that lowers the counts moves no stage.
+  While the field or its Clear button has the focus no stage moves at all, since a list opened with a text in its URI has seen no count without one, and a stage that moved would shift the field under the caret or replace it; the actions settle once the focus leaves.
+  While the popover is open the filter stays an icon, wherever the focus is in it.
   Beside docked details the actions end at the list's right edge, and the details shrink so that the list keeps what its strip needs at the last stage: the active tab at 220 px, the overflow button, and the actions with the space after them (4.3).
+  The room the details take is read as they dock, before paint, so their first frame ends the actions at that edge too.
   A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.8.3 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L839-L888)).
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
@@ -1497,6 +1500,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - Dense rows: 22 px in trees, 26 px in tables, whose rows carry more columns to read across; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
   Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the strip takes the shell's surface, the active tab the editor's, open into it.
+  A tab in the editor area is as wide as its title up to 220 px, where the title is cut with an ellipsis, so that a list's actions keep room beside the tabs (4.4); a tab in the panel takes its whole title, so a logs tab's reads whole; and a tab's close button keeps its 20 px whatever its title takes.
   Table columns resize from their header's edge.
 - **Giving way.**
   A part too narrow for itself gives way in a fixed order of stages, decided by widths its stages cannot change, and folds before it cuts: the title bar (4.1), the details' row of actions (4.3), and a list's actions and columns (4.4) ([decision](decisions/parts-give-way-by-width.md)).
@@ -1615,6 +1619,7 @@ interface CommandDescriptor {
     A key holds until its answer says no, and one the cluster cannot answer holds, so only what RBAC refuses is disabled and the server still decides.
     A refusal is asked again every 30 s while its row is still asked about, and an access review that fails drops its entry, so the next ask sends it again.
     Until a hovered row's own answers come, its icons read the last answers in its namespace of the keys asked without a name, `capability.*`, which hold for every object there; an answer by name, `resource.capability.*`, never stands in for another object, and a key nobody has answered holds.
+    A review of the selected or the hovered row that fails drops, with that object's own answers, its namespace's answers of the keys they held, so the row's icons, and those of its namespace's rows with no answers of their own, read those keys as held again, as the details do.
   - `operationUndo`: the spaces whose last action an undo puts back now
   - `platform`
 
