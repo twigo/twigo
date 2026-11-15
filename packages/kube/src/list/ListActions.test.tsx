@@ -190,6 +190,22 @@ test("the least a list keeps beside docked details is known as they first dock, 
   );
 });
 
+test("the room the details take is read as they dock, without waiting for the list's width to be reported", async () => {
+  laidOut();
+  await openList();
+  withRoom(900);
+  const column = grid().parentElement;
+  if (!column) throw new Error("no list column");
+  Object.defineProperty(column, "clientWidth", {
+    configurable: true,
+    get: () => (document.querySelector("aside") ? 810 : 1280),
+  });
+  expect(actions().style.marginRight).toBe("0px");
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  expect(actions().style.marginRight).toBe("470px");
+  expect(stageOf(actions())).toBe(4);
+});
+
 test("a health just picked keeps the focus while the last stage waits to be measured again", async () => {
   laidOut();
   await openList();

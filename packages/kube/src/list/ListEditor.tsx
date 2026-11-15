@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton, useWidth } from "@twigo/ui";
@@ -175,6 +175,12 @@ function Loaded({
     !open || selected === undefined ? undefined : docked ? "beside" : "over";
   const beside = details === "beside";
   const inspector = beside && listWidth > 0 ? width - listWidth : 0;
+  // Read as the details dock, since the observers report a frame later and
+  // the strip's actions would end past the list's edge until then.
+  useLayoutEffect(() => {
+    if (beside && wrapper && column)
+      states.setInspector(uri, wrapper.clientWidth - column.clientWidth);
+  }, [beside, wrapper, column, states, uri]);
   useEffect(() => {
     states.setInspector(uri, inspector);
   }, [states, uri, inspector]);
