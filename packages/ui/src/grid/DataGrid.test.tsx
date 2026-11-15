@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { Copy } from "lucide-react";
+import { resize } from "../../test/resize";
 import type { ListController } from "../lib/list";
 import { DataGrid } from "./DataGrid";
 import type { GridItem } from "./types";
@@ -685,14 +686,23 @@ test("the first column stays at the grid's left edge, beside the marks, only whi
     column.id === "Name" ? row.name : "4d";
 
   grid({ columns: columns(300), cell });
+  act(() => {
+    resize();
+  });
   expect(held()).toEqual(["", ""]);
   cleanup();
 
   grid({ columns: columns(900), cell });
+  act(() => {
+    resize();
+  });
   expect(held()).toEqual(["28px", "28px"]);
   cleanup();
 
   grid({ columns: columns(960), cell });
+  act(() => {
+    resize();
+  });
   expect(held()).toEqual(["", ""]);
 });
 

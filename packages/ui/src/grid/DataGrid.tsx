@@ -2,7 +2,6 @@ import {
   useEffect,
   useEffectEvent,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,6 +13,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
+import { useWidth } from "../lib/useWidth";
 import {
   ActionContextMenu,
   ActionDropdown,
@@ -180,25 +180,13 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const ids = useId();
   const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const [shown, setShown] = useState(0);
+  const shown = useWidth(element);
   const [cursor, setCursor] = useState(selected);
   const [followed, setFollowed] = useState(selected);
   if (selected !== followed) {
     setFollowed(selected);
     setCursor(selected);
   }
-
-  useLayoutEffect(() => {
-    if (!element) return;
-    setShown(element.clientWidth);
-    const observer = new ResizeObserver(() => {
-      setShown(element.clientWidth);
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-    };
-  }, [element]);
 
   const virtualizer = useVirtualizer({
     count: loading ? 0 : length,
