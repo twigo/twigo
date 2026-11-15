@@ -453,7 +453,7 @@ const trackOf = (name: string) => {
   return tracks[at];
 };
 
-test("Status keeps the room that Ready's value takes when the person sized it, and what the person's drag keeps is the width without that room", async () => {
+test("Status keeps the room that Ready's value takes when the person sized it, and what the person's drag keeps is the width without that room, never below a column's minimum", async () => {
   await openList(
     createMockBackend("ready"),
     "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
@@ -473,6 +473,13 @@ test("Status keeps the room that Ready's value takes when the person sized it, a
   expect(trackOf("Status")).toBe("234px");
   shownAt(1280);
   expect(trackOf("Status")).toBe("210px");
+
+  shownAt(460);
+  await drag(-1000);
+  expect(trackOf("Ready")).toBe("56px");
+  expect(trackOf("Status")).toBe("48px");
+  shownAt(1280);
+  expect(trackOf("Status")).toBe("48px");
 });
 
 test("a sort by a column the width has dropped stays, and the Name header says so until the column is back", async () => {

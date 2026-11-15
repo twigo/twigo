@@ -9,6 +9,7 @@ import {
 } from "@twigo/protocol";
 import {
   ActionDropdown,
+  COLUMN_MIN_WIDTH,
   Count,
   DataGrid,
   EmptyState,
@@ -456,7 +457,11 @@ function Grid({
       columns={gridColumns}
       widths={{ ...preset.widths, ...widened }}
       onResize={(column, width) => {
-        presets.resize(gvr, column, width - mergedRoom(column));
+        presets.resize(
+          gvr,
+          column,
+          Math.max(COLUMN_MIN_WIDTH, width - mergedRoom(column)),
+        );
       }}
       sort={sorted ?? null}
       onSort={(sort: Sort) => {

@@ -49,6 +49,7 @@ export {
   ROW_HEIGHT,
   type DataGridProps,
 } from "./grid/DataGrid";
+export { MIN_WIDTH as COLUMN_MIN_WIDTH } from "./grid/fit";
 export type { GridColumn, GridItem, GridSort } from "./grid/types";
 export { Tree, type TreeRow } from "./tree/Tree";
 export * from "./components/histogram";
