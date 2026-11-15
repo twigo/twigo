@@ -57,7 +57,7 @@ function ContextMenuItem({
         "focus:bg-accent focus:text-accent-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "data-[variant=destructive]:text-error data-[variant=destructive]:focus:bg-error/10",
-        "[&_svg]:size-3.5 [&_svg]:shrink-0",
+        "[&>svg]:size-3.5 [&>svg]:shrink-0",
         className,
       )}
       {...props}

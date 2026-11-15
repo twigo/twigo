@@ -91,7 +91,7 @@ function ItemBody({ action }: { action: Action }) {
         </span>
         {action.reason !== undefined && (
           <span className="flex items-center gap-1 text-2xs text-quiet">
-            {action.locked && <Lock aria-hidden />}
+            {action.locked && <Lock aria-hidden className="size-3 shrink-0" />}
             {action.reason}
           </span>
         )}
