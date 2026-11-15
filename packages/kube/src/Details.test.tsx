@@ -86,6 +86,48 @@ describe("in a wide editor", () => {
     expect(headers()).toEqual(EVERY_COLUMN);
   });
 
+  test("the width the user dragged the details to is the app's: a close keeps it, and so does a restart", async () => {
+    const backend = createMockBackend("ready");
+    const widthOf = () => shown().style.width;
+    const drag = (to: number) => {
+      shown().getBoundingClientRect = () =>
+        new DOMRect(0, 0, Number.parseInt(widthOf(), 10), 600);
+      const strip = within(shown()).getByRole("separator", {
+        name: "Resize details",
+      });
+      fireEvent.pointerDown(strip, { clientX: 700, pointerId: 1 });
+      fireEvent.pointerMove(strip, { clientX: to, pointerId: 1 });
+      fireEvent.pointerUp(strip, { pointerId: 1 });
+    };
+    const workbench = await openList(backend);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("470px");
+    drag(600);
+    expect(widthOf()).toBe("570px");
+    fireEvent.click(
+      within(shown()).getByRole("button", { name: "Close details" }),
+    );
+    await settle(1);
+    fireEvent.click(rows()[1] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("570px");
+    drag(900);
+    expect(widthOf()).toBe("370px");
+    drag(1400);
+    expect(widthOf()).toBe("320px");
+
+    drag(300);
+    const written = workbench.state.settled();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await written;
+    cleanup();
+    await openList(backend);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("720px");
+  });
+
   test("the header shows the row's status as a pill, and its controlling owner opens the owner", async () => {
     const workbench = await openList(
       createMockBackend("ready"),

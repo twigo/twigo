@@ -32,6 +32,7 @@ import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
 const MIN_WIDTH = 320;
+const DEFAULT_WIDTH = 470;
 
 /** How long the selection rests on a row before its object opens (ARCHITECTURE 4.3). */
 export const DWELL_MS = 150;
@@ -65,13 +66,16 @@ export function Details({
   onClose: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, keys, menus } = workbench;
+  const { backend, keys, menus, sizes } = workbench;
   const { discovery, selection, states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(sizes.changes);
   const resources = useResources(discovery, space);
-  const [width, setWidth] = useState(470);
+  const [dragged, setDragged] = useState<number>();
+  const width =
+    dragged ?? Math.max(MIN_WIDTH, sizes.get("inspector") ?? DEFAULT_WIDTH);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
@@ -166,17 +170,23 @@ export function Details({
         onPointerDown={(event) => {
           event.preventDefault();
           const start = event.clientX;
-          const from = width;
+          const from = element?.getBoundingClientRect().width ?? width;
           const target = event.currentTarget;
+          let latest = width;
           target.setPointerCapture(event.pointerId);
           const move = (next: PointerEvent) => {
-            setWidth(Math.max(MIN_WIDTH, from + start - next.clientX));
+            latest = Math.round(
+              Math.max(MIN_WIDTH, from + start - next.clientX),
+            );
+            setDragged(latest);
           };
           target.addEventListener("pointermove", move);
           target.addEventListener(
             "pointerup",
             () => {
               target.removeEventListener("pointermove", move);
+              sizes.set("inspector", latest);
+              setDragged(undefined);
             },
             { once: true },
           );
