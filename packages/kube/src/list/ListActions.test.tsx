@@ -68,6 +68,15 @@ const withRoom = (room: number) => {
   layout.resize(strip(), room + 54);
 };
 
+const counted = (row: HTMLElement) =>
+  [...row.querySelectorAll<HTMLElement>("span.tabular-nums")].reduce(
+    (sum, count) =>
+      sum +
+      7 *
+        Math.max(count.textContent.length, count.dataset.reserve?.length ?? 0),
+    0,
+  );
+
 test("the actions give up one thing at a time as the strip narrows: the key hint, the Group label, the filter field, the health filter", async () => {
   laidOut();
   await openList();
@@ -223,17 +232,6 @@ test("the filter field keeps its place and its focus while its text, and so the 
 });
 
 test("a filter that was on while the stages were learnt does not move a stage when it clears: each count keeps the room it took with no text", async () => {
-  const counted = (row: HTMLElement) =>
-    [...row.querySelectorAll<HTMLElement>("span.tabular-nums")].reduce(
-      (sum, count) =>
-        sum +
-        7 *
-          Math.max(
-            count.textContent.length,
-            count.dataset.reserve?.length ?? 0,
-          ),
-      0,
-    );
   laidOut((row) => -counted(row));
   await openList();
   withRoom(740);
@@ -267,6 +265,34 @@ test("a filter that was on while the stages were learnt does not move a stage wh
   expect(grouped()).toBe(before);
   expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
   expect(document.activeElement).toBe(field);
+});
+
+test("a list opened with a text in its URI, whose counts were never seen without it, keeps its stage while the field has the focus, and settles when it loses it", async () => {
+  laidOut((row) => -counted(row));
+  await openList(undefined, "k8s-list://prod-eu/v1/pods?q=zzzz");
+  withRoom(740);
+  const grouped = () => actions().textContent.includes("Group");
+  expect(grouped()).toBe(true);
+  const field = screen.getByRole<HTMLInputElement>("textbox", {
+    name: "Filter rows",
+  });
+  act(() => {
+    field.focus();
+  });
+  fireEvent.change(field, { target: { value: "" } });
+  await settle();
+  expect(
+    screen.getByRole("group", { name: "Rows by health" }).textContent,
+  ).toMatch(/^All5,000/);
+  expect(grouped()).toBe(true);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
+  expect(document.activeElement).toBe(field);
+
+  act(() => {
+    grid().focus();
+  });
+  await settle(1);
+  expect(grouped()).toBe(false);
 });
 
 test("the popover keeps its field and its focus when the strip widens, and Escape clears the text before it closes", async () => {

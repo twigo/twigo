@@ -131,8 +131,9 @@ function Actions({
   };
   const text = states.text(uri) ?? input.text ?? "";
   const current = items.find((item) => item.value === (picked ?? "all"));
-  // The text changes the counts: each keeps the room it took without one, so
-  // the text moves neither the actions' width nor their stage.
+  // The text changes the counts: each keeps the room it took while the text
+  // was empty. A list opened with a text has seen none, so its stage is held
+  // while the field has the focus, below.
   useLayoutEffect(() => {
     if (text !== "" || items.length === 0) return;
     states.seeCountDigits(
@@ -170,8 +171,9 @@ function Actions({
   const lastMeasured = useRef<string>(undefined);
   const back = useRef<number>(undefined);
   // A stage's width is read as it shows, before it paints. While the field
-  // or its Clear button has the focus the filter stays as it is, an icon or
-  // the field, since the other would replace it and take the focus with it.
+  // or its Clear button has the focus no stage moves, since the text changes
+  // the counts' width and a stage that moved would shift the field under the
+  // caret, or replace it and take the focus with it.
   // The last stage's width is the least a list beside docked details keeps
   // for its strip, so it is read as soon as the row shows what it will, on a
   // turn to that stage and back that never paints, once nothing in the row
@@ -200,11 +202,7 @@ function Actions({
       room - inspector,
       STAGES.health,
     );
-    const settled = !focused
-      ? next
-      : stage >= STAGES.filter
-        ? Math.max(next, STAGES.filter)
-        : Math.min(next, STAGES.filter - 1);
+    const settled = focused ? stage : next;
     if (settled !== stage) setStage(settled);
   }, [
     row,
