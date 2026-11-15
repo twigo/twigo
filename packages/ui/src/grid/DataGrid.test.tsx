@@ -573,6 +573,31 @@ test("a hovered row's icons are its own actions and run on that row, which they 
   expect(handlers.onActivate).not.toHaveBeenCalled();
 });
 
+test("a hovered row's icon names no key, since the key acts on the selected row", async () => {
+  grid({
+    columns: WITH_AGE,
+    cell: nameOnly,
+    selected: "a1",
+    inline: () => [
+      {
+        id: "cordon",
+        label: "Cordon",
+        icon: Copy,
+        keys: "⇧C",
+        run: vi.fn(),
+      },
+    ],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  await rest();
+  act(() => {
+    within(rowNamed("gateway-1"))
+      .getByRole("button", { name: "Cordon" })
+      .focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe("Cordon");
+});
+
 test("a hovered row's icons show once the pointer rests on it, and only where the last columns that may be covered have room", async () => {
   const icons = (name: string) =>
     within(rowNamed(name))

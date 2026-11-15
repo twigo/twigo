@@ -87,7 +87,8 @@ export interface DataGridProps<R, G> {
   /**
    * A row's first actions, as icons over the end of the row once the pointer
    * rests on it, run on that row; they show only where the columns at the
-   * row's end that may be covered have room for them.
+   * row's end that may be covered have room for them, and name no keys,
+   * which act on the selected row.
    */
   readonly inline?: (row: R) => readonly Action[];
   /** At the head of the actions column, such as the choice of columns. */
@@ -516,7 +517,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     )}
                   >
                     <InlineActions
-                      actions={actions.map((action) => ({
+                      actions={actions.map(({ keys: _, ...action }) => ({
                         ...action,
                         run: () => {
                           select();
