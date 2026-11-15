@@ -30,10 +30,29 @@ test("a name keeps the part after its last : or / when that is short", () => {
   });
 });
 
-test("a name with a long last part, or none, keeps its last 12 characters", () => {
+test("a name keeps a last part whole while it leaves the head 4 characters", () => {
+  expect(
+    cutText(
+      "arn:aws:eks:eu-west-1:123456789012:cluster/payments-prod-eu1",
+      28,
+      NAME,
+    ),
+  ).toEqual({
+    head: "arn:aws:eks",
+    middle: ":eu-west-1:123456789012:cluster/",
+    tail: "payments-prod-eu1",
+  });
   const cluster = "arn:aws:eks:eu-west-1:123456789012:cluster/";
-  expect(cutText(`${cluster}payments-production`, 28, NAME)?.tail).toBe(
-    "s-production",
+  expect(cutText(`${cluster}${"p".repeat(24)}`, 28, NAME)).toMatchObject({
+    head: "arn:",
+    tail: "p".repeat(24),
+  });
+});
+
+test("a name with a longer last part, or none, keeps its last 12 characters", () => {
+  const cluster = "arn:aws:eks:eu-west-1:123456789012:cluster/";
+  expect(cutText(`${cluster}${"p".repeat(25)}`, 28, NAME)?.tail).toBe(
+    "p".repeat(12),
   );
   expect(cutText(cluster, 28, NAME)?.tail).toBe("012:cluster/");
   expect(
@@ -44,6 +63,7 @@ test("a name with a long last part, or none, keeps its last 12 characters", () =
 test("head and tail are the floor's characters together, and with the middle the whole text", () => {
   const texts = [
     "arn:aws:eks:eu-west-1:123456789012:cluster/payments-prod",
+    "arn:aws:eks:eu-west-1:123456789012:cluster/payments-prod-eu1",
     "prod-eu + staging + dev + qa + kind-local",
     "W".repeat(40),
     "a:" + "b".repeat(40),
@@ -69,4 +89,11 @@ test("a scope keeps its last namespace, whole when short, and never splits All n
     middle: "ents, checkout, ledger, platform-o",
     tail: "bservability",
   });
+  expect(cutText("payments, checkout, platform-obs", 16, ", ")).toMatchObject({
+    head: "paym",
+    tail: "platform-obs",
+  });
+  expect(cutText("payments, checkout, platform-obse", 16, ", ")?.tail).toBe(
+    "latform-obse",
+  );
 });

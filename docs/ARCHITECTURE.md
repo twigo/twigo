@@ -735,7 +735,7 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 The title bar gives way in a fixed order where it is too narrow, by the widths of hidden copies of its parts at their natural size ([decision](decisions/parts-give-way-by-width.md)).
 First the search field folds to an icon that keeps its key, ⌘P, and still opens quick access; then the search leaves the middle for the bar's right end; then the mode chip folds to its icon, a 20 px square, its words in its tooltip; only then are the crumbs cut.
 Each crumb is cut in the middle, a fixed head and tail around a middle that shrinks to no less than 2em, so that a whole glyph and the ellipsis always show, the scope first and the name only once the scope is at its floor.
-The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` where that is 1 to 16 characters, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, so `All namespaces` is never cut, and no text as short as its floor is.
+The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, 1 to 12, so `All namespaces` is never cut, and no text as short as its floor is.
 A stage counts half a pixel for each rounded width it adds up, so that a part stays whole only where it fits whichever way the widths were rounded.
 The bar stays 36 px high, which the position of the macOS traffic lights in `tauri.conf.json` is tied to.
 
