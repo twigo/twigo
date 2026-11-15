@@ -421,43 +421,36 @@ export function ActionBar({
           {(index > 0 || children !== undefined) && (
             <span aria-hidden className="mx-1 h-4 w-px bg-border" />
           )}
-          {group.map((action) => (
-            <ButtonTooltip
-              key={action.id}
-              action={action}
-              told={action.reason !== undefined}
-            >
-              {outlined ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={action.disabled}
-                  onClick={action.run}
-                  className={cn(
-                    "disabled:opacity-50",
-                    action.danger && "text-error",
-                    lockTone(action),
-                  )}
-                >
-                  <ButtonFace action={action} form="full" />
-                </Button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={action.disabled}
-                  onClick={action.run}
-                  className={cn(
-                    BUTTON,
-                    "disabled:opacity-50",
-                    action.danger && "text-error",
-                    lockTone(action),
-                  )}
-                >
-                  <ButtonFace action={action} form="full" />
-                </button>
-              )}
-            </ButtonTooltip>
-          ))}
+          {group.map((action) => {
+            const props = {
+              disabled: action.disabled,
+              onClick: action.run,
+              className: cn(
+                !outlined && BUTTON,
+                "disabled:opacity-50",
+                action.danger && "text-error",
+                lockTone(action),
+              ),
+            };
+            const face = <ButtonFace action={action} form="full" />;
+            return (
+              <ButtonTooltip
+                key={action.id}
+                action={action}
+                told={action.reason !== undefined}
+              >
+                {outlined ? (
+                  <Button variant="outline" size="sm" {...props}>
+                    {face}
+                  </Button>
+                ) : (
+                  <button type="button" {...props}>
+                    {face}
+                  </button>
+                )}
+              </ButtonTooltip>
+            );
+          })}
         </Fragment>
       ))}
     </div>
@@ -519,6 +512,16 @@ function Measured({
 }
 
 const MORE = cn(BUTTON, "data-[state=open]:bg-row-hover");
+
+const MORE_FACE = (
+  <>
+    More
+    <ChevronDown aria-hidden className="text-support" />
+  </>
+);
+
+const sized = (form: Form, action: Action) =>
+  cn(BUTTON, form === "icon" && action.icon && "px-1.5");
 
 /**
  * An object's actions as one row (ARCHITECTURE 4.3): its pinned actions in
@@ -611,8 +614,7 @@ export function ActionRow({
                 if (!action.disabled) action.run();
               }}
               className={cn(
-                BUTTON,
-                form === "icon" && action.icon && "px-1.5",
+                sized(form, action),
                 action.danger && "text-error",
                 lockTone(action),
                 action.disabled && "opacity-50 hover:bg-transparent",
@@ -625,13 +627,11 @@ export function ActionRow({
       })}
       <ActionDropdown actions={rest} label="More">
         <button type="button" {...roving(pinned.length)} className={MORE}>
-          More
-          <ChevronDown aria-hidden className="text-support" />
+          {MORE_FACE}
         </button>
       </ActionDropdown>
       <div
         aria-hidden
-        inert
         className="invisible absolute top-0 left-0 h-0 overflow-hidden"
       >
         {stages.map((at) => (
@@ -639,21 +639,12 @@ export function ActionRow({
             {pinned.map((action, index) => {
               const form = formAt(at, index, pinned.length);
               return (
-                <span
-                  key={action.id}
-                  className={cn(
-                    BUTTON,
-                    form === "icon" && action.icon && "px-1.5",
-                  )}
-                >
+                <span key={action.id} className={sized(form, action)}>
                   <ButtonFace action={action} form={form} />
                 </span>
               );
             })}
-            <span className={MORE}>
-              More
-              <ChevronDown aria-hidden className="text-support" />
-            </span>
+            <span className={MORE}>{MORE_FACE}</span>
           </Measured>
         ))}
       </div>
