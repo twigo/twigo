@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { PanelsTopLeft } from "lucide-react";
 import { cn, EmptyState, InlineActions, Section } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
@@ -6,6 +6,7 @@ import { useChanges, useWorkbench } from "../react";
 import { LOCATION_TITLES, type SideBar, type View } from "../views/registry";
 import { activeContainer } from "./activeContainer";
 import { PanelBoundary } from "./PanelBoundary";
+import { useInertWhile } from "./useInertWhile";
 
 /** A side bar: a header with its containers, then the active one's views. */
 export function PartView({ location }: { location: SideBar }) {
@@ -18,6 +19,8 @@ export function PartView({ location }: { location: SideBar }) {
   const containers = views.containers(location);
   const container = activeContainer(workbench, location);
   const lookup = keys.lookup(null);
+  const ref = useRef<HTMLElement>(null);
+  useInertWhile(ref, location);
   const shown =
     container && space
       ? views.viewsIn(container.id, spaces.state(space.id).placement, lookup)
@@ -25,6 +28,7 @@ export function PartView({ location }: { location: SideBar }) {
 
   return (
     <section
+      ref={ref}
       aria-label={LOCATION_TITLES[location]}
       style={{ "--surface": "var(--sidebar)" } as CSSProperties}
       className="flex h-full min-h-0 flex-col bg-sidebar"

@@ -11,6 +11,7 @@ import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
 import { PanelArea } from "./PanelArea";
 import { PartView } from "./PartView";
+import { sideBarShown } from "./sideBarShown";
 import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
@@ -30,7 +31,8 @@ const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
  * the split views remount with it; sizes are the app's.
  */
 export function Shell() {
-  const { spaces, sizes, keybindings, views } = useWorkbench();
+  const workbench = useWorkbench();
+  const { spaces, sizes, keybindings, views } = workbench;
   useChanges(spaces.changes);
   useChanges(sizes.changes);
   useChanges(views.changes);
@@ -50,9 +52,7 @@ export function Shell() {
 
   const space = spaces.active;
   const parts = space ? spaces.state(space.id).parts : undefined;
-  const shown = (location: SideBar) =>
-    (parts?.[location].visible ?? false) &&
-    views.containers(location).length > 0;
+  const shown = (location: SideBar) => sideBarShown(workbench, location);
   const panel = parts?.panel.visible ?? false;
   const maximized = panel && (parts?.panel.maximized ?? false);
   const size = (location: Location) =>

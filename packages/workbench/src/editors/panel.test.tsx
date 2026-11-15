@@ -6,6 +6,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { PanelBottom } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useEditorShown } from "../react";
 import { tabOf, tabsIn, testWorkbench } from "../testing";
@@ -225,6 +226,76 @@ test("the panel is inert while hidden and the editor area while a maximized pane
   expect(note().closest("[inert]")).toBeNull();
 });
 
+function withSideBar(
+  workbench: Awaited<ReturnType<typeof mounted>>["workbench"],
+) {
+  act(() => {
+    workbench.views.registerContainer({
+      id: "test.bar",
+      title: "Bar",
+      icon: PanelBottom,
+      location: "sidebar",
+    });
+    workbench.views.registerView({
+      id: "test.tree",
+      title: "Tree",
+      container: "test.bar",
+      component: () => <input aria-label="tree" />,
+    });
+  });
+}
+
+const sideBar = () =>
+  document.querySelector('section[aria-label="Primary Side Bar"]');
+
+test("a side bar is inert while it is hidden, and the focus it held goes to the editor area's active editor", async () => {
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  withSideBar(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  expect(sideBar()?.hasAttribute("inert")).toBe(false);
+  act(() => {
+    screen.getByLabelText("tree").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "sidebar", { visible: false });
+  });
+  expect(sideBar()?.hasAttribute("inert")).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+  act(() => {
+    workbench.spaces.setPart(space(), "sidebar", { visible: true });
+  });
+  expect(sideBar()?.hasAttribute("inert")).toBe(false);
+});
+
+test("the focus does not go back into a side bar that was hidden meanwhile", async () => {
+  refuseInertFocus();
+  const { workbench, editors, space } = await mounted();
+  withFields(workbench);
+  withSideBar(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  act(() => {
+    screen.getByLabelText("tree").focus();
+  });
+  act(() => {
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    workbench.spaces.setPart(space(), "sidebar", { visible: false });
+  });
+  act(() => {
+    editors.dismiss("input://x");
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
 test("the focus leaves a part before the part goes inert", async () => {
   const { workbench, editors, space } = await mounted();
   withFields(workbench);
@@ -291,7 +362,8 @@ test("an area that an open reveals takes the focus once it is no longer inert", 
   act(() => {
     workbench.spaces.setPart(space(), "panel", { maximized: true });
   });
-  expect(document.querySelectorAll("[inert]")).toHaveLength(1);
+  expect(root("editor")?.closest("[inert]")).not.toBeNull();
+  expect(root("panel")?.closest("[inert]")).toBeNull();
   inertAtFocus.length = 0;
   act(() => {
     editors.open("focusing://b");
