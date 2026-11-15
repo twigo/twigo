@@ -67,20 +67,22 @@ const EVERY_COLUMN = [
 ];
 
 describe("in a wide editor", () => {
-  withScreenSize(1000);
+  const layout = withScreenSize(1000);
 
-  test("the details stand beside the list, which keeps its name, ready and status columns until they close", async () => {
+  test("the details stand beside the list, whose columns leave as the details narrow it and come back as it widens", async () => {
     await openList();
     expect(headers()).toEqual(EVERY_COLUMN);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).not.toContain("absolute");
+    layout.resize(grid(), 530);
     expect(headers()).toEqual(["", "Name", "Ready", "Status", ""]);
     fireEvent.click(
       within(shown()).getByRole("button", { name: "Close details" }),
     );
     await settle(1);
     expect(details()).toBeNull();
+    layout.resize(grid(), 1000);
     expect(headers()).toEqual(EVERY_COLUMN);
   });
 
@@ -311,12 +313,23 @@ describe("in a wide editor", () => {
 describe("in a narrow editor", () => {
   withScreenSize(800);
 
-  test("the details slide over the list, which keeps every column", async () => {
+  test("the details slide over the list, which keeps the columns its own width leaves it", async () => {
     await openList();
+    const own = [
+      "",
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "Restarts",
+      "Age",
+      "",
+    ];
+    expect(headers()).toEqual(own);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).toContain("absolute");
-    expect(headers()).toEqual(EVERY_COLUMN);
+    expect(headers()).toEqual(own);
   });
 
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {

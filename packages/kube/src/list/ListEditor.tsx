@@ -27,9 +27,8 @@ const DOCK_WIDTH = 960;
 /**
  * A `k8s-list://` editor (ARCHITECTURE 4.3, 4.4). Without `ns` in its URI
  * it follows the space's namespace scope. An opened row's details stand
- * beside the list, which narrows to its name, ready and status columns,
- * or slide over it in a narrow editor; marked rows get a bar of what can
- * be done to them.
+ * beside the list, which gives up columns as it narrows, or slide over it
+ * in a narrow editor; marked rows get a bar of what can be done to them.
  */
 export function ListEditor({
   uri,

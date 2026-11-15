@@ -21,7 +21,7 @@ import { DWELL_MS } from "../Details";
 import { PODS } from "../kinds";
 import { parseListUri } from "../uri";
 
-withScreenSize();
+withScreenSize(1280);
 
 beforeEach(() => {
   vi.useFakeTimers();

@@ -44,6 +44,7 @@ export * from "./components/tile";
 export * from "./components/trigger";
 export {
   DataGrid,
+  GUTTERS_WIDTH,
   GridSkeleton,
   ROW_HEIGHT,
   type DataGridProps,

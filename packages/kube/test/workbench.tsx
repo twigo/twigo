@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { afterAll, beforeAll, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
@@ -47,6 +47,18 @@ export async function openList(
 
 export function withScreenSize(width = 800) {
   const unsized = globalThis.ResizeObserver;
+  const widths = new Map<Element, number>();
+  const watchers = new Map<Element, Set<ResizeObserverCallback>>();
+  const entry = (target: Element) =>
+    ({
+      target,
+      contentRect: new DOMRectReadOnly(
+        0,
+        0,
+        target.clientWidth,
+        target.clientHeight,
+      ),
+    }) as ResizeObserverEntry;
   beforeAll(() => {
     Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
@@ -54,31 +66,28 @@ export function withScreenSize(width = 800) {
     });
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
-      get: () => width,
+      get(this: HTMLElement) {
+        return widths.get(this) ?? width;
+      },
     });
     globalThis.ResizeObserver = class {
+      readonly #watched = new Set<Element>();
       constructor(private readonly report: ResizeObserverCallback) {}
       observe(target: Element) {
-        this.report(
-          [
-            {
-              target,
-              contentRect: new DOMRectReadOnly(
-                0,
-                0,
-                target.clientWidth,
-                target.clientHeight,
-              ),
-            } as ResizeObserverEntry,
-          ],
-          this,
+        this.#watched.add(target);
+        watchers.set(
+          target,
+          (watchers.get(target) ?? new Set()).add(this.report),
         );
+        this.report([entry(target)], this);
       }
       unobserve() {
         return undefined;
       }
       disconnect() {
-        return undefined;
+        for (const target of this.#watched)
+          watchers.get(target)?.delete(this.report);
+        this.#watched.clear();
       }
     };
   });
@@ -87,4 +96,17 @@ export function withScreenSize(width = 800) {
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
     globalThis.ResizeObserver = unsized;
   });
+  afterEach(() => {
+    widths.clear();
+    watchers.clear();
+  });
+  return {
+    resize(target: Element, to: number) {
+      widths.set(target, to);
+      act(() => {
+        for (const report of watchers.get(target) ?? [])
+          report([entry(target)], {} as ResizeObserver);
+      });
+    },
+  };
 }

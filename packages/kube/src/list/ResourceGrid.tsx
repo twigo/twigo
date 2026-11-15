@@ -12,7 +12,9 @@ import {
   Count,
   DataGrid,
   EmptyState,
+  GUTTERS_WIDTH,
   StatusDot,
+  useWidth,
   type GridColumn,
   type GridItem,
 } from "@twigo/ui";
@@ -27,6 +29,7 @@ import {
   byHealth,
   columnRule,
   type CellKind,
+  type ColumnRule,
   HEALTH,
   healthValues,
   rowTone,
@@ -40,6 +43,7 @@ import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { CellView, type ShownColumn } from "./cells";
+import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
 import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
 import { sequence } from "./sequence";
@@ -47,7 +51,7 @@ import { useListView } from "./useListView";
 
 const GROUP = "group:";
 
-/** The cells a list beside the details keeps, which a hovered row's icons never cover. */
+/** The cells a hovered row's icons never cover. */
 const NARROW: ReadonlySet<CellKind> = new Set(["name", "status", "ratio"]);
 
 /**
@@ -62,7 +66,7 @@ export function ResourceGrid(props: {
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   services: ListServices;
-  /** Beside the details: only the columns that say what a row is and how it is. */
+  /** Beside docked details, which show the selected row's actions. */
   narrow: boolean;
   onActivate: () => void;
 }) {
@@ -181,6 +185,7 @@ function Grid({
     },
   );
   const [grid, setGrid] = useState<HTMLElement | null>(null);
+  const width = useWidth(grid);
   // Rust groups nothing by a column the list lacks, such as Namespace in
   // a list of one namespace, and then sends no groups.
   const grouping =
@@ -192,20 +197,51 @@ function Grid({
     rule: columnRule(gvr, column),
     priority: column.priority,
   }));
-  const columns: readonly ShownColumn[] = every.filter(
+  const chosen = every.filter(
     (column) =>
       column.name === "Name" ||
       (column.name !== grouping?.column &&
-        (preset.columns[column.name] ?? column.priority === 0) &&
-        (!narrow || NARROW.has(column.rule.cell))),
+        (preset.columns[column.name] ?? column.priority === 0)),
   );
+  const widthOf = (column: { name: string; rule: ColumnRule }) =>
+    preset.widths[column.name] ?? column.rule.width;
+  const gone = leaving(
+    chosen
+      .filter((column) => column.name === "Name")
+      .reduce((sum, column) => sum + widthOf(column), 0),
+    chosen
+      .filter((column) => column.name !== "Name")
+      .map((column) => ({
+        name: column.name,
+        width: widthOf(column),
+        drop: column.rule.drop,
+        ...(column.rule.into && { into: column.rule.into }),
+      })),
+    width > 0 ? width - GUTTERS_WIDTH : Infinity,
+  );
+  const columns: readonly ShownColumn[] = chosen
+    .filter((column) => !gone.has(column.name))
+    .map((column) => {
+      const merged = chosen.find(
+        (other) =>
+          gone.has(other.name) && other.rule.into?.column === column.name,
+      );
+      return merged ? { ...column, merged } : column;
+    });
   const byName = new Map(columns.map((column) => [column.name, column]));
+  const sorted = shown?.sort;
+  const sortLost =
+    sorted && gone.has(sorted.column)
+      ? `Sorted by ${sorted.column}, ${sorted.descending ? "descending" : "ascending"}: the column has no room at this width.`
+      : undefined;
   const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note = metricsNote(snapshot.metrics, column);
+    const note =
+      metricsNote(snapshot.metrics, column) ??
+      (column.name === "Name" ? sortLost : undefined);
     return {
       id: column.name,
       title: column.name,
-      width: column.rule.width,
+      width: column.rule.width + (column.merged?.rule.into?.room ?? 0),
       grow: column.rule.grow,
       align: column.rule.align,
       numeric: column.rule.figures,
@@ -226,7 +262,6 @@ function Grid({
       (every.length === 0 && preset.columns[name] !== false),
     sort: query.sort,
     visible,
-    narrow,
   });
   useEffect(() => {
     setMetrics(reads);
@@ -403,7 +438,7 @@ function Grid({
       onResize={(column, width) => {
         presets.resize(gvr, column, width);
       }}
-      sort={shown?.sort ?? null}
+      sort={sorted ?? null}
       onSort={(sort: Sort) => {
         states.setSort(uri, sort);
       }}

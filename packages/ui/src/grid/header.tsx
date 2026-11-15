@@ -18,6 +18,7 @@ export function HeaderCell({
   onSort,
   onResize,
   onFit,
+  held,
 }: {
   column: GridColumn;
   width: number;
@@ -25,6 +26,8 @@ export function HeaderCell({
   onSort: (sort: GridSort) => void;
   onResize: (width: number) => void;
   onFit: () => void;
+  /** Stays at this distance from the grid's left edge while the grid scrolls sideways. */
+  held?: number;
 }) {
   const title = useId();
   const noteId = useId();
@@ -64,7 +67,11 @@ export function HeaderCell({
       // Its content would add the resize edge's label to its name.
       aria-labelledby={title}
       aria-describedby={note ? noteId : undefined}
-      className="relative h-full border-r border-transparent group-hover/header:border-border-subtle"
+      style={held === undefined ? undefined : { left: held }}
+      className={cn(
+        "h-full border-r border-transparent group-hover/header:border-border-subtle",
+        held === undefined ? "relative" : "sticky z-[1] bg-inherit",
+      )}
     >
       <Tooltip open={note !== undefined && noting} onOpenChange={setNoting}>
         <TooltipTrigger asChild>{sorter}</TooltipTrigger>

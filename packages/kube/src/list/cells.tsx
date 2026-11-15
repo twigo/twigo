@@ -15,6 +15,8 @@ export interface ShownColumn {
   /** Where the column's cells are in a row. */
   readonly index: number;
   readonly rule: ColumnRule;
+  /** A column that left for this one, whose value reads before this one's. */
+  readonly merged?: ShownColumn;
 }
 
 /** A cell's text as the server gave it. */
@@ -66,7 +68,18 @@ export function CellView({
       return <ObjectName name={text} generated={row.generated} />;
     case "status": {
       const tone = rule.tone?.(text);
-      if (!tone) return text;
+      const merged = column.merged && (
+        <>
+          <CellView row={row} column={column.merged} tone={rowTone} />{" "}
+        </>
+      );
+      if (!tone)
+        return (
+          <>
+            {merged}
+            {text}
+          </>
+        );
       return (
         <span
           className={cn(
@@ -76,6 +89,7 @@ export function CellView({
           )}
         >
           <StatusDot tone={tone} pulse={IN_FLIGHT.test(text)} />
+          {merged}
           {text}
         </span>
       );

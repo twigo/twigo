@@ -29,7 +29,7 @@ vi.mock("@twigo/ui", async (original) => {
   };
 });
 
-withScreenSize();
+const layout = withScreenSize(1280);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -372,6 +372,125 @@ test.each([
     expect(
       Number.parseInt(screen.getAllByRole("row")[0]?.style.minWidth ?? "", 10),
     ).toBeLessThanOrEqual(GRID_WIDTH_AT_1280_WITH_EXPLORER);
+  },
+);
+
+const PODS_PRESET = "list//pods";
+
+const shownAt = (width: number) => {
+  layout.resize(grid(), width);
+  return screen
+    .getAllByRole("columnheader")
+    .map((h) => h.firstElementChild?.textContent ?? h.textContent);
+};
+
+test("a list gives up columns as it narrows and takes back the same ones in the same order as it widens, and the person's choices stay as they were", async () => {
+  const backend = createMockBackend("ready");
+  const choices = JSON.stringify({
+    columns: { Restarts: false, Node: true },
+    widths: { Name: 200 },
+  });
+  const set = backend.invoke("state_set", [
+    { space: null, key: PODS_PRESET, value: choices },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(50));
+  await set;
+  const workbench = await openList(backend);
+  const stored = async () => {
+    await act(() => workbench.state.settled());
+    const loaded = backend.invoke("state_load", null);
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    return (await loaded).app[PODS_PRESET];
+  };
+  expect(await stored()).toBe(choices);
+  const widths = [1100, 900, 600, 465, 300];
+  const narrowing = widths.map(shownAt);
+  expect(narrowing).toEqual([
+    [
+      ...["", "Name", "Namespace", "Ready", "Status"],
+      ...["CPU", "Memory", "Age", "Node", "", ""],
+    ],
+    [
+      "",
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "CPU",
+      "Memory",
+      "Age",
+      "",
+      "",
+    ],
+    ["", "Name", "Namespace", "Ready", "Status", "", ""],
+    ["", "Name", "Status", "", ""],
+    ["", "Name", "", ""],
+  ]);
+  expect(await stored()).toBe(choices);
+  const widening = [...widths].reverse().map(shownAt).reverse();
+  expect(widening).toEqual(narrowing);
+  expect(await stored()).toBe(choices);
+});
+
+test("the last column to give way is Status, and Ready joins it first", async () => {
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+  );
+  expect(textOf(rows()[0], "Status")).toBe("CrashLoopBackOff");
+  expect(shownAt(420)).toEqual(["", "Name", "Status", ""]);
+  const merged = textOf(rows()[0], "Status");
+  expect(merged).toMatch(/^\d+\/\d+ ?CrashLoopBackOff$/);
+  expect(merged.startsWith("0/")).toBe(true);
+  expect(shownAt(300)).toEqual(["", "Name", ""]);
+});
+
+test("a sort by a column the width has dropped stays, and the Name header says so until the column is back", async () => {
+  await openList();
+  fireEvent.click(within(header("Memory")).getByRole("button"));
+  await settle();
+  const sorted = () => rows().map((row) => textOf(row, "Name"));
+  const order = sorted();
+  expect(header("Memory").getAttribute("aria-sort")).toBe("descending");
+  expect(screen.queryByText(/^Sorted by /)).toBeNull();
+
+  expect(shownAt(600)).toEqual(["", "Name", "Ready", "Status", "Restarts", ""]);
+  await settle();
+  expect(sorted()).toEqual(order);
+  expect(
+    screen.getByText(
+      "Sorted by Memory, descending: the column has no room at this width.",
+    ),
+  ).toBeTruthy();
+
+  layout.resize(grid(), 1280);
+  await settle();
+  expect(header("Memory").getAttribute("aria-sort")).toBe("descending");
+  expect(sorted()).toEqual(order);
+  expect(screen.queryByText(/^Sorted by /)).toBeNull();
+});
+
+test("a width change renders the grid once, for every row at once, and the same width renders nothing", async () => {
+  await openList();
+  const renders = gridRenders.count;
+  layout.resize(grid(), 900);
+  expect(gridRenders.count).toBe(renders + 1);
+  layout.resize(grid(), 900);
+  expect(gridRenders.count).toBe(renders + 1);
+});
+
+test.each([
+  ["every namespace", "k8s-list://prod-eu/v1/pods", true],
+  ["one namespace", "k8s-list://prod-eu/v1/pods?ns=auth", false],
+])(
+  "Namespace is a column of a list of %s only when it says more",
+  async (_, uri, has) => {
+    await openList(createMockBackend("ready"), uri);
+    expect(
+      screen
+        .getAllByRole("columnheader")
+        .some((h) => h.textContent === "Namespace"),
+    ).toBe(has);
   },
 );
 

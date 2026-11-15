@@ -29,6 +29,15 @@ export const ROW_HEIGHT = 26;
 const HEADER_HEIGHT = 28;
 const MARK_WIDTH = 28;
 const ACTIONS_WIDTH = 32;
+/** What a grid with marks takes beside its columns. */
+export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
+/**
+ * A row's first cells stay while the grid scrolls sideways: they cover what
+ * passes under them, and their own tint, which `before` carries, lies over
+ * their fill as the row's does over the grid's.
+ */
+const HELD =
+  "sticky z-[1] isolate bg-[var(--surface,var(--editor))] before:pointer-events-none before:absolute before:inset-0 before:-z-10";
 /** How long the pointer rests on a row before its icons show, so that a pass over the rows shows none. */
 const HOVER_MS = 60;
 
@@ -465,6 +474,20 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       : isCursor
         ? "bg-selected-unfocused group-focus/grid:bg-selected"
         : undefined;
+    const held = cn(
+      HELD,
+      isMarked
+        ? "before:bg-selected"
+        : isCursor
+          ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
+          : "group-hover/row:before:bg-row-hover",
+    );
+    const edge =
+      target.tone === "error"
+        ? "shadow-[inset_2px_0_0_var(--error)]"
+        : target.tone === "warn"
+          ? "shadow-[inset_2px_0_0_var(--warn)]"
+          : undefined;
     const select = () => {
       setWanted(undefined);
       setCursor(target.id);
@@ -548,9 +571,12 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             role="gridcell"
             className={cn(
               "flex justify-center",
+              held,
+              edge,
+              "left-0",
               !isMarked &&
                 marked.size === 0 &&
-                "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
+                "[&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100",
             )}
           >
             <MarkBox
@@ -562,17 +588,21 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             />
           </div>
         )}
-        {columns.map((column) => {
+        {columns.map((column, order) => {
           const since = flash?.(target.id, column.id);
+          const first = order === 0;
           return (
             <div
               key={column.id}
               role="gridcell"
               data-column={column.id}
+              style={first ? { left: marking ? MARK_WIDTH : 0 } : undefined}
               className={cn(
                 "truncate px-2",
                 column.align === "end" && "text-right",
                 column.numeric && "tabular-nums",
+                first && held,
+                first && !marking && edge,
               )}
             >
               <span
@@ -620,7 +650,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           }}
         >
           {marking && (
-            <div role="columnheader" className="flex justify-center">
+            <div
+              role="columnheader"
+              className="sticky left-0 z-[1] flex justify-center bg-inherit"
+            >
               {marked.size > 0 && (
                 <MarkBox
                   checked={false}
@@ -633,11 +666,12 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               )}
             </div>
           )}
-          {columns.map((column) => (
+          {columns.map((column, order) => (
             <HeaderCell
               key={column.id}
               column={column}
               width={widthOf(column)}
+              {...(order === 0 && { held: marking ? MARK_WIDTH : 0 })}
               sort={sort}
               onSort={(next) => {
                 onSort?.(next);

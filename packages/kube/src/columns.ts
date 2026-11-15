@@ -45,10 +45,34 @@ export interface ColumnRule {
   readonly metric: boolean;
   /** A changed value flashes; a measure that moves at every poll does not. */
   readonly flash: boolean;
+  /**
+   * Where the column goes as its list narrows: the lowest leaves first, and
+   * among equals the one on the right. A column nobody ranked leaves before
+   * every ranked one.
+   */
+  readonly drop: number;
+  /**
+   * When it goes, its value reads in the cell of this column instead, which
+   * takes `room` px more for it.
+   */
+  readonly into?: { readonly column: string; readonly room: number };
 }
+
+/** The order columns leave a narrowing list: `ColumnRule.drop`. */
+const DROP = {
+  node: 1,
+  memory: 2,
+  cpu: 3,
+  age: 4,
+  namespace: 5,
+  restarts: 6,
+  ready: 7,
+  health: 8,
+} as const;
 
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
+    age: { drop: DROP.age },
     cpu: {
       cell: "cpu",
       width: 72,
@@ -56,6 +80,7 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
       descendFirst: true,
       metric: true,
       flash: false,
+      drop: DROP.cpu,
     },
     memory: {
       cell: "memory",
@@ -64,6 +89,7 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
       descendFirst: true,
       metric: true,
       flash: false,
+      drop: DROP.memory,
     },
   };
 
@@ -121,28 +147,43 @@ export const IN_FLIGHT =
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
   Name: { cell: "name", width: 160, grow: true },
-  Namespace: { width: 120, secondary: true, identifier: true, groups: true },
-  Context: { width: 120, secondary: true, groups: true },
-  Node: { width: 200, identifier: true, groups: true },
+  Namespace: {
+    width: 120,
+    secondary: true,
+    identifier: true,
+    groups: true,
+    drop: DROP.namespace,
+  },
+  Context: { width: 120, secondary: true, groups: true, drop: DROP.namespace },
+  Node: { width: 200, identifier: true, groups: true, drop: DROP.node },
 };
 
 /** Rules for one resource's column, by `group/resource/column`, over those by name. */
 const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
-  "/pods/Ready": { cell: "ratio", width: 56, align: "end", tone: ratio },
+  "/pods/Ready": {
+    cell: "ratio",
+    width: 56,
+    align: "end",
+    tone: ratio,
+    drop: DROP.ready,
+    into: { column: "Status", room: 24 },
+  },
   "/pods/Status": {
     cell: "status",
     width: 160,
     groups: true,
     health: true,
     tone: podStatus,
+    drop: DROP.health,
   },
-  "/pods/Restarts": { cell: "restarts", width: 132 },
+  "/pods/Restarts": { cell: "restarts", width: 132, drop: DROP.restarts },
   "/nodes/Status": {
     cell: "status",
     width: 160,
     groups: true,
     health: true,
     tone: nodeStatus,
+    drop: DROP.health,
   },
   "apps/deployments/Ready": {
     cell: "ratio",
@@ -150,6 +191,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     align: "end",
     health: true,
     tone: ratio,
+    drop: DROP.health,
   },
 };
 
@@ -182,6 +224,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     health: false,
     metric: false,
     flash: true,
+    drop: 0,
     ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],
