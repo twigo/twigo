@@ -83,6 +83,7 @@ function Actions({
   useChanges(spaces.changes);
   const list = statuses.get(uri);
   const field = useRef<HTMLInputElement>(null);
+  const fieldBox = useRef<HTMLDivElement>(null);
   const wanted = states.wantsFocus(uri);
   const room = useActionRoom();
   const inspector = states.inspector(uri);
@@ -163,23 +164,21 @@ function Actions({
   ]);
   const taken = useWidth(row);
   // A stage's width is read as it shows, before it paints. While the field
-  // has the focus the filter stays as it is, an icon or the field, since the
-  // other would replace it and take the focus with it: the text changes the
-  // counts, and so the row's width.
+  // or its Clear button has the focus the filter stays as it is, an icon or
+  // the field, since the other would replace it and take the focus with it.
   useLayoutEffect(() => {
     if (room === undefined || !row) return;
     needs.current[stage] = row.offsetWidth;
     const widest = needs.current[STAGES.health];
     if (widest !== undefined) states.setStripMin(uri, TABS_KEPT + widest);
-    const typing =
-      field.current !== null && document.activeElement === field.current;
+    const focused = fieldBox.current?.contains(document.activeElement) === true;
     const next = stageFor(
       needs.current,
       stage,
       room - inspector,
       STAGES.health,
     );
-    const settled = !typing
+    const settled = !focused
       ? next
       : stage >= STAGES.filter
         ? Math.max(next, STAGES.filter)
@@ -195,23 +194,25 @@ function Actions({
   }, [wanted, iconFilter, states, uri]);
 
   const filter = (inPopover: boolean) => (
-    <SearchField
-      label="Filter rows"
-      placeholder="Filter, !not, /regex/"
-      value={text}
-      onChange={(next) => {
-        states.setText(uri, next);
-      }}
-      {...(inPopover && {
-        onEnter: () => {
-          setFiltering(false);
-        },
-      })}
-      {...(find &&
-        stage < STAGES.keys && { keys: keybindings.label(find.presses) })}
-      inputRef={field}
-      className={inPopover ? "w-full" : "w-58"}
-    />
+    <div ref={fieldBox} className="contents">
+      <SearchField
+        label="Filter rows"
+        placeholder="Filter, !not, /regex/"
+        value={text}
+        onChange={(next) => {
+          states.setText(uri, next);
+        }}
+        {...(inPopover && {
+          onEnter: () => {
+            setFiltering(false);
+          },
+        })}
+        {...(find &&
+          stage < STAGES.keys && { keys: keybindings.label(find.presses) })}
+        inputRef={field}
+        className={inPopover ? "w-full" : "w-58"}
+      />
+    </div>
   );
 
   return (

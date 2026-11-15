@@ -265,6 +265,40 @@ test("the popover keeps its field and its focus when the strip widens, and Escap
   expect(stageOf(actions())).toBe(0);
 });
 
+test("the filter keeps its place while its Clear button has the focus, inline or in the popover", async () => {
+  laidOut();
+  await openList();
+  withRoom(620);
+  expect(stageOf(actions())).toBe(2);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+    target: { value: "api" },
+  });
+  await settle();
+  const inline = screen.getByRole("button", { name: "Clear filter rows" });
+  act(() => {
+    inline.focus();
+  });
+  withRoom(500);
+  await settle(1);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBeTruthy();
+  expect(document.activeElement).toBe(inline);
+
+  act(() => {
+    grid().focus();
+  });
+  await settle(1);
+  fireEvent.click(screen.getByRole("button", { name: "Filter rows" }));
+  await settle(1);
+  const popped = screen.getByRole("button", { name: "Clear filter rows" });
+  act(() => {
+    popped.focus();
+  });
+  withRoom(900);
+  await settle(1);
+  expect(screen.getByRole("button", { name: "Filter rows" })).toBeTruthy();
+  expect(document.activeElement).toBe(popped);
+});
+
 test("a popover the strip leaves behind does not open again by itself when the strip narrows", async () => {
   laidOut();
   await openList();
@@ -276,8 +310,11 @@ test("a popover the strip leaves behind does not open again by itself when the s
   });
   await settle();
   act(() => {
-    screen.getByRole("button", { name: "Clear filter rows" }).focus();
+    screen.getByRole("button", { name: "Filter rows" }).focus();
   });
+  expect(
+    document.querySelector("[data-radix-popper-content-wrapper]"),
+  ).not.toBeNull();
   withRoom(900);
   await settle(1);
   expect(screen.queryByRole("button", { name: "Filter rows" })).toBeNull();
