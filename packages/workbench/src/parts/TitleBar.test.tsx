@@ -41,7 +41,7 @@ afterEach(() => {
   globalThis.ResizeObserver = unsized;
 });
 
-const COPIES = { words: 400, icon: 300, search: 60 };
+const COPIES = { words: 400, search: 60 };
 
 function measure(width: number, copies: Partial<typeof COPIES> = COPIES) {
   const sizes: Record<string, number> = { ...COPIES, ...copies };
@@ -50,7 +50,9 @@ function measure(width: number, copies: Partial<typeof COPIES> = COPIES) {
       const size =
         target.tagName === "HEADER"
           ? width
-          : sizes[target.getAttribute("data-copy") ?? ""];
+          : target.childElementCount === 0
+            ? 0
+            : sizes[target.getAttribute("data-copy") ?? ""];
       if (size === undefined) continue;
       report(
         [{ target, contentRect: { width: size } } as ResizeObserverEntry],
@@ -295,7 +297,7 @@ test("the search folds to an icon that keeps its key hint and still opens quick 
   expect(search().textContent).toBe("Search prod-eu⌘P");
 });
 
-test("the chip folds to its icon after the search, its words kept for the tooltip and the popover", async () => {
+test("the chip folds to its icon last, its words kept for the tooltip and the popover", async () => {
   await mounted();
   await settled();
   const chip = () =>
@@ -304,8 +306,10 @@ test("the chip folds to its icon after the search, its words kept for the toolti
     });
   measure(1100);
   expect(chip().textContent).toBe("Production · read-only");
+  measure(700);
+  expect(chip().textContent).toBe("Production · read-only");
 
-  measure(900);
+  measure(500);
   expect(chip().textContent).toBe("");
   expect(chip().querySelector("svg")).not.toBeNull();
   fireEvent.focus(chip());
@@ -322,7 +326,7 @@ test("a folded chip of a type with no icon of its own still shows one", async ()
     workbench.spaces.select("dev");
   });
   await settled();
-  measure(700);
+  measure(500);
   const chip = screen.getByRole("button", { name: "Mode of dev: Development" });
   expect(chip.textContent).toBe("");
   expect(chip.querySelector("svg")).not.toBeNull();
@@ -330,19 +334,26 @@ test("a folded chip of a type with no icon of its own still shows one", async ()
   expect(chip.querySelector("svg")).toBeNull();
 });
 
-test("once both have folded and the crumbs still do not fit, the search moves to the right end", async () => {
+test("the search leaves the middle before the chip folds, and comes back to it as the bar widens", async () => {
   const { container } = await mounted();
+  await settled();
   const columns = () =>
     container.querySelector("header")?.style.gridTemplateColumns;
+  const words = () =>
+    screen.getByRole("button", { name: /^Mode of prod-eu/ }).textContent;
   measure(1440);
   const centred = columns();
-  measure(900);
+  measure(1100);
   expect(columns()).toBe(centred);
   measure(700);
   expect(columns()).not.toBe(centred);
   expect(columns()?.split(" ")).toHaveLength(2);
+  expect(words()).toBe("Production · read-only");
+  measure(500);
+  expect(words()).toBe("");
   measure(1440);
   expect(columns()).toBe(centred);
+  expect(words()).toBe("Production · read-only");
 });
 
 test("a bar that has not been measured shows the search and the chip whole", async () => {
@@ -431,4 +442,18 @@ test("the scope is cut in the middle too: its last namespace stays, All namespac
     "ents, checkout, ledger, platform-o",
     "bservability",
   ]);
+});
+
+test("with no active space the bar shows the search whole, whatever the last space's breadcrumb took", async () => {
+  const { workbench } = await mounted();
+  const search = () => screen.getByRole("button", { name: /^Search / });
+  measure(1100);
+  expect(search().textContent).toBe("⌘P");
+  vi.spyOn(workbench.spaces, "active", "get").mockReturnValue(undefined);
+  act(() => {
+    workbench.spaces.changes.emit();
+  });
+  measure(1100);
+  expect(screen.queryByRole("button", { name: "Switch space" })).toBeNull();
+  expect(search().textContent).toBe("Search Twigo⌘P");
 });

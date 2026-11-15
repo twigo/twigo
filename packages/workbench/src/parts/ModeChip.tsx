@@ -67,13 +67,13 @@ export function ModeChip({ folded }: { folded: boolean }) {
   return <Chip key={chip.context} {...chip} folded={folded} />;
 }
 
-/** The chip as the title bar's hidden copy, to measure what it takes. */
-export function ModeChipCopy({ folded }: { folded: boolean }) {
+/** The chip with its words as the title bar's hidden copy, to measure what it takes. */
+export function ModeChipCopy() {
   const chip = useChip();
   return (
     chip && (
       <span className={CHIP}>
-        <ChipFace access={chip.access} label={chip.label} folded={folded} />
+        <ChipFace access={chip.access} label={chip.label} folded={false} />
       </span>
     )
   );

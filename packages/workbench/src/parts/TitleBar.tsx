@@ -27,9 +27,10 @@ const SEARCH =
  * opens quick access, as VS Code's Command Center. A space with one
  * coloured context tints the bar's left end, as JetBrains tints it with a
  * project's colour, and its mode's chip follows its name (6.4). Where the
- * bar is too narrow the search folds to an icon, then the chip to its icon.
- * What each takes is measured on hidden copies at their natural size, so
- * that a fold never changes what decides it.
+ * bar is too narrow the search folds to an icon, leaves the middle, and then
+ * the chip folds to its icon. What each takes is measured on hidden copies
+ * at their natural size, so that a fold never changes what decides it, and
+ * the copies stay mounted without a space, so that they measure nothing.
  */
 export function TitleBar() {
   const { spaces, colors } = useWorkbench();
@@ -37,7 +38,6 @@ export function TitleBar() {
   useChanges(colors.changes);
   const [bar, setBar] = useState<HTMLElement | null>(null);
   const [words, setWords] = useState<HTMLElement | null>(null);
-  const [icon, setIcon] = useState<HTMLElement | null>(null);
   const [find, setFind] = useState<HTMLElement | null>(null);
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
@@ -46,7 +46,6 @@ export function TitleBar() {
   const width = useWidth(bar);
   const { searchFolded, chipFolded, centred } = titleBarStage(width, {
     crumbs: useWidth(words),
-    crumbsChipFolded: useWidth(icon),
     searchIcon: useWidth(find),
   });
   return (
@@ -78,24 +77,13 @@ export function TitleBar() {
         aria-hidden
         className="invisible absolute top-0 left-0 h-0 overflow-hidden"
       >
-        {space && (
-          <>
-            <div
-              ref={setWords}
-              data-copy="words"
-              className={cn(BREADCRUMB, "w-max")}
-            >
-              <Breadcrumb name={name} scope={scope} chipFolded={false} copy />
-            </div>
-            <div
-              ref={setIcon}
-              data-copy="icon"
-              className={cn(BREADCRUMB, "w-max")}
-            >
-              <Breadcrumb name={name} scope={scope} chipFolded copy />
-            </div>
-          </>
-        )}
+        <div
+          ref={setWords}
+          data-copy="words"
+          className={cn(BREADCRUMB, "w-max")}
+        >
+          {space && <Breadcrumb name={name} scope={scope} copy />}
+        </div>
         <div ref={setFind} data-copy="search" className="w-max">
           <div className={SEARCH}>
             <SearchFace space={space} folded />
@@ -113,12 +101,12 @@ function scopeOf(namespaces: readonly string[]): string {
 function Breadcrumb({
   name,
   scope,
-  chipFolded,
+  chipFolded = false,
   copy = false,
 }: {
   name: string;
   scope: string;
-  chipFolded: boolean;
+  chipFolded?: boolean;
   copy?: boolean;
 }) {
   const { quickAccess } = useWorkbench();
@@ -137,11 +125,7 @@ function Breadcrumb({
       >
         <CutInTheMiddle text={name} floor={NAME_FLOOR} separator={/[:/]/} />
       </Crumb>
-      {copy ? (
-        <ModeChipCopy folded={chipFolded} />
-      ) : (
-        <ModeChip folded={chipFolded} />
-      )}
+      {copy ? <ModeChipCopy /> : <ModeChip folded={chipFolded} />}
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb
         label="Select namespace"
@@ -154,7 +138,13 @@ function Breadcrumb({
   );
 }
 
-/** A text CSS can cut only at its end, cut in the middle instead, with the head and the tail fixed. */
+/**
+ * A text CSS can cut only at its end, cut in the middle instead, with the head
+ * and the tail fixed. The middle's floor of 2em holds a whole glyph and the
+ * ellipsis: narrower, Chrome clips the ellipsis and leaves a letter that is
+ * not in the text. Its `white-space` stays the grid's `pre`, which `truncate`
+ * would turn to `nowrap` and drop the spaces at the ends.
+ */
 function CutInTheMiddle({
   text,
   floor,
@@ -167,9 +157,9 @@ function CutInTheMiddle({
   const cut = cutText(text, floor, separator);
   if (!cut) return <span className="whitespace-pre">{text}</span>;
   return (
-    <span className="grid grid-cols-[auto_minmax(1em,1fr)_auto] whitespace-pre">
+    <span className="grid grid-cols-[auto_minmax(2em,1fr)_auto] whitespace-pre">
       <span>{cut.head}</span>
-      <span className="truncate">{cut.middle}</span>
+      <span className="overflow-hidden text-ellipsis">{cut.middle}</span>
       <span>{cut.tail}</span>
     </span>
   );

@@ -1,19 +1,19 @@
 import { expect, test } from "vitest";
-import { titleBarStage, type TitleBarWidths } from "./titleBarStage";
+import {
+  breadcrumbRoom,
+  SEARCH_FIELD,
+  titleBarStage,
+  TRAFFIC_LIGHTS,
+  type TitleBarWidths,
+} from "./titleBarStage";
 
-const WIDTHS: TitleBarWidths = {
-  crumbs: 400,
-  crumbsChipFolded: 300,
-  searchIcon: 60,
-};
-
-const NAMES = ["unfolded", "search", "search and chip", "search at the end"];
+const WIDTHS: TitleBarWidths = { crumbs: 400, searchIcon: 60 };
 
 const STAGES: Record<string, string> = {
   "false false true": "unfolded",
   "true false true": "search",
-  "true true true": "search and chip",
-  "true true false": "search at the end",
+  "true false false": "search at the end",
+  "true true false": "search at the end, chip",
 };
 
 const stageName = (width: number, widths: TitleBarWidths = WIDTHS) => {
@@ -41,8 +41,13 @@ const firstFoldAt = (widths: TitleBarWidths) => {
   return 0;
 };
 
-test("as the bar narrows the search folds first, then the chip, then the search leaves the middle, and none comes back", () => {
-  expect(stagesAsItNarrows()).toEqual(NAMES);
+test("as the bar narrows the search folds, then leaves the middle, then the chip folds, and none comes back", () => {
+  expect(stagesAsItNarrows()).toEqual([
+    "unfolded",
+    "search",
+    "search at the end",
+    "search at the end, chip",
+  ]);
 });
 
 test("a longer breadcrumb folds at a wider bar", () => {
@@ -57,11 +62,24 @@ test("a bar or a part not yet measured shows everything", () => {
   expect(stageName(500, { ...WIDTHS, searchIcon: 0 })).toBe("unfolded");
 });
 
-test("a space with no chip goes from the search straight to the end", () => {
-  const without = { ...WIDTHS, crumbsChipFolded: WIDTHS.crumbs };
-  expect(stagesAsItNarrows(without)).toEqual([
-    "unfolded",
-    "search",
-    "search at the end",
-  ]);
+test("a part stays as it is only where the layout fits, whichever way the widths were rounded", () => {
+  const icons = [59.5, 60.02, 60.49];
+  const wrong: string[] = [];
+  for (const crumbs of [400.13, 400.5, 400.87]) {
+    for (const icon of icons) {
+      for (let width = 700; width < 1500; width += 0.0625) {
+        const stage = titleBarStage(Math.round(width), {
+          crumbs: Math.round(crumbs),
+          searchIcon: Math.round(icon),
+        });
+        const room = stage.searchFolded
+          ? breadcrumbRoom(width, icon, stage.centred)
+          : breadcrumbRoom(width, SEARCH_FIELD, true);
+        if (!stage.chipFolded && TRAFFIC_LIGHTS + crumbs > room) {
+          wrong.push(`${String(width)} ${String(crumbs)} ${String(icon)}`);
+        }
+      }
+    }
+  }
+  expect(wrong).toEqual([]);
 });

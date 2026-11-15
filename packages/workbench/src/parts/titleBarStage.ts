@@ -3,6 +3,7 @@ export const TRAFFIC_LIGHTS = 84;
 export const SEARCH_FIELD = 300;
 export const BAR_GAP = 12;
 const BREADCRUMB_SHARE = 1.3;
+const ROUNDING = 0.5;
 
 /** The bar's columns: the search between the breadcrumb and an empty column that centres it, or at the right end. */
 export function titleBarColumns(centred: boolean): string {
@@ -11,18 +12,29 @@ export function titleBarColumns(centred: boolean): string {
     : "minmax(0,1fr) auto";
 }
 
+/** The width the grid gives the breadcrumb's column in a bar `width` wide, with a search `search` wide. */
+export function breadcrumbRoom(
+  width: number,
+  search: number,
+  centred: boolean,
+): number {
+  return centred
+    ? ((width - 2 * BAR_GAP - search) * BREADCRUMB_SHARE) /
+        (1 + BREADCRUMB_SHARE)
+    : width - BAR_GAP - search;
+}
+
 /** What the hidden copies of the title bar's parts measure at their natural size. */
 export interface TitleBarWidths {
   /** The breadcrumb with the chip's words, without the room for the traffic lights. */
   readonly crumbs: number;
-  readonly crumbsChipFolded: number;
   readonly searchIcon: number;
 }
 
 export interface TitleBarStage {
   readonly searchFolded: boolean;
   readonly chipFolded: boolean;
-  /** Whether the search sits in the middle, or at the right end once the crumbs have no room even folded. */
+  /** Whether the search sits in the middle, or at the right end. */
   readonly centred: boolean;
 }
 
@@ -33,31 +45,30 @@ const UNFOLDED: TitleBarStage = {
 };
 
 /**
- * Which parts of the title bar fold at a measured width: the search field to
- * an icon first, then the mode chip to its icon, so that the name and the
- * scope stay whole as long as they can; once both have folded and the crumbs
- * still do not fit, the search leaves the middle for the right end. Past that
- * the layout cuts the scope in the middle, and the name only down to its
- * floor. `width` is the bar's content width, as the observer reports it, and
- * the room the breadcrumb has is what its grid column leaves.
+ * Which parts of the title bar give way at a measured width, in this order:
+ * the search field folds to an icon, the search leaves the middle for the
+ * right end, the mode chip folds to its icon. Past that the layout cuts the
+ * scope in the middle, and the name only down to its floor, so that the
+ * chip, which says the context's mode, stays longest. The widths come
+ * rounded, each off by up to half a pixel, so a part stays unfolded only
+ * where it fits whichever way they were rounded. `width` is the bar's
+ * content width, as the observer reports it, and the room the breadcrumb has
+ * is what its grid column leaves.
  */
 export function titleBarStage(
   width: number,
-  { crumbs, crumbsChipFolded, searchIcon }: TitleBarWidths,
+  { crumbs, searchIcon }: TitleBarWidths,
 ): TitleBarStage {
-  if (width === 0 || crumbs === 0 || crumbsChipFolded === 0 || searchIcon === 0)
-    return UNFOLDED;
-  const room = (search: number) =>
-    ((width - 2 * BAR_GAP - search) * BREADCRUMB_SHARE) /
-    (1 + BREADCRUMB_SHARE);
-  const need = (breadcrumb: number) => TRAFFIC_LIGHTS + breadcrumb;
-  if (need(crumbs) <= room(SEARCH_FIELD)) return UNFOLDED;
-  if (need(crumbs) <= room(searchIcon)) {
-    return { ...UNFOLDED, searchFolded: true };
-  }
+  if (width === 0 || crumbs === 0 || searchIcon === 0) return UNFOLDED;
+  const fits = (search: number, centred: boolean) =>
+    TRAFFIC_LIGHTS + crumbs + ROUNDING <=
+    breadcrumbRoom(width - ROUNDING, search, centred);
+  const icon = searchIcon + ROUNDING;
+  if (fits(SEARCH_FIELD, true)) return UNFOLDED;
+  if (fits(icon, true)) return { ...UNFOLDED, searchFolded: true };
   return {
     searchFolded: true,
-    chipFolded: true,
-    centred: need(crumbsChipFolded) <= room(searchIcon),
+    chipFolded: !fits(icon, false),
+    centred: false,
   };
 }
