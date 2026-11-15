@@ -60,6 +60,11 @@ export interface Action {
 /** Actions in groups, drawn with a separator between groups. */
 export type ActionGroups = readonly (readonly Action[])[];
 
+/** A locked action reads in the support role, but one that destroys keeps the error tone. */
+function lockTone(action: Action): string | undefined {
+  return action.locked && !action.danger ? "text-support" : undefined;
+}
+
 /**
  * A menu item's icon, label and keys, and under the label why it cannot run
  * or what its lock will answer. An item that says why stays opaque, so that
@@ -76,17 +81,12 @@ function ItemBody({ action }: { action: Action }) {
         Icon && (
           <Icon
             aria-hidden
-            className={cn(
-              faded && "opacity-50",
-              action.locked && "text-support",
-            )}
+            className={cn(faded && "opacity-50", lockTone(action))}
           />
         )
       )}
       <span className="flex flex-1 flex-col">
-        <span
-          className={cn(faded && "opacity-50", action.locked && "text-support")}
-        >
+        <span className={cn(faded && "opacity-50", lockTone(action))}>
           {action.label}
         </span>
         {action.reason !== undefined && (
@@ -428,7 +428,7 @@ export function ActionBar({
                   BUTTON,
                   "disabled:opacity-50",
                   action.danger && "text-error",
-                  action.locked && "text-support",
+                  lockTone(action),
                 )}
               >
                 <ButtonFace action={action} form="full" />
@@ -591,7 +591,7 @@ export function ActionRow({
                 BUTTON,
                 form === "icon" && action.icon && "px-1.5",
                 action.danger && "text-error",
-                action.locked && "text-support",
+                lockTone(action),
                 action.disabled && "opacity-50 hover:bg-transparent",
               )}
             >
