@@ -63,8 +63,11 @@ export function ResourceGrid(props: {
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   services: ListServices;
-  /** Beside docked details, which show the selected row's actions. */
-  narrow: boolean;
+  /**
+   * Where the selected row's details show: beside the list, with that row's
+   * actions, or over the list's right side, rows' ends included.
+   */
+  details: "beside" | "over" | undefined;
   onActivate: () => void;
 }) {
   const [attempt, setAttempt] = useState(0);
@@ -85,7 +88,7 @@ function Grid({
   resource,
   title,
   services,
-  narrow,
+  details,
   onActivate,
   onRetry,
 }: {
@@ -94,7 +97,7 @@ function Grid({
   resource: Resource;
   title: string;
   services: ListServices;
-  narrow: boolean;
+  details: "beside" | "over" | undefined;
   onActivate: () => void;
   onRetry: () => void;
 }) {
@@ -501,14 +504,17 @@ function Grid({
         selection.mark(uri, ids, marked);
       }}
       menu={workbench.actions("resource/context", lookup)}
-      inline={(row) =>
-        narrow && row.id === current?.row.id
-          ? []
-          : workbench
-              .actions("resource/details", rowLookup(row))
-              .flat()
-              .filter((action) => action.pinned)
-              .slice(0, 2)
+      inline={
+        details === "over"
+          ? undefined
+          : (row) =>
+              details === "beside" && row.id === current?.row.id
+                ? []
+                : workbench
+                    .actions("resource/details", rowLookup(row))
+                    .flat()
+                    .filter((action) => action.pinned)
+                    .slice(0, 2)
       }
       onRest={(row) =>
         row.id === current?.row.id

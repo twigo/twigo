@@ -171,7 +171,9 @@ function Loaded({
   const docked = width >= DOCK_WIDTH;
   const [column, setColumn] = useState<HTMLDivElement | null>(null);
   const listWidth = useWidth(column);
-  const beside = open && docked && selected !== undefined;
+  const details =
+    !open || selected === undefined ? undefined : docked ? "beside" : "over";
+  const beside = details === "beside";
   const inspector = beside && listWidth > 0 ? width - listWidth : 0;
   useEffect(() => {
     states.setInspector(uri, inspector);
@@ -243,7 +245,7 @@ function Loaded({
           resource={resource}
           title={title}
           services={services}
-          narrow={open && docked && selected !== undefined}
+          details={details}
           onActivate={() => {
             setOpen(true);
           }}

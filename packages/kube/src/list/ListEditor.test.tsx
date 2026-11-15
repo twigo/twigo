@@ -307,6 +307,28 @@ test("a row's hover shows its first two pinned verbs before any row is selected,
   expect(nameOf(third)).not.toBe(nameOf(rows()[0]));
 });
 
+test("beside docked details a list with room shows a hovered row's icons on every row but the selected one, whose details show them", async () => {
+  await openList();
+  const icons = (row: HTMLElement) =>
+    within(row)
+      .queryAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => label !== "Row actions" && label !== "Mark row");
+  fireEvent.click(rows()[0] ?? document.body);
+  await settle(2);
+  expect(details()?.className).not.toContain("absolute");
+  const [selected, other] = [rows()[0], rows()[2]];
+  if (!selected || !other) throw new Error("no rows");
+  expect(selected.getAttribute("aria-selected")).toBe("true");
+  fireEvent.pointerEnter(other);
+  await settle(2);
+  expect(icons(other)).toEqual(["Logs", "Shell"]);
+  fireEvent.pointerLeave(other);
+  fireEvent.pointerEnter(selected);
+  await settle(2);
+  expect(icons(selected)).toEqual([]);
+});
+
 test("the column chooser shows a wide column, and the kind keeps the choice", async () => {
   const backend = createMockBackend("ready");
   await openList(backend);

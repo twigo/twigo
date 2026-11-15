@@ -413,6 +413,45 @@ describe("in a narrow editor", () => {
     expect(shown().style.minWidth).toBe("");
   });
 
+  test("lying over the list, the details leave its rows no hover icons, which would mount unseen and ask the cluster for nobody", async () => {
+    const backend = createMockBackend("ready");
+    const invoke = vi.spyOn(backend, "invoke");
+    await openList(backend);
+    const icons = (row: HTMLElement) =>
+      within(row)
+        .queryAllByRole("button")
+        .filter(
+          (button) =>
+            !["Row actions", "Mark row"].includes(
+              button.getAttribute("aria-label") ?? "",
+            ),
+        );
+    const reviews = () =>
+      invoke.mock.calls.filter(([command]) => command === "access_review")
+        .length;
+    const other = rows()[2];
+    if (!other) throw new Error("no rows");
+    const unasked = reviews();
+    fireEvent.pointerEnter(other);
+    await settle(2);
+    expect(icons(other).length).toBeGreaterThan(0);
+    expect(reviews()).toBeGreaterThan(unasked);
+    fireEvent.pointerLeave(other);
+    await settle(1);
+
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(2);
+    expect(shown().className).toContain("absolute");
+    const before = reviews();
+    for (const row of rows().slice(1, 6)) {
+      fireEvent.pointerEnter(row);
+      await settle(2);
+      expect(icons(row)).toEqual([]);
+      fireEvent.pointerLeave(row);
+    }
+    expect(reviews()).toBe(before);
+  });
+
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {
     const script = scriptedPods(true);
     await openList(script.backend);
