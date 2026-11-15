@@ -191,6 +191,7 @@ export function registerExec(
     title: "Shell",
     category: "Shell",
     icon: SquareTerminal,
+    sends: "exec",
     run: async (args) => {
       const parsed = v.safeParse(REQUEST, args);
       if (!parsed.success || !canShell(parsed.output.gvr)) return;
@@ -219,6 +220,7 @@ export function registerExec(
     category: "Shell",
     icon: RotateCcw,
     enablement: "execEnded",
+    sends: "exec",
     run: async (args) => {
       const uri = uriOf(args);
       const input = uri === undefined ? undefined : parseExecUri(uri);

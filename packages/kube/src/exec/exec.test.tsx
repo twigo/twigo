@@ -890,12 +890,12 @@ test("a hidden panel or a tab behind another holds no WebGL, and showing it load
   expect(made.filter(({ disposed }) => !disposed)).toHaveLength(1);
 });
 
-async function kubeMounted() {
+async function kubeMounted(space = "qa") {
   const workbench = await testWorkbench("shellOneContainer");
   registerKube(workbench);
-  await act(() => workbench.spaces.open("qa"));
+  await act(() => workbench.spaces.open(space));
   act(() => {
-    workbench.spaces.select("qa");
+    workbench.spaces.select(space);
   });
   render(<WorkbenchView workbench={workbench} />);
   await settle();
@@ -938,4 +938,32 @@ test("a pod's editor offers Shell in its title, and a deployment's does not", as
   });
   await settle(10);
   expect(screen.queryByRole("button", { name: "Shell" })).toBeNull();
+});
+
+test("on a read-only context a pod's editor draws its Shell with the lock, saying why, and its press still reaches the gate", async () => {
+  const workbench = await kubeMounted("prod-eu");
+  const error = vi.spyOn(notify, "error");
+  act(() => {
+    workbench.editors.open(
+      objectUri({
+        space: "prod-eu",
+        gvr: PODS,
+        namespace: NAMESPACE,
+        name: FIRST["prod-eu"] ?? "",
+      }),
+    );
+  });
+  await settle(10);
+  const shell = screen.getByRole("button", { name: "Shell" });
+  act(() => {
+    shell.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "Shellprod-eu is read-only",
+  );
+  fireEvent.click(shell);
+  await settle(10);
+  const [message, options] = error.mock.calls[0] ?? [];
+  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
