@@ -407,7 +407,15 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
     (overlayMenu ? 0 : ACTIONS_WIDTH);
-  const overflowing = shown > 0 && minWidth > shown;
+  // A held first column that reaches the actions column would lie over the
+  // rows' ⋯ and the choice of columns.
+  const holding =
+    shown > 0 &&
+    minWidth > shown &&
+    (marking ? MARK_WIDTH : 0) +
+      (columns[0] ? widthOf(columns[0]) : 0) +
+      (overlayMenu ? 0 : ACTIONS_WIDTH) <=
+      shown;
   // The menu's trigger wraps every row, and opens the selected row's menu
   // unless a row prevents the event's default.
   const withoutMenu = (event: SyntheticEvent) => {
@@ -490,7 +498,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       : isCursor
         ? "bg-selected-unfocused group-focus/grid:bg-selected"
         : undefined;
-    const held = overflowing
+    const held = holding
       ? cn(
           HELD,
           isMarked
@@ -676,7 +684,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               role="columnheader"
               className={cn(
                 "flex justify-center",
-                overflowing && "sticky left-0 z-20 bg-inherit",
+                holding && "sticky left-0 z-20 bg-inherit",
               )}
             >
               {marked.size > 0 && (
@@ -697,7 +705,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               column={column}
               width={widthOf(column)}
               {...(order === 0 &&
-                overflowing && { held: marking ? MARK_WIDTH : 0 })}
+                holding && { held: marking ? MARK_WIDTH : 0 })}
               sort={sort}
               onSort={(next) => {
                 onSort?.(next);

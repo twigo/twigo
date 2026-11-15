@@ -668,7 +668,7 @@ test("a row's actions mount only while the pointer, the focus or the cursor is o
   expect(hasActions("gateway-1")).toBe(false);
 });
 
-test("the first column stays at the grid's left edge, beside the marks, only while the grid scrolls sideways", () => {
+test("the first column stays at the grid's left edge, beside the marks, only while the grid scrolls sideways and the column leaves the row's actions their room", () => {
   const columns = (name: number) => [
     { id: "Name", title: "Name", width: name },
     { id: "Age", title: "Age", width: 100 },
@@ -690,6 +690,10 @@ test("the first column stays at the grid's left edge, beside the marks, only whi
 
   grid({ columns: columns(900), cell });
   expect(held()).toEqual(["28px", "28px"]);
+  cleanup();
+
+  grid({ columns: columns(960), cell });
+  expect(held()).toEqual(["", ""]);
 });
 
 test("a row's menu has a column of its own, unless the grid lays it over the row's end", () => {
