@@ -270,6 +270,8 @@ pub struct ContainerState {
     pub text: String,
     pub tone: Tone,
     pub ready: bool,
+    /// Its process runs, which a shell or an attach needs.
+    pub running: bool,
     pub restarts: u32,
 }
 

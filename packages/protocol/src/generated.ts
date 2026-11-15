@@ -294,7 +294,11 @@ export type ContainerState = {
 /**
  * "Running", "Waiting · CrashLoopBackOff", "Terminated · Completed".
  */
-text: string, tone: Tone, ready: boolean, restarts: number, };
+text: string, tone: Tone, ready: boolean, 
+/**
+ * Its process runs, which a shell or an attach needs.
+ */
+running: boolean, restarts: number, };
 
 export type ContainerUsage = { name: string, cpu: Measure, memory: Measure, };
 

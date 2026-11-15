@@ -43,6 +43,16 @@ const CRON_JOB = "resource.group == batch && resource.kind == CronJob";
 /** Pinned wherever the item shows. */
 const ALWAYS = "true";
 
+/**
+ * That a container of the pod runs, as its details' Overview says; the
+ * list, the palette and the keys never know, so there `shell_containers`
+ * decides.
+ */
+const RUNS = {
+  when: "!resource.noContainerRuns",
+  reason: "No container runs",
+};
+
 /** That RBAC lets the person patch the object, in the words of what it does. */
 const PATCH = (reason: string) => ({
   when: "resource.capability.patch",
@@ -202,6 +212,7 @@ export function registerResourceActions(
       icon: SquareTerminal,
       key: "s",
       when: "resource.shell",
+      requires: [RUNS],
       sends: "exec",
       menus: [
         ["resource/context", "navigation"],
@@ -214,6 +225,7 @@ export function registerResourceActions(
       title: "Attach",
       icon: Cable,
       when: "resource.shell",
+      requires: [RUNS],
       sends: "exec",
       menus: [
         ["resource/context", "navigation"],

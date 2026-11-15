@@ -196,6 +196,53 @@ describe("in a wide editor", () => {
     ).toBe("separator");
   });
 
+  test("a pod whose Overview lists no running container draws Shell and Attach disabled, saying so, where a running pod's are enabled", async () => {
+    await openList();
+    const cell = (row: HTMLElement, column: string) =>
+      row.querySelector(`[data-column="${column}"]`)?.textContent;
+    const pod = (status: string, ready: string) => {
+      const found = rows().find(
+        (row) => cell(row, "Status") === status && cell(row, "Ready") === ready,
+      );
+      if (!found) throw new Error(`no ${status} pod of ${ready}`);
+      return found;
+    };
+    const shell = () =>
+      within(
+        within(shown()).getByRole("toolbar", { name: "Pod actions" }),
+      ).getByRole("button", { name: "Shell" });
+
+    fireEvent.click(pod("Running", "1/1"));
+    await settle(6);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+    cleanup();
+
+    await openList(
+      createMockBackend("ready"),
+      "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+    );
+    fireEvent.click(pod("CrashLoopBackOff", "0/1"));
+    await settle(1);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+    await settle(6);
+    expect(shell().getAttribute("aria-disabled")).toBe("true");
+    act(() => {
+      shell().focus();
+    });
+    expect(screen.getByRole("tooltip").textContent).toContain(
+      "No container runs",
+    );
+    fireEvent.pointerDown(
+      within(shown()).getByRole("button", { name: "More" }),
+      { button: 0, ctrlKey: false },
+    );
+    const attach = within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: /^Attach/,
+    });
+    expect(attach.getAttribute("aria-disabled")).toBe("true");
+    expect(attach.textContent).toContain("No container runs");
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);

@@ -3204,6 +3204,7 @@
                     "text": "Running",
                     "tone": "success",
                     "ready": true,
+                    "running": true,
                     "restarts": 0
                   },
                   "ports": [
@@ -3836,6 +3837,7 @@
                     "text": "Waiting · CrashLoopBackOff",
                     "tone": "danger",
                     "ready": false,
+                    "running": false,
                     "restarts": 4
                   },
                   "ports": [],
@@ -4694,6 +4696,7 @@
                     "text": "Waiting · ImagePullBackOff",
                     "tone": "danger",
                     "ready": false,
+                    "running": false,
                     "restarts": 0
                   },
                   "ports": [],
@@ -5172,6 +5175,7 @@
                     "text": "Running · not ready",
                     "tone": "warning",
                     "ready": false,
+                    "running": true,
                     "restarts": 0
                   },
                   "ports": [],

@@ -131,6 +131,15 @@ export function Details({
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
   const warnings = warningCount(snapshot.overview, snapshot.events?.events);
+  const idle = noContainerRuns(snapshot.overview);
+  useEffect(() => {
+    if (!element) return;
+    const scope = keys.scope(element);
+    scope.set("resource.noContainerRuns", idle);
+    return () => {
+      scope.dispose();
+    };
+  }, [keys, element, idle]);
   const now = useNow();
   const lookup = keys.lookup(element);
   const measured = useSyncExternalStore(selection.watch, () =>
@@ -332,6 +341,17 @@ function warningCount(
       .flatMap((section) => section.blocks)
       .flatMap((block) => (block.type === "events" ? block.events : []));
   return (listed ?? []).filter((event) => event.type === "Warning").length;
+}
+
+/** Whether the Overview lists containers and none of them runs: false while it lists none, as before it comes. */
+function noContainerRuns(overview: Overview | undefined): boolean {
+  const containers = (overview?.sections ?? [])
+    .flatMap((section) => section.blocks)
+    .flatMap((block) => (block.type === "containers" ? block.containers : []));
+  return (
+    containers.length > 0 &&
+    containers.every((container) => container.state?.running !== true)
+  );
 }
 
 /** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */

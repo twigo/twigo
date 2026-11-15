@@ -169,6 +169,7 @@ fn state(status: &Value, role: ContainerRole) -> ContainerState {
         text,
         tone,
         ready,
+        running: state["running"].is_object(),
         restarts: status["restartCount"]
             .as_u64()
             .and_then(|count| u32::try_from(count).ok())
