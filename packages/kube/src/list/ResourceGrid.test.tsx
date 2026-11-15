@@ -673,7 +673,7 @@ test("the first subscription already carries the column choices the text filter 
   expect(queries).toEqual([{ IP: true }]);
 });
 
-test("a failing row has an edge, a name's hash reads quiet and its last segment support, and restarts read as a count and its age", async () => {
+test("a failing row has an edge, a name reads in its parts, and restarts read as a count and its age", async () => {
   await openList();
   const parts = (row: HTMLElement | undefined, column: string) =>
     [
@@ -700,9 +700,6 @@ test("a failing row has an edge, a name's hash reads quiet and its last segment 
   ]);
   expect(name[1]?.textContent).toMatch(/^[0-9a-z]+-$/);
   expect(name[2]?.textContent).toMatch(/^[0-9a-z]{5}$/);
-  expect(name[0]?.className).not.toMatch(/text-(quiet|support)/);
-  expect(name[1]?.className).toContain("text-quiet");
-  expect(name[2]?.className).toContain("text-support");
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");

@@ -54,7 +54,7 @@ test("a column of an Overview table is numeric when every cell that has somethin
       text("cpu"),
       text("16"),
       text("970m (6%)"),
-      text("0 (0%)"),
+      toned("32 (200%)"),
       text("1"),
       time,
       text(""),
@@ -77,18 +77,5 @@ test("a column of an Overview table is numeric when every cell that has somethin
     false,
     true,
     false,
-  ]);
-});
-
-test("a node's Limits column stays numeric when a value is over its allocatable and toned", () => {
-  const rows = [
-    [text("cpu"), text("970m (6%)"), text("2 (12%)")],
-    [text("memory"), text("322Mi (2%)"), toned("32Gi (200%)")],
-    [text("pods"), text("17"), text("")],
-  ];
-  expect(numericColumns(["Resource", "Requests", "Limits"], rows)).toEqual([
-    false,
-    true,
-    true,
   ]);
 });

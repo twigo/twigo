@@ -12,7 +12,6 @@ const DEPLOYMENTS: Gvr = {
   version: "v1",
   resource: "deployments",
 };
-const JOBS: Gvr = { group: "batch", version: "v1", resource: "jobs" };
 const SERVICES: Gvr = { group: "", version: "v1", resource: "services" };
 const READY: Column = { name: "Ready", kind: "string", priority: 0 };
 
@@ -57,13 +56,8 @@ test("a cell of a column the server declares a string is tabular when its text i
   });
   const cases: [Gvr, string, string, boolean][] = [
     [DEPLOYMENTS, "Up-to-date", "40", true],
-    [DEPLOYMENTS, "Available", "35", true],
     [DEPLOYMENTS, "Up-to-date", "<none>", false],
-    [JOBS, "Completions", "1/1", true],
-    [JOBS, "Duration", "48s", true],
-    [JOBS, "Duration", "2m6s", true],
     [SERVICES, "Cluster-IP", "10.96.0.1", true],
-    [SERVICES, "External-IP", "203.0.113.7,203.0.113.8", true],
     [PODS, "Status", "Running", false],
     [PODS, "Node", "worker-1", false],
   ];

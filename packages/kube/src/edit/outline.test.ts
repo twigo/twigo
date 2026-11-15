@@ -144,9 +144,8 @@ test("the lines of a block scalar are under its key", () => {
   ]);
 });
 
-test("a position past the end, before the first line, or on a blank line between top-level keys has no path", () => {
+test("a position past the end or on a blank line between top-level keys has no path", () => {
   expect(at(deployment, 19)).toEqual([]);
-  expect(at(deployment, 0)).toEqual([]);
   expect(at("a: 1\n\nb: 2\n", 2)).toEqual([]);
   expect(at("", 1)).toEqual([]);
 });

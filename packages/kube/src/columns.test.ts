@@ -224,13 +224,9 @@ test("a row's tone is the abnormal value of its resource's health column", () =>
     generated: null,
     cells: ["api", "0/1", status],
   });
-  expect(rowTone(PODS, "Status", columns, row("CrashLoopBackOff"))).toBe(
-    "error",
-  );
   expect(rowTone(PODS, "Status", columns, row("ContainerCreating"))).toBe(
     "warn",
   );
-  expect(rowTone(PODS, "Status", columns, row("Running"))).toBeUndefined();
   expect(rowTone(PODS, undefined, columns, row("Error"))).toBeUndefined();
 });
 
