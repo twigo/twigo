@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
+  hoverIcons,
   mountKube,
   openList,
   settle,
@@ -1032,16 +1033,11 @@ test("a hovered row's verbs read that row's own state, not the selected row's", 
     fireEvent.pointerEnter(row);
     return row;
   };
-  const labels = (row: HTMLElement) =>
-    within(row)
-      .queryAllByRole("button")
-      .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => label !== "Row actions" && label !== "Mark row");
   const ready = icons("b");
   await settle(2);
-  expect(labels(ready)).toEqual(["Cordon", "Drain"]);
+  expect(hoverIcons(ready)).toEqual(["Cordon", "Drain"]);
   fireEvent.pointerLeave(ready);
   const cordoned = icons("c");
   await settle(2);
-  expect(labels(cordoned)).toEqual(["Uncordon", "Drain"]);
+  expect(hoverIcons(cordoned)).toEqual(["Uncordon", "Drain"]);
 });

@@ -17,11 +17,10 @@ import {
   tabsIn,
   testWorkbench,
 } from "@twigo/workbench/testing";
-import { settle, withScreenSize } from "../../test/workbench";
+import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { ctrlC, withTerminalLayout } from "../../test/terminal";
 import { execUri, objectUri, type ExecInput } from "../uri";
 import { registerKube } from "../register";
-import { tabPaths } from "../tabPaths";
 import { createExecTabs, registerExec } from "./register";
 import { ExecTabs, type WebglRenderer } from "./tabs";
 
@@ -88,7 +87,7 @@ async function mounted(
         webgl,
       })
     : createExecTabs(workbench);
-  registerExec(workbench, tabs, tabPaths(workbench, { last: () => undefined }));
+  registerExec(workbench, tabs, bareTabPaths(workbench));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");

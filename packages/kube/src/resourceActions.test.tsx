@@ -9,9 +9,15 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AccessQuery, ResourceRef } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
-import type { Lookup } from "@twigo/workbench";
+import type { Lookup, Workbench } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
-import { mountKube, openList, settle, withScreenSize } from "../test/workbench";
+import {
+  hoverIcons,
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../test/workbench";
 import { REFUSED_MS } from "./capabilities";
 import { canShell } from "./exec/kinds";
 import { canForward } from "./forward/kinds";
@@ -161,6 +167,20 @@ async function openInStaging(scenario: "ready" | "viewer", uri: string) {
   });
   await settle(30);
   return workbench;
+}
+
+function reviews(
+  workbench: Workbench,
+  answer: (query: AccessQuery) => boolean[] | Promise<boolean[]>,
+) {
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  return vi
+    .spyOn(workbench.backend, "invoke")
+    .mockImplementation((command: string, request: unknown) =>
+      command === "access_review"
+        ? Promise.resolve(answer(request as AccessQuery))
+        : original(command as never, request as never),
+    );
 }
 
 async function selectFirst(): Promise<HTMLElement> {
@@ -325,22 +345,14 @@ test("a Job that ended offers neither Suspend nor Resume", async () => {
 
 test("the delete of marked rows asks for those rows, not the selected one", async () => {
   const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
-  const original = workbench.backend.invoke.bind(workbench.backend);
   const asked: AccessQuery[] = [];
   let refused: string | null = null;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      asked.push(query);
-      return Promise.resolve(
-        query.checks.map(
-          (check) => !(check.verb === "delete" && check.name === refused),
-        ),
-      );
-    },
-  );
+  reviews(workbench, (query) => {
+    asked.push(query);
+    return query.checks.map(
+      (check) => !(check.verb === "delete" && check.name === refused),
+    );
+  });
   const main = await selectFirst();
   const first = asked
     .flatMap((query) => query.checks)
@@ -359,25 +371,16 @@ test("the delete of marked rows asks for those rows, not the selected one", asyn
 
 test("a row moved onto from one whose delete was refused may be deleted while its own review is out", async () => {
   const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
-  const original = workbench.backend.invoke.bind(workbench.backend);
   let refused: string | null = null;
   let held = false;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review") {
-        return original(command as never, request as never);
-      }
-      const query = request as AccessQuery;
-      if (held) return new Promise(() => undefined);
-      return Promise.resolve(
-        query.checks.map((check) => {
-          if (check.verb === "delete" && check.name !== null)
-            refused ??= check.name;
-          return !(check.verb === "delete" && check.name === refused);
-        }),
-      );
-    },
-  );
+  reviews(workbench, (query) => {
+    if (held) return new Promise<boolean[]>(() => undefined);
+    return query.checks.map((check) => {
+      if (check.verb === "delete" && check.name !== null)
+        refused ??= check.name;
+      return !(check.verb === "delete" && check.name === refused);
+    });
+  });
   const main = await selectFirst();
   await settle(4);
   const lookup = () => workbench.keys.lookup(main);
@@ -570,16 +573,6 @@ test("a write the context's mode holds, clicked in the details' row, reaches the
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
 
-const hoverIcons = (row: HTMLElement) =>
-  within(row)
-    .queryAllByRole("button")
-    .filter(
-      (button) =>
-        !["Row actions", "Mark row"].includes(
-          button.getAttribute("aria-label") ?? "",
-        ),
-    );
-
 function twoOfANamespace(): [HTMLElement, HTMLElement] {
   const rows = screen.getAllByRole("row").slice(1);
   const namespaceOf = (row: HTMLElement) =>
@@ -599,22 +592,16 @@ test("a hovered row asks RBAC for itself: its refused verb draws enabled until t
     "ready",
     "k8s-list://staging/apps/v1/deployments",
   );
-  const original = workbench.backend.invoke.bind(workbench.backend);
   const held: (() => void)[] = [];
   const asked: AccessQuery[] = [];
-  const invoke = vi
-    .spyOn(workbench.backend, "invoke")
-    .mockImplementation((command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      asked.push(query);
-      return new Promise((resolve) => {
-        held.push(() => {
-          resolve(query.checks.map((check) => check.verb !== "patch"));
-        });
+  const invoke = reviews(workbench, (query) => {
+    asked.push(query);
+    return new Promise<boolean[]>((resolve) => {
+      held.push(() => {
+        resolve(query.checks.map((check) => check.verb !== "patch"));
       });
     });
+  });
   const [first, second] = twoOfANamespace();
   const nameOf = (row: HTMLElement) =>
     row.querySelector('[data-column="Name"]')?.textContent;
@@ -623,9 +610,7 @@ test("a hovered row asks RBAC for itself: its refused verb draws enabled until t
 
   fireEvent.pointerEnter(first);
   await settle(2);
-  expect(
-    hoverIcons(first).map((icon) => icon.getAttribute("aria-label")),
-  ).toEqual(["Logs", "Restart"]);
+  expect(hoverIcons(first)).toEqual(["Logs", "Restart"]);
   expect(restart(first).getAttribute("aria-disabled")).toBeNull();
   expect(asked[asked.length - 1]?.checks).toContainEqual(
     expect.objectContaining({ verb: "patch", name: nameOf(first) }),
@@ -657,17 +642,11 @@ test("a hovered row's refused verb is enabled again once the review asked again 
     "ready",
     "k8s-list://staging/apps/v1/deployments",
   );
-  const original = workbench.backend.invoke.bind(workbench.backend);
   let answers = true;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      return answers
-        ? Promise.resolve(query.checks.map((check) => check.verb !== "patch"))
-        : Promise.reject(new Error("no answer"));
-    },
+  reviews(workbench, (query) =>
+    answers
+      ? query.checks.map((check) => check.verb !== "patch")
+      : Promise.reject(new Error("no answer")),
   );
   const row = screen.getAllByRole("row")[3];
   if (!row) throw new Error("a list of deployments");
@@ -686,19 +665,11 @@ test("a hovered row's verb that another resource as a whole refuses is enabled a
     "ready",
     "k8s-list://staging/batch/v1/cronjobs",
   );
-  const original = workbench.backend.invoke.bind(workbench.backend);
   let answers = true;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      return answers
-        ? Promise.resolve(
-            query.checks.map((check) => check.resource !== "jobs"),
-          )
-        : Promise.reject(new Error("no answer"));
-    },
+  reviews(workbench, (query) =>
+    answers
+      ? query.checks.map((check) => check.resource !== "jobs")
+      : Promise.reject(new Error("no answer")),
   );
   const [first] = twoOfANamespace();
   const trigger = () => within(first).getByRole("button", { name: "Trigger" });
@@ -724,19 +695,15 @@ test("a hovered row's verb that another resource as a whole refuses draws disabl
     "ready",
     "k8s-list://staging/batch/v1/cronjobs",
   );
-  const original = workbench.backend.invoke.bind(workbench.backend);
   const held: (() => void)[] = [];
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      return new Promise((resolve) => {
+  reviews(
+    workbench,
+    (query) =>
+      new Promise((resolve) => {
         held.push(() => {
           resolve(query.checks.map((check) => check.resource !== "jobs"));
         });
-      });
-    },
+      }),
   );
   const [first, second] = twoOfANamespace();
   const trigger = (row: HTMLElement) =>
@@ -767,19 +734,11 @@ test("a hovered row is asked about only while its icons show: never where the li
     "ready",
     "k8s-list://staging/apps/v1/deployments",
   );
-  const original = workbench.backend.invoke.bind(workbench.backend);
   const asked: AccessQuery[] = [];
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      asked.push(query);
-      return Promise.resolve(
-        query.checks.map((check) => check.verb !== "patch"),
-      );
-    },
-  );
+  reviews(workbench, (query) => {
+    asked.push(query);
+    return query.checks.map((check) => check.verb !== "patch");
+  });
   const rows = () => screen.getAllByRole("row").slice(1);
   const named = (row: HTMLElement) => {
     const name = row.querySelector('[data-column="Name"]')?.textContent;

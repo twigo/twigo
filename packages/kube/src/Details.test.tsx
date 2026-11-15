@@ -14,7 +14,12 @@ import type {
   Overview,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { openList, settle, withScreenSize } from "../test/workbench";
+import {
+  hoverIcons,
+  openList,
+  settle,
+  withScreenSize,
+} from "../test/workbench";
 
 vi.mock("./edit/YamlEditor", () => ({ default: () => <div /> }));
 
@@ -247,7 +252,7 @@ describe("in a wide editor", () => {
     expect(details()).toBeNull();
   });
 
-  test("the header's row is a pod's pinned verbs, then More, whose last item is Delete behind a separator", async () => {
+  test("the header's row is a pod's pinned verbs, then More", async () => {
     await openList();
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
@@ -257,19 +262,6 @@ describe("in a wide editor", () => {
         .getAllByRole("button")
         .map((button) => button.getAttribute("aria-label")),
     ).toEqual(["Logs", "Shell", "Forward", "More"]);
-    fireEvent.pointerDown(within(row).getByRole("button", { name: "More" }), {
-      button: 0,
-      ctrlKey: false,
-    });
-    const menu = screen.getByRole("menu");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.firstChild?.nextSibling?.firstChild?.textContent),
-    ).toEqual(["Attach", "Forward Port…", "Delete"]);
-    expect(
-      menu.lastElementChild?.previousElementSibling?.getAttribute("role"),
-    ).toBe("separator");
   });
 
   test("a pod whose Overview lists no running container draws Shell and Attach disabled, saying so, where a running pod's are enabled", async () => {
@@ -387,7 +379,7 @@ describe("in a wide editor", () => {
 describe("in a narrow editor", () => {
   withScreenSize(800);
 
-  test("the details slide over the list, which keeps the columns its own width leaves it", async () => {
+  test("the details slide over the list, which keeps the columns its own width leaves it, and keep no minimum width, so a narrow editor's 85 % bounds them", async () => {
     await openList();
     const own = [
       "",
@@ -403,29 +395,14 @@ describe("in a narrow editor", () => {
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).toContain("absolute");
-    expect(headers()).toEqual(own);
-  });
-
-  test("lying over the list, the details keep no minimum width, so a narrow editor's 85 % bounds them", async () => {
-    await openList();
-    fireEvent.click(rows()[0] ?? document.body);
-    await settle(1);
     expect(shown().style.minWidth).toBe("");
+    expect(headers()).toEqual(own);
   });
 
   test("lying over the list, the details leave its rows no hover icons, which would mount unseen and ask the cluster for nobody", async () => {
     const backend = createMockBackend("ready");
     const invoke = vi.spyOn(backend, "invoke");
     await openList(backend);
-    const icons = (row: HTMLElement) =>
-      within(row)
-        .queryAllByRole("button")
-        .filter(
-          (button) =>
-            !["Row actions", "Mark row"].includes(
-              button.getAttribute("aria-label") ?? "",
-            ),
-        );
     const reviews = () =>
       invoke.mock.calls.filter(([command]) => command === "access_review")
         .length;
@@ -434,7 +411,7 @@ describe("in a narrow editor", () => {
     const unasked = reviews();
     fireEvent.pointerEnter(other);
     await settle(2);
-    expect(icons(other).length).toBeGreaterThan(0);
+    expect(hoverIcons(other).length).toBeGreaterThan(0);
     expect(reviews()).toBeGreaterThan(unasked);
     fireEvent.pointerLeave(other);
     await settle(1);
@@ -446,7 +423,7 @@ describe("in a narrow editor", () => {
     for (const row of rows().slice(1, 6)) {
       fireEvent.pointerEnter(row);
       await settle(2);
-      expect(icons(row)).toEqual([]);
+      expect(hoverIcons(row)).toEqual([]);
       fireEvent.pointerLeave(row);
     }
     expect(reviews()).toBe(before);

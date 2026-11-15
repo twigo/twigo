@@ -27,8 +27,7 @@ import {
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
-import { settle, withScreenSize } from "../../test/workbench";
-import { tabPaths } from "../tabPaths";
+import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { objectUri, pfUri } from "../uri";
 import { registerForwards } from "./register";
 import { Forwards } from "./service";
@@ -84,11 +83,7 @@ async function mounted(
   const backend = patch ? patching(mock, patch) : mock;
   const workbench = await testWorkbench(scenario, backend);
   const forwards = new Forwards(backend);
-  registerForwards(
-    workbench,
-    forwards,
-    tabPaths(workbench, { last: () => undefined }),
-  );
+  registerForwards(workbench, forwards, bareTabPaths(workbench));
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);
@@ -547,11 +542,7 @@ test("a tab that opens before the core has answered does not say the forward is 
         ? new Promise<never>(() => undefined)
         : backend.subscribe(command, request, onMessage),
   };
-  registerForwards(
-    workbench,
-    new Forwards(held),
-    tabPaths(workbench, { last: () => undefined }),
-  );
+  registerForwards(workbench, new Forwards(held), bareTabPaths(workbench));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");
@@ -604,11 +595,7 @@ test("a resume that fails for another reason than a busy port or the mode is sho
   };
   const workbench = await testWorkbench("live", backend);
   const forwards = new Forwards(backend);
-  registerForwards(
-    workbench,
-    forwards,
-    tabPaths(workbench, { last: () => undefined }),
-  );
+  registerForwards(workbench, forwards, bareTabPaths(workbench));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");

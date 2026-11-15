@@ -1,10 +1,11 @@
-import { act, render } from "@testing-library/react";
+import { act, render, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../src/register";
+import { tabPaths } from "../src/tabPaths";
 import { testSignal } from "./setup";
 
 export async function settle(steps = 6) {
@@ -44,6 +45,15 @@ export async function openList(
   await settle();
   return workbench;
 }
+
+export const hoverIcons = (row: HTMLElement) =>
+  within(row)
+    .queryAllByRole("button")
+    .map((button) => button.getAttribute("aria-label"))
+    .filter((label) => label !== "Row actions" && label !== "Mark row");
+
+export const bareTabPaths = (workbench: Workbench) =>
+  tabPaths(workbench, { last: () => undefined });
 
 export function withScreenSize(width = 800) {
   const unsized = globalThis.ResizeObserver;

@@ -11,6 +11,7 @@ import type { Backend } from "@twigo/protocol";
 import { createMockBackend, SCRAPE_MS } from "@twigo/protocol/mock";
 import type { QuickAccessContext } from "@twigo/workbench";
 import {
+  hoverIcons,
   mountKube,
   openList,
   settle,
@@ -275,14 +276,9 @@ test("a row's hover shows its first two pinned verbs before any row is selected,
   expect(
     rows().filter((row) => row.getAttribute("aria-selected") === "true"),
   ).toEqual([]);
-  const icons = (row: HTMLElement) =>
-    within(row)
-      .queryAllByRole("button")
-      .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => label !== "Row actions" && label !== "Mark row");
   fireEvent.pointerEnter(second);
   await settle(2);
-  expect(icons(second)).toEqual(["Logs", "Shell"]);
+  expect(hoverIcons(second)).toEqual(["Logs", "Shell"]);
   fireEvent.pointerLeave(second);
 
   focusGrid();
@@ -309,11 +305,6 @@ test("a row's hover shows its first two pinned verbs before any row is selected,
 
 test("beside docked details a list with room shows a hovered row's icons on every row but the selected one, whose details show them", async () => {
   await openList();
-  const icons = (row: HTMLElement) =>
-    within(row)
-      .queryAllByRole("button")
-      .map((button) => button.getAttribute("aria-label"))
-      .filter((label) => label !== "Row actions" && label !== "Mark row");
   fireEvent.click(rows()[0] ?? document.body);
   await settle(2);
   expect(details()?.className).not.toContain("absolute");
@@ -322,11 +313,11 @@ test("beside docked details a list with room shows a hovered row's icons on ever
   expect(selected.getAttribute("aria-selected")).toBe("true");
   fireEvent.pointerEnter(other);
   await settle(2);
-  expect(icons(other)).toEqual(["Logs", "Shell"]);
+  expect(hoverIcons(other)).toEqual(["Logs", "Shell"]);
   fireEvent.pointerLeave(other);
   fireEvent.pointerEnter(selected);
   await settle(2);
-  expect(icons(selected)).toEqual([]);
+  expect(hoverIcons(selected)).toEqual([]);
 });
 
 test("the column chooser shows a wide column, and the kind keeps the choice", async () => {

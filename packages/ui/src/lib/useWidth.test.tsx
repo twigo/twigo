@@ -1,38 +1,19 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { expect, test } from "vitest";
+import { resize } from "../../test/resize";
 import { useWidth } from "./useWidth";
 
-const observed = globalThis.ResizeObserver;
-
-afterEach(() => {
-  globalThis.ResizeObserver = observed;
-});
-
 test("an element that stops being laid out keeps the width it had", () => {
-  let report: ResizeObserverCallback = () => undefined;
-  globalThis.ResizeObserver = class {
-    constructor(callback: ResizeObserverCallback) {
-      report = callback;
-    }
-    observe() {
-      return undefined;
-    }
-    unobserve() {
-      return undefined;
-    }
-    disconnect() {
-      return undefined;
-    }
-  };
+  const element = document.createElement("div");
   const measure = (width: number) => {
+    Object.defineProperty(element, "clientWidth", {
+      configurable: true,
+      value: width,
+    });
     act(() => {
-      report(
-        [{ contentRect: new DOMRectReadOnly(0, 0, width, 100) }] as never,
-        {} as ResizeObserver,
-      );
+      resize();
     });
   };
-  const element = document.createElement("div");
   const { result } = renderHook(() => useWidth(element));
   expect(result.current).toBe(0);
   measure(0);

@@ -11,14 +11,13 @@ import type { LogBatch, LogPod, StreamState, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { WorkbenchView } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
-import { settle, withScreenSize } from "../test/workbench";
+import { bareTabPaths, settle, withScreenSize } from "../test/workbench";
 import { withTerminalLayout } from "../test/terminal";
 import { createExecTabs, registerExec } from "./exec/register";
 import { registerLogs } from "./logs/register";
 import { LogsTabs } from "./logs/state";
 import { createTerminalTabs, registerTerminals } from "./terminal/register";
 import { registerSessions } from "./sessions";
-import { tabPaths } from "./tabPaths";
 import { execUri, logsUri, terminalUri } from "./uri";
 
 withScreenSize(1400);
@@ -50,7 +49,7 @@ async function mounted(scenario: MockScenario = "shellOneContainer") {
   const logs = new LogsTabs(backend);
   const shells = createExecTabs(workbench);
   const terminals = createTerminalTabs(workbench);
-  const paths = tabPaths(workbench, { last: () => undefined });
+  const paths = bareTabPaths(workbench);
   registerLogs(workbench, logs, paths);
   registerExec(workbench, shells, paths);
   registerTerminals(workbench, terminals, paths);
