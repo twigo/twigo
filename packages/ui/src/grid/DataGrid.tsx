@@ -92,8 +92,11 @@ export interface DataGridProps<R, G> {
    * which act on the selected row.
    */
   readonly inline?: (row: R) => readonly Action[];
-  /** The pointer has come to rest on a row, whose icons now show: the time to ask what they need. */
-  readonly onRest?: (row: R) => void;
+  /**
+   * A row's icons have come to show, after the pointer rested on it: the
+   * time to ask what they need; what it returns runs once they go.
+   */
+  readonly onRest?: (row: R) => () => void;
   /** At the head of the actions column, such as the choice of columns. */
   readonly headerEnd?: ReactNode;
   /** Skeleton rows until the first rows come. */
@@ -503,12 +506,6 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             )}
           </>
         }
-        onRest={
-          onRest &&
-          (() => {
-            onRest(target.data);
-          })
-        }
         icons={
           inline &&
           (() => {
@@ -516,27 +513,17 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             return (
               actions.length > 0 &&
               room >= iconsWidth(actions.length) && (
-                <div
-                  className="absolute inset-y-0 flex items-center bg-editor"
-                  style={{ right: ACTIONS_WIDTH }}
-                >
-                  <div
-                    className={cn(
-                      "flex h-full items-center bg-row-hover pl-2",
-                      tint,
-                    )}
-                  >
-                    <InlineActions
-                      actions={actions.map(({ keys: _, ...action }) => ({
-                        ...action,
-                        run: () => {
-                          select();
-                          action.run();
-                        },
-                      }))}
-                    />
-                  </div>
-                </div>
+                <RowIcons
+                  tint={tint}
+                  actions={actions.map(({ keys: _, ...action }) => ({
+                    ...action,
+                    run: () => {
+                      select();
+                      action.run();
+                    },
+                  }))}
+                  onShow={onRest && (() => onRest(target.data))}
+                />
               )
             );
           })
@@ -708,7 +695,6 @@ function DataRow({
   overlay,
   actions,
   icons,
-  onRest,
   children,
   ...row
 }: ComponentProps<"div"> & {
@@ -717,19 +703,16 @@ function DataRow({
   overlay: string | undefined;
   actions: ReactNode;
   icons: (() => ReactNode) | undefined;
-  onRest: (() => void) | undefined;
 }) {
   const [pointed, setPointed] = useState(false);
   const [rested, setRested] = useState(false);
   const [focused, setFocused] = useState(false);
   const shown = keepActions || pointed || focused;
-  const rest = useEffectEvent(() => {
-    setRested(true);
-    onRest?.();
-  });
   useEffect(() => {
     if (!pointed) return;
-    const timer = setTimeout(rest, HOVER_MS);
+    const timer = setTimeout(() => {
+      setRested(true);
+    }, HOVER_MS);
     return () => {
       clearTimeout(timer);
     };
@@ -770,6 +753,30 @@ function DataRow({
           </div>
         )
       )}
+    </div>
+  );
+}
+
+/** A row's icons over its end; `onShow` runs once they show, and what it returns once they go. */
+function RowIcons({
+  tint,
+  actions,
+  onShow,
+}: {
+  tint: string | undefined;
+  actions: readonly Action[];
+  onShow: (() => () => void) | undefined;
+}) {
+  const show = useEffectEvent(() => onShow?.());
+  useEffect(() => show(), []);
+  return (
+    <div
+      className="absolute inset-y-0 flex items-center bg-editor"
+      style={{ right: ACTIONS_WIDTH }}
+    >
+      <div className={cn("flex h-full items-center bg-row-hover pl-2", tint)}>
+        <InlineActions actions={actions} />
+      </div>
     </div>
   );
 }

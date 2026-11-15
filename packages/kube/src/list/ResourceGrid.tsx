@@ -454,17 +454,18 @@ function Grid({
               .filter((action) => action.pinned)
               .slice(0, 2)
       }
-      onRest={(row) => {
-        if (row.id === current?.row.id) return;
-        capabilities.askHovered(
-          uri,
-          input.space,
-          resource.gvr,
-          objectOfRow(row.id, resource.namespaced),
-          referenced,
-          catalog.list,
-        );
-      }}
+      onRest={(row) =>
+        row.id === current?.row.id
+          ? () => undefined
+          : capabilities.askHovered(
+              uri,
+              input.space,
+              resource.gvr,
+              objectOfRow(row.id, resource.namespaced),
+              referenced,
+              catalog.list,
+            )
+      }
       headerEnd={
         <ActionDropdown
           label="Choose columns"

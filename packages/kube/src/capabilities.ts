@@ -86,7 +86,11 @@ export class Capabilities {
     this.#ask(uri, space, resource, [object], keys, basis, uri);
   }
 
-  /** Asks for the keys of the row the pointer rests on in a list, as `ask` asks for its selected one. */
+  /**
+   * Asks for the keys of the row whose icons show in a list, as `ask` asks
+   * for its selected one, until the function it returns says they went:
+   * then a no is asked no more.
+   */
   askHovered(
     uri: string,
     space: string,
@@ -94,8 +98,13 @@ export class Capabilities {
     object: Asked,
     keys: readonly string[],
     basis: unknown,
-  ): void {
-    this.#ask(`${uri}${HOVERED}`, space, resource, [object], keys, basis, uri);
+  ): () => void {
+    const entry = `${uri}${HOVERED}`;
+    this.#ask(entry, space, resource, [object], keys, basis, uri);
+    const asked = this.#lists.get(entry)?.ask;
+    return () => {
+      if (this.#lists.get(entry)?.ask === asked) this.#lists.delete(entry);
+    };
   }
 
   /**

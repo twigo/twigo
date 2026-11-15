@@ -12,6 +12,7 @@ import { notify } from "@twigo/ui";
 import type { Lookup } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
 import { mountKube, openList, settle, withScreenSize } from "../test/workbench";
+import { REFUSED_MS } from "./capabilities";
 import { canShell } from "./exec/kinds";
 import { canForward } from "./forward/kinds";
 import { logsKind } from "./logs/entries";
@@ -691,6 +692,59 @@ test("a hovered row's verb that another resource as a whole refuses draws disabl
   expect(screen.getByRole("tooltip").textContent).toContain(
     "You may not create Jobs here",
   );
+});
+
+test("a hovered row is asked about only while its icons show: never beside the docked details, which leave them no room, and no more once the pointer leaves", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  const asked: AccessQuery[] = [];
+  vi.spyOn(workbench.backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command !== "access_review")
+        return original(command as never, request as never);
+      const query = request as AccessQuery;
+      asked.push(query);
+      return Promise.resolve(
+        query.checks.map((check) => check.verb !== "patch"),
+      );
+    },
+  );
+  const rows = () => screen.getAllByRole("row").slice(1);
+  const named = (row: HTMLElement) => {
+    const name = row.querySelector('[data-column="Name"]')?.textContent;
+    return asked.filter((query) =>
+      query.checks.some((check) => check.name === name),
+    ).length;
+  };
+
+  const hovered = rows()[2];
+  if (!hovered) throw new Error("a list of deployments");
+  fireEvent.pointerEnter(hovered);
+  await settle(2);
+  expect(hoverIcons(hovered).length).toBeGreaterThan(0);
+  expect(named(hovered)).toBe(1);
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  expect(named(hovered)).toBe(2);
+  fireEvent.pointerLeave(hovered);
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS * 3));
+  expect(named(hovered)).toBe(2);
+
+  fireEvent.click(rows()[0] ?? document.body);
+  await settle(8);
+  expect(
+    screen.getByRole("complementary", { name: "Deployment details" }).className,
+  ).not.toContain("absolute");
+  const before = asked.length;
+  for (const row of rows().slice(1, 9)) {
+    fireEvent.pointerEnter(row);
+    await settle(2);
+    expect(hoverIcons(row)).toEqual([]);
+    fireEvent.pointerLeave(row);
+  }
+  expect(asked.length).toBe(before);
 });
 
 test("a hovered row's verb the context's mode holds runs on that row and meets the gate's refusal, which offers the unlock", async () => {
