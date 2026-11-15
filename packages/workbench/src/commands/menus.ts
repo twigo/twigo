@@ -44,11 +44,22 @@ export interface MenuItem {
   readonly group?: string;
   readonly order?: number;
   readonly when?: string;
+  /**
+   * Where the item keeps its place on a row of actions, before More, as a
+   * when-expression: the verbs a kind pins (ARCHITECTURE 4.3).
+   */
+  readonly pin?: string;
+}
+
+/** An item where its when holds, and whether it is pinned there. */
+export interface Placed extends MenuItem {
+  readonly pinned: boolean;
 }
 
 interface Entry {
   readonly item: MenuItem;
   readonly when: When | undefined;
+  readonly pin: When | undefined;
 }
 
 /** Menus are data that point at commands, as VS Code's MenuRegistry. */
@@ -60,6 +71,7 @@ export class Menus {
     const entry = {
       item,
       when: item.when === undefined ? undefined : parseWhen(item.when),
+      pin: item.pin === undefined ? undefined : parseWhen(item.pin),
     };
     const entries = this.#menus.get(menu) ?? new Set();
     entries.add(entry);
@@ -74,14 +86,16 @@ export class Menus {
   /**
    * The items whose `when` holds, in groups, each group sorted by order.
    * Without a lookup every item counts, for the native menu, which cannot
-   * follow the focus.
+   * follow the focus, and none is pinned.
    */
-  groups(menu: MenuId, lookup?: Lookup): MenuItem[][] {
-    const groups = new Map<string, MenuItem[]>();
-    for (const { item, when } of this.#menus.get(menu) ?? []) {
+  groups(menu: MenuId, lookup?: Lookup): Placed[][] {
+    const groups = new Map<string, Placed[]>();
+    for (const { item, when, pin } of this.#menus.get(menu) ?? []) {
       if (lookup && when && !evaluate(when, lookup)) continue;
       const name = item.group ?? "";
-      groups.set(name, [...(groups.get(name) ?? []), item]);
+      const pinned =
+        lookup !== undefined && pin !== undefined && evaluate(pin, lookup);
+      groups.set(name, [...(groups.get(name) ?? []), { ...item, pinned }]);
     }
     return [...groups.entries()]
       .sort(([a], [b]) => groupRank(a) - groupRank(b) || a.localeCompare(b))

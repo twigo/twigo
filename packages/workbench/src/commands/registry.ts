@@ -8,6 +8,14 @@ import {
   type When,
 } from "../contextkey/when";
 
+/** A condition a command needs besides its enablement, with the words for it while it fails. */
+export interface Requirement {
+  /** A when-expression: `resource.capability.patch`. */
+  readonly when: string;
+  /** `You may not restart it`. */
+  readonly reason: string;
+}
+
 /** A command as the palette, menus and keybindings see it (ARCHITECTURE 5.1). */
 export interface CommandDescriptor {
   /** `k8s.resource.delete`, `workbench.action.quickOpen`. */
@@ -18,6 +26,15 @@ export interface CommandDescriptor {
   readonly icon?: LucideIcon;
   /** A when-expression; the command does nothing where it fails. */
   readonly enablement?: string;
+  /** What else it needs, as permissions RBAC grants, each saying why the command cannot run while it fails. */
+  readonly requires?: readonly Requirement[];
+  /** It destroys what it acts on, so menus draw it in the error tone. */
+  readonly danger?: boolean;
+  /**
+   * The class of request it asks the gate for, which a read-only context
+   * refuses: menus show the lock, and the gate still decides (ARCHITECTURE 6.4).
+   */
+  readonly sends?: "write" | "exec";
 }
 
 export interface Command extends CommandDescriptor {
@@ -28,6 +45,10 @@ export interface Command extends CommandDescriptor {
 interface Entry {
   readonly command: Command;
   readonly enablement: When | undefined;
+  readonly requires: readonly {
+    readonly when: When;
+    readonly reason: string;
+  }[];
 }
 
 /** One namespace for every command, as VS Code's CommandsRegistry. */
@@ -50,6 +71,10 @@ export class Commands {
         command.enablement === undefined
           ? undefined
           : parseWhen(command.enablement),
+      requires: (command.requires ?? []).map(({ when, reason }) => ({
+        when: parseWhen(when),
+        reason,
+      })),
     };
     this.#entries.set(command.id, entry);
     this.#changed();
@@ -74,20 +99,37 @@ export class Commands {
   /** The keys the commands' enablement reads that start with `prefix`. */
   referenced(prefix: string): readonly string[] {
     const keys = new Set<string>();
-    for (const { enablement } of this.#entries.values()) {
-      if (!enablement) continue;
-      for (const key of keysOf(enablement)) {
+    for (const { enablement, requires } of this.#entries.values()) {
+      const whens = [
+        ...(enablement ? [enablement] : []),
+        ...requires.map(({ when }) => when),
+      ];
+      for (const key of whens.flatMap(keysOf)) {
         if (key.startsWith(prefix)) keys.add(key);
       }
     }
     return [...keys].sort();
   }
 
-  /** Whether the command exists and its enablement holds. */
+  /** Whether the command exists and its enablement and requirements hold. */
   enabled(id: string, lookup: Lookup): boolean {
     const entry = this.#entries.get(id);
     if (!entry) return false;
-    return entry.enablement === undefined || evaluate(entry.enablement, lookup);
+    return (
+      (entry.enablement === undefined || evaluate(entry.enablement, lookup)) &&
+      entry.requires.every(({ when }) => evaluate(when, lookup))
+    );
+  }
+
+  /** Why a command whose enablement holds cannot run: the first requirement that fails. */
+  reason(id: string, lookup: Lookup): string | undefined {
+    const entry = this.#entries.get(id);
+    if (
+      !entry ||
+      (entry.enablement !== undefined && !evaluate(entry.enablement, lookup))
+    )
+      return undefined;
+    return entry.requires.find(({ when }) => !evaluate(when, lookup))?.reason;
   }
 
   /**

@@ -30,7 +30,7 @@ export { Observer as ResizeObserver };
 
 const sizeOf = (target: Element) =>
   target instanceof HTMLElement
-    ? `${String(target.clientHeight)} ${String(target.offsetHeight)}`
+    ? `${String(target.clientWidth)} ${String(target.clientHeight)} ${String(target.offsetHeight)}`
     : "";
 
 export function resize(): void {

@@ -1,4 +1,5 @@
 import { cn } from "../lib/cn";
+import { rovingMove } from "../lib/roving";
 import { Count } from "./count";
 
 export interface Tab<V extends string> {
@@ -8,15 +9,6 @@ export interface Tab<V extends string> {
   readonly count?: number;
   readonly warn?: boolean;
 }
-
-const MOVES: Readonly<
-  Record<string, (index: number, count: number) => number>
-> = {
-  ArrowLeft: (index, count) => (index - 1 + count) % count,
-  ArrowRight: (index, count) => (index + 1) % count,
-  Home: () => 0,
-  End: (_, count) => count - 1,
-};
 
 /**
  * The views of a panel as underlined tabs, the shown one underlined. Tab
@@ -56,10 +48,9 @@ export function TabBar<V extends string>({
             onChange(tab.value);
           }}
           onKeyDown={(event) => {
-            const move = MOVES[event.key];
-            if (!move) return;
+            const to = rovingMove(event.key, index, tabs.length);
+            if (to === undefined) return;
             event.preventDefault();
-            const to = move(index, tabs.length);
             const next = tabs[to];
             if (!next) return;
             onChange(next.value);

@@ -5,6 +5,7 @@ import type {
   ModeSource,
   Space,
 } from "@twigo/protocol";
+import type { Lookup } from "../contextkey/when";
 import type { Catalog } from "./catalog";
 
 export const MODES: readonly Mode[] = ["read-write", "guarded", "read-only"];
@@ -78,6 +79,18 @@ export function chipLabel(access: ContextAccess): string | undefined {
   return mode === "read-write" && environment !== "production"
     ? type
     : `${type} · ${mode}`;
+}
+
+/**
+ * What the active space's context will answer a write or an exec while its
+ * mode is read-only, as its keys say: `prod-eu is read-only`. A space of
+ * several contexts has no one mode, so it says nothing, and the gate decides.
+ */
+export function modeLock(lookup: Lookup): string | undefined {
+  const name = lookup("context.name");
+  return lookup("context.readOnly") === true && typeof name === "string"
+    ? `${name} is read-only`
+    : undefined;
 }
 
 /** Whether the admin's file holds the mode, so nothing in the UI changes it. */

@@ -71,3 +71,29 @@ test("a bad when fails at registration", () => {
     new Menus().append("statusBar", { command: "x", when: "a ==" }),
   ).toThrow();
 });
+
+test("an item is pinned where its pin holds, and never without a lookup", () => {
+  const menus = new Menus();
+  menus.append("resource/details", {
+    command: "logs",
+    pin: "resource.kind == Pod",
+  });
+  menus.append("resource/details", { command: "delete" });
+  const pinned = (context?: Record<string, ContextValue>) =>
+    menus
+      .groups("resource/details", context && lookup(context))
+      .flat()
+      .map((item) => [item.command, item.pinned]);
+  expect(pinned({ "resource.kind": "Pod" })).toEqual([
+    ["logs", true],
+    ["delete", false],
+  ]);
+  expect(pinned({ "resource.kind": "Job" })).toEqual([
+    ["logs", false],
+    ["delete", false],
+  ]);
+  expect(pinned()).toEqual([
+    ["logs", false],
+    ["delete", false],
+  ]);
+});
