@@ -734,7 +734,7 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 
 The interface zoom is the app's too.
 Zoom In (⌘=, ⇧⌘= and the numpad's +), Zoom Out (⌘- and the numpad's −) and Reset Zoom (⌘0 and the numpad's 0), with Ctrl on Linux and Windows, step it from 0.5 to 2 in tenths; the palette and the macOS View menu hold them too.
-The workbench keeps the factor under `window/zoom` (4.8), read once at start, and `apps/desktop` applies it before the first render, then each change in turn: in the app as the webview's zoom, which wry sets on macOS as WKWebView's `pageZoom` ([mod.rs at wry-v0.57.1](https://github.com/tauri-apps/wry/blob/wry-v0.57.1/src/wkwebview/mod.rs#L1024-L1031)), and in the mock as CSS `zoom` on `<html>`.
+The workbench keeps the factor under `window/zoom` (4.8), read once at start, and `apps/desktop` applies a stored factor other than 1 before the first render (the webview starts at 1, so 1 sends nothing and the first render does not wait for a command that changes nothing), then each change in turn: in the app as the webview's zoom, which wry sets on macOS as WKWebView's `pageZoom` ([mod.rs at wry-v0.57.1](https://github.com/tauri-apps/wry/blob/wry-v0.57.1/src/wkwebview/mod.rs#L1024-L1031)), and in the mock as CSS `zoom` on `<html>`.
 In WKWebView that zoom scales `devicePixelRatio`, the screen's scale times the page zoom ([`devicePixelRatio`](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/page/LocalDOMWindow.cpp#L1780-L1794)), while resolution media queries keep the screen's scale (a plain WKWebView on macOS 27.2, 2026-11-14).
 On a layout where `=` needs ⇧, as the German one, ⌘+ zooms nothing, while the numpad's + works on every layout ([`TODO.md`](../TODO.md)).
 

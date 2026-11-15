@@ -44,27 +44,40 @@ test("in the app the webview hears the starting factor once, then each change", 
   expect(document.documentElement.style.zoom).toBe("");
 });
 
+test("a starting factor of 1 sends nothing, since the webview starts there, and a change still does", async () => {
+  host.app = true;
+  host.setZoom.mockResolvedValue(undefined);
+  const workbench = await startingAt(1);
+  await installZoom(workbench);
+  expect(host.setZoom).not.toHaveBeenCalled();
+
+  workbench.zoom.zoomIn();
+  await vi.waitFor(() => {
+    expect(host.setZoom.mock.calls).toEqual([[1.1]]);
+  });
+});
+
 test("the webview hears one factor at a time, in the order they were chosen", async () => {
   host.app = true;
   const answers: (() => void)[] = [];
   host.setZoom.mockImplementation(
     () => new Promise<void>((resolve) => answers.push(resolve)),
   );
-  const workbench = await startingAt(1);
+  const workbench = await startingAt(1.3);
   const started = installZoom(workbench);
   workbench.zoom.zoomIn();
   workbench.zoom.zoomIn();
   await Promise.resolve();
-  expect(host.setZoom.mock.calls).toEqual([[1]]);
+  expect(host.setZoom.mock.calls).toEqual([[1.3]]);
 
   answers[0]?.();
   await started;
   await vi.waitFor(() => {
-    expect(host.setZoom.mock.calls).toEqual([[1], [1.1]]);
+    expect(host.setZoom.mock.calls).toEqual([[1.3], [1.4]]);
   });
   answers[1]?.();
   await vi.waitFor(() => {
-    expect(host.setZoom.mock.calls).toEqual([[1], [1.1], [1.2]]);
+    expect(host.setZoom.mock.calls).toEqual([[1.3], [1.4], [1.5]]);
   });
 });
 
@@ -72,7 +85,7 @@ test("a refused zoom is reported, and the next change is still applied", async (
   host.app = true;
   host.setZoom.mockRejectedValueOnce(new Error("not allowed"));
   host.setZoom.mockResolvedValue(undefined);
-  const workbench = await startingAt(1);
+  const workbench = await startingAt(1.3);
   const report = vi
     .spyOn(workbench, "report")
     .mockImplementation(() => undefined);
@@ -81,7 +94,7 @@ test("a refused zoom is reported, and the next change is still applied", async (
 
   workbench.zoom.zoomIn();
   await vi.waitFor(() => {
-    expect(host.setZoom).toHaveBeenLastCalledWith(1.1);
+    expect(host.setZoom).toHaveBeenLastCalledWith(1.4);
   });
 });
 

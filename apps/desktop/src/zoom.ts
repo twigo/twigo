@@ -9,9 +9,11 @@ async function apply(factor: number): Promise<void> {
 
 /**
  * Applies the workbench's interface zoom: the webview's own in the app, the
- * page's CSS `zoom` in the browser mock. Resolves once the starting factor is
- * applied, so the first render needs no jump. Each later change follows it,
- * one at a time: two async commands in flight could land in either order.
+ * page's CSS `zoom` in the browser mock. Resolves once a starting factor other
+ * than 1 is applied, so the first render needs no jump; the webview starts at
+ * 1, so a starting factor of 1 sends nothing and the first render does not
+ * wait for a command that changes nothing. Each later change follows, one at
+ * a time: two async commands in flight could land in either order.
  */
 export function installZoom(workbench: Workbench): Promise<void> {
   const { zoom } = workbench;
@@ -28,5 +30,5 @@ export function installZoom(workbench: Workbench): Promise<void> {
   zoom.changes.subscribe(() => {
     void follow();
   });
-  return follow();
+  return zoom.factor === 1 ? Promise.resolve() : follow();
 }
