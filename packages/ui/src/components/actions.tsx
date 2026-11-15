@@ -388,8 +388,9 @@ function ButtonTooltip({
 
 /**
  * Actions as labelled buttons with their keys: a selection's floating bar,
- * or `inline` in a panel's header, as the details' actions. `outlined` draws
- * them as `Button`s of the outline variant, as an empty state does.
+ * or `inline` in a toolbar or a banner, as the editors' edit actions and the
+ * empty panel's are. `outlined` draws them as `Button`s of the outline
+ * variant, as an empty state does.
  */
 export function ActionBar({
   actions,

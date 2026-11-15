@@ -96,7 +96,7 @@ export class Commands {
     return this.#all;
   }
 
-  /** The keys the commands' enablement reads that start with `prefix`. */
+  /** The keys the commands' enablement and requirements read that start with `prefix`. */
   referenced(prefix: string): readonly string[] {
     const keys = new Set<string>();
     for (const { enablement, requires } of this.#entries.values()) {
