@@ -11,6 +11,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { useActionRoom } from "../react";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
+import { STRIP_KEPT, TAB_MAX } from "./strip";
 
 afterEach(() => {
   cleanup();
@@ -147,7 +148,7 @@ function fakeResizes() {
   };
 }
 
-test("a group's actions get the strip's width less its tabs and the overflow button, as the tabs come and go and the strip resizes", async () => {
+test("a group's actions get the strip's width less its tabs, the overflow button and the space after them, as the tabs come and go and the strip resizes", async () => {
   const resizes = fakeResizes();
   let strip = 900;
   const tabs: Record<string, number> = { "note://a": 120, "note://b": 220 };
@@ -179,25 +180,61 @@ test("a group's actions get the strip's width less its tabs and the overflow but
       workbench.editors.open("note://a", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 732")).toBeTruthy();
+    expect(screen.getByText("room 726")).toBeTruthy();
 
     act(() => {
       workbench.editors.open("note://b", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 512")).toBeTruthy();
+    expect(screen.getByText("room 506")).toBeTruthy();
 
     strip = 700;
     resizes.report(700);
-    expect(screen.getByText("room 312")).toBeTruthy();
+    expect(screen.getByText("room 306")).toBeTruthy();
 
     act(() => {
       workbench.editors.close("note://b");
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 532")).toBeTruthy();
+    expect(screen.getByText("room 526")).toBeTruthy();
   } finally {
     resizes.restore();
+    Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+  }
+});
+
+test("a strip as wide as what it keeps besides its actions, and a stage of theirs, leaves them that stage beside an active tab at its widest", async () => {
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("dv-tabs-and-actions-container")
+        ? STRIP_KEPT + 300
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.dataset.tabPanelId === undefined ? 0 : TAB_MAX;
+    },
+  });
+  try {
+    const workbench = await testWorkbench();
+    workbench.editors.register({
+      id: "test.note",
+      scheme: "note",
+      title: (uri) => uri.host,
+      component: ({ uri }) => <p>body of {uri}</p>,
+      actions: Room,
+    });
+    render(<WorkbenchView workbench={workbench} />);
+    act(() => {
+      workbench.editors.open("note://a", { preview: false });
+    });
+    await act(() => Promise.resolve());
+    expect(screen.getByText("room 300")).toBeTruthy();
+  } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
     Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
   }

@@ -16,7 +16,7 @@ import {
   type SegmentedItem,
 } from "@twigo/ui";
 import {
-  TABS_KEPT,
+  STRIP_KEPT,
   useActionRoom,
   useChanges,
   useWorkbench,
@@ -170,7 +170,7 @@ function Actions({
     if (room === undefined || !row) return;
     needs.current[stage] = row.offsetWidth;
     const widest = needs.current[STAGES.health];
-    if (widest !== undefined) states.setStripMin(uri, TABS_KEPT + widest);
+    if (widest !== undefined) states.setStripMin(uri, STRIP_KEPT + widest);
     const focused = fieldBox.current?.contains(document.activeElement) === true;
     const next = stageFor(
       needs.current,

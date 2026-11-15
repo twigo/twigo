@@ -15,7 +15,7 @@ export type { Platform } from "./keybindings/chord";
 export { platformOf } from "./keybindings/platform";
 export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
-export { TABS_KEPT } from "./parts/strip";
+export { STRIP_KEPT } from "./parts/strip";
 export {
   EditorShownContext,
   useActionRoom,

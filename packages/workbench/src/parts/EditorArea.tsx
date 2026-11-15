@@ -35,7 +35,7 @@ import {
   useWorkbench,
 } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
-import { OVERFLOW_BUTTON } from "./strip";
+import { ACTIONS_PADDING, OVERFLOW_BUTTON } from "./strip";
 import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
@@ -291,12 +291,13 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
 
 /**
  * The width a group's actions may take without a tab giving way: the
- * strip's, less every tab at the width it asks for (up to 220 px) and the
- * overflow button. Undefined until measured. Each measure also brings the
- * active tab back into view, since dockview does that only as a tab
- * activates, before the actions settle: by the tab list's own scroll, as
- * dockview 8.8.3's `Tabs._scrollTabIntoView` does, since `scrollIntoView`
- * would scroll the split views around the strip too.
+ * strip's, less every tab at the width it asks for (up to 220 px), the
+ * overflow button and the space after the actions. Undefined until
+ * measured. Each measure also brings the active tab back into view, since
+ * dockview does that only as a tab activates, before the actions settle: by
+ * the tab list's own scroll, as dockview 8.8.3's `Tabs._scrollTabIntoView`
+ * does, since `scrollIntoView` would scroll the split views around the strip
+ * too.
  */
 function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
   const [room, setRoom] = useState<number>();
@@ -306,14 +307,16 @@ function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
     );
     const list = strip?.querySelector(".dv-tabs-container");
     if (!wrapper || !strip || !list) return;
-    const padding = parseFloat(getComputedStyle(wrapper).paddingRight) || 0;
     const measure = () => {
       const tabs = [...list.children].reduce(
         (sum, tab) => sum + (tab as HTMLElement).offsetWidth,
         0,
       );
       setRoom(
-        Math.max(0, strip.clientWidth - tabs - OVERFLOW_BUTTON - padding),
+        Math.max(
+          0,
+          strip.clientWidth - tabs - OVERFLOW_BUTTON - ACTIONS_PADDING,
+        ),
       );
       const active = list.querySelector<HTMLElement>(".dv-active-tab");
       if (
@@ -359,7 +362,11 @@ export function GroupActions({
   if (!params || !provider?.actions) return null;
   const Actions = provider.actions;
   return (
-    <div ref={setWrapper} className="flex h-full items-center pr-1.5">
+    <div
+      ref={setWrapper}
+      style={{ paddingRight: ACTIONS_PADDING }}
+      className="flex h-full items-center"
+    >
       <ActionRoomContext.Provider value={room}>
         <Actions key={params.uri} uri={params.uri} />
       </ActionRoomContext.Provider>

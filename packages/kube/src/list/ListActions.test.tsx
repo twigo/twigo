@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { TABS_KEPT } from "@twigo/workbench";
+import { STRIP_KEPT } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
 
 const layout = withScreenSize(1280);
@@ -59,7 +59,7 @@ const typed = () =>
     ?.value.toString() ?? "";
 
 const withRoom = (room: number) => {
-  layout.resize(strip(), room + 48);
+  layout.resize(strip(), room + 54);
 };
 
 test("the actions give up one thing at a time as the strip narrows: the key hint, the Group label, the filter field, the health filter", async () => {
@@ -152,7 +152,7 @@ test("details docked beside the list take their width from the room, and the act
   expect(actions().style.marginRight).toBe("470px");
   expect(stageOf(actions())).toBe(4);
   expect(column.style.minWidth).toBe(
-    `${String(TABS_KEPT + (TAKES[4] ?? 0))}px`,
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0))}px`,
   );
   fireEvent.click(screen.getByRole("button", { name: "Close details" }));
   await settle(1);
