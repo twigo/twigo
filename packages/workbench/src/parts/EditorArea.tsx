@@ -176,7 +176,12 @@ export function SpaceDock({
         if (uri === undefined) return;
         event.preventDefault();
         event.stopPropagation();
+        const next = neighbourTab(api, target);
+        const dock = event.currentTarget;
         workbench.editors.dismiss(uri);
+        if (next !== undefined && api.getPanel(next)) {
+          tabElement(dock, next)?.focus();
+        }
       }}
     >
       <DockviewReact
@@ -214,6 +219,21 @@ function pressedEditor(api: DockviewApi, target: Element): string | undefined {
   if (!target.closest(".dv-void-container")) return undefined;
   const group = api.groups.find((each) => each.element.contains(target));
   return readParams(group?.activePanel?.params)?.uri;
+}
+
+/** The tab dockview focuses after a key closes `tab`: the next in its group, else the previous. */
+function neighbourTab(api: DockviewApi, tab: Element): string | undefined {
+  const panel = api.getPanel(tab.getAttribute("data-tab-panel-id") ?? "");
+  if (!panel) return undefined;
+  const { panels } = panel.group;
+  const at = panels.indexOf(panel);
+  return (panels[at + 1] ?? panels[at - 1])?.id;
+}
+
+function tabElement(dock: Element, id: string): HTMLElement | undefined {
+  return [
+    ...dock.querySelectorAll<HTMLElement>("[role=tab][data-tab-panel-id]"),
+  ].find((tab) => tab.dataset.tabPanelId === id);
 }
 
 /** The browser moves the focus after a press's listeners ran, so the editor takes it a task later. */

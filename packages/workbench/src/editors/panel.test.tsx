@@ -905,6 +905,29 @@ test.each(["Backspace", "Delete"])(
   },
 );
 
+test.each([
+  ["Delete", "terminal://x", "terminal://y"],
+  ["Backspace", "terminal://y", "terminal://z"],
+  ["Delete", "terminal://z", "terminal://y"],
+])(
+  "%s on the tab of %s, with others open, keeps the focus in the strip on %s",
+  async (key, closed, neighbour) => {
+    const { workbench, editors } = await mounted();
+    withTerminal(workbench);
+    act(() => {
+      editors.open("terminal://x");
+      editors.open("terminal://y");
+      editors.open("terminal://z");
+    });
+    act(() => {
+      tabOf(closed).focus();
+    });
+    fireEvent.keyDown(tabOf(closed), { key });
+    expect(tabsIn("panel")).not.toContain(closed);
+    expect(document.activeElement).toBe(tabOf(neighbour));
+  },
+);
+
 test("Reopen Closed Editor brings back an editor of the editor area, closed by its tab's X", async () => {
   const { editors } = await mounted();
   act(() => {
