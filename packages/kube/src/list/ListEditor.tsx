@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleAlert } from "lucide-react";
 import type { Resource } from "@twigo/protocol";
-import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
+import { ActionBar, EmptyState, GridSkeleton, useWidth } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
 import { canShell } from "../exec/kinds";
@@ -18,7 +18,6 @@ import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
-import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import { ResourceGrid } from "./ResourceGrid";
 

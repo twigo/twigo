@@ -17,6 +17,7 @@ import {
   type HistogramSpan,
   type LinePlace,
   type LineWindow,
+  useWidth,
 } from "@twigo/ui";
 import {
   useChanges,
@@ -25,7 +26,6 @@ import {
   type EditorProps,
 } from "@twigo/workbench";
 import { useNow } from "../useNow";
-import { useWidth } from "../useWidth";
 import { parseLogsUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { viewProblem } from "../viewProblem";

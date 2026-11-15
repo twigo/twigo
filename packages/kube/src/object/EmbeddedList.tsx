@@ -14,6 +14,7 @@ import {
   TonedText,
   type GridColumn,
   type GridItem,
+  useWidth,
 } from "@twigo/ui";
 import {
   useChanges,
@@ -34,7 +35,6 @@ import { metricsNote, readsMetrics } from "../list/metrics";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
-import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import type { OverviewStates } from "./overviewStates";
 
