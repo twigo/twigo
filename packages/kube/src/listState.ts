@@ -24,6 +24,8 @@ interface State {
   readonly inspector: number;
   /** The width the list keeps for its group's strip, in px; 0 until the strip's actions have shown their last stage. */
   readonly stripMin: number;
+  /** By health, and `all`, the most characters its count had while the text was empty. */
+  readonly countDigits: Readonly<Record<string, number>>;
 }
 
 const INITIAL: State = {
@@ -32,6 +34,7 @@ const INITIAL: State = {
   details: "overview",
   inspector: 0,
   stripMin: 0,
+  countDigits: {},
 };
 
 /**
@@ -41,7 +44,7 @@ const INITIAL: State = {
  * mounts again shows the same. A list that closes opens again with the text
  * and health of its URI (4.4). The room its details take from it is 0 once
  * the editor unmounts, and the width its strip needs stays as its actions
- * last measured it.
+ * last measured it, as does the room its health counts keep.
  */
 export class ListStates {
   readonly changes = new Changes();
@@ -122,6 +125,22 @@ export class ListStates {
 
   setStripMin(uri: string, stripMin: number): void {
     if (this.#get(uri).stripMin !== stripMin) this.#update(uri, { stripMin });
+  }
+
+  countDigits(uri: string): Readonly<Record<string, number>> {
+    return this.#get(uri).countDigits;
+  }
+
+  /** The characters of counts read while the text was empty: what each count keeps room for grows, never shrinks. */
+  seeCountDigits(uri: string, digits: Readonly<Record<string, number>>): void {
+    const kept = this.#get(uri).countDigits;
+    const wider = Object.entries(digits).filter(
+      ([key, count]) => count > (kept[key] ?? 0),
+    );
+    if (wider.length > 0)
+      this.#update(uri, {
+        countDigits: { ...kept, ...Object.fromEntries(wider) },
+      });
   }
 
   /** The list's editor closed: the text and health picked in it go. */

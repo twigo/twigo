@@ -100,6 +100,7 @@ function Actions({
   const pin = pinOf(services, spaces, uri);
   const isPinned = pin !== undefined && pinned.has(input.space, pin.uri);
 
+  const digits = states.countDigits(uri);
   const items: SegmentedItem<Health | "all">[] = counts
     ? [
         {
@@ -107,11 +108,13 @@ function Actions({
           label: "All",
           // Counts come before the health filter, so they sum to every row.
           count: counts.ok.count + counts.warn.count + counts.error.count,
+          digits: digits.all,
         },
         ...ORDER.map((health) => ({
           value: health,
           label: HEALTH[health].title,
           count: counts[health].count,
+          digits: digits[health],
           ...(health !== "ok" && { tone: health }),
         })),
       ]
@@ -127,6 +130,20 @@ function Actions({
   };
   const text = states.text(uri) ?? input.text ?? "";
   const current = items.find((item) => item.value === (picked ?? "all"));
+  // The text changes the counts: each keeps the room it took without one, so
+  // the text moves neither the actions' width nor their stage.
+  useLayoutEffect(() => {
+    if (text !== "" || items.length === 0) return;
+    states.seeCountDigits(
+      uri,
+      Object.fromEntries(
+        items.map(({ value, count }) => [
+          value,
+          (count ?? 0).toLocaleString("en").length,
+        ]),
+      ),
+    );
+  });
 
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const needs = useRef<number[]>([]);
@@ -139,6 +156,7 @@ function Actions({
   // Group button names.
   const fit = JSON.stringify([
     items.map(({ count }) => String(count ?? 0).length),
+    digits,
     current?.value,
     preset.group,
     groupable.length > 0,
@@ -239,6 +257,7 @@ function Actions({
               {current.label}
               <Count
                 value={current.count ?? 0}
+                digits={current.digits}
                 tone={
                   current.tone === "error" && (current.count ?? 0) > 0
                     ? "error"

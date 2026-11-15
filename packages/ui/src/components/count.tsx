@@ -13,14 +13,27 @@ const TONE: Readonly<Record<Tone | "quiet", string>> = {
 export function Count({
   value,
   tone,
+  digits,
   className,
 }: {
   value: number;
   tone?: Tone | "quiet";
+  /** The characters it keeps room for, so that a count that shrinks keeps its width. */
+  digits?: number;
   className?: string;
 }) {
   return (
-    <span className={cn("tabular-nums", tone && TONE[tone], className)}>
+    <span
+      style={
+        digits === undefined ? undefined : { minWidth: `${String(digits)}ch` }
+      }
+      className={cn(
+        "tabular-nums",
+        digits !== undefined && "inline-block",
+        tone && TONE[tone],
+        className,
+      )}
+    >
       {value.toLocaleString("en")}
     </span>
   );

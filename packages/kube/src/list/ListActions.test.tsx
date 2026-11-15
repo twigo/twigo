@@ -188,6 +188,53 @@ test("the filter field keeps its place and its focus while its text, and so the 
   expect(screen.queryByRole("textbox", { name: "Filter rows" })).toBeNull();
 });
 
+test("a filter that was on while the stages were learnt does not move a stage when it clears: each count keeps the room it took with no text", async () => {
+  const counted = (row: HTMLElement) =>
+    [...row.querySelectorAll<HTMLElement>("span.tabular-nums")].reduce(
+      (sum, count) =>
+        sum +
+        7 *
+          Math.max(
+            count.textContent.length,
+            Number.parseFloat(count.style.minWidth) || 0,
+          ),
+      0,
+    );
+  laidOut((row) => -counted(row));
+  await openList();
+  withRoom(740);
+  const field = screen.getByRole<HTMLInputElement>("textbox", {
+    name: "Filter rows",
+  });
+  const grouped = () => actions().textContent.includes("Group");
+  act(() => {
+    field.focus();
+  });
+  fireEvent.change(field, { target: { value: "zzzz" } });
+  await settle();
+  expect(
+    screen.getByRole("group", { name: "Rows by health" }).textContent,
+  ).toBe("All0Failing0Pending0Healthy0");
+  act(() => {
+    grid().focus();
+  });
+  await settle(1);
+  withRoom(900);
+  withRoom(740);
+  const before = grouped();
+  act(() => {
+    field.focus();
+  });
+  fireEvent.change(field, { target: { value: "" } });
+  await settle();
+  expect(
+    screen.getByRole("group", { name: "Rows by health" }).textContent,
+  ).toMatch(/^All5,000/);
+  expect(grouped()).toBe(before);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
+  expect(document.activeElement).toBe(field);
+});
+
 test("the popover keeps its field and its focus when the strip widens, and Escape clears the text before it closes", async () => {
   laidOut();
   await openList();
