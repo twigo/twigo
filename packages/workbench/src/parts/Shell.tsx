@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Allotment, LayoutPriority } from "allotment";
+import { useEffect, useRef, useState } from "react";
+import { Allotment, LayoutPriority, type AllotmentHandle } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
@@ -35,6 +35,8 @@ export function Shell() {
   useChanges(sizes.changes);
   useChanges(views.changes);
   const [panelHeight, setPanelHeight] = useState(0);
+  const split = useRef<AllotmentHandle>(null);
+  const dragging = useRef(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -109,12 +111,28 @@ export function Shell() {
           </Allotment.Pane>
           <Allotment.Pane minSize={320} priority={LayoutPriority.High}>
             <Allotment
+              ref={split}
               vertical
               proportionalLayout={false}
               onChange={([, measured]) => {
-                setPanelHeight(Math.round(measured ?? 0));
+                const height = Math.round(measured ?? 0);
+                setPanelHeight(height);
+                const shown = height > 0;
+                if (dragging.current && space && shown !== panel) {
+                  spaces.setPart(space.id, "panel", { visible: shown });
+                }
               }}
-              onDragEnd={remember([undefined, "panel"])}
+              onDragStart={() => {
+                dragging.current = true;
+              }}
+              onDragEnd={(measured) => {
+                dragging.current = false;
+                remember([undefined, "panel"])(measured);
+              }}
+              onReset={() => {
+                sizes.set("panel", DEFAULT_SIZE.panel);
+                split.current?.resize([0, DEFAULT_SIZE.panel]);
+              }}
             >
               <Allotment.Pane
                 minSize={120}
@@ -127,6 +145,7 @@ export function Shell() {
                 minSize={80}
                 preferredSize={size("panel")}
                 visible={panel}
+                snap
               >
                 <PanelBoundary label="Panel">
                   <PanelArea />

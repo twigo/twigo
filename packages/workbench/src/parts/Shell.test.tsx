@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { notify } from "@twigo/ui";
@@ -11,31 +11,52 @@ const dragEnds = vi.hoisted(
 const layouts = vi.hoisted(
   () => new Map<"rows" | "columns", (sizes: number[]) => void>(),
 );
+const dragStarts = vi.hoisted(
+  () => new Map<"rows" | "columns", (sizes: number[]) => void>(),
+);
+const resets = vi.hoisted(() => new Map<"rows" | "columns", () => void>());
+const resize = vi.hoisted(() => vi.fn<(sizes: number[]) => void>());
 
 vi.mock("allotment", () => {
   function Allotment({
     children,
     vertical,
     onDragEnd,
+    onDragStart,
     onChange,
+    onReset,
+    ref,
   }: {
     children: ReactNode;
     vertical?: boolean;
     onDragEnd?: (sizes: number[]) => void;
+    onDragStart?: (sizes: number[]) => void;
     onChange?: (sizes: number[]) => void;
+    onReset?: () => void;
+    ref?: RefObject<{ resize: typeof resize } | null>;
   }) {
-    if (onDragEnd) dragEnds.set(vertical ? "rows" : "columns", onDragEnd);
-    if (onChange) layouts.set(vertical ? "rows" : "columns", onChange);
+    const split = vertical ? "rows" : "columns";
+    if (onDragEnd) dragEnds.set(split, onDragEnd);
+    if (onDragStart) dragStarts.set(split, onDragStart);
+    if (onChange) layouts.set(split, onChange);
+    if (onReset) resets.set(split, onReset);
+    if (ref) ref.current = { resize };
     return <div>{children}</div>;
   }
   Allotment.Pane = function Pane({
     children,
     preferredSize,
+    snap,
   }: {
     children: ReactNode;
     preferredSize?: number;
+    snap?: boolean;
   }) {
-    return <div data-size={preferredSize}>{children}</div>;
+    return (
+      <div data-size={preferredSize} data-snap={snap === true}>
+        {children}
+      </div>
+    );
   };
   return { Allotment, LayoutPriority: { High: "HIGH" } };
 });
@@ -127,4 +148,52 @@ test("toasts stay above the panel's tab strip as far up as the panel measures wh
   expect([
     ...(document.querySelector(".twigo-titlebar")?.classList ?? []),
   ]).toContain("h-9");
+});
+
+test("a drag that takes the panel under its snap point hides it, and one that takes it past again shows it, while a layout nobody dragged leaves visibility to the store", async () => {
+  const workbench = await testWorkbench();
+  render(<WorkbenchView workbench={workbench} />);
+  const space = workbench.spaces.active?.id ?? "";
+  const visible = () => workbench.spaces.state(space).parts.panel.visible;
+  expect(
+    [...document.querySelectorAll("[data-snap=true]")].map((pane) =>
+      pane.getAttribute("data-size"),
+    ),
+  ).toEqual(["340"]);
+  act(() => {
+    workbench.spaces.setPart(space, "panel", { visible: true });
+  });
+  lay("rows", [840, 0]);
+  expect(visible()).toBe(true);
+
+  act(() => {
+    dragStarts.get("rows")?.([500, 340]);
+  });
+  lay("rows", [760, 80]);
+  expect(visible()).toBe(true);
+  lay("rows", [840, 0]);
+  expect(visible()).toBe(false);
+  lay("rows", [700, 140]);
+  expect(visible()).toBe(true);
+  lay("rows", [840, 0]);
+  expect(visible()).toBe(false);
+  drag("rows", [840, 0]);
+
+  act(() => {
+    workbench.spaces.setPart(space, "panel", { visible: true });
+  });
+  lay("rows", [840, 0]);
+  expect(visible()).toBe(true);
+});
+
+test("a double click on the sash gives the panel its default height, and that is the height it remembers", async () => {
+  const workbench = await testWorkbench();
+  render(<WorkbenchView workbench={workbench} />);
+  drag("rows", [300, 540]);
+  expect(workbench.sizes.get("panel")).toBe(540);
+  act(() => {
+    resets.get("rows")?.();
+  });
+  expect(resize).toHaveBeenCalledWith([0, 340]);
+  expect(workbench.sizes.get("panel")).toBe(340);
 });
