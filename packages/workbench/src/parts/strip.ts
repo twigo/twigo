@@ -1,4 +1,4 @@
-/** The widest a tab grows: `styles.css` cuts a longer title at this width. */
+/** The widest an editor tab grows: `styles.css` cuts a longer title at this width. */
 export const TAB_MAX = 220;
 
 /** What a group's strip keeps free for dockview's overflow button, with room for a count of two digits. */

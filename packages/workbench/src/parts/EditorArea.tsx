@@ -291,7 +291,8 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
 
 /**
  * The width a group's actions may take without a tab giving way: the
- * strip's, less every tab at the width it asks for (up to 220 px), the
+ * strip's, less every tab at the width it asks for (up to 220 px in the
+ * editor area), the
  * overflow button and the space after the actions. Undefined until
  * measured. Each measure also brings the active tab back into view, since
  * dockview does that only as a tab activates, before the actions settle: by
@@ -409,7 +410,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           editors.dismiss(api.id);
         }}
         className={cn(
-          "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded",
           "hover:bg-row-hover",
         )}
       >
