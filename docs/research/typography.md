@@ -30,12 +30,12 @@ Lc serves as an even ruler between two texts, not as a pass mark.
 
 ## Four text roles
 
-| Role    | Carries                                                                     | Dark, OKLCH L | Light, OKLCH L |
-| ------- | --------------------------------------------------------------------------- | ------------- | -------------- |
-| strong  | the object's title, section titles, the name in the row under the cursor    | 0.96          | 0.18           |
-| content | names, values, messages, log lines                                          | 0.90          | 0.25           |
-| support | property labels, table headers, healthy states, defaults, secondary columns | 0.75          | 0.48           |
-| quiet   | timestamps, units, a zero count, placeholders, hints                        | 0.65          | 0.55           |
+| Role    | Carries                                                                  | Dark, OKLCH L | Light, OKLCH L |
+| ------- | ------------------------------------------------------------------------ | ------------- | -------------- |
+| strong  | the object's title, section titles, the name in the row under the cursor | 0.96          | 0.18           |
+| content | names, values, messages, log lines                                       | 0.90          | 0.25           |
+| support | property labels, table headers, secondary columns                        | 0.75          | 0.48           |
+| quiet   | timestamps, units, a zero count, placeholders, hints                     | 0.65          | 0.55           |
 
 Chroma and hue stay those of the old text greys, 0.002 to 0.006 at hue 250.
 Computed from `theme.css` with the four roles, on 2026-11-15:
@@ -48,7 +48,7 @@ Computed from `theme.css` with the four roles, on 2026-11-15:
 | quiet   | 5.7:1, Lc 41  | 5.4:1, Lc 41  | 4.9, 4.6, 5.4:1                  | 4.8:1, Lc 74   | 4.5:1, Lc 69   | 5.1:1              |
 
 - A selected row's tint, `#293844` in dark and `#d9e6ed` in light, would take quiet to 3.7:1 and 3.8:1, so on a selected row and under the cursor quiet takes support's colour, which the table shows there.
-- The figures are those of the 8-bit colours; the unrounded OKLCH values differ in the last digit shown, strong Lc 98 and quiet 5.8:1 on the dark editor.
+- The figures are those of the 8-bit colours; the unrounded OKLCH values differ in the last digit shown, strong Lc 98 and quiet 5.8:1 on the dark editor, and support Lc 77 on the light shell (77.405 unrounded, 77.500 from the 8-bit colour, which rounds to 78; colorjs.io 0.7.1, 2026-11-15).
 - Neighbouring roles stand 12.7, 28.3 and 16.2 Lc apart on the dark editor and 2.4, 20.6 and 8.7 on the light one.
   A label and its value, support and content, stand 1.65:1 apart as greys in dark, from 1.50:1.
 - In light the two steps below content share 29 Lc: content is Lc 103 on the editor, and the lightest quiet of its hue that keeps 4.5:1 on the shell is the one in use, `#6f7274` at Lc 74 (lightness stepped by 0.001, 2026-11-15); black itself is Lc 106.
@@ -63,7 +63,8 @@ Computed from `theme.css` with the four roles, on 2026-11-15:
 - So a heading takes the body's size and the heavier weight, and a label a size below its value: two cues a step.
   Lines of whole pixels keep baselines on the pixel grid at 1x, which 18.85 and 17.55 px did not.
 - With `antialiased`, 13 px system-font text light on dark carried 1.70 times the ink of weight 400 at weight 510 and 1.36 times at 600 in headless Chrome 157, and 1.32 and 1.28 times without it (mean grey of 2x screenshots, macOS 27.2, 2026-11-15).
-  An offscreen WKWebView drew 510 lighter than 600, 1.18 against 1.32 times with `antialiased` (mean grey of a 2x snapshot, macOS 27.2, 2026-11-15), so the Chrome mock shows a weight of 510 heavier than the app draws it.
+  An offscreen WKWebView drew 510 lighter than 600, 1.18 against 1.32 times with `antialiased` (mean grey of a 2x snapshot, macOS 27.2, 2026-11-15), so with `antialiased` the Chrome mock shows a weight of 510 heavier than the app drew it.
+  The app no longer sets `antialiased`, and WKWebView without it was not measured.
 
 ## Figures and identifiers
 
@@ -81,7 +82,8 @@ Computed from `theme.css` with the four roles, on 2026-11-15:
   Read with CoreText on 2026-11-15, both say "Version 2.304" and map the 128 characters of the box-drawing block, the arrows ← ↑ → ↓, ✓, and Ukrainian ґ, ї, є and і.
 - `@fontsource/jetbrains-mono` 5.3.0 on npm carries Google Fonts' build, "Version 2.211", split into Google's subsets: its Latin face maps no box drawing, no ✓ and only ↑ and ↓ of the four arrows ([400.css at 5.3.0](https://unpkg.com/@fontsource/jetbrains-mono@5.3.0/400.css); its faces read with CoreText, 2026-11-15).
 - The font ships code ligatures ([README at v2.304](https://github.com/JetBrains/JetBrainsMono/blob/v2.304/README.md#L8)), and its `GSUB` table has `calt` but no `liga`, so its ligatures are contextual alternates and both features go off, as VS Code's editor turns both off by default ([editorOptions.ts at 1.146.0](https://github.com/microsoft/vscode/blob/1.146.0/src/vs/editor/common/config/editorOptions.ts#L1928-L1935)).
-- At 13 / 20 against 12 / 19 a line holds 7.7 % fewer characters and a panel 5 % fewer lines, 12/13 and 19/20 of what they held; the two faces add 186,636 bytes.
+- At 13 / 20 against 12 / 19 a log line holds 4.9 % fewer characters in the app, SF Mono at 12 px at 7.418 px a character against JetBrains Mono at 13 px at 7.8 px, and 7.4 % fewer in the Chrome mock, Menlo at 7.225 px (arithmetic on the advances above); 12/13, 7.7 %, holds for one face only.
+  A panel holds 5 % fewer lines, 19/20 of what it held; the two faces add 186,636 bytes.
 
 ## Font smoothing
 

@@ -901,11 +901,11 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, and Namespace unless the query names one namespace.
   Pod and node lists of a context that serves the Metrics API (3.6) also get CPU and Memory, of priority 0, just before the Age column, whose cells are numbers the webview prints as kubectl does.
   Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
-- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, which way its first click sorts, and the tone of its abnormal values.
+- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether its text cells are secondary and read in support, whether rows group by it, which way its first click sorts, and the tone of its abnormal values.
   Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
   The name column also gives way to the others, down to its starting width of 160 px, and no other column does: the pods of every namespace need 904 px at the least and keep CPU, Memory and Age in view at 1280 px with the explorer open, where the grid has 972 (Chrome on the mock, 2026-11-13).
 - Cells read by what matters, data near-monochrome, in the text roles of 4.9:
-  - a name reads in three parts (3.4): what comes before its generated part in content, the hash quiet, and the last segment, after the generated part's last `-`, in support; one that does not fit gives up the hash first, to an ellipsis (`auth-api-…-x2kq9`), then the end of its first part, and never the last segment, which tells siblings apart; in the row under the cursor and in a selected one the name is strong;
+  - a name reads in three parts (3.4): what comes before its generated part in content, the hash quiet, and the last segment, after the generated part's last `-`, in support; one that does not fit gives up the hash first, to its first character and an ellipsis, its trailing `-` going with the rest (`auth-api-7…x2kq9`), then the end of its first part, and never the last segment, which tells siblings apart; in the row under the cursor and in a selected one the name is strong;
   - a status shows a tone dot, its text coloured when abnormal, the dot pulsing while the state is in flight (ContainerCreating, Terminating);
   - a ratio short of its total (Ready `0/1`) is pending, unless the row's status already carries a tone, so that a row raises one alarm;
   - restarts read as a count in a column of its own and how long ago the last was;
@@ -957,7 +957,7 @@ Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
-- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a quiet description such as the namespace, a state only when it is abnormal as its dot and its words in its tone, a quieter kind at the end, and keys.
+- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
 - **Recent first.**
   The no-prefix provider shows the space's recently opened editors that match under Recent, each with its kind and namespace, then the pods; `workbench.recent` keeps them per space (4.8).
@@ -1103,7 +1103,8 @@ Extensions add commands, not prefixes.
     A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
     A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
-  - The font is `--font-mono`, the bundled JetBrains Mono (4.9), at 12 px, and a terminal opens only once its regular and bold faces have loaded or failed: xterm measures its cell when it opens ([CoreBrowserTerminal.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L648-L649), at the commit 6.1.0-beta.337 is built from) and again when `fontFamily` or `fontSize` change ([CharSizeService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/CharSizeService.ts#L34)) or the pixel ratio does, not when a face loads, so a face that came later would leave the fallback's cell.
+  - The font is `--font-mono`, the bundled JetBrains Mono (4.9), at 12 px, and a terminal opens only once its regular and bold faces have loaded or failed: xterm measures its cell when it opens ([CoreBrowserTerminal.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L648-L649), at the commit 6.1.0-beta.337 is built from), when `fontFamily` or `fontSize` change ([CharSizeService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/CharSizeService.ts#L34)) or the pixel ratio does ([RenderService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/RenderService.ts#L289-L293)), and after every resize of its buffer ([the listener](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L197), [`_afterResize`](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L1078-L1080)), but not when a face loads.
+    A face that came later would leave the fallback's cell only until the next resize, and waiting for the faces is what keeps the first screen right.
 - **Port-forward manager.**
   A target is a Pod, a Service or a Deployment, ReplicaSet, StatefulSet or DaemonSet, and a forward is one port of one target, named by the target the person chose; the pod it reaches is a detail of it.
   The data path is `twigo_sessions::forward`; the table, the policy and what is kept are `twigo_core::forward`.
@@ -1407,10 +1408,10 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - Neutral greys with a trace of the brand hue: an app's chrome, not a tinted dashboard.
     The shell and the side bars share one tone and the editor is the surface that stands out: white under a 0.975 shell on light; on dark the darkest, 0.185 under a 0.218 shell, as VS Code's Dark 2026, JetBrains Islands and Zed draw it, with card 0.25 and popover 0.27 above both.
     Text stays below white on dark: content at 0.90, and strong, kept for titles and the row in hand, at 0.96.
-  - Four text roles, by what the text is worth reading now ([decision](decisions/text-roles-and-type-scale.md), [research](research/typography.md)): strong for the object's title, section titles and the name in the row under the cursor; content for names, values, messages and log lines; support for property labels, table headers, healthy states, defaults and secondary columns; quiet for timestamps, units, a zero count, placeholders and hints.
-    Each is 4.5:1 or more on the shell, the editor, a card, a popover and a selected row (WCAG 1.4.3): on the dark editor 16.6, 13.8, 8.4 and 5.7:1, APCA Lc 99, 86, 58 and 41, and on the light one 18.8, 16.0, 6.5 and 4.8:1, Lc 105, 103, 82 and 74 (colorjs.io 0.7.1, as `roles.test.ts` computes them).
+  - Four text roles, by what the text is worth reading now ([decision](decisions/text-roles-and-type-scale.md), [research](research/typography.md)): strong for the object's title, section titles and the name in the row under the cursor; content for names, values, messages and log lines; support for property labels, table headers and secondary columns; quiet for timestamps, units, a zero count, placeholders and hints.
+    Each is 4.5:1 or more on the shell, the editor, a card, a popover and a selected row (WCAG 1.4.3); the comment over the roles in `theme.css` states the WCAG ratio and APCA Lc of each on the shell and the editor in both themes (colorjs.io 0.7.1), and `roles.test.ts` holds it.
     Two adjacent texts in different roles differ by 25 Lc or by a second cue, a size step or the other weight.
-    In the light theme the roles below content stand 20.6 and 8.7 Lc apart on the editor and cannot be wider while quiet keeps 4.5:1 on the shell, so there the second cue carries the rule.
+    In the light theme the roles below content stand 20.6 and 8.7 Lc apart on the editor, and no light values give both steps 25 Lc while quiet keeps 4.5:1 on the shell, so there the second cue carries the rule.
     On a selected row and under the cursor quiet takes support's colour, since the tint would take it below 4.5:1, and text in a tone reads at 4.5:1 on a selected row and its pill's tint too.
   - Tones: error, warn, ok and idle; `--warn` fills dots and edges, and `--warn-foreground` is its readable text.
   - Hover and selection are alpha overlays, so they work on any surface.
@@ -1419,7 +1420,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - The status bar takes the shell's colour; colour there comes only from its entries' tones and the active space's context colour, as VS Code's 2026 themes do, and from the whole bar's tint in a production context (6.4).
 - **Type.**
   - The platform's UI font, SF on macOS, as VS Code, in the platform's own anti-aliasing: nothing sets `-webkit-font-smoothing`, whose `antialiased` takes about a quarter of the ink from light text on dark in WKWebView ([research](research/typography.md)).
-  - Two weights, 400 and 600, as VS Code and JetBrains, and never 510, which Chrome draws heavier than 600 for the system font, so the mock would mislead; sentence case, no capitals.
+  - Two weights, 400 and 600, as VS Code and JetBrains, and never 510, which Chrome draws heavier than 600 for the system font with `antialiased` and without it, so the mock would mislead; WKWebView drew it lighter than 600 with `antialiased`, which the app no longer sets, and without it that is not measured ([research](research/typography.md)); sentence case, no capitals.
   - A scale of steps in `theme.css`, each a size with its own whole-pixel line height:
     - `2xs` 11 / 16: key caps, count badges, the mode chip, menu key hints and the side bar's view titles;
     - `xs` 12 / 16: table headers, the kind before an object's title, menus, chips and the status bar;
@@ -1427,7 +1428,9 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
     - `body` 13 / 18: body text, table cells, tree rows, property values, and section titles at 600;
     - `prose` 13 / 20: event and condition messages and descriptions, and logs and YAML in the monospace;
     - `sm` 14 / 20: buttons and empty states;
-    - `title` 16 / 22: the object's title.
+    - `title` 16 / 22: the object's title;
+    - `base` 16 / 24: the device code of a sign-in, in the monospace;
+    - `lg` 18 / 28: the name of a space over its Home.
   - A literal size stays only with a whole-pixel line height and a reason, as the two letters of a small tile at 9 px.
   - The monospace is JetBrains Mono 2.304, bundled from its release as two WOFF2 faces, 400 and 600, with its licence beside them in `packages/ui/src/styles/fonts`, and first in `--font-mono`: logs and YAML at 13 / 20, the terminal at 12 px.
     The family token turns `liga` and `calt` off, since its code ligatures are contextual alternates.
