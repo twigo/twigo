@@ -567,3 +567,85 @@ test("a write the context's mode holds, clicked in the details' row, reaches the
   expect(message).toMatch(/^prod-eu is read-only/);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
+
+const hoverIcons = (row: HTMLElement) =>
+  within(row)
+    .queryAllByRole("button")
+    .filter(
+      (button) =>
+        !["Row actions", "Mark row"].includes(
+          button.getAttribute("aria-label") ?? "",
+        ),
+    );
+
+function twoOfANamespace(): [HTMLElement, HTMLElement] {
+  const rows = screen.getAllByRole("row").slice(1);
+  const namespaceOf = (row: HTMLElement) =>
+    row.querySelector('[data-column="Namespace"]')?.textContent;
+  for (const row of rows) {
+    const other = rows.find(
+      (candidate) =>
+        candidate !== row && namespaceOf(candidate) === namespaceOf(row),
+    );
+    if (other) return [row, other];
+  }
+  throw new Error("no two rows of one namespace");
+}
+
+test("a hovered row asks RBAC for itself: its refused verb draws enabled until the answer, then disabled with the reason, does not run, and a row of its namespace draws disabled at once", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  const held: (() => void)[] = [];
+  const asked: AccessQuery[] = [];
+  const invoke = vi
+    .spyOn(workbench.backend, "invoke")
+    .mockImplementation((command: string, request: unknown) => {
+      if (command !== "access_review")
+        return original(command as never, request as never);
+      const query = request as AccessQuery;
+      asked.push(query);
+      return new Promise((resolve) => {
+        held.push(() => {
+          resolve(query.checks.map((check) => check.verb !== "patch"));
+        });
+      });
+    });
+  const [first, second] = twoOfANamespace();
+  const nameOf = (row: HTMLElement) =>
+    row.querySelector('[data-column="Name"]')?.textContent;
+  const restart = (row: HTMLElement) =>
+    within(row).getByRole("button", { name: "Restart" });
+
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(
+    hoverIcons(first).map((icon) => icon.getAttribute("aria-label")),
+  ).toEqual(["Logs", "Restart"]);
+  expect(restart(first).getAttribute("aria-disabled")).toBeNull();
+  expect(asked[asked.length - 1]?.checks).toContainEqual(
+    expect.objectContaining({ verb: "patch", name: nameOf(first) }),
+  );
+  for (const answer of held.splice(0)) answer();
+  await settle(1);
+  expect(restart(first).getAttribute("aria-disabled")).toBe("true");
+  act(() => {
+    restart(first).focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "You may not restart it",
+  );
+  fireEvent.click(restart(first));
+  await settle(4);
+  expect(
+    invoke.mock.calls.filter(([command]) => command === "command_plan"),
+  ).toEqual([]);
+
+  fireEvent.pointerLeave(first);
+  fireEvent.pointerEnter(second);
+  await settle(2);
+  expect(held).toHaveLength(1);
+  expect(restart(second).getAttribute("aria-disabled")).toBe("true");
+});

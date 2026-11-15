@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useMemo,
   useRef,
@@ -91,6 +92,8 @@ export interface DataGridProps<R, G> {
    * which act on the selected row.
    */
   readonly inline?: (row: R) => readonly Action[];
+  /** The pointer has come to rest on a row, whose icons now show: the time to ask what they need. */
+  readonly onRest?: (row: R) => void;
   /** At the head of the actions column, such as the choice of columns. */
   readonly headerEnd?: ReactNode;
   /** Skeleton rows until the first rows come. */
@@ -145,6 +148,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     menu = [],
     overlayMenu = false,
     inline,
+    onRest,
     headerEnd,
     loading,
     empty,
@@ -499,6 +503,12 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             )}
           </>
         }
+        onRest={
+          onRest &&
+          (() => {
+            onRest(target.data);
+          })
+        }
         icons={
           inline &&
           (() => {
@@ -698,6 +708,7 @@ function DataRow({
   overlay,
   actions,
   icons,
+  onRest,
   children,
   ...row
 }: ComponentProps<"div"> & {
@@ -706,16 +717,19 @@ function DataRow({
   overlay: string | undefined;
   actions: ReactNode;
   icons: (() => ReactNode) | undefined;
+  onRest: (() => void) | undefined;
 }) {
   const [pointed, setPointed] = useState(false);
   const [rested, setRested] = useState(false);
   const [focused, setFocused] = useState(false);
   const shown = keepActions || pointed || focused;
+  const rest = useEffectEvent(() => {
+    setRested(true);
+    onRest?.();
+  });
   useEffect(() => {
     if (!pointed) return;
-    const timer = setTimeout(() => {
-      setRested(true);
-    }, HOVER_MS);
+    const timer = setTimeout(rest, HOVER_MS);
     return () => {
       clearTimeout(timer);
     };

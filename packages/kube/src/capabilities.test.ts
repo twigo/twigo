@@ -377,3 +377,71 @@ test("asking the same again starts no second round of asks", async () => {
     vi.useRealTimers();
   }
 });
+
+test("a hovered row reads its own answers once they come, until then its namespace's last, and a new basis forgets them", async () => {
+  const refused = new Set(["web"]);
+  const invoke = vi.fn(
+    (_command: string, request: { checks: { name: string | null }[] }) =>
+      Promise.resolve(
+        request.checks.map(({ name }) => !refused.has(name ?? "")),
+      ),
+  );
+  const capabilities = new Capabilities(
+    { invoke } as unknown as Pick<Backend, "invoke">,
+    vi.fn(),
+  );
+  const keys = ["resource.capability.delete"];
+  const BASIS = {};
+  const hovered = (namespace: string, name: string) =>
+    capabilities.hovered("pods", { namespace, name }, keys)[
+      "resource.capability.delete"
+    ];
+  const hover = (name: string, basis: unknown) => {
+    capabilities.askHovered(
+      "pods",
+      "qa",
+      PODS_GVR,
+      { namespace: "shop", name },
+      keys,
+      basis,
+    );
+  };
+  capabilities.ask(
+    "pods",
+    "qa",
+    PODS_GVR,
+    { namespace: "shop", name: "web" },
+    keys,
+    BASIS,
+  );
+  expect(hovered("shop", "cart")).toBe(true);
+  await settled();
+  expect(hovered("shop", "cart")).toBe(false);
+  expect(hovered("edge", "cart")).toBe(true);
+
+  hover("api", BASIS);
+  expect(hovered("shop", "api")).toBe(false);
+  await settled();
+  expect(invoke).toHaveBeenLastCalledWith(
+    "access_review",
+    expect.objectContaining({
+      namespace: "shop",
+      checks: [expect.objectContaining({ verb: "delete", name: "api" })],
+    }),
+  );
+  expect(hovered("shop", "api")).toBe(true);
+  expect(hovered("shop", "web")).toBe(false);
+  expect(hovered("shop", "cart")).toBe(true);
+  expect(capabilities.values("pods", keys)["resource.capability.delete"]).toBe(
+    false,
+  );
+
+  hover("api", {});
+  expect(hovered("shop", "web")).toBe(true);
+  await settled();
+  hover("web", {});
+  await settled();
+  expect(hovered("shop", "web")).toBe(false);
+  capabilities.closed("pods");
+  expect(hovered("shop", "web")).toBe(true);
+});

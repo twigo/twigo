@@ -14,6 +14,8 @@ export const MARKED_DELETE = "marked.capability.delete";
 const DELETE = `${OWN}delete`;
 /** Beside a list's own entry, the entry of its marked rows. */
 const MARKED = "#marked";
+/** And the entry of the row the pointer rests on, one row at a time. */
+const HOVERED = "#hovered";
 /** How long a no holds before the list asks again, as Rust's `cluster::REFUSED_FOR`. */
 export const REFUSED_MS = 30_000;
 
@@ -44,6 +46,15 @@ export class Capabilities {
       readonly ask: object;
     }
   >();
+  /** Per list, the last answers for each object and each namespace it asked about. */
+  readonly #known = new Map<
+    string,
+    {
+      readonly basis: unknown;
+      readonly objects: Map<string, Readonly<Record<string, boolean>>>;
+      readonly namespaces: Map<string | null, Record<string, boolean>>;
+    }
+  >();
 
   constructor(
     private readonly backend: Pick<Backend, "invoke">,
@@ -72,7 +83,37 @@ export class Capabilities {
     keys: readonly string[],
     basis: unknown,
   ): void {
-    this.#ask(uri, space, resource, [object], keys, basis);
+    this.#ask(uri, space, resource, [object], keys, basis, uri);
+  }
+
+  /** Asks for the keys of the row the pointer rests on in a list, as `ask` asks for its selected one. */
+  askHovered(
+    uri: string,
+    space: string,
+    resource: Gvr,
+    object: Asked,
+    keys: readonly string[],
+    basis: unknown,
+  ): void {
+    this.#ask(`${uri}${HOVERED}`, space, resource, [object], keys, basis, uri);
+  }
+
+  /**
+   * The keys' values for a list's hovered row: the last answers for its
+   * object, else, at once, the last for its namespace, which another
+   * object's rules may differ from until its own come; else true.
+   */
+  hovered(
+    uri: string,
+    object: Asked,
+    keys: readonly string[],
+  ): Record<string, boolean> {
+    const known = this.#known.get(uri);
+    const own = known?.objects.get(objectKey(object)) ?? {};
+    const near = known?.namespaces.get(object.namespace ?? null) ?? {};
+    return Object.fromEntries(
+      keys.map((key) => [key, own[key] ?? near[key] ?? true]),
+    );
   }
 
   /**
@@ -95,7 +136,11 @@ export class Capabilities {
     return this.values(`${uri}${MARKED}`, [DELETE])[DELETE] ?? true;
   }
 
-  /** One review a namespace; each key holds where every answer for it says yes. */
+  /**
+   * One review a namespace; each key holds where every answer for it says
+   * yes. An ask of one object keeps its answers for the hovered rows of the
+   * list `learns`, which forgets those of another basis.
+   */
   #ask(
     entry: string,
     space: string,
@@ -103,7 +148,14 @@ export class Capabilities {
     objects: readonly Asked[],
     keys: readonly string[],
     basis: unknown,
+    learns?: string,
   ): void {
+    if (learns !== undefined && this.#known.get(learns)?.basis !== basis)
+      this.#known.set(learns, {
+        basis,
+        objects: new Map(),
+        namespaces: new Map(),
+      });
     const names = new Map<string | null, Set<string | null>>();
     for (const { namespace, name } of objects) {
       const where = names.get(namespace ?? null) ?? new Set();
@@ -148,6 +200,17 @@ export class Capabilities {
             });
           });
           this.#lists.set(entry, { asked, basis, answers, ask });
+          const known =
+            learns === undefined ? undefined : this.#known.get(learns);
+          const [object] = objects;
+          if (known !== undefined && known.basis === basis && object) {
+            known.objects.set(objectKey(object), answers);
+            const namespace = object.namespace ?? null;
+            known.namespaces.set(namespace, {
+              ...known.namespaces.get(namespace),
+              ...answers,
+            });
+          }
           this.changes.emit();
           if (Object.values(answers).includes(false)) {
             setTimeout(() => {
@@ -166,7 +229,13 @@ export class Capabilities {
   closed(uri: string): void {
     this.#lists.delete(uri);
     this.#lists.delete(`${uri}${MARKED}`);
+    this.#lists.delete(`${uri}${HOVERED}`);
+    this.#known.delete(uri);
   }
+}
+
+function objectKey({ namespace, name }: Asked): string {
+  return JSON.stringify([namespace ?? null, name ?? null]);
 }
 
 /**

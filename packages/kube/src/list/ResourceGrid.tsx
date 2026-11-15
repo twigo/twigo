@@ -34,6 +34,7 @@ import {
 } from "../columns";
 import { kindIcon } from "../kinds";
 import { rowState } from "../rowState";
+import { objectOfRow } from "../selection";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
@@ -97,8 +98,16 @@ function Grid({
   onRetry: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, spaces, menus, keys } = workbench;
-  const { presets, states, selection, statuses, grids, measures } = services;
+  const { backend, spaces, menus, keys, commands, catalog } = workbench;
+  const {
+    presets,
+    states,
+    selection,
+    statuses,
+    grids,
+    measures,
+    capabilities,
+  } = services;
   useChanges(spaces.changes);
   useChanges(presets.changes);
   useChanges(states.changes);
@@ -106,6 +115,7 @@ function Grid({
   useChanges(menus.changes);
   useChanges(keys.changes);
   useChanges(measures.changes);
+  useChanges(capabilities.changes);
   const { gvr } = input;
   const preset = presets.get(gvr);
   const countBy = statusColumn(gvr);
@@ -344,25 +354,32 @@ function Grid({
     [register, grids, uri],
   );
   const lookup = keys.lookup(grid);
+  const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
+    commands.referenced(prefix),
+  );
   // The grid selects a row before it runs one of its icons, so they show
-  // and run as for a selected row, with that row's own state. RBAC answers
-  // only for the selected row, so another's capabilities read true, as an
-  // unanswered one does, and the server decides.
+  // and run as for a selected row, with that row's own state and what RBAC
+  // answers for it once the pointer rests on it.
   const rowLookup = (row: Row): Lookup => {
     if (row.id === current?.row.id)
       return (key) => (key === "resource.selected" ? true : lookup(key));
-    const own: Record<string, boolean> = rowState(resource, {
-      gvr,
-      kind: resource.kind,
-      namespaced: resource.namespaced,
-      columns: snapshot.columns,
-      row,
-    });
+    const own: Record<string, boolean> = {
+      ...rowState(resource, {
+        gvr,
+        kind: resource.kind,
+        namespaced: resource.namespaced,
+        columns: snapshot.columns,
+        row,
+      }),
+      ...capabilities.hovered(
+        uri,
+        objectOfRow(row.id, resource.namespaced),
+        referenced,
+      ),
+    };
     return (key) => {
       if (key === "resource.selected") return true;
       if (key in own) return own[key];
-      if (CAPABILITY_PREFIXES.some((prefix) => key.startsWith(prefix)))
-        return true;
       return lookup(key);
     };
   };
@@ -437,6 +454,17 @@ function Grid({
               .filter((action) => action.pinned)
               .slice(0, 2)
       }
+      onRest={(row) => {
+        if (row.id === current?.row.id) return;
+        capabilities.askHovered(
+          uri,
+          input.space,
+          resource.gvr,
+          objectOfRow(row.id, resource.namespaced),
+          referenced,
+          catalog.list,
+        );
+      }}
       headerEnd={
         <ActionDropdown
           label="Choose columns"
