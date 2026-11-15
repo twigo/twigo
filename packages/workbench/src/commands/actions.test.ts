@@ -96,7 +96,7 @@ test("a menu's actions say which are pinned, why one cannot run, and which destr
   ).toBe(true);
 });
 
-test("on a read-only context what sends a write is locked and still runs, and what cannot run says its own reason", async () => {
+test("on a read-only context what sends a write is locked and still runs, what sends nothing is not, and what cannot run says its own reason", async () => {
   const { workbench, run } = await withScale();
   act(() => {
     workbench.spaces.select("prod-eu");
@@ -110,10 +110,13 @@ test("on a read-only context what sends a write is locked and still runs, and wh
     },
     base,
   );
-  const [, [scale] = [], [remove] = []] = workbench.actions(
+  const [[logs] = [], [scale] = [], [remove] = []] = workbench.actions(
     "resource/details",
     allowed,
   );
+  expect(logs).toMatchObject({ id: "logs", disabled: false });
+  expect(logs?.locked).toBeUndefined();
+  expect(logs?.reason).toBeUndefined();
   expect(scale).toMatchObject({
     locked: true,
     disabled: false,
@@ -135,7 +138,4 @@ test("on a read-only context what sends a write is locked and still runs, and wh
     reason: "You may not patch it",
   });
   expect(held?.locked).toBeUndefined();
-  expect(workbench.actions("resource/details", base)[0]?.[0]?.locked).toBe(
-    undefined,
-  );
 });
