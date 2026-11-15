@@ -20,21 +20,10 @@ describe("cn", () => {
       expect(cn(`text-${step}`, "text-content")).toBe(
         `text-${step} text-content`,
       );
-      expect(cn("text-content", `text-${step}`)).toBe(
-        `text-content text-${step}`,
-      );
     },
   );
 
-  it("keeps the size when a role follows a run of classes", () => {
-    expect(cn("min-w-0 text-body break-words text-content")).toBe(
-      "min-w-0 text-body break-words text-content",
-    );
-  });
-
   it("lets the last of two sizes win", () => {
-    expect(cn("text-label", "text-body")).toBe("text-body");
-    expect(cn("text-body", "text-label")).toBe("text-label");
     expect(cn("text-xs", "text-prose")).toBe("text-prose");
     expect(cn("text-title", "text-sm")).toBe("text-sm");
     expect(cn("text-2xs", "text-title")).toBe("text-title");

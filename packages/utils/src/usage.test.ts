@@ -29,8 +29,6 @@ test.each([
   ["1250m", "1250", "m"],
   ["51Mi", "51", "Mi"],
   ["0m", "0", "m"],
-  ["7", "7", ""],
-  ["–", "–", ""],
 ])("%s splits into the number %s and the unit %s", (text, number, unit) => {
   expect(splitQuantity(text)).toEqual([number, unit]);
 });

@@ -18,7 +18,7 @@ const press = (
     }),
   );
 
-test("ten steps up from 1 land on 2 and ten down on 0.5, each a tenth, and neither limit is passed", async () => {
+test("ten steps up from 1 land on 2 and five down from 1 on 0.5, each a tenth, and neither limit is passed", async () => {
   const { zoom } = await testWorkbench();
   const up: number[] = [];
   for (let step = 0; step < 10; step++) {
