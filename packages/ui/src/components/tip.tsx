@@ -19,7 +19,7 @@ export function ButtonTip({
         {keys && <span className="text-support">{keys}</span>}
       </span>
       {reason !== undefined && (
-        <span className="flex items-center gap-1 text-support">
+        <span className="flex items-center gap-1 text-2xs text-support">
           {locked && <Lock aria-hidden className="size-3" />}
           {reason}
         </span>
