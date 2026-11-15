@@ -99,12 +99,13 @@ export function registerResourceActions(
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
   /**
-   * The list editor a command was run from, as its lookup says, else the
-   * active one: a press that moves no focus leaves another list active.
+   * The list editor a command was run from, as its lookup says, and none
+   * where it says none: the active editor may be another list than the one
+   * a press that moves no focus was on.
    */
   const listIn = (lookup: Lookup): string | undefined => {
     const uri = lookup(LIST_URI);
-    return typeof uri === "string" ? uri : editors.active;
+    return typeof uri === "string" ? uri : undefined;
   };
   /** That list editor and its selected row. */
   const target = (

@@ -16,6 +16,7 @@ import { REFUSED_MS } from "./capabilities";
 import { canShell } from "./exec/kinds";
 import { canForward } from "./forward/kinds";
 import { logsKind } from "./logs/entries";
+import { LIST_URI } from "./selection";
 
 const screenSize = withScreenSize(1400);
 
@@ -897,4 +898,28 @@ test("a press that moves no focus, on a hover icon, in the details or on the mar
     nameOf(hovered),
     nameOf(hovered),
   ]);
+});
+
+test("a resource command whose lookup names no list acts on nothing, though a list with a selected row is active", async () => {
+  const uri = "k8s-list://staging/apps/v1/deployments";
+  const workbench = await openInStaging("ready", uri);
+  const grid = screen.getByRole("grid");
+  const row = within(grid).getAllByRole("row")[1];
+  if (!row) throw new Error("a list of deployments");
+  fireEvent.click(row);
+  await settle(4);
+  expect(workbench.editors.active).toBe(uri);
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const inList = workbench.keys.lookup(grid);
+  const nowhere: Lookup = (key) => (key === LIST_URI ? undefined : inList(key));
+  expect(workbench.commands.enabled("k8s.resource.restart", nowhere)).toBe(
+    true,
+  );
+  act(() => {
+    void workbench.commands.execute("k8s.resource.restart", nowhere);
+  });
+  await settle(4);
+  expect(
+    invoke.mock.calls.filter(([command]) => command === "command_plan"),
+  ).toEqual([]);
 });
