@@ -155,7 +155,7 @@ export function Details({
     <aside
       ref={setElement}
       aria-label={`${kind} details`}
-      style={{ width, minWidth: MIN_WIDTH }}
+      style={{ width, ...(docked && { minWidth: MIN_WIDTH }) }}
       className={cn(
         "flex h-full max-w-[85%] flex-col border-l border-border bg-editor",
         docked

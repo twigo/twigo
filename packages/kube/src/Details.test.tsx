@@ -75,6 +75,7 @@ describe("in a wide editor", () => {
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).not.toContain("absolute");
+    expect(shown().style.minWidth).toBe("320px");
     layout.resize(grid(), 530);
     expect(headers()).toEqual(["", "Name", "Ready", "Status", ""]);
     fireEvent.click(
@@ -403,6 +404,13 @@ describe("in a narrow editor", () => {
     await settle(1);
     expect(shown().className).toContain("absolute");
     expect(headers()).toEqual(own);
+  });
+
+  test("lying over the list, the details keep no minimum width, so a narrow editor's 85 % bounds them", async () => {
+    await openList();
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(shown().style.minWidth).toBe("");
   });
 
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {
