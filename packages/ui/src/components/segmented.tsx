@@ -7,7 +7,7 @@ export interface SegmentedItem<V extends string> {
   readonly value: V;
   readonly label: string;
   readonly count?: number;
-  /** The characters its count keeps room for: `Count`'s `digits`. */
+  /** The digits its count keeps room for: `Count`'s `digits`. */
   readonly digits?: number;
   /** A dot before the label, and the count's colour for an abnormal tone. */
   readonly tone?: Tone;

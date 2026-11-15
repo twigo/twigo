@@ -230,7 +230,7 @@ test("a filter that was on while the stages were learnt does not move a stage wh
         7 *
           Math.max(
             count.textContent.length,
-            Number.parseFloat(count.style.minWidth) || 0,
+            count.dataset.reserve?.length ?? 0,
           ),
       0,
     );

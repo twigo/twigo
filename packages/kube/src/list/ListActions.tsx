@@ -138,10 +138,7 @@ function Actions({
     states.seeCountDigits(
       uri,
       Object.fromEntries(
-        items.map(({ value, count }) => [
-          value,
-          (count ?? 0).toLocaleString("en").length,
-        ]),
+        items.map(({ value, count }) => [value, String(count ?? 0).length]),
       ),
     );
   });
@@ -167,11 +164,7 @@ function Actions({
   // choice with its count's room, and the Group button.
   const last = JSON.stringify([
     current?.value,
-    current &&
-      Math.max(
-        current.digits ?? 0,
-        (current.count ?? 0).toLocaleString("en").length,
-      ),
+    current && Math.max(current.digits ?? 0, String(current.count ?? 0).length),
     groupable.length > 0,
   ]);
   const lastMeasured = useRef<string>(undefined);

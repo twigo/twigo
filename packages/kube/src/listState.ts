@@ -131,7 +131,7 @@ export class ListStates {
     return this.#get(uri).countDigits;
   }
 
-  /** The characters of counts read while the text was empty: what each count keeps room for grows, never shrinks. */
+  /** The digits of counts read while the text was empty: what each count keeps room for grows, never shrinks. */
   seeCountDigits(uri: string, digits: Readonly<Record<string, number>>): void {
     const kept = this.#get(uri).countDigits;
     const wider = Object.entries(digits).filter(
