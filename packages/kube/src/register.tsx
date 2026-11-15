@@ -170,6 +170,7 @@ export function registerKube(workbench: Workbench): void {
           return `${name(input.left)} ↔ ${name(input.right)}`;
       }
     },
+    tooltip: (uri) => paths.diff(uri.href),
     icon: ({ className }) => <GitCompare className={className} />,
     component: ({ uri }) => (
       <DiffEditor
@@ -216,7 +217,7 @@ export function registerKube(workbench: Workbench): void {
   registerExec(workbench, shells, paths);
   registerTerminals(workbench, terminals, paths);
   registerSessions(workbench, { logs, shells, terminals });
-  registerForwards(workbench, new Forwards(workbench.backend));
+  registerForwards(workbench, new Forwards(workbench.backend), paths);
   registerResourceActions(workbench, services);
   registerEdits(workbench, {
     discovery: services.discovery,

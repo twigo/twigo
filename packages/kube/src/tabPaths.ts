@@ -1,8 +1,10 @@
-import type { Gvr } from "@twigo/protocol";
+import type { Forward, Gvr } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import type { Discovery } from "./discovery";
+import { portWords } from "./forward/words";
 import { PODS } from "./kinds";
 import {
+  parseDiffUri,
   parseExecUri,
   parseListUri,
   parseLogsUri,
@@ -58,6 +60,17 @@ export function tabPaths(
       ...rest,
     );
 
+  const object = (uri: string) => {
+    const input = parseObjectUri(uri);
+    return (
+      input && objectPath(input.space, input.gvr, input.namespace, input.name)
+    );
+  };
+  const manifest = (uri: string) => {
+    const input = parseUntitledUri(uri);
+    return input && path(input.space);
+  };
+
   return {
     list: (uri: string) => {
       const input = parseListUri(uri);
@@ -71,12 +84,7 @@ export function tabPaths(
         editors.title(uri) ?? gvr.resource,
       );
     },
-    object: (uri: string) => {
-      const input = parseObjectUri(uri);
-      return (
-        input && objectPath(input.space, input.gvr, input.namespace, input.name)
-      );
-    },
+    object,
     logs: (uri: string) => {
       const input = parseLogsUri(uri);
       return (
@@ -100,9 +108,22 @@ export function tabPaths(
       const input = parseTerminalUri(uri);
       return input && contextsOf(input.space)?.[0];
     },
-    manifest: (uri: string) => {
-      const input = parseUntitledUri(uri);
-      return input && path(input.space);
+    manifest,
+    forward: (forward: Forward) =>
+      path(
+        forward.target.space,
+        forward.target.namespace,
+        forward.kind,
+        forward.target.name,
+        portWords(forward),
+      ),
+    diff: (uri: string) => {
+      const input = parseDiffUri(uri);
+      if (!input) return undefined;
+      const side = (editor: string) => object(editor) ?? manifest(editor);
+      if (input.kind !== "objects") return side(input.editor);
+      const [left, right] = [side(input.left), side(input.right)];
+      return left && right ? `${left} ↔ ${right}` : undefined;
     },
   };
 }
