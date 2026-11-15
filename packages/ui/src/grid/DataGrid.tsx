@@ -28,6 +28,11 @@ export const ROW_HEIGHT = 26;
 const HEADER_HEIGHT = 28;
 const MARK_WIDTH = 28;
 const ACTIONS_WIDTH = 32;
+/** How long the pointer rests on a row before its icons show, so that a pass over the rows shows none. */
+const HOVER_MS = 60;
+
+/** The width of `count` icons over a row's end: 24 px each, 2 px apart, after 8 px. */
+const iconsWidth = (count: number) => 8 + count * 24 + (count - 1) * 2;
 
 export interface DataGridProps<R, G> {
   readonly label: string;
@@ -79,8 +84,12 @@ export interface DataGridProps<R, G> {
    * part holding the grid sets its own.
    */
   readonly overlayMenu?: boolean;
-  /** Actions with icons that show on a hovered row, run on that row. */
-  readonly inline?: readonly Action[];
+  /**
+   * A row's first actions, as icons over the end of the row once the pointer
+   * rests on it, run on that row; they show only where the columns at the
+   * row's end that may be covered have room for them.
+   */
+  readonly inline?: (row: R) => readonly Action[];
   /** At the head of the actions column, such as the choice of columns. */
   readonly headerEnd?: ReactNode;
   /** Skeleton rows until the first rows come. */
@@ -134,7 +143,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onMark,
     menu = [],
     overlayMenu = false,
-    inline = [],
+    inline,
     headerEnd,
     loading,
     empty,
@@ -372,6 +381,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     event.preventDefault();
   };
   const anyMarked = (marked?.size ?? 0) > 0;
+  let room = 0;
+  for (const column of [...columns].reverse()) {
+    if (column.coverable !== true) break;
+    room += widthOf(column);
+  }
   const active = virtual.find(
     (at) => cursor !== undefined && item(at.index)?.id === cursor,
   );
@@ -482,30 +496,39 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                 </button>
               </ActionDropdown>
             )}
-            {inline.length > 0 && (
-              <div
-                className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
-                style={{ right: ACTIONS_WIDTH }}
-              >
-                <div
-                  className={cn(
-                    "flex h-full items-center bg-row-hover pl-2",
-                    tint,
-                  )}
-                >
-                  <InlineActions
-                    actions={inline.map((action) => ({
-                      ...action,
-                      run: () => {
-                        select();
-                        action.run();
-                      },
-                    }))}
-                  />
-                </div>
-              </div>
-            )}
           </>
+        }
+        icons={
+          inline &&
+          (() => {
+            const actions = inline(target.data);
+            return (
+              actions.length > 0 &&
+              room >= iconsWidth(actions.length) && (
+                <div
+                  className="absolute inset-y-0 flex items-center bg-editor"
+                  style={{ right: ACTIONS_WIDTH }}
+                >
+                  <div
+                    className={cn(
+                      "flex h-full items-center bg-row-hover pl-2",
+                      tint,
+                    )}
+                  >
+                    <InlineActions
+                      actions={actions.map((action) => ({
+                        ...action,
+                        run: () => {
+                          select();
+                          action.run();
+                        },
+                      }))}
+                    />
+                  </div>
+                </div>
+              )
+            );
+          })
         }
         onClick={(event) => {
           // A click in a menu the row opened reaches it through the portal.
@@ -667,11 +690,13 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
  * A row whose last cell holds its actions, mounted only while they can be
  * reached: one Tooltip per action and a menu on each of a window's rows cost
  * more to render, on every frame of a scroll, than all of the rows' cells.
+ * Its icons mount once the pointer has rested on it.
  */
 function DataRow({
   keepActions,
   overlay,
   actions,
+  icons,
   children,
   ...row
 }: ComponentProps<"div"> & {
@@ -679,10 +704,21 @@ function DataRow({
   /** The row's tint, when the actions lie over its end rather than in a column. */
   overlay: string | undefined;
   actions: ReactNode;
+  icons: (() => ReactNode) | undefined;
 }) {
   const [pointed, setPointed] = useState(false);
+  const [rested, setRested] = useState(false);
   const [focused, setFocused] = useState(false);
   const shown = keepActions || pointed || focused;
+  useEffect(() => {
+    if (!pointed) return;
+    const timer = setTimeout(() => {
+      setRested(true);
+    }, HOVER_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [pointed]);
   return (
     <div
       {...row}
@@ -691,6 +727,7 @@ function DataRow({
       }}
       onPointerLeave={() => {
         setPointed(false);
+        setRested(false);
       }}
       onFocus={() => {
         setFocused(true);
@@ -704,6 +741,7 @@ function DataRow({
       {overlay === undefined ? (
         <div role="gridcell" className="flex items-center justify-center">
           {shown && actions}
+          {rested && icons?.()}
         </div>
       ) : (
         shown && (

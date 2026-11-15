@@ -1,9 +1,20 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AccessQuery } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { notify } from "@twigo/ui";
+import type { Lookup } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
 import { mountKube, openList, settle, withScreenSize } from "../test/workbench";
+import { canShell } from "./exec/kinds";
+import { canForward } from "./forward/kinds";
+import { logsKind } from "./logs/entries";
 
 withScreenSize(1400);
 
@@ -399,4 +410,160 @@ test("marked rows marked again after their marks were cleared are asked about ag
   fireEvent.keyDown(main, { code: "KeyX", key: "x" });
   await settle(4);
   expect(marked()).toBeGreaterThan(once);
+});
+
+function rowOf(
+  resource: string,
+  kind: string,
+  state: Record<string, boolean> = {},
+): Lookup {
+  const [group = "", plural = resource] = resource.includes("/")
+    ? resource.split("/")
+    : ["", resource];
+  const gvr = { group, version: "v1", resource: plural };
+  const values: Record<string, string | boolean> = {
+    "resource.selected": true,
+    "resource.group": group,
+    "resource.kind": kind,
+    "resource.logs": logsKind(gvr) !== undefined,
+    "resource.shell": canShell(gvr),
+    "resource.forward": canForward(gvr),
+    "resource.scalable": [
+      "deployments",
+      "statefulsets",
+      "replicasets",
+    ].includes(plural),
+    ...state,
+  };
+  return (key) =>
+    key in values
+      ? values[key]
+      : key.startsWith("resource.capability.") || key.startsWith("capability.");
+}
+
+test("each kind pins its verbs in their order, and the rest go into More with Delete last in its own group, in the error tone", async () => {
+  const workbench = await mountKube();
+  const pins = (row: Lookup) =>
+    workbench
+      .actions("resource/details", row)
+      .flat()
+      .filter((action) => action.pinned)
+      .map((action) => action.label);
+  const kinds: [Lookup, string[]][] = [
+    [rowOf("pods", "Pod"), ["Logs", "Shell", "Forward"]],
+    [rowOf("apps/deployments", "Deployment"), ["Logs", "Restart", "Scale…"]],
+    [rowOf("apps/statefulsets", "StatefulSet"), ["Logs", "Restart", "Scale…"]],
+    [rowOf("apps/daemonsets", "DaemonSet"), ["Logs", "Restart"]],
+    [rowOf("batch/cronjobs", "CronJob"), ["Trigger", "Suspend"]],
+    [
+      rowOf("batch/cronjobs", "CronJob", { "resource.suspended": true }),
+      ["Trigger", "Resume"],
+    ],
+    [rowOf("nodes", "Node"), ["Cordon", "Drain"]],
+    [
+      rowOf("nodes", "Node", { "resource.cordoned": true }),
+      ["Uncordon", "Drain"],
+    ],
+    [rowOf("services", "Service"), ["Forward"]],
+    [rowOf("apps/replicasets", "ReplicaSet"), ["Forward"]],
+    [rowOf("batch/jobs", "Job"), []],
+    [rowOf("configmaps", "ConfigMap"), []],
+  ];
+  for (const [row, pinned] of kinds) {
+    expect(pins(row)).toEqual(pinned);
+    const groups = workbench.actions("resource/details", row);
+    const last = groups[groups.length - 1];
+    expect(last?.map(({ label, danger }) => ({ label, danger }))).toEqual([
+      { label: "Delete", danger: true },
+    ]);
+    expect(
+      groups
+        .flat()
+        .filter(({ id }) =>
+          ["k8s.resource.yaml", "k8s.resource.openEditor"].includes(id),
+        ),
+    ).toEqual([]);
+  }
+});
+
+test("a pinned write RBAC refuses stays in its place, disabled, saying why, and the context menu leaves it out", async () => {
+  const workbench = await mountKube();
+  const refused = rowOf("apps/deployments", "Deployment", {
+    "resource.capability.patch": false,
+    "resource.capability.patch/scale": false,
+    "resource.capability.delete": false,
+  });
+  const shown = workbench
+    .actions("resource/details", refused)
+    .flat()
+    .map(({ label, pinned, disabled, reason }) => ({
+      label,
+      pinned: pinned === true,
+      disabled,
+      reason,
+    }));
+  expect(shown.filter(({ pinned }) => pinned)).toEqual([
+    { label: "Logs", pinned: true, disabled: false, reason: undefined },
+    {
+      label: "Restart",
+      pinned: true,
+      disabled: true,
+      reason: "You may not restart it",
+    },
+    {
+      label: "Scale…",
+      pinned: true,
+      disabled: true,
+      reason: "You may not scale it",
+    },
+  ]);
+  expect(shown[shown.length - 1]).toEqual({
+    label: "Delete",
+    pinned: false,
+    disabled: true,
+    reason: "You may not delete it",
+  });
+  expect(
+    workbench
+      .actions("resource/context", refused)
+      .flat()
+      .map(({ label }) => label)
+      .filter((label) => ["Restart", "Scale…", "Delete"].includes(label)),
+  ).toEqual([]);
+});
+
+test("a write the context's mode holds, clicked in the details' row, reaches the gate, whose refusal offers the unlock, and runs no further", async () => {
+  const error = vi.spyOn(notify, "error");
+  const workbench = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const subscribe = vi.spyOn(workbench.backend, "subscribe");
+  const row = screen.getAllByRole("row")[1];
+  fireEvent.click(row ?? document.body);
+  await settle(4);
+  const restart = within(
+    screen.getByRole("toolbar", { name: "Deployment actions" }),
+  ).getByRole("button", { name: "Restart" });
+  expect(restart.getAttribute("aria-disabled")).toBeNull();
+  act(() => {
+    restart.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "prod-eu is read-only",
+  );
+  fireEvent.click(restart);
+  await settle(4);
+  expect(invoke).toHaveBeenCalledWith(
+    "command_plan",
+    expect.objectContaining({ action: "restart", space: "prod-eu" }),
+  );
+  expect(
+    subscribe.mock.calls.filter(([command]) => command === "command_execute"),
+  ).toEqual([]);
+  const [message, options] =
+    error.mock.calls[error.mock.calls.length - 1] ?? [];
+  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });

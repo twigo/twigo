@@ -171,6 +171,31 @@ describe("in a wide editor", () => {
     expect(details()).toBeNull();
   });
 
+  test("the header's row is a pod's pinned verbs, then More, whose last item is Delete behind a separator", async () => {
+    await openList();
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    const row = within(shown()).getByRole("toolbar", { name: "Pod actions" });
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Logs", "Shell", "Forward", "More"]);
+    fireEvent.pointerDown(within(row).getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    const menu = screen.getByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.firstChild?.nextSibling?.firstChild?.textContent),
+    ).toEqual(["Attach", "Forward Port…", "Delete"]);
+    expect(
+      menu.lastElementChild?.previousElementSibling?.getAttribute("role"),
+    ).toBe("separator");
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);

@@ -14,6 +14,8 @@ export interface GridColumn {
   readonly descendFirst?: boolean;
   /** A quiet mark beside the title, whose tooltip says this. */
   readonly note?: string;
+  /** A hovered row's icons may lie over its cells, as over an age or a measure, when it is among the last columns. */
+  readonly coverable?: boolean;
 }
 
 export interface GridSort {

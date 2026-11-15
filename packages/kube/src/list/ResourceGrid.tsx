@@ -20,7 +20,9 @@ import {
   useChanges,
   useListRegistration,
   useWorkbench,
+  type Lookup,
 } from "@twigo/workbench";
+import { CAPABILITY_PREFIXES } from "../capabilities";
 import {
   byHealth,
   columnRule,
@@ -31,6 +33,7 @@ import {
   statusColumn,
 } from "../columns";
 import { kindIcon } from "../kinds";
+import { rowState } from "../rowState";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
@@ -43,7 +46,7 @@ import { useListView } from "./useListView";
 
 const GROUP = "group:";
 
-/** The cells a list beside the details keeps. */
+/** The cells a list beside the details keeps, which a hovered row's icons never cover. */
 const NARROW: ReadonlySet<CellKind> = new Set(["name", "status", "ratio"]);
 
 /**
@@ -197,6 +200,7 @@ function Grid({
       align: column.rule.align,
       numeric: column.rule.figures,
       descendFirst: column.rule.descendFirst,
+      coverable: !NARROW.has(column.rule.cell),
       ...(note !== undefined && { note }),
     };
   });
@@ -340,10 +344,28 @@ function Grid({
     [register, grids, uri],
   );
   const lookup = keys.lookup(grid);
-  // The grid selects a row before it runs one of the row's inline actions,
-  // so they show and run as for a selected row.
-  const rowLookup = (key: string) =>
-    key === "resource.selected" ? true : lookup(key);
+  // The grid selects a row before it runs one of its icons, so they show
+  // and run as for a selected row, with that row's own state. RBAC answers
+  // only for the selected row, so another's capabilities read true, as an
+  // unanswered one does, and the server decides.
+  const rowLookup = (row: Row): Lookup => {
+    if (row.id === current?.row.id)
+      return (key) => (key === "resource.selected" ? true : lookup(key));
+    const own: Record<string, boolean> = rowState(resource, {
+      gvr,
+      kind: resource.kind,
+      namespaced: resource.namespaced,
+      columns: snapshot.columns,
+      row,
+    });
+    return (key) => {
+      if (key === "resource.selected") return true;
+      if (key in own) return own[key];
+      if (CAPABILITY_PREFIXES.some((prefix) => key.startsWith(prefix)))
+        return true;
+      return lookup(key);
+    };
+  };
 
   if (isProblem(snapshot.status.state))
     return (
@@ -406,7 +428,15 @@ function Grid({
         selection.mark(uri, ids, marked);
       }}
       menu={workbench.actions("resource/context", lookup)}
-      inline={workbench.actions("resource/inline", rowLookup).flat()}
+      inline={(row) =>
+        narrow && row.id === current?.row.id
+          ? []
+          : workbench
+              .actions("resource/details", rowLookup(row))
+              .flat()
+              .filter((action) => action.pinned)
+              .slice(0, 2)
+      }
       headerEnd={
         <ActionDropdown
           label="Choose columns"

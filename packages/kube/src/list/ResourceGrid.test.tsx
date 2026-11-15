@@ -827,3 +827,65 @@ test("a header's click folds its group, Left goes from a row to its header, and 
     ),
   ).toBeTruthy();
 });
+
+test("a hovered row's verbs read that row's own state, not the selected row's", async () => {
+  const script = scriptedBackend();
+  const workbench = await mountKube(script.backend);
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settle(2);
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/nodes");
+  });
+  await settle();
+  act(() => {
+    script.send({
+      seq: 1,
+      total: 3,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        { name: "Version", kind: "string", priority: 0 },
+      ],
+      window: { start: 0, ids: ["dev/a", "dev/b", "dev/c"] },
+      upserts: [
+        ["dev/a", "Ready,SchedulingDisabled"],
+        ["dev/b", "Ready"],
+        ["dev/c", "Ready,SchedulingDisabled"],
+      ].map(([id = "", status]) => ({
+        id,
+        created: null,
+        generated: null,
+        cells: [id.slice(4), status ?? "", "v1.37.1"],
+      })),
+      status: { state: "ready" },
+      counts: null,
+      groups: null,
+      metrics: null,
+    });
+  });
+  await settle(1);
+  focusGrid();
+  key("KeyJ");
+  await settle(1);
+  expect(selectedNames()).toEqual(["a"]);
+  const icons = (name: string) => {
+    const row = rows().find((each) => textOf(each, "Name") === name);
+    if (!row) throw new Error(`no row ${name}`);
+    fireEvent.pointerEnter(row);
+    return row;
+  };
+  const labels = (row: HTMLElement) =>
+    within(row)
+      .queryAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => label !== "Row actions" && label !== "Mark row");
+  const ready = icons("b");
+  await settle(2);
+  expect(labels(ready)).toEqual(["Cordon", "Drain"]);
+  fireEvent.pointerLeave(ready);
+  const cordoned = icons("c");
+  await settle(2);
+  expect(labels(cordoned)).toEqual(["Uncordon", "Drain"]);
+});

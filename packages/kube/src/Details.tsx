@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
 import type { ObjectQuery, ObjectRef, Overview, Row } from "@twigo/protocol";
 import {
-  ActionBar,
+  ActionRow,
   cn,
   IconButton,
   LinkButton,
@@ -269,8 +269,8 @@ export function Details({
                   ],
             )}
         </div>
-        <ActionBar
-          inline
+        <ActionRow
+          label={`${kind} actions`}
           actions={workbench.actions("resource/details", lookup)}
           className="-ml-1.5"
         />

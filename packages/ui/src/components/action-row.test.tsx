@@ -119,7 +119,6 @@ test("an action the context's mode will refuse says so and still runs, so that t
   );
 });
 
-/** Lays the row out at `width`, each stage of a copy needing what `needs` says. */
 function layOut(width: number, needs: readonly number[]) {
   const sized = (element: Element, value: number) => {
     Object.defineProperty(element, "clientWidth", {
@@ -135,7 +134,6 @@ function layOut(width: number, needs: readonly number[]) {
   });
 }
 
-/** What each pinned button shows: its keys too, its label, or its icon alone. */
 const forms = () =>
   buttons()
     .slice(0, -1)
