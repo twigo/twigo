@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
 /**
- * An element's width as it lays out, 0 until it is first measured. An
- * element that measures 0 is not laid out, as a tab dockview detaches
- * while another shows, and keeps the width it had.
+ * An element's width as it lays out, 0 until it is first measured. A
+ * measure of 0 is taken as not laid out, as with a tab dockview detaches
+ * while another shows, and the width it had stays.
  */
 export function useWidth(element: HTMLElement | null): number {
   const [width, setWidth] = useState(0);
