@@ -222,7 +222,9 @@ describe("the main list", () => {
     expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
     const names = () => rows().map((row) => textOf(row, "Name"));
     const before = names();
-    fireEvent.change(filter, { target: { value: "payments" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "payments" },
+    });
     const marks: boolean[] = [];
     for (let step = 0; step < 40; step++) {
       await act(() => vi.advanceTimersByTimeAsync(5));

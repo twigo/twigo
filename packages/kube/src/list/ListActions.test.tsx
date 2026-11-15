@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { STRIP_KEPT } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
@@ -161,6 +167,34 @@ test("details docked beside the list take their width from the room, and the act
   await settle(1);
   expect(actions().style.marginRight).toBe("0px");
   expect(stageOf(actions())).toBe(1);
+});
+
+test("the least a list keeps beside docked details is known as they first dock, though its actions never had to give way", async () => {
+  laidOut();
+  await openList();
+  withRoom(900);
+  expect(stageOf(actions())).toBe(0);
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  await settle(1);
+  expect(grid().parentElement?.style.minWidth).toBe(
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0))}px`,
+  );
+});
+
+test("a health just picked keeps the focus while the last stage waits to be measured again", async () => {
+  laidOut();
+  await openList();
+  withRoom(900);
+  const failing = within(
+    screen.getByRole("group", { name: "Rows by health" }),
+  ).getByRole("button", { name: /^Failing/ });
+  act(() => {
+    failing.focus();
+  });
+  fireEvent.click(failing);
+  await settle();
+  expect(failing.getAttribute("aria-pressed")).toBe("true");
+  expect(document.activeElement).toBe(failing);
 });
 
 test("the filter field keeps its place and its focus while its text, and so the row's width, changes", async () => {

@@ -163,15 +163,44 @@ function Actions({
     groupable.length > 0,
   ]);
   const taken = useWidth(row);
+  // What the last stage shows once the list shows its rows: the health
+  // choice with its count's room, and the Group button.
+  const last = JSON.stringify([
+    current?.value,
+    current &&
+      Math.max(
+        current.digits ?? 0,
+        (current.count ?? 0).toLocaleString("en").length,
+      ),
+    groupable.length > 0,
+  ]);
+  const lastMeasured = useRef<string>(undefined);
+  const back = useRef<number>(undefined);
   // A stage's width is read as it shows, before it paints. While the field
   // or its Clear button has the focus the filter stays as it is, an icon or
   // the field, since the other would replace it and take the focus with it.
+  // The last stage's width is the least a list beside docked details keeps
+  // for its strip, so it is read as soon as the row shows what it will, on a
+  // turn to that stage and back that never paints, once nothing in the row
+  // has the focus that the turn would take.
   useLayoutEffect(() => {
     if (room === undefined || !row) return;
     needs.current[stage] = row.offsetWidth;
+    if (stage === STAGES.health && shows) lastMeasured.current = last;
     const widest = needs.current[STAGES.health];
     if (widest !== undefined) states.setStripMin(uri, STRIP_KEPT + widest);
     const focused = fieldBox.current?.contains(document.activeElement) === true;
+    if (back.current !== undefined) {
+      setStage(back.current);
+      back.current = undefined;
+      return;
+    }
+    const busy = focused || row.contains(document.activeElement) || wanted;
+    if (shows && lastMeasured.current !== last && !busy) {
+      back.current = stage;
+      setStage(STAGES.health);
+      return;
+    }
     const next = stageFor(
       needs.current,
       stage,
@@ -184,7 +213,20 @@ function Actions({
         ? Math.max(next, STAGES.filter)
         : Math.min(next, STAGES.filter - 1);
     if (settled !== stage) setStage(settled);
-  }, [row, room, inspector, stage, taken, fit, focusMoves, states, uri]);
+  }, [
+    row,
+    room,
+    inspector,
+    stage,
+    taken,
+    fit,
+    focusMoves,
+    shows,
+    last,
+    wanted,
+    states,
+    uri,
+  ]);
   if (wanted && iconFilter && !filtering) setFiltering(true);
   if (!iconFilter && filtering) setFiltering(false);
   useEffect(() => {
