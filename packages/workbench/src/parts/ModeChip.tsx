@@ -127,6 +127,7 @@ function Chip({
               className={cn(
                 "twigo-mode-chip outline-none focus-visible:shadow-[var(--focus-ring)]",
                 CHIP,
+                folded && "w-5 justify-center px-0",
               )}
             >
               <ChipFace access={access} label={label} folded={folded} />
