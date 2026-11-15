@@ -18,6 +18,7 @@ import { registerLogs } from "./logs/register";
 import { LogsTabs } from "./logs/state";
 import { createTerminalTabs, registerTerminals } from "./terminal/register";
 import { registerSessions } from "./sessions";
+import { tabPaths } from "./tabPaths";
 import { execUri, logsUri, terminalUri } from "./uri";
 
 withScreenSize(1400);
@@ -49,9 +50,10 @@ async function mounted(scenario: MockScenario = "shellOneContainer") {
   const logs = new LogsTabs(backend);
   const shells = createExecTabs(workbench);
   const terminals = createTerminalTabs(workbench);
-  registerLogs(workbench, logs);
-  registerExec(workbench, shells);
-  registerTerminals(workbench, terminals);
+  const paths = tabPaths(workbench, { last: () => undefined });
+  registerLogs(workbench, logs, paths);
+  registerExec(workbench, shells, paths);
+  registerTerminals(workbench, terminals, paths);
   registerSessions(workbench, { logs, shells, terminals });
   await act(() => workbench.spaces.open(SPACE));
   act(() => {
