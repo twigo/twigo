@@ -592,7 +592,7 @@ function twoOfANamespace(): [HTMLElement, HTMLElement] {
   throw new Error("no two rows of one namespace");
 }
 
-test("a hovered row asks RBAC for itself: its refused verb draws enabled until the answer, then disabled with the reason, does not run, and a row of its namespace draws disabled at once", async () => {
+test("a hovered row asks RBAC for itself: its refused verb draws enabled until the answer, then disabled with the reason, does not run, and draws no row of its namespace disabled", async () => {
   const workbench = await openInStaging(
     "ready",
     "k8s-list://staging/apps/v1/deployments",
@@ -647,7 +647,50 @@ test("a hovered row asks RBAC for itself: its refused verb draws enabled until t
   fireEvent.pointerEnter(second);
   await settle(2);
   expect(held).toHaveLength(1);
-  expect(restart(second).getAttribute("aria-disabled")).toBe("true");
+  expect(restart(second).getAttribute("aria-disabled")).toBeNull();
+});
+
+test("a hovered row's verb that another resource as a whole refuses draws disabled at once on a row of the same namespace", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/batch/v1/cronjobs",
+  );
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  const held: (() => void)[] = [];
+  vi.spyOn(workbench.backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command !== "access_review")
+        return original(command as never, request as never);
+      const query = request as AccessQuery;
+      return new Promise((resolve) => {
+        held.push(() => {
+          resolve(query.checks.map((check) => check.resource !== "jobs"));
+        });
+      });
+    },
+  );
+  const [first, second] = twoOfANamespace();
+  const trigger = (row: HTMLElement) =>
+    within(row).getByRole("button", { name: "Trigger" });
+
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(trigger(first).getAttribute("aria-disabled")).toBeNull();
+  for (const answer of held.splice(0)) answer();
+  await settle(1);
+  expect(trigger(first).getAttribute("aria-disabled")).toBe("true");
+
+  fireEvent.pointerLeave(first);
+  fireEvent.pointerEnter(second);
+  await settle(2);
+  expect(held).toHaveLength(1);
+  expect(trigger(second).getAttribute("aria-disabled")).toBe("true");
+  act(() => {
+    trigger(second).focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "You may not create Jobs here",
+  );
 });
 
 test("a hovered row's verb the context's mode holds runs on that row and meets the gate's refusal, which offers the unlock", async () => {

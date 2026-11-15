@@ -100,8 +100,9 @@ export class Capabilities {
 
   /**
    * The keys' values for a list's hovered row: the last answers for its
-   * object, else, at once, the last for its namespace, which another
-   * object's rules may differ from until its own come; else true.
+   * object, else, at once, the last for its namespace of the keys that ask
+   * about another resource as a whole, which hold for every object there;
+   * else true.
    */
   hovered(
     uri: string,
@@ -138,8 +139,9 @@ export class Capabilities {
 
   /**
    * One review a namespace; each key holds where every answer for it says
-   * yes. An ask of one object keeps its answers for the hovered rows of the
-   * list `learns`, which forgets those of another basis.
+   * yes, and a review that fails is asked again by the next ask. An ask of
+   * one object keeps its answers for the hovered rows of the list `learns`,
+   * which forgets those of another basis.
    */
   #ask(
     entry: string,
@@ -208,7 +210,9 @@ export class Capabilities {
             const namespace = object.namespace ?? null;
             known.namespaces.set(namespace, {
               ...known.namespaces.get(namespace),
-              ...answers,
+              ...Object.fromEntries(
+                Object.entries(answers).filter(([key]) => !key.startsWith(OWN)),
+              ),
             });
           }
           this.changes.emit();
@@ -219,6 +223,11 @@ export class Capabilities {
           }
         },
         (error: unknown) => {
+          if (current()) {
+            const answered = this.#lists.get(entry)?.answers ?? {};
+            this.#lists.delete(entry);
+            if (Object.keys(answered).length > 0) this.changes.emit();
+          }
           this.report(error);
         },
       );
