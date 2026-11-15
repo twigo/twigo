@@ -39,7 +39,7 @@ export function Tile({
         "relative flex shrink-0 items-center justify-center font-medium",
         size === "md"
           ? "size-8 rounded-md text-2xs"
-          : "size-5 rounded-[5px] text-[9px] leading-[13px] font-bold",
+          : "size-5 rounded-[5px] text-[9px] leading-[13px] font-semibold",
         color ? `${TINT[color]} text-content` : "bg-card text-support",
         className,
       )}
