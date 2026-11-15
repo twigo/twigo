@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import type { SerializedDockview } from "dockview-react";
 import { afterEach, expect, test, vi } from "vitest";
+import { useActionRoom } from "../react";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
@@ -100,6 +101,87 @@ test("an empty editor area shows the first watermark whose when holds, else its 
     workbench.editors.close("note://a");
   });
   expect(screen.getByText("home of prod-eu")).toBeTruthy();
+});
+
+function Room() {
+  return <p>room {String(useActionRoom())}</p>;
+}
+
+test("a group's actions get the strip's width less its tabs and the overflow button, as the tabs come and go and the strip resizes", async () => {
+  const resizes = new Set<ResizeObserverCallback>();
+  const unobserved = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(report: ResizeObserverCallback) {
+      resizes.add(report);
+    }
+    observe() {
+      return undefined;
+    }
+    unobserve() {
+      return undefined;
+    }
+    disconnect() {
+      return undefined;
+    }
+  };
+  let strip = 900;
+  const tabs: Record<string, number> = { "note://a": 120, "note://b": 220 };
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("dv-tabs-and-actions-container")
+        ? strip
+        : 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return tabs[this.dataset.tabPanelId ?? ""] ?? 0;
+    },
+  });
+  try {
+    const workbench = await testWorkbench();
+    workbench.editors.register({
+      id: "test.note",
+      scheme: "note",
+      title: (uri) => uri.host,
+      component: ({ uri }) => <p>body of {uri}</p>,
+      actions: Room,
+    });
+    render(<WorkbenchView workbench={workbench} />);
+    act(() => {
+      workbench.editors.open("note://a", { preview: false });
+    });
+    await act(() => Promise.resolve());
+    expect(screen.getByText("room 732")).toBeTruthy();
+
+    act(() => {
+      workbench.editors.open("note://b", { preview: false });
+    });
+    await act(() => Promise.resolve());
+    expect(screen.getByText("room 512")).toBeTruthy();
+
+    strip = 700;
+    act(() => {
+      const entry = {
+        contentRect: new DOMRectReadOnly(0, 0, 700, 600),
+        contentBoxSize: [{ inlineSize: 700, blockSize: 600 }],
+      } as unknown as ResizeObserverEntry;
+      for (const report of resizes) report([entry], {} as ResizeObserver);
+    });
+    expect(screen.getByText("room 312")).toBeTruthy();
+
+    act(() => {
+      workbench.editors.close("note://b");
+    });
+    await act(() => Promise.resolve());
+    expect(screen.getByText("room 532")).toBeTruthy();
+  } finally {
+    globalThis.ResizeObserver = unobserved;
+    Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+    Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+  }
 });
 
 test("a tab's tooltip is what its editor says now, asked each time it opens, and none where the editor says none", async () => {

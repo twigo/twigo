@@ -27,7 +27,12 @@ import {
   type Area,
   type Editors,
 } from "../editors/registry";
-import { EditorShownContext, useChanges, useWorkbench } from "../react";
+import {
+  ActionRoomContext,
+  EditorShownContext,
+  useChanges,
+  useWorkbench,
+} from "../react";
 import { PanelBoundary } from "./PanelBoundary";
 import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
@@ -282,11 +287,57 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
   );
 }
 
+/** What the strip keeps free for dockview's overflow button, with room for a count of two digits. */
+const OVERFLOW_BUTTON = 48;
+
+/**
+ * The width a group's actions may take without a tab giving way: the
+ * strip's, less every tab at the width it asks for (up to 220 px) and the
+ * overflow button. Undefined until measured.
+ */
+function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
+  const [room, setRoom] = useState<number>();
+  useEffect(() => {
+    const strip = wrapper?.closest<HTMLElement>(
+      ".dv-tabs-and-actions-container",
+    );
+    const list = strip?.querySelector(".dv-tabs-container");
+    if (!wrapper || !strip || !list) return;
+    const padding = parseFloat(getComputedStyle(wrapper).paddingRight) || 0;
+    const measure = () => {
+      const tabs = [...list.children].reduce(
+        (sum, tab) => sum + (tab as HTMLElement).offsetWidth,
+        0,
+      );
+      setRoom(
+        Math.max(0, strip.clientWidth - tabs - OVERFLOW_BUTTON - padding),
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    const watch = () => {
+      observer.disconnect();
+      observer.observe(strip);
+      for (const tab of list.children) observer.observe(tab);
+      measure();
+    };
+    const changed = new MutationObserver(watch);
+    changed.observe(list, { childList: true });
+    watch();
+    return () => {
+      observer.disconnect();
+      changed.disconnect();
+    };
+  }, [wrapper]);
+  return room;
+}
+
 export function GroupActions({
   activePanel,
   panels,
 }: IDockviewHeaderActionsProps) {
   const { editors } = useWorkbench();
+  const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
+  const room = useActionsRoom(wrapper);
   const params = readParams(
     activePanel && panels.includes(activePanel)
       ? activePanel.params
@@ -296,8 +347,10 @@ export function GroupActions({
   if (!params || !provider?.actions) return null;
   const Actions = provider.actions;
   return (
-    <div className="flex h-full items-center pr-1.5">
-      <Actions uri={params.uri} />
+    <div ref={setWrapper} className="flex h-full items-center pr-1.5">
+      <ActionRoomContext.Provider value={room}>
+        <Actions uri={params.uri} />
+      </ActionRoomContext.Provider>
     </div>
   );
 }

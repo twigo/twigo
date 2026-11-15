@@ -20,19 +20,22 @@ interface State {
   readonly focus: boolean;
   /** The view the row's details show, kept as the selection moves. */
   readonly details: ObjectTab;
+  /** The width the details beside the list take from it, in px; 0 without them. */
+  readonly inspector: number;
 }
 
 const INITIAL: State = {
   collapsed: new Set(),
   focus: false,
   details: "overview",
+  inspector: 0,
 };
 
 /**
  * What each open list editor shows, by URI (ARCHITECTURE 4.4): its sort,
  * its text filter, its picked health, its collapsed groups, and the asks
- * for its filter field's focus, and the view its details show, so an
- * editor that mounts again shows the same. A list that closes opens again
+ * for its filter field's focus, the view its details show and the width
+ * they take beside it, so an editor that mounts again shows the same. A list that closes opens again
  * with the text and health of its URI (4.4).
  */
 export class ListStates {
@@ -97,6 +100,15 @@ export class ListStates {
 
   setDetailsTab(uri: string, details: ObjectTab): void {
     if (this.#get(uri).details !== details) this.#update(uri, { details });
+  }
+
+  inspector(uri: string): number {
+    return this.#get(uri).inspector;
+  }
+
+  setInspector(uri: string, inspector: number): void {
+    if (this.#get(uri).inspector !== inspector)
+      this.#update(uri, { inspector });
   }
 
   /** The list's editor closed: the text and health picked in it go. */

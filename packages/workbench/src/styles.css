@@ -86,6 +86,10 @@
 .twigo-dockview .dv-right-actions-container {
   flex-shrink: 100000;
 }
+/* A tab asks for its title's width, up to 220 px, where the title cuts. */
+.twigo-dockview .dv-tabs-container > .dv-tab {
+  max-width: 220px;
+}
 /* Centred above the strip's bottom line, a little high, since lowercase
    titles read low when their capitals are centred. */
 .twigo-dockview .dv-tabs-container > .dv-tab {

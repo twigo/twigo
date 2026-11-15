@@ -17,6 +17,7 @@ export type { KeybindingRule } from "./keybindings/resolver";
 export { Changes } from "./changes";
 export {
   EditorShownContext,
+  useActionRoom,
   useChanges,
   useEditorShown,
   useWorkbench,

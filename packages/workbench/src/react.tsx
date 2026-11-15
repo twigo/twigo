@@ -28,6 +28,17 @@ export function useEditorShown(): boolean {
   return useContext(EditorShownContext);
 }
 
+/**
+ * How wide the actions at the right of a group's tab strip may be before a
+ * tab gives way: what the strip leaves beside its tabs and its overflow
+ * button. Undefined until the strip is measured.
+ */
+export const ActionRoomContext = createContext<number | undefined>(undefined);
+
+export function useActionRoom(): number | undefined {
+  return useContext(ActionRoomContext);
+}
+
 /** Re-renders whenever the registry or store behind `changes` changes. */
 export function useChanges(changes: Changes): void {
   useSyncExternalStore(changes.subscribe, () => changes.version);
