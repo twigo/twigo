@@ -144,6 +144,42 @@ test.each([
   },
 );
 
+test.each([
+  ["Close Terminal…", "k8s.terminal.new", undefined, "k8s.terminal.close"],
+  [
+    "Close Shell…",
+    "k8s.shell.open",
+    { ...TARGET, container: "api" },
+    "k8s.shell.close",
+  ],
+] as const)(
+  "%s as the panel's last close gives the focus back to the element that held it before the panel took it",
+  async (_title, open, args, closing) => {
+    const { workbench, run, panel } = await mounted();
+    const before = document.body.appendChild(document.createElement("button"));
+    act(() => {
+      before.focus();
+    });
+    await run(open, args);
+    expect(tabsIn("panel")).toHaveLength(1);
+    const done = workbench.commands.execute(
+      closing,
+      workbench.keys.lookup(document.activeElement),
+    );
+    await settle(4);
+    fireEvent.keyDown(screen.getByRole("combobox"), {
+      key: "Enter",
+      code: "Enter",
+    });
+    await settle(6);
+    await done;
+    expect(tabsIn("panel")).toEqual([]);
+    expect(panel().visible).toBe(false);
+    expect(document.activeElement).toBe(before);
+    before.remove();
+  },
+);
+
 test("a session that ends by itself keeps its tab and the panel, and is not counted once the panel hides", async () => {
   const { run, panel, shells } = await mounted("shellNoShell");
   await run("k8s.shell.open", { ...TARGET, container: "api" });

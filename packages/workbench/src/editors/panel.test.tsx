@@ -9,7 +9,7 @@ import {
 import { PanelBottom } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useEditorShown } from "../react";
-import { tabOf, tabsIn, testWorkbench } from "../testing";
+import { click, tabOf, tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
 afterEach(() => {
@@ -787,7 +787,7 @@ const CLOSERS: readonly [
   [
     "its tab's X",
     () => {
-      fireEvent.click(screen.getByRole("button", { name: "Close x" }));
+      click(screen.getByRole("button", { name: "Close x" }));
     },
   ],
   [
@@ -799,23 +799,45 @@ const CLOSERS: readonly [
     },
   ],
   [
-    "a key",
-    (workbench) =>
-      workbench.commands.execute(
-        "workbench.action.closeActiveEditor",
-        workbench.keys.lookup(null),
-      ),
+    "⌘W",
+    () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, {
+        code: "KeyW",
+        key: "w",
+        metaKey: true,
+      });
+    },
   ],
   [
     "Backspace on its tab",
     () => {
+      act(() => {
+        tabOf("session://x").focus();
+      });
       fireEvent.keyDown(tabOf("session://x"), { key: "Backspace" });
     },
   ],
   [
     "Delete on its tab",
     () => {
+      act(() => {
+        tabOf("session://x").focus();
+      });
       fireEvent.keyDown(tabOf("session://x"), { key: "Delete" });
+    },
+  ],
+  [
+    "Close Editor from the palette",
+    async (workbench) => {
+      await act(async () => {
+        workbench.quickAccess.show(">Close Editor");
+        await Promise.resolve();
+      });
+      fireEvent.keyDown(screen.getByRole("combobox"), {
+        key: "Enter",
+        code: "Enter",
+      });
+      await act(() => Promise.resolve());
     },
   ],
 ];
@@ -830,13 +852,38 @@ test.each(CLOSERS)(
     });
     await act(() => maximize(workbench));
     expect(panel()).toEqual({ visible: true, maximized: true });
-    await act(async () => {
-      await close(workbench);
-    });
+    await close(workbench);
     expect(tabsIn("panel")).toEqual([]);
     expect(panel()).toEqual({ visible: false, maximized: false });
     expect(panelElement()?.hasAttribute("inert")).toBe(true);
     expect(screen.getByText("note note://a").closest("[inert]")).toBeNull();
+  },
+);
+
+test.each(CLOSERS)(
+  "closing the panel's last editor by %s gives the focus back to the element that held it before the panel took it",
+  async (_gesture, close) => {
+    const { workbench, editors, panel } = await mounted();
+    act(() => {
+      editors.open("note://a");
+    });
+    const before = document.body.appendChild(document.createElement("button"));
+    act(() => {
+      before.focus();
+    });
+    act(() => {
+      editors.open("session://x");
+    });
+    const held = panelElement()?.querySelector<HTMLElement>("p");
+    held?.setAttribute("tabindex", "-1");
+    act(() => {
+      held?.focus();
+    });
+    await close(workbench);
+    expect(tabsIn("panel")).toEqual([]);
+    expect(panel().visible).toBe(false);
+    expect(document.activeElement).toBe(before);
+    before.remove();
   },
 );
 
@@ -857,6 +904,86 @@ test.each(["Backspace", "Delete"])(
     expect(tabsIn("editor").sort()).toEqual(["note://a", "note://b"]);
   },
 );
+
+test("Reopen Closed Editor brings back an editor of the editor area, closed by its tab's X", async () => {
+  const { editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("note://b");
+  });
+  click(within(tabOf("note://a")).getByRole("button", { name: "Close a" }));
+  expect(tabsIn("editor")).toEqual(["note://b"]);
+  fireEvent.keyDown(document.body, {
+    code: "KeyT",
+    key: "t",
+    metaKey: true,
+    shiftKey: true,
+  });
+  expect(tabsIn("editor").sort()).toEqual(["note://a", "note://b"]);
+  expect(editors.active).toBe("note://a");
+});
+
+test("Reopen Closed Editor brings back the active space's last closed editor, not the one closed last anywhere", async () => {
+  const { workbench, editors, space } = await mounted();
+  workbench.editors.register({
+    id: "test.tied",
+    scheme: "tied",
+    area: "panel",
+    title: (uri) => uri.host,
+    space: (uri) => uri.searchParams.get("space") ?? undefined,
+    component: ({ uri }) => <p>tied {uri}</p>,
+  });
+  const first = space();
+  const reopen = () =>
+    act(() =>
+      workbench.commands.execute(
+        "workbench.action.reopenClosedEditor",
+        workbench.keys.lookup(null),
+      ),
+    );
+  act(() => {
+    editors.open(`tied://a?space=${first}`);
+  });
+  act(() => {
+    editors.dismiss(`tied://a?space=${first}`);
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  act(() => {
+    editors.open("tied://b?space=staging");
+  });
+  act(() => {
+    editors.dismiss("tied://b?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select(first);
+  });
+  await reopen();
+  expect(tabsIn("panel")).toEqual([`tied://a?space=${first}`]);
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  await reopen();
+  expect(tabsIn("panel")).toEqual(["tied://b?space=staging"]);
+});
+
+test("Close Editor does not close an editor that an empty maximized panel covers", async () => {
+  const { workbench, editors, panel } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  await act(() => maximize(workbench));
+  act(() => {
+    editors.close("session://x");
+  });
+  expect(tabsIn("panel")).toEqual([]);
+  expect(panel()).toEqual({ visible: true, maximized: true });
+  fireEvent.keyDown(document.body, { code: "KeyW", key: "w", metaKey: true });
+  expect(tabsIn("editor")).toEqual(["note://a"]);
+  expect(panel()).toEqual({ visible: true, maximized: true });
+});
 
 test("closing one of the panel's editors leaves the panel", async () => {
   const { editors, panel } = await mounted();
@@ -977,37 +1104,6 @@ test("it goes to the editor area's active editor when that element cannot take t
     editors.dismiss("input://x");
   });
   expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
-});
-
-test("the last close run from the palette gives the focus back to the element that held it before the panel took it", async () => {
-  const { workbench, editors, panel } = await mounted();
-  withFields(workbench);
-  act(() => {
-    editors.open("field://a");
-  });
-  const before = document.body.appendChild(document.createElement("button"));
-  act(() => {
-    before.focus();
-  });
-  act(() => {
-    editors.open("input://x");
-  });
-  act(() => {
-    screen.getByLabelText("input://x").focus();
-  });
-  await act(async () => {
-    workbench.quickAccess.show(">Close Editor");
-    await Promise.resolve();
-  });
-  fireEvent.keyDown(screen.getByRole("combobox"), {
-    key: "Enter",
-    code: "Enter",
-  });
-  await act(() => Promise.resolve());
-  expect(tabsIn("panel")).toEqual([]);
-  expect(panel().visible).toBe(false);
-  expect(document.activeElement).toBe(before);
-  before.remove();
 });
 
 const LAYER_MARKUP: readonly [string, Record<string, string>][] = [
