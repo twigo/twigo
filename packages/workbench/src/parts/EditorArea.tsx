@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -34,6 +35,7 @@ import {
   useWorkbench,
 } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
+import { OVERFLOW_BUTTON } from "./strip";
 import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
@@ -287,17 +289,16 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
   );
 }
 
-/** What the strip keeps free for dockview's overflow button, with room for a count of two digits. */
-const OVERFLOW_BUTTON = 48;
-
 /**
  * The width a group's actions may take without a tab giving way: the
  * strip's, less every tab at the width it asks for (up to 220 px) and the
- * overflow button. Undefined until measured.
+ * overflow button. Undefined until measured. Each measure also brings the
+ * active tab back into view, since dockview does that only as a tab
+ * activates, before the actions settle.
  */
 function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
   const [room, setRoom] = useState<number>();
-  useEffect(() => {
+  useLayoutEffect(() => {
     const strip = wrapper?.closest<HTMLElement>(
       ".dv-tabs-and-actions-container",
     );
@@ -312,11 +313,15 @@ function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
       setRoom(
         Math.max(0, strip.clientWidth - tabs - OVERFLOW_BUTTON - padding),
       );
+      list
+        .querySelector(".dv-active-tab")
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     };
     const observer = new ResizeObserver(measure);
     const watch = () => {
       observer.disconnect();
       observer.observe(strip);
+      observer.observe(list);
       for (const tab of list.children) observer.observe(tab);
       measure();
     };
@@ -349,7 +354,7 @@ export function GroupActions({
   return (
     <div ref={setWrapper} className="flex h-full items-center pr-1.5">
       <ActionRoomContext.Provider value={room}>
-        <Actions uri={params.uri} />
+        <Actions key={params.uri} uri={params.uri} />
       </ActionRoomContext.Provider>
     </div>
   );

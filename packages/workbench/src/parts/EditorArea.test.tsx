@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   act,
   cleanup,
@@ -181,6 +182,87 @@ test("a group's actions get the strip's width less its tabs and the overflow but
     globalThis.ResizeObserver = unobserved;
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
     Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+  }
+});
+
+function OwnState({ uri }: { uri: string }) {
+  const [first] = useState(uri);
+  return <p>actions of {first}</p>;
+}
+
+test("a group's actions belong to the editor they are for: another editor of the group gets them anew", async () => {
+  const workbench = await testWorkbench();
+  workbench.editors.register({
+    id: "test.note",
+    scheme: "note",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>body of {uri}</p>,
+    actions: OwnState,
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    workbench.editors.open("note://a", { preview: false });
+  });
+  await act(() => Promise.resolve());
+  expect(screen.getByText("actions of note://a")).toBeTruthy();
+  act(() => {
+    workbench.editors.open("note://b", { preview: false });
+  });
+  await act(() => Promise.resolve());
+  expect(screen.getByText("actions of note://b")).toBeTruthy();
+  expect(screen.queryByText("actions of note://a")).toBeNull();
+});
+
+test("the active tab is brought back into view whenever the strip is measured, since the actions settle after dockview scrolls to it", async () => {
+  const resizes = new Set<ResizeObserverCallback>();
+  const unobserved = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(report: ResizeObserverCallback) {
+      resizes.add(report);
+    }
+    observe() {
+      return undefined;
+    }
+    unobserve() {
+      return undefined;
+    }
+    disconnect() {
+      return undefined;
+    }
+  };
+  const scrolled: Element[] = [];
+  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
+    this: Element,
+  ) {
+    scrolled.push(this);
+  });
+  try {
+    const workbench = await testWorkbench();
+    workbench.editors.register({
+      id: "test.note",
+      scheme: "note",
+      title: (uri) => uri.host,
+      component: ({ uri }) => <p>body of {uri}</p>,
+      actions: Room,
+    });
+    render(<WorkbenchView workbench={workbench} />);
+    act(() => {
+      workbench.editors.open("note://a", { preview: false });
+      workbench.editors.open("note://b", { preview: false });
+    });
+    await act(() => Promise.resolve());
+    scrolled.length = 0;
+    act(() => {
+      const entry = {
+        contentRect: new DOMRectReadOnly(0, 0, 700, 600),
+      } as unknown as ResizeObserverEntry;
+      for (const report of resizes) report([entry], {} as ResizeObserver);
+    });
+    const active = document.querySelector(".dv-tab.dv-active-tab");
+    expect(active?.textContent).toBe("b");
+    expect(scrolled).toContain(active);
+  } finally {
+    globalThis.ResizeObserver = unobserved;
   }
 });
 
