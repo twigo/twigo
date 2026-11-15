@@ -163,7 +163,7 @@ export function Home({
             <SpaceTile space={space} className="size-7" />
             <h1 className="truncate text-lg font-semibold">{space.name}</h1>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-support">
             {[
               version && `Kubernetes ${version}`,
               nodes.state === "counted" &&
@@ -187,7 +187,7 @@ export function Home({
                 <Count value={notReady} tone="error" /> not ready
               </>
             ) : (
-              <span className="text-muted-foreground">All ready</span>
+              <span className="text-support">All ready</span>
             )}
           </Tile>
           <Tile
@@ -209,14 +209,12 @@ export function Home({
             {failing + pending > 0 ? (
               <>
                 <Count value={failing} tone={failing > 0 ? "error" : "quiet"} />{" "}
-                failing <span className="text-muted-foreground">·</span>{" "}
+                failing <span className="text-support">·</span>{" "}
                 <Count value={pending} tone={pending > 0 ? "warn" : "quiet"} />{" "}
                 pending
               </>
             ) : (
-              <span className="text-muted-foreground">
-                None failing or pending
-              </span>
+              <span className="text-support">None failing or pending</span>
             )}
           </Tile>
           <Tile
@@ -229,7 +227,7 @@ export function Home({
                 <Count value={short} tone="warn" /> short of ready
               </>
             ) : (
-              <span className="text-muted-foreground">All ready</span>
+              <span className="text-support">All ready</span>
             )}
           </Tile>
           <Tile
@@ -242,7 +240,7 @@ export function Home({
             )}
           >
             {events.state === "counted" && (
-              <span className="text-muted-foreground">
+              <span className="text-support">
                 of <Count value={events.total} />{" "}
                 {unit(events.total, "event", "events")}
               </span>
@@ -251,7 +249,7 @@ export function Home({
         </section>
         <div className="grid items-start gap-6 @3xl:grid-cols-[1.6fr_1fr]">
           <section aria-label="Needs attention" className="grid gap-2">
-            <h2 className="text-[11px] font-semibold text-muted-foreground">
+            <h2 className="text-2xs font-semibold text-support">
               Needs attention
             </h2>
             {attention.length > 0 ? (
@@ -283,12 +281,12 @@ export function Home({
                         >
                           {item.title}
                         </span>{" "}
-                        <span className="text-muted-foreground">
+                        <span className="text-support">
                           · <Count value={item.count} /> {item.unit}
                         </span>
                       </span>
                       {item.words && (
-                        <span className="truncate text-xs text-muted-foreground">
+                        <span className="truncate text-xs text-support">
                           {item.words}
                         </span>
                       )}
@@ -306,17 +304,13 @@ export function Home({
               </ul>
             ) : (
               settled && (
-                <p className="text-xs text-muted-foreground">
-                  Nothing needs attention.
-                </p>
+                <p className="text-xs text-support">Nothing needs attention.</p>
               )
             )}
           </section>
           <aside className="grid gap-2">
             <Recent space={id} resources={resources} />
-            <h2 className="text-[11px] font-semibold text-muted-foreground">
-              Keys
-            </h2>
+            <h2 className="text-2xs font-semibold text-support">Keys</h2>
             <Keys />
           </aside>
         </div>
@@ -353,7 +347,7 @@ function Tile({
   if (tally.state === "missing")
     return (
       <StatTile label={label} value={undefined}>
-        <span className="text-muted-foreground">{tally.why}</span>
+        <span className="text-support">{tally.why}</span>
       </StatTile>
     );
   return (
@@ -384,9 +378,7 @@ function Recent({
   const known = resources.state === "ready" ? resources.value : [];
   return (
     <section aria-label="Recent" className="mb-2.5 grid gap-2">
-      <h2 className="text-[11px] font-semibold text-muted-foreground">
-        Recent
-      </h2>
+      <h2 className="text-2xs font-semibold text-support">Recent</h2>
       <ul className="grid">
         {entries.map((entry) => {
           const row = recentRow(entry, known);
@@ -406,12 +398,12 @@ function Recent({
                 {Icon && (
                   <Icon
                     aria-hidden
-                    className="size-3.5 shrink-0 text-muted-foreground"
+                    className="size-3.5 shrink-0 text-support"
                   />
                 )}
                 <span className="truncate">{row.label}</span>
                 {detail && (
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-xs text-support">
                     {detail}
                   </span>
                 )}

@@ -11,6 +11,7 @@ import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
 import type { Tone } from "../lib/tone";
 import { moveOf, pageOf, ROW, wheelDeltas, type Move } from "./input";
+import { continues, timeAfter } from "./roles";
 import { useKeptSizes, useRowKeys } from "./rows";
 import { StyledText, type TextMark, type TextRun } from "./StyledText";
 
@@ -555,7 +556,7 @@ export function LineList({
           event.preventDefault();
           move(event.currentTarget, to);
         }}
-        className="h-full overflow-auto py-1 font-mono text-xs leading-[19px] outline-none [overflow-anchor:none] focus-visible:shadow-[inset_var(--focus-ring)]"
+        className="h-full overflow-auto py-1 font-mono text-prose outline-none [overflow-anchor:none] focus-visible:shadow-[inset_var(--focus-ring)]"
       >
         <div
           className={cn("relative", !wrap && "w-max min-w-full")}
@@ -578,6 +579,7 @@ export function LineList({
                 ) : (
                   <Line
                     item={item}
+                    above={items[row.index - start - 1]}
                     wrap={wrap}
                     timestamps={timestamps}
                     tagWidth={tagWidth}
@@ -606,15 +608,18 @@ export function LineList({
 
 function Line({
   item,
+  above,
   wrap,
   timestamps,
   tagWidth,
 }: {
   item: TextLine;
+  above: LineItem | undefined;
   wrap: boolean;
   timestamps: boolean;
   tagWidth: number;
 }) {
+  const { same, changed } = timeAfter(item.time, above);
   return (
     <div
       style={{
@@ -630,18 +635,22 @@ function Line({
       <span
         className={cn(
           "truncate",
-          item.tagAccent ? "text-brand" : "text-muted-foreground",
+          item.tagAccent ? "text-brand" : "text-support",
         )}
       >
         {item.tag}
       </span>
       {timestamps && (
-        <span className="text-muted-foreground-2 tabular-nums">
-          {item.time}
+        <span className="text-quiet tabular-nums">
+          {same}
+          <span className="text-support">{changed}</span>
         </span>
       )}
       <span
-        className={wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre"}
+        className={cn(
+          wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
+          continues(item.text) ? "text-support" : "text-content",
+        )}
       >
         <StyledText text={item.text} runs={item.runs} marks={item.marks} />
       </span>
@@ -652,7 +661,10 @@ function Line({
 function Marker({ item }: { item: MarkerLine }) {
   const Icon = item.icon;
   return (
-    <div className="flex h-[19px] items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-muted-foreground">
+    <div
+      style={{ height: ROW }}
+      className="flex items-center gap-2 border-y border-dashed border-border px-3 font-sans text-xs text-support"
+    >
       <Icon
         aria-hidden
         className={cn(

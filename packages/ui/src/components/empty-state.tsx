@@ -32,8 +32,8 @@ export function EmptyState({
     return (
       <p
         className={cn(
-          "flex items-start gap-1.5 px-2 py-3 text-xs leading-relaxed",
-          variant === "error" ? "text-error" : "text-muted-foreground",
+          "flex items-start gap-1.5 px-2 py-3 text-xs leading-5",
+          variant === "error" ? "text-error" : "text-support",
           className,
         )}
       >
@@ -52,7 +52,7 @@ export function EmptyState({
     <div
       className={cn(
         "flex animate-in flex-col items-center justify-center gap-2 px-6 text-center text-sm fade-in slide-in-from-bottom-1 duration-300",
-        variant === "error" ? "text-error" : "text-muted-foreground",
+        variant === "error" ? "text-error" : "text-support",
         className,
       )}
     >
@@ -65,7 +65,7 @@ export function EmptyState({
           )}
         />
       )}
-      {title && <p className="font-medium text-foreground">{title}</p>}
+      {title && <p className="font-medium text-content">{title}</p>}
       {children}
       {action && (
         <Button

@@ -103,7 +103,7 @@ Everything NATS-specific goes.
 | Tauri plugin set (`src-tauri/src/lib.rs`): single-instance (registered first) and window-state now; updater, process, opener and dialog with the features that call them                                                                                                        | `apps/desktop/src-tauri`                | Window chrome stays: `titleBarStyle: Overlay`, `trafficLightPosition`, and the strict CSP.                                                                                                                                                                                                      |
 | `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
 | `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
-| `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list.                                                                                                                                                                                                           |
+| `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list. `store/zoom.ts` became `src/zoom.ts`, which keeps the factor in the app's state while `apps/desktop` applies it (4.1).                                                                                    |
 | Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error kinds are generated from Rust instead of written by hand.                                                                                                                                                                                                                                 |
 | Bounded coalescing with a `dropped` counter (`nats/subscription.rs`)                                                                                                                                                                                                            | `twigo-sessions` (logs)                 | The same rule holds: never lose data silently, show the gap.                                                                                                                                                                                                                                    |
 
@@ -246,7 +246,7 @@ It translates Tauri commands and channels into calls on `twigo-core`.
 | `packages/kube`      | Every Kubernetes view and editor, column rules and cells, status entries; registers into the workbench registries                                                                                                                                                                                                                      | `ui`, `workbench`, `protocol` |
 | `packages/protocol`  | Generated request and response types, a channel client with seq/ack, and a **mock backend** that runs the UI in a plain browser on fixtures (design reviews, component tests)                                                                                                                                                          | —                             |
 | `packages/utils`     | Pure helpers without React or IPC, such as formatters                                                                                                                                                                                                                                                                                  | —                             |
-| `apps/desktop/src`   | Bootstraps the workbench and registers `kube`                                                                                                                                                                                                                                                                                          | all                           |
+| `apps/desktop/src`   | Bootstraps the workbench, registers `kube`, and applies the interface zoom to the webview (`zoom.ts`)                                                                                                                                                                                                                                  | all                           |
 | `apps/desktop/bench` | The bench mode's entry and driver, built only by `vite build --mode bench` ([bench](bench.md))                                                                                                                                                                                                                                         | all                           |
 
 Every package may import `utils`.
@@ -466,7 +466,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
 - `groupBy { column, collapsed }` groups the rows by a column's text: groups in the natural order of their values, the empty value last, and rows within a group by the sort.
   Only groups with a matching row show; a batch carries them whenever one appears, goes, moves or changes, each with its rows and its own `countBy` counts, counted before values drop any.
   A collapsed group's rows still count, but they leave the sequence the window indexes, so `setWindow` and the window cover only the rows of open groups; the webview puts each group's header before its rows (4.4).
-- Each row says where the generated part of its name starts, when the name is its `generateName`, cut to 58 bytes as the API server cuts it, and the five characters the API server appends: after the `generateName`, less a `pod-template-hash` it ends with, so a Deployment's pod `api-7f9c8d6b5-x2kq9` reads `api-` and a quieter rest, and a StatefulSet's `db-0`, whose `generateName` is `db-` but whose controller names it, has none (4.4).
+- Each row says where the generated part of its name starts, when the name is its `generateName`, cut to 58 bytes as the API server cuts it, and the five characters the API server appends: after the `generateName`, less a `pod-template-hash` it ends with, so a Deployment's pod `api-7f9c8d6b5-x2kq9` reads `api-` and a generated `7f9c8d6b5-x2kq9`, which the list draws as a hash and a last segment, and a StatefulSet's `db-0`, whose `generateName` is `db-` but whose controller names it, has none (4.4).
 - A list sends rows only while it is ready, relisting or stale; in the other states its view shows the state, as 3.7 has it.
 - The mock backend sorts, filters and groups by the same rules, and `packages/protocol/src/query-cases.json` holds cases that both it and Rust's query view run.
   Its regexes are the browser's, which agree with Rust's `regex` crate only where both the pattern and the text are ASCII, without carriage returns, in the syntax both have, since the crate's `\d`, `\w`, `\s` and case folding follow Unicode and its `.` matches a carriage return, and it prints numbers as JavaScript does, `1e-7` where Rust prints `0.0000001`: the shared cases keep to what both read alike.
@@ -732,6 +732,12 @@ Rust counts each tile's list in a query view with `countBy` and an empty window,
 A list the credentials may not read shows "–" and why, never 0.
 The layout per space is persisted (dockview `toJSON` and which parts show); part sizes are the app's (4.8).
 
+The interface zoom is the app's too.
+Zoom In (⌘=, ⇧⌘= and the numpad's +), Zoom Out (⌘- and the numpad's −) and Reset Zoom (⌘0 and the numpad's 0), with Ctrl on Linux and Windows, step it from 0.5 to 2 in tenths; the palette and the macOS View menu hold them too.
+The workbench keeps the factor under `window/zoom` (4.8), read once at start, and `apps/desktop` applies a stored factor other than 1 before the first render (the webview starts at 1, so 1 sends nothing and the first render does not wait for a command that changes nothing), then each change in turn: in the app as the webview's zoom, which wry sets on macOS as WKWebView's `pageZoom` ([mod.rs at wry-v0.57.1](https://github.com/tauri-apps/wry/blob/wry-v0.57.1/src/wkwebview/mod.rs#L1024-L1031)), and in the mock as CSS `zoom` on `<html>`.
+In WKWebView that zoom scales `devicePixelRatio`, the screen's scale times the page zoom ([`devicePixelRatio`](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/page/LocalDOMWindow.cpp#L1780-L1794)), while resolution media queries keep the screen's scale (a plain WKWebView on macOS 27.2, 2026-11-14).
+On a layout where `=` needs ⇧, as the German one, ⌘+ zooms nothing, while the numpad's + works on every layout ([`TODO.md`](../TODO.md)).
+
 ### 4.2 Spaces (D6)
 
 - A space has an ID, a list of contexts (one or more), a namespace scope and a persisted layout: open inputs, view placement, and what each view keeps, such as the explorer's open sections (4.8).
@@ -776,7 +782,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - **Details and preview tabs.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
   - In an editor at least 960 px wide they stand beside the list as an inspector, and the list keeps only its name, ready and status columns, so the selected row stays in view (WCAG 2.4.11); in a narrower one they slide over the list from the right, as Lens's drawer.
-  - Their header says what the object is and how it is: the name, its generated part quieter; the status as a pill; the namespace; the controlling owner as a link; the age.
+  - Their header says what the object is and how it is: the kind's word, then the name at 16 px in strong, its hash and last segment as the list draws them (4.4), the kind's word giving way first in a narrow inspector; the status as a pill; the namespace; the controlling owner as a link; the age, in content for its first ten minutes.
     Then the commands of `resource/details` with their keys, such as Logs (`l`), Show YAML (`e`) and Open in Editor, and later Shell (`s`) and Forward (`f`) as their commands come.
   - Below, the object's views as tabs, Overview, YAML, Events with its warnings counted, and Related, the same views the editor shows; the tab shown stays as the selection moves.
   - The Diagnostics section of step 9 comes first in the Overview when something is wrong: why, in words, with its exit code, restarts, next try and the last log line of the instance that ended, and Previous logs and Logs buttons that open the container's logs tab.
@@ -870,6 +876,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
   - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
     Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
+    A section's title is strong, 13 px at weight 600 over a hairline, with 24 px above the section and 8 px under the title (4.9).
+    The property lists of a page read one label column of 112 px, in which a label wraps, so values share one axis, except a container's environment and mounts: keys and paths in the monospace, they keep a column of their own up to 14 rem, which cuts what does not fit.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
     A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
   - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
@@ -877,6 +885,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown, under the gate a list reads its metrics by (4.4).
     Each container that has a sample comes against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
     A Usage section follows the Diagnostics with the pod's total and each of its containers, or the node, as meters against the limit with the request marked, else against the request, and a node's against what it can allocate; the percent is kubectl's, truncated and past 100 where it passes.
+    A meter is 11 rem wide at most, so a wide editor does not stretch it, and a quantity's unit is quiet beside its number.
     Against a limit or what a node allocates, 90 % is a warning and the limit an error, in the meter and in words.
     A row without a sample says no data yet, never zero, and a Metrics API that does not answer or may not be read says so in place.
     The usage comes with the Overview once the context's discovery is known, and in a later batch before that, which the usual order of events, resources first, makes rare, and a usage that has `waiting` draws the section at its height: the rows it names, the pod's and each container in `containers` or the node's, with empty meters that a screen reader hears as loading and no figures, and the answer fills the same rows.
@@ -892,15 +901,16 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - Columns come from the Table `columnDefinitions` (priority 0 by default, wide on toggle), plus Context, and Namespace unless the query names one namespace.
   Pod and node lists of a context that serves the Metrics API (3.6) also get CPU and Memory, of priority 0, just before the Age column, whose cells are numbers the webview prints as kubectl does.
   Each kind keeps a preset for every space: the columns the user showed or hid by name from the head of the actions column (a column nobody chose for follows its priority), the widths they dragged or fitted, and the column the rows are grouped by.
-- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether it is quiet, whether rows group by it, which way its first click sorts, and the tone of its abnormal values.
+- What a column does is data in `packages/kube`, a rule by kind, then by name, then by `group/resource/column`: its cell, starting width, alignment, whether its text cells are secondary and read in support, whether rows group by it, which way its first click sorts, and the tone of its abnormal values.
   Columns keep their widths, numbers and ratios aligned to the end; the name column takes the free width until the user sizes it; a double click on a header's edge fits the column to what it shows.
   The name column also gives way to the others, down to its starting width of 160 px, and no other column does: the pods of every namespace need 904 px at the least and keep CPU, Memory and Age in view at 1280 px with the explorer open, where the grid has 972 (Chrome on the mock, 2026-11-13).
-- Cells read by what matters, data near-monochrome:
-  - a name's generated part is quieter, and stays whole when the name is cut, since it tells siblings apart (3.4);
+- Cells read by what matters, data near-monochrome, in the text roles of 4.9:
+  - a name reads in three parts (3.4): what comes before its generated part in content, the hash quiet, and the last segment, after the generated part's last `-`, in support; one that does not fit gives up the hash first, to its first character and an ellipsis, its trailing `-` going with the rest (`auth-api-7…x2kq9`), then the end of its first part, and never the last segment, which tells siblings apart; in the row under the cursor and in a selected one the name is strong;
   - a status shows a tone dot, its text coloured when abnormal, the dot pulsing while the state is in flight (ContainerCreating, Terminating);
-  - a ratio short of its total (Ready `0/1`) is pending;
+  - a ratio short of its total (Ready `0/1`) is pending, unless the row's status already carries a tone, so that a row raises one alarm;
   - restarts read as a count in a column of its own and how long ago the last was;
-  - Namespace and Age are quiet, a zero count and empty values grey.
+  - Namespace and Context read in support, an age in content for its first ten minutes and in support after, and a zero count, an empty value and a quantity's unit (the `m` of `120m`) quiet;
+  - figures line up in tabular numerals: a column of ratios, restarts, ages, CPU or memory, or one the server declares a number, and in any other column each cell whose text is figures or IPv4 addresses, since rows stream.
 - A failing or pending row has an edge in its tone at its left.
 - Grouping by a column (Namespace, Node, a status) puts a header before each group with its rows and how many fail or wait; a click or Enter folds it, Left goes to it from a row, and folded groups are kept per list.
 - The last column is the row's actions: a ⋯ button on hover and on the selected row, and the same menu on a right click, from `resource/context`; a hovered row also shows the commands of `resource/inline` that have icons.
@@ -947,7 +957,7 @@ Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
-- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a quiet description such as the namespace, a state only when it is abnormal as its dot and its words in its tone, a quieter kind at the end, and keys.
+- **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
 - **Recent first.**
   The no-prefix provider shows the space's recently opened editors that match under Recent, each with its kind and namespace, then the pods; `workbench.recent` keeps them per space (4.8).
@@ -1018,6 +1028,7 @@ Extensions add commands, not prefixes.
       a window asked around a line says where that line stands, so an earlier window is not taken for the answer, and a paused list keeps its place across a new view and a remount, a line the view hides where its time puts it;
       a step reveals its line once, a remount included, and a reveal that comes while the list follows is no step's and moves nothing;
     - a line shows its text as the container wrote it, ANSI colours as tokens at 4.5:1 or more on the editor, warnings and errors tinted with an edge as failing rows are; markers say that a container ended, with its code and next start, that a pod joined from its ReplicaSet or left, and what the buffer dropped;
+    - a line is the monospace at 13 / 20 (4.9): its source in support, or the brand for a pod that joined after the tab first listed its pods, as a rollout's new ones; its time quiet, the part that changed from the line above in support, in tabular figures; its message in content, and in support where it starts with whitespace, as a stack trace's continuation does; a wrapped line hangs under the start of its message;
     - F, W and T toggle follow, wrap and timestamps while the lines have the focus, ⌘F finds and `/` filters; below 1,100 px the toolbar drops the level counts, narrows its fields and shortens the range's label, and below 800 px, a split panel's group, the filter and the search go to a row of their own under it, which opens once their icons, `/` or ⌘F ask for a field, and while either is set, so a split panel keeps every control.
 - **Exec and attach.**
   xterm.js 6.1.0-beta.337 with the WebGL addon 0.20.0-beta.330, the fit addon and Unicode 11: VS Code 1.145.2 locks 6.1.0-beta.304, whose `flushSync`, which every resize runs, parsed again the chunks its write queue had parsed and kept, repeating output and acks, until [#6201](https://github.com/xtermjs/xterm.js/pull/6201).
@@ -1083,7 +1094,7 @@ Extensions add commands, not prefixes.
     The terminal keeps every key except those the workbench takes, which `attachCustomKeyEventHandler` leaves to it, as VS Code does; single-letter list keys never fire in a terminal, since `listFocus` does not hold there.
     The workbench takes the next key of a chord that waits, on every platform.
     On macOS it takes a ⌘ chord that is a binding or starts one.
-    On Linux and Windows `mod` is Ctrl, which a shell needs, so only quick access, the command palette and the toggle of the panel win over the shell, a short list as VS Code's `commandsToSkipShell` is, and every other Ctrl chord stays with it.
+    On Linux and Windows `mod` is Ctrl, which a shell needs, so only quick access, the command palette, the toggle of the panel and the three zoom commands win over the shell, a short list as VS Code's `commandsToSkipShell` is, which holds its zoom commands too ([terminal.ts at 1.144.0](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/contrib/terminal/common/terminal.ts#L652-L654)), and every other Ctrl chord stays with it.
     New Terminal and Toggle Terminal join that list on every platform, since their keys, ⌃⇧\` and ⌃\`, are Ctrl chords on macOS too.
     Copy and paste ride on the `copy` and `paste` events, which xterm answers with the selection and with `Terminal.paste`, so bracketed paste works; the Edit menu keeps its Copy and Paste for them.
     A `linkHandler` makes OSC 8 links do nothing unless ⌘-clicked, and opens only what the app's opener takes, `https` and `http` on localhost; xterm's `confirm` and `window.open` never run, and no addon detects URLs.
@@ -1092,6 +1103,8 @@ Extensions add commands, not prefixes.
     A finished tab stays with its scrollback readable and selectable and its input off, until it is closed or restarted; Restart plans a new shell, so `guarded` asks again.
     A session that waits for a place among the cluster's 64 says so in its tab, and the status bar lists open shells while there are any, to go to one or close it.
   - The theme is the editor's surface and the logs' sixteen colours from the tokens, and follows the document's theme live.
+  - The font is `--font-mono`, the bundled JetBrains Mono (4.9), at 12 px, and a terminal opens only once its regular and bold faces have loaded or failed: xterm measures its cell when it opens ([CoreBrowserTerminal.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L648-L649), at the commit 6.1.0-beta.337 is built from), when `fontFamily` or `fontSize` change ([CharSizeService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/CharSizeService.ts#L34)) or the pixel ratio does ([RenderService.ts](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/services/RenderService.ts#L289-L293)), and after every resize of its buffer ([the listener](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L197), [`_afterResize`](https://github.com/xtermjs/xterm.js/blob/f70764dd3da05ebda0390605c6f9adbbea3f0e90/src/browser/CoreBrowserTerminal.ts#L1078-L1080)), but not when a face loads.
+    A face that came later would leave the fallback's cell only until the next resize, and waiting for the faces is what keeps the first screen right.
 - **Port-forward manager.**
   A target is a Pod, a Service or a Deployment, ReplicaSet, StatefulSet or DaemonSet, and a forward is one port of one target, named by the target the person chose; the pod it reaches is a detail of it.
   The data path is `twigo_sessions::forward`; the table, the policy and what is kept are `twigo_core::forward`.
@@ -1317,6 +1330,14 @@ Extensions add commands, not prefixes.
     The context menu's Paste can change the block too: Monaco's action reads the clipboard and inserts the text itself ([`clipboard.ts`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/contrib/clipboard/browser/clipboard.ts#L279-L336), the commit monaco-editor 0.57.0 is built from), so no DOM `paste` event reaches the lock, and over a selection of whole lines that ends at column 1 of `status:` the pasted text lands on `status:`.
     We accept that: the result is visible and can be undone, and the diff step says `.status` was left out of what is sent.
     Checked with a right-click on the mock in headless Chrome, 2026-11-09: no `paste` event, `GLUEDstatus:` where the line was, ⌘Z gave the two lines back, and ⌘S showed "Left out of what is sent: .status."
+  - The YAML editor and the diff draw the app's monospace at 13 / 20 with ligatures off (4.9).
+    Monaco measures a face when an editor is created and keeps what it read ([`readFontInfo`](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/browser/config/fontMeasurements.ts#L130-L159)), so once the regular and the bold face have loaded or failed, `remeasureFonts` reads them again ([standaloneEditor.ts](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/standalone/browser/standaloneEditor.ts#L423-L425)).
+  - Monaco's light and dark themes are Twigo's, built from the tokens at run time and defined again when `.dark` changes on `<html>`.
+    Monaco takes `#rrggbb` and the tokens are `oklch`, many with alpha or `color-mix`, so the browser paints each token's computed value into a one-pixel canvas and it is read back as sRGB hex (`srgbHex` in `ui`).
+    Monaco keeps only the first six hex digits of a token rule's colour ([tokenization.ts](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/common/languages/supports/tokenization.ts#L154-L176)), so the rules take opaque tokens only.
+    The current Find match takes `--mark-current-foreground` on `--mark-current` through `editor.findMatchHighlightForeground`, which Monaco 0.57 applies to the current match although its description names the other matches ([findWidget.ts](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/editor/contrib/find/browser/findWidget.ts#L1489-L1496), [editorColors.ts](https://github.com/microsoft/vscode/blob/6a598d4a13031703d483d103c1d934a36ad27971/src/vs/platform/theme/common/colors/editorColors.ts#L152-L162)).
+  - Top-level keys at weight 600 and a `managedFields` block that a person writes, in support, are decorations placed from the same `yaml` parse, with the editor's YAML 1.1 options, as the `status` lines above.
+  - Above the text and outside its scroll, every YAML editor, the inspector's read-only one included, shows the path to the cursor's line in support at 12 px, `spec › template › spec › containers[0]`, with keys as written, such as `<<` and `no`, and a comment at the end of a block on that block's path; the last key stays whole when the path is cut.
   - Monaco is bundled locally (no CDN loader) and loaded lazily on the first YAML or diff editor.
     It is built from the tree-shakeable entry points of monaco-editor 0.57 (`monaco-editor/editor`, then each language and feature it needs), and its editor worker is a Vite `?worker` module served from the app.
   - monaco-yaml 5.5.1 runs on those entry points, since it takes the Monaco namespace as an argument, with `yamlVersion: "1.1"`; its worker is a Vite `?worker` too, whose build has no `eval` and no `new Function`, so `script-src 'self'` covers it: validation and completion ran in a Tauri build under this CSP on kind (2026-11-09).
@@ -1352,10 +1373,10 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   `keybindings.json` works the same way.
 - **State** is what the UI leaves behind and nobody edits by hand: layouts, recent items, command history, column choices ([research](research/state.md)).
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
-    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind and the colours chosen for contexts.
+    The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind, the colours chosen for contexts and the interface zoom (4.1).
     A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
-  - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes` or `quickaccess/history` in the app.
+  - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes`, `quickaccess/history` or `window/zoom` in the app.
     The module reads it back with a valibot schema, field by field, and what does not fit falls back to its default, so a bad value costs that value only.
     Extensions (M3) get keys in the same scopes.
   - The webview reads everything once as it starts (`state_load`), so its reads are synchronous.
@@ -1386,17 +1407,36 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
     Changing that pair re-skins the app.
   - Neutral greys with a trace of the brand hue: an app's chrome, not a tinted dashboard.
     The shell and the side bars share one tone and the editor is the surface that stands out: white under a 0.975 shell on light; on dark the darkest, 0.185 under a 0.218 shell, as VS Code's Dark 2026, JetBrains Islands and Zed draw it, with card 0.25 and popover 0.27 above both.
-    Text sits a step below white on dark (0.87).
-  - Three text tiers, each at 4.5:1 or more on the shell and the editor (WCAG 1.4.3): primary, secondary for what places a row, tertiary for units, hints and empty values ([research](research/workbench-design.md)).
-    On a selected row tertiary reads as secondary, and text in a tone reads at 4.5:1 on a selected row and its pill's tint too.
+    Text stays below white on dark: content at 0.90, and strong, kept for titles and the row in hand, at 0.96.
+  - Four text roles, by what the text is worth reading now ([decision](decisions/text-roles-and-type-scale.md), [research](research/typography.md)): strong for the object's title, section titles and the name in the row under the cursor; content for names, values, messages and log lines; support for property labels, table headers and secondary columns; quiet for timestamps, units, a zero count, placeholders and hints.
+    Each is 4.5:1 or more on the shell, the editor, a card, a popover and a selected row (WCAG 1.4.3); the comment over the roles in `theme.css` states the WCAG ratio and APCA Lc of each on the shell and the editor in both themes (colorjs.io 0.7.1), and `roles.test.ts` holds it.
+    Two adjacent texts in different roles differ by 25 Lc or by a second cue, a size step or the other weight.
+    In the light theme the roles below content stand 20.6 and 8.7 Lc apart on the editor, and no light values give both steps 25 Lc while quiet keeps 4.5:1 on the shell, so there the second cue carries the rule.
+    On a selected row and under the cursor quiet takes support's colour, since the tint would take it below 4.5:1, and text in a tone reads at 4.5:1 on a selected row and its pill's tint too.
   - Tones: error, warn, ok and idle; `--warn` fills dots and edges, and `--warn-foreground` is its readable text.
   - Hover and selection are alpha overlays, so they work on any surface.
   - A two-layer focus ring: a solid brand line, 3:1 or more on any surface (WCAG 1.4.11), and a translucent halo.
   - Hairline borders in alpha tiers.
   - The status bar takes the shell's colour; colour there comes only from its entries' tones and the active space's context colour, as VS Code's 2026 themes do, and from the whole bar's tint in a production context (6.4).
 - **Type.**
-  - The platform's UI font, SF on macOS, as VS Code; tabular numbers for every metric column.
-  - Two weights, 400 and 600, as VS Code and JetBrains; 13 px base, 12 px secondary, 11 px labels; sentence case, no capitals.
+  - The platform's UI font, SF on macOS, as VS Code, in the platform's own anti-aliasing: nothing sets `-webkit-font-smoothing`, whose `antialiased` takes about a quarter of the ink from light text on dark in WKWebView ([research](research/typography.md)).
+  - Two weights, 400 and 600, as VS Code and JetBrains, and never 510, which Chrome draws heavier than 600 for the system font with `antialiased` and without it, so the mock would mislead; WKWebView drew it lighter than 600 with `antialiased`, which the app no longer sets, and without it that is not measured ([research](research/typography.md)); sentence case, no capitals.
+  - A scale of steps in `theme.css`, each a size with its own whole-pixel line height:
+    - `2xs` 11 / 16: key caps, count badges, the mode chip, menu key hints and the side bar's view titles;
+    - `xs` 12 / 16: table headers, the kind before an object's title, menus, chips and the status bar;
+    - `label` 12 / 18: property labels, beside values at 13 / 18;
+    - `body` 13 / 18: body text, table cells, tree rows, property values, and section titles at 600;
+    - `prose` 13 / 20: event and condition messages and descriptions, and logs and YAML in the monospace;
+    - `sm` 14 / 20: buttons and empty states;
+    - `title` 16 / 22: the object's title;
+    - `base` 16 / 24: the device code of a sign-in, in the monospace;
+    - `lg` 18 / 28: the name of a space over its Home.
+  - A literal size stays only with a whole-pixel line height and a reason, each for one place that no step fits: the two letters of a small tile at 9 px, a histogram's axis at 10 px, the confirm dialog's question at 15 px and a stat tile's figure at 22 px.
+  - The monospace is JetBrains Mono 2.304, bundled from its release as two WOFF2 faces, 400 and 600, with its licence beside them in `packages/ui/src/styles/fonts`, and first in `--font-mono`: logs and YAML at 13 / 20, the terminal at 12 px.
+    The family token turns `liga` and `calt` off, since its code ligatures are contextual alternates.
+  - Figures are tabular by column and value type, never on a whole row: counts, ratios, quantities, durations, clocks and addresses in lists (4.4), an Overview value that is a time or figures, and an Overview table's column whose every cell is, since Rust sends no column type.
+  - On macOS identifiers in the UI font take SF's stylistic set 6, which the font calls high legibility, so that I, l and 1, and 0 and O, differ: names, namespaces and nodes in lists, the object's title, links to objects.
+    `main.tsx` sets `data-platform` on `<html>` before the first render and the rule keys on it rather than on `@supports`, since Inter's set 6 squares its letters.
   - Dense rows: 22 px in trees, 26 px in tables, whose rows carry more columns to read across; icons 16 px, Lucide's 1.5 stroke drawing 1 px lines.
 - **Surfaces.**
   Flat parts split by hairlines (4.1), and editor tabs connect to their editor: the strip takes the shell's surface, the active tab the editor's, open into it.
@@ -1413,7 +1453,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - Kubernetes status uses small semantic glyphs, and colour only for abnormal states (failed, pending, warning).
     A tone has a shape too, so no state rests on hue alone (WCAG 1.4.1): error a filled dot, warn a ring, and a pulse only while a state is in flight.
     Rows, namespaces and labels are never coloured; a failing or pending row has only an edge in its tone.
-  - Syntax colour lives in Monaco only.
+  - Syntax colour lives in Monaco only, from the tokens: keys in the brand, numbers, booleans and null in `--ansi-cyan`, comments in support, and strings and punctuation in content (4.6).
   - Big canvases stay plain.
   - About one primary action per panel.
   - The density target is the JetBrains/Fleet/Linear end, not an airy admin panel.
@@ -1421,6 +1461,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   Every view state in 3.7 has its own empty, loading (skeleton) or error rendering, with a plain muted icon and one action.
 - **How quality is kept.**
   - Tokens only: a lint rule rejects raw colour literals outside `packages/ui`.
+  - `packages/ui/src/styles/roles.test.ts` resolves `theme.css` and holds every text role at 4.5:1 on each surface, and the figures the comment over the roles states.
   - The `packages/protocol` mock backend runs the whole workbench in a browser on fixtures: 5k-pod lists, every state.
     Every visual change is reviewed there with before and after screenshots.
 - **Settled with the owner** on 2026-10-31, from variants on live tokens:
@@ -1439,6 +1480,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - text tiers at 4.5:1, a solid focus ring, tones drawn by shape;
   - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
 - **Settled with the owner** on 2026-11-03, from live variants of the Overview (4.3): the object's state before its metadata, and containers as cards whose less used fields fold.
+- **Settled with the owner** on 2026-11-15, from live variants in the app's window after [research](research/typography.md) into contrast, type and rendering: the text roles at their lightness in `theme.css` (0.96, 0.90, 0.75 and 0.65 in dark) over the dimmer set the research measured (0.94, 0.87, 0.71 and 0.61), and the platform's own font smoothing over `antialiased` in the dark theme.
 
 ## 5. Commands, keybindings and extensions
 

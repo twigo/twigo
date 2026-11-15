@@ -13,7 +13,7 @@ const DiffView = lazy(() => import("../edit/DiffView"));
 
 const DIFF_HEIGHT = 300;
 
-const CODE = "font-mono text-[11px] wrap-anywhere select-text";
+const CODE = "font-mono text-2xs wrap-anywhere select-text";
 
 export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
   switch (detail.kind) {
@@ -53,13 +53,13 @@ export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
         <div className="grid gap-1.5">
           <p>Twigo cannot show what this changes.</p>
           {noDiffWords(detail.reason).map((sentence) => (
-            <p key={sentence} className="text-muted-foreground">
+            <p key={sentence} className="text-support">
               {sentence}
             </p>
           ))}
           {detail.body !== null && (
             <section aria-label="Request body" className="grid gap-1">
-              <h3 className="text-[11px] font-semibold text-muted-foreground">
+              <h3 className="text-2xs font-semibold text-support">
                 Request body
               </h3>
               <pre
@@ -104,10 +104,10 @@ function Changes({
         <span className="font-medium">
           {live === null ? "Not on the cluster yet" : "Live"}
         </span>{" "}
-        <span className="text-muted-foreground">against</span>{" "}
+        <span className="text-support">against</span>{" "}
         <span className="font-medium">the result of a dry run</span>
       </p>
-      {secret && <p className="text-muted-foreground">{SECRET_NOTE}</p>}
+      {secret && <p className="text-support">{SECRET_NOTE}</p>}
       <div
         role="group"
         aria-label="Changes"

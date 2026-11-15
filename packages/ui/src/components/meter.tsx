@@ -2,13 +2,13 @@ import { cn } from "../lib/cn";
 import type { Tone } from "../lib/tone";
 
 const FRAME = "relative h-2 w-full min-w-12";
-const TRACK = "absolute inset-0 overflow-hidden rounded-xs bg-foreground/12";
+const TRACK = "absolute inset-0 overflow-hidden rounded-xs bg-content/12";
 
 const FILL: Readonly<Record<Tone, string>> = {
   error: "bg-error",
   warn: "bg-warn",
-  ok: "bg-muted-foreground",
-  idle: "bg-muted-foreground",
+  ok: "bg-support",
+  idle: "bg-support",
 };
 
 /**
@@ -57,7 +57,7 @@ export function Meter({
       {mark !== undefined && (
         <span
           aria-hidden
-          className="absolute -inset-y-0.5 w-px bg-foreground"
+          className="absolute -inset-y-0.5 w-px bg-content"
           style={{ left: share(mark) }}
         />
       )}

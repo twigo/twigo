@@ -219,10 +219,7 @@ function Open({ session }: { session: Session }) {
         />
         <CommandList>
           {result.state === "ready" && result.notice !== undefined && (
-            <p
-              role="status"
-              className="px-3 py-2 text-xs text-muted-foreground"
-            >
+            <p role="status" className="px-3 py-2 text-xs text-support">
               {result.notice}
             </p>
           )}
@@ -270,7 +267,7 @@ function Asked({
   message: string | undefined;
 }) {
   return message === undefined ? (
-    <p className="px-3 py-2.5 text-xs text-muted-foreground">{prompt}</p>
+    <p className="px-3 py-2.5 text-xs text-support">{prompt}</p>
   ) : (
     <p role="alert" className="px-3 py-2.5 text-xs text-error">
       {message}
@@ -299,7 +296,7 @@ function Row({
           size="sm"
         />
       ) : (
-        Icon && <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+        Icon && <Icon aria-hidden className="size-3.5 text-support" />
       )}
       <HighlightedLabel
         text={item.label}
@@ -307,11 +304,11 @@ function Row({
         className="min-w-0"
       />
       {item.description && (
-        <span className="min-w-0 shrink-[3] truncate text-xs text-muted-foreground">
+        <span className="min-w-0 shrink-[3] truncate text-xs text-support">
           {item.description}
         </span>
       )}
-      <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2 text-xs text-muted-foreground">
+      <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2 text-xs text-support">
         {item.state && (
           <StatusLabel
             tone={item.state.tone}
@@ -323,7 +320,7 @@ function Row({
           </StatusLabel>
         )}
         {item.kind && (
-          <span className="w-20 truncate text-right text-muted-foreground-2">
+          <span className="w-20 truncate text-right text-quiet">
             {item.kind}
           </span>
         )}
@@ -366,7 +363,7 @@ function Footer({
   return (
     <div
       aria-label="Keys"
-      className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-[11px] whitespace-nowrap text-muted-foreground"
+      className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-2xs whitespace-nowrap text-support"
     >
       {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
       {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}

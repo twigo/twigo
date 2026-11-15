@@ -13,7 +13,7 @@ const SEGMENT: Readonly<Record<Tone, string>> = {
   error: "bg-error",
   warn: "bg-warn",
   ok: "bg-ok",
-  idle: "bg-muted-foreground-2",
+  idle: "bg-quiet",
 };
 
 /**
@@ -43,7 +43,7 @@ export function StatTile({
 }) {
   const body = (
     <>
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-support">{label}</span>
       {loading ? (
         <>
           <Skeleton className="my-1 h-5 w-16" />
@@ -60,7 +60,7 @@ export function StatTile({
       {segments && value !== undefined && value > 0 && (
         <span
           aria-hidden
-          className="mt-1.5 flex h-1 overflow-hidden rounded-xs bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)]"
+          className="mt-1.5 flex h-1 overflow-hidden rounded-xs bg-[color-mix(in_oklab,var(--content)_12%,transparent)]"
         >
           {segments.map((segment) => (
             <span

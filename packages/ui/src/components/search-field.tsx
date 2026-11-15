@@ -37,7 +37,7 @@ export function SearchField({
   return (
     <div
       className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md bg-editor px-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--input)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
+        "flex h-6 items-center gap-1.5 rounded-md bg-editor px-2 text-xs text-support shadow-[inset_0_0_0_1px_var(--input)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
         className,
       )}
     >
@@ -62,7 +62,7 @@ export function SearchField({
           if (value) onChange("");
           else event.currentTarget.blur();
         }}
-        className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground-2"
+        className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-quiet"
       />
       {value && trailing}
       {value ? (
@@ -72,7 +72,7 @@ export function SearchField({
           onClick={() => {
             onChange("");
           }}
-          className="flex size-4 items-center justify-center rounded hover:bg-row-hover hover:text-foreground"
+          className="flex size-4 items-center justify-center rounded hover:bg-row-hover hover:text-content"
         >
           <X aria-hidden className="size-3" />
         </button>

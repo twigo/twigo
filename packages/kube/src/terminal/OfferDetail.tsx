@@ -17,16 +17,16 @@ function Name({ name }: { name: string }) {
 
 function Line({ entry }: { entry: OfferName }) {
   return (
-    <div className={cn("min-w-0", entry.leftOut && "text-muted-foreground")}>
+    <div className={cn("min-w-0", entry.leftOut && "text-support")}>
       <Name name={entry.name} />
-      <span className="text-muted-foreground"> · {entry.kinds}</span>
+      <span className="text-support"> · {entry.kinds}</span>
     </div>
   );
 }
 
 export function OfferDetail({ words }: { words: OfferWords }) {
   return (
-    <div className="grid gap-1 text-[11px] leading-4">
+    <div className="grid gap-1 text-2xs">
       <div className="grid gap-0.5">
         {words.names.map((entry) => (
           <Line key={entry.name} entry={entry} />
@@ -36,12 +36,12 @@ export function OfferDetail({ words }: { words: OfferWords }) {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="justify-self-start rounded text-muted-foreground underline decoration-dotted underline-offset-2 outline-none hover:text-foreground focus-visible:shadow-[var(--focus-ring)]"
+                className="justify-self-start rounded text-support underline decoration-dotted underline-offset-2 outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
               >
                 {words.more}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="left" className="grid gap-0.5 text-[11px]">
+            <TooltipContent side="left" className="grid gap-0.5 text-2xs">
               {words.all.map((entry) => (
                 <Line key={entry.name} entry={entry} />
               ))}
@@ -50,7 +50,7 @@ export function OfferDetail({ words }: { words: OfferWords }) {
         )}
       </div>
       {words.reason !== undefined && (
-        <span className="text-muted-foreground">{words.reason}</span>
+        <span className="text-support">{words.reason}</span>
       )}
     </div>
   );

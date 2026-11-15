@@ -673,7 +673,7 @@ test("the first subscription already carries the column choices the text filter 
   expect(queries).toEqual([{ IP: true }]);
 });
 
-test("a failing row has an edge, a name's generated part reads quieter, and restarts read as a count and its age", async () => {
+test("a failing row has an edge, a name reads in its parts, and restarts read as a count and its age", async () => {
   await openList();
   const parts = (row: HTMLElement | undefined, column: string) =>
     [
@@ -690,15 +690,16 @@ test("a failing row has an edge, a name's generated part reads quieter, and rest
   const running = rows().find((row) => textOf(row, "Status") === "Running");
   expect(running?.className).not.toMatch(/var\(--(error|warn)\)/);
   const whole = textOf(running, "Name");
-  const cut = whole.lastIndexOf("-", whole.lastIndexOf("-") - 1) + 1;
+  const last = whole.lastIndexOf("-") + 1;
+  const cut = whole.lastIndexOf("-", last - 2) + 1;
   const name = parts(running, "Name");
   expect(name.map((part) => part.textContent)).toEqual([
     whole.slice(0, cut),
-    whole.slice(cut),
+    whole.slice(cut, last),
+    whole.slice(last),
   ]);
-  expect(name[1]?.textContent).toMatch(/^[0-9a-z]+-[0-9a-z]{5}$/);
-  expect(name[0]?.className).not.toContain("text-muted-foreground");
-  expect(name[1]?.className).toContain("text-muted-foreground-2");
+  expect(name[1]?.textContent).toMatch(/^[0-9a-z]+-$/);
+  expect(name[2]?.textContent).toMatch(/^[0-9a-z]{5}$/);
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");

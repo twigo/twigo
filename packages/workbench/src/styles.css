@@ -29,7 +29,7 @@
    tinted in its colour. */
 .twigo-statusbar[data-strong] {
   background: color-mix(in oklab, var(--twigo-context) 16%, var(--shell));
-  color: var(--foreground);
+  color: var(--content);
   box-shadow: inset 0 1px 0
     color-mix(in oklab, var(--twigo-context) 40%, transparent);
 }
@@ -48,15 +48,15 @@
   --dv-group-view-background-color: var(--editor);
   --dv-tabs-and-actions-container-background-color: var(--shell);
   --dv-tabs-and-actions-container-height: 34px;
-  --dv-tabs-and-actions-container-font-size: 13px;
+  --dv-tabs-and-actions-container-font-size: var(--text-body);
   --dv-activegroup-visiblepanel-tab-background-color: var(--editor);
-  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-visiblepanel-tab-color: var(--content);
   --dv-activegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-activegroup-hiddenpanel-tab-color: var(--support);
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--editor);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--support);
   --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--support);
   --dv-tab-divider-color: transparent;
   --dv-separator-border: var(--border);
   --dv-paneview-active-outline-color: transparent;
@@ -151,8 +151,8 @@
 }
 .twigo-dockview.twigo-panel .dv-tab.dv-active-tab,
 .twigo-dockview.twigo-panel .dv-tab.dv-active-tab:first-child {
-  box-shadow: inset 0 -2px 0 var(--foreground);
+  box-shadow: inset 0 -2px 0 var(--content);
 }
 .twigo-dockview.twigo-panel .dv-inactive-group .dv-tab.dv-active-tab {
-  box-shadow: inset 0 -2px 0 var(--muted-foreground-2);
+  box-shadow: inset 0 -2px 0 var(--quiet);
 }

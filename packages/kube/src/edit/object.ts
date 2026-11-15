@@ -161,7 +161,7 @@ function finite(value: number): number | undefined {
  * no more: Go's rules for them differ too widely, so `goNumber` reads plain
  * scalars itself and these read as text until then.
  */
-const READING: ParseOptions & DocumentOptions & SchemaOptions = {
+export const READING: ParseOptions & DocumentOptions & SchemaOptions = {
   version: "1.1",
   uniqueKeys: false,
   customTags: (tags: Tags) =>

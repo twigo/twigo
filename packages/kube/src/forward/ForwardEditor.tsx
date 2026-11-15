@@ -166,6 +166,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "connections",
+      numeric: true,
       label: "Connections",
       value:
         queued > 0
@@ -174,6 +175,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "sent",
+      numeric: true,
       label: "Sent",
       value: (
         <>
@@ -184,6 +186,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     },
     {
       key: "received",
+      numeric: true,
       label: "Received",
       value: (
         <>
@@ -202,7 +205,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     <div className="flex h-full min-h-0 flex-col bg-editor">
       <Notices forward={forward} />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="flex max-w-3xl flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+        <div className="flex max-w-3xl flex-col gap-4 px-3.5 pt-3 pb-4 text-body">
           <h2 className="truncate text-sm font-semibold">
             {forwardTitle(forward)}
           </h2>
@@ -215,7 +218,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
 }
 
 function Quiet({ children }: { children: ReactNode }) {
-  return <span className="text-muted-foreground">{children}</span>;
+  return <span className="text-support">{children}</span>;
 }
 
 /** The bars over the tab, for what holds of the forward as a whole. */
@@ -254,7 +257,7 @@ function Problem({ forward }: { forward: Forward }) {
     return (
       <Callout tone="warn" title="Reconnecting">
         <p>{state.reason}</p>
-        <p className="text-muted-foreground">
+        <p className="text-support">
           It looks again while it has connections, and at its next one.
         </p>
       </Callout>
@@ -270,7 +273,7 @@ function Problem({ forward }: { forward: Forward }) {
   return (
     <Callout tone={tone} title={title}>
       <p className="break-words">{error.message}</p>
-      <p className="text-muted-foreground">
+      <p className="text-support">
         {!listens
           ? `Nothing listens on ${where}. Change Local Port… moves it to another port, and Start tries this one again.`
           : error.blocked

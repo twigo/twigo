@@ -23,11 +23,11 @@ import {
 } from "@twigo/workbench";
 import {
   byHealth,
-  cellTone,
   columnRule,
   type CellKind,
   HEALTH,
   healthValues,
+  rowTone,
   statusColumn,
 } from "../columns";
 import { kindIcon } from "../kinds";
@@ -195,6 +195,7 @@ function Grid({
       width: column.rule.width,
       grow: column.rule.grow,
       align: column.rule.align,
+      numeric: column.rule.figures,
       descendFirst: column.rule.descendFirst,
       ...(note !== undefined && { note }),
     };
@@ -226,9 +227,6 @@ function Grid({
       ),
     [grouping, snapshot.groups, snapshot.total],
   );
-  const statusIndex = countBy
-    ? snapshot.columns.findIndex((column) => column.name === countBy)
-    : -1;
   const item = (index: number): GridItem<Row, RowGroup> | undefined => {
     const slot = items.at(index);
     if (!slot) return undefined;
@@ -242,11 +240,7 @@ function Grid({
     const id = snapshot.ids[slot.row - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const status = statusIndex < 0 ? undefined : row.cells[statusIndex];
-    const tone =
-      countBy && typeof status === "string"
-        ? cellTone(gvr, countBy, status)
-        : undefined;
+    const tone = rowTone(gvr, countBy, snapshot.columns, row);
     return {
       type: "row",
       id: row.id,
@@ -381,7 +375,15 @@ function Grid({
       onRange={onRange}
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
-        return shownColumn && <CellView row={row} column={shownColumn} />;
+        return (
+          shownColumn && (
+            <CellView
+              row={row}
+              column={shownColumn}
+              tone={rowTone(gvr, countBy, snapshot.columns, row)}
+            />
+          )
+        );
       }}
       group={(group) => (
         <GroupHeader
@@ -429,7 +431,7 @@ function Grid({
         >
           <button
             type="button"
-            className="flex size-6 items-center justify-center rounded-md outline-none hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
+            className="flex size-6 items-center justify-center rounded-md outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover"
           >
             <Columns3 aria-hidden className="size-3.5" />
           </button>
@@ -492,10 +494,10 @@ function GroupHeader({
     : undefined;
   return (
     <>
-      <span className="truncate font-semibold text-foreground">
+      <span className="truncate font-semibold text-content">
         {group.value === "" ? "None" : group.value}
       </span>
-      <span className="text-muted-foreground">
+      <span className="text-support">
         <Count value={group.rows} /> {gvrTitle.toLowerCase()}
       </span>
       {counts &&

@@ -6,7 +6,7 @@ const TEXT: Readonly<Record<Tone, string>> = {
   error: "text-error",
   warn: "text-warn-foreground",
   ok: "",
-  idle: "text-muted-foreground",
+  idle: "text-support",
 };
 
 /** Words in their tone's colour, without a dot: a Ready of `0/1`. */

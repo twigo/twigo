@@ -6,6 +6,7 @@ import {
   columnRule,
   healthValues,
   IN_FLIGHT,
+  rowTone,
   statusColumn,
   worstHealth,
 } from "./columns";
@@ -21,14 +22,14 @@ test("a column's rule comes from its kind, then its name, then its resource", ()
   expect(columnRule(PODS, column("Age", "age"))).toMatchObject({
     cell: "age",
     align: "end",
-    quiet: true,
+    secondary: true,
   });
   expect(columnRule(PODS, column("Name"))).toMatchObject({
     cell: "name",
     grow: true,
   });
   expect(columnRule(PODS, column("Namespace"))).toMatchObject({
-    quiet: true,
+    secondary: true,
     groups: true,
   });
   expect(columnRule(PODS, column("Ready"))).toMatchObject({
@@ -213,4 +214,32 @@ test("the worst health of counts is what a group or a list sums up to", () => {
   expect(worst(["Running"])).toBe("ok");
   expect(worst(["Running", "Pending"])).toBe("warn");
   expect(worst(["Pending", "Error"])).toBe("error");
+});
+
+test("a row's tone is the abnormal value of its resource's health column", () => {
+  const columns = [column("Name"), column("Ready"), column("Status")];
+  const row = (status: string) => ({
+    id: "r",
+    created: null,
+    generated: null,
+    cells: ["api", "0/1", status],
+  });
+  expect(rowTone(PODS, "Status", columns, row("ContainerCreating"))).toBe(
+    "warn",
+  );
+  expect(rowTone(PODS, undefined, columns, row("Error"))).toBeUndefined();
+});
+
+test("a column's cells are figures by their cell kind, or by a numeric column kind", () => {
+  const figures = (name: string, kind: Column["kind"] = "string") =>
+    columnRule(PODS, column(name, kind)).figures;
+  expect(figures("Ready")).toBe(true);
+  expect(figures("Restarts")).toBe(true);
+  expect(figures("Age", "age")).toBe(true);
+  expect(figures("CPU", "cpu")).toBe(true);
+  expect(figures("Memory", "memory")).toBe(true);
+  expect(figures("Priority", "integer")).toBe(true);
+  expect(figures("Name")).toBe(false);
+  expect(figures("Status")).toBe(false);
+  expect(figures("Node")).toBe(false);
 });

@@ -31,17 +31,17 @@ export function Diagnostics({
           title={finding.title}
         >
           {finding.detail.length > 0 && (
-            <p>
+            <p className="text-prose text-content">
               <Sentence spans={finding.detail} />
             </p>
           )}
           {finding.message !== null && (
-            <p className="font-mono text-xs break-words whitespace-pre-wrap text-muted-foreground">
+            <p className="font-mono text-xs break-words whitespace-pre-wrap text-support">
               {finding.message}
             </p>
           )}
           {finding.logs?.lastLine && (
-            <p className="truncate font-mono text-xs text-muted-foreground">
+            <p className="truncate font-mono text-xs text-support">
               {finding.logs.lastLine}
             </p>
           )}

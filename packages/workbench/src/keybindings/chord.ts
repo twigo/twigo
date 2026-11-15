@@ -37,6 +37,9 @@ export const NAMED_KEYS: Readonly<Record<string, string>> = {
   down: "ArrowDown",
   left: "ArrowLeft",
   right: "ArrowRight",
+  numpad0: "Numpad0",
+  numpad_add: "NumpadAdd",
+  numpad_subtract: "NumpadSubtract",
   ...Object.fromEntries(
     Array.from({ length: 19 }, (_, index) => [
       `f${index + 1}`,

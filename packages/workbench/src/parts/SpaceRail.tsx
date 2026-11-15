@@ -66,7 +66,7 @@ export function SpaceRail() {
             onClick={() => {
               quickAccess.show("ctx ");
             }}
-            className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-row-hover hover:text-foreground"
+            className="flex size-8 items-center justify-center rounded-md text-support hover:bg-row-hover hover:text-content"
           >
             <Plus className="size-4" />
           </button>
@@ -103,7 +103,7 @@ function RailTile({
           <span
             aria-hidden
             className={cn(
-              "absolute top-1/2 left-0 w-0.5 -translate-y-1/2 rounded-r-full bg-foreground",
+              "absolute top-1/2 left-0 w-0.5 -translate-y-1/2 rounded-r-full bg-content",
               selected ? "h-5" : "h-0",
             )}
           />
@@ -111,7 +111,7 @@ function RailTile({
             space={space}
             className={
               selected
-                ? "ring-1 ring-foreground/60"
+                ? "ring-1 ring-content/60"
                 : "group-hover:ring-1 group-hover:ring-border"
             }
           >
@@ -128,8 +128,8 @@ function RailTile({
       </TooltipTrigger>
       <TooltipContent side="right" className="flex items-center gap-2">
         <span>{space.contexts.join(" + ")}</span>
-        {shortcut && <span className="text-muted-foreground">{shortcut}</span>}
-        {state && <span className="text-muted-foreground">{state.label}</span>}
+        {shortcut && <span className="text-support">{shortcut}</span>}
+        {state && <span className="text-support">{state.label}</span>}
       </TooltipContent>
     </Tooltip>
   );

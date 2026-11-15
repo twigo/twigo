@@ -152,7 +152,7 @@ function Conflicts({
             manager,
           ])}
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-support">
           Force takes the fields from their owners. Drop my change leaves them
           out of what is sent: your YAML keeps your values until the apply
           lands, and then shows what the server holds.
@@ -182,7 +182,7 @@ function Stale({
     <Panel>
       <Callout tone="warn" title="Changed on the server since you opened it">
         <p>{message}</p>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-support">
           {keepable &&
             "Keep mine applies your changes on top of the new version. "}
           Reload takes the server&apos;s and drops yours.
@@ -225,12 +225,12 @@ function Immutable({
         <p>{message}</p>
         {recreates &&
           (policed ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-support">
               <span className="font-medium">{chipLabel(policed)}:</span> Delete
               and recreate is not offered. {describeAccess(policed)}
             </p>
           ) : (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-support">
               Delete and recreate deletes the object and creates it from your
               YAML. Twigo asks before it does.
             </p>
@@ -292,9 +292,9 @@ function Ready({
         <span className="font-medium">
           {answer.live === null ? "Not on the cluster yet" : "Live"}
         </span>
-        <span className="text-muted-foreground">against</span>
+        <span className="text-support">against</span>
         <span className="font-medium">the result of the dry run</span>
-        <span className="text-muted-foreground">on</span>
+        <span className="text-support">on</span>
         <span className="font-medium">{found?.name ?? space}</span>
         <span className="flex-1" />
         <EditActions edits={edits} uri={uri} menus={["edit/diff"]} />
@@ -339,7 +339,7 @@ function Ready({
             </p>
           )}
           {ignored.length > 0 && (
-            <p className="text-muted-foreground">
+            <p className="text-support">
               Left out of what is sent:{" "}
               {ignored.map((field, index) => (
                 <span key={field}>

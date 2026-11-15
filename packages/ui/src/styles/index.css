@@ -2,6 +2,22 @@
 @import "tw-animate-css";
 @import "./theme.css";
 
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("./fonts/JetBrainsMono-SemiBold.woff2") format("woff2");
+}
+
 @layer base {
   * {
     @apply border-border outline-ring;
@@ -12,10 +28,7 @@
     height: 100%;
   }
   body {
-    @apply bg-background font-sans text-foreground;
-    font-size: 13px;
-    line-height: 1.45;
-    -webkit-font-smoothing: antialiased;
+    @apply bg-background font-sans text-body text-content;
     overflow: hidden;
     /* WKWebView (Tauri) needs the prefix; without it a tab drag selects text. */
     -webkit-user-select: none;
@@ -26,9 +39,16 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* SF's stylistic set 6 tells I, l and 1 apart. In Inter the same tag selects
+     other glyphs, and a Linux desktop's system-ui may be an Inter derivative,
+     so it is switched on by platform, not by @supports. */
+  [data-platform="mac"] .ident {
+    font-feature-settings: "ss06";
+  }
+
   [aria-selected="true"],
   [data-cursor] {
-    --muted-foreground-2: var(--muted-foreground);
+    --quiet: var(--support);
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset
@@ -65,7 +85,7 @@
   /* IDE-style scrollbars: thin, overlay, brighten on hover. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent)
+    scrollbar-color: color-mix(in oklab, var(--content) 22%, transparent)
       transparent;
   }
   ::-webkit-scrollbar {

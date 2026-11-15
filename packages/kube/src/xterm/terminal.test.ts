@@ -90,10 +90,11 @@ function lines(tab: ShellTerminal): string[] {
 describe.each(SHELLS)("$name", ({ starter }) => {
   function setup(onOpen?: Parameters<typeof fakeShells>[0]) {
     const fake = fakeShells(onOpen);
+    const report = vi.fn();
     const tabs = starter({
       backend: fake.backend,
       platform: "mac",
-      report: vi.fn(),
+      report,
       openUrl: vi.fn(),
       binds: () => false,
     });
@@ -113,6 +114,7 @@ describe.each(SHELLS)("$name", ({ starter }) => {
     };
     return {
       fake,
+      report,
       begin,
       show,
       restored: tabs.restored,
@@ -140,6 +142,40 @@ describe.each(SHELLS)("$name", ({ starter }) => {
       },
     };
   }
+
+  test("a terminal opens once the family's faces are in, so xterm measures its cell with them", async () => {
+    const check = vi.spyOn(document.fonts, "check").mockReturnValue(false);
+    let arrive = () => undefined;
+    const load = vi.spyOn(document.fonts, "load").mockReturnValue(
+      new Promise((resolve) => {
+        arrive = () => {
+          check.mockReturnValue(true);
+          resolve([]);
+        };
+      }),
+    );
+    const { start } = setup();
+    const tab = await start(7);
+    expect(tab.term.element).toBeUndefined();
+    expect(load.mock.calls.map(([face]) => face)).toEqual([
+      "12px monospace",
+      "bold 12px monospace",
+    ]);
+
+    arrive();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(tab.term.element).toBeDefined();
+  });
+
+  test("a face that fails to load is reported and the terminal opens with the fallback", async () => {
+    vi.spyOn(document.fonts, "check").mockReturnValue(false);
+    const failure = new Error("NetworkError");
+    vi.spyOn(document.fonts, "load").mockRejectedValue(failure);
+    const { start, report } = setup();
+    const tab = await start(7);
+    expect(report).toHaveBeenCalledWith(failure);
+    expect(tab.term.element).toBeDefined();
+  });
 
   test("a restart while the old prompt waits for a command starts the new shell on a line of its own", async () => {
     const { start, output } = setup();

@@ -27,7 +27,7 @@ export function KindTip({ words }: { words: KindWords }) {
       {notes.map(({ title, detail }) => (
         <div key={title}>
           <div className="font-medium">{title}</div>
-          <div className="text-muted-foreground">{detail}</div>
+          <div className="text-support">{detail}</div>
         </div>
       ))}
     </div>

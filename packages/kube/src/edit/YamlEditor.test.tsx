@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { EditorShownContext } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
@@ -9,11 +9,25 @@ interface FakeModel {
   value: string;
   disposed: boolean;
   readonly uri: string;
+  edit(text: string): void;
+}
+
+interface Decoration {
+  readonly range: {
+    readonly startLineNumber: number;
+    readonly startColumn: number;
+    readonly endLineNumber: number;
+    readonly endColumn: number;
+  };
+  readonly options: { readonly inlineClassName: string };
 }
 
 interface FakeView {
   readonly model: FakeModel;
+  readonly decorations: Decoration[][];
   cursor: number;
+  line: number;
+  moved: (() => void) | undefined;
   disposed: boolean;
   focused: boolean;
   focus(): void;
@@ -39,6 +53,7 @@ vi.mock("./monaco", () => {
     KeyCode: {},
     Uri: { from: ({ path }: { path: string }) => path },
     setSchema: () => Promise.resolve(undefined),
+    textOptions: () => ({}),
     editor: {
       setModelMarkers: () => undefined,
       createModel: (value: string, _language: string, uri: string) => {
@@ -46,17 +61,39 @@ vi.mock("./monaco", () => {
           value,
           disposed: false,
           uri,
+          version: 1,
+          listeners: new Set<() => void>(),
           getValue() {
             return this.value;
           },
-          setValue(next: string) {
+          edit(next: string) {
             this.value = next;
+            this.version++;
+            for (const listener of [...this.listeners]) listener();
+          },
+          setValue(next: string) {
+            this.edit(next);
             for (const view of fake.views) {
               if (view.model === this) view.cursor = 0;
             }
           },
-          getVersionId: () => 1,
-          onDidChangeContent: dispose,
+          getVersionId() {
+            return this.version;
+          },
+          getPositionAt(offset: number) {
+            const before = this.value.slice(0, offset).split("\n");
+            return {
+              lineNumber: before.length,
+              column: (before[before.length - 1]?.length ?? 0) + 1,
+            };
+          },
+          getLineMaxColumn(line: number) {
+            return (this.value.split("\n")[line - 1]?.length ?? 0) + 1;
+          },
+          onDidChangeContent(listener: () => void) {
+            this.listeners.add(listener);
+            return { dispose: () => this.listeners.delete(listener) };
+          },
           dispose() {
             this.disposed = true;
           },
@@ -72,6 +109,8 @@ vi.mock("./monaco", () => {
         const view = {
           model,
           cursor: 0,
+          line: 1,
+          moved: undefined as (() => void) | undefined,
           disposed: false,
           focused: false,
           focus() {
@@ -87,7 +126,21 @@ vi.mock("./monaco", () => {
           dispose() {
             this.disposed = true;
           },
+          decorations: [] as Decoration[][],
           updateOptions: () => undefined,
+          createDecorationsCollection(initial: Decoration[]) {
+            this.decorations.push(initial);
+            return {
+              set: (next: Decoration[]) => this.decorations.push(next),
+            };
+          },
+          getPosition() {
+            return { lineNumber: this.line, column: 1 };
+          },
+          onDidChangeCursorPosition(listener: () => void) {
+            this.moved = listener;
+            return dispose();
+          },
           onKeyDown: dispose,
           onDidCompositionStart: dispose,
           onDidCompositionEnd: dispose,
@@ -157,6 +210,28 @@ test("a text that comes from outside replaces the model's and leaves the cursor 
   expect(shown.cursor).toBe(7);
 });
 
+test("an edit in the editor reaches onChange with the text, and a text set from outside does not", async () => {
+  const copies = await buffers();
+  const onChange = vi.fn();
+  const view = render(
+    <YamlEditor uri={URI} text="a: 1" buffers={copies} onChange={onChange} />,
+  );
+  const [model] = fake.models;
+  if (!model) throw new Error("no editor was made");
+
+  act(() => {
+    model.edit("a: 2");
+  });
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenLastCalledWith("a: 2");
+
+  view.rerender(
+    <YamlEditor uri={URI} text="a: 3" buffers={copies} onChange={onChange} />,
+  );
+  expect(model.value).toBe("a: 3");
+  expect(onChange).toHaveBeenCalledTimes(1);
+});
+
 test("a focus asked of the editor goes to its view now, or to the one it gets, and a view replaced while it holds the focus hands it on", async () => {
   const copies = await buffers();
   copies.focus(URI);
@@ -203,4 +278,49 @@ test("an editor that is not on screen has no view, so a key typed into the one t
 
   a.rerender(shown(URI, true));
   expect(fake.views[2]?.model).toBe(fake.models[0]);
+});
+
+test("the path shows on opening and follows the cursor and an edit, as the decorations do", () => {
+  const before = "kind: Pod\nmetadata:\n  name: web\n";
+  const after = `${before}  managedFields:\n    - manager: kubectl\nspec:\n  a: 1\n`;
+  const { container } = render(
+    <YamlEditor uri="details:2" text={before} readOnly />,
+  );
+  const [model] = fake.models;
+  const [view] = fake.views;
+  if (!model || !view) throw new Error("no editor was made");
+  const landmarks = () =>
+    view.decorations[view.decorations.length - 1]?.map(
+      ({ range: r, options }) => [
+        options.inlineClassName,
+        r.startLineNumber,
+        r.startColumn,
+        r.endLineNumber,
+        r.endColumn,
+      ],
+    );
+  const shown = () => container.querySelector("[title]")?.getAttribute("title");
+
+  expect(shown()).toBe("kind");
+  expect(landmarks()).toEqual([
+    ["twigo-yaml-top-key", 1, 1, 1, 5],
+    ["twigo-yaml-top-key", 2, 1, 2, 9],
+  ]);
+  act(() => {
+    view.line = 7;
+    view.moved?.();
+  });
+  expect(shown()).toBe("");
+
+  act(() => {
+    model.edit(after);
+  });
+
+  expect(landmarks()).toEqual([
+    ["twigo-yaml-top-key", 1, 1, 1, 5],
+    ["twigo-yaml-top-key", 2, 1, 2, 9],
+    ["twigo-yaml-top-key", 6, 1, 6, 5],
+    ["twigo-yaml-support", 4, 1, 5, 23],
+  ]);
+  expect(shown()).toBe("spec › a");
 });

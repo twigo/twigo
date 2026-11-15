@@ -32,7 +32,7 @@ const dot = (space: string) => {
   if (className.includes("var(--warn)"))
     return className.includes("animate-pulse") ? "warn, pulsing" : "warn";
   if (className.includes("bg-ok")) return "ok";
-  if (className.includes("bg-muted-foreground-2")) return "idle";
+  if (className.includes("bg-quiet")) return "idle";
   return className;
 };
 

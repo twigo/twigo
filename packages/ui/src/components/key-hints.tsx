@@ -20,7 +20,7 @@ export function KeyHints({
   return (
     <dl
       className={cn(
-        "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground",
+        "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs text-support",
         className,
       )}
     >

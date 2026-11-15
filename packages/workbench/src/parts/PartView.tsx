@@ -50,8 +50,8 @@ export function PartView({ location }: { location: SideBar }) {
                 className={cn(
                   "h-6 rounded px-1.5 text-xs font-medium transition-colors",
                   candidate.id === container?.id
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
+                    ? "text-content"
+                    : "text-support hover:text-content",
                 )}
               >
                 {candidate.title}

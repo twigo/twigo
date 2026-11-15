@@ -75,7 +75,7 @@ function Chip({
         <button
           type="button"
           aria-label={`Mode of ${context}: ${label}`}
-          className="twigo-mode-chip mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-[11px] font-semibold whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]"
+          className="twigo-mode-chip mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-2xs font-semibold whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]"
         >
           {Icon && <Icon aria-hidden className="size-3" />}
           {label}
@@ -115,7 +115,7 @@ function ModeDetails({
     <div className="grid gap-3">
       <div className="grid gap-1">
         <div className="font-medium">{context}</div>
-        <div className="text-muted-foreground">{modeHelp(access.mode)}</div>
+        <div className="text-support">{modeHelp(access.mode)}</div>
       </div>
       <Row label="Mode">
         {locked ? (
@@ -159,7 +159,7 @@ function ModeDetails({
           }}
         />
       </Row>
-      <div className="text-muted-foreground">
+      <div className="text-support">
         {describeAccess(access)}
         {access.source.kind === "user" && (
           <>
@@ -214,7 +214,7 @@ function Row({
 }) {
   return (
     <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-support">{label}</span>
       <div className="min-w-0">{children}</div>
     </div>
   );

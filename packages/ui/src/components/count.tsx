@@ -5,8 +5,8 @@ const TONE: Readonly<Record<Tone | "quiet", string>> = {
   error: "text-error",
   warn: "text-warn-foreground",
   ok: "",
-  idle: "text-muted-foreground",
-  quiet: "text-muted-foreground-2",
+  idle: "text-support",
+  quiet: "text-quiet",
 };
 
 /** A number as people read it, in tabular figures: `5,000`. */

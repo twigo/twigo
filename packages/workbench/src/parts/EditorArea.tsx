@@ -268,7 +268,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const dirty = params !== undefined && editors.isDirty(params.uri);
   return (
     <div
-      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-[13px]"
+      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
@@ -279,7 +279,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       {params && provider?.icon && (
         <provider.icon
           uri={params.uri}
-          className="size-4 shrink-0 text-muted-foreground"
+          className="size-4 shrink-0 text-support"
         />
       )}
       <span data-preview={params?.preview ?? false} className="truncate">

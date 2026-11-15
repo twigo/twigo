@@ -41,3 +41,9 @@ window.matchMedia = (query: string) =>
     addListener: () => undefined,
     removeListener: () => undefined,
   }) as unknown as MediaQueryList;
+
+// jsdom loads no fonts: every face is in.
+Object.defineProperty(document, "fonts", {
+  configurable: true,
+  value: { check: () => true, load: () => Promise.resolve([]) },
+});

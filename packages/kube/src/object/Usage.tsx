@@ -1,6 +1,7 @@
 import type { Measure, ShownUsage } from "@twigo/protocol";
 import { EmptyMeter, Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
+import { Quantity } from "../Quantity";
 import { figure, type Figure, type Resource } from "./figures";
 
 const LABEL: Readonly<Record<Resource, string>> = {
@@ -9,7 +10,7 @@ const LABEL: Readonly<Record<Resource, string>> = {
 };
 
 const GRID =
-  "grid grid-cols-[3.5rem_minmax(4rem,1fr)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
+  "grid grid-cols-[3.5rem_minmax(4rem,11rem)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
 interface Subject {
   /** What its meters are labelled with, and its heading when it has one. */
@@ -53,14 +54,14 @@ export function UsageView({
 }
 
 function Said({ state }: { state: Exclude<ShownUsage["state"], "ready"> }) {
-  return <p className="text-muted-foreground">{METRICS_NOTES[state]}</p>;
+  return <p className="text-support">{METRICS_NOTES[state]}</p>;
 }
 
 function Rows({ subject }: { subject: Subject }) {
   return (
     <>
       {subject.name !== null && (
-        <span className="col-span-4 mt-2 font-semibold first:mt-0">
+        <span className="col-span-4 mt-2 text-xs font-semibold text-support first:mt-0">
           {subject.name}
         </span>
       )}
@@ -83,7 +84,7 @@ function Row({
   if (measure === null) {
     return (
       <>
-        <span className="text-muted-foreground">{label}</span>
+        <span className="text-label text-support">{label}</span>
         <EmptyMeter label={name === null ? label : `${label} of ${name}`} />
         <span aria-hidden className="col-span-2">
           {"\u00a0"}
@@ -94,9 +95,9 @@ function Row({
   const shown = figure(resource, measure);
   return (
     <>
-      <span className="text-muted-foreground">{label}</span>
+      <span className="text-label text-support">{label}</span>
       {shown.used === null ? (
-        <span className="col-span-3 text-muted-foreground">No data yet</span>
+        <span className="col-span-3 text-support">No data yet</span>
       ) : (
         <>
           {shown.bar ? (
@@ -110,8 +111,10 @@ function Row({
             <span />
           )}
           <span className="tabular-nums">
-            {shown.used}
-            <span className="text-muted-foreground">{details(shown)}</span>
+            <Quantity text={shown.used} />
+            <span className="text-support">
+              <Details shown={shown} />
+            </span>
           </span>
           <Percent shown={shown} />
         </>
@@ -120,12 +123,38 @@ function Row({
   );
 }
 
-function details({ base, limit, request, allocatable }: Figure): string {
-  if (base === "allocatable") return ` of ${allocatable ?? ""}`;
-  return [
-    ` · ${limit === null ? "no limit" : `limit ${limit}`}`,
-    request === null ? "" : ` · request ${request}`,
-  ].join("");
+function Details({
+  shown: { base, limit, request, allocatable },
+}: {
+  shown: Figure;
+}) {
+  if (base === "allocatable") {
+    return (
+      <>
+        {" of "}
+        <Quantity text={allocatable ?? ""} />
+      </>
+    );
+  }
+  return (
+    <>
+      {" · "}
+      {limit === null ? (
+        "no limit"
+      ) : (
+        <>
+          {"limit "}
+          <Quantity text={limit} />
+        </>
+      )}
+      {request !== null && (
+        <>
+          {" · request "}
+          <Quantity text={request} />
+        </>
+      )}
+    </>
+  );
 }
 
 const OF = { limit: "limit", request: "request", allocatable: "allocatable" };

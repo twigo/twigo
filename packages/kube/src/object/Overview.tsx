@@ -31,6 +31,7 @@ import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
 import type { Reveal } from "./reveal";
+import { isNumeric, numericColumns } from "./numeric";
 import { UsageView } from "./Usage";
 import { Age, ValueView } from "./values";
 
@@ -125,7 +126,7 @@ export function Overview({
     );
   }
   return (
-    <div className="flex flex-col gap-4 px-3.5 pt-3 pb-4 text-[13px]">
+    <div className="flex flex-col gap-6 px-3.5 pt-4 pb-4 text-body">
       <Announcer titles={titles} />
       {rendered}
     </div>
@@ -215,6 +216,7 @@ function BlockView({
         <Table
           label={section.title}
           columns={block.columns}
+          numeric={numericColumns(block.columns, block.rows)}
           rows={block.rows.map((row) =>
             row.map((value, index) => (
               <ValueView key={index} value={value} onOpen={onOpen} compact />
@@ -248,6 +250,7 @@ function Fields({
       items={fields.map((field) => ({
         key: field.label,
         label: field.label,
+        numeric: isNumeric(field.value),
         value: <ValueView value={field.value} onOpen={onOpen} />,
       }))}
     />
@@ -260,7 +263,7 @@ const CONDITION: Readonly<
   success: { icon: Check, className: "text-ok" },
   danger: { icon: X, className: "text-error" },
   warning: { icon: TriangleAlert, className: "text-warn-foreground" },
-  neutral: { icon: Minus, className: "text-muted-foreground" },
+  neutral: { icon: Minus, className: "text-support" },
 };
 
 /**
@@ -298,9 +301,7 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
                 className={cn("size-3", className)}
               />
               {condition.type}
-              <span className="text-muted-foreground-2">
-                <Age at={condition.lastTransition} />
-              </span>
+              <Age at={condition.lastTransition} />
             </li>
           );
         })}
@@ -309,10 +310,10 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
         <p key={condition.type} className="break-words">
           <span className="font-semibold">{condition.type}</span>
           {condition.reason && (
-            <span className="text-muted-foreground"> · {condition.reason}</span>
+            <span className="text-support"> · {condition.reason}</span>
           )}
           {condition.message && (
-            <span className="block text-muted-foreground">
+            <span className="block text-prose text-content">
               {condition.message}
             </span>
           )}
@@ -335,8 +336,7 @@ function Data({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
 }) {
-  if (entries.length === 0)
-    return <p className="text-muted-foreground">No data</p>;
+  if (entries.length === 0) return <p className="text-support">No data</p>;
   return (
     <ul className="flex flex-col">
       {entries.map((entry) =>
@@ -380,7 +380,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
     <li className="flex flex-col">
       <div className="flex h-6 items-center gap-2">
         <span className="truncate font-mono text-xs">{entry.key}</span>
-        <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+        <span className="ml-auto shrink-0 text-xs text-support tabular-nums">
           {entry.binary && "binary, "}
           {formatBytes(entry.bytes)}
         </span>
@@ -415,9 +415,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
         <pre className="mb-1 ml-0 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
           {shown.value}
           {shown.binary && (
-            <span className="mt-1 block font-sans text-muted-foreground">
-              base64
-            </span>
+            <span className="mt-1 block font-sans text-support">base64</span>
           )}
         </pre>
       )}
@@ -458,7 +456,7 @@ function DataRow({
     };
   }, [open, values, entry]);
   const size = (
-    <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+    <span className="ml-auto shrink-0 text-xs text-support tabular-nums">
       {entry.binary && "binary, "}
       {formatBytes(entry.bytes)}
     </span>
@@ -478,12 +476,12 @@ function DataRow({
         onClick={() => {
           setOpen(!open);
         }}
-        className="flex h-6 items-center gap-1 text-left hover:text-foreground"
+        className="flex h-6 items-center gap-1 text-left hover:text-content"
       >
         {open ? (
-          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          <ChevronDown className="size-3.5 shrink-0 text-support" />
         ) : (
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+          <ChevronRight className="size-3.5 shrink-0 text-support" />
         )}
         <span className="truncate font-mono text-xs">{entry.key}</span>
         {size}
@@ -504,8 +502,7 @@ function DataRow({
 export function Events({ list }: { list: EventList }) {
   const { events, unavailable } = list;
   if (unavailable !== null) return <p className="text-error">{unavailable}</p>;
-  if (events.length === 0)
-    return <p className="text-muted-foreground">No events</p>;
+  if (events.length === 0) return <p className="text-support">No events</p>;
   return (
     <ul className="flex flex-col gap-1.5">
       {events.map((event, index) => {
@@ -530,16 +527,16 @@ export function Events({ list }: { list: EventList }) {
                   {event.reason}
                 </span>
                 {event.count > 1 && (
-                  <span className="text-xs text-muted-foreground">
-                    ×{event.count}
-                  </span>
+                  <span className="text-xs text-support">×{event.count}</span>
                 )}
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+                <span className="ml-auto shrink-0 text-xs">
                   <Age at={event.last} />
                 </span>
               </div>
-              <p className="break-words">{event.message}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-prose break-words text-content">
+                {event.message}
+              </p>
+              <p className="text-xs text-support">
                 {event.source}
                 {event.fieldPath && ` · ${event.fieldPath}`}
               </p>

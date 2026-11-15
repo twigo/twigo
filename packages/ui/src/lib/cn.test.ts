@@ -13,4 +13,23 @@ describe("cn", () => {
   it("drops falsy values", () => {
     expect(cn("a", null, undefined, "c")).toBe("a c");
   });
+
+  it.each(["2xs", "label", "body", "prose", "title"])(
+    "keeps the text-%s size beside a role",
+    (step) => {
+      expect(cn(`text-${step}`, "text-content")).toBe(
+        `text-${step} text-content`,
+      );
+    },
+  );
+
+  it("lets the last of two sizes win", () => {
+    expect(cn("text-xs", "text-prose")).toBe("text-prose");
+    expect(cn("text-title", "text-sm")).toBe("text-sm");
+    expect(cn("text-2xs", "text-title")).toBe("text-title");
+  });
+
+  it("lets the last of two roles win", () => {
+    expect(cn("text-content", "text-support")).toBe("text-support");
+  });
 });

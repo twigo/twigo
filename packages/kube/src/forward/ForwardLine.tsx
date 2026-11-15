@@ -36,14 +36,14 @@ export function ForwardLine({ forward }: { forward: Forward }) {
           />
           <KindIcon
             gvr={forward.target.gvr}
-            className="mr-1.5 size-3.5 shrink-0 text-muted-foreground"
+            className="mr-1.5 size-3.5 shrink-0 text-support"
           />
           <span className="flex min-w-0">
             <span className="truncate">{forward.target.name}</span>
             <span className="shrink-0">:{portLabel(forward)}</span>
           </span>
           {!ready && (
-            <span className="flex h-4 min-w-0 flex-1 flex-wrap overflow-hidden text-xs text-muted-foreground">
+            <span className="flex h-4 min-w-0 flex-1 flex-wrap overflow-hidden text-xs text-support">
               <span className="h-4 w-1.5 shrink-0" />
               <span className="whitespace-nowrap">{label}</span>
             </span>
@@ -57,17 +57,17 @@ export function ForwardLine({ forward }: { forward: Forward }) {
         <span>
           {forward.kind} {forward.target.name}
         </span>
-        <span className="text-muted-foreground">
+        <span className="text-support">
           {portWords(forward)} → {addressOf(forward)}
         </span>
         <span>
           <TonedText tone={tone}>{label}</TonedText>
           {detail !== undefined && (
-            <span className="text-muted-foreground"> · {detail}</span>
+            <span className="text-support"> · {detail}</span>
           )}
         </span>
         {forward.pod !== null && (
-          <span className="text-muted-foreground">Pod {forward.pod}</span>
+          <span className="text-support">Pod {forward.pod}</span>
         )}
       </TooltipContent>
     </Tooltip>

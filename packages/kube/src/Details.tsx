@@ -12,17 +12,20 @@ import {
 } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
+import { ageRole } from "./age";
 import { cellTone, columnRule, statusColumn } from "./columns";
 import { useResources } from "./discovery";
 import { KindIcon } from "./KindIcon";
 import { measureText } from "./list/metrics";
-import { ObjectContent } from "./object/ObjectContent";
+import { ObjectName } from "./ObjectName";
+import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { OBJECT_TABS } from "./object/tabs";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
+import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
 import { useNow } from "./useNow";
 import { useVisible } from "./useVisible";
@@ -173,12 +176,16 @@ export function Details({
       />
       <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2.5 pr-2 pb-2 pl-3.5">
         <div className="flex items-center gap-1.5">
-          <KindIcon
-            gvr={gvr}
-            className="size-4 shrink-0 text-muted-foreground"
-          />
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">
-            <Name name={name} generated={row.generated} />
+          <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
+          <h2 className="flex min-w-0 flex-1 items-baseline text-title font-semibold text-strong">
+            <span className="min-w-0 truncate text-xs text-support">
+              {kind}
+            </span>{" "}
+            <ObjectName
+              name={name}
+              generated={row.generated}
+              className="max-w-full shrink-0 pl-1.5 text-strong"
+            />
           </h2>
           <IconButton
             icon={Copy}
@@ -208,13 +215,13 @@ export function Details({
             onClick={onClose}
           />
         </div>
-        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 text-xs text-support">
           {tone && typeof status === "string" && (
             <Pill tone={tone}>{status}</Pill>
           )}
           {[
             namespace !== undefined && (
-              <span key="namespace" className="truncate">
+              <span key="namespace" className="ident truncate">
                 {namespace}
               </span>
             ),
@@ -229,13 +236,19 @@ export function Details({
                 {ownerGvr && (
                   <KindIcon gvr={ownerGvr} className="size-3 shrink-0" />
                 )}
-                <span className="truncate">
+                <span className="ident truncate">
                   {owner.target.kind} {owner.target.name}
                 </span>
               </LinkButton>
             ),
             row.created && (
-              <span key="age" className="shrink-0 tabular-nums">
+              <span
+                key="age"
+                className={cn(
+                  "shrink-0 tabular-nums",
+                  ageRole(now - Date.parse(row.created)),
+                )}
+              >
                 {humanDuration(now - Date.parse(row.created))}
               </span>
             ),
@@ -248,7 +261,7 @@ export function Details({
                     <span
                       key={`dot-${String(index)}`}
                       aria-hidden
-                      className="text-muted-foreground-2"
+                      className="text-quiet"
                     >
                       ·
                     </span>,
@@ -321,19 +334,6 @@ function warningCount(
   return (listed ?? []).filter((event) => event.type === "Warning").length;
 }
 
-function Name({ name, generated }: { name: string; generated: number | null }) {
-  if (generated === null || generated <= 0 || generated >= name.length)
-    return name;
-  return (
-    <>
-      {name.slice(0, generated)}
-      <span className="font-normal text-muted-foreground-2">
-        {name.slice(generated)}
-      </span>
-    </>
-  );
-}
-
 /** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */
 function Cells({
   selected,
@@ -347,20 +347,22 @@ function Cells({
   const { gvr, columns } = selected;
   return (
     <PropertyList
-      className="p-3 text-[13px]"
+      className={cn("p-3 text-body", LABEL_COLUMN)}
       items={columns.map((column, index) => {
-        const { cell } = columnRule(gvr, column);
+        const { cell, figures } = columnRule(gvr, column);
+        const value =
+          cell === "age"
+            ? row.created
+              ? humanDuration(now - Date.parse(row.created))
+              : ""
+            : cell === "cpu" || cell === "memory"
+              ? (measureText(cell, row.cells[index] ?? null) ?? "–")
+              : String(row.cells[index] ?? "");
         return {
           key: column.name,
           label: column.name,
-          value:
-            cell === "age"
-              ? row.created
-                ? humanDuration(now - Date.parse(row.created))
-                : ""
-              : cell === "cpu" || cell === "memory"
-                ? (measureText(cell, row.cells[index] ?? null) ?? "–")
-                : String(row.cells[index] ?? ""),
+          numeric: figures || isTabular(value),
+          value,
         };
       })}
     />

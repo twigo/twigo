@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import type { ObjectRef, Span, Value } from "@twigo/protocol";
 import { Chip, cn, LinkButton, TonedText } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
+import { ageRole } from "../age";
 import { useNow } from "../useNow";
 import { TONE } from "./tone";
 
@@ -48,7 +49,7 @@ export function ValueView({
           onClick={() => {
             onOpen(value.target);
           }}
-          className="break-all"
+          className="ident break-all"
         >
           {value.text}
         </LinkButton>
@@ -80,7 +81,7 @@ function LabelChip({ name, value }: { name: string; value: string }) {
   const [open, setOpen] = useState(false);
   const chip = (
     <>
-      <span className="text-muted-foreground">{name}</span>
+      <span className="text-support">{name}</span>
       {value !== "" && <span>={value}</span>}
     </>
   );
@@ -114,10 +115,11 @@ function Time({ at }: { at: string }) {
   const when = Date.parse(at);
   if (Number.isNaN(when)) return <span>{at}</span>;
   const date = new Date(when).toLocaleString();
+  const age = Math.max(0, now - when);
   return (
     <span title={date}>
-      {humanDuration(Math.max(0, now - when))} ago
-      <span className="ml-2 text-muted-foreground">{date}</span>
+      <span className={ageRole(age)}>{humanDuration(age)} ago</span>
+      <span className="ml-2 text-quiet">{date}</span>
     </span>
   );
 }
@@ -134,9 +136,13 @@ export function Age({
   const now = useNow();
   const when = at === null ? Number.NaN : Date.parse(at);
   if (Number.isNaN(when)) return null;
+  const age = Math.max(0, now - when);
   return (
-    <span title={new Date(when).toLocaleString()} className="tabular-nums">
-      {humanDuration(Math.max(0, now - when))}
+    <span
+      title={new Date(when).toLocaleString()}
+      className={cn("tabular-nums", ageRole(age))}
+    >
+      {humanDuration(age)}
       {suffix}
     </span>
   );

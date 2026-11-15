@@ -24,6 +24,7 @@ import { Spaces } from "./spaces/store";
 import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
+import { Zoom } from "./zoom";
 
 /**
  * The services of one window. Features, the workbench's own included,
@@ -71,6 +72,7 @@ export class Workbench {
   readonly spaces: Spaces;
   readonly recent: RecentEditors;
   readonly sizes: PartSizes;
+  readonly zoom: Zoom;
   readonly shellEnvironment: ShellEnvironmentStatus;
   readonly credentials: Credentials;
   readonly operations: Operations;
@@ -102,6 +104,7 @@ export class Workbench {
     );
     this.recent = new RecentEditors(this.editors, this.spaces);
     this.sizes = new PartSizes(state);
+    this.zoom = new Zoom(state);
     this.shellEnvironment = new ShellEnvironmentStatus(backend, this.keys);
     this.credentials = new Credentials(backend, this.spaces, (error) => {
       this.report(error);

@@ -23,24 +23,38 @@
   /* Neutral greys with a trace of the brand hue: an app's chrome, not a
      tinted dashboard. Content surfaces stay white so data reads on paper. */
   --background: oklch(0.975 0.002 250);
-  --foreground: oklch(0.32 0.004 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.32 0.004 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.32 0.004 250);
+  --popover-foreground: var(--content);
   --primary: oklch(0.3 0.006 250);
   --primary-foreground: oklch(0.985 0.002 250);
   --secondary: oklch(0.955 0.002 250);
-  --secondary-foreground: oklch(0.3 0.006 250);
+  --secondary-foreground: var(--content);
   --muted: oklch(0.955 0.002 250);
-  /* Three text tiers, each at 4.5:1 or more on the shell and the editor
-     (WCAG 1.4.3): secondary for what places a row, tertiary for units,
-     timestamps, hints and empty values. A selected row's tint takes
-     tertiary below that, so there it reads as secondary. */
-  --muted-foreground: oklch(0.47 0.006 250);
-  --muted-foreground-2: oklch(0.55 0.005 250);
+  /* Four text roles; a component names the role of what it shows.
+       strong   an object's title, section titles, the name in the row under
+                the cursor
+       content  names, values, messages, log lines
+       support  property labels, table headers, secondary columns
+       quiet    timestamps, units, a zero count, placeholders, hints
+     Two adjacent pieces of text in different roles differ by 25 Lc or more,
+     or by a second cue: a size step or the other weight.
+     WCAG 2 ratio / APCA Lc (0.0.98G) of the 8-bit sRGB colours, on the shell
+     and the editor; every role is 4.5:1 or more on the card, the popover and
+     a selected row as well (WCAG 1.4.3):
+                dark shell   dark editor  light shell  light editor
+       strong   15.5 / 98    16.6 / 99    17.5 / 100   18.8 / 105
+       content  12.9 / 85    13.8 / 86    14.9 / 98    16.0 / 103
+       support   7.8 / 57     8.4 / 58     6.1 / 78     6.5 / 82
+       quiet     5.4 / 41     5.7 / 41     4.5 / 69     4.8 / 74
+     A selected row's tint takes quiet below 4.5:1, so there it reads as
+     support (index.css). */
+  --strong: oklch(0.18 0.004 250);
+  --content: oklch(0.25 0.004 250);
+  --support: oklch(0.48 0.006 250);
+  --quiet: oklch(0.55 0.005 250);
   --accent: oklch(0.945 0.003 250);
-  --accent-foreground: oklch(0.3 0.006 250);
+  --accent-foreground: var(--content);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.915 0.003 250);
@@ -75,7 +89,6 @@
   --editor: oklch(1 0 0);
 
   --sidebar: oklch(0.975 0.002 250);
-  --sidebar-foreground: oklch(0.32 0.004 250);
   --sidebar-border: oklch(0.915 0.003 250);
   --panel: oklch(0.975 0.002 250);
 
@@ -161,20 +174,20 @@
   --shell: oklch(0.218 0.002 250);
   --editor: oklch(0.185 0.002 250);
   --background: oklch(0.218 0.002 250);
-  --foreground: oklch(0.87 0.002 250);
   --card: oklch(0.25 0.003 250);
-  --card-foreground: oklch(0.87 0.002 250);
   --popover: oklch(0.27 0.003 250);
-  --popover-foreground: oklch(0.87 0.002 250);
+  --popover-foreground: var(--content);
   --primary: oklch(0.87 0.002 250);
   --primary-foreground: oklch(0.218 0.002 250);
   --secondary: oklch(0.28 0.003 250);
-  --secondary-foreground: oklch(0.87 0.002 250);
+  --secondary-foreground: var(--content);
   --muted: oklch(0.28 0.003 250);
-  --muted-foreground: oklch(0.75 0.003 250);
-  --muted-foreground-2: oklch(0.65 0.003 250);
+  --strong: oklch(0.96 0.002 250);
+  --content: oklch(0.9 0.002 250);
+  --support: oklch(0.75 0.003 250);
+  --quiet: oklch(0.65 0.003 250);
   --accent: oklch(0.3 0.003 250);
-  --accent-foreground: oklch(0.87 0.002 250);
+  --accent-foreground: var(--content);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 8%);
@@ -191,7 +204,6 @@
   --border-subtle: oklch(1 0 0 / 5%);
 
   --sidebar: oklch(0.218 0.002 250);
-  --sidebar-foreground: oklch(0.87 0.002 250);
   --sidebar-border: oklch(1 0 0 / 8%);
   --panel: oklch(0.218 0.002 250);
 
@@ -250,9 +262,7 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
@@ -260,8 +270,10 @@
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted-foreground-2: var(--muted-foreground-2);
+  --color-strong: var(--strong);
+  --color-content: var(--content);
+  --color-support: var(--support);
+  --color-quiet: var(--quiet);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-editor: var(--editor);
@@ -280,7 +292,6 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-panel: var(--panel);
   --color-ok: var(--ok);
@@ -333,6 +344,18 @@
   /* Two weights, as VS Code and JetBrains use: 400, and 600 for emphasis. */
   --font-weight-medium: 600;
 
+  /* xs (12 / 16), sm (14 / 20), base (16 / 24) and lg (18 / 28) are Tailwind's own. */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-label: 12px;
+  --text-label--line-height: 18px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  --text-prose: 13px;
+  --text-prose--line-height: 20px;
+  --text-title: 16px;
+  --text-title--line-height: 22px;
+
   /* The platform's UI font, as VS Code's workbench: SF on macOS. */
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
@@ -340,6 +363,8 @@
   --font-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     monospace;
+  /* JetBrains Mono's code ligatures are contextual alternates. */
+  --font-mono--font-feature-settings: "liga" 0, "calt" 0;
 }
 
 @theme {

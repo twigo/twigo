@@ -10,7 +10,7 @@ export function StartupFailure({ message }: { message: string }) {
       title="Twigo could not start"
       className="h-full"
     >
-      <p className="text-muted-foreground">{message}</p>
+      <p className="text-support">{message}</p>
     </EmptyState>
   );
 }

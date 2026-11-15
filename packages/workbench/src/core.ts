@@ -55,6 +55,33 @@ const TOGGLES: readonly {
   },
 ];
 
+/** The last key of each is the one that menus and the palette show. */
+const ZOOM: readonly {
+  id: string;
+  title: string;
+  keys: readonly string[];
+  method: "zoomIn" | "zoomOut" | "reset";
+}[] = [
+  {
+    id: "workbench.action.zoomIn",
+    title: "Zoom In",
+    keys: ["mod+numpad_add", "mod+shift+=", "mod+="],
+    method: "zoomIn",
+  },
+  {
+    id: "workbench.action.zoomOut",
+    title: "Zoom Out",
+    keys: ["mod+numpad_subtract", "mod+-"],
+    method: "zoomOut",
+  },
+  {
+    id: "workbench.action.zoomReset",
+    title: "Reset Zoom",
+    keys: ["mod+numpad0", "mod+0"],
+    method: "reset",
+  },
+];
+
 /** The workbench's own commands, keys and status-bar items, through the same registries as any feature. */
 export function registerCore(workbench: Workbench): void {
   const { commands, keybindings, spaces, editors, views, quickAccess, menus } =
@@ -159,6 +186,17 @@ export function registerCore(workbench: Workbench): void {
       },
     });
     rules.push({ key, command: id });
+  }
+  for (const { id, title, keys, method } of ZOOM) {
+    commands.register({
+      id,
+      title,
+      category: "View",
+      run: () => {
+        workbench.zoom[method]();
+      },
+    });
+    for (const key of keys) rules.push({ key, command: id });
   }
   const panel: readonly {
     id: string;
@@ -307,6 +345,7 @@ export function registerCore(workbench: Workbench): void {
         "workbench.action.moveEditorToBelowGroup",
       ],
     ],
+    ["menubar/view", "4_zoom", ZOOM.map(({ id }) => id)],
     [
       "menubar/go",
       "1_quick",

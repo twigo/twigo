@@ -24,7 +24,7 @@ Decided 2026-11-03 with the workbench redesign (ARCHITECTURE 2.3, 4.1, 4.4, 4.9;
    A view's own display choices, such as its shown columns or its grouping, are actions it builds from its data; nothing draws a menu by hand.
 3. **Primitives own the look.**
    Every recurring pattern (a dot, a count, a key, a button, a menu, a field, a row, a section, an empty state) is a `ui` primitive, and features use it rather than redraw it.
-   Feature code colours text only through the tokens' tiers and tones (`text-muted-foreground`, `text-error`) and otherwise only lays things out.
+   Feature code colours text only through the four text roles and the tones (`text-support`, `text-error`; [text roles](text-roles-and-type-scale.md)) and otherwise only lays things out.
 4. **Status is semantic.**
    `Tone` is `error`, `warn`, `ok` or `idle`; `kube` maps Kubernetes values to tones as data.
    `ui` draws a tone by shape and colour, so no state rests on hue alone: error a filled dot, warn a ring, idle grey, and a pulse only while a state is in flight.

@@ -81,7 +81,7 @@ export function YamlSurface({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-8 flex-none items-center gap-2 border-b border-border-subtle pr-2 pl-3 text-xs">
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate text-support">
           {note}
           {loaded?.state === "failed" && (
             <span title={loaded.message}> · No schema for completion</span>

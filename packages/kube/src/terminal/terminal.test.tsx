@@ -572,7 +572,7 @@ test.each<[Platform, boolean]>([
   ["mac", false],
   ["linux", true],
 ])(
-  "on %s a Ctrl binding of quick access, the palette or the panel's toggle is taken from the shell: %s",
+  "on %s a Ctrl binding of quick access, the palette, the panel's toggle or the zoom is taken from the shell: %s",
   async (platform, taken) => {
     const { workbench, tabs, create } = await mounted("ready", "qa", platform);
     await create();
@@ -582,6 +582,9 @@ test.each<[Platform, boolean]>([
       ["KeyQ", "workbench.action.quickOpen"],
       ["KeyW", "workbench.action.showCommands"],
       ["KeyE", "workbench.action.togglePanel"],
+      ["KeyR", "workbench.action.zoomIn"],
+      ["KeyT", "workbench.action.zoomOut"],
+      ["KeyY", "workbench.action.zoomReset"],
     ] as const;
     workbench.keybindings.register(
       "user",

@@ -29,8 +29,8 @@ const TONE: Readonly<
   warning: { icon: TriangleAlert, text: "text-warn", rule: "bg-warn" },
   info: {
     icon: Info,
-    text: "text-muted-foreground",
-    rule: "bg-muted-foreground/40",
+    text: "text-support",
+    rule: "bg-support/40",
   },
 };
 
@@ -62,7 +62,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
         <Icon aria-hidden className={cn("size-3.5", text)} />
       </span>
       <span className="grid min-w-0 flex-1 justify-items-start gap-1 leading-5">
-        <span className="break-words text-foreground">{message}</span>
+        <span className="break-words text-content">{message}</span>
         {action && (
           <button
             type="button"
@@ -80,7 +80,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
         type="button"
         aria-label="Dismiss"
         onClick={() => toast.dismiss(id)}
-        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-row-hover hover:text-foreground focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+        className="flex size-5 shrink-0 items-center justify-center rounded text-support transition-colors hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
       >
         <X className="size-3.5" />
       </button>
@@ -137,17 +137,15 @@ export function CountdownToast({
       role="status"
       className="relative flex w-[var(--width)] items-center gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
-      <Icon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      <Icon aria-hidden className="size-3.5 shrink-0 text-support" />
       <span className="grid min-w-0 flex-1 gap-0.5 leading-5">
-        <span className="break-words text-foreground">{message}</span>
-        <span className="text-[11px] leading-4 text-muted-foreground">
-          {detail(shown)}
-        </span>
+        <span className="break-words text-content">{message}</span>
+        <span className="text-2xs text-support">{detail(shown)}</span>
       </span>
       <button
         type="button"
         onClick={action.run}
-        className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-accent focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+        className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-content shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-accent focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
       >
         {action.label}
         {action.keys && <Kbd>{action.keys}</Kbd>}
@@ -189,10 +187,10 @@ export function ChoiceToast({
       className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
       <span className="flex h-5 shrink-0 items-center">
-        <Icon aria-hidden className="size-3.5 text-muted-foreground" />
+        <Icon aria-hidden className="size-3.5 text-support" />
       </span>
       <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] gap-1.5 leading-5">
-        <span className="break-words text-foreground">{message}</span>
+        <span className="break-words text-content">{message}</span>
         {detail}
         <span className="flex flex-wrap gap-1.5">
           {choices.map(({ label, run }, index) => (

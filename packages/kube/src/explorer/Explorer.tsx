@@ -194,9 +194,7 @@ function Pinned({
   return (
     <>
       {title}
-      {detail && (
-        <span className="ml-1.5 text-xs text-muted-foreground">{detail}</span>
-      )}
+      {detail && <span className="ml-1.5 text-xs text-support">{detail}</span>}
     </>
   );
 }
@@ -225,7 +223,7 @@ function Total({
       ? counts.ok.count + counts.warn.count + counts.error.count
       : status.total;
   return (
-    <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground">
+    <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 pl-2 text-xs text-support">
       {worst !== "ok" && <StatusDot tone={worst} />}
       <Count value={total} />
     </span>

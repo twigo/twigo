@@ -6,6 +6,7 @@ import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
 import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
 import { StartupFailure } from "./App";
 import { installNativeMenu } from "./nativeMenu";
+import { installZoom } from "./zoom";
 import "./index.css";
 
 const root = document.getElementById("root");
@@ -16,6 +17,7 @@ const applyTheme = () =>
   document.documentElement.classList.toggle("dark", dark.matches);
 applyTheme();
 dark.addEventListener("change", applyTheme);
+document.documentElement.dataset.platform = platformOf(navigator.userAgent);
 
 async function browserBackend(): Promise<Backend> {
   const { createMockBackend, MOCK_LAYOUTS, MOCK_SCENARIOS } =
@@ -34,6 +36,7 @@ async function start() {
     platformOf(navigator.userAgent),
   );
   registerKube(workbench);
+  await installZoom(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;
 }

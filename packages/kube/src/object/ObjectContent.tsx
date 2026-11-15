@@ -12,6 +12,9 @@ import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
+/** The one label column of an object's page, which every property list in it reads. */
+export const LABEL_COLUMN = "[--label-column:112px]";
+
 /**
  * One view of an object (ARCHITECTURE 4.3): its Overview, YAML, events or
  * related objects, or why that view cannot show; the editor and the
@@ -55,8 +58,9 @@ export function ObjectContent({
       aria-label={OBJECT_TABS.find(({ id }) => id === tab)?.title}
       className={cn(
         "h-full bg-editor",
+        LABEL_COLUMN,
         tab === "yaml" ? "overflow-hidden" : "overflow-auto",
-        (tab === "events" || tab === "related") && "p-3 text-[13px]",
+        (tab === "events" || tab === "related") && "p-3 text-body",
       )}
     >
       {tab === "overview" && (
@@ -151,9 +155,7 @@ export function RelatedView({
         <RelatedList title="Owns" objects={related.owned} onOpen={onOpen} />
       ) : (
         <section aria-label="Owns">
-          <h3 className="mb-1 text-xs font-semibold text-muted-foreground">
-            Owns
-          </h3>
+          <h3 className="mb-1 text-xs font-semibold text-support">Owns</h3>
           <p className="text-error">{related.unavailable}</p>
         </section>
       )}
@@ -172,11 +174,9 @@ function RelatedList({
 }) {
   return (
     <section aria-label={title}>
-      <h3 className="mb-1 text-xs font-semibold text-muted-foreground">
-        {title}
-      </h3>
+      <h3 className="mb-1 text-xs font-semibold text-support">{title}</h3>
       {objects.length === 0 ? (
-        <p className="text-muted-foreground">None</p>
+        <p className="text-support">None</p>
       ) : (
         <ul className="flex flex-col">
           {objects.map(({ target, controller }) => (
@@ -184,9 +184,7 @@ function RelatedList({
               key={`${target.kind}/${target.name}`}
               className="flex items-baseline gap-2"
             >
-              <span className="w-28 shrink-0 text-muted-foreground">
-                {target.kind}
-              </span>
+              <span className="w-28 shrink-0 text-support">{target.kind}</span>
               <LinkButton
                 onClick={() => {
                   onOpen(target);
@@ -196,9 +194,7 @@ function RelatedList({
                 {target.name}
               </LinkButton>
               {controller && (
-                <span className="text-xs text-muted-foreground">
-                  controller
-                </span>
+                <span className="text-xs text-support">controller</span>
               )}
             </li>
           ))}

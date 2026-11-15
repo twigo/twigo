@@ -18,6 +18,9 @@ const SCROLLBACK = 5000;
 /** How long a layout change waits for the next one before the terminal is fitted. */
 const FIT_MS = 100;
 
+/** What a terminal draws: regular text, and bold, which takes the family's 600 face. */
+const FACES = ["12px", "bold 12px"];
+
 /**
  * The modes a program leaves on: the mouse, bracketed paste and focus
  * reporting, and the cursor, hidden while the input is off. Written when a
@@ -98,6 +101,8 @@ export class ShellTerminal {
   #webgl: WebglRenderer | undefined;
   #unload: ReturnType<typeof setTimeout> | undefined;
   #fitTimer: ReturnType<typeof setTimeout> | undefined;
+  #faces: Promise<void> | undefined;
+  #faced = false;
   #steps: Promise<void> = Promise.resolve();
   /** The starts whose steps have not finished: while one waits, only the queue opens the session. */
   #starting = 0;
@@ -112,7 +117,7 @@ export class ShellTerminal {
     this.#pending = session?.id;
     this.#status =
       session === undefined ? { state: "restored" } : { state: "connecting" };
-    this.host.className = "size-full overflow-hidden";
+    this.host.className = "size-full overflow-hidden font-mono";
     this.term = new Terminal({
       allowProposedApi: true,
       scrollback: SCROLLBACK,
@@ -293,6 +298,7 @@ export class ShellTerminal {
     if (this.#opened) {
       this.#fit.fit();
     } else {
+      if (!this.#faceIn()) return;
       this.term.open(this.host);
       this.#opened = true;
       this.#fit.fit();
@@ -303,6 +309,30 @@ export class ShellTerminal {
       this.#focusWanted = false;
       this.term.focus();
     }
+  }
+
+  /**
+   * Whether the family's faces are in. xterm measures its cell when it
+   * opens and keeps that width for a face that arrives later, so the
+   * terminal opens once they are, or once they have failed, which is
+   * reported.
+   */
+  #faceIn(): boolean {
+    const faces = FACES.map(
+      (face) => `${face} ${this.term.options.fontFamily}`,
+    );
+    if (this.#faced || faces.every((face) => document.fonts.check(face))) {
+      return true;
+    }
+    if (this.#faces === undefined) {
+      this.#faces = Promise.all(faces.map((face) => document.fonts.load(face)))
+        .catch(this.#options.report)
+        .then(() => {
+          this.#faced = true;
+          this.#fitNow();
+        });
+    }
+    return false;
   }
 
   /** The first size goes in `shell_open`, so the session opens once the terminal is mounted and fitted. */

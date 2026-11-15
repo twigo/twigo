@@ -19,6 +19,9 @@ const SKIP_SHELL: ReadonlySet<string> = new Set([
   "workbench.action.quickOpen",
   "workbench.action.showCommands",
   "workbench.action.togglePanel",
+  "workbench.action.zoomIn",
+  "workbench.action.zoomOut",
+  "workbench.action.zoomReset",
 ]);
 
 /**

@@ -129,7 +129,7 @@ export function Tree({
             key={row.id}
             id={rowId(index)}
             role="presentation"
-            className="flex h-6 items-end px-3 pb-1 text-[11px] font-semibold text-muted-foreground"
+            className="flex h-6 items-end px-3 pb-1 text-2xs font-semibold text-support"
           >
             {row.label}
           </div>
@@ -183,7 +183,7 @@ function TreeItem({
       onDoubleClick={onDoubleClick}
       style={{ paddingLeft: (folds ? 8 : 12) + row.depth * 16 }}
       className={cn(
-        "relative flex h-[22px] items-center gap-1 pr-2 text-[13px] select-none",
+        "relative flex h-[22px] items-center gap-1 pr-2 text-body select-none",
         active ? "bg-selected-unfocused" : "hover:bg-row-hover",
         cursor &&
           "group-focus/tree:bg-selected group-focus/tree:hover:bg-selected",
@@ -198,16 +198,10 @@ function TreeItem({
         />
       ))}
       {folds && (
-        <Chevron
-          aria-hidden
-          className="size-4 shrink-0 text-muted-foreground"
-        />
+        <Chevron aria-hidden className="size-4 shrink-0 text-support" />
       )}
       {row.icon && (
-        <row.icon
-          aria-hidden
-          className="mr-0.5 size-4 shrink-0 text-muted-foreground"
-        />
+        <row.icon aria-hidden className="mr-0.5 size-4 shrink-0 text-support" />
       )}
       <span className="min-w-0 flex-1 truncate">{row.label}</span>
       {row.trailing}
