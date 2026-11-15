@@ -1576,7 +1576,7 @@ interface CommandDescriptor {
   - Args are resource references (`ResourceRef`), never full objects.
     What a command still needs is asked in quick access, as VS Code's input box: scale's replicas, prefilled with what the row says.
 - **A command says what it needs and what it sends**, beside its enablement:
-  - `requires`, conditions that each give the words for why the command cannot run while they fail, as `resource.capability.patch` with `You may not restart it`; the command is disabled with the first that fails, and a menu or a row of actions says why, as the details' row does on a pinned verb kept in its place (4.3);
+  - `requires`, conditions that each give the words for why the command cannot run while they fail, as `resource.capability.patch` with `You may not restart it`; the command is disabled with the first that fails, which the details' row shows on a pinned verb kept in its place (4.3), while a resource command's other menus hold its requirements in their `when` and leave the item out;
   - `danger`, that it destroys what it acts on, which menus draw in the error tone;
   - `sends`, the class of request it asks the gate for, `write` or `exec`.
 
