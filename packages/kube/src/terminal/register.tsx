@@ -1,6 +1,7 @@
 import { RotateCcw, Terminal } from "lucide-react";
 import * as v from "valibot";
 import type { Workbench } from "@twigo/workbench";
+import type { TabPaths } from "../tabPaths";
 import {
   parseTerminalUri,
   TERMINAL_SCHEME,
@@ -34,6 +35,7 @@ const URI_ARGUMENT = v.object({ uri: v.string() });
 export function registerTerminals(
   workbench: Workbench,
   tabs: TerminalTabs,
+  paths: TabPaths,
 ): void {
   const { backend, commands, editors, keybindings, menus, spaces } = workbench;
   editors.onClose((uri) => {
@@ -55,6 +57,7 @@ export function registerTerminals(
       const input = parseTerminalUri(uri.href);
       return input ? terminalTitle(input) : uri.href;
     },
+    tooltip: (uri) => paths.terminal(uri.href),
     icon: ({ className }) => <Terminal className={className} />,
     component: ({ uri }) => (
       <TerminalEditor uri={uri} tabs={tabs} offers={offers} />

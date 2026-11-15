@@ -13,6 +13,7 @@ import { registerKube } from "../register";
 import { registerLogs } from "./register";
 import { LogsToolbar } from "./LogsToolbar";
 import { LogsTabs } from "./state";
+import { tabPaths } from "../tabPaths";
 import { logsUri, parseLogsUri } from "../uri";
 import {
   anchoredMatch,
@@ -413,7 +414,7 @@ function published(session: LogsSession) {
 async function logsTab() {
   const workbench = await testWorkbench();
   const tabs = new LogsTabs(workbench.backend);
-  registerLogs(workbench, tabs);
+  registerLogs(workbench, tabs, tabPaths(workbench, { last: () => undefined }));
   render(<WorkbenchView workbench={workbench} />);
   await act(() =>
     workbench.commands.execute(

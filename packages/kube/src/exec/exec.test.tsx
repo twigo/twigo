@@ -21,6 +21,7 @@ import { settle, withScreenSize } from "../../test/workbench";
 import { ctrlC, withTerminalLayout } from "../../test/terminal";
 import { execUri, objectUri, type ExecInput } from "../uri";
 import { registerKube } from "../register";
+import { tabPaths } from "../tabPaths";
 import { createExecTabs, registerExec } from "./register";
 import { ExecTabs, type WebglRenderer } from "./tabs";
 
@@ -87,7 +88,7 @@ async function mounted(
         webgl,
       })
     : createExecTabs(workbench);
-  registerExec(workbench, tabs);
+  registerExec(workbench, tabs, tabPaths(workbench, { last: () => undefined }));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");

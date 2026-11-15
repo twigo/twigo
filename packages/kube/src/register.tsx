@@ -27,6 +27,7 @@ import { registerResourceActions } from "./resourceActions";
 import { editorSpace } from "./edit/services";
 import { registerSessions } from "./sessions";
 import { createServices, type ListServices } from "./services";
+import { tabPaths } from "./tabPaths";
 import {
   DIFF_SCHEME,
   LIST_SCHEME,
@@ -43,6 +44,7 @@ export function registerKube(workbench: Workbench): void {
   const services = createServices(workbench);
   const { views, editors, commands, keybindings, quickAccess, menus } =
     workbench;
+  const paths = tabPaths(workbench, services.discovery);
 
   quickAccess.register(listProvider(workbench, services.discovery));
   quickAccess.register(namespaceProvider(workbench));
@@ -107,6 +109,7 @@ export function registerKube(workbench: Workbench): void {
       const resource = parseListUri(uri.href)?.gvr.resource ?? uri.href;
       return resource.charAt(0).toUpperCase() + resource.slice(1);
     },
+    tooltip: (uri) => paths.list(uri.href),
     icon: ListIcon,
     component: ({ uri }) => <ListEditor uri={uri} services={services} />,
     actions: ({ uri }) => <ListActions uri={uri} services={services} />,
@@ -121,6 +124,7 @@ export function registerKube(workbench: Workbench): void {
     scheme: OBJECT_SCHEME,
     space: (uri) => parseObjectUri(uri.href)?.space,
     title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
+    tooltip: (uri) => paths.object(uri.href),
     icon: ObjectIcon,
     component: ({ uri }) => (
       <ObjectEditor
@@ -181,6 +185,7 @@ export function registerKube(workbench: Workbench): void {
     scheme: UNTITLED_SCHEME,
     space: (uri) => parseUntitledUri(uri.href)?.space,
     title: (uri) => `Manifest ${String(parseUntitledUri(uri.href)?.n ?? "")}`,
+    tooltip: (uri) => paths.manifest(uri.href),
     icon: ({ className }) => <FileCode className={className} />,
     component: ({ uri }) => (
       <ManifestEditor
@@ -207,9 +212,9 @@ export function registerKube(workbench: Workbench): void {
   const logs = new LogsTabs(workbench.backend);
   const shells = createExecTabs(workbench);
   const terminals = createTerminalTabs(workbench);
-  registerLogs(workbench, logs);
-  registerExec(workbench, shells);
-  registerTerminals(workbench, terminals);
+  registerLogs(workbench, logs, paths);
+  registerExec(workbench, shells, paths);
+  registerTerminals(workbench, terminals, paths);
   registerSessions(workbench, { logs, shells, terminals });
   registerForwards(workbench, new Forwards(workbench.backend));
   registerResourceActions(workbench, services);

@@ -22,6 +22,7 @@ import { withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
 import { KubeconfigOffers } from "./offers";
 import { presentOffers } from "./presentOffers";
+import { tabPaths } from "../tabPaths";
 import { createTerminalTabs, registerTerminals } from "./register";
 import type { TerminalTabs } from "./tabs";
 
@@ -304,7 +305,11 @@ async function mounted(
   const scenario = "terminalOffer";
   const workbench = await testWorkbench(scenario, backend, "mac");
   const tabs = createTerminalTabs(workbench);
-  registerTerminals(workbench, tabs);
+  registerTerminals(
+    workbench,
+    tabs,
+    tabPaths(workbench, { last: () => undefined }),
+  );
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);

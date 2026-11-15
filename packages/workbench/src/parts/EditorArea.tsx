@@ -29,6 +29,7 @@ import {
 } from "../editors/registry";
 import { EditorShownContext, useChanges, useWorkbench } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
+import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
 const THEME: DockviewTheme = {
@@ -308,7 +309,8 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const provider = params && editors.resolve(params.uri);
   const dirty = params !== undefined && editors.isDirty(params.uri);
   return (
-    <div
+    <TabTooltip
+      tooltip={() => params && provider?.tooltip?.(new URL(params.uri))}
       className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
@@ -342,7 +344,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
         <X className="twigo-tab-x size-3.5" />
       </button>
-    </div>
+    </TabTooltip>
   );
 }
 

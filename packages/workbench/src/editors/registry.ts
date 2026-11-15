@@ -22,6 +22,8 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /** What the tab's tooltip says: where the editor's subject is, from its context down. */
+  readonly tooltip?: (uri: URL) => string | undefined;
   /**
    * The space whose dock the editor belongs in, if it belongs to one: an
    * editor of another space than the one shown waits for that space's dock

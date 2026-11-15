@@ -1,4 +1,10 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import type { SerializedDockview } from "dockview-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { testWorkbench } from "../testing";
@@ -93,4 +99,60 @@ test("an empty editor area shows the first watermark whose when holds, else its 
     workbench.editors.close("note://a");
   });
   expect(screen.getByText("home of prod-eu")).toBeTruthy();
+});
+
+test("a tab's tooltip is what its editor says now, asked each time it opens, and none where the editor says none", async () => {
+  const workbench = await testWorkbench();
+  vi.useFakeTimers();
+  try {
+    let scope = "payments";
+    workbench.editors.register({
+      id: "test.note",
+      scheme: "note",
+      title: (uri) => uri.host,
+      tooltip: (uri) => (uri.host === "a" ? `prod-eu › ${scope}` : undefined),
+      component: ({ uri }) => <p>body of {uri}</p>,
+    });
+    render(<WorkbenchView workbench={workbench} />);
+    act(() => {
+      workbench.editors.open("note://a");
+      workbench.editors.open("note://b");
+    });
+    const hover = async (uri: string) => {
+      const tab = [...document.querySelectorAll(".dv-tab")]
+        .find((each) => each.textContent === uri.slice("note://".length))
+        ?.querySelector("[data-slot=tooltip-trigger]");
+      if (!tab) throw new Error(`no tab for ${uri}`);
+      fireEvent.pointerMove(tab, { pointerType: "mouse" });
+      await act(() => vi.advanceTimersByTimeAsync(400));
+      return tab;
+    };
+    const shown = () =>
+      screen.queryAllByRole("tooltip").map((each) => each.textContent);
+
+    const dismiss = async () => {
+      for (const tab of document.querySelectorAll(
+        "[data-slot=tooltip-trigger]",
+      )) {
+        fireEvent.pointerLeave(tab);
+      }
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      await act(() => vi.advanceTimersByTimeAsync(400));
+    };
+
+    await hover("note://a");
+    expect(shown()).toEqual(["prod-eu › payments"]);
+    await dismiss();
+    expect(shown()).toEqual([]);
+
+    scope = "checkout";
+    await hover("note://a");
+    expect(shown()).toEqual(["prod-eu › checkout"]);
+    await dismiss();
+
+    await hover("note://b");
+    expect(shown()).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

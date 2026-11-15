@@ -3,6 +3,7 @@ import * as v from "valibot";
 import type { ShellKind, ShellTarget } from "@twigo/protocol";
 import type { QuickPickItem, StatusEntry, Workbench } from "@twigo/workbench";
 import { useChanges } from "@twigo/workbench";
+import type { TabPaths } from "../tabPaths";
 import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
@@ -39,7 +40,11 @@ const URI_ARGUMENT = v.object({ uri: v.string() });
  * and in an object editor's title through `k8s.shell.open`; a status-bar
  * entry lists the open shells.
  */
-export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
+export function registerExec(
+  workbench: Workbench,
+  tabs: ExecTabs,
+  paths: TabPaths,
+): void {
   const { backend, commands, editors, keys, menus, operations, quickAccess } =
     workbench;
   editors.onClose((uri) => {
@@ -54,6 +59,7 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
       const input = parseExecUri(uri.href);
       return input ? execTitle(input) : uri.href;
     },
+    tooltip: (uri) => paths.exec(uri.href),
     icon: ({ className }) => <SquareTerminal className={className} />,
     component: ({ uri }) => <ExecEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <ExecActions uri={uri} tabs={tabs} />,
