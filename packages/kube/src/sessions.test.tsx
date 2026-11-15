@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { LogBatch, ViewState } from "@twigo/protocol";
+import type { LogBatch, LogPod, StreamState, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { WorkbenchView } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
@@ -212,44 +212,127 @@ const STREAMS: readonly [ViewState, boolean][] = [
   ],
 ];
 
-test.each(STREAMS)(
-  "a logs session whose stream is %j is counted: %s, and the count follows it",
-  async (status, counted) => {
-    const { run, backend } = await mounted();
-    const subscribe = vi.spyOn(backend, "subscribe");
-    await run("k8s.logs.open", TARGET);
-    const opened = subscribe.mock.calls.find(
-      ([command]) => command === "logs_open",
-    );
-    if (!opened) throw new Error("no logs session opened");
-    const send = opened[2] as (batch: LogBatch) => void;
-    let seq = 1000;
-    const stream = (state: ViewState) => {
-      act(() => {
-        send({
-          seq: seq++,
-          status: state,
-          pods: null,
-          total: 0,
-          window: null,
-          matches: null,
-          histogram: null,
-          dropped: 0,
-          arrived: 0,
-          changes: 0,
-        });
+async function hiddenWithLogs() {
+  const mount = await mounted();
+  const subscribe = vi.spyOn(mount.backend, "subscribe");
+  await mount.run("k8s.logs.open", TARGET);
+  const opened = subscribe.mock.calls.find(
+    ([command]) => command === "logs_open",
+  );
+  if (!opened) throw new Error("no logs session opened");
+  const send = opened[2] as (batch: LogBatch) => void;
+  const emits = vi.spyOn(mount.logs.changes, "emit");
+  let seq = 1000;
+  const batch = (change: Partial<LogBatch>) => {
+    emits.mockClear();
+    act(() => {
+      send({
+        seq: seq++,
+        status: { state: "ready" },
+        pods: null,
+        total: 0,
+        window: null,
+        matches: null,
+        histogram: null,
+        dropped: 0,
+        arrived: 0,
+        changes: 0,
+        ...change,
       });
-    };
-    await run("workbench.action.closePanel");
-    stream({ state: "ready" });
-    expect(within(statusBar()).queryByText("1 session")).not.toBeNull();
+    });
+    return emits.mock.calls.length;
+  };
+  await mount.run("workbench.action.closePanel");
+  return { ...mount, batch };
+}
 
-    stream(status);
-    expect(within(statusBar()).queryByText("1 session") !== null).toBe(counted);
-    stream({ state: "ready" });
-    expect(within(statusBar()).queryByText("1 session")).not.toBeNull();
+const counted = () => within(statusBar()).queryByText("1 session") !== null;
+
+test.each(STREAMS)(
+  "a logs session whose target is %j is counted: %s, and the count follows it",
+  async (status, shown) => {
+    const { batch } = await hiddenWithLogs();
+    expect(batch({ status: { state: "ready" } })).toBe(0);
+    expect(counted()).toBe(true);
+
+    expect(batch({ status })).toBe(shown ? 0 : 1);
+    expect(counted()).toBe(shown);
+    expect(batch({ status: { state: "ready" } })).toBe(shown ? 0 : 1);
+    expect(counted()).toBe(true);
   },
 );
+
+const POD_STREAMS: readonly [StreamState, boolean][] = [
+  [{ state: "following" }, true],
+  [{ state: "connecting" }, true],
+  [{ state: "queued" }, true],
+  [{ state: "waiting", reason: "CrashLoopBackOff" }, true],
+  [{ state: "ended" }, false],
+  [{ state: "off" }, false],
+  [{ state: "overLimit" }, false],
+  [
+    { state: "error", error: { kind: "unavailable", message: "broken" } },
+    false,
+  ],
+];
+
+const podsWith = (...streams: StreamState[]): LogPod[] => [
+  {
+    name: TARGET.name,
+    generated: null,
+    status: "Running",
+    tone: "neutral",
+    containers: streams.map((stream, at) => ({
+      name: `container-${String(at)}`,
+      stream,
+    })),
+  },
+];
+
+test.each(POD_STREAMS)(
+  "a logs session whose only stream is %j is counted: %s, and the count follows it",
+  async (stream, shown) => {
+    const { batch } = await hiddenWithLogs();
+    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(0);
+    expect(counted()).toBe(true);
+
+    expect(batch({ pods: podsWith(stream) })).toBe(shown ? 0 : 1);
+    expect(counted()).toBe(shown);
+    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(
+      shown ? 0 : 1,
+    );
+    expect(counted()).toBe(true);
+  },
+);
+
+test("a logs session is counted while one of its streams reads, though the others ended", async () => {
+  const { batch } = await hiddenWithLogs();
+  expect(
+    batch({ pods: podsWith({ state: "ended" }, { state: "following" }) }),
+  ).toBe(0);
+  expect(counted()).toBe(true);
+  expect(
+    batch({ pods: podsWith({ state: "ended" }, { state: "ended" }) }),
+  ).toBe(1);
+  expect(counted()).toBe(false);
+});
+
+test("a tab of a previous instance, whose streams all ended, is not counted", async () => {
+  const { logs, run } = await mounted();
+  await run("k8s.logs.open", { ...TARGET, container: "api", previous: true });
+  await settle(10);
+  await run("workbench.action.closePanel");
+  const [uri] = tabsIn("panel");
+  if (!uri) throw new Error("no logs tab");
+  expect(
+    logs
+      .session(uri, TARGET)
+      .getSnapshot()
+      .pods?.flatMap((pod) => pod.containers.map(({ stream }) => stream.state)),
+  ).toContain("ended");
+  expect(logs.live(SPACE)).toBe(0);
+  expect(within(statusBar()).queryByText(/sessions?$/)).toBeNull();
+});
 
 test("while the panel is hidden the status bar counts the sessions in one entry, and shows the shells' own once the panel shows", async () => {
   const { run } = await mounted();

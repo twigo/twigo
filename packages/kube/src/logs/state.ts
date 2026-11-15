@@ -5,6 +5,7 @@ import {
   type LogsSnapshot,
   type LogTarget,
   type LogView,
+  type StreamState,
   type ViewState,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
@@ -77,12 +78,30 @@ const INITIAL: LogsTab = {
   fields: false,
 };
 
-/** The states of a stream that stays down until the person acts; the others run, or will by themselves. */
+/** The states of a target that stays down until the person acts; the others run, or will by themselves. */
 const DOWN: ReadonlySet<ViewState["state"]> = new Set([
   "error",
   "forbidden",
   "unauthorized",
 ]);
+
+/** The states of a stream that reads, or will by itself. */
+const READING: ReadonlySet<StreamState["state"]> = new Set([
+  "queued",
+  "connecting",
+  "following",
+  "waiting",
+]);
+
+/** Whether a session reads: its target is not down and, once its pods are known, one of their streams reads. */
+function reads(snapshot: LogsSnapshot): boolean {
+  if (DOWN.has(snapshot.status.state)) return false;
+  return (
+    snapshot.pods?.some((pod) =>
+      pod.containers.some(({ stream }) => READING.has(stream.state)),
+    ) ?? true
+  );
+}
 
 /**
  * Each logs tab's choices and its session in Rust, by the tab's URI, so a
@@ -124,7 +143,7 @@ export class LogsTabs {
     this.changes.emit();
   }
 
-  /** How many tabs of a space hold a session whose stream is not down. */
+  /** How many tabs of a space hold a session that reads. */
   live(space: string): number {
     return [...this.#sessions.keys()].filter(
       (uri) => parseLogsUri(uri)?.space === space && !this.#down.has(uri),
@@ -257,7 +276,7 @@ export class LogsTabs {
    * newest once its line is gone, and a step that waited for its search.
    */
   #onBatch(uri: string, snapshot: LogsSnapshot): void {
-    const down = DOWN.has(snapshot.status.state);
+    const down = !reads(snapshot);
     if (down !== this.#down.has(uri)) {
       if (down) this.#down.add(uri);
       else this.#down.delete(uri);
