@@ -14,6 +14,7 @@ beforeEach(() => {
 
 afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
+  document.body.replaceChildren();
 });
 
 function grid(
@@ -43,6 +44,7 @@ function grid(
     cell.style.margin = margin;
     element.append(cell);
   }
+  document.body.append(element);
   return element;
 }
 

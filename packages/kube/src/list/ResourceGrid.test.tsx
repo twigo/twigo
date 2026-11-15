@@ -331,7 +331,7 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
   expect(template()).toBe(
-    "28px 260px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px",
+    "28px 260px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px",
   );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
@@ -400,7 +400,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     fireEvent.doubleClick(edge);
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
 
     const ready = Math.max(
@@ -412,7 +412,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
