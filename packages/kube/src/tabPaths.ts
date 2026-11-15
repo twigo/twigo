@@ -11,6 +11,7 @@ import {
   parseObjectUri,
   parseTerminalUri,
   parseUntitledUri,
+  type ObjectInput,
 } from "./uri";
 
 const SEPARATOR = " › ";
@@ -60,12 +61,9 @@ export function tabPaths(
       ...rest,
     );
 
-  const object = (uri: string) => {
-    const input = parseObjectUri(uri);
-    return (
-      input && objectPath(input.space, input.gvr, input.namespace, input.name)
-    );
-  };
+  const at = (input: ObjectInput | undefined) =>
+    input && objectPath(input.space, input.gvr, input.namespace, input.name);
+  const object = (uri: string) => at(parseObjectUri(uri));
   const manifest = (uri: string) => {
     const input = parseUntitledUri(uri);
     return input && path(input.space);
@@ -85,12 +83,7 @@ export function tabPaths(
       );
     },
     object,
-    logs: (uri: string) => {
-      const input = parseLogsUri(uri);
-      return (
-        input && objectPath(input.space, input.gvr, input.namespace, input.name)
-      );
-    },
+    logs: (uri: string) => at(parseLogsUri(uri)),
     exec: (uri: string) => {
       const input = parseExecUri(uri);
       return (

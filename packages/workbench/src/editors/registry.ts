@@ -465,14 +465,13 @@ export class Editors {
     return this.#lastClosed(space, scheme)?.uri;
   }
 
-  /** Brings back what {@link lastClosed} tells of; tells whether there was one. */
-  reopen(space: string, scheme?: string): boolean {
+  /** Brings back what {@link lastClosed} tells of, if there is one. */
+  reopen(space: string, scheme?: string): void {
     const closed = this.#lastClosed(space, scheme);
-    if (!closed) return false;
+    if (!closed) return;
     this.#closing.splice(this.#closing.indexOf(closed), 1);
     if (closed.reopen) closed.reopen();
     else this.open(closed.uri);
-    return true;
   }
 
   /** Moves an area's active editor into a new group beside its own. */
