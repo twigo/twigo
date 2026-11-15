@@ -206,6 +206,35 @@ test("the room the details take is read as they dock, without waiting for the li
   expect(stageOf(actions())).toBe(4);
 });
 
+test("the least a list keeps beside docked details follows the health choice its last stage names", async () => {
+  laidOut((row) =>
+    row
+      .querySelector('button[aria-label="Rows by health"]')
+      ?.textContent.startsWith("Failing") === true
+      ? 50
+      : 0,
+  );
+  await openList();
+  withRoom(900);
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  await settle(1);
+  const column = grid().parentElement;
+  if (!column) throw new Error("no list column");
+  expect(column.style.minWidth).toBe(
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0))}px`,
+  );
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Rows by health" })).getByRole(
+      "button",
+      { name: /^Failing/ },
+    ),
+  );
+  await settle();
+  expect(column.style.minWidth).toBe(
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0) - 50)}px`,
+  );
+});
+
 test("a health just picked keeps the focus while the last stage waits to be measured again", async () => {
   laidOut();
   await openList();
