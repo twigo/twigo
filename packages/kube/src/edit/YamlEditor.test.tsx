@@ -210,6 +210,28 @@ test("a text that comes from outside replaces the model's and leaves the cursor 
   expect(shown.cursor).toBe(7);
 });
 
+test("an edit in the editor reaches onChange with the text, and a text set from outside does not", async () => {
+  const copies = await buffers();
+  const onChange = vi.fn();
+  const view = render(
+    <YamlEditor uri={URI} text="a: 1" buffers={copies} onChange={onChange} />,
+  );
+  const [model] = fake.models;
+  if (!model) throw new Error("no editor was made");
+
+  act(() => {
+    model.edit("a: 2");
+  });
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenLastCalledWith("a: 2");
+
+  view.rerender(
+    <YamlEditor uri={URI} text="a: 3" buffers={copies} onChange={onChange} />,
+  );
+  expect(model.value).toBe("a: 3");
+  expect(onChange).toHaveBeenCalledTimes(1);
+});
+
 test("a focus asked of the editor goes to its view now, or to the one it gets, and a view replaced while it holds the focus hands it on", async () => {
   const copies = await buffers();
   copies.focus(URI);
