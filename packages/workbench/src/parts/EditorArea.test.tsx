@@ -108,23 +108,47 @@ function Room() {
   return <p>room {String(useActionRoom())}</p>;
 }
 
-test("a group's actions get the strip's width less its tabs and the overflow button, as the tabs come and go and the strip resizes", async () => {
-  const resizes = new Set<ResizeObserverCallback>();
+function fakeResizes() {
+  const observers = new Map<ResizeObserverCallback, Set<Element>>();
   const unobserved = globalThis.ResizeObserver;
   globalThis.ResizeObserver = class {
+    readonly #targets = new Set<Element>();
     constructor(report: ResizeObserverCallback) {
-      resizes.add(report);
+      observers.set(report, this.#targets);
     }
-    observe() {
-      return undefined;
+    observe(target: Element) {
+      this.#targets.add(target);
     }
-    unobserve() {
-      return undefined;
+    unobserve(target: Element) {
+      this.#targets.delete(target);
     }
     disconnect() {
-      return undefined;
+      this.#targets.clear();
     }
   };
+  return {
+    report(width: number) {
+      act(() => {
+        for (const [report, targets] of observers) {
+          const entries = [...targets].map(
+            (target) =>
+              ({
+                target,
+                contentRect: new DOMRectReadOnly(0, 0, width, 600),
+              }) as unknown as ResizeObserverEntry,
+          );
+          if (entries.length > 0) report(entries, {} as ResizeObserver);
+        }
+      });
+    },
+    restore() {
+      globalThis.ResizeObserver = unobserved;
+    },
+  };
+}
+
+test("a group's actions get the strip's width less its tabs and the overflow button, as the tabs come and go and the strip resizes", async () => {
+  const resizes = fakeResizes();
   let strip = 900;
   const tabs: Record<string, number> = { "note://a": 120, "note://b": 220 };
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
@@ -164,13 +188,7 @@ test("a group's actions get the strip's width less its tabs and the overflow but
     expect(screen.getByText("room 512")).toBeTruthy();
 
     strip = 700;
-    act(() => {
-      const entry = {
-        contentRect: new DOMRectReadOnly(0, 0, 700, 600),
-        contentBoxSize: [{ inlineSize: 700, blockSize: 600 }],
-      } as unknown as ResizeObserverEntry;
-      for (const report of resizes) report([entry], {} as ResizeObserver);
-    });
+    resizes.report(700);
     expect(screen.getByText("room 312")).toBeTruthy();
 
     act(() => {
@@ -179,7 +197,7 @@ test("a group's actions get the strip's width less its tabs and the overflow but
     await act(() => Promise.resolve());
     expect(screen.getByText("room 532")).toBeTruthy();
   } finally {
-    globalThis.ResizeObserver = unobserved;
+    resizes.restore();
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
     Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
   }
@@ -214,22 +232,7 @@ test("a group's actions belong to the editor they are for: another editor of the
 });
 
 test("the active tab is brought back into view whenever the strip is measured, since the actions settle after dockview scrolls to it", async () => {
-  const resizes = new Set<ResizeObserverCallback>();
-  const unobserved = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class {
-    constructor(report: ResizeObserverCallback) {
-      resizes.add(report);
-    }
-    observe() {
-      return undefined;
-    }
-    unobserve() {
-      return undefined;
-    }
-    disconnect() {
-      return undefined;
-    }
-  };
+  const resizes = fakeResizes();
   const scrolled: Element[] = [];
   vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
     this: Element,
@@ -252,17 +255,12 @@ test("the active tab is brought back into view whenever the strip is measured, s
     });
     await act(() => Promise.resolve());
     scrolled.length = 0;
-    act(() => {
-      const entry = {
-        contentRect: new DOMRectReadOnly(0, 0, 700, 600),
-      } as unknown as ResizeObserverEntry;
-      for (const report of resizes) report([entry], {} as ResizeObserver);
-    });
+    resizes.report(700);
     const active = document.querySelector(".dv-tab.dv-active-tab");
     expect(active?.textContent).toBe("b");
     expect(scrolled).toContain(active);
   } finally {
-    globalThis.ResizeObserver = unobserved;
+    resizes.restore();
   }
 });
 
