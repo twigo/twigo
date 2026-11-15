@@ -186,6 +186,35 @@ test("a drag that takes the panel under its snap point hides it, and one that ta
   expect(visible()).toBe(true);
 });
 
+test("a hidden panel that is still maximized, dragged out by its sash, shows at the dragged height and not maximized, and a drag that ends while it is maximized remembers no height", async () => {
+  const workbench = await testWorkbench();
+  render(<WorkbenchView workbench={workbench} />);
+  const space = workbench.spaces.active?.id ?? "";
+  const panel = () => workbench.spaces.state(space).parts.panel;
+  act(() => {
+    workbench.spaces.setPart(space, "panel", {
+      visible: false,
+      maximized: true,
+    });
+  });
+  act(() => {
+    dragStarts.get("rows")?.([840, 0]);
+  });
+  lay("rows", [700, 140]);
+  expect(panel()).toEqual({ visible: true, maximized: false });
+  drag("rows", [700, 140]);
+  expect(workbench.sizes.get("panel")).toBe(140);
+
+  act(() => {
+    workbench.spaces.setPart(space, "panel", {
+      visible: true,
+      maximized: true,
+    });
+  });
+  drag("rows", [0, 840]);
+  expect(workbench.sizes.get("panel")).toBe(140);
+});
+
 test("a double click on the sash gives the panel its default height, and that is the height it remembers", async () => {
   const workbench = await testWorkbench();
   render(<WorkbenchView workbench={workbench} />);

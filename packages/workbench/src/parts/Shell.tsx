@@ -119,7 +119,13 @@ export function Shell() {
                 setPanelHeight(height);
                 const shown = height > 0;
                 if (dragging.current && space && shown !== panel) {
-                  spaces.setPart(space.id, "panel", { visible: shown });
+                  spaces.setPart(
+                    space.id,
+                    "panel",
+                    shown
+                      ? { visible: true, maximized: false }
+                      : { visible: false },
+                  );
                 }
               }}
               onDragStart={() => {
@@ -127,7 +133,7 @@ export function Shell() {
               }}
               onDragEnd={(measured) => {
                 dragging.current = false;
-                remember([undefined, "panel"])(measured);
+                if (!maximized) remember([undefined, "panel"])(measured);
               }}
               onReset={() => {
                 sizes.set("panel", DEFAULT_SIZE.panel);
