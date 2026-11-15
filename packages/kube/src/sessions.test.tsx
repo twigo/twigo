@@ -319,6 +319,14 @@ test("a logs session is counted while one of its streams reads, though the other
   expect(counted()).toBe(false);
 });
 
+test("a logs session whose pods are known and none, as of a workload at zero replicas, waits for them and is counted", async () => {
+  const { batch } = await hiddenWithLogs();
+  expect(batch({ pods: podsWith({ state: "ended" }) })).toBe(1);
+  expect(counted()).toBe(false);
+  expect(batch({ pods: [] })).toBe(1);
+  expect(counted()).toBe(true);
+});
+
 test("a tab of a previous instance, whose streams all ended, is not counted", async () => {
   const { logs, run } = await mounted();
   await run("k8s.logs.open", { ...TARGET, container: "api", previous: true });

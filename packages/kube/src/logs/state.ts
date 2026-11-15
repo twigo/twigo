@@ -93,13 +93,19 @@ const READING: ReadonlySet<StreamState["state"]> = new Set([
   "waiting",
 ]);
 
-/** Whether a session reads: its target is not down and, once its pods are known, one of their streams reads. */
-function reads(snapshot: LogsSnapshot): boolean {
-  if (DOWN.has(snapshot.status.state)) return false;
+/**
+ * Whether a session reads: its target is not down and, once its pods are
+ * known, one of their streams reads, or there are none, as of a workload at
+ * zero replicas, whose pods it waits for by itself.
+ */
+function reads({ status, pods }: LogsSnapshot): boolean {
+  if (DOWN.has(status.state)) return false;
   return (
-    snapshot.pods?.some((pod) =>
+    pods === undefined ||
+    pods.length === 0 ||
+    pods.some((pod) =>
       pod.containers.some(({ stream }) => READING.has(stream.state)),
-    ) ?? true
+    )
   );
 }
 
