@@ -127,6 +127,7 @@ async fn run(
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut unacked = None;
     let mut windowed = false;
+    let mut range: Option<(u32, u32)> = None;
     let mut moved = false;
     let mut reading = false;
     let mut unanswered: Option<Instant> = None;
@@ -154,7 +155,8 @@ async fn run(
             view.set_window(start, end);
             reading = read;
             windowed = true;
-            moved = true;
+            moved |= range != Some((start, end));
+            range = Some((start, end));
         }
         if acked.is_some() && acked == unacked {
             unacked = None;
@@ -432,6 +434,18 @@ mod tests {
         let (at, batch) = rig.next().await;
         assert!(at - ticked < FLUSH, "{:?}", at - ticked);
         assert_eq!(batch.window.unwrap().start, 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_change_of_the_metrics_alone_waits_for_the_interval() {
+        let mut rig = rig().await;
+        let (ticked, _) = rig.until_total(1).await;
+        rig.fake.add("pods", Some("a"), "p2");
+        sleep(Duration::from_millis(10)).await;
+        rig.batcher.set_window(0, 100, true);
+        let (at, batch) = rig.next().await;
+        assert!(at - ticked >= FLUSH, "{:?}", at - ticked);
+        assert_eq!(batch.total, 2);
     }
 
     #[tokio::test(start_paused = true)]
