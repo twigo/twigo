@@ -51,12 +51,20 @@ const ITEM = cn(
 
 function DropdownMenuItem({
   className,
+  variant = "default",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+  variant?: "default" | "destructive";
+}) {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
-      className={cn(ITEM, className)}
+      data-variant={variant}
+      className={cn(
+        ITEM,
+        "data-[variant=destructive]:text-error data-[variant=destructive]:focus:bg-error/10",
+        className,
+      )}
       {...props}
     />
   );

@@ -280,10 +280,8 @@ export function ActionDropdown({
               <DropdownMenuItem
                 key={action.id}
                 disabled={action.disabled}
-                className={cn(
-                  action.danger && "text-error",
-                  action.reason !== undefined && SAYS_WHY,
-                )}
+                variant={action.danger ? "destructive" : "default"}
+                className={cn(action.reason !== undefined && SAYS_WHY)}
                 onSelect={(event) => {
                   if (keepOpen) {
                     event.preventDefault();
