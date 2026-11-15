@@ -119,7 +119,7 @@ function Time({ at }: { at: string }) {
   return (
     <span title={date}>
       <span className={ageRole(age)}>{humanDuration(age)} ago</span>
-      <span className="ml-2 text-support">{date}</span>
+      <span className="ml-2 text-quiet">{date}</span>
     </span>
   );
 }
