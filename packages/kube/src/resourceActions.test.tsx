@@ -681,6 +681,44 @@ test("a hovered row's refused verb is enabled again once the review asked again 
   expect(restart().getAttribute("aria-disabled")).toBeNull();
 });
 
+test("a hovered row's verb that another resource as a whole refuses is enabled again once the review asked again fails, as the details' is", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/batch/v1/cronjobs",
+  );
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  let answers = true;
+  vi.spyOn(workbench.backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command !== "access_review")
+        return original(command as never, request as never);
+      const query = request as AccessQuery;
+      return answers
+        ? Promise.resolve(
+            query.checks.map((check) => check.resource !== "jobs"),
+          )
+        : Promise.reject(new Error("no answer"));
+    },
+  );
+  const [first] = twoOfANamespace();
+  const trigger = () => within(first).getByRole("button", { name: "Trigger" });
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(trigger().getAttribute("aria-disabled")).toBe("true");
+  answers = false;
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  await settle(1);
+  expect(trigger().getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(first);
+  await settle(4);
+  const details = screen.getByRole("complementary", { name: /details/ });
+  expect(
+    within(details)
+      .getByRole("button", { name: "Trigger" })
+      .getAttribute("aria-disabled"),
+  ).toBeNull();
+});
+
 test("a hovered row's verb that another resource as a whole refuses draws disabled at once on a row of the same namespace", async () => {
   const workbench = await openInStaging(
     "ready",

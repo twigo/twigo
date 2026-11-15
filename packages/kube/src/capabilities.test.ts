@@ -503,3 +503,65 @@ test("a review that fails is asked again by the next ask of the same, and a no i
     vi.useRealTimers();
   }
 });
+
+test("a review that fails lifts, for the hover, what the object's answers told of its namespace, and no other namespace's, nor an object's own for another", async () => {
+  vi.useFakeTimers();
+  try {
+    let failing = false;
+    const invoke = vi.fn(
+      (
+        _command: string,
+        request: {
+          namespace: string | null;
+          checks: { resource: string; name: string | null }[];
+        },
+      ) =>
+        request.namespace === "shop" && failing
+          ? Promise.reject(new Error("no answer"))
+          : Promise.resolve(
+              request.checks.map(
+                ({ resource, name }) => resource !== "jobs" && name !== "web",
+              ),
+            ),
+    );
+    const capabilities = new Capabilities(
+      { invoke } as unknown as Pick<Backend, "invoke">,
+      vi.fn(),
+    );
+    const DELETE = "resource.capability.delete";
+    const JOBS = "capability.create.jobs.batch";
+    const keys = [DELETE, JOBS];
+    const BASIS = {};
+    const hovered = (namespace: string, name: string) =>
+      capabilities.hovered("pods", { namespace, name }, keys);
+    capabilities.ask(
+      "pods",
+      "qa",
+      PODS_GVR,
+      { namespace: "edge", name: "api" },
+      keys,
+      BASIS,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    capabilities.askHovered(
+      "pods",
+      "qa",
+      PODS_GVR,
+      { namespace: "shop", name: "web" },
+      keys,
+      BASIS,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hovered("shop", "web")).toEqual({ [DELETE]: false, [JOBS]: false });
+    expect(hovered("shop", "cart")).toEqual({ [DELETE]: true, [JOBS]: false });
+    expect(hovered("edge", "cart")).toEqual({ [DELETE]: true, [JOBS]: false });
+
+    failing = true;
+    await vi.advanceTimersByTimeAsync(REFUSED_MS);
+    expect(hovered("shop", "web")).toEqual({ [DELETE]: true, [JOBS]: true });
+    expect(hovered("shop", "cart")).toEqual({ [DELETE]: true, [JOBS]: true });
+    expect(hovered("edge", "cart")).toEqual({ [DELETE]: true, [JOBS]: false });
+  } finally {
+    vi.useRealTimers();
+  }
+});
