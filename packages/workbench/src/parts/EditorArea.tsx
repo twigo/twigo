@@ -166,6 +166,18 @@ export function SpaceDock({
         const uri = pressedEditor(api, target);
         if (uri !== undefined) focusLater(workbench.editors, uri);
       }}
+      onKeyDownCapture={(event) => {
+        const { target, key } = event;
+        if (!api || (key !== "Delete" && key !== "Backspace")) return;
+        if (!(target instanceof Element) || !target.matches("[role=tab]")) {
+          return;
+        }
+        const uri = pressedEditor(api, target);
+        if (uri === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        workbench.editors.dismiss(uri);
+      }}
     >
       <DockviewReact
         theme={theme}

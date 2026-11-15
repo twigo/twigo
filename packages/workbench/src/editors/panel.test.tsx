@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useEditorShown } from "../react";
-import { tabsIn, testWorkbench } from "../testing";
+import { tabOf, tabsIn, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 
 afterEach(() => {
@@ -702,6 +702,18 @@ const CLOSERS: readonly [
         workbench.keys.lookup(null),
       ),
   ],
+  [
+    "Backspace on its tab",
+    () => {
+      fireEvent.keyDown(tabOf("session://x"), { key: "Backspace" });
+    },
+  ],
+  [
+    "Delete on its tab",
+    () => {
+      fireEvent.keyDown(tabOf("session://x"), { key: "Delete" });
+    },
+  ],
 ];
 
 test.each(CLOSERS)(
@@ -721,6 +733,24 @@ test.each(CLOSERS)(
     expect(panel()).toEqual({ visible: false, maximized: false });
     expect(panelElement()?.hasAttribute("inert")).toBe(true);
     expect(screen.getByText("note note://a").closest("[inert]")).toBeNull();
+  },
+);
+
+test.each(["Backspace", "Delete"])(
+  "%s on a focused tab of the editor area closes its editor as a gesture, which Reopen brings back",
+  async (key) => {
+    const { editors, space } = await mounted();
+    act(() => {
+      editors.open("note://a");
+      editors.open("note://b");
+    });
+    fireEvent.keyDown(tabOf("note://a"), { key });
+    expect(tabsIn("editor")).toEqual(["note://b"]);
+    expect(editors.lastClosed(space())).toBe("note://a");
+    act(() => {
+      editors.reopen(space());
+    });
+    expect(tabsIn("editor").sort()).toEqual(["note://a", "note://b"]);
   },
 );
 
