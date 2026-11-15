@@ -649,3 +649,38 @@ test("a hovered row asks RBAC for itself: its refused verb draws enabled until t
   expect(held).toHaveLength(1);
   expect(restart(second).getAttribute("aria-disabled")).toBe("true");
 });
+
+test("a hovered row's verb the context's mode holds runs on that row and meets the gate's refusal, which offers the unlock", async () => {
+  const error = vi.spyOn(notify, "error");
+  const workbench = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const subscribe = vi.spyOn(workbench.backend, "subscribe");
+  const row = screen.getAllByRole("row")[3];
+  if (!row) throw new Error("a list of deployments");
+  const name = row.querySelector('[data-column="Name"]')?.textContent;
+  fireEvent.pointerEnter(row);
+  await settle(2);
+  const restart = within(row).getByRole("button", { name: "Restart" });
+  expect(restart.getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(restart);
+  await settle(4);
+  const plans = invoke.mock.calls.filter(
+    ([command]) => command === "command_plan",
+  );
+  expect(plans).toHaveLength(1);
+  expect(plans[0]?.[1]).toMatchObject({
+    action: "restart",
+    space: "prod-eu",
+    target: { name },
+  });
+  expect(
+    subscribe.mock.calls.filter(([command]) => command === "command_execute"),
+  ).toEqual([]);
+  const [message, options] =
+    error.mock.calls[error.mock.calls.length - 1] ?? [];
+  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
+});
