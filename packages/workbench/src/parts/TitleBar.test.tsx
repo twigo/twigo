@@ -5,12 +5,53 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
 
-afterEach(cleanup);
+const unsized = globalThis.ResizeObserver;
+const watching = new Set<{
+  target: Element;
+  report: ResizeObserverCallback;
+  observer: ResizeObserver;
+}>();
+
+beforeEach(() => {
+  globalThis.ResizeObserver = class {
+    constructor(private readonly report: ResizeObserverCallback) {}
+    observe(target: Element) {
+      watching.add({ target, report: this.report, observer: this });
+    }
+    unobserve() {
+      return undefined;
+    }
+    disconnect() {
+      for (const each of watching) {
+        if (each.observer === this) watching.delete(each);
+      }
+    }
+  };
+});
+
+afterEach(() => {
+  cleanup();
+  watching.clear();
+  globalThis.ResizeObserver = unsized;
+});
+
+function widen(width: number) {
+  act(() => {
+    for (const { target, report, observer } of watching) {
+      if (target.tagName !== "HEADER") continue;
+      report(
+        [{ target, contentRect: { width } } as ResizeObserverEntry],
+        observer,
+      );
+    }
+  });
+}
 
 /** The mock answers after a timer. */
 const settled = () =>
@@ -230,4 +271,120 @@ test("a type other than Production has its chip", async () => {
   expect(
     screen.getByRole("button", { name: "Mode of dev: Development" }),
   ).toBeTruthy();
+});
+
+test("the search folds to an icon that keeps its key hint and still opens quick access", async () => {
+  const { workbench } = await mounted();
+  const search = () => screen.getByRole("button", { name: "Search prod-eu" });
+  widen(1280);
+  expect(search().textContent).toBe("Search prod-eu⌘P");
+
+  widen(1100);
+  expect(search().textContent).toBe("⌘P");
+  fireEvent.click(search());
+  expect(workbench.quickAccess.session?.value).toBe("");
+
+  widen(1280);
+  expect(search().textContent).toBe("Search prod-eu⌘P");
+});
+
+test("the chip folds to its icon after the search, its words kept for the tooltip and the popover", async () => {
+  await mounted();
+  await settled();
+  const chip = () =>
+    screen.getByRole("button", {
+      name: "Mode of prod-eu: Production · read-only",
+    });
+  widen(1100);
+  expect(chip().textContent).toBe("Production · read-only");
+
+  widen(900);
+  expect(chip().textContent).toBe("");
+  expect(chip().querySelector("svg")).not.toBeNull();
+  fireEvent.focus(chip());
+  expect(screen.getAllByText("Production · read-only").length).toBeGreaterThan(
+    0,
+  );
+  fireEvent.click(chip());
+  expect(screen.getByRole("dialog", { name: "Mode of prod-eu" })).toBeTruthy();
+});
+
+test("a folded chip of a type with no icon of its own still shows one", async () => {
+  const { workbench } = await mounted();
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settled();
+  widen(700);
+  const chip = screen.getByRole("button", { name: "Mode of dev: Development" });
+  expect(chip.textContent).toBe("");
+  expect(chip.querySelector("svg")).not.toBeNull();
+  widen(1440);
+  expect(chip.querySelector("svg")).toBeNull();
+});
+
+test("at 1,100 px the name and the scope show whole beside the chip's words", async () => {
+  await mounted();
+  await settled();
+  widen(1100);
+  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
+    "prod-eu",
+  );
+  expect(
+    screen.getByRole("button", { name: "Select namespace" }).textContent,
+  ).toBe("All namespaces");
+  expect(
+    screen.getByRole("button", { name: /^Mode of prod-eu/ }).textContent,
+  ).toBe("Production · read-only");
+});
+
+async function inLongSpace() {
+  const mock = createMockBackend("ready");
+  const backend = {
+    invoke: (command: string, request: unknown) =>
+      command === "spaces_list"
+        ? Promise.resolve([
+            {
+              id: "all",
+              name: "all",
+              contexts: ["prod-eu", "staging", "dev", "qa", "kind-local"],
+            },
+          ])
+        : (mock.invoke as (...args: unknown[]) => unknown)(command, request),
+    subscribe: mock.subscribe.bind(mock),
+  } as Backend;
+  const workbench = await testWorkbench(undefined, backend);
+  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+  return workbench;
+}
+
+test("a name of more than 28 characters can be cut, never below 28; a shorter one is not cut", async () => {
+  const workbench = await inLongSpace();
+  const name = workbench.spaces.active?.contexts.join(" + ") ?? "";
+  expect(name.length).toBeGreaterThan(28);
+  const crumb = screen.getByRole("button", { name: "Switch space" });
+  expect(crumb.textContent).toBe(name);
+  expect(crumb.style.minWidth).toBe("calc(28ch + 2rem)");
+  cleanup();
+
+  await mounted();
+  expect(
+    screen.getByRole("button", { name: "Switch space" }).style.minWidth,
+  ).toBe("max-content");
+});
+
+test("the scope is cut in the middle: its last characters stay whole and what comes before gives way", async () => {
+  const { workbench } = await mounted();
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments", "checkout", "ledger", "platform-observability"],
+    }));
+  });
+  const crumb = screen.getByRole("button", { name: "Select namespace" });
+  const scope = "payments, checkout, ledger, platform-observability";
+  expect(crumb.textContent).toBe(scope);
+  const [head, tail] = [...(crumb.querySelector("span")?.children ?? [])];
+  expect(tail?.textContent).toBe(scope.slice(-8));
+  expect(head?.textContent).toBe(scope.slice(0, -8));
 });
