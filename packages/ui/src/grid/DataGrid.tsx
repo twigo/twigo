@@ -43,8 +43,12 @@ const HELD =
 /** How long the pointer rests on a row before its icons show, so that a pass over the rows shows none. */
 const HOVER_MS = 60;
 
-/** The width of `count` icons over a row's end: 24 px each, 2 px apart, after 8 px. */
-const iconsWidth = (count: number) => 8 + count * 24 + (count - 1) * 2;
+/** How far the icons reach into the actions column: they end 2 px before the ⋯ button, which sits 4 px inside it. */
+const ICONS_REACH = 2;
+
+/** The width of `count` icons over a row's columns: 24 px each, 2 px apart, after 8 px, less what reaches into the actions column. */
+const iconsWidth = (count: number) =>
+  8 + count * 24 + (count - 1) * 2 - ICONS_REACH;
 
 export interface DataGridProps<R, G> {
   readonly label: string;
@@ -551,7 +555,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     !overlayMenu && isCursor && "opacity-100",
                   )}
                 >
-                  <Ellipsis aria-hidden className="size-4" />
+                  <Ellipsis aria-hidden className="size-3.5" />
                 </button>
               </ActionDropdown>
             )}
@@ -840,7 +844,7 @@ function RowIcons({
   return (
     <div
       className="absolute inset-y-0 z-[2] flex items-center bg-editor"
-      style={{ right: ACTIONS_WIDTH }}
+      style={{ right: ACTIONS_WIDTH - ICONS_REACH }}
     >
       <div className={cn("flex h-full items-center bg-row-hover pl-2", tint)}>
         <InlineActions actions={actions} />
