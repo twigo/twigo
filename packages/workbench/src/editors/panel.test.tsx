@@ -1137,40 +1137,55 @@ const LAYER_MARKUP: readonly [string, Record<string, string>][] = [
   ["quick access", { "cmdk-root": "" }],
 ];
 
+async function dismissedAfterFocusIn(attributes: Record<string, string>) {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  const before = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    before.focus();
+  });
+  act(() => {
+    editors.open("input://x");
+  });
+  const layer = document.body.appendChild(document.createElement("div"));
+  for (const [name, value] of Object.entries(attributes)) {
+    layer.setAttribute(name, value);
+  }
+  const field = layer.appendChild(document.createElement("input"));
+  act(() => {
+    field.focus();
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  act(() => {
+    editors.dismiss("input://x");
+  });
+  return { before, field, layer };
+}
+
 test.each(LAYER_MARKUP)(
   "a focus that %s took is not where the focus goes back to",
   async (_layer, attributes) => {
-    const { workbench, editors } = await mounted();
-    withFields(workbench);
-    act(() => {
-      editors.open("field://a");
-    });
-    const before = document.body.appendChild(document.createElement("button"));
-    act(() => {
-      before.focus();
-    });
-    act(() => {
-      editors.open("input://x");
-    });
-    const layer = document.body.appendChild(document.createElement("div"));
-    for (const [name, value] of Object.entries(attributes)) {
-      layer.setAttribute(name, value);
-    }
-    const field = layer.appendChild(document.createElement("input"));
-    act(() => {
-      field.focus();
-    });
-    act(() => {
-      screen.getByLabelText("input://x").focus();
-    });
-    act(() => {
-      editors.dismiss("input://x");
-    });
+    const { before, layer } = await dismissedAfterFocusIn(attributes);
     expect(document.activeElement).toBe(before);
     before.remove();
     layer.remove();
   },
 );
+
+test("a focus in dockview's floating group, which is a dialog by role, is where the focus goes back to", async () => {
+  const { before, field, layer } = await dismissedAfterFocusIn({
+    role: "dialog",
+    class: "dv-resize-container",
+  });
+  expect(document.activeElement).toBe(field);
+  before.remove();
+  layer.remove();
+});
 
 test("a focus that is elsewhere stays where it is when the panel hides", async () => {
   const { workbench, editors, panel } = await mounted();

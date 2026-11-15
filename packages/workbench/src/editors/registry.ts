@@ -77,9 +77,13 @@ export const EDITOR_TAB = "editor-tab";
 
 const CLOSED_LIMIT = 20;
 
-/** Layers that give the focus back themselves when they go, and so are not where it returns to. */
+/**
+ * Layers that give the focus back themselves when they go, and so are not
+ * where it returns to. Dockview's floating group is a `role=dialog` too, and
+ * stays where it is.
+ */
 const LAYERS =
-  "[cmdk-root], [role=dialog], [role=alertdialog], [role=menu], [data-sonner-toaster]";
+  "[cmdk-root], [role=dialog]:not(.dv-resize-container), [role=alertdialog], [role=menu], [data-sonner-toaster]";
 
 /** An editor the person closed, as {@link Editors.dismiss} remembers it. */
 interface Closed {
