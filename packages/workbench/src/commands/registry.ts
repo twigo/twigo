@@ -56,6 +56,7 @@ export class Commands {
   readonly #entries = new Map<string, Entry>();
   readonly changes = new Changes();
   #all: CommandDescriptor[] | undefined;
+  readonly #referenced = new Map<string, readonly string[]>();
 
   constructor(
     private readonly onError: (command: string, error: unknown) => void,
@@ -96,8 +97,10 @@ export class Commands {
     return this.#all;
   }
 
-  /** The keys the commands' enablement and requirements read that start with `prefix`. */
+  /** The keys the commands' enablement and requirements read that start with `prefix`, the same array until the next change. */
   referenced(prefix: string): readonly string[] {
+    const known = this.#referenced.get(prefix);
+    if (known) return known;
     const keys = new Set<string>();
     for (const { enablement, requires } of this.#entries.values()) {
       const whens = [
@@ -108,7 +111,9 @@ export class Commands {
         if (key.startsWith(prefix)) keys.add(key);
       }
     }
-    return [...keys].sort();
+    const sorted = [...keys].sort();
+    this.#referenced.set(prefix, sorted);
+    return sorted;
   }
 
   /** Whether the command exists and its enablement and requirements hold. */
@@ -149,6 +154,7 @@ export class Commands {
 
   #changed() {
     this.#all = undefined;
+    this.#referenced.clear();
     this.changes.emit();
   }
 }

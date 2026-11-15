@@ -40,6 +40,9 @@ export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
  */
 const HELD =
   "sticky z-[1] isolate bg-[var(--surface,var(--editor))] before:pointer-events-none before:absolute before:inset-0 before:-z-10";
+const MARK_CELL = "flex justify-center";
+const MARK_CELL_REVEALING = `${MARK_CELL} [&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100`;
+const MARK_HEADER_HELD = `${MARK_CELL} sticky left-0 z-20 bg-inherit`;
 /** How long the pointer rests on a row before its icons show, so that a pass over the rows shows none. */
 const HOVER_MS = 60;
 
@@ -434,6 +437,13 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const active = virtual.find(
     (at) => cursor !== undefined && item(at.index)?.id === cursor,
   );
+  const cellClasses = columns.map((column) =>
+    cn(
+      "truncate px-2",
+      column.align === "end" && "text-right",
+      column.numeric && "tabular-nums",
+    ),
+  );
 
   const rows = virtual.map((at) => {
     const target = item(at.index);
@@ -512,6 +522,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               : "group-hover/row:before:bg-row-hover",
         )
       : undefined;
+    const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
     const edge =
       held === undefined
         ? undefined
@@ -601,15 +612,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         {marking && (
           <div
             role="gridcell"
-            className={cn(
-              "flex justify-center",
-              held,
-              edge,
-              held && "left-0",
-              !isMarked &&
-                marked.size === 0 &&
-                "[&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100",
-            )}
+            className={held ? cn(markCell, held, edge, "left-0") : markCell}
           >
             <MarkBox
               checked={isMarked}
@@ -631,13 +634,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               style={
                 first && held ? { left: marking ? MARK_WIDTH : 0 } : undefined
               }
-              className={cn(
-                "truncate px-2",
-                column.align === "end" && "text-right",
-                column.numeric && "tabular-nums",
-                first && held,
-                first && !marking && edge,
-              )}
+              className={
+                first && held
+                  ? cn(cellClasses[order], held, !marking && edge)
+                  : cellClasses[order]
+              }
             >
               <span
                 key={since ?? "steady"}
@@ -686,10 +687,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           {marking && (
             <div
               role="columnheader"
-              className={cn(
-                "flex justify-center",
-                holding && "sticky left-0 z-20 bg-inherit",
-              )}
+              className={holding ? MARK_HEADER_HELD : MARK_CELL}
             >
               {marked.size > 0 && (
                 <MarkBox

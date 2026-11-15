@@ -6,6 +6,11 @@ import type { GridColumn, GridSort } from "./types";
 
 import { MIN_WIDTH } from "./fit";
 
+const CELL =
+  "h-full border-r border-transparent group-hover/header:border-border-subtle";
+const CELL_FREE = `${CELL} relative`;
+const CELL_HELD = `${CELL} sticky z-20 bg-inherit`;
+
 /**
  * A column's header: a click sorts by it, a second click reverses; its
  * right edge drags to resize, and a double click there fits the column
@@ -71,10 +76,7 @@ export function HeaderCell({
       aria-labelledby={title}
       aria-describedby={note ? noteId : undefined}
       style={held === undefined ? undefined : { left: held }}
-      className={cn(
-        "h-full border-r border-transparent group-hover/header:border-border-subtle",
-        held === undefined ? "relative" : "sticky z-20 bg-inherit",
-      )}
+      className={held === undefined ? CELL_FREE : CELL_HELD}
     >
       <Tooltip open={note !== undefined && noting} onOpenChange={setNoting}>
         <TooltipTrigger asChild>{sorter}</TooltipTrigger>

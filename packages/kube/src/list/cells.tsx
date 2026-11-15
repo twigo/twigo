@@ -91,10 +91,14 @@ export function CellView({
           )}
         >
           <StatusDot tone={tone} pulse={IN_FLIGHT.test(text)} />
-          <span>
-            {merged}
-            {text}
-          </span>
+          {merged ? (
+            <span>
+              {merged}
+              {text}
+            </span>
+          ) : (
+            text
+          )}
         </span>
       );
     }
