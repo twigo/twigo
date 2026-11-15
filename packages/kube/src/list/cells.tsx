@@ -90,10 +90,10 @@ export function CellView({
       return <Restarts text={text} />;
     case "text": {
       const tabular = !rule.figures && isTabular(text);
-      return rule.quiet || rule.identifier || tabular ? (
+      return rule.secondary || rule.identifier || tabular ? (
         <span
           className={cn(
-            rule.quiet && "text-support",
+            rule.secondary && "text-support",
             rule.identifier && "ident",
             tabular && "tabular-nums",
           )}

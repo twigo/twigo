@@ -22,14 +22,14 @@ test("a column's rule comes from its kind, then its name, then its resource", ()
   expect(columnRule(PODS, column("Age", "age"))).toMatchObject({
     cell: "age",
     align: "end",
-    quiet: true,
+    secondary: true,
   });
   expect(columnRule(PODS, column("Name"))).toMatchObject({
     cell: "name",
     grow: true,
   });
   expect(columnRule(PODS, column("Namespace"))).toMatchObject({
-    quiet: true,
+    secondary: true,
     groups: true,
   });
   expect(columnRule(PODS, column("Ready"))).toMatchObject({

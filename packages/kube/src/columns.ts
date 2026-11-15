@@ -29,8 +29,8 @@ export interface ColumnRule {
   readonly align: "start" | "end";
   /** A first click on the header sorts the largest first, as `kubectl top --sort-by` does. */
   readonly descendFirst: boolean;
-  /** Places a row rather than says what it is, so it reads quieter. */
-  readonly quiet: boolean;
+  /** Places a row rather than says what it is, so it reads in support. */
+  readonly secondary: boolean;
   /** Its cells are figures, which line up in tabular numerals. */
   readonly figures: boolean;
   /** Its cells are names of objects, drawn so that I, l and 1 differ. */
@@ -121,8 +121,8 @@ export const IN_FLIGHT =
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
   Name: { cell: "name", width: 160, grow: true },
-  Namespace: { width: 120, quiet: true, identifier: true, groups: true },
-  Context: { width: 120, quiet: true, groups: true },
+  Namespace: { width: 120, secondary: true, identifier: true, groups: true },
+  Context: { width: 120, secondary: true, groups: true },
   Node: { width: 200, identifier: true, groups: true },
 };
 
@@ -176,7 +176,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     grow: false,
     align: age || numeric ? "end" : "start",
     descendFirst: false,
-    quiet: age,
+    secondary: age,
     identifier: false,
     groups: false,
     health: false,
