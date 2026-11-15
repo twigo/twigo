@@ -76,6 +76,7 @@ function Actions({
   const { keybindings, spaces } = useWorkbench();
   const { states, statuses, presets, pinned } = services;
   useChanges(states.changes);
+  useChanges(states.strip);
   useChanges(statuses.changes);
   useChanges(presets.changes);
   useChanges(pinned.changes);

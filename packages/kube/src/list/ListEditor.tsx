@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { CircleAlert } from "lucide-react";
 import type { Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton, useWidth } from "@twigo/ui";
@@ -114,7 +120,6 @@ function Loaded({
   const workbench = useWorkbench();
   const { keys, lists, editors, menus, commands, catalog } = workbench;
   const { selection, states, capabilities } = services;
-  useChanges(states.changes);
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
@@ -174,6 +179,9 @@ function Loaded({
   const details =
     !open || selected === undefined ? undefined : docked ? "beside" : "over";
   const beside = details === "beside";
+  const stripMin = useSyncExternalStore(states.strip.subscribe, () =>
+    beside ? states.stripMin(uri) : 0,
+  );
   const inspector = beside && listWidth > 0 ? width - listWidth : 0;
   // Read as the details dock, since the observers report a frame later and
   // the strip's actions would end past the list's edge until then.
@@ -242,7 +250,7 @@ function Loaded({
     <div ref={setWrapper} className="relative flex h-full overflow-hidden">
       <div
         ref={setColumn}
-        style={beside ? { minWidth: states.stripMin(uri) } : undefined}
+        style={beside ? { minWidth: stripMin } : undefined}
         className="relative h-full min-w-0 flex-1"
       >
         <ResourceGrid

@@ -48,6 +48,8 @@ const INITIAL: State = {
  */
 export class ListStates {
   readonly changes = new Changes();
+  /** The strip's measures, which only the strip and a list beside its details read. */
+  readonly strip = new Changes();
   readonly #lists = new Map<string, State>();
 
   #get(uri: string): State {
@@ -57,6 +59,11 @@ export class ListStates {
   #update(uri: string, change: Partial<State>): void {
     this.#lists.set(uri, { ...this.#get(uri), ...change });
     this.changes.emit();
+  }
+
+  #measure(uri: string, change: Partial<State>): void {
+    this.#lists.set(uri, { ...this.#get(uri), ...change });
+    this.strip.emit();
   }
 
   /** Undefined sorts by Name. */
@@ -116,7 +123,7 @@ export class ListStates {
 
   setInspector(uri: string, inspector: number): void {
     if (this.#get(uri).inspector !== inspector)
-      this.#update(uri, { inspector });
+      this.#measure(uri, { inspector });
   }
 
   stripMin(uri: string): number {
@@ -124,7 +131,7 @@ export class ListStates {
   }
 
   setStripMin(uri: string, stripMin: number): void {
-    if (this.#get(uri).stripMin !== stripMin) this.#update(uri, { stripMin });
+    if (this.#get(uri).stripMin !== stripMin) this.#measure(uri, { stripMin });
   }
 
   countDigits(uri: string): Readonly<Record<string, number>> {
@@ -138,7 +145,7 @@ export class ListStates {
       ([key, count]) => count > (kept[key] ?? 0),
     );
     if (wider.length > 0)
-      this.#update(uri, {
+      this.#measure(uri, {
         countDigits: { ...kept, ...Object.fromEntries(wider) },
       });
   }
