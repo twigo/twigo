@@ -138,6 +138,8 @@ function EmptyPanel() {
     >
       <ActionBar
         inline
+        outlined
+        className="mt-1 gap-2"
         actions={workbench.actions("panel/empty", keys.lookup(null))}
       />
       {binding && (

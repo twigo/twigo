@@ -25,6 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./dropdown-menu";
+import { Button } from "./button";
 import { IconButton } from "./icon-button";
 import { Kbd } from "./kbd";
 import { ButtonTip } from "./tip";
@@ -387,16 +388,19 @@ function ButtonTooltip({
 
 /**
  * Actions as labelled buttons with their keys: a selection's floating bar,
- * or `inline` in a panel's header, as the details' actions.
+ * or `inline` in a panel's header, as the details' actions. `outlined` draws
+ * them as `Button`s of the outline variant, as an empty state does.
  */
 export function ActionBar({
   actions,
   inline = false,
+  outlined = false,
   className,
   children,
 }: {
   actions: ActionGroups;
   inline?: boolean;
+  outlined?: boolean;
   className?: string;
   /** What the bar is about, before the actions: `2 selected`. */
   children?: ReactNode;
@@ -422,19 +426,35 @@ export function ActionBar({
               action={action}
               told={action.reason !== undefined}
             >
-              <button
-                type="button"
-                disabled={action.disabled}
-                onClick={action.run}
-                className={cn(
-                  BUTTON,
-                  "disabled:opacity-50",
-                  action.danger && "text-error",
-                  lockTone(action),
-                )}
-              >
-                <ButtonFace action={action} form="full" />
-              </button>
+              {outlined ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={action.disabled}
+                  onClick={action.run}
+                  className={cn(
+                    "disabled:opacity-50",
+                    action.danger && "text-error",
+                    lockTone(action),
+                  )}
+                >
+                  <ButtonFace action={action} form="full" />
+                </Button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={action.disabled}
+                  onClick={action.run}
+                  className={cn(
+                    BUTTON,
+                    "disabled:opacity-50",
+                    action.danger && "text-error",
+                    lockTone(action),
+                  )}
+                >
+                  <ButtonFace action={action} form="full" />
+                </button>
+              )}
             </ButtonTooltip>
           ))}
         </Fragment>
