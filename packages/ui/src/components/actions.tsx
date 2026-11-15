@@ -517,7 +517,7 @@ function Measured({
   );
 }
 
-const MORE = cn(BUTTON, "gap-1 data-[state=open]:bg-row-hover");
+const MORE = cn(BUTTON, "data-[state=open]:bg-row-hover");
 
 /**
  * An object's actions as one row (ARCHITECTURE 4.3): its pinned actions in
@@ -625,7 +625,7 @@ export function ActionRow({
       <ActionDropdown actions={rest} label="More">
         <button type="button" {...roving(pinned.length)} className={MORE}>
           More
-          <ChevronDown aria-hidden />
+          <ChevronDown aria-hidden className="text-support" />
         </button>
       </ActionDropdown>
       <div
@@ -651,7 +651,7 @@ export function ActionRow({
             })}
             <span className={MORE}>
               More
-              <ChevronDown aria-hidden />
+              <ChevronDown aria-hidden className="text-support" />
             </span>
           </Measured>
         ))}
