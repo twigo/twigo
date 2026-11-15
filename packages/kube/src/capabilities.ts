@@ -150,7 +150,8 @@ export class Capabilities {
    * One review a namespace; each key holds where every answer for it says
    * yes, and a review that fails is asked again by the next ask. An ask of
    * one object keeps its answers for the hovered rows of the list `learns`,
-   * which forgets those of another basis.
+   * which forgets those of another basis, and the object's own once a review
+   * of it fails.
    */
   #ask(
     entry: string,
@@ -235,7 +236,15 @@ export class Capabilities {
           if (current()) {
             const answered = this.#lists.get(entry)?.answers ?? {};
             this.#lists.delete(entry);
-            if (Object.keys(answered).length > 0) this.changes.emit();
+            const known =
+              learns === undefined ? undefined : this.#known.get(learns);
+            const [object] = objects;
+            const forgot =
+              known !== undefined &&
+              known.basis === basis &&
+              object !== undefined &&
+              known.objects.delete(objectKey(object));
+            if (Object.keys(answered).length > 0 || forgot) this.changes.emit();
           }
           this.report(error);
         },

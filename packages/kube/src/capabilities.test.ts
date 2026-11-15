@@ -458,7 +458,7 @@ test("a hovered row reads its own answers once they come, until then its namespa
   expect(hovered("shop", "web")[DELETE]).toBe(true);
 });
 
-test("a review that fails is asked again by the next ask of the same, and a no it was to ask again holds no more", async () => {
+test("a review that fails is asked again by the next ask of the same, and a no it was to ask again holds no more, for the details or the hover", async () => {
   vi.useFakeTimers();
   try {
     const invoke = vi
@@ -495,6 +495,9 @@ test("a review that fails is asked again by the next ask of the same, and a no i
     expect(changed).toHaveBeenCalled();
     expect(
       capabilities.values("pods", keys)["resource.capability.delete"],
+    ).toBe(true);
+    expect(
+      capabilities.hovered("pods", object, keys)["resource.capability.delete"],
     ).toBe(true);
   } finally {
     vi.useRealTimers();

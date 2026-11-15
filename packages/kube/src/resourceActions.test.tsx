@@ -651,6 +651,35 @@ test("a hovered row asks RBAC for itself: its refused verb draws enabled until t
   expect(restart(second).getAttribute("aria-disabled")).toBeNull();
 });
 
+test("a hovered row's refused verb is enabled again once the review asked again fails, as the details' is", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  let answers = true;
+  vi.spyOn(workbench.backend, "invoke").mockImplementation(
+    (command: string, request: unknown) => {
+      if (command !== "access_review")
+        return original(command as never, request as never);
+      const query = request as AccessQuery;
+      return answers
+        ? Promise.resolve(query.checks.map((check) => check.verb !== "patch"))
+        : Promise.reject(new Error("no answer"));
+    },
+  );
+  const row = screen.getAllByRole("row")[3];
+  if (!row) throw new Error("a list of deployments");
+  const restart = () => within(row).getByRole("button", { name: "Restart" });
+  fireEvent.pointerEnter(row);
+  await settle(2);
+  expect(restart().getAttribute("aria-disabled")).toBe("true");
+  answers = false;
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  await settle(1);
+  expect(restart().getAttribute("aria-disabled")).toBeNull();
+});
+
 test("a hovered row's verb that another resource as a whole refuses draws disabled at once on a row of the same namespace", async () => {
   const workbench = await openInStaging(
     "ready",
