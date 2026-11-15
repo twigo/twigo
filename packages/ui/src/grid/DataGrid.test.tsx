@@ -668,6 +668,30 @@ test("a row's actions mount only while the pointer, the focus or the cursor is o
   expect(hasActions("gateway-1")).toBe(false);
 });
 
+test("the first column stays at the grid's left edge, beside the marks, only while the grid scrolls sideways", () => {
+  const columns = (name: number) => [
+    { id: "Name", title: "Name", width: name },
+    { id: "Age", title: "Age", width: 100 },
+  ];
+  const held = () => [
+    within(screen.getByRole("columnheader", { name: "Name" })).getByRole(
+      "button",
+    ).parentElement?.style.left,
+    rowNamed("gateway-1").querySelector<HTMLElement>('[data-column="Name"]')
+      ?.style.left,
+  ];
+
+  const cell = (row: Pod, column: { id: string }) =>
+    column.id === "Name" ? row.name : "4d";
+
+  grid({ columns: columns(300), cell });
+  expect(held()).toEqual(["", ""]);
+  cleanup();
+
+  grid({ columns: columns(900), cell });
+  expect(held()).toEqual(["28px", "28px"]);
+});
+
 test("a row's menu has a column of its own, unless the grid lays it over the row's end", () => {
   const menu = [[{ id: "copy", label: "Copy Name", run: vi.fn() }]];
   const tracks = (name: string) =>

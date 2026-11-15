@@ -26,7 +26,10 @@ export function HeaderCell({
   onSort: (sort: GridSort) => void;
   onResize: (width: number) => void;
   onFit: () => void;
-  /** Stays at this distance from the grid's left edge while the grid scrolls sideways. */
+  /**
+   * Stays at this distance from the grid's left edge while the grid scrolls
+   * sideways, over every column's resize edge, which sits at `z-10`.
+   */
   held?: number;
 }) {
   const title = useId();
@@ -70,7 +73,7 @@ export function HeaderCell({
       style={held === undefined ? undefined : { left: held }}
       className={cn(
         "h-full border-r border-transparent group-hover/header:border-border-subtle",
-        held === undefined ? "relative" : "sticky z-[1] bg-inherit",
+        held === undefined ? "relative" : "sticky z-20 bg-inherit",
       )}
     >
       <Tooltip open={note !== undefined && noting} onOpenChange={setNoting}>

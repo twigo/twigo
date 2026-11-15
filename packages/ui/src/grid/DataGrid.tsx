@@ -2,6 +2,7 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -34,7 +35,8 @@ export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
 /**
  * A row's first cells stay while the grid scrolls sideways: they cover what
  * passes under them, and their own tint, which `before` carries, lies over
- * their fill as the row's does over the grid's.
+ * their fill as the row's does over the grid's. The row's overlays, which
+ * sit at `z-[2]`, lie over them.
  */
 const HELD =
   "sticky z-[1] isolate bg-[var(--surface,var(--editor))] before:pointer-events-none before:absolute before:inset-0 before:-z-10";
@@ -171,12 +173,25 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const ids = useId();
   const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const [shown, setShown] = useState(0);
   const [cursor, setCursor] = useState(selected);
   const [followed, setFollowed] = useState(selected);
   if (selected !== followed) {
     setFollowed(selected);
     setCursor(selected);
   }
+
+  useLayoutEffect(() => {
+    if (!element) return;
+    setShown(element.clientWidth);
+    const observer = new ResizeObserver(() => {
+      setShown(element.clientWidth);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, [element]);
 
   const virtualizer = useVirtualizer({
     count: loading ? 0 : length,
@@ -392,6 +407,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
     (overlayMenu ? 0 : ACTIONS_WIDTH);
+  const overflowing = shown > 0 && minWidth > shown;
   // The menu's trigger wraps every row, and opens the selected row's menu
   // unless a row prevents the event's default.
   const withoutMenu = (event: SyntheticEvent) => {
@@ -474,20 +490,24 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       : isCursor
         ? "bg-selected-unfocused group-focus/grid:bg-selected"
         : undefined;
-    const held = cn(
-      HELD,
-      isMarked
-        ? "before:bg-selected"
-        : isCursor
-          ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
-          : "group-hover/row:before:bg-row-hover",
-    );
+    const held = overflowing
+      ? cn(
+          HELD,
+          isMarked
+            ? "before:bg-selected"
+            : isCursor
+              ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
+              : "group-hover/row:before:bg-row-hover",
+        )
+      : undefined;
     const edge =
-      target.tone === "error"
-        ? "shadow-[inset_2px_0_0_var(--error)]"
-        : target.tone === "warn"
-          ? "shadow-[inset_2px_0_0_var(--warn)]"
-          : undefined;
+      held === undefined
+        ? undefined
+        : target.tone === "error"
+          ? "shadow-[inset_2px_0_0_var(--error)]"
+          : target.tone === "warn"
+            ? "shadow-[inset_2px_0_0_var(--warn)]"
+            : undefined;
     const select = () => {
       setWanted(undefined);
       setCursor(target.id);
@@ -573,7 +593,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               "flex justify-center",
               held,
               edge,
-              "left-0",
+              held && "left-0",
               !isMarked &&
                 marked.size === 0 &&
                 "[&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100",
@@ -596,7 +616,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               key={column.id}
               role="gridcell"
               data-column={column.id}
-              style={first ? { left: marking ? MARK_WIDTH : 0 } : undefined}
+              style={
+                first && held ? { left: marking ? MARK_WIDTH : 0 } : undefined
+              }
               className={cn(
                 "truncate px-2",
                 column.align === "end" && "text-right",
@@ -652,7 +674,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           {marking && (
             <div
               role="columnheader"
-              className="sticky left-0 z-[1] flex justify-center bg-inherit"
+              className={cn(
+                "flex justify-center",
+                overflowing && "sticky left-0 z-20 bg-inherit",
+              )}
             >
               {marked.size > 0 && (
                 <MarkBox
@@ -671,7 +696,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               key={column.id}
               column={column}
               width={widthOf(column)}
-              {...(order === 0 && { held: marking ? MARK_WIDTH : 0 })}
+              {...(order === 0 &&
+                overflowing && { held: marking ? MARK_WIDTH : 0 })}
               sort={sort}
               onSort={(next) => {
                 onSort?.(next);
@@ -779,7 +805,7 @@ function DataRow({
         shown && (
           <div
             role="gridcell"
-            className="absolute inset-y-0 right-0 flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+            className="absolute inset-y-0 right-0 z-[2] flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
           >
             <div className={cn("flex h-full items-center px-1", overlay)}>
               {actions}
@@ -805,7 +831,7 @@ function RowIcons({
   useEffect(() => show(), []);
   return (
     <div
-      className="absolute inset-y-0 flex items-center bg-editor"
+      className="absolute inset-y-0 z-[2] flex items-center bg-editor"
       style={{ right: ACTIONS_WIDTH }}
     >
       <div className={cn("flex h-full items-center bg-row-hover pl-2", tint)}>
