@@ -347,7 +347,11 @@ test("the search leaves the middle before the chip folds, and comes back to it a
   expect(columns()).toBe(centred);
   measure(700);
   expect(columns()).not.toBe(centred);
-  expect(columns()?.split(" ")).toHaveLength(2);
+  expect(
+    columns()
+      ?.replace(/\([^)]*\)/g, "()")
+      .split(" "),
+  ).toHaveLength(2);
   expect(words()).toBe("Production · read-only");
   measure(500);
   expect(words()).toBe("");
