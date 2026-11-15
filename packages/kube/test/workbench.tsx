@@ -5,10 +5,13 @@ import { createMockBackend } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { registerKube } from "../src/register";
+import { testSignal } from "./setup";
 
 export async function settle(steps = 6) {
+  const signal = testSignal();
   for (let i = 0; i < steps; i++) {
     await act(() => vi.advanceTimersByTimeAsync(50));
+    signal?.throwIfAborted();
     act(() => {
       vi.advanceTimersToNextFrame();
     });
@@ -18,9 +21,12 @@ export async function settle(steps = 6) {
 export async function mountKube(
   backend: Backend = createMockBackend("ready"),
 ): Promise<Workbench> {
+  const signal = testSignal();
   const pending = testWorkbench("ready", backend);
   await vi.advanceTimersByTimeAsync(10);
+  signal?.throwIfAborted();
   const workbench = await pending;
+  signal?.throwIfAborted();
   registerKube(workbench);
   render(<WorkbenchView workbench={workbench} />);
   await settle();
