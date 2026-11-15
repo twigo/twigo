@@ -18,9 +18,14 @@ function TooltipProvider({
 
 // Self-contained: each Tooltip carries its own provider, so it works anywhere
 // (incl. Button's `tooltip` prop) without a root provider.
-function Tooltip(props: React.ComponentProps<typeof TooltipPrimitive.Root>) {
+function Tooltip({
+  skipDelayDuration,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Root> & {
+  skipDelayDuration?: number;
+}) {
   return (
-    <TooltipProvider>
+    <TooltipProvider skipDelayDuration={skipDelayDuration}>
       <TooltipPrimitive.Root data-slot="tooltip" {...props} />
     </TooltipProvider>
   );

@@ -6,7 +6,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
  * it opens, since what it says, a space's namespace scope among it, changes
  * while the tab stays. While a button is down on the tab it stays shut, since
  * a press held past the delay is the start of a drag, and the content takes
- * no pointer so that it cannot sit over where the tab is dropped.
+ * no pointer so that it cannot sit over where the tab is dropped. Radix
+ * counts an open it did not get to show as an open one and skips the delay
+ * of the next, so the delay is never skipped.
  */
 export function TabTooltip({
   tooltip,
@@ -22,6 +24,7 @@ export function TabTooltip({
     <Tooltip
       open={open}
       disableHoverableContent
+      skipDelayDuration={0}
       onOpenChange={(next) => {
         const asked = next && !pressed.current ? tooltip() : undefined;
         if (asked !== undefined) setText(asked);
