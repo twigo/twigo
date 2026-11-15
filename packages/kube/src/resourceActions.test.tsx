@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { AccessQuery } from "@twigo/protocol";
+import type { AccessQuery, ResourceRef } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import type { Lookup } from "@twigo/workbench";
@@ -683,4 +683,84 @@ test("a hovered row's verb the context's mode holds runs on that row and meets t
     error.mock.calls[error.mock.calls.length - 1] ?? [];
   expect(message).toMatch(/^prod-eu is read-only/);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
+});
+
+test("a press that moves no focus, on a hover icon, in the details or on the marked rows' bar of the list beside the active one, acts on that list's rows", async () => {
+  const active = "k8s-list://staging/apps/v1/deployments";
+  const workbench = await openInStaging("ready", active);
+  act(() => {
+    workbench.editors.open(`${active}?q=auth`, { side: true });
+  });
+  await settle(30);
+  const [left, right] = screen.getAllByRole("grid");
+  if (!left || !right) throw new Error("two lists side by side");
+  const rowsOf = (grid: HTMLElement) =>
+    within(grid).getAllByRole("row").slice(1);
+  const nameOf = (row: HTMLElement | undefined) =>
+    row?.querySelector('[data-column="Name"]')?.textContent;
+  const selected = rowsOf(left)[0];
+  const hovered = rowsOf(right)[1];
+  if (!selected || !hovered) throw new Error("rows in both lists");
+  expect(nameOf(hovered)).not.toBe(nameOf(selected));
+  fireEvent.click(selected);
+  await settle(4);
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const planned = () =>
+    invoke.mock.calls
+      .filter(([command]) => command === "command_plan")
+      .map(([, request]) => {
+        const { target, targets } = request as {
+          target?: ResourceRef;
+          targets?: ResourceRef[];
+        };
+        return target?.name ?? targets?.map(({ name }) => name).join();
+      });
+  const press = (element: HTMLElement, name: string | RegExp) => {
+    act(() => {
+      workbench.editors.activate(active);
+    });
+    expect(workbench.editors.active).toBe(active);
+    fireEvent.click(within(element).getByRole("button", { name }));
+  };
+  const restartIn = (element: HTMLElement) => {
+    press(element, "Restart");
+  };
+
+  fireEvent.pointerEnter(hovered);
+  await settle(2);
+  restartIn(hovered);
+  await settle(4);
+  expect(planned()).toEqual([nameOf(hovered)]);
+  fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+  await settle(2);
+
+  fireEvent.click(hovered);
+  await settle(4);
+  const details = screen
+    .getAllByRole("complementary", { name: "Deployment details" })
+    .find((aside) => aside.parentElement?.contains(right));
+  if (!details) throw new Error("the details of the list on the right");
+  restartIn(details);
+  await settle(4);
+  expect(planned()).toEqual([nameOf(hovered), nameOf(hovered)]);
+  fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+  await settle(2);
+
+  fireEvent.click(within(hovered).getByRole("checkbox", { name: "Mark row" }));
+  await settle(2);
+  const bar = screen
+    .getAllByRole("toolbar")
+    .find(
+      (toolbar) =>
+        toolbar.textContent.startsWith("1 marked") &&
+        toolbar.parentElement?.parentElement?.contains(right),
+    );
+  if (!bar) throw new Error("the marked rows' bar of the list on the right");
+  press(bar, /^Delete/);
+  await settle(4);
+  expect(planned()).toEqual([
+    nameOf(hovered),
+    nameOf(hovered),
+    nameOf(hovered),
+  ]);
 });

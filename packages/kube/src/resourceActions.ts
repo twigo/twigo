@@ -27,7 +27,7 @@ import type {
   Workbench,
 } from "@twigo/workbench";
 import type { ListServices } from "./services";
-import { objectOf, objectOfRow, type Selected } from "./selection";
+import { LIST_URI, objectOf, objectOfRow, type Selected } from "./selection";
 import { objectUri, parseListUri } from "./uri";
 
 /** Where the actions on a pod, a node, a workload or a job apply, as when-expressions. */
@@ -80,7 +80,7 @@ export function replicasOf({ columns, row }: Selected): number | undefined {
 }
 
 /**
- * Commands on the active list's selected row and on its marked rows, and
+ * Commands on a list's selected row and on its marked rows, and
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
  * menu, the details' row of actions, whose first two pinned verbs the row
  * shows on hover, and the marked rows' bar. Each kind pins its verbs in
@@ -98,9 +98,19 @@ export function registerResourceActions(
   { selection, statuses, states }: ListServices,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
-  /** The active list editor and its selected row. */
-  const target = (): { uri: string; selected: Selected } | undefined => {
-    const uri = editors.active;
+  /**
+   * The list editor a command was run from, as its lookup says, else the
+   * active one: a press that moves no focus leaves another list active.
+   */
+  const listIn = (lookup: Lookup): string | undefined => {
+    const uri = lookup(LIST_URI);
+    return typeof uri === "string" ? uri : editors.active;
+  };
+  /** That list editor and its selected row. */
+  const target = (
+    lookup: Lookup,
+  ): { uri: string; selected: Selected } | undefined => {
+    const uri = listIn(lookup);
     const selected = uri === undefined ? undefined : selection.get(uri);
     return uri && selected ? { uri, selected } : undefined;
   };
@@ -115,18 +125,19 @@ export function registerResourceActions(
   };
   /** Plans and runs a request of the bus on the selected row's space. */
   const act = async (
+    lookup: Lookup,
     request: (space: string, found: { selected: Selected }) => PlanRequest,
     look: { icon: LucideIcon },
   ) => {
-    const found = target();
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     await workbench.operations.run(request(space, found), look);
   };
   const node = (found: { selected: Selected }) => objectOf(found.selected).name;
   /** Forwards a port of the selected pod, Service or workload; `pick` asks which whatever their number. */
-  const forward = async (pick: boolean) => {
-    const found = target();
+  const forward = async (lookup: Lookup, pick: boolean) => {
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     const { namespace, name } = objectOf(found.selected);
@@ -140,8 +151,8 @@ export function registerResourceActions(
     });
   };
   /** Opens a shell, or an attach, in a container of the selected pod. */
-  const shell = async (kind: ShellKind) => {
-    const found = target();
+  const shell = async (lookup: Lookup, kind: ShellKind) => {
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     const { namespace, name } = objectOf(found.selected);
@@ -176,8 +187,8 @@ export function registerResourceActions(
       title: "Open Details",
       icon: PanelRight,
       menus: [["resource/context", "navigation"]],
-      run: () => {
-        const found = target();
+      run: (lookup) => {
+        const found = target(lookup);
         if (found)
           selection.set(found.uri, { ...found.selected, reveal: true });
       },
@@ -192,8 +203,8 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation", `${POD} || ${RESTARTS}`],
       ],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         const space = found && parseListUri(found.uri)?.space;
         if (!found || space === undefined) return;
         const { namespace, name } = objectOf(found.selected);
@@ -218,7 +229,7 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation", ALWAYS],
       ],
-      run: () => shell("shell"),
+      run: (lookup) => shell(lookup, "shell"),
     },
     {
       id: "k8s.resource.attach",
@@ -231,7 +242,7 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation"],
       ],
-      run: () => shell("attach"),
+      run: (lookup) => shell(lookup, "attach"),
     },
     {
       id: "k8s.resource.forward",
@@ -243,7 +254,7 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation", `!(${RESTARTS})`],
       ],
-      run: () => forward(false),
+      run: (lookup) => forward(lookup, false),
     },
     {
       id: "k8s.resource.forwardPick",
@@ -255,7 +266,7 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation"],
       ],
-      run: () => forward(true),
+      run: (lookup) => forward(lookup, true),
     },
     {
       id: "k8s.resource.yaml",
@@ -263,8 +274,8 @@ export function registerResourceActions(
       icon: FileCode,
       key: "e",
       menus: [["resource/context", "navigation"]],
-      run: () => {
-        const found = target();
+      run: (lookup) => {
+        const found = target(lookup);
         if (!found) return;
         states.setDetailsTab(found.uri, "yaml");
         selection.set(found.uri, { ...found.selected, reveal: true });
@@ -275,8 +286,8 @@ export function registerResourceActions(
       title: "Open in Editor",
       icon: SquareArrowOutUpRight,
       menus: [["resource/context", "navigation"]],
-      run: () => {
-        const found = target();
+      run: (lookup) => {
+        const found = target(lookup);
         const space = found && parseListUri(found.uri)?.space;
         if (!found || space === undefined) return;
         const { namespace, name } = objectOf(found.selected);
@@ -296,8 +307,8 @@ export function registerResourceActions(
       title: "Copy Name",
       icon: Copy,
       menus: [["resource/context", "2_copy"]],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         if (found) await copy(objectOf(found.selected).name);
       },
     },
@@ -306,8 +317,8 @@ export function registerResourceActions(
       title: "Copy Namespace/Name",
       when: "resource.namespaced",
       menus: [["resource/context", "2_copy"]],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         const { namespace, name } = found ? objectOf(found.selected) : {};
         if (namespace && name) await copy(`${namespace}/${name}`);
       },
@@ -317,8 +328,8 @@ export function registerResourceActions(
       title: "Copy Names",
       icon: Copy,
       menus: [["resource/marked", "1_copy"]],
-      run: async () => {
-        const uri = editors.active;
+      run: async (lookup) => {
+        const uri = listIn(lookup);
         const list = uri === undefined ? undefined : statuses.get(uri);
         if (!uri || !list) return;
         const names = [...selection.marks(uri)].map(
@@ -339,8 +350,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "restart",
             space,
@@ -366,8 +378,8 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", SCALES_PINNED],
       ],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         if (!found) return;
         const { name } = objectOf(found.selected);
         const now = replicasOf(found.selected);
@@ -387,6 +399,7 @@ export function registerResourceActions(
         });
         if (typed === undefined) return;
         await act(
+          lookup,
           (space) => ({
             action: "scale",
             space,
@@ -409,8 +422,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "cordon",
             space,
@@ -432,8 +446,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "cordon",
             space,
@@ -461,10 +476,12 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
-        act((space, found) => ({ action: "drain", space, node: node(found) }), {
-          icon: ArrowDownToLine,
-        }),
+      run: (lookup) =>
+        act(
+          lookup,
+          (space, found) => ({ action: "drain", space, node: node(found) }),
+          { icon: ArrowDownToLine },
+        ),
     },
     {
       id: "k8s.cronjob.trigger",
@@ -483,8 +500,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => {
             const { namespace, name } = objectOf(found.selected);
             return {
@@ -509,8 +527,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", CRON_JOB],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "suspend",
             space,
@@ -532,8 +551,9 @@ export function registerResourceActions(
         ["resource/context", "5_actions"],
         ["resource/details", "5_actions", CRON_JOB],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "suspend",
             space,
@@ -558,8 +578,9 @@ export function registerResourceActions(
         ["resource/context", "9_delete"],
         ["resource/details", "9_delete"],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "delete",
             space,
@@ -579,7 +600,7 @@ export function registerResourceActions(
       sends: "write",
       menus: [["resource/marked", "8_delete"]],
       run: async (lookup) => {
-        const uri = editors.active;
+        const uri = listIn(lookup);
         const list = uri === undefined ? undefined : parseListUri(uri);
         if (!uri || !list) return;
         const namespaced = lookup("resource.namespaced") === true;
@@ -607,8 +628,8 @@ export function registerResourceActions(
       title: "Clear Marks",
       icon: X,
       menus: [["resource/marked", "9_clear"]],
-      run: () => {
-        const uri = editors.active;
+      run: (lookup) => {
+        const uri = listIn(lookup);
         if (uri) selection.mark(uri, [...selection.marks(uri)], false);
       },
     },

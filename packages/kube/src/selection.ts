@@ -12,6 +12,9 @@ export interface Selected {
   readonly reveal?: boolean;
 }
 
+/** The context key a list editor sets to its URI, so a command finds the list it was run from. */
+export const LIST_URI = "list.uri";
+
 /**
  * A row's object, from its ID: `context/namespace/name`, or `context/name`
  * when cluster-scoped. A context's name may hold slashes, as an EKS

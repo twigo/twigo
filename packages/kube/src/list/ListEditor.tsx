@@ -13,7 +13,7 @@ import {
 } from "../capabilities";
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
-import { objectOf, objectOfRow } from "../selection";
+import { LIST_URI, objectOf, objectOfRow } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -173,6 +173,7 @@ function Loaded({
   useEffect(() => {
     if (!wrapper) return;
     const scope = keys.scope(wrapper);
+    scope.set(LIST_URI, uri);
     scope.set("detailsOpen", open);
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
