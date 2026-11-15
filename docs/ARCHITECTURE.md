@@ -1431,7 +1431,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
     - `title` 16 / 22: the object's title;
     - `base` 16 / 24: the device code of a sign-in, in the monospace;
     - `lg` 18 / 28: the name of a space over its Home.
-  - A literal size stays only with a whole-pixel line height and a reason, as the two letters of a small tile at 9 px.
+  - A literal size stays only with a whole-pixel line height and a reason, each for one place that no step fits: the two letters of a small tile at 9 px, a histogram's axis at 10 px, the confirm dialog's question at 15 px and a stat tile's figure at 22 px.
   - The monospace is JetBrains Mono 2.304, bundled from its release as two WOFF2 faces, 400 and 600, with its licence beside them in `packages/ui/src/styles/fonts`, and first in `--font-mono`: logs and YAML at 13 / 20, the terminal at 12 px.
     The family token turns `liga` and `calt` off, since its code ligatures are contextual alternates.
   - Figures are tabular by column and value type, never on a whole row: counts, ratios, quantities, durations, clocks and addresses in lists (4.4), an Overview value that is a time or figures, and an Overview table's column whose every cell is, since Rust sends no column type.
