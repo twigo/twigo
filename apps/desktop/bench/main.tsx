@@ -24,6 +24,7 @@ document.documentElement.classList.toggle(
   "dark",
   window.matchMedia("(prefers-color-scheme: dark)").matches,
 );
+document.documentElement.dataset.platform = platformOf(navigator.userAgent);
 
 function write(name: string, value: unknown): Promise<void> {
   return invoke("plugin:twigo-bench|write", { name, value });
