@@ -86,19 +86,23 @@ describe("in a wide editor", () => {
     expect(headers()).toEqual(EVERY_COLUMN);
   });
 
+  const ROOM = 600;
+  const widthOf = () => shown().style.width;
+  const strip = () =>
+    within(shown()).getByRole("separator", { name: "Resize details" });
+  const onScreen = () => {
+    shown().getBoundingClientRect = () =>
+      new DOMRect(0, 0, Math.min(Number.parseInt(widthOf(), 10), ROOM), 600);
+  };
+  const drag = (to: number) => {
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientX: to, pointerId: 1 });
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+  };
+
   test("the width the user dragged the details to is the app's: a close keeps it, and so does a restart", async () => {
     const backend = createMockBackend("ready");
-    const widthOf = () => shown().style.width;
-    const drag = (to: number) => {
-      shown().getBoundingClientRect = () =>
-        new DOMRect(0, 0, Number.parseInt(widthOf(), 10), 600);
-      const strip = within(shown()).getByRole("separator", {
-        name: "Resize details",
-      });
-      fireEvent.pointerDown(strip, { clientX: 700, pointerId: 1 });
-      fireEvent.pointerMove(strip, { clientX: to, pointerId: 1 });
-      fireEvent.pointerUp(strip, { pointerId: 1 });
-    };
     const workbench = await openList(backend);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
@@ -117,7 +121,7 @@ describe("in a wide editor", () => {
     drag(1400);
     expect(widthOf()).toBe("320px");
 
-    drag(300);
+    drag(500);
     const written = workbench.state.settled();
     await act(() => vi.advanceTimersByTimeAsync(100));
     await written;
@@ -125,7 +129,34 @@ describe("in a wide editor", () => {
     await openList(backend);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
-    expect(widthOf()).toBe("720px");
+    expect(widthOf()).toBe("520px");
+  });
+
+  test("a drag starts from the width on screen and keeps the width it ended at, which the editor's room may have cut", async () => {
+    const workbench = await openList(createMockBackend("ready"));
+    workbench.sizes.set("inspector", 900);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("900px");
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientX: 650, pointerId: 1 });
+    expect(widthOf()).toBe("650px");
+    onScreen();
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+    expect(workbench.sizes.get("inspector")).toBe(ROOM);
+    expect(widthOf()).toBe("600px");
+  });
+
+  test("a click on the resize strip changes no width", async () => {
+    const workbench = await openList(createMockBackend("ready"));
+    workbench.sizes.set("inspector", 900);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+    expect(workbench.sizes.get("inspector")).toBe(900);
   });
 
   test("the header shows the row's status as a pill, and its controlling owner opens the owner", async () => {

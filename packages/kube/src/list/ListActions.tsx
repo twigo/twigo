@@ -15,7 +15,12 @@ import {
   useWidth,
   type SegmentedItem,
 } from "@twigo/ui";
-import { useActionRoom, useChanges, useWorkbench } from "@twigo/workbench";
+import {
+  TABS_KEPT,
+  useActionRoom,
+  useChanges,
+  useWorkbench,
+} from "@twigo/workbench";
 import {
   byHealth,
   columnRule,
@@ -25,7 +30,7 @@ import {
   type Health,
 } from "../columns";
 import type { ListServices } from "../services";
-import { parseListUri } from "../uri";
+import { parseListUri, type ListInput } from "../uri";
 import { pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
 import { stageFor } from "./stages";
@@ -54,6 +59,20 @@ export function ListActions({
   uri: string;
   services: ListServices;
 }) {
+  const input = parseListUri(uri);
+  if (!input) return null;
+  return <Actions uri={uri} input={input} services={services} />;
+}
+
+function Actions({
+  uri,
+  input,
+  services,
+}: {
+  uri: string;
+  input: ListInput;
+  services: ListServices;
+}) {
   const { keybindings, spaces } = useWorkbench();
   const { states, statuses, presets, pinned } = services;
   useChanges(states.changes);
@@ -62,38 +81,11 @@ export function ListActions({
   useChanges(pinned.changes);
   useChanges(keybindings.changes);
   useChanges(spaces.changes);
-  const input = parseListUri(uri);
   const list = statuses.get(uri);
   const field = useRef<HTMLInputElement>(null);
   const wanted = states.wantsFocus(uri);
   const room = useActionRoom();
   const inspector = states.inspector(uri);
-  const [row, setRow] = useState<HTMLDivElement | null>(null);
-  const needs = useRef<number[]>([]);
-  const [stage, setStage] = useState(0);
-  const [filtering, setFiltering] = useState(false);
-  const iconFilter = stage >= STAGES.filter;
-  // A stage's width is read as it shows, before it paints; the row's own
-  // width changing, as a count gains a digit, asks again.
-  const taken = useWidth(row);
-  useLayoutEffect(() => {
-    if (room === undefined || !row) return;
-    needs.current[stage] = row.offsetWidth;
-    const next = stageFor(
-      needs.current,
-      stage,
-      room - inspector,
-      STAGES.health,
-    );
-    if (next !== stage) setStage(next);
-  }, [row, room, inspector, stage, taken]);
-  if (wanted && iconFilter && !filtering) setFiltering(true);
-  useEffect(() => {
-    if (!wanted) return;
-    if (!iconFilter) field.current?.focus();
-    states.focused(uri);
-  }, [wanted, iconFilter, states, uri]);
-  if (!input) return null;
   const { gvr } = input;
   const column = statusColumn(gvr);
   const shows = list !== undefined && SHOWS_ROWS.has(list.status.state);
@@ -135,6 +127,55 @@ export function ListActions({
   };
   const text = states.text(uri) ?? input.text ?? "";
   const current = items.find((item) => item.value === (picked ?? "all"));
+
+  const [row, setRow] = useState<HTMLDivElement | null>(null);
+  const needs = useRef<number[]>([]);
+  const [stage, setStage] = useState(0);
+  const [filtering, setFiltering] = useState(false);
+  const [focusMoves, setFocusMoves] = useState(0);
+  const iconFilter = stage >= STAGES.filter;
+  // What besides the stage and the room changes the row's width: a count
+  // gaining a digit, the choice the health filter names, the grouping the
+  // Group button names.
+  const fit = JSON.stringify([
+    items.map(({ count }) => String(count ?? 0).length),
+    current?.value,
+    preset.group,
+    groupable.length > 0,
+  ]);
+  const taken = useWidth(row);
+  // A stage's width is read as it shows, before it paints. While the field
+  // has the focus the filter stays as it is, an icon or the field, since the
+  // other would replace it and take the focus with it: the text changes the
+  // counts, and so the row's width.
+  useLayoutEffect(() => {
+    if (room === undefined || !row) return;
+    needs.current[stage] = row.offsetWidth;
+    const widest = needs.current[STAGES.health];
+    if (widest !== undefined) states.setStripMin(uri, TABS_KEPT + widest);
+    const typing =
+      field.current !== null && document.activeElement === field.current;
+    const next = stageFor(
+      needs.current,
+      stage,
+      room - inspector,
+      STAGES.health,
+    );
+    const settled = !typing
+      ? next
+      : stage >= STAGES.filter
+        ? Math.max(next, STAGES.filter)
+        : Math.min(next, STAGES.filter - 1);
+    if (settled !== stage) setStage(settled);
+  }, [row, room, inspector, stage, taken, fit, focusMoves, states, uri]);
+  if (wanted && iconFilter && !filtering) setFiltering(true);
+  if (!iconFilter && filtering) setFiltering(false);
+  useEffect(() => {
+    if (!wanted) return;
+    if (!iconFilter) field.current?.focus();
+    states.focused(uri);
+  }, [wanted, iconFilter, states, uri]);
+
   const filter = (inPopover: boolean) => (
     <SearchField
       label="Filter rows"
@@ -159,6 +200,12 @@ export function ListActions({
     <div
       ref={setRow}
       style={{ marginRight: inspector }}
+      onFocus={() => {
+        setFocusMoves((moves) => moves + 1);
+      }}
+      onBlur={() => {
+        setFocusMoves((moves) => moves + 1);
+      }}
       className="flex shrink-0 items-center gap-2"
     >
       {shows &&
@@ -216,7 +263,13 @@ export function ListActions({
               <ListFilter aria-hidden className="size-3.5" />
             </button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-64 p-1.5">
+          <PopoverContent
+            align="end"
+            className="w-64 p-1.5"
+            onEscapeKeyDown={(event) => {
+              if (text !== "") event.preventDefault();
+            }}
+          >
             {filter(true)}
           </PopoverContent>
         </Popover>

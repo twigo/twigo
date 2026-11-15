@@ -155,11 +155,11 @@ export function Details({
     <aside
       ref={setElement}
       aria-label={`${kind} details`}
-      style={{ width }}
+      style={{ width, minWidth: MIN_WIDTH }}
       className={cn(
         "flex h-full max-w-[85%] flex-col border-l border-border bg-editor",
         docked
-          ? "relative shrink-0"
+          ? "relative"
           : "absolute inset-y-0 right-0 z-10 animate-in shadow-lg animation-duration-150 slide-in-from-right-8",
       )}
     >
@@ -172,20 +172,24 @@ export function Details({
           const start = event.clientX;
           const from = element?.getBoundingClientRect().width ?? width;
           const target = event.currentTarget;
-          let latest = width;
+          let moved = false;
           target.setPointerCapture(event.pointerId);
           const move = (next: PointerEvent) => {
-            latest = Math.round(
-              Math.max(MIN_WIDTH, from + start - next.clientX),
+            moved = true;
+            setDragged(
+              Math.round(Math.max(MIN_WIDTH, from + start - next.clientX)),
             );
-            setDragged(latest);
           };
           target.addEventListener("pointermove", move);
           target.addEventListener(
             "pointerup",
             () => {
               target.removeEventListener("pointermove", move);
-              sizes.set("inspector", latest);
+              if (moved && element)
+                sizes.set(
+                  "inspector",
+                  Math.round(element.getBoundingClientRect().width),
+                );
               setDragged(undefined);
             },
             { once: true },

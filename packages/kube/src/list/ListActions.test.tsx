@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { TABS_KEPT } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
 
 const layout = withScreenSize(1280);
@@ -39,18 +40,23 @@ const stageOf = (root: HTMLElement) =>
 
 const TAKES = [700, 660, 600, 440, 330];
 
-function laidOut() {
+function laidOut(narrowed: (row: HTMLElement) => number = () => 0) {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
     get(this: HTMLElement) {
       return this ===
         screen.queryByRole("button", { name: /to the explorer$/ })
           ?.parentElement
-        ? (TAKES[stageOf(this)] ?? 0)
+        ? (TAKES[stageOf(this)] ?? 0) - narrowed(this)
         : 0;
     },
   });
 }
+
+const typed = () =>
+  document
+    .querySelector<HTMLInputElement>('input[aria-label="Filter rows"]')
+    ?.value.toString() ?? "";
 
 const withRoom = (room: number) => {
   layout.resize(strip(), room + 48);
@@ -145,10 +151,113 @@ test("details docked beside the list take their width from the room, and the act
   await settle(1);
   expect(actions().style.marginRight).toBe("470px");
   expect(stageOf(actions())).toBe(4);
+  expect(column.style.minWidth).toBe(
+    `${String(TABS_KEPT + (TAKES[4] ?? 0))}px`,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Close details" }));
   await settle(1);
+  expect(column.style.minWidth).toBe("");
   layout.resize(column, 1280);
   await settle(1);
   expect(actions().style.marginRight).toBe("0px");
   expect(stageOf(actions())).toBe(1);
+});
+
+test("the filter field keeps its place and its focus while its text, and so the row's width, changes", async () => {
+  laidOut(() => (typed() === "" ? 0 : 100));
+  await openList(undefined, "k8s-list://prod-eu/v1/pods?q=api");
+  withRoom(520);
+  expect(stageOf(actions())).toBe(2);
+  const field = screen.getByRole<HTMLInputElement>("textbox", {
+    name: "Filter rows",
+  });
+  act(() => {
+    field.focus();
+  });
+  fireEvent.change(field, { target: { value: "" } });
+  await settle();
+  expect(stageOf(actions())).toBe(2);
+  expect(document.activeElement).toBe(field);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
+
+  act(() => {
+    field.blur();
+  });
+  await settle(1);
+  expect(stageOf(actions())).toBe(3);
+  expect(screen.queryByRole("textbox", { name: "Filter rows" })).toBeNull();
+});
+
+test("the popover keeps its field and its focus when the strip widens, and Escape clears the text before it closes", async () => {
+  laidOut();
+  await openList();
+  withRoom(500);
+  fireEvent.click(screen.getByRole("button", { name: "Filter rows" }));
+  await settle(1);
+  const field = screen.getByRole<HTMLInputElement>("textbox", {
+    name: "Filter rows",
+  });
+  act(() => {
+    field.focus();
+  });
+  fireEvent.change(field, { target: { value: "api" } });
+  await settle();
+
+  withRoom(900);
+  expect(stageOf(actions())).toBe(3);
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
+  expect(document.activeElement).toBe(field);
+
+  fireEvent.keyDown(field, { key: "Escape" });
+  await settle(1);
+  expect(field.value).toBe("");
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).toBe(field);
+  fireEvent.keyDown(field, { key: "Escape" });
+  await settle(1);
+  expect(field.isConnected).toBe(false);
+  expect(stageOf(actions())).toBe(0);
+});
+
+test("a popover the strip leaves behind does not open again by itself when the strip narrows", async () => {
+  laidOut();
+  await openList();
+  withRoom(500);
+  fireEvent.click(screen.getByRole("button", { name: "Filter rows" }));
+  await settle(1);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+    target: { value: "api" },
+  });
+  await settle();
+  act(() => {
+    screen.getByRole("button", { name: "Clear filter rows" }).focus();
+  });
+  withRoom(900);
+  await settle(1);
+  expect(screen.queryByRole("button", { name: "Filter rows" })).toBeNull();
+  expect(
+    document.querySelector("[data-radix-popper-content-wrapper]"),
+  ).toBeNull();
+  withRoom(500);
+  await settle(1);
+  expect(screen.getByRole("button", { name: "Filter rows" })).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Filter rows" })).toBeNull();
+});
+
+test("the list in the strip is its own: a list with narrower actions does not inherit the stage of the one before it", async () => {
+  laidOut((row) =>
+    row.querySelector('[aria-label="Rows by health"]') ? 0 : 240,
+  );
+  const workbench = await openList();
+  withRoom(500);
+  expect(stageOf(actions())).toBe(3);
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/configmaps");
+  });
+  await settle();
+  expect(actions().querySelector("kbd")).not.toBeNull();
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  expect(stageOf(actions())).toBe(3);
 });

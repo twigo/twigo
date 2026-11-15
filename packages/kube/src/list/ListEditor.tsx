@@ -114,6 +114,7 @@ function Loaded({
   const workbench = useWorkbench();
   const { keys, lists, editors, menus, commands, catalog } = workbench;
   const { selection, states, capabilities } = services;
+  useChanges(states.changes);
   useChanges(selection.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
@@ -170,10 +171,8 @@ function Loaded({
   const docked = width >= DOCK_WIDTH;
   const [column, setColumn] = useState<HTMLDivElement | null>(null);
   const listWidth = useWidth(column);
-  const inspector =
-    open && docked && selected !== undefined && listWidth > 0
-      ? width - listWidth
-      : 0;
+  const beside = open && docked && selected !== undefined;
+  const inspector = beside && listWidth > 0 ? width - listWidth : 0;
   useEffect(() => {
     states.setInspector(uri, inspector);
   }, [states, uri, inspector]);
@@ -233,7 +232,11 @@ function Loaded({
 
   return (
     <div ref={setWrapper} className="relative flex h-full overflow-hidden">
-      <div ref={setColumn} className="relative h-full min-w-0 flex-1">
+      <div
+        ref={setColumn}
+        style={beside ? { minWidth: states.stripMin(uri) } : undefined}
+        className="relative h-full min-w-0 flex-1"
+      >
         <ResourceGrid
           uri={uri}
           input={input}
