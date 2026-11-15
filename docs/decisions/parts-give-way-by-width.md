@@ -1,6 +1,6 @@
 # A part that does not fit gives way in stages, by widths its stages cannot change
 
-Decided 2026-11-15, for the title bar, the details' row of actions, a list's actions and a list's columns (ARCHITECTURE 4.1, 4.3, 4.4, 4.9).
+Decided 2026-11-15, for the title bar, the details' row of actions, a list's actions and a list editor's columns (ARCHITECTURE 4.1, 4.3, 4.4, 4.9).
 
 ## Context
 
@@ -18,32 +18,33 @@ A width estimated by counting a text's characters misses for capitals and digits
   - the title bar: the search field to an icon, the search out of the middle, the mode chip to its icon, then the crumbs cut in the middle (ARCHITECTURE 4.1);
   - the details' row of actions: the keys, then the labels from the last pinned action back (4.3);
   - a list's actions, once the tabs have their room: the field's key hint, the Group button's label, the field to an icon, the health control to a menu (4.4);
-  - a list's columns: by each column rule's `drop`, the name column never (4.4).
+  - a list editor's columns: by each column rule's `drop`, the name column never (4.4).
 - What decides a stage is never a width the stage changed.
   - The title bar and the row of actions measure hidden copies of themselves at their natural size, one per stage or part, `aria-hidden` and out of sight in a box of no height.
   - A list's actions read their own row at each stage as it shows, which never shrinks, so that is the stage's natural width, against the room the strip leaves beside its tabs, which the actions do not move.
     Each read is in a layout effect, and React runs it and the state updates it schedules before the browser paints ([`useLayoutEffect`](https://github.com/reactjs/react.dev/blob/46a54e0592729712b7640308b53268e84fdc7c9f/src/content/reference/react/useLayoutEffect.md?plain=1#L262)), so a turn to a stage that is too wide never shows.
     Beside docked details that room is less what the details take, which is read in a layout effect too as they dock, before the width observers report it.
-    A text in the filter changes the counts, and so the row: each count keeps room for the most digits it had with no text, by an invisible copy of them, and while the filter field has the focus no stage moves, so the field never shifts under the caret; while the filter's popover is open the filter stays an icon.
-  - A list's columns add up the widths in effect, the person's or the rule's, against the grid's measured width.
+    A text in the filter changes the counts, and so the row: each count keeps room for the most digits it had with no text, by an invisible copy of them, and while the filter field or its Clear button has the focus no stage moves, so the field never shifts under the caret; while the filter's popover is open the filter stays an icon.
+  - A list editor's columns add up the widths in effect, the person's or the rule's, against the grid's measured width.
 - Where a width on a boundary could flip a stage or cut a text, the step holds a margin.
   - The row of actions comes back to a fuller stage only with 16 px to spare.
   - The title bar counts half a pixel for each rounded width it adds up, so a part stays unfolded only where it fits whichever way the widths were rounded.
-  - A list's actions and its columns hold none: neither moves the room it is measured against, so the same room gives the same stage whichever way it came, but for a list's actions while their filter field has the focus or its popover is open.
+  - A list's actions and a list editor's columns hold none: neither moves the room it is measured against, so the same room gives the same stage whichever way it came, but for a list's actions while their filter field or its Clear button has the focus, or the filter's popover is open.
 - A part folds before it cuts.
   The title bar cuts its crumbs only once the search, the centring and the chip have given way, and then in the middle, down to a floor of characters with a middle of at least 2em.
-  The row of actions and a list's actions only fold, and a list's columns leave whole, once the name column has given up the free width it takes.
+  The row of actions and a list's actions only fold, and a list editor's columns leave whole, once the name column has given up the free width it takes.
 - A part measures once, never once per row: one title bar, one row of actions per details, one strip per group, and a grid's own width, from which every row draws its columns; whether a row's hover icons have room comes from the columns' widths.
 
 ## Consequences
 
-- What each stage takes is read the same way every time, so the stage is a function of the room, and only the row of actions, by its margin, and a list's actions, while their filter field has the focus or its popover is open, depend on the way the room came.
+- What each stage takes is read the same way every time, so the stage is a function of the room, and only the row of actions, by its margin, and a list's actions, while their filter field or its Clear button has the focus, or the filter's popover is open, depend on the way the room came.
 - The hidden copies cost elements: a row of actions draws its pinned actions once more for each stage, for one row per details and never for a list's rows.
 - The upstream behaviour this rests on:
   - `ResizeObserver` reports an element's content box, without its padding ([content rect](https://www.w3.org/TR/2020/WD-resize-observer-1-20200211/#content-rect-h)), once layout is done and before paint ([event loop](https://www.w3.org/TR/2020/WD-resize-observer-1-20200211/#html-event-loop)); `useWidth` rounds it, and takes a report of 0 for an element that is not laid out, as a tab that dockview detaches, and keeps the width it had.
   - With `text-overflow: ellipsis` the first character on a line is clipped rather than ellipsed ([CSS Overflow 3](https://www.w3.org/TR/2025/WD-css-overflow-3-20251007/#text-overflow)), so a middle narrower than a glyph and the ellipsis shows a letter and no ellipsis, a name that does not exist.
-    The middle is a grid track of `minmax(2em, 1fr)`, which never gets narrower than 2em ([`minmax()`](https://www.w3.org/TR/2025/CRD-css-grid-1-20250326/#funcdef-grid-template-columns-minmax)), 26 px at 13 px, where an M and the ellipsis take 23.25 px and a W and the ellipsis 23.20 (Chrome, 2026-11-15).
-  - The title bar's columns are `minmax(0, …fr)`, since an `fr` track alone has an automatic minimum ([`<flex>`](https://www.w3.org/TR/2025/CRD-css-grid-1-20250326/#typedef-flex)) and would not narrow below the breadcrumb's content.
+    The middle is a grid track of `minmax(2em, 1fr)`, which never gets narrower than 2em ([`minmax()`](https://www.w3.org/TR/2025/CRD-css-grid-1-20250326/#funcdef-grid-template-columns-minmax)), 26 px at 13 px.
+    In the system font at weight 600, the name crumb's, an M and the ellipsis take 23.25 px and `@` and the ellipsis, the widest of M, W, m, w and `@` measured, 23.63 px, so all stay under the floor (Chrome 157 on the mock, 2026-11-15).
+  - The title bar's columns are `minmax(0, …fr)`, since an `fr` track alone has an automatic minimum ([`<flex>`](https://www.w3.org/TR/2025/CRD-css-grid-1-20250326/#valdef-grid-template-columns-flex-0)) and would not narrow below the breadcrumb's content.
 - Tests stand in for `ResizeObserver`, as `packages/ui/test/resize.ts` and `withScreenSize` in `packages/kube/test/workbench.tsx` do: jsdom lays nothing out, so a test sets the widths and checks the stage, and what is drawn is checked in a browser.
 - The terminal's chip in the panel's strip still gives way by CSS alone, its words cut down to its icon (ARCHITECTURE 4.6).
 
