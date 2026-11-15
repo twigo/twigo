@@ -1,67 +1,63 @@
-export interface TitleBarTexts {
-  readonly name: string;
-  readonly scope: string;
-  readonly chip: string | undefined;
+/** Where the traffic lights end: the breadcrumb starts after them (`trafficLightPosition` in `tauri.conf.json`). */
+export const TRAFFIC_LIGHTS = 84;
+export const SEARCH_FIELD = 300;
+export const BAR_GAP = 12;
+const BREADCRUMB_SHARE = 1.3;
+
+/** The bar's columns: the search between the breadcrumb and an empty column that centres it, or at the right end. */
+export function titleBarColumns(centred: boolean): string {
+  return centred
+    ? `minmax(0,${String(BREADCRUMB_SHARE)}fr) auto minmax(0,1fr)`
+    : "minmax(0,1fr) auto";
+}
+
+/** What the hidden copies of the title bar's parts measure at their natural size. */
+export interface TitleBarWidths {
+  /** The breadcrumb with the chip's words, without the room for the traffic lights. */
+  readonly crumbs: number;
+  readonly crumbsChipFolded: number;
+  readonly searchIcon: number;
 }
 
 export interface TitleBarStage {
   readonly searchFolded: boolean;
   readonly chipFolded: boolean;
+  /** Whether the search sits in the middle, or at the right end once the crumbs have no room even folded. */
+  readonly centred: boolean;
 }
 
-/** The name crumb is cut no further than this many characters, which a shorter name never is. */
-export const NAME_FLOOR = 28;
-
-const BAR_EDGES = 16 + 2 * 12;
-const TRAFFIC_LIGHTS = 84;
-const BREADCRUMB_SHARE = 1.3 / 2.3;
-const SEARCH_FIELD = 300;
-const SEARCH_ICON = 62;
-
-const NAME_CHAR = 7.6;
-const SCOPE_CHAR = 6.9;
-const CRUMB = 32;
-const BREADCRUMB_GAPS = 6 + 14;
-const CHIP_CHAR = 5.8;
-const CHIP_WORDS_FRAME = 38;
-const CHIP_ICON = 34;
+const UNFOLDED: TitleBarStage = {
+  searchFolded: false,
+  chipFolded: false,
+  centred: true,
+};
 
 /**
  * Which parts of the title bar fold at a measured width: the search field to
  * an icon first, then the mode chip to its icon, so that the name and the
- * scope stay whole as long as they can. Past that the layout cuts the scope
- * in the middle, and the name only down to its floor.
- * The widths follow the bar's grid, where the breadcrumb has 1.3 parts of
- * what the search leaves; characters are estimated a little over what SF
- * measures, so a stage never claims room it lacks.
+ * scope stay whole as long as they can; once both have folded and the crumbs
+ * still do not fit, the search leaves the middle for the right end. Past that
+ * the layout cuts the scope in the middle, and the name only down to its
+ * floor. `width` is the bar's content width, as the observer reports it, and
+ * the room the breadcrumb has is what its grid column leaves.
  */
 export function titleBarStage(
   width: number,
-  { name, scope, chip }: TitleBarTexts,
+  { crumbs, crumbsChipFolded, searchIcon }: TitleBarWidths,
 ): TitleBarStage {
-  if (width === 0) return { searchFolded: false, chipFolded: false };
+  if (width === 0 || crumbs === 0 || crumbsChipFolded === 0 || searchIcon === 0)
+    return UNFOLDED;
   const room = (search: number) =>
-    (width - BAR_EDGES - search) * BREADCRUMB_SHARE - TRAFFIC_LIGHTS;
-  const need = (chipFolded: boolean) => {
-    const chipWidth =
-      chip === undefined
-        ? 0
-        : chipFolded
-          ? CHIP_ICON
-          : chip.length * CHIP_CHAR + CHIP_WORDS_FRAME;
-    return (
-      name.length * NAME_CHAR +
-      scope.length * SCOPE_CHAR +
-      2 * CRUMB +
-      BREADCRUMB_GAPS +
-      chipWidth
-    );
+    ((width - 2 * BAR_GAP - search) * BREADCRUMB_SHARE) /
+    (1 + BREADCRUMB_SHARE);
+  const need = (breadcrumb: number) => TRAFFIC_LIGHTS + breadcrumb;
+  if (need(crumbs) <= room(SEARCH_FIELD)) return UNFOLDED;
+  if (need(crumbs) <= room(searchIcon)) {
+    return { ...UNFOLDED, searchFolded: true };
+  }
+  return {
+    searchFolded: true,
+    chipFolded: true,
+    centred: need(crumbsChipFolded) <= room(searchIcon),
   };
-  if (need(false) <= room(SEARCH_FIELD)) {
-    return { searchFolded: false, chipFolded: false };
-  }
-  if (need(false) <= room(SEARCH_ICON)) {
-    return { searchFolded: true, chipFolded: false };
-  }
-  return { searchFolded: true, chipFolded: true };
 }

@@ -1,12 +1,25 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { cn, Kbd, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
-import { accessOfSpace, chipLabel } from "../spaces/modes";
-import { ModeChip } from "./ModeChip";
-import { NAME_FLOOR, titleBarStage } from "./titleBarStage";
+import { cutText } from "./cutText";
+import { ModeChip, ModeChipCopy } from "./ModeChip";
+import {
+  BAR_GAP,
+  SEARCH_FIELD,
+  titleBarColumns,
+  titleBarStage,
+  TRAFFIC_LIGHTS,
+} from "./titleBarStage";
 import { useWidth } from "./useWidth";
+
+const NAME_FLOOR = 28;
+const SCOPE_FLOOR = 16;
+
+const BREADCRUMB = "flex items-center gap-0.5";
+const SEARCH =
+  "flex h-6 items-center gap-2 rounded-md pr-1 pl-2 text-xs text-support";
 
 /**
  * Where you are (ARCHITECTURE 4.2): the space and its namespace scope as a
@@ -15,23 +28,26 @@ import { useWidth } from "./useWidth";
  * coloured context tints the bar's left end, as JetBrains tints it with a
  * project's colour, and its mode's chip follows its name (6.4). Where the
  * bar is too narrow the search folds to an icon, then the chip to its icon.
+ * What each takes is measured on hidden copies at their natural size, so
+ * that a fold never changes what decides it.
  */
 export function TitleBar() {
-  const { spaces, colors, catalog } = useWorkbench();
+  const { spaces, colors } = useWorkbench();
   useChanges(spaces.changes);
   useChanges(colors.changes);
-  useChanges(catalog.changes);
   const [bar, setBar] = useState<HTMLElement | null>(null);
-  const width = useWidth(bar);
+  const [words, setWords] = useState<HTMLElement | null>(null);
+  const [icon, setIcon] = useState<HTMLElement | null>(null);
+  const [find, setFind] = useState<HTMLElement | null>(null);
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
   const name = space?.contexts.join(" + ") ?? "";
   const scope = space ? scopeOf(spaces.state(space.id).namespaces) : "";
-  const access = space && accessOfSpace(catalog, space);
-  const { searchFolded, chipFolded } = titleBarStage(width, {
-    name,
-    scope,
-    chip: access && chipLabel(access),
+  const width = useWidth(bar);
+  const { searchFolded, chipFolded, centred } = titleBarStage(width, {
+    crumbs: useWidth(words),
+    crumbsChipFolded: useWidth(icon),
+    searchIcon: useWidth(find),
   });
   return (
     // 36 px pairs with trafficLightPosition in tauri.conf.json: change both or neither.
@@ -39,21 +55,53 @@ export function TitleBar() {
       ref={setBar}
       data-tauri-drag-region="deep"
       data-color={color}
-      style={
-        color &&
-        ({
+      style={{
+        gridTemplateColumns: titleBarColumns(centred),
+        columnGap: BAR_GAP,
+        ...(color && {
           "--twigo-context": `var(--context-${color})`,
           "--twigo-context-ink": `var(--context-${color}-ink)`,
-        } as CSSProperties)
-      }
-      className="twigo-titlebar grid h-9 shrink-0 grid-cols-[minmax(0,1.3fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-border bg-shell px-2"
+        }),
+      }}
+      className="twigo-titlebar relative grid h-9 shrink-0 items-center border-b border-border bg-shell px-2"
     >
-      <div className="flex min-w-0 items-center gap-0.5 overflow-hidden pl-[84px]">
+      <div
+        style={{ paddingLeft: TRAFFIC_LIGHTS }}
+        className={cn(BREADCRUMB, "min-w-0 overflow-hidden")}
+      >
         {space && (
           <Breadcrumb name={name} scope={scope} chipFolded={chipFolded} />
         )}
       </div>
       <CommandCenter space={space} folded={searchFolded} />
+      <div
+        aria-hidden
+        className="invisible absolute top-0 left-0 h-0 overflow-hidden"
+      >
+        {space && (
+          <>
+            <div
+              ref={setWords}
+              data-copy="words"
+              className={cn(BREADCRUMB, "w-max")}
+            >
+              <Breadcrumb name={name} scope={scope} chipFolded={false} copy />
+            </div>
+            <div
+              ref={setIcon}
+              data-copy="icon"
+              className={cn(BREADCRUMB, "w-max")}
+            >
+              <Breadcrumb name={name} scope={scope} chipFolded copy />
+            </div>
+          </>
+        )}
+        <div ref={setFind} data-copy="search" className="w-max">
+          <div className={SEARCH}>
+            <SearchFace space={space} folded />
+          </div>
+        </div>
+      </div>
     </header>
   );
 }
@@ -66,81 +114,100 @@ function Breadcrumb({
   name,
   scope,
   chipFolded,
+  copy = false,
 }: {
   name: string;
   scope: string;
   chipFolded: boolean;
+  copy?: boolean;
 }) {
   const { quickAccess } = useWorkbench();
+  const opening = (prefix: string) =>
+    copy
+      ? undefined
+      : () => {
+          quickAccess.show(prefix);
+        };
   return (
     <>
       <Crumb
         label="Switch space"
-        onClick={() => quickAccess.show("ctx ")}
+        onClick={opening("ctx ")}
         className="font-medium"
-        style={{
-          minWidth:
-            name.length > NAME_FLOOR
-              ? `calc(${String(NAME_FLOOR)}ch + 2rem)`
-              : "max-content",
-        }}
       >
-        <span className="truncate">{name}</span>
+        <CutInTheMiddle text={name} floor={NAME_FLOOR} separator={/[:/]/} />
       </Crumb>
-      <ModeChip folded={chipFolded} />
+      {copy ? (
+        <ModeChipCopy folded={chipFolded} />
+      ) : (
+        <ModeChip folded={chipFolded} />
+      )}
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb
         label="Select namespace"
-        onClick={() => quickAccess.show("ns ")}
-        className="max-w-max min-w-28 flex-1 basis-0"
+        onClick={opening("ns ")}
+        className={cn(!copy && "max-w-max flex-1 basis-0")}
       >
-        <CutInTheMiddle text={scope} />
+        <CutInTheMiddle text={scope} floor={SCOPE_FLOOR} separator=", " />
       </Crumb>
     </>
   );
 }
 
-const TAIL = 8;
-
-/** CSS cuts only at the end of a text: the head gives way, and the last characters stay. */
-function CutInTheMiddle({ text }: { text: string }) {
+/** A text CSS can cut only at its end, cut in the middle instead, with the head and the tail fixed. */
+function CutInTheMiddle({
+  text,
+  floor,
+  separator,
+}: {
+  text: string;
+  floor: number;
+  separator: string | RegExp;
+}) {
+  const cut = cutText(text, floor, separator);
+  if (!cut) return <span className="whitespace-pre">{text}</span>;
   return (
-    <span className="flex min-w-0 whitespace-pre">
-      <span className="overflow-hidden text-ellipsis">
-        {text.slice(0, -TAIL)}
-      </span>
-      <span className="shrink-0">{text.slice(-TAIL)}</span>
+    <span className="grid grid-cols-[auto_minmax(1em,1fr)_auto] whitespace-pre">
+      <span>{cut.head}</span>
+      <span className="truncate">{cut.middle}</span>
+      <span>{cut.tail}</span>
     </span>
   );
 }
 
+/** A crumb with no handler is the hidden copy that measures one. */
 function Crumb({
   label,
   onClick,
   className,
-  style,
   children,
 }: {
   label: string;
-  onClick: () => void;
+  onClick: (() => void) | undefined;
   className?: string;
-  style?: CSSProperties;
   children: ReactNode;
 }) {
-  return (
+  const classes = cn(
+    "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-body",
+    className,
+  );
+  const face = (
+    <>
+      {children}
+      <ChevronDown aria-hidden className="size-3.5 shrink-0 text-support" />
+    </>
+  );
+  return onClick ? (
     <button
       type="button"
       aria-label={label}
       onClick={onClick}
-      style={style}
-      className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md px-1.5 text-body hover:bg-row-hover",
-        className,
-      )}
+      className={cn(classes, "hover:bg-row-hover")}
     >
-      {children}
-      <ChevronDown aria-hidden className="size-3.5 shrink-0 text-support" />
+      {face}
     </button>
+  ) : (
+    <span className={classes}>{face}</span>
   );
 }
 
@@ -151,10 +218,8 @@ function CommandCenter({
   space: Space | undefined;
   folded: boolean;
 }) {
-  const { quickAccess, keybindings } = useWorkbench();
-  useChanges(keybindings.changes);
-  const binding = keybindings.primary("workbench.action.quickOpen");
-  const label = `Search ${space?.name ?? "Twigo"}`;
+  const { quickAccess } = useWorkbench();
+  const label = searchLabel(space);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -164,19 +229,40 @@ function CommandCenter({
           onClick={() => {
             quickAccess.show("");
           }}
+          style={folded ? undefined : { width: SEARCH_FIELD }}
           className={cn(
-            "flex h-6 items-center gap-2 rounded-md bg-content/5 pr-1 pl-2 text-xs text-support shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]",
-            !folded && "w-[300px]",
+            SEARCH,
+            "bg-content/5 shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]",
           )}
         >
-          <Search aria-hidden className="size-3.5 shrink-0" />
-          {!folded && (
-            <span className="flex-1 truncate text-left">{label}</span>
-          )}
-          {binding && <Kbd>{keybindings.label(binding.presses)}</Kbd>}
+          <SearchFace space={space} folded={folded} />
         </button>
       </TooltipTrigger>
       {folded && <TooltipContent>{label}</TooltipContent>}
     </Tooltip>
+  );
+}
+
+const searchLabel = (space: Space | undefined) =>
+  `Search ${space?.name ?? "Twigo"}`;
+
+function SearchFace({
+  space,
+  folded,
+}: {
+  space: Space | undefined;
+  folded: boolean;
+}) {
+  const { keybindings } = useWorkbench();
+  useChanges(keybindings.changes);
+  const binding = keybindings.primary("workbench.action.quickOpen");
+  return (
+    <>
+      <Search aria-hidden className="size-3.5 shrink-0" />
+      {!folded && (
+        <span className="flex-1 truncate text-left">{searchLabel(space)}</span>
+      )}
+      {binding && <Kbd>{keybindings.label(binding.presses)}</Kbd>}
+    </>
   );
 }

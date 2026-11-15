@@ -41,12 +41,19 @@ afterEach(() => {
   globalThis.ResizeObserver = unsized;
 });
 
-function widen(width: number) {
+const COPIES = { words: 400, icon: 300, search: 60 };
+
+function measure(width: number, copies: Partial<typeof COPIES> = COPIES) {
+  const sizes: Record<string, number> = { ...COPIES, ...copies };
   act(() => {
     for (const { target, report, observer } of watching) {
-      if (target.tagName !== "HEADER") continue;
+      const size =
+        target.tagName === "HEADER"
+          ? width
+          : sizes[target.getAttribute("data-copy") ?? ""];
+      if (size === undefined) continue;
       report(
-        [{ target, contentRect: { width } } as ResizeObserverEntry],
+        [{ target, contentRect: { width: size } } as ResizeObserverEntry],
         observer,
       );
     }
@@ -276,15 +283,15 @@ test("a type other than Production has its chip", async () => {
 test("the search folds to an icon that keeps its key hint and still opens quick access", async () => {
   const { workbench } = await mounted();
   const search = () => screen.getByRole("button", { name: "Search prod-eu" });
-  widen(1280);
+  measure(1280);
   expect(search().textContent).toBe("Search prod-eu⌘P");
 
-  widen(1100);
+  measure(1100);
   expect(search().textContent).toBe("⌘P");
   fireEvent.click(search());
   expect(workbench.quickAccess.session?.value).toBe("");
 
-  widen(1280);
+  measure(1280);
   expect(search().textContent).toBe("Search prod-eu⌘P");
 });
 
@@ -295,15 +302,15 @@ test("the chip folds to its icon after the search, its words kept for the toolti
     screen.getByRole("button", {
       name: "Mode of prod-eu: Production · read-only",
     });
-  widen(1100);
+  measure(1100);
   expect(chip().textContent).toBe("Production · read-only");
 
-  widen(900);
+  measure(900);
   expect(chip().textContent).toBe("");
   expect(chip().querySelector("svg")).not.toBeNull();
   fireEvent.focus(chip());
-  expect(screen.getAllByText("Production · read-only").length).toBeGreaterThan(
-    0,
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "Production · read-only",
   );
   fireEvent.click(chip());
   expect(screen.getByRole("dialog", { name: "Mode of prod-eu" })).toBeTruthy();
@@ -315,24 +322,35 @@ test("a folded chip of a type with no icon of its own still shows one", async ()
     workbench.spaces.select("dev");
   });
   await settled();
-  widen(700);
+  measure(700);
   const chip = screen.getByRole("button", { name: "Mode of dev: Development" });
   expect(chip.textContent).toBe("");
   expect(chip.querySelector("svg")).not.toBeNull();
-  widen(1440);
+  measure(1440);
   expect(chip.querySelector("svg")).toBeNull();
 });
 
-test("at 1,100 px the name and the scope show whole beside the chip's words", async () => {
+test("once both have folded and the crumbs still do not fit, the search moves to the right end", async () => {
+  const { container } = await mounted();
+  const columns = () =>
+    container.querySelector("header")?.style.gridTemplateColumns;
+  measure(1440);
+  const centred = columns();
+  measure(900);
+  expect(columns()).toBe(centred);
+  measure(700);
+  expect(columns()).not.toBe(centred);
+  expect(columns()?.split(" ")).toHaveLength(2);
+  measure(1440);
+  expect(columns()).toBe(centred);
+});
+
+test("a bar that has not been measured shows the search and the chip whole", async () => {
   await mounted();
   await settled();
-  widen(1100);
-  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
-    "prod-eu",
-  );
   expect(
-    screen.getByRole("button", { name: "Select namespace" }).textContent,
-  ).toBe("All namespaces");
+    screen.getByRole("button", { name: "Search prod-eu" }).textContent,
+  ).toBe("Search prod-eu⌘P");
   expect(
     screen.getByRole("button", { name: /^Mode of prod-eu/ }).textContent,
   ).toBe("Production · read-only");
@@ -358,33 +376,59 @@ async function inLongSpace() {
   return workbench;
 }
 
-test("a name of more than 28 characters can be cut, never below 28; a shorter one is not cut", async () => {
-  const workbench = await inLongSpace();
-  const name = workbench.spaces.active?.contexts.join(" + ") ?? "";
-  expect(name.length).toBeGreaterThan(28);
-  const crumb = screen.getByRole("button", { name: "Switch space" });
-  expect(crumb.textContent).toBe(name);
-  expect(crumb.style.minWidth).toBe("calc(28ch + 2rem)");
+const parts = (label: string) =>
+  [
+    ...(screen.getByRole("button", { name: label }).firstElementChild
+      ?.children ?? []),
+  ].map((part) => part.textContent);
+
+test("a long name is cut in the middle: the first characters and the end stay, 28 in all, and a short one is whole", async () => {
+  await inLongSpace();
+  const name = "prod-eu + staging + dev + qa + kind-local";
+  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
+    name,
+  );
+  expect(parts("Switch space")).toEqual([
+    "prod-eu + stagin",
+    "g + dev + qa ",
+    "+ kind-local",
+  ]);
   cleanup();
 
   await mounted();
-  expect(
-    screen.getByRole("button", { name: "Switch space" }).style.minWidth,
-  ).toBe("max-content");
+  expect(parts("Switch space")).toEqual([]);
+  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
+    "prod-eu",
+  );
 });
 
-test("the scope is cut in the middle: its last characters stay whole and what comes before gives way", async () => {
+test("the scope is cut in the middle too: its last namespace stays, All namespaces is never cut", async () => {
   const { workbench } = await mounted();
+  expect(parts("Select namespace")).toEqual([]);
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments", "checkout", "ledger"],
+    }));
+  });
+  expect(parts("Select namespace")).toEqual([
+    "payments, ",
+    "checkout, ",
+    "ledger",
+  ]);
   act(() => {
     workbench.spaces.update("prod-eu", (state) => ({
       ...state,
       namespaces: ["payments", "checkout", "ledger", "platform-observability"],
     }));
   });
-  const crumb = screen.getByRole("button", { name: "Select namespace" });
   const scope = "payments, checkout, ledger, platform-observability";
-  expect(crumb.textContent).toBe(scope);
-  const [head, tail] = [...(crumb.querySelector("span")?.children ?? [])];
-  expect(tail?.textContent).toBe(scope.slice(-8));
-  expect(head?.textContent).toBe(scope.slice(0, -8));
+  expect(
+    screen.getByRole("button", { name: "Select namespace" }).textContent,
+  ).toBe(scope);
+  expect(parts("Select namespace")).toEqual([
+    "paym",
+    "ents, checkout, ledger, platform-o",
+    "bservability",
+  ]);
 });

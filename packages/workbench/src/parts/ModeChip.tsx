@@ -3,6 +3,7 @@ import { Lock, LockOpen, ShieldAlert, Tag } from "lucide-react";
 import type { ContextAccess, Environment, Mode } from "@twigo/protocol";
 import {
   Button,
+  cn,
   LinkButton,
   Popover,
   PopoverContent,
@@ -35,6 +36,22 @@ import {
 const NO_TYPE = "none";
 type TypeChoice = Environment | typeof NO_TYPE;
 
+const CHIP =
+  "mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-2xs font-semibold whitespace-nowrap";
+
+function useChip() {
+  const { spaces, catalog } = useWorkbench();
+  useChanges(spaces.changes);
+  useChanges(catalog.changes);
+  const space = spaces.active;
+  const access = space && accessOfSpace(catalog, space);
+  const [context] = space?.contexts ?? [];
+  const label = access && chipLabel(access);
+  return access && label && context !== undefined
+    ? { access, label, context }
+    : undefined;
+}
+
 /**
  * The mode after the context's name (ARCHITECTURE 6.4), in the context's
  * colour, as NN/g asks of a mode: say it where you are looking. It opens
@@ -43,24 +60,47 @@ type TypeChoice = Environment | typeof NO_TYPE;
  * words are the tooltip.
  */
 export function ModeChip({ folded }: { folded: boolean }) {
-  const { spaces, catalog } = useWorkbench();
-  useChanges(spaces.changes);
-  useChanges(catalog.changes);
-  const space = spaces.active;
-  const access = space && accessOfSpace(catalog, space);
-  const [context] = space?.contexts ?? [];
-  const label = access && chipLabel(access);
-  if (!access || !label || context === undefined) return null;
+  const chip = useChip();
+  if (!chip) return null;
   // Its own state per context, so a popover left open on one never opens on
   // the next.
+  return <Chip key={chip.context} {...chip} folded={folded} />;
+}
+
+/** The chip as the title bar's hidden copy, to measure what it takes. */
+export function ModeChipCopy({ folded }: { folded: boolean }) {
+  const chip = useChip();
   return (
-    <Chip
-      key={context}
-      context={context}
-      access={access}
-      label={label}
-      folded={folded}
-    />
+    chip && (
+      <span className={CHIP}>
+        <ChipFace access={chip.access} label={chip.label} folded={folded} />
+      </span>
+    )
+  );
+}
+
+function ChipFace({
+  access,
+  label,
+  folded,
+}: {
+  access: ContextAccess;
+  label: string;
+  folded: boolean;
+}) {
+  const Icon = access.unlockedUntil
+    ? LockOpen
+    : access.mode === "read-only"
+      ? Lock
+      : access.mode === "guarded"
+        ? ShieldAlert
+        : undefined;
+  const Shown = Icon ?? (folded ? Tag : undefined);
+  return (
+    <>
+      {Shown && <Shown aria-hidden className="size-3" />}
+      {!folded && label}
+    </>
   );
 }
 
@@ -76,14 +116,6 @@ function Chip({
   folded: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const Icon = access.unlockedUntil
-    ? LockOpen
-    : access.mode === "read-only"
-      ? Lock
-      : access.mode === "guarded"
-        ? ShieldAlert
-        : undefined;
-  const Shown = Icon ?? (folded ? Tag : undefined);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>
@@ -92,10 +124,12 @@ function Chip({
             <button
               type="button"
               aria-label={`Mode of ${context}: ${label}`}
-              className="twigo-mode-chip mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-2xs font-semibold whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]"
+              className={cn(
+                "twigo-mode-chip outline-none focus-visible:shadow-[var(--focus-ring)]",
+                CHIP,
+              )}
             >
-              {Shown && <Shown aria-hidden className="size-3" />}
-              {!folded && label}
+              <ChipFace access={access} label={label} folded={folded} />
             </button>
           </PopoverTrigger>
         </TooltipTrigger>

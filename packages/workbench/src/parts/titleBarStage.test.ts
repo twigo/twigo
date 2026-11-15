@@ -1,58 +1,67 @@
 import { expect, test } from "vitest";
-import { titleBarStage, type TitleBarTexts } from "./titleBarStage";
+import { titleBarStage, type TitleBarWidths } from "./titleBarStage";
 
-const PRODUCTION: TitleBarTexts = {
-  name: "prod-eu",
-  scope: "All namespaces",
-  chip: "Production · read-only",
+const WIDTHS: TitleBarWidths = {
+  crumbs: 400,
+  crumbsChipFolded: 300,
+  searchIcon: 60,
 };
 
-const folds = (width: number, texts: TitleBarTexts = PRODUCTION) => {
-  const { searchFolded, chipFolded } = titleBarStage(width, texts);
-  return [searchFolded, chipFolded];
+const NAMES = ["unfolded", "search", "search and chip", "search at the end"];
+
+const STAGES: Record<string, string> = {
+  "false false true": "unfolded",
+  "true false true": "search",
+  "true true true": "search and chip",
+  "true true false": "search at the end",
 };
 
-test("the search folds first, then the chip, as the bar narrows", () => {
-  const seen = [1600, 1280, 1100, 900, 700].map((width) => folds(width));
-  expect(seen).toEqual([
-    [false, false],
-    [false, false],
-    [true, false],
-    [true, true],
-    [true, true],
-  ]);
-  for (let width = 1600; width > 400; width -= 10) {
-    const [search, chip] = folds(width);
-    expect(chip && !search).toBe(false);
+const stageName = (width: number, widths: TitleBarWidths = WIDTHS) => {
+  const { searchFolded, chipFolded, centred } = titleBarStage(width, widths);
+  return (
+    STAGES[
+      `${String(searchFolded)} ${String(chipFolded)} ${String(centred)}`
+    ] ?? "a state that should not occur"
+  );
+};
+
+const stagesAsItNarrows = (widths: TitleBarWidths = WIDTHS) => {
+  const seen: string[] = [];
+  for (let width = 1800; width > 300; width--) {
+    const stage = stageName(width, widths);
+    if (stage !== seen[seen.length - 1]) seen.push(stage);
   }
+  return seen;
+};
+
+const firstFoldAt = (widths: TitleBarWidths) => {
+  for (let width = 1800; width > 0; width--) {
+    if (titleBarStage(width, widths).searchFolded) return width;
+  }
+  return 0;
+};
+
+test("as the bar narrows the search folds first, then the chip, then the search leaves the middle, and none comes back", () => {
+  expect(stagesAsItNarrows()).toEqual(NAMES);
 });
 
-test("at 1,100 px a short name and All namespaces keep their chip's words", () => {
-  expect(folds(1100)).toEqual([true, false]);
+test("a longer breadcrumb folds at a wider bar", () => {
+  const wide = firstFoldAt(WIDTHS);
+  expect(wide).toBeGreaterThan(0);
+  expect(firstFoldAt({ ...WIDTHS, crumbs: 500 })).toBeGreaterThan(wide);
 });
 
-test("a bar not yet measured shows everything", () => {
-  expect(folds(0)).toEqual([false, false]);
+test("a bar or a part not yet measured shows everything", () => {
+  expect(stageName(0)).toBe("unfolded");
+  expect(stageName(500, { ...WIDTHS, crumbs: 0 })).toBe("unfolded");
+  expect(stageName(500, { ...WIDTHS, searchIcon: 0 })).toBe("unfolded");
 });
 
-test("a longer name or scope folds at a wider bar", () => {
-  const at = (texts: TitleBarTexts) => {
-    for (let width = 1800; width > 0; width--) {
-      if (titleBarStage(width, texts).searchFolded) return width;
-    }
-    return 0;
-  };
-  const wide = at(PRODUCTION);
-  expect(
-    at({ ...PRODUCTION, scope: "payments, checkout, ledger" }),
-  ).toBeGreaterThan(wide);
-  expect(
-    at({ ...PRODUCTION, name: "prod-eu + staging + dev" }),
-  ).toBeGreaterThan(wide);
-});
-
-test("a space with no chip leaves the chip's room to the name and the scope", () => {
-  const without = { ...PRODUCTION, chip: undefined };
-  expect(folds(800, PRODUCTION)).toEqual([true, true]);
-  expect(folds(800, without)).toEqual([true, false]);
+test("a space with no chip goes from the search straight to the end", () => {
+  const without = { ...WIDTHS, crumbsChipFolded: WIDTHS.crumbs };
+  expect(stagesAsItNarrows(without)).toEqual([
+    "unfolded",
+    "search",
+    "search at the end",
+  ]);
 });
