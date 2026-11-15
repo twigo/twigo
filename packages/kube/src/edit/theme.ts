@@ -59,13 +59,9 @@ function themeData(
   };
 }
 
-let applied: boolean | undefined;
-
 function apply(): void {
   const root = document.documentElement;
   const dark = root.classList.contains("dark");
-  if (dark === applied) return;
-  applied = dark;
   const style = getComputedStyle(root);
   const name = dark ? "twigo-dark" : "twigo-light";
   editor.defineTheme(

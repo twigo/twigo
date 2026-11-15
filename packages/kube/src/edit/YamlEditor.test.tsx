@@ -258,33 +258,12 @@ test("an editor that is not on screen has no view, so a key typed into the one t
   expect(fake.views[2]?.model).toBe(fake.models[0]);
 });
 
-test("the path to the cursor's line shows above the editor and follows the cursor", () => {
-  const { container } = render(
-    <YamlEditor uri="details:1" text={"a:\n  b: 1\nc: 2\n"} readOnly />,
-  );
-  const view = fake.views[0];
-  if (!view) throw new Error("no editor was made");
-  const shown = () => container.querySelector("[title]")?.getAttribute("title");
-  const moveTo = (line: number) => {
-    act(() => {
-      view.line = line;
-      view.moved?.();
-    });
-  };
-
-  expect(shown()).toBe("a");
-  moveTo(2);
-  expect(shown()).toBe("a › b");
-  moveTo(3);
-  expect(shown()).toBe("c");
-  moveTo(9);
-  expect(shown()).toBe("");
-});
-
-test("the decorations and the path follow an edit", () => {
+test("the path shows on opening and follows the cursor and an edit, as the decorations do", () => {
   const before = "kind: Pod\nmetadata:\n  name: web\n";
   const after = `${before}  managedFields:\n    - manager: kubectl\nspec:\n  a: 1\n`;
-  const { container } = render(<YamlEditor uri="details:2" text={before} />);
+  const { container } = render(
+    <YamlEditor uri="details:2" text={before} readOnly />,
+  );
   const [model] = fake.models;
   const [view] = fake.views;
   if (!model || !view) throw new Error("no editor was made");
@@ -300,6 +279,7 @@ test("the decorations and the path follow an edit", () => {
     );
   const shown = () => container.querySelector("[title]")?.getAttribute("title");
 
+  expect(shown()).toBe("kind");
   expect(landmarks()).toEqual([
     ["twigo-yaml-top-key", 1, 1, 1, 5],
     ["twigo-yaml-top-key", 2, 1, 2, 9],

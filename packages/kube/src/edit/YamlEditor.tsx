@@ -236,9 +236,6 @@ function ShownYamlEditor({
       }
     };
     if (buffers?.takeFocus(uri)) instance.focus();
-    const content = created.onDidChangeContent(() => {
-      if (!setting.current) changed.current?.(created.getValue());
-    });
     let outlined: { version: number; entries: readonly Entry[] } | undefined;
     const outline = () => {
       const version = created.getVersionId();
@@ -260,7 +257,8 @@ function ShownYamlEditor({
       );
     };
     follow();
-    const marked = created.onDidChangeContent(() => {
+    const content = created.onDidChangeContent(() => {
+      if (!setting.current) changed.current?.(created.getValue());
       marks.set(landmarks(outline(), created));
       follow();
     });
@@ -270,7 +268,6 @@ function ShownYamlEditor({
       buffer.view = instance.saveViewState();
       buffer.focus = undefined;
       content.dispose();
-      marked.dispose();
       moved.dispose();
       instance.dispose();
       if (!buffers) created.dispose();

@@ -5,7 +5,7 @@
  * none. `generated` is where the generated part starts (`Row.generated`).
  */
 export function splitName(name: string, generated: number | null) {
-  if (generated === null || generated <= 0 || generated >= name.length) {
+  if (generated === null) {
     return { first: name, hash: "", last: "" };
   }
   const rest = name.slice(generated);

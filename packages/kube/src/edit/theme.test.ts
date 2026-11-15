@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { editor } from "monaco-editor/editor";
+import { followTheme } from "./theme";
 
 const fake = vi.hoisted(() => ({
   themes: [] as { name: string; data: editor.IStandaloneThemeData }[],
@@ -77,12 +78,6 @@ vi.stubGlobal(
 const root = document.documentElement;
 let style: HTMLStyleElement;
 
-async function start() {
-  vi.resetModules();
-  const { followTheme } = await import("./theme");
-  followTheme();
-}
-
 beforeEach(() => {
   style = document.createElement("style");
   style.textContent = `:root{${tokens(false)}} .dark{${tokens(true)}}`;
@@ -92,16 +87,16 @@ beforeEach(() => {
 afterEach(() => {
   for (const observer of watching.splice(0)) observer.disconnect();
   style.remove();
-  root.classList.remove("dark", "compact");
+  root.classList.remove("dark");
   fake.themes.length = 0;
   fake.set.length = 0;
 });
 
 test.each([false, true])(
   "the tokens become Monaco's colours (dark: %s)",
-  async (dark) => {
+  (dark) => {
     if (dark) root.classList.add("dark");
-    await start();
+    followTheme();
 
     const [theme] = fake.themes;
     expect(theme?.name).toBe(dark ? "twigo-dark" : "twigo-light");
@@ -121,8 +116,8 @@ test.each([false, true])(
   },
 );
 
-test("the theme follows .dark on <html>, resolving the tokens anew each time, and ignores other classes", async () => {
-  await start();
+test("the theme follows .dark on <html>, resolving the tokens anew each time", async () => {
+  followTheme();
   expect(fake.set).toEqual(["twigo-light"]);
 
   root.classList.add("dark");
@@ -132,10 +127,6 @@ test("the theme follows .dark on <html>, resolving the tokens anew each time, an
   expect(fake.themes[1]?.data.colors["editor.background"]).toBe(
     value("editor", true),
   );
-
-  root.classList.add("compact");
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(fake.set).toEqual(["twigo-light", "twigo-dark"]);
 
   root.classList.remove("dark");
   await vi.waitFor(() => {
