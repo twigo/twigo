@@ -5,6 +5,7 @@ import {
   type LogsSnapshot,
   type LogTarget,
   type LogView,
+  type ViewState,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
@@ -76,6 +77,13 @@ const INITIAL: LogsTab = {
   fields: false,
 };
 
+/** The states of a stream that stays down until the person acts; the others run, or will by themselves. */
+const DOWN: ReadonlySet<ViewState["state"]> = new Set([
+  "error",
+  "forbidden",
+  "unauthorized",
+]);
+
 /**
  * Each logs tab's choices and its session in Rust, by the tab's URI, so a
  * tab that mounts again, as panel tabs do when they show, keeps its lines;
@@ -85,6 +93,8 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
+  /** The tabs whose stream is down. */
+  readonly #down = new Set<string>();
   /** Where each paused list stands, kept as it scrolls, so a tab that mounts again stands there. */
   readonly #places = new Map<string, LinePlace>();
   /** The pods each tab saw join, from their Joined entries, which stand out in its lines. */
@@ -115,10 +125,10 @@ export class LogsTabs {
     this.changes.emit();
   }
 
-  /** How many tabs of a space hold a session that runs on. */
+  /** How many tabs of a space hold a session whose stream is not down. */
   live(space: string): number {
     return [...this.#sessions.keys()].filter(
-      (uri) => parseLogsUri(uri)?.space === space,
+      (uri) => parseLogsUri(uri)?.space === space && !this.#down.has(uri),
     ).length;
   }
 
@@ -248,6 +258,12 @@ export class LogsTabs {
    * newest once its line is gone, and a step that waited for its search.
    */
   #onBatch(uri: string, snapshot: LogsSnapshot): void {
+    const down = DOWN.has(snapshot.status.state);
+    if (down !== this.#down.has(uri)) {
+      if (down) this.#down.add(uri);
+      else this.#down.delete(uri);
+      this.changes.emit();
+    }
     for (const entry of snapshot.window?.entries ?? []) {
       if (entry.type !== "joined") continue;
       let joined = this.#joined.get(uri);
@@ -280,6 +296,7 @@ export class LogsTabs {
   closed(uri: string): void {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);
+    this.#down.delete(uri);
     this.#joined.delete(uri);
     this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();

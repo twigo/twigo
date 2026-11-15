@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { LogBatch, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { WorkbenchView } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
@@ -158,6 +159,73 @@ test("a session that ends by itself keeps its tab and the panel, and is not coun
   await run("workbench.action.closePanel");
   expect(tabsIn("panel")).toEqual([uri]);
   expect(within(statusBar()).queryByText(/sessions?$/)).toBeNull();
+});
+
+const STREAMS: readonly [ViewState, boolean][] = [
+  [{ state: "queued" }, true],
+  [{ state: "connecting" }, true],
+  [{ state: "syncing", loaded: 3 }, true],
+  [{ state: "ready" }, true],
+  [{ state: "relisting" }, true],
+  [{ state: "stale" }, true],
+  [{ state: "forbidden", verb: "get", resource: "pods/log" }, false],
+  [{ state: "unauthorized" }, false],
+  [
+    { state: "error", error: { kind: "unavailable", message: "broken" } },
+    false,
+  ],
+];
+
+test.each(STREAMS)(
+  "a logs session whose stream is %j is counted: %s, and the count follows it",
+  async (status, counted) => {
+    const { run, backend } = await mounted();
+    const subscribe = vi.spyOn(backend, "subscribe");
+    await run("k8s.logs.open", TARGET);
+    const opened = subscribe.mock.calls.find(
+      ([command]) => command === "logs_open",
+    );
+    if (!opened) throw new Error("no logs session opened");
+    const send = opened[2] as (batch: LogBatch) => void;
+    let seq = 1000;
+    const stream = (state: ViewState) => {
+      act(() => {
+        send({
+          seq: seq++,
+          status: state,
+          pods: null,
+          total: 0,
+          window: null,
+          matches: null,
+          histogram: null,
+          dropped: 0,
+          arrived: 0,
+          changes: 0,
+        });
+      });
+    };
+    await run("workbench.action.closePanel");
+    stream({ state: "ready" });
+    expect(within(statusBar()).queryByText("1 session")).not.toBeNull();
+
+    stream(status);
+    expect(within(statusBar()).queryByText("1 session") !== null).toBe(counted);
+    stream({ state: "ready" });
+    expect(within(statusBar()).queryByText("1 session")).not.toBeNull();
+  },
+);
+
+test("while the panel is hidden the status bar counts the sessions in one entry, and shows the shells' own once the panel shows", async () => {
+  const { run } = await mounted();
+  await run("k8s.shell.open", { ...TARGET, container: "api" });
+  expect(within(statusBar()).queryByText("1 shell")).not.toBeNull();
+  expect(within(statusBar()).queryByText("1 session")).toBeNull();
+  await run("workbench.action.closePanel");
+  expect(within(statusBar()).queryByText("1 shell")).toBeNull();
+  expect(within(statusBar()).queryByText("1 session")).not.toBeNull();
+  await run("workbench.action.togglePanel");
+  expect(within(statusBar()).queryByText("1 shell")).not.toBeNull();
+  expect(within(statusBar()).queryByText("1 session")).toBeNull();
 });
 
 const close = (name: string) => {

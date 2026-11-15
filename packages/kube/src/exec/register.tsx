@@ -248,6 +248,9 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
       const live = tabs
         .list()
         .filter(([, tab]) => tab.input.space === space && tab.live);
+      const hidden =
+        space !== undefined &&
+        !workbench.spaces.state(space).parts.panel.visible;
       const entry: StatusEntry = {
         id: "shells",
         text: live.length === 1 ? "1 shell" : `${String(live.length)} shells`,
@@ -257,7 +260,7 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
           void commands.execute("k8s.shell.show", keys.lookup(null));
         },
       };
-      return live.length === 0 ? [] : [entry];
+      return live.length === 0 || hidden ? [] : [entry];
     },
   });
 }
