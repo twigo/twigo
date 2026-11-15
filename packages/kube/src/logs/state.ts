@@ -93,7 +93,6 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
-  /** The tabs whose stream is down. */
   readonly #down = new Set<string>();
   /** Where each paused list stands, kept as it scrolls, so a tab that mounts again stands there. */
   readonly #places = new Map<string, LinePlace>();
