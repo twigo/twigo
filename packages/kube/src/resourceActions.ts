@@ -45,8 +45,8 @@ const ALWAYS = "true";
 
 /**
  * That a container of the pod runs, as its details' Overview says; the
- * list, the palette and the keys never know, so there `shell_containers`
- * decides.
+ * list, the keys and a palette opened outside the details never know, so
+ * there `shell_containers` decides.
  */
 const RUNS = {
   when: "!resource.noContainerRuns",
