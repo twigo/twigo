@@ -156,3 +156,38 @@ test("a tab's tooltip is what its editor says now, asked each time it opens, and
     vi.useRealTimers();
   }
 });
+
+test("a tab pressed does not open its tooltip, however long the press is held, and opens it again once the button is up", async () => {
+  const workbench = await testWorkbench();
+  vi.useFakeTimers();
+  try {
+    workbench.editors.register({
+      id: "test.note",
+      scheme: "note",
+      title: (uri) => uri.host,
+      tooltip: () => "prod-eu › payments",
+      component: ({ uri }) => <p>body of {uri}</p>,
+    });
+    render(<WorkbenchView workbench={workbench} />);
+    act(() => {
+      workbench.editors.open("note://a");
+    });
+    const tab = document.querySelector(".dv-tab [data-slot=tooltip-trigger]");
+    if (!tab) throw new Error("no tab");
+    const shown = () => screen.queryAllByRole("tooltip").length;
+    const wait = () => act(() => vi.advanceTimersByTimeAsync(400));
+
+    fireEvent.pointerMove(tab, { pointerType: "mouse" });
+    fireEvent.pointerDown(tab, { pointerType: "mouse" });
+    await wait();
+    expect(shown()).toBe(0);
+
+    fireEvent.pointerCancel(tab, { pointerType: "mouse" });
+    fireEvent.pointerLeave(tab, { pointerType: "mouse" });
+    fireEvent.pointerMove(tab, { pointerType: "mouse" });
+    await wait();
+    expect(shown()).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
