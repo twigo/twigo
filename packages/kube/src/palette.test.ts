@@ -21,6 +21,7 @@ async function withEveryEnablement() {
   workbench.keys.set("terminalOpen", true);
   workbench.keys.set("logsFocus", true);
   workbench.keys.set("logLines", true);
+  workbench.keys.set("logsReopenable", true);
   workbench.keys.set("panelVisible", true);
   workbench.keys.set("panelMaximized", true);
   workbench.keys.set("editor.open", true);

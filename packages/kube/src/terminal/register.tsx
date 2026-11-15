@@ -65,6 +65,16 @@ export function registerTerminals(
     focus: (uri) => {
       tabs.get(uri)?.focus();
     },
+    keep: (uri) => {
+      const input = parseTerminalUri(uri);
+      return () => {
+        if (input) {
+          start(input).catch((error: unknown) => {
+            workbench.report(error);
+          });
+        }
+      };
+    },
   });
 
   /** Creates the terminal of `input`'s space, and opens its tab at `input`'s URI once the core answers. */
@@ -140,6 +150,7 @@ export function registerTerminals(
     enablement: "space.count > 0",
     run: open,
   });
+  menus.append("panel/empty", { command: NEW_TERMINAL, order: 0 });
 
   commands.register({
     id: TOGGLE_TERMINAL,

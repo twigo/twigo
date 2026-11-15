@@ -9,6 +9,7 @@ import {
 import type { LinePlace } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
 import { Changes } from "@twigo/workbench";
+import { parseLogsUri } from "../uri";
 import { anchoredMatch, currentMatch, standingMatch } from "./entries";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
@@ -105,6 +106,20 @@ export class LogsTabs {
       if (after.view !== before.view) session.setView(after.view);
     }
     this.changes.emit();
+  }
+
+  /** A closed tab's choices back for its tab to open with: what it reads and how it shows it, not where it stood. */
+  restore(uri: string, tab: LogsTab): void {
+    const { source, view, wrap, timestamps } = tab;
+    this.#tabs.set(uri, { ...INITIAL, source, view, wrap, timestamps });
+    this.changes.emit();
+  }
+
+  /** How many tabs of a space hold a session that runs on. */
+  live(space: string): number {
+    return [...this.#sessions.keys()].filter(
+      (uri) => parseLogsUri(uri)?.space === space,
+    ).length;
   }
 
   /**

@@ -25,6 +25,7 @@ import { createTerminalTabs, registerTerminals } from "./terminal/register";
 import { LogsTabs } from "./logs/state";
 import { registerResourceActions } from "./resourceActions";
 import { editorSpace } from "./edit/services";
+import { registerSessions } from "./sessions";
 import { createServices, type ListServices } from "./services";
 import {
   DIFF_SCHEME,
@@ -203,9 +204,13 @@ export function registerKube(workbench: Workbench): void {
   keybindings.register("core", [
     { key: "escape", command: "k8s.details.close", when: "detailsOpen" },
   ]);
-  registerLogs(workbench, new LogsTabs(workbench.backend));
-  registerExec(workbench, createExecTabs(workbench));
-  registerTerminals(workbench, createTerminalTabs(workbench));
+  const logs = new LogsTabs(workbench.backend);
+  const shells = createExecTabs(workbench);
+  const terminals = createTerminalTabs(workbench);
+  registerLogs(workbench, logs);
+  registerExec(workbench, shells);
+  registerTerminals(workbench, terminals);
+  registerSessions(workbench, { logs, shells, terminals });
   registerForwards(workbench, new Forwards(workbench.backend));
   registerResourceActions(workbench, services);
   registerEdits(workbench, {

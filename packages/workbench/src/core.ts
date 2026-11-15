@@ -211,7 +211,7 @@ export function registerCore(workbench: Workbench): void {
       id: "workbench.action.maximizePanel",
       title: "Maximize Panel Size",
       icon: ChevronUp,
-      when: "!panelMaximized",
+      when: "!panelMaximized && panelHasEditor",
       // Maximizing a maximized panel changes nothing, so it waits for no state.
       part: { visible: true, maximized: true },
     },
@@ -278,7 +278,7 @@ export function registerCore(workbench: Workbench): void {
       title: "Close Editor",
       key: "mod+w",
       run: (uri) => {
-        editors.close(uri);
+        editors.dismiss(uri);
       },
     },
     {
@@ -305,6 +305,19 @@ export function registerCore(workbench: Workbench): void {
       },
     },
   ];
+  commands.register({
+    id: "workbench.action.reopenClosedEditor",
+    title: "Reopen Closed Editor",
+    category: "Editor",
+    run: () => {
+      const space = spaces.active;
+      if (space) editors.reopen(space.id);
+    },
+  });
+  rules.push({
+    key: "mod+shift+t",
+    command: "workbench.action.reopenClosedEditor",
+  });
   for (const { id, title, key, run } of editor) {
     commands.register({
       id,
@@ -333,7 +346,14 @@ export function registerCore(workbench: Workbench): void {
   keybindings.register("core", rules);
 
   const menubar: readonly [MenuId, string, readonly string[]][] = [
-    ["menubar/file", "1_editor", ["workbench.action.closeActiveEditor"]],
+    [
+      "menubar/file",
+      "1_editor",
+      [
+        "workbench.action.closeActiveEditor",
+        "workbench.action.reopenClosedEditor",
+      ],
+    ],
     ["menubar/view", "1_parts", TOGGLES.map(({ id }) => id)],
     ["menubar/view", "2_views", ["workbench.action.moveView"]],
     [

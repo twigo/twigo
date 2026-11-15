@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { useEditorShown } from "../react";
 import { tabsIn, testWorkbench } from "../testing";
@@ -468,6 +475,7 @@ test("the panel's layout comes back with its space", async () => {
   const saved = workbench.spaces.state(space()).panelEditors;
   expect(JSON.stringify(saved)).toContain("session://x");
   cleanup();
+  expect(workbench.spaces.state(space()).parts.panel.visible).toBe(true);
   render(<WorkbenchView workbench={workbench} />);
   expect(tabsIn("panel")).toEqual(["session://x"]);
 });
@@ -665,7 +673,301 @@ test("closing the active editor closes the panel's while a maximized panel cover
   await act(close);
   expect(tabsIn("panel")).toEqual([]);
   expect(tabsIn("editor")).toEqual(["note://a"]);
-  await act(close);
-  expect(tabsIn("editor")).toEqual(["note://a"]);
   outside.remove();
+});
+
+const CLOSERS: readonly [
+  string,
+  (workbench: Awaited<ReturnType<typeof mounted>>["workbench"]) => unknown,
+][] = [
+  [
+    "its tab's X",
+    () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close x" }));
+    },
+  ],
+  [
+    "a middle click",
+    () => {
+      const tab = screen.getByRole("button", { name: "Close x" }).parentElement;
+      if (!tab) throw new Error("no tab");
+      fireEvent(tab, new MouseEvent("auxclick", { button: 1, bubbles: true }));
+    },
+  ],
+  [
+    "a key",
+    (workbench) =>
+      workbench.commands.execute(
+        "workbench.action.closeActiveEditor",
+        workbench.keys.lookup(null),
+      ),
+  ],
+];
+
+test.each(CLOSERS)(
+  "closing the panel's last editor by %s leaves maximize, hides the panel and keeps its layout",
+  async (_gesture, close) => {
+    const { workbench, editors, panel } = await mounted();
+    act(() => {
+      editors.open("note://a");
+      editors.open("session://x");
+    });
+    await act(() => maximize(workbench));
+    expect(panel()).toEqual({ visible: true, maximized: true });
+    await act(async () => {
+      await close(workbench);
+    });
+    expect(tabsIn("panel")).toEqual([]);
+    expect(panel()).toEqual({ visible: false, maximized: false });
+    expect(panelElement()?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByText("note note://a").closest("[inert]")).toBeNull();
+  },
+);
+
+test("closing one of the panel's editors leaves the panel", async () => {
+  const { editors, panel } = await mounted();
+  act(() => {
+    editors.open("session://x");
+    editors.open("session://y");
+  });
+  act(() => {
+    editors.dismiss("session://x");
+  });
+  expect(tabsIn("panel")).toEqual(["session://y"]);
+  expect(panel().visible).toBe(true);
+});
+
+test("closing the last editor of the editor area leaves the panel", async () => {
+  const { editors, panel } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("session://x");
+  });
+  act(() => {
+    editors.dismiss("note://a");
+  });
+  expect(panel().visible).toBe(true);
+});
+
+test("a close the app makes leaves the panel, and the focus where it is", async () => {
+  const { workbench, editors, panel } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("field://a").focus();
+  });
+  act(() => {
+    editors.close("input://x");
+  });
+  expect(tabsIn("panel")).toEqual([]);
+  expect(panel().visible).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("a space that gives way, and an editor moved to another group, hide nothing", async () => {
+  const { workbench, editors, space, panel } = await mounted();
+  withFields(workbench);
+  const first = space();
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+    editors.open("input://y");
+  });
+  act(() => {
+    screen.getByLabelText("input://y").focus();
+  });
+  act(() => {
+    editors.moveActive("right", "panel");
+  });
+  expect(panel().visible).toBe(true);
+  expect(panelElement()?.contains(document.activeElement)).toBe(true);
+  const other = workbench.spaces.list.find((each) => each.id !== first);
+  if (!other) throw new Error("the mock lists one space");
+  act(() => {
+    workbench.spaces.select(other.id);
+  });
+  expect(workbench.spaces.state(first).parts.panel.visible).toBe(true);
+  act(() => {
+    workbench.spaces.select(first);
+  });
+  expect(tabsIn("panel").sort()).toEqual(["input://x", "input://y"]);
+  expect(panel().visible).toBe(true);
+});
+
+test("hiding the panel by its last close gives the focus back to the element that held it before the panel took it", async () => {
+  const { workbench, editors, panel } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  const before = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    before.focus();
+  });
+  act(() => {
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("input://x"));
+  act(() => {
+    editors.dismiss("input://x");
+  });
+  expect(panel().visible).toBe(false);
+  expect(document.activeElement).toBe(before);
+  before.remove();
+});
+
+test("it goes to the editor area's active editor when that element cannot take the focus", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+  });
+  const before = document.body.appendChild(document.createElement("button"));
+  act(() => {
+    before.focus();
+  });
+  act(() => {
+    editors.open("input://x");
+  });
+  act(() => {
+    screen.getByLabelText("input://x").focus();
+  });
+  before.remove();
+  act(() => {
+    editors.dismiss("input://x");
+  });
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
+});
+
+test("a focus that is elsewhere stays where it is when the panel hides", async () => {
+  const { workbench, editors, panel } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("input://x");
+  });
+  const outside = document.body.appendChild(document.createElement("input"));
+  act(() => {
+    outside.focus();
+  });
+  act(() => {
+    editors.dismiss("input://x");
+  });
+  expect(panel().visible).toBe(false);
+  expect(document.activeElement).toBe(outside);
+  outside.remove();
+});
+
+test("a hidden panel with an editor in it is shown again by opening it, and the editor is still there", async () => {
+  const { workbench, editors, panel } = await mounted();
+  act(() => {
+    editors.open("session://x");
+    editors.open("session://y");
+  });
+  act(() => {
+    workbench.spaces.setPart(workbench.spaces.active?.id ?? "", "panel", {
+      visible: false,
+    });
+  });
+  expect(tabsIn("panel").sort()).toEqual(["session://x", "session://y"]);
+  act(() => {
+    editors.open("session://x");
+  });
+  expect(panel().visible).toBe(true);
+  expect(editors.activeIn("panel")).toBe("session://x");
+});
+
+function emptyPanel() {
+  return within(panelElement() as HTMLElement);
+}
+
+test("an empty panel shown on purpose keeps its strip with Hide, and names the space with what it offers", async () => {
+  const { workbench, editors, space } = await mounted();
+  workbench.commands.register({
+    id: "test.start",
+    title: "Start Something",
+    category: "Test",
+    run: () => undefined,
+  });
+  workbench.menus.append("panel/empty", { command: "test.start", order: 0 });
+  act(() => {
+    editors.open("session://x");
+  });
+  act(() => {
+    editors.dismiss("session://x");
+  });
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.togglePanel",
+      workbench.keys.lookup(null),
+    ),
+  );
+  expect(workbench.spaces.state(space()).parts.panel.visible).toBe(true);
+  const contexts = workbench.spaces.active?.contexts.join(" + ") ?? "";
+  expect(emptyPanel().getByText(`No sessions in ${contexts}`)).toBeTruthy();
+  expect(
+    emptyPanel().getByRole("button", { name: "Start Something" }),
+  ).toBeTruthy();
+  expect(emptyPanel().getByRole("button", { name: "Hide Panel" })).toBeTruthy();
+  expect(
+    emptyPanel().queryByRole("button", { name: "Maximize Panel Size" }),
+  ).toBeNull();
+});
+
+test("a panel that never held an editor, and one restored empty, keep their strip with Hide", async () => {
+  const { workbench, space } = await mounted();
+  await act(() =>
+    workbench.commands.execute(
+      "workbench.action.togglePanel",
+      workbench.keys.lookup(null),
+    ),
+  );
+  expect(workbench.spaces.state(space()).parts.panel.visible).toBe(true);
+  expect(emptyPanel().getByRole("button", { name: "Hide Panel" })).toBeTruthy();
+  await act(() => Promise.resolve());
+  cleanup();
+  render(<WorkbenchView workbench={workbench} />);
+  expect(emptyPanel().getByRole("button", { name: "Hide Panel" })).toBeTruthy();
+  act(() => {
+    workbench.editors.open("session://x");
+  });
+  expect(tabsIn("panel")).toEqual(["session://x"]);
+  expect(
+    document.querySelectorAll('[aria-label="Panel"] .dv-groupview'),
+  ).toHaveLength(1);
+});
+
+test("an editor closed for a space whose dock is not shown closes when it mounts, and the panel stays", async () => {
+  const { workbench, editors } = await mounted();
+  workbench.editors.register({
+    id: "test.tied",
+    scheme: "tied",
+    area: "panel",
+    title: (uri) => uri.host,
+    space: (uri) => uri.searchParams.get("space") ?? undefined,
+    component: ({ uri }) => <p>tied {uri}</p>,
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  act(() => {
+    editors.open("tied://a?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("prod-eu");
+  });
+  act(() => {
+    editors.close("tied://a?space=staging");
+  });
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(tabsIn("panel")).toEqual([]);
+  expect(workbench.spaces.state("staging").parts.panel.visible).toBe(true);
 });

@@ -709,7 +709,11 @@ test("closing an editor says so, while moving it or switching spaces does not", 
       workbench.keys.lookup(null),
     );
   });
-  expect(document.querySelectorAll(".dv-groupview")).toHaveLength(2);
+  expect(
+    document.querySelectorAll(
+      ".twigo-dockview:not(.twigo-panel) .dv-groupview",
+    ),
+  ).toHaveLength(2);
   act(() => {
     workbench.spaces.select("staging");
   });

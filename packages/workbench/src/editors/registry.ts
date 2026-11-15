@@ -35,6 +35,12 @@ export interface EditorProvider {
   readonly focus?: (uri: string) => void;
   /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
   readonly actions?: ComponentType<EditorProps>;
+  /**
+   * Read as the person closes the editor: what it keeps to come back, as the
+   * function that brings it back where reopening it would open its URI anew.
+   * A session cannot be restored, so a shell's starts a new one.
+   */
+  readonly keep?: (uri: string) => () => void;
 }
 
 /** A place in an editor that `@` in quick access goes to, such as a YAML key. */
@@ -69,6 +75,16 @@ export interface OpenOptions {
 export const EDITOR_COMPONENT = "editor";
 export const EDITOR_TAB = "editor-tab";
 
+const CLOSED_LIMIT = 20;
+
+/** An editor the person closed, as {@link Editors.dismiss} remembers it. */
+interface Closed {
+  readonly uri: string;
+  readonly scheme: string;
+  readonly space: string | undefined;
+  readonly reopen: (() => void) | undefined;
+}
+
 /**
  * Opens editors in the active space's editor area and its panel. Each area
  * attaches its dockview while it is mounted; panels are keyed by URI, so
@@ -99,17 +115,22 @@ export class Editors {
   >();
   /** Titles editors set before their dock was attached, which a restored layout's panels do. */
   readonly #titles = new Map<string, string>();
+  #closing: Closed[] = [];
+  /** The last element outside the panel to hold the focus: where it goes back to when the panel hides. */
+  #outside: HTMLElement | undefined;
   #active: string | undefined;
 
   /**
-   * `reveal` shows a hidden area before an editor opens in it, `saved` reads
-   * the layout a space keeps for an area, and `onScreen` says whether an area
-   * is on screen: not a hidden panel, nor the editor area under a maximized
-   * one, which take no focus.
+   * `reveal` shows a hidden area before an editor opens in it, `hidePanel`
+   * hides the panel and leaves its maximize, `saved` reads the layout a space
+   * keeps for an area, and `onScreen` says whether an area is on screen: not
+   * a hidden panel, nor the editor area under a maximized one, which take no
+   * focus.
    */
   constructor(
     private readonly keys: ContextKeys,
     private readonly reveal: (area: Area) => void,
+    private readonly hidePanel: () => void,
     private readonly saved: (space: string, area: Area) => unknown,
     readonly onScreen: (area: Area) => boolean,
   ) {}
@@ -137,6 +158,10 @@ export class Editors {
   /** The URI of the editor area's active editor; the panel's does not count. */
   get active(): string | undefined {
     return this.#active;
+  }
+
+  holds(area: Area): boolean {
+    return (this.#apis.get(area)?.panels.length ?? 0) > 0;
   }
 
   /** The active editor of an area. */
@@ -188,6 +213,13 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
+    const focusin = (event: FocusEvent) => {
+      const { target } = event;
+      if (target instanceof HTMLElement && !this.#inArea("panel", target)) {
+        this.#outside = target;
+      }
+    };
+    if (area === "panel") document.addEventListener("focusin", focusin);
     if (area === "editor") this.#setActive(api.activePanel);
     if (area === this.#front) this.keepFocus(area);
     for (const [uri, later] of [...this.#leaving]) {
@@ -207,6 +239,7 @@ export class Editors {
       active.dispose();
       removal.dispose();
       added?.dispose();
+      if (area === "panel") document.removeEventListener("focusin", focusin);
       if (this.#apis.get(area) === api) {
         this.#apis.delete(area);
         this.#spaces.delete(area);
@@ -364,6 +397,70 @@ export class Editors {
     }
   }
 
+  /**
+   * Closes an editor at the person's own act: its tab's X, a middle click or
+   * a key. The panel's last editor going this way hides the panel, which
+   * leaves its maximize, and gives the focus back to the element that held it
+   * before the panel took it, else to the editor area's active editor; closed
+   * by the app, as {@link close} does, the panel stays as it is. The editor
+   * can be brought back with {@link reopen}.
+   */
+  dismiss(uri: string): void {
+    const open = this.#find(uri);
+    if (!open) {
+      this.close(uri);
+      return;
+    }
+    const provider = this.resolve(uri);
+    if (provider) {
+      this.#closing = [
+        ...this.#closing.filter((closed) => closed.uri !== uri),
+        {
+          uri,
+          scheme: provider.scheme,
+          space: provider.space?.(new URL(uri)),
+          reopen: provider.keep?.(uri),
+        },
+      ].slice(-CLOSED_LIMIT);
+    }
+    const last =
+      open.area === "panel" && this.#apis.get("panel")?.panels.length === 1;
+    if (!last) {
+      this.close(uri);
+      this.changes.emit();
+      return;
+    }
+    this.#waiting.delete(uri);
+    open.panel.api.close();
+    const focused = document.activeElement;
+    const held =
+      focused === null ||
+      focused === document.body ||
+      this.#inArea("panel", focused);
+    const before = this.#outside;
+    this.hidePanel();
+    if (held) this.returnFocus(before);
+    this.changes.emit();
+  }
+
+  /**
+   * The editor the person closed last in a space, whose scheme is `scheme`
+   * when one is given, unless it is open again.
+   */
+  lastClosed(space: string, scheme?: string): string | undefined {
+    return this.#lastClosed(space, scheme)?.uri;
+  }
+
+  /** Brings back what {@link lastClosed} tells of; tells whether there was one. */
+  reopen(space: string, scheme?: string): boolean {
+    const closed = this.#lastClosed(space, scheme);
+    if (!closed) return false;
+    this.#closing.splice(this.#closing.indexOf(closed), 1);
+    if (closed.reopen) closed.reopen();
+    else this.open(closed.uri);
+    return true;
+  }
+
   /** Moves an area's active editor into a new group beside its own. */
   moveActive(side: "right" | "bottom", area: Area = "editor"): void {
     const panel = this.#apis.get(area)?.activePanel;
@@ -480,6 +577,24 @@ export class Editors {
       if (api.groups.some((group) => group.element === element)) return true;
     }
     return false;
+  }
+
+  #lastClosed(space: string, scheme?: string): Closed | undefined {
+    const found = this.#closing.filter(
+      (closed) =>
+        (closed.space === undefined || closed.space === space) &&
+        (scheme === undefined || closed.scheme === scheme) &&
+        !this.#find(closed.uri),
+    );
+    return found[found.length - 1];
+  }
+
+  #inArea(area: Area, element: Element | null): boolean {
+    return (
+      this.#apis
+        .get(area)
+        ?.groups.some((group) => group.element.contains(element)) ?? false
+    );
   }
 
   #inGroup(element: Element | null): boolean {

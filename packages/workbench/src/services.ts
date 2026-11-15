@@ -50,6 +50,14 @@ export class Workbench {
         area === "panel" ? { visible: true } : { maximized: false },
       );
     },
+    () => {
+      const space = this.spaces.active;
+      if (!space) return;
+      this.spaces.setPart(space.id, "panel", {
+        visible: false,
+        maximized: false,
+      });
+    },
     (space, area) => {
       const state = this.spaces.state(space);
       return area === "panel" ? state.panelEditors : state.editors;

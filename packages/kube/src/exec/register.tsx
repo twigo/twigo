@@ -60,6 +60,16 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     focus: (uri) => {
       tabs.get(uri)?.focus();
     },
+    keep: (uri) => {
+      const input = parseExecUri(uri);
+      return () => {
+        if (input) {
+          start(input).catch((error: unknown) => {
+            workbench.report(error);
+          });
+        }
+      };
+    },
   });
 
   const targetOf = (input: ExecInput, container: string): ShellTarget => ({

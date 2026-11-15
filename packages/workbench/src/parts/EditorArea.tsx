@@ -150,6 +150,7 @@ export function SpaceDock({
         workbench.report(error);
       }
     }
+    if (area === "panel" && ready.groups.length === 0) ready.addGroup();
     setApi(ready);
   };
 
@@ -172,6 +173,7 @@ export function SpaceDock({
         tabComponents={TABS}
         rightHeaderActionsComponent={actions}
         watermarkComponent={watermark}
+        noPanelsOverlay={area === "panel" ? "emptyGroup" : undefined}
         disableAutoResizing
         onReady={onReady}
       />
@@ -247,9 +249,16 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
   );
 }
 
-export function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
+export function GroupActions({
+  activePanel,
+  panels,
+}: IDockviewHeaderActionsProps) {
   const { editors } = useWorkbench();
-  const params = readParams(activePanel?.params);
+  const params = readParams(
+    activePanel && panels.includes(activePanel)
+      ? activePanel.params
+      : undefined,
+  );
   const provider = params && editors.resolve(params.uri);
   if (!params || !provider?.actions) return null;
   const Actions = provider.actions;
@@ -273,7 +282,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         if (params) editors.pin(params.uri);
       }}
       onAuxClick={(event) => {
-        if (event.button === 1) editors.close(api.id);
+        if (event.button === 1) editors.dismiss(api.id);
       }}
     >
       {params && provider?.icon && (
@@ -291,7 +300,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         data-dirty={dirty}
         onClick={(event) => {
           event.stopPropagation();
-          editors.close(api.id);
+          editors.dismiss(api.id);
         }}
         className={cn(
           "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",

@@ -60,7 +60,7 @@ export function ForwardEditor({
         action={{
           label: "Close",
           onClick: () => {
-            editors.close(uri);
+            editors.dismiss(uri);
           },
         }}
         className="h-full"
