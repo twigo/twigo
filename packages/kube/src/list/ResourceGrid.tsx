@@ -229,6 +229,18 @@ function Grid({
       return merged ? { ...column, merged } : column;
     });
   const byName = new Map(columns.map((column) => [column.name, column]));
+  const mergedRoom = (name: string) =>
+    byName.get(name)?.merged?.rule.into?.room ?? 0;
+  const widened = Object.fromEntries(
+    columns
+      .filter(
+        (column) => column.merged && preset.widths[column.name] !== undefined,
+      )
+      .map((column) => [
+        column.name,
+        widthOf(column) + mergedRoom(column.name),
+      ]),
+  );
   const sorted = shown?.sort;
   const sortLost =
     sorted && gone.has(sorted.column)
@@ -241,7 +253,7 @@ function Grid({
     return {
       id: column.name,
       title: column.name,
-      width: column.rule.width + (column.merged?.rule.into?.room ?? 0),
+      width: widthOf(column) + mergedRoom(column.name),
       grow: column.rule.grow,
       align: column.rule.align,
       numeric: column.rule.figures,
@@ -250,6 +262,11 @@ function Grid({
       ...(note !== undefined && { note }),
     };
   });
+  // While a new subscription has no columns yet, what was drawn stays drawn.
+  const [drawnBefore, setDrawnBefore] = useState<readonly string[]>();
+  const drawnNow = every.length > 0 ? [...byName.keys()] : undefined;
+  if (drawnNow && drawnNow.join("\n") !== drawnBefore?.join("\n"))
+    setDrawnBefore(drawnNow);
   const reads = readsMetrics({
     measures:
       every.length > 0
@@ -258,8 +275,11 @@ function Grid({
           ? [...known]
           : undefined,
     drawn: (name) =>
-      byName.has(name) ||
-      (every.length === 0 && preset.columns[name] !== false),
+      every.length > 0
+        ? byName.has(name)
+        : drawnBefore
+          ? drawnBefore.includes(name)
+          : preset.columns[name] !== false,
     sort: query.sort,
     visible,
   });
@@ -434,9 +454,9 @@ function Grid({
     <DataGrid<Row, RowGroup>
       label={title}
       columns={gridColumns}
-      widths={preset.widths}
+      widths={{ ...preset.widths, ...widened }}
       onResize={(column, width) => {
-        presets.resize(gvr, column, width);
+        presets.resize(gvr, column, width - mergedRoom(column));
       }}
       sort={sorted ?? null}
       onSort={(sort: Sort) => {

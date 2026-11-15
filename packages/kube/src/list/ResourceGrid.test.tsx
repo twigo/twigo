@@ -445,6 +445,36 @@ test("the last column to give way is Status, and Ready joins it first", async ()
   expect(shownAt(300)).toEqual(["", "Name", ""]);
 });
 
+const trackOf = (name: string) => {
+  const tracks = template().match(/minmax\([^)]*\)|\S+/g) ?? [];
+  const at = screen
+    .getAllByRole("columnheader")
+    .findIndex((each) => each.textContent === name);
+  return tracks[at];
+};
+
+test("Status keeps the room that Ready's value takes when the person sized it, and what the person's drag keeps is the width without that room", async () => {
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+  );
+  const drag = async (by: number) => {
+    const edge = screen.getByRole("separator", { name: "Resize Status" });
+    fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(edge, { clientX: 300 + by, pointerId: 1 });
+    fireEvent.pointerUp(edge, { pointerId: 1 });
+    await settle(1);
+  };
+  await drag(40);
+  expect(trackOf("Status")).toBe("200px");
+  shownAt(460);
+  expect(trackOf("Status")).toBe("224px");
+  await drag(10);
+  expect(trackOf("Status")).toBe("234px");
+  shownAt(1280);
+  expect(trackOf("Status")).toBe("210px");
+});
+
 test("a sort by a column the width has dropped stays, and the Name header says so until the column is back", async () => {
   await openList();
   fireEvent.click(within(header("Memory")).getByRole("button"));

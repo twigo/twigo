@@ -12,17 +12,15 @@ export function measureText(
 
 /**
  * Whether a list reads its metric columns (ARCHITECTURE 3.6): the document
- * is visible, its editor on screen, and the list is not a narrow embedded
- * one, which draws none of them; and either the names of its resource's
- * measures are not known yet, so that a list sorted by one is held from its
- * first rows, or one of them is drawn or sorted by.
+ * is visible and its editor on screen, and either the names of its
+ * resource's measures are not known yet, so that a list sorted by one is
+ * held from its first rows, or one of them is drawn or sorted by.
  */
 export function readsMetrics({
   measures,
   drawn,
   sort,
   visible,
-  narrow = false,
 }: {
   /** The names of the resource's measures, once its columns are known. */
   measures: readonly string[] | undefined;
@@ -30,9 +28,8 @@ export function readsMetrics({
   drawn: (name: string) => boolean;
   sort: Sort | null;
   visible: boolean;
-  narrow?: boolean;
 }): boolean {
-  if (!visible || narrow) return false;
+  if (!visible) return false;
   return (
     measures === undefined ||
     measures.some((name) => drawn(name) || name === sort?.column)

@@ -924,12 +924,14 @@ describe("a list whose columns are not known yet", () => {
     layout.resize(grid(), 400);
     await settle();
     expect(last(sent.reads())).toBe(false);
+    const before = sent.reads().length;
     fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
       target: { value: "a" },
     });
     await settle(30);
     await script.send(batch(2, false));
     await script.send(batch(3, true));
+    expect(windowsAfter(sent, before)).not.toContain(true);
     expect(last(sent.reads())).toBe(false);
   });
 });

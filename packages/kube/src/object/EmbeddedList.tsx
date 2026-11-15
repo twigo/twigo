@@ -139,8 +139,7 @@ export function EmbeddedList({
         : undefined,
     drawn: (name) => byName.has(name),
     sort,
-    visible,
-    narrow,
+    visible: visible && !narrow,
   });
   useEffect(() => {
     setMetrics(reads);
