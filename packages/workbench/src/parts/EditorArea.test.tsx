@@ -231,13 +231,27 @@ test("a group's actions belong to the editor they are for: another editor of the
   expect(screen.queryByText("actions of note://a")).toBeNull();
 });
 
-test("the active tab is brought back into view whenever the strip is measured, since the actions settle after dockview scrolls to it", async () => {
+test("each measure brings the active tab back into view by the tab list's own scroll, and scrolls nothing else", async () => {
   const resizes = fakeResizes();
-  const scrolled: Element[] = [];
-  vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (
-    this: Element,
-  ) {
-    scrolled.push(this);
+  const into = vi.spyOn(Element.prototype, "scrollIntoView");
+  const left: Record<string, number> = { "note://a": 0, "note://b": 400 };
+  Object.defineProperty(HTMLElement.prototype, "offsetLeft", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return left[this.dataset.tabPanelId ?? ""] ?? 0;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.dataset.tabPanelId === undefined ? 0 : 220;
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList.contains("dv-tabs-container") ? 300 : 0;
+    },
   });
   try {
     const workbench = await testWorkbench();
@@ -254,13 +268,24 @@ test("the active tab is brought back into view whenever the strip is measured, s
       workbench.editors.open("note://b", { preview: false });
     });
     await act(() => Promise.resolve());
-    scrolled.length = 0;
+    const list = document.querySelector(".dv-tabs-container");
+    if (!list) throw new Error("no tab list");
+    list.scrollLeft = 0;
     resizes.report(700);
-    const active = document.querySelector(".dv-tab.dv-active-tab");
-    expect(active?.textContent).toBe("b");
-    expect(scrolled).toContain(active);
+    expect(list.scrollLeft).toBe(400);
+    expect(into).not.toHaveBeenCalled();
+    expect(
+      [...document.querySelectorAll("*")].filter(
+        (element) =>
+          element !== list &&
+          (element.scrollLeft !== 0 || element.scrollTop !== 0),
+      ),
+    ).toEqual([]);
   } finally {
     resizes.restore();
+    Reflect.deleteProperty(HTMLElement.prototype, "offsetLeft");
+    Reflect.deleteProperty(HTMLElement.prototype, "offsetWidth");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
   }
 });
 

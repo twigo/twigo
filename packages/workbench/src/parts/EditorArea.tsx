@@ -294,7 +294,9 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
  * strip's, less every tab at the width it asks for (up to 220 px) and the
  * overflow button. Undefined until measured. Each measure also brings the
  * active tab back into view, since dockview does that only as a tab
- * activates, before the actions settle.
+ * activates, before the actions settle: by the tab list's own scroll, as
+ * dockview 8.8.3's `Tabs._scrollTabIntoView` does, since `scrollIntoView`
+ * would scroll the split views around the strip too.
  */
 function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
   const [room, setRoom] = useState<number>();
@@ -313,9 +315,14 @@ function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
       setRoom(
         Math.max(0, strip.clientWidth - tabs - OVERFLOW_BUTTON - padding),
       );
-      list
-        .querySelector(".dv-active-tab")
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const active = list.querySelector<HTMLElement>(".dv-active-tab");
+      if (
+        active &&
+        (active.offsetLeft < list.scrollLeft ||
+          active.offsetLeft + active.offsetWidth >
+            list.scrollLeft + list.clientWidth)
+      )
+        list.scrollLeft = active.offsetLeft;
     };
     const observer = new ResizeObserver(measure);
     const watch = () => {
