@@ -1,6 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
-import { cn, Kbd, Tooltip, TooltipContent, TooltipTrigger } from "@twigo/ui";
+import {
+  cn,
+  Kbd,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  useWidth,
+} from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { cutText } from "./cutText";
@@ -12,7 +19,6 @@ import {
   titleBarStage,
   TRAFFIC_LIGHTS,
 } from "./titleBarStage";
-import { useWidth } from "./useWidth";
 
 const NAME_FLOOR = 28;
 const SCOPE_FLOOR = 16;
@@ -29,8 +35,9 @@ const SEARCH =
  * project's colour, and its mode's chip follows its name (6.4). Where the
  * bar is too narrow the search folds to an icon, leaves the middle, and then
  * the chip folds to its icon. What each takes is measured on hidden copies
- * at their natural size, so that a fold never changes what decides it, and
- * the copies stay mounted without a space, so that they measure nothing.
+ * at their natural size, so that a fold never changes what decides it; the
+ * copies stay mounted without a space, and the breadcrumb then takes
+ * nothing, whatever its copy last measured.
  */
 export function TitleBar() {
   const { spaces, colors } = useWorkbench();
@@ -44,8 +51,9 @@ export function TitleBar() {
   const name = space?.contexts.join(" + ") ?? "";
   const scope = space ? scopeOf(spaces.state(space.id).namespaces) : "";
   const width = useWidth(bar);
+  const crumbs = useWidth(words);
   const { searchFolded, chipFolded, centred } = titleBarStage(width, {
-    crumbs: useWidth(words),
+    crumbs: space ? crumbs : 0,
     searchIcon: useWidth(find),
   });
   return (
