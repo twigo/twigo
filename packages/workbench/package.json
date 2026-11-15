@@ -17,7 +17,7 @@
     "@twigo/protocol": "workspace:*",
     "@twigo/ui": "workspace:*",
     "allotment": "^1.20.6",
-    "dockview-react": "^8.8.3",
+    "dockview-react": "^8.9.0",
     "lucide-react": "^1.72.0",
     "valibot": "^1.5.0"
   },
