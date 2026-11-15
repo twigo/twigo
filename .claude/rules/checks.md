@@ -84,6 +84,9 @@
   An unknown command may ask the person to sign in, so it runs only while a window has the focus: tests build their `Registry` with focus on, and the app runs a plugin only once its `HOME`'s `trust.json` lists it, else it starts with the review of untrusted plugins.
 - k8s-openapi moves only together with kube: kube 5.0 requires `^0.29`.
   Dependabot bumps both in its `kube` group; a group PR that carries only k8s-openapi cannot build until a kube release requires that version.
+- json-patch moves only together with kube-core: `kube::api::Patch::Json` takes the `json_patch::Patch` of kube-core's own json-patch, `^4` in kube-core 5.0.0 and 5.1.0, and the bench harness builds that patch.
+  With json-patch 5 beside it the harness fails to compile (`expected json_patch::Patch, found a different json_patch::Patch`), which failed every live job of Dependabot's PR #50 on 2026-11-14; json-patch 5's source differs from 4.2.0's only in its `jsonptr` requirement, 0.7.1 to 0.8.2.
+  Dependabot ignores json-patch majors until kube-core requires 5.
 - `windows` and `windows-core` move together and by hand: `#[implement]` expands to `::windows_core` paths, so twigo-keyboard names that crate directly, at the version `windows` uses.
   CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
 - zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.

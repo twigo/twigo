@@ -12,6 +12,9 @@ updates:
       # Tauri's plugins require zbus 5, so a new major here would build two of it.
       - dependency-name: zbus
         update-types: ["version-update:semver-major"]
+      # kube-core's `Patch::Json` takes the `Patch` of json-patch 4, which the bench harness builds.
+      - dependency-name: json-patch
+        update-types: ["version-update:semver-major"]
     groups:
       kube:
         patterns: [kube, k8s-openapi]
