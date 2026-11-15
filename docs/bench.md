@@ -4,7 +4,7 @@ M0 step 7, 2026-11-01; on the Rust list path since M1 step 7, 2026-11-02.
 The harness measures the six budgets of [ARCHITECTURE 3.8](ARCHITECTURE.md#38-performance-budgets-and-the-benchmark) at 5k pods in the real Tauri app, the cluster's pods coming through the watch hub, the query view and the batcher.
 
 - Run: `export TWIGO_BENCH_DIR=$(mktemp -d)`, then `bench/harness.sh` on macOS, with the screen unlocked.
-  The app takes no focus and its window stays behind others, so the desktop stays in use ([the window](#the-window)).
+  The app asks for no focus and its window stays behind others, so the desktop stays in use; WebKit counts the window active at the start all the same, so the bench keeps the page from napping once another app is activated ([the window](#the-window)).
   Without an argument it creates a kind 1.37 cluster with kwok and 5,000 pods (`bench/cluster.sh up bench`, `bench/pods.sh`) and deletes it at the end; given a kubeconfig, it uses that cluster, which must hold the `bench/bench` Deployment at 5,000 pods.
 - Output: the report table on stdout; `report.json` and every file it is built from in `$TWIGO_BENCH_DIR/harness`.
 - Code: `bench/harness.sh`; `bench/harness`, the `twigo-bench` tool with `churn`, `launch`, `sample` and `report`; `apps/desktop/bench`, the webview's entry and driver; `apps/desktop/src-tauri/src/bench.rs`, the app's bench commands.
@@ -48,17 +48,25 @@ Nothing of it ships.
 A run leaves the desktop alone, and its numbers do not depend on what the desktop does.
 
 - The window has 40 pt on screen, at the screen's left edge, behind other windows: `x` and `focus` in `src-tauri/tauri.bench.conf.json`.
-- The app takes no focus: `activate_ignoring_other_apps(false)` and the `Accessory` activation policy, so it has no Dock icon either.
+- The app asks for no focus: `activate_ignoring_other_apps(false)` and the `Accessory` activation policy, so it has no Dock icon either.
+  WebKit still counts the window active from launch until another app is activated, so nothing about the window keeps the page awake after that.
 - WebKit pauses a page in a window it counts as covered, so the bench turns that off with `_setWindowOcclusionDetectionEnabled:` ([WKWebViewPrivate.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/API/Cocoa/WKWebViewPrivate.h#L876)).
   That setter only stores its flag ([WebViewImpl.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/mac/WebViewImpl.h#L438)), and the page stayed `hidden` until the view was hidden and shown once, as the page starts.
-- A process activity keeps App Nap away while the window is covered.
+- A process activity keeps App Nap away from the app's process only.
+  The page's WebContent process has a guard of its own, which WebKit stops 5 s after the page turns visually idle in a window that is not key.
+  The window server reports that the app's windows stopped changing ([PageClientImplMac.mm](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/mac/PageClientImplMac.mm#L257-L260), [WindowServerConnection.mm](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/mac/WindowServerConnection.mm#L85-L105)), and the page's activity ends after a hysteresis ([WebPage.cpp](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/WebProcess/WebPage/WebPage.cpp#L1603-L1627), [HysteresisActivity.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/PAL/pal/HysteresisActivity.h#L35)).
+  A napped page draws late: in three instrumented runs on 2026-11-15 (`bench/harness.sh` on kind 1.37 with 5,000 pods) its frames came 31–32 ms apart at the median after the nap and up to 149 ms apart, and a batch's acknowledgement rides on a frame, so "Change → painted cell, p95" read 105–280 ms in 12 of 31 runs on main and on an unmerged UI branch alike, and 60–68 ms in the rest.
+- The bench turns the page's process suppression off with `_setPageVisibilityBasedProcessSuppressionEnabled:` as the page starts, which keeps that guard, and on again as `idle` hides the window, so the idle row measures a page WebKit may nap, as before.
+  The setter is private ([WKPreferencesPrivate.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/API/Cocoa/WKPreferencesPrivate.h#L104)); it is set on `[view configuration]`'s preferences, which are the page's own, since the configuration is a copy that shares them ([WKWebView.mm](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/API/Cocoa/WKWebView.mm#L614-L616), [APIPageConfiguration.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/UIProcess/API/APIPageConfiguration.h#L502-L517)).
 
 Limits:
 
-- The setter is private; checked on macOS 27.2 only, and a macOS without it stops the app with an unrecognized selector.
+- The two setters are private; checked on macOS 27.2 only, and a macOS without one stops the app with an unrecognized selector.
 - A display to the left of the main one shows the window whole, as `x` then lies on it; not tried.
 - One run with the window fully off the screen read 14.8 % by Name, as at the edge, which is where the numbers below were taken.
 - WebKit still paints nothing behind a locked screen.
+- The page still goes visually idle once another app is activated, and WebKit then draws it at half speed, a 30 ms frame interval ([AnimationFrameRate.cpp](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/platform/graphics/AnimationFrameRate.cpp#L33), [AnimationFrameRate.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/platform/graphics/AnimationFrameRate.h#L52)); at this tag no preference turns that off, since `Page::setActivityState` applies it with no setting in between ([Page.cpp](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/page/Page.cpp#L3408-L3409)).
+  It came 21.7–70.4 s into the change window in each of the 23 runs of 2026-11-15 where it came, so after the scroll and the sorts, and the change row read 64–72 ms in the five of them with App Nap off.
 
 ## How each metric is measured
 

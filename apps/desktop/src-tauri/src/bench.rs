@@ -4,8 +4,9 @@
 //! time the harness samples idle CPU in.
 //!
 //! A run leaves the desktop alone: the window has 40 pt on screen, at the left edge
-//! (`tauri.bench.conf.json`), behind other windows, and the app takes no focus. WebKit paints
-//! nothing in a window it counts as covered, so it is told not to look.
+//! (`tauri.bench.conf.json`), behind other windows, and the app asks for no focus. WebKit paints
+//! nothing in a window it counts as covered, so it is told not to look, and it naps a page whose
+//! window is not key, so napping stays off until the window hides.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -79,6 +80,24 @@ fn paint_when_covered(platform: tauri::webview::PlatformWebview) {
         let _: () = msg_send![&*view, setHidden: true];
         let _: () = msg_send![&*view, setHidden: false];
     }
+    allow_app_nap(&platform, false);
+}
+
+/// Allowed, WebKit drops its page's guard against App Nap 5 s after the page turns visually idle
+/// in a window that is not key; `stay_awake` guards the app's process only
+/// ([WebPage.cpp](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebKit/WebProcess/WebPage/WebPage.cpp#L1603-L1627),
+/// [HysteresisActivity.h](https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/PAL/pal/HysteresisActivity.h#L35)).
+#[cfg(target_os = "macos")]
+fn allow_app_nap(platform: &tauri::webview::PlatformWebview, allowed: bool) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let view = platform.inner().cast::<AnyObject>();
+    unsafe {
+        let configuration: *mut AnyObject = msg_send![&*view, configuration];
+        let preferences: *mut AnyObject = msg_send![&*configuration, preferences];
+        let _: () =
+            msg_send![&*preferences, _setPageVisibilityBasedProcessSuppressionEnabled: allowed];
+    }
 }
 
 fn store(dir: &Dir, name: &str, value: &serde_json::Value) -> Result<(), String> {
@@ -102,6 +121,10 @@ fn idle<R: Runtime>(
     window: WebviewWindow<R>,
     dir: State<'_, Dir>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    window
+        .with_webview(|platform| allow_app_nap(&platform, true))
+        .map_err(|e| e.to_string())?;
     window.hide().map_err(|e| e.to_string())?;
     let at_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
