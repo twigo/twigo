@@ -447,20 +447,24 @@ describe("an open object", () => {
     );
   const namespaceOf = (uri: string) => uri.split("/")[6];
 
+  const region = (name: string) =>
+    document.querySelector(`section[aria-label="${name}"]`);
+
   const drawn = () => {
-    const section = screen.queryByRole("region", { name: "Usage" });
-    if (!section) return "none";
-    if (within(section).queryAllByRole("progressbar").length > 0)
-      return "empty";
-    if (within(section).queryAllByRole("meter").length > 0) return "figures";
+    const usage = region("Usage");
+    if (!usage) return "none";
+    if (usage.querySelector('[role="progressbar"]')) return "empty";
+    if (usage.querySelector('[role="meter"]')) return "figures";
     return "sentence";
   };
 
   const frame = () => ({
-    overview: screen.queryByRole("region", { name: "Metadata" }) !== null,
+    overview: region("Metadata") !== null,
     state: drawn(),
     rows: [
-      ...document.querySelectorAll('[role="progressbar"], [role="meter"]'),
+      ...(region("Usage")?.querySelectorAll(
+        '[role="progressbar"], [role="meter"]',
+      ) ?? []),
     ].map((meter) => meter.getAttribute("aria-label")),
   });
 

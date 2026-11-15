@@ -20,18 +20,44 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { PlanRequest, ResourceRef, ShellKind } from "@twigo/protocol";
-import type { Lookup, MenuId, Workbench } from "@twigo/workbench";
+import type {
+  CommandDescriptor,
+  Lookup,
+  MenuId,
+  Workbench,
+} from "@twigo/workbench";
 import type { ListServices } from "./services";
-import { objectOf, objectOfRow, type Selected } from "./selection";
+import { LIST_URI, objectOf, objectOfRow, type Selected } from "./selection";
 import { objectUri, parseListUri } from "./uri";
 
-/** Where the actions on a node, a workload or a job apply, as when-expressions. */
+/** Where the actions on a pod, a node, a workload or a job apply, as when-expressions. */
+const POD = "resource.group == '' && resource.kind == Pod";
 const NODE = "resource.group == '' && resource.kind == Node";
 const RESTARTS =
   "resource.group == apps && resource.kind =~ /^(Deployment|StatefulSet|DaemonSet)$/";
+const SCALES_PINNED =
+  "resource.group == apps && resource.kind =~ /^(Deployment|StatefulSet)$/";
 const SUSPENDS =
   "resource.group == batch && resource.kind =~ /^(Job|CronJob)$/";
 const CRON_JOB = "resource.group == batch && resource.kind == CronJob";
+/** Pinned wherever the item shows. */
+const ALWAYS = "true";
+
+/**
+ * That a container of the pod runs, as its details' Overview says while
+ * they show it; their other tabs, the list, the keys and a palette opened
+ * outside the details never know, so there `shell_containers` decides.
+ */
+const RUNS = {
+  when: "!resource.noContainerRuns",
+  reason: "No container runs",
+};
+
+/** That RBAC lets the person patch the object, in the words of what it does. */
+const PATCH = (reason: string) => ({
+  when: "resource.capability.patch",
+  reason,
+});
 
 /** A kind as a sentence names it: `StatefulSet` → `stateful set`. */
 function kindWords(kind: string): string {
@@ -54,22 +80,38 @@ export function replicasOf({ columns, row }: Selected): number | undefined {
 }
 
 /**
- * Commands on the active list's selected row and on its marked rows, and
+ * Commands on a list's selected row and on its marked rows, and
  * the menus that place them (ARCHITECTURE 4.4, 5.1): the row's context
- * menu, its hover buttons and the marked rows' bar, and an object editor's
- * title. Delete goes through the command bus, whose plan says how much to
- * ask (6.4); it is ⌘⌫, never a bare key (4.4). A pod's shell and attach
- * open their tab in the panel through `k8s.shell.open`, and a port-forward
- * starts through `k8s.forward.open`.
+ * menu, the details' row of actions, whose first two pinned verbs the row
+ * shows on hover, and the marked rows' bar. Each kind pins its verbs in
+ * `resource/details` (4.3): a pod Logs, Shell and Forward, a Deployment or
+ * StatefulSet Logs, Restart and Scale, a DaemonSet Logs and Restart, a
+ * CronJob Trigger and Suspend or Resume, a node Cordon or Uncordon and
+ * Drain, and any other kind Forward where it has one. Delete goes through
+ * the command bus, whose plan says how much to ask (6.4); it is ⌘⌫, never a
+ * bare key (4.4). A pod's shell and attach open their tab in the panel
+ * through `k8s.shell.open`, and a port-forward starts through
+ * `k8s.forward.open`.
  */
 export function registerResourceActions(
   workbench: Workbench,
   { selection, statuses, states }: ListServices,
 ): void {
   const { commands, menus, editors, keybindings } = workbench;
-  /** The active list editor and its selected row. */
-  const target = (): { uri: string; selected: Selected } | undefined => {
-    const uri = editors.active;
+  /**
+   * The list editor a command was run from, as its lookup says, and none
+   * where it says none: the active editor may be another list than the one
+   * a press that moves no focus was on.
+   */
+  const listIn = (lookup: Lookup): string | undefined => {
+    const uri = lookup(LIST_URI);
+    return typeof uri === "string" ? uri : undefined;
+  };
+  /** That list editor and its selected row. */
+  const target = (
+    lookup: Lookup,
+  ): { uri: string; selected: Selected } | undefined => {
+    const uri = listIn(lookup);
     const selected = uri === undefined ? undefined : selection.get(uri);
     return uri && selected ? { uri, selected } : undefined;
   };
@@ -84,18 +126,19 @@ export function registerResourceActions(
   };
   /** Plans and runs a request of the bus on the selected row's space. */
   const act = async (
+    lookup: Lookup,
     request: (space: string, found: { selected: Selected }) => PlanRequest,
     look: { icon: LucideIcon },
   ) => {
-    const found = target();
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     await workbench.operations.run(request(space, found), look);
   };
   const node = (found: { selected: Selected }) => objectOf(found.selected).name;
   /** Forwards a port of the selected pod, Service or workload; `pick` asks which whatever their number. */
-  const forward = async (pick: boolean) => {
-    const found = target();
+  const forward = async (lookup: Lookup, pick: boolean) => {
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     const { namespace, name } = objectOf(found.selected);
@@ -109,8 +152,8 @@ export function registerResourceActions(
     });
   };
   /** Opens a shell, or an attach, in a container of the selected pod. */
-  const shell = async (kind: ShellKind) => {
-    const found = target();
+  const shell = async (lookup: Lookup, kind: ShellKind) => {
+    const found = target(lookup);
     const space = found && parseListUri(found.uri)?.space;
     if (!found || space === undefined) return;
     const { namespace, name } = objectOf(found.selected);
@@ -131,20 +174,22 @@ export function registerResourceActions(
     key?: string;
     /** Where the key works, beyond the grid's focus. */
     keyWhen?: string;
+    /** Where it applies: the details keep its place there while a requirement fails. */
     when?: string;
-    menus: readonly (readonly [MenuId, string])[];
+    requires?: CommandDescriptor["requires"];
+    danger?: true;
+    sends?: CommandDescriptor["sends"];
+    /** Each menu, its group, and in `resource/details` where it is pinned. */
+    menus: readonly (readonly [MenuId, string, string?])[];
     run: (lookup: Lookup) => void | Promise<void>;
   }[] = [
     {
       id: "k8s.resource.details",
       title: "Open Details",
       icon: PanelRight,
-      menus: [
-        ["resource/context", "navigation"],
-        ["resource/inline", "navigation"],
-      ],
-      run: () => {
-        const found = target();
+      menus: [["resource/context", "navigation"]],
+      run: (lookup) => {
+        const found = target(lookup);
         if (found)
           selection.set(found.uri, { ...found.selected, reveal: true });
       },
@@ -157,11 +202,10 @@ export function registerResourceActions(
       when: "resource.logs",
       menus: [
         ["resource/context", "navigation"],
-        ["resource/inline", "navigation"],
-        ["resource/details", "navigation"],
+        ["resource/details", "navigation", `${POD} || ${RESTARTS}`],
       ],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         const space = found && parseListUri(found.uri)?.space;
         if (!found || space === undefined) return;
         const { namespace, name } = objectOf(found.selected);
@@ -180,23 +224,26 @@ export function registerResourceActions(
       icon: SquareTerminal,
       key: "s",
       when: "resource.shell",
+      requires: [RUNS],
+      sends: "exec",
       menus: [
         ["resource/context", "navigation"],
-        ["resource/inline", "navigation"],
-        ["resource/details", "navigation"],
+        ["resource/details", "navigation", ALWAYS],
       ],
-      run: () => shell("shell"),
+      run: (lookup) => shell(lookup, "shell"),
     },
     {
       id: "k8s.resource.attach",
       title: "Attach",
       icon: Cable,
       when: "resource.shell",
+      requires: [RUNS],
+      sends: "exec",
       menus: [
         ["resource/context", "navigation"],
         ["resource/details", "navigation"],
       ],
-      run: () => shell("attach"),
+      run: (lookup) => shell(lookup, "attach"),
     },
     {
       id: "k8s.resource.forward",
@@ -206,10 +253,9 @@ export function registerResourceActions(
       when: "resource.forward",
       menus: [
         ["resource/context", "navigation"],
-        ["resource/inline", "navigation"],
-        ["resource/details", "navigation"],
+        ["resource/details", "navigation", `!(${RESTARTS})`],
       ],
-      run: () => forward(false),
+      run: (lookup) => forward(lookup, false),
     },
     {
       id: "k8s.resource.forwardPick",
@@ -221,19 +267,16 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation"],
       ],
-      run: () => forward(true),
+      run: (lookup) => forward(lookup, true),
     },
     {
       id: "k8s.resource.yaml",
       title: "Show YAML",
       icon: FileCode,
       key: "e",
-      menus: [
-        ["resource/context", "navigation"],
-        ["resource/details", "navigation"],
-      ],
-      run: () => {
-        const found = target();
+      menus: [["resource/context", "navigation"]],
+      run: (lookup) => {
+        const found = target(lookup);
         if (!found) return;
         states.setDetailsTab(found.uri, "yaml");
         selection.set(found.uri, { ...found.selected, reveal: true });
@@ -243,13 +286,9 @@ export function registerResourceActions(
       id: "k8s.resource.openEditor",
       title: "Open in Editor",
       icon: SquareArrowOutUpRight,
-      menus: [
-        ["resource/context", "navigation"],
-        ["resource/inline", "navigation"],
-        ["resource/details", "navigation"],
-      ],
-      run: () => {
-        const found = target();
+      menus: [["resource/context", "navigation"]],
+      run: (lookup) => {
+        const found = target(lookup);
         const space = found && parseListUri(found.uri)?.space;
         if (!found || space === undefined) return;
         const { namespace, name } = objectOf(found.selected);
@@ -268,12 +307,9 @@ export function registerResourceActions(
       id: "k8s.resource.copyName",
       title: "Copy Name",
       icon: Copy,
-      menus: [
-        ["resource/context", "2_copy"],
-        ["resource/inline", "2_copy"],
-      ],
-      run: async () => {
-        const found = target();
+      menus: [["resource/context", "2_copy"]],
+      run: async (lookup) => {
+        const found = target(lookup);
         if (found) await copy(objectOf(found.selected).name);
       },
     },
@@ -282,8 +318,8 @@ export function registerResourceActions(
       title: "Copy Namespace/Name",
       when: "resource.namespaced",
       menus: [["resource/context", "2_copy"]],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         const { namespace, name } = found ? objectOf(found.selected) : {};
         if (namespace && name) await copy(`${namespace}/${name}`);
       },
@@ -293,8 +329,8 @@ export function registerResourceActions(
       title: "Copy Names",
       icon: Copy,
       menus: [["resource/marked", "1_copy"]],
-      run: async () => {
-        const uri = editors.active;
+      run: async (lookup) => {
+        const uri = listIn(lookup);
         const list = uri === undefined ? undefined : statuses.get(uri);
         if (!uri || !list) return;
         const names = [...selection.marks(uri)].map(
@@ -304,17 +340,47 @@ export function registerResourceActions(
       },
     },
     {
+      id: "k8s.resource.restart",
+      title: "Restart",
+      icon: RotateCcw,
+      key: "shift+r",
+      when: RESTARTS,
+      requires: [PATCH("You may not restart it")],
+      sends: "write",
+      menus: [
+        ["resource/context", "5_actions"],
+        ["resource/details", "5_actions", ALWAYS],
+      ],
+      run: (lookup) =>
+        act(
+          lookup,
+          (space, found) => ({
+            action: "restart",
+            space,
+            target: reference(found),
+          }),
+          { icon: RotateCcw },
+        ),
+    },
+    {
       id: "k8s.resource.scale",
       title: "Scale…",
       icon: Scaling,
       key: "shift+s",
-      when: "resource.scalable && resource.capability.patch/scale",
+      when: "resource.scalable",
+      requires: [
+        {
+          when: "resource.capability.patch/scale",
+          reason: "You may not scale it",
+        },
+      ],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", SCALES_PINNED],
       ],
-      run: async () => {
-        const found = target();
+      run: async (lookup) => {
+        const found = target(lookup);
         if (!found) return;
         const { name } = objectOf(found.selected);
         const now = replicasOf(found.selected);
@@ -334,6 +400,7 @@ export function registerResourceActions(
         });
         if (typed === undefined) return;
         await act(
+          lookup,
           (space) => ({
             action: "scale",
             space,
@@ -345,37 +412,20 @@ export function registerResourceActions(
       },
     },
     {
-      id: "k8s.resource.restart",
-      title: "Restart",
-      icon: RotateCcw,
-      key: "shift+r",
-      when: `${RESTARTS} && resource.capability.patch`,
-      menus: [
-        ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
-      ],
-      run: () =>
-        act(
-          (space, found) => ({
-            action: "restart",
-            space,
-            target: reference(found),
-          }),
-          { icon: RotateCcw },
-        ),
-    },
-    {
       id: "k8s.node.cordon",
       title: "Cordon",
       icon: CircleSlash,
       key: "shift+c",
-      when: `${NODE} && !resource.cordoned && resource.capability.patch`,
+      when: `${NODE} && !resource.cordoned`,
+      requires: [PATCH("You may not cordon it")],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "cordon",
             space,
@@ -390,13 +440,16 @@ export function registerResourceActions(
       title: "Uncordon",
       icon: CircleCheck,
       key: "shift+u",
-      when: `${NODE} && resource.cordoned && resource.capability.patch`,
+      when: `${NODE} && resource.cordoned`,
+      requires: [PATCH("You may not uncordon it")],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "cordon",
             space,
@@ -411,28 +464,46 @@ export function registerResourceActions(
       title: "Drain",
       icon: ArrowDownToLine,
       key: "shift+d",
-      when: `${NODE} && resource.capability.patch && capability.create.pods/eviction`,
+      when: NODE,
+      requires: [
+        PATCH("You may not cordon it"),
+        {
+          when: "capability.create.pods/eviction",
+          reason: "You may not evict its pods",
+        },
+      ],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
-        act((space, found) => ({ action: "drain", space, node: node(found) }), {
-          icon: ArrowDownToLine,
-        }),
+      run: (lookup) =>
+        act(
+          lookup,
+          (space, found) => ({ action: "drain", space, node: node(found) }),
+          { icon: ArrowDownToLine },
+        ),
     },
     {
       id: "k8s.cronjob.trigger",
       title: "Trigger",
       icon: Play,
       key: "shift+t",
-      when: `${CRON_JOB} && capability.create.jobs.batch`,
+      when: CRON_JOB,
+      requires: [
+        {
+          when: "capability.create.jobs.batch",
+          reason: "You may not create Jobs here",
+        },
+      ],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", ALWAYS],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => {
             const { namespace, name } = objectOf(found.selected);
             return {
@@ -450,13 +521,16 @@ export function registerResourceActions(
       title: "Suspend",
       icon: CirclePause,
       key: "shift+p",
-      when: `${SUSPENDS} && !resource.suspended && !resource.ended && resource.capability.patch`,
+      when: `${SUSPENDS} && !resource.suspended && !resource.ended`,
+      requires: [PATCH("You may not suspend it")],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", CRON_JOB],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "suspend",
             space,
@@ -471,13 +545,16 @@ export function registerResourceActions(
       title: "Resume",
       icon: CirclePlay,
       key: "shift+o",
-      when: `${SUSPENDS} && resource.suspended && !resource.ended && resource.capability.patch`,
+      when: `${SUSPENDS} && resource.suspended && !resource.ended`,
+      requires: [PATCH("You may not resume it")],
+      sends: "write",
       menus: [
         ["resource/context", "5_actions"],
-        ["resource/details", "5_actions"],
+        ["resource/details", "5_actions", CRON_JOB],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "suspend",
             space,
@@ -493,13 +570,18 @@ export function registerResourceActions(
       icon: Trash2,
       key: "mod+backspace",
       keyWhen: "!listMarked",
-      when: "resource.capability.delete",
+      requires: [
+        { when: "resource.capability.delete", reason: "You may not delete it" },
+      ],
+      danger: true,
+      sends: "write",
       menus: [
         ["resource/context", "9_delete"],
         ["resource/details", "9_delete"],
       ],
-      run: () =>
+      run: (lookup) =>
         act(
+          lookup,
           (space, found) => ({
             action: "delete",
             space,
@@ -515,9 +597,11 @@ export function registerResourceActions(
       key: "mod+backspace",
       keyWhen: "listMarked",
       when: "marked.capability.delete",
+      danger: true,
+      sends: "write",
       menus: [["resource/marked", "8_delete"]],
       run: async (lookup) => {
-        const uri = editors.active;
+        const uri = listIn(lookup);
         const list = uri === undefined ? undefined : parseListUri(uri);
         if (!uri || !list) return;
         const namespaced = lookup("resource.namespaced") === true;
@@ -545,15 +629,30 @@ export function registerResourceActions(
       title: "Clear Marks",
       icon: X,
       menus: [["resource/marked", "9_clear"]],
-      run: () => {
-        const uri = editors.active;
+      run: (lookup) => {
+        const uri = listIn(lookup);
         if (uri) selection.mark(uri, [...selection.marks(uri)], false);
       },
     },
   ];
   const keys: { key: string; command: string; when: string }[] = [];
   actions.forEach(
-    ({ id, title, icon, key, keyWhen, when, menus: placed, run }, order) => {
+    (
+      {
+        id,
+        title,
+        icon,
+        key,
+        keyWhen,
+        when,
+        requires = [],
+        danger,
+        sends,
+        menus: placed,
+        run,
+      },
+      order,
+    ) => {
       // The row's details and the marked rows' bar sit beside the grid, so a
       // command needs a selected row or marks, not the grid's focus; its key
       // works only in the grid.
@@ -566,6 +665,9 @@ export function registerResourceActions(
         category: "Resource",
         ...(icon && { icon }),
         enablement: when ? `${needs} && ${when}` : needs,
+        ...(requires.length > 0 && { requires }),
+        ...(danger && { danger }),
+        ...(sends && { sends }),
         run: (_args, lookup) => run(lookup),
       });
       if (key) {
@@ -575,12 +677,19 @@ export function registerResourceActions(
           when: keyWhen ? `listFocus && ${keyWhen}` : "listFocus",
         });
       }
-      for (const [menu, group] of placed) {
+      // The details keep a verb in its place while it cannot run, saying
+      // why; the other menus leave it out.
+      const runs = [when, ...requires.map((needed) => needed.when)]
+        .filter((part) => part !== undefined)
+        .join(" && ");
+      for (const [menu, group, pin] of placed) {
+        const shown = menu === "resource/details" ? when : runs;
         menus.append(menu, {
           command: id,
           group,
           order,
-          ...(when && { when }),
+          ...(shown && { when: shown }),
+          ...(pin && { pin }),
         });
       }
     },

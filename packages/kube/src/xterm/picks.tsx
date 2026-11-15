@@ -70,7 +70,7 @@ export function registerPicks<
       title: `Close ${noun}…`,
       placeholder: `Close a ${noun.toLowerCase()}`,
       accept: (uri) => {
-        editors.close(uri);
+        editors.dismiss(uri);
       },
     },
   ];

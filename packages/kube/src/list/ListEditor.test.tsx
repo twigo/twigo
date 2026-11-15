@@ -11,6 +11,7 @@ import type { Backend } from "@twigo/protocol";
 import { createMockBackend, SCRAPE_MS } from "@twigo/protocol/mock";
 import type { QuickAccessContext } from "@twigo/workbench";
 import {
+  hoverIcons,
   mountKube,
   openList,
   settle,
@@ -21,7 +22,7 @@ import { DWELL_MS } from "../Details";
 import { PODS } from "../kinds";
 import { parseListUri } from "../uri";
 
-withScreenSize();
+withScreenSize(1280);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -267,18 +268,56 @@ test("a row's actions button and a right click run the resource commands on that
   expect(details()?.textContent).toContain(nameOf(third));
 });
 
-test("a row's hover buttons show before any row is selected, and act on their row", async () => {
-  const writeText = clipboard();
-  await openList();
+test("a row's hover shows its first two pinned verbs before any row is selected, and they act on their own row, not the selected one", async () => {
+  const workbench = await openList();
+  const execute = vi.spyOn(workbench.commands, "execute");
   const second = rows()[1];
   if (!second) throw new Error("no rows");
   expect(
     rows().filter((row) => row.getAttribute("aria-selected") === "true"),
   ).toEqual([]);
   fireEvent.pointerEnter(second);
-  fireEvent.click(within(second).getByRole("button", { name: "Copy Name" }));
-  await settle(1);
-  expect(writeText).toHaveBeenCalledWith(nameOf(second));
+  await settle(2);
+  expect(hoverIcons(second)).toEqual(["Logs", "Shell"]);
+  fireEvent.pointerLeave(second);
+
+  focusGrid();
+  key("KeyJ");
+  await settle(2);
+  const third = rows()[2];
+  if (!third) throw new Error("no rows");
+  expect(rows()[0]?.getAttribute("aria-selected")).toBe("true");
+  expect(details()).toBeNull();
+  fireEvent.pointerEnter(third);
+  await settle(2);
+  fireEvent.click(within(third).getByRole("button", { name: "Logs" }));
+  await settle(2);
+  expect(execute).toHaveBeenCalledWith(
+    "k8s.logs.open",
+    expect.anything(),
+    expect.objectContaining({
+      namespace: cellOf(third, "Namespace"),
+      name: nameOf(third),
+    }),
+  );
+  expect(nameOf(third)).not.toBe(nameOf(rows()[0]));
+});
+
+test("beside docked details a list with room shows a hovered row's icons on every row but the selected one, whose details show them", async () => {
+  await openList();
+  fireEvent.click(rows()[0] ?? document.body);
+  await settle(2);
+  expect(details()?.className).not.toContain("absolute");
+  const [selected, other] = [rows()[0], rows()[2]];
+  if (!selected || !other) throw new Error("no rows");
+  expect(selected.getAttribute("aria-selected")).toBe("true");
+  fireEvent.pointerEnter(other);
+  await settle(2);
+  expect(hoverIcons(other)).toEqual(["Logs", "Shell"]);
+  fireEvent.pointerLeave(other);
+  fireEvent.pointerEnter(selected);
+  await settle(2);
+  expect(hoverIcons(selected)).toEqual([]);
 });
 
 test("the column chooser shows a wide column, and the kind keeps the choice", async () => {

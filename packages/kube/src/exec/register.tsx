@@ -3,6 +3,7 @@ import * as v from "valibot";
 import type { ShellKind, ShellTarget } from "@twigo/protocol";
 import type { QuickPickItem, StatusEntry, Workbench } from "@twigo/workbench";
 import { useChanges } from "@twigo/workbench";
+import type { TabPaths } from "../tabPaths";
 import { EXEC_SCHEME, execUri, parseExecUri, type ExecInput } from "../uri";
 import { ExecActions } from "./ExecActions";
 import { ExecEditor } from "./ExecEditor";
@@ -39,7 +40,11 @@ const URI_ARGUMENT = v.object({ uri: v.string() });
  * and in an object editor's title through `k8s.shell.open`; a status-bar
  * entry lists the open shells.
  */
-export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
+export function registerExec(
+  workbench: Workbench,
+  tabs: ExecTabs,
+  paths: TabPaths,
+): void {
   const { backend, commands, editors, keys, menus, operations, quickAccess } =
     workbench;
   editors.onClose((uri) => {
@@ -54,11 +59,22 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
       const input = parseExecUri(uri.href);
       return input ? execTitle(input) : uri.href;
     },
+    tooltip: (uri) => paths.exec(uri.href),
     icon: ({ className }) => <SquareTerminal className={className} />,
     component: ({ uri }) => <ExecEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <ExecActions uri={uri} tabs={tabs} />,
     focus: (uri) => {
       tabs.get(uri)?.focus();
+    },
+    keep: (uri) => {
+      const input = parseExecUri(uri);
+      return () => {
+        if (input) {
+          start(input).catch((error: unknown) => {
+            workbench.report(error);
+          });
+        }
+      };
     },
   });
 
@@ -175,6 +191,7 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     title: "Shell",
     category: "Shell",
     icon: SquareTerminal,
+    sends: "exec",
     run: async (args) => {
       const parsed = v.safeParse(REQUEST, args);
       if (!parsed.success || !canShell(parsed.output.gvr)) return;
@@ -203,6 +220,7 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
     category: "Shell",
     icon: RotateCcw,
     enablement: "execEnded",
+    sends: "exec",
     run: async (args) => {
       const uri = uriOf(args);
       const input = uri === undefined ? undefined : parseExecUri(uri);
@@ -238,6 +256,9 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
       const live = tabs
         .list()
         .filter(([, tab]) => tab.input.space === space && tab.live);
+      const hidden =
+        space !== undefined &&
+        !workbench.spaces.state(space).parts.panel.visible;
       const entry: StatusEntry = {
         id: "shells",
         text: live.length === 1 ? "1 shell" : `${String(live.length)} shells`,
@@ -247,7 +268,7 @@ export function registerExec(workbench: Workbench, tabs: ExecTabs): void {
           void commands.execute("k8s.shell.show", keys.lookup(null));
         },
       };
-      return live.length === 0 ? [] : [entry];
+      return live.length === 0 || hidden ? [] : [entry];
     },
   });
 }

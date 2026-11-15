@@ -1,3 +1,4 @@
+/** The narrowest a column gets, by a drag or a fit. */
 export const MIN_WIDTH = 48;
 
 /**

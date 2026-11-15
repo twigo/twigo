@@ -1,6 +1,15 @@
-import { Fragment, useRef, type ReactNode } from "react";
-import { Check, type LucideIcon } from "lucide-react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { Check, ChevronDown, Lock, type LucideIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { rovingMove } from "../lib/roving";
+import { useWidth } from "../lib/useWidth";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,8 +25,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./dropdown-menu";
+import { Button } from "./button";
 import { IconButton } from "./icon-button";
 import { Kbd } from "./kbd";
+import { ButtonTip } from "./tip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 /**
  * Something the user can do, as one model for every place that offers it:
@@ -32,6 +44,15 @@ export interface Action {
   readonly keys?: string;
   readonly danger?: boolean;
   readonly disabled?: boolean;
+  /** Why it cannot run, or, when locked, what the context's mode will answer. */
+  readonly reason?: string;
+  /**
+   * The context's mode will refuse it: drawn dimmed with a lock, and it
+   * still runs, so that the refusal can offer what lifts the lock.
+   */
+  readonly locked?: boolean;
+  /** Kept in its place on a row of actions, before More. */
+  readonly pinned?: boolean;
   /** A choice that is on or off, such as a shown column. */
   readonly checked?: boolean;
   readonly run: () => void;
@@ -40,22 +61,55 @@ export interface Action {
 /** Actions in groups, drawn with a separator between groups. */
 export type ActionGroups = readonly (readonly Action[])[];
 
+/** A locked action reads in the support role, but one that destroys keeps the error tone. */
+function lockTone(action: Action): string | undefined {
+  return action.locked && !action.danger ? "text-support" : undefined;
+}
+
+/**
+ * A menu item's icon, label and keys, and under the label why it cannot run
+ * or what its lock will answer. An item that says why stays opaque, so that
+ * the reason reads, and fades only its own parts.
+ */
 function ItemBody({ action }: { action: Action }) {
   const Icon = action.icon;
+  const faded = action.disabled === true && action.reason !== undefined;
   return (
     <>
       {action.checked !== undefined ? (
         <Check aria-hidden className={cn(!action.checked && "invisible")} />
       ) : (
-        Icon && <Icon aria-hidden />
+        Icon && (
+          <Icon
+            aria-hidden
+            className={cn(faded && "opacity-50", lockTone(action))}
+          />
+        )
       )}
-      <span className="flex-1">{action.label}</span>
+      <span className="flex flex-1 flex-col">
+        <span className={cn(faded && "opacity-50", lockTone(action))}>
+          {action.label}
+        </span>
+        {action.reason !== undefined && (
+          <span className="flex items-center gap-1 text-2xs text-quiet">
+            {action.locked && <Lock aria-hidden className="size-3 shrink-0" />}
+            {action.reason}
+          </span>
+        )}
+      </span>
       {action.keys && (
-        <span className="pl-4 text-2xs text-support">{action.keys}</span>
+        <span
+          className={cn("pl-4 text-2xs text-support", faded && "opacity-50")}
+        >
+          {action.keys}
+        </span>
       )}
     </>
   );
 }
+
+/** A menu item that says why it is disabled keeps its own opacity: `ItemBody` fades its parts. */
+const SAYS_WHY = "data-[disabled]:opacity-100";
 
 /**
  * Runs the chosen action as its menu closes, once the focus is back where
@@ -153,6 +207,7 @@ export function ActionContextMenu({
                 key={action.id}
                 disabled={action.disabled}
                 variant={action.danger ? "destructive" : "default"}
+                className={cn(action.reason !== undefined && SAYS_WHY)}
                 onSelect={() => {
                   run.choose(action);
                 }}
@@ -226,7 +281,8 @@ export function ActionDropdown({
               <DropdownMenuItem
                 key={action.id}
                 disabled={action.disabled}
-                className={cn(action.danger && "text-error")}
+                variant={action.danger ? "destructive" : "default"}
+                className={cn(action.reason !== undefined && SAYS_WHY)}
                 onSelect={(event) => {
                   if (keepOpen) {
                     event.preventDefault();
@@ -246,7 +302,11 @@ export function ActionDropdown({
   );
 }
 
-/** Actions with icons as a row of icon buttons; those without an icon stay in menus. */
+/**
+ * Actions with icons as a row of icon buttons; those without an icon, and
+ * the disabled ones that give no reason, stay in menus. A disabled one with
+ * a reason keeps its place and says why in its tooltip.
+ */
 export function InlineActions({
   actions,
   className,
@@ -256,7 +316,8 @@ export function InlineActions({
 }) {
   const shown = actions.filter(
     (action): action is Action & { icon: LucideIcon } =>
-      action.icon !== undefined && !action.disabled,
+      action.icon !== undefined &&
+      (!action.disabled || action.reason !== undefined),
   );
   if (shown.length === 0) return null;
   return (
@@ -267,6 +328,9 @@ export function InlineActions({
           icon={action.icon}
           label={action.label}
           keys={action.keys}
+          disabled={action.disabled}
+          locked={action.locked}
+          reason={action.reason}
           onClick={action.run}
         />
       ))}
@@ -274,18 +338,70 @@ export function InlineActions({
   );
 }
 
+const BUTTON =
+  "inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2 outline-none hover:bg-row-hover focus-visible:shadow-[var(--focus-ring)] [&_svg]:size-3.5";
+
+/** How much of its action a button on a bar shows: all, all but the keys, or the icon alone. */
+type Form = "full" | "label" | "icon";
+
+/** A button's icon, its label unless the icon alone shows, its keys while they fit, and a lock where the mode will refuse it. */
+function ButtonFace({ action, form }: { action: Action; form: Form }) {
+  const Icon = action.icon;
+  return (
+    <>
+      {Icon && <Icon aria-hidden />}
+      {(form !== "icon" || !Icon) && action.label}
+      {form === "full" && action.keys && <Kbd>{action.keys}</Kbd>}
+      {action.locked && <Lock aria-hidden />}
+    </>
+  );
+}
+
+/** A tooltip over a bar's button that opens only when it has something to tell. */
+function ButtonTooltip({
+  action,
+  told,
+  children,
+}: {
+  action: Action;
+  told: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  // Radix reports no close while `open` is false, so an open it reports
+  // with nothing to tell would outlast the hover.
+  if (open && !told) setOpen(false);
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent className="flex flex-col gap-0.5">
+        <ButtonTip
+          label={action.label}
+          keys={action.keys}
+          reason={action.reason}
+          locked={action.locked}
+        />
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /**
  * Actions as labelled buttons with their keys: a selection's floating bar,
- * or `inline` in a panel's header, as the details' actions.
+ * or `inline` in a toolbar or a banner, as the editors' edit actions and the
+ * empty panel's are. `outlined` draws them as `Button`s of the outline
+ * variant, as an empty state does.
  */
 export function ActionBar({
   actions,
   inline = false,
+  outlined = false,
   className,
   children,
 }: {
   actions: ActionGroups;
   inline?: boolean;
+  outlined?: boolean;
   className?: string;
   /** What the bar is about, before the actions: `2 selected`. */
   children?: ReactNode;
@@ -306,26 +422,232 @@ export function ActionBar({
             <span aria-hidden className="mx-1 h-4 w-px bg-border" />
           )}
           {group.map((action) => {
-            const Icon = action.icon;
+            const props = {
+              disabled: action.disabled,
+              onClick: action.run,
+              className: cn(
+                !outlined && BUTTON,
+                "disabled:opacity-50",
+                action.danger && "text-error",
+                lockTone(action),
+              ),
+            };
+            const face = <ButtonFace action={action} form="full" />;
             return (
-              <button
+              <ButtonTooltip
                 key={action.id}
-                type="button"
-                disabled={action.disabled}
-                onClick={action.run}
-                className={cn(
-                  "inline-flex h-6.5 items-center gap-1.5 rounded-md px-2 outline-none hover:bg-row-hover focus-visible:shadow-[var(--focus-ring)] disabled:opacity-50 [&_svg]:size-3.5",
-                  action.danger && "text-error",
-                )}
+                action={action}
+                told={action.reason !== undefined}
               >
-                {Icon && <Icon aria-hidden />}
-                {action.label}
-                {action.keys && <Kbd>{action.keys}</Kbd>}
-              </button>
+                {outlined ? (
+                  <Button variant="outline" size="sm" {...props}>
+                    {face}
+                  </Button>
+                ) : (
+                  <button type="button" {...props}>
+                    {face}
+                  </button>
+                )}
+              </ButtonTooltip>
             );
           })}
         </Fragment>
       ))}
+    </div>
+  );
+}
+
+/** Below this much spare width a row keeps a stage it narrowed to, so that a width on a boundary does not flicker. */
+const MARGIN = 16;
+
+/**
+ * The stage a row takes at `width` from `current`, where `needs` holds the
+ * width each stage takes, the least collapsed first: it collapses as soon
+ * as the current stage no longer fits, and comes back only with `MARGIN` to
+ * spare. Until the row and every stage are measured it keeps `current`.
+ */
+function fitStage(
+  width: number,
+  needs: readonly number[],
+  current: number,
+): number {
+  if (width <= 0 || needs.some((need) => need <= 0)) return current;
+  const last = needs.length - 1;
+  let stage = Math.min(current, last);
+  while (stage < last && (needs[stage] ?? 0) > width) stage++;
+  while (stage > 0 && (needs[stage - 1] ?? 0) + MARGIN <= width) stage--;
+  return stage;
+}
+
+/** The form of the pinned action at `index` of `count` at `stage`: the keys go first, then the labels from the last one back. */
+function formAt(stage: number, index: number, count: number): Form {
+  if (stage === 0) return "full";
+  return index >= count - (stage - 1) ? "icon" : "label";
+}
+
+/** A copy of the row at one stage, out of sight, whose width says what that stage takes. */
+function Measured({
+  stage,
+  onMeasure,
+  children,
+}: {
+  stage: number;
+  onMeasure: (stage: number, width: number) => void;
+  children: ReactNode;
+}) {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const width = useWidth(element);
+  useEffect(() => {
+    onMeasure(stage, width);
+  }, [onMeasure, stage, width]);
+  return (
+    <div
+      ref={setElement}
+      data-stage={stage}
+      className="flex w-max items-center gap-1"
+    >
+      {children}
+    </div>
+  );
+}
+
+const MORE = cn(BUTTON, "data-[state=open]:bg-row-hover");
+
+const MORE_FACE = (
+  <>
+    More
+    <ChevronDown aria-hidden className="text-support" />
+  </>
+);
+
+const sized = (form: Form, action: Action) =>
+  cn(BUTTON, form === "icon" && action.icon && "px-1.5");
+
+/**
+ * An object's actions as one row (ARCHITECTURE 4.3): its pinned actions in
+ * their places with their labels and keys, a disabled one saying why in its
+ * tooltip, then More, always last, with the rest in their groups. As the row
+ * narrows the keys go first, then the labels from the last pinned action
+ * back. The row is one tab stop, and the arrows, Home and End move along it.
+ */
+export function ActionRow({
+  actions,
+  label,
+  className,
+}: {
+  actions: ActionGroups;
+  /** The toolbar's accessible name. */
+  label: string;
+  className?: string;
+}) {
+  const pinned = actions.flat().filter((action) => action.pinned === true);
+  const rest = actions
+    .map((group) => group.filter((action) => action.pinned !== true))
+    .filter((group) => group.length > 0);
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const width = useWidth(element);
+  const [needs, setNeeds] = useState<Readonly<Record<number, number>>>({});
+  const onMeasure = useCallback((stage: number, need: number) => {
+    setNeeds((was) => (was[stage] === need ? was : { ...was, [stage]: need }));
+  }, []);
+  const stages = Array.from({ length: pinned.length + 2 }, (_, stage) => stage);
+  const [stage, setStage] = useState(0);
+  const fitted = fitStage(
+    width,
+    stages.map((at) => needs[at] ?? 0),
+    stage,
+  );
+  if (fitted !== stage) setStage(fitted);
+  const [active, setActive] = useState(0);
+  const count = pinned.length + 1;
+  const focused = Math.min(active, count - 1);
+  const roving = (index: number) => ({
+    tabIndex: index === focused ? 0 : -1,
+    onFocus: () => {
+      setActive(index);
+    },
+  });
+
+  return (
+    <div
+      ref={setElement}
+      role="toolbar"
+      aria-label={label}
+      onKeyDown={(event) => {
+        // The row's own buttons; a key in More's menu, which React bubbles
+        // here through its portal, is not one of them.
+        const items = [
+          ...event.currentTarget.querySelectorAll<HTMLElement>(
+            ":scope > button",
+          ),
+        ];
+        const from = items.indexOf(event.target as HTMLElement);
+        if (from < 0) return;
+        const to = rovingMove(event.key, from, items.length);
+        if (to === undefined) return;
+        event.preventDefault();
+        setActive(to);
+        items[to]?.focus();
+      }}
+      className={cn(
+        "relative flex min-w-0 items-center gap-1 text-xs whitespace-nowrap",
+        className,
+      )}
+    >
+      {pinned.map((action, index) => {
+        const form = formAt(fitted, index, pinned.length);
+        const hides =
+          (form === "icon" && action.icon !== undefined) ||
+          (form !== "full" && action.keys !== undefined);
+        return (
+          <ButtonTooltip
+            key={action.id}
+            action={action}
+            told={hides || action.reason !== undefined}
+          >
+            <button
+              type="button"
+              aria-label={action.label}
+              aria-disabled={action.disabled === true || undefined}
+              {...roving(index)}
+              onClick={() => {
+                if (!action.disabled) action.run();
+              }}
+              className={cn(
+                sized(form, action),
+                action.danger && "text-error",
+                lockTone(action),
+                action.disabled && "opacity-50 hover:bg-transparent",
+              )}
+            >
+              <ButtonFace action={action} form={form} />
+            </button>
+          </ButtonTooltip>
+        );
+      })}
+      <ActionDropdown actions={rest} label="More">
+        <button type="button" {...roving(pinned.length)} className={MORE}>
+          {MORE_FACE}
+        </button>
+      </ActionDropdown>
+      <div
+        aria-hidden
+        className="invisible absolute top-0 left-0 h-0 overflow-hidden"
+      >
+        {stages.map((at) => (
+          <Measured key={at} stage={at} onMeasure={onMeasure}>
+            {pinned.map((action, index) => {
+              const form = formAt(at, index, pinned.length);
+              return (
+                <span key={action.id} className={sized(form, action)}>
+                  <ButtonFace action={action} form={form} />
+                </span>
+              );
+            })}
+            <span className={MORE}>{MORE_FACE}</span>
+          </Measured>
+        ))}
+      </div>
     </div>
   );
 }

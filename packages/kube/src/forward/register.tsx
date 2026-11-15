@@ -1,6 +1,7 @@
 import { ArrowLeftRight } from "lucide-react";
 import * as v from "valibot";
 import type { Workbench } from "@twigo/workbench";
+import type { TabPaths } from "../tabPaths";
 import { PF_SCHEME, parsePfUri } from "../uri";
 import {
   FORWARDS_CONTAINER,
@@ -38,6 +39,7 @@ const REQUEST = v.object({
 export function registerForwards(
   workbench: Workbench,
   forwards: Forwards,
+  paths: TabPaths,
 ): void {
   const { commands, editors, keybindings, keys, menus, spaces, views } =
     workbench;
@@ -53,6 +55,11 @@ export function registerForwards(
       const input = parsePfUri(uri.href);
       const forward = input && forwards.find(input);
       return forward ? forwardTitle(forward) : "Port forward";
+    },
+    tooltip: (uri) => {
+      const input = parsePfUri(uri.href);
+      const forward = input && forwards.find(input);
+      return forward && paths.forward(forward);
     },
     icon: ({ className }) => <ArrowLeftRight className={className} />,
     component: ({ uri }) => <ForwardEditor uri={uri} forwards={forwards} />,

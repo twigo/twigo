@@ -6,6 +6,11 @@ import type { GridColumn, GridSort } from "./types";
 
 import { MIN_WIDTH } from "./fit";
 
+const CELL =
+  "h-full border-r border-transparent group-hover/header:border-border-subtle";
+const CELL_FREE = `${CELL} relative`;
+const CELL_HELD = `${CELL} sticky z-20 bg-inherit`;
+
 /**
  * A column's header: a click sorts by it, a second click reverses; its
  * right edge drags to resize, and a double click there fits the column
@@ -18,6 +23,7 @@ export function HeaderCell({
   onSort,
   onResize,
   onFit,
+  held,
 }: {
   column: GridColumn;
   width: number;
@@ -25,6 +31,11 @@ export function HeaderCell({
   onSort: (sort: GridSort) => void;
   onResize: (width: number) => void;
   onFit: () => void;
+  /**
+   * Stays at this distance from the grid's left edge while the grid scrolls
+   * sideways, over every column's resize edge, which sits at `z-10`.
+   */
+  held?: number;
 }) {
   const title = useId();
   const noteId = useId();
@@ -64,7 +75,8 @@ export function HeaderCell({
       // Its content would add the resize edge's label to its name.
       aria-labelledby={title}
       aria-describedby={note ? noteId : undefined}
-      className="relative h-full border-r border-transparent group-hover/header:border-border-subtle"
+      style={held === undefined ? undefined : { left: held }}
+      className={held === undefined ? CELL_FREE : CELL_HELD}
     >
       <Tooltip open={note !== undefined && noting} onOpenChange={setNoting}>
         <TooltipTrigger asChild>{sorter}</TooltipTrigger>

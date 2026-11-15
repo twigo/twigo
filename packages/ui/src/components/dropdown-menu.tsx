@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Check } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
 import { cn } from "../lib/cn";
@@ -46,40 +45,27 @@ const ITEM = cn(
   "relative flex select-none items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none transition-colors duration-100 ease-[var(--ease-out)]",
   "focus:bg-accent focus:text-accent-foreground",
   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-  "[&_svg]:size-3.5 [&_svg]:shrink-0",
+  "[&>svg]:size-3.5 [&>svg]:shrink-0",
 );
 
 function DropdownMenuItem({
   className,
+  variant = "default",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Item>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Item> & {
+  variant?: "default" | "destructive";
+}) {
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
-      className={cn(ITEM, className)}
+      data-variant={variant}
+      className={cn(
+        ITEM,
+        "data-[variant=destructive]:text-error data-[variant=destructive]:focus:bg-error/10",
+        className,
+      )}
       {...props}
     />
-  );
-}
-
-function DropdownMenuCheckboxItem({
-  className,
-  children,
-  ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.CheckboxItem>) {
-  return (
-    <DropdownMenuPrimitive.CheckboxItem
-      data-slot="dropdown-menu-checkbox-item"
-      className={cn(ITEM, "pl-7", className)}
-      {...props}
-    >
-      <span className="absolute left-2 flex size-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <Check />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {children}
-    </DropdownMenuPrimitive.CheckboxItem>
   );
 }
 
@@ -114,7 +100,6 @@ export {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 };

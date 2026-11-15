@@ -1,3 +1,5 @@
+import { afterEach, beforeEach, vi } from "vitest";
+
 globalThis.ResizeObserver = class {
   observe() {
     return undefined;
@@ -46,4 +48,31 @@ window.matchMedia = (query: string) =>
 Object.defineProperty(document, "fonts", {
   configurable: true,
   value: { check: () => true, load: () => Promise.resolve([]) },
+});
+
+// Vitest does not stop the body of a test that timed out: it runs on while the next tests start, and the act() it holds open overlaps theirs.
+// The shared waits end at the test's signal; the hook below waits, with the clock down so that the body's next step fails, for that act to close, and ends the queue that a failed act leaves set.
+let running: AbortSignal | undefined;
+
+beforeEach(({ signal }) => {
+  running = signal;
+});
+
+export function testSignal() {
+  return running;
+}
+
+afterEach(async ({ signal }) => {
+  if (!signal.aborted) return;
+  vi.useRealTimers();
+  const { act } = await import("@testing-library/react");
+  const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  const until = performance.now() + 2000;
+  while (environment.IS_REACT_ACT_ENVIRONMENT === true) {
+    if (performance.now() > until) {
+      throw new Error("a test that timed out still holds an act scope");
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await act(() => Promise.resolve());
 });

@@ -20,7 +20,11 @@ async function mounted() {
     });
   };
   const groups = () =>
-    [...document.querySelectorAll(".dv-groupview")].map((group) =>
+    [
+      ...document.querySelectorAll(
+        ".twigo-dockview:not(.twigo-panel) .dv-groupview",
+      ),
+    ].map((group) =>
       [...group.querySelectorAll(".dv-tab")].map((tab) => tab.textContent),
     );
   return { workbench, open, groups };

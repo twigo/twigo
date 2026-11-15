@@ -98,8 +98,8 @@ pub struct SetWindow {
     /// Exclusive.
     pub end: u32,
     /// Whether the list reads its metric columns now, which takes the
-    /// document visible, the list's editor on screen, and the list not the
-    /// narrow one beside an object's details, which always says false.
+    /// document visible, the list's editor on screen, and the list not one
+    /// inside an Overview narrower than 640 px, which always says false.
     /// Before the list's columns are known it says true, so that a list
     /// sorted by a metric is held from its first rows; once they are known,
     /// while a metric column is drawn or sorted by. Only then are the

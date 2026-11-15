@@ -2,6 +2,7 @@ import { ScrollText } from "lucide-react";
 import * as v from "valibot";
 import type { LogTarget } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
+import type { TabPaths } from "../tabPaths";
 import { LOGS_SCHEME, logsUri, parseLogsUri } from "../uri";
 import { logsKind } from "./entries";
 import { LogsEditor } from "./LogsEditor";
@@ -12,8 +13,12 @@ import type { LogsTab, LogsTabs } from "./state";
  * opened by `l` on a row, in the details and in an object's editor through
  * `k8s.logs.open`, and the keys of a logs tab.
  */
-export function registerLogs(workbench: Workbench, tabs: LogsTabs): void {
-  const { editors, commands, keybindings, menus } = workbench;
+export function registerLogs(
+  workbench: Workbench,
+  tabs: LogsTabs,
+  paths: TabPaths,
+): void {
+  const { editors, commands, keybindings, keys, menus, spaces } = workbench;
   editors.onClose((uri) => {
     tabs.closed(uri);
   });
@@ -29,8 +34,43 @@ export function registerLogs(workbench: Workbench, tabs: LogsTabs): void {
         ? `Logs · ${logsKind(input.gvr) ?? input.gvr.resource} ${input.name}`
         : uri.href;
     },
+    tooltip: (uri) => paths.logs(uri.href),
     icon: ({ className }) => <ScrollText className={className} />,
     component: ({ uri }) => <LogsEditor uri={uri} tabs={tabs} />,
+    keep: (uri) => {
+      const tab = tabs.get(uri);
+      return () => {
+        tabs.restore(uri, tab);
+        editors.open(uri);
+      };
+    },
+  });
+
+  const syncReopenable = () => {
+    const space = spaces.active;
+    keys.set(
+      "logsReopenable",
+      space !== undefined &&
+        editors.lastClosed(space.id, LOGS_SCHEME) !== undefined,
+    );
+  };
+  editors.changes.subscribe(syncReopenable);
+  spaces.changes.subscribe(syncReopenable);
+  commands.register({
+    id: "k8s.logs.reopen",
+    title: "Reopen Logs",
+    category: "Logs",
+    icon: ScrollText,
+    enablement: "logsReopenable",
+    run: () => {
+      const space = spaces.active;
+      if (space) editors.reopen(space.id, LOGS_SCHEME);
+    },
+  });
+  menus.append("panel/empty", {
+    command: "k8s.logs.reopen",
+    order: 1,
+    when: "logsReopenable",
   });
 
   /** Opens or focuses an object's logs, on one container and its previous instance when a finding asks. */

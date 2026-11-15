@@ -14,7 +14,12 @@ import type {
   Overview,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { openList, settle, withScreenSize } from "../test/workbench";
+import {
+  hoverIcons,
+  openList,
+  settle,
+  withScreenSize,
+} from "../test/workbench";
 
 vi.mock("./edit/YamlEditor", () => ({ default: () => <div /> }));
 
@@ -67,21 +72,97 @@ const EVERY_COLUMN = [
 ];
 
 describe("in a wide editor", () => {
-  withScreenSize(1000);
+  const layout = withScreenSize(1000);
 
-  test("the details stand beside the list, which keeps its name, ready and status columns until they close", async () => {
+  test("the details stand beside the list, whose columns leave as the details narrow it and come back as it widens", async () => {
     await openList();
     expect(headers()).toEqual(EVERY_COLUMN);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).not.toContain("absolute");
+    expect(shown().style.minWidth).toBe("320px");
+    layout.resize(grid(), 530);
     expect(headers()).toEqual(["", "Name", "Ready", "Status", ""]);
     fireEvent.click(
       within(shown()).getByRole("button", { name: "Close details" }),
     );
     await settle(1);
     expect(details()).toBeNull();
+    layout.resize(grid(), 1000);
     expect(headers()).toEqual(EVERY_COLUMN);
+  });
+
+  const ROOM = 600;
+  const widthOf = () => shown().style.width;
+  const strip = () =>
+    within(shown()).getByRole("separator", { name: "Resize details" });
+  const onScreen = () => {
+    shown().getBoundingClientRect = () =>
+      new DOMRect(0, 0, Math.min(Number.parseInt(widthOf(), 10), ROOM), 600);
+  };
+  const drag = (to: number) => {
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientX: to, pointerId: 1 });
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+  };
+
+  test("the width the user dragged the details to is the app's: a close keeps it, and so does a restart", async () => {
+    const backend = createMockBackend("ready");
+    const workbench = await openList(backend);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("470px");
+    drag(600);
+    expect(widthOf()).toBe("570px");
+    fireEvent.click(
+      within(shown()).getByRole("button", { name: "Close details" }),
+    );
+    await settle(1);
+    fireEvent.click(rows()[1] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("570px");
+    drag(900);
+    expect(widthOf()).toBe("370px");
+    drag(1400);
+    expect(widthOf()).toBe("320px");
+
+    drag(500);
+    const written = workbench.state.settled();
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await written;
+    cleanup();
+    await openList(backend);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("520px");
+  });
+
+  test("a drag starts from the width on screen and keeps the width it ended at, which the editor's room may have cut", async () => {
+    const workbench = await openList(createMockBackend("ready"));
+    workbench.sizes.set("inspector", 900);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    expect(widthOf()).toBe("900px");
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerMove(strip(), { clientX: 650, pointerId: 1 });
+    expect(widthOf()).toBe("650px");
+    onScreen();
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+    expect(workbench.sizes.get("inspector")).toBe(ROOM);
+    expect(widthOf()).toBe("600px");
+  });
+
+  test("a click on the resize strip changes no width", async () => {
+    const workbench = await openList(createMockBackend("ready"));
+    workbench.sizes.set("inspector", 900);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    onScreen();
+    fireEvent.pointerDown(strip(), { clientX: 700, pointerId: 1 });
+    fireEvent.pointerUp(strip(), { pointerId: 1 });
+    expect(workbench.sizes.get("inspector")).toBe(900);
   });
 
   test("the header shows the row's status as a pill, and its controlling owner opens the owner", async () => {
@@ -171,6 +252,121 @@ describe("in a wide editor", () => {
     expect(details()).toBeNull();
   });
 
+  test("the header's row is a pod's pinned verbs, then More", async () => {
+    await openList();
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    const row = within(shown()).getByRole("toolbar", { name: "Pod actions" });
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Logs", "Shell", "Forward", "More"]);
+  });
+
+  test("a pod whose Overview lists no running container draws Shell and Attach disabled, saying so, where a running pod's are enabled", async () => {
+    await openList();
+    const cell = (row: HTMLElement, column: string) =>
+      row.querySelector(`[data-column="${column}"]`)?.textContent;
+    const pod = (status: string, ready: string) => {
+      const found = rows().find(
+        (row) => cell(row, "Status") === status && cell(row, "Ready") === ready,
+      );
+      if (!found) throw new Error(`no ${status} pod of ${ready}`);
+      return found;
+    };
+    const shell = () =>
+      within(
+        within(shown()).getByRole("toolbar", { name: "Pod actions" }),
+      ).getByRole("button", { name: "Shell" });
+
+    fireEvent.click(pod("Running", "1/1"));
+    await settle(6);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+    cleanup();
+
+    await openList(
+      createMockBackend("ready"),
+      "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+    );
+    fireEvent.click(pod("CrashLoopBackOff", "0/1"));
+    await settle(1);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+    await settle(6);
+    expect(shell().getAttribute("aria-disabled")).toBe("true");
+    act(() => {
+      shell().focus();
+    });
+    expect(screen.getByRole("tooltip").textContent).toContain(
+      "No container runs",
+    );
+    fireEvent.pointerDown(
+      within(shown()).getByRole("button", { name: "More" }),
+      { button: 0, ctrlKey: false },
+    );
+    const attach = within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: /^Attach/,
+    });
+    expect(attach.getAttribute("aria-disabled")).toBe("true");
+    expect(attach.textContent).toContain("No container runs");
+  });
+
+  test("off the Overview a crash-looping pod's Shell runs, since the details no longer know its containers, which a batch may have started", async () => {
+    const mock = createMockBackend("ready");
+    let send: ((batch: ObjectBatch) => void) | undefined;
+    let last: ObjectBatch | undefined;
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "object_open")
+          return mock.subscribe(command, request, onMessage);
+        const forward = onMessage as (batch: ObjectBatch) => void;
+        send = forward;
+        return mock.subscribe(command, request, (message) => {
+          last = message as ObjectBatch;
+          forward(last);
+        });
+      },
+    };
+    await openList(backend, "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff");
+    const crashing = rows().find(
+      (row) =>
+        row.querySelector('[data-column="Status"]')?.textContent ===
+          "CrashLoopBackOff" &&
+        row.querySelector('[data-column="Ready"]')?.textContent === "0/1",
+    );
+    fireEvent.click(crashing ?? document.body);
+    await settle(8);
+    const shell = () =>
+      within(
+        within(shown()).getByRole("toolbar", { name: "Pod actions" }),
+      ).getByRole("button", { name: "Shell" });
+    expect(shell().getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.click(tab("YAML"));
+    await settle(8);
+    const batch = last;
+    if (!send || !batch?.manifest) throw new Error("no object batches");
+    const manifest = JSON.parse(batch.manifest) as {
+      status: { containerStatuses: { state: unknown }[] };
+    };
+    for (const status of manifest.status.containerStatuses)
+      status.state = { running: { startedAt: "2026-11-15T10:00:00Z" } };
+    act(() => {
+      send?.({
+        ...batch,
+        seq: batch.seq + 1,
+        overview: null,
+        events: null,
+        related: null,
+        usage: null,
+        manifest: JSON.stringify(manifest),
+      });
+    });
+    await settle(2);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);
@@ -183,12 +379,54 @@ describe("in a wide editor", () => {
 describe("in a narrow editor", () => {
   withScreenSize(800);
 
-  test("the details slide over the list, which keeps every column", async () => {
+  test("the details slide over the list, which keeps the columns its own width leaves it, and keep no minimum width, so a narrow editor's 85 % bounds them", async () => {
     await openList();
+    const own = [
+      "",
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "Restarts",
+      "Age",
+      "",
+    ];
+    expect(headers()).toEqual(own);
     fireEvent.click(rows()[0] ?? document.body);
     await settle(1);
     expect(shown().className).toContain("absolute");
-    expect(headers()).toEqual(EVERY_COLUMN);
+    expect(shown().style.minWidth).toBe("");
+    expect(headers()).toEqual(own);
+  });
+
+  test("lying over the list, the details leave its rows no hover icons, which would mount unseen and ask the cluster for nobody", async () => {
+    const backend = createMockBackend("ready");
+    const invoke = vi.spyOn(backend, "invoke");
+    await openList(backend);
+    const reviews = () =>
+      invoke.mock.calls.filter(([command]) => command === "access_review")
+        .length;
+    const other = rows()[2];
+    if (!other) throw new Error("no rows");
+    const unasked = reviews();
+    fireEvent.pointerEnter(other);
+    await settle(2);
+    expect(hoverIcons(other).length).toBeGreaterThan(0);
+    expect(reviews()).toBeGreaterThan(unasked);
+    fireEvent.pointerLeave(other);
+    await settle(1);
+
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(2);
+    expect(shown().className).toContain("absolute");
+    const before = reviews();
+    for (const row of rows().slice(1, 6)) {
+      fireEvent.pointerEnter(row);
+      await settle(2);
+      expect(hoverIcons(row)).toEqual([]);
+      fireEvent.pointerLeave(row);
+    }
+    expect(reviews()).toBe(before);
   });
 
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {

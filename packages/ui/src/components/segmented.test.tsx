@@ -58,3 +58,21 @@ test("an abnormal tone puts a dot before the label, and an error count above 0 t
   ]);
   expect(screen.getByText("0")).not.toHaveClass("text-error");
 });
+
+test("a count that keeps room for digits reserves them as zeros grouped as the count is, and reads as the count alone", () => {
+  health("all", [
+    { value: "all", label: "All", count: 12, digits: 4 },
+    { value: "failing", label: "Failing", count: 2, digits: 3 },
+    { value: "pending", label: "Pending", count: 3, digits: 7 },
+    { value: "healthy", label: "Healthy", count: 10 },
+  ]);
+  const reserve = (name: string) =>
+    item(name).querySelector<HTMLElement>("span.tabular-nums")?.dataset.reserve;
+  expect([
+    reserve("All"),
+    reserve("Failing"),
+    reserve("Pending"),
+    reserve("Healthy"),
+  ]).toEqual(["0,000", "000", "0,000,000", undefined]);
+  expect(item("All").textContent).toBe("All12");
+});

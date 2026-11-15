@@ -1,14 +1,16 @@
 import type { ActionGroups } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
 import type { Keybindings } from "../keybindings/service";
+import { modeLock } from "../spaces/modes";
 import type { MenuId, Menus } from "./menus";
 import type { Commands } from "./registry";
 
 /**
  * A menu's commands as `ui` actions (ARCHITECTURE 5.1): titles, icons and
- * keys from the registries, disabled where enablement fails, each run
- * against `lookup`. One model for context menus, dropdowns, inline buttons
- * and the selection bar.
+ * keys from the registries, disabled where enablement fails with the reason
+ * a requirement gives, locked where the context's mode will refuse what
+ * they send, pinned where their item is, each run against `lookup`. One
+ * model for context menus, dropdowns, inline buttons and the bars.
  */
 export function menuActions(
   {
@@ -31,13 +33,20 @@ export function menuActions(
         const command = commands.get(item.command);
         if (!command) return [];
         const binding = keybindings.primary(item.command);
+        const enabled = commands.enabled(item.command, lookup);
+        const lock = enabled && command.sends ? modeLock(lookup) : undefined;
+        const reason = enabled ? lock : commands.reason(item.command, lookup);
         return [
           {
             id: item.command,
             label: command.title,
             ...(command.icon && { icon: command.icon }),
             ...(binding && { keys: keybindings.label(binding.presses) }),
-            disabled: !commands.enabled(item.command, lookup),
+            ...(command.danger && { danger: true }),
+            ...(item.pinned && { pinned: true }),
+            disabled: !enabled,
+            ...(reason !== undefined && { reason }),
+            ...(lock !== undefined && { locked: true }),
             run: () => {
               void commands.execute(item.command, lookup, args);
             },

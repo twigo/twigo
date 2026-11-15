@@ -57,22 +57,9 @@ function ContextMenuItem({
         "focus:bg-accent focus:text-accent-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         "data-[variant=destructive]:text-error data-[variant=destructive]:focus:bg-error/10",
-        "[&_svg]:size-3.5 [&_svg]:shrink-0",
+        "[&>svg]:size-3.5 [&>svg]:shrink-0",
         className,
       )}
-      {...props}
-    />
-  );
-}
-
-function ContextMenuLabel({
-  className,
-  ...props
-}: React.ComponentProps<typeof ContextMenuPrimitive.Label>) {
-  return (
-    <ContextMenuPrimitive.Label
-      data-slot="context-menu-label"
-      className={cn("px-2 py-1.5 text-2xs font-medium text-support", className)}
       {...props}
     />
   );
@@ -96,6 +83,5 @@ export {
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
 };

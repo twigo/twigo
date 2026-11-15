@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { Copy } from "lucide-react";
+import { resize } from "../../test/resize";
 import type { ListController } from "../lib/list";
 import { DataGrid } from "./DataGrid";
 import type { GridItem } from "./types";
@@ -492,7 +493,9 @@ test("whatever a row holds sits in one of its cells", () => {
     ...list([...ITEMS, undefined]),
     columns: [{ id: "Name", title: "Name", width: 200 }],
     marked: new Set(["a1"]),
-    inline: [{ id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() }],
+    inline: () => [
+      { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+    ],
   });
   const [header, ...rows] = screen.getAllByRole("row");
   for (const row of rows)
@@ -529,38 +532,125 @@ test("a move down scrolls the cursor's row clear of the bottom, a move up clear 
   expect(scrolled.scrollTop).toBe(234);
 });
 
-test("a hovered row's actions run on that row, which they select first, without opening it", () => {
+const WITH_AGE = [
+  { id: "Name", title: "Name", width: 200, grow: true },
+  { id: "Status", title: "Status", width: 120 },
+  { id: "Age", title: "Age", width: 64, coverable: true },
+];
+
+const nameOnly = (row: Pod, column: { id: string }) =>
+  column.id === "Name" ? row.name : "";
+
+const rest = (ms = 70) =>
+  act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+test("a hovered row's icons are its own actions and run on that row, which they select first, without opening it", async () => {
   let selection = "a1";
   const ranOn: string[] = [];
   const { handlers } = grid({
+    columns: WITH_AGE,
+    cell: nameOnly,
     selected: selection,
     onSelect: (id: string) => {
       selection = id;
     },
-    inline: [
+    inline: (row) => [
       {
         id: "copy",
         label: "Copy Name",
         icon: Copy,
         run: () => {
-          ranOn.push(selection);
+          ranOn.push(`${row.name} on ${selection}`);
         },
       },
     ],
   });
   fireEvent.pointerEnter(rowNamed("gateway-1"));
+  await rest();
   fireEvent.click(
     within(rowNamed("gateway-1")).getByRole("button", { name: "Copy Name" }),
   );
-  expect(ranOn).toEqual(["e1"]);
+  expect(ranOn).toEqual(["gateway-1 on e1"]);
   expect(handlers.onActivate).not.toHaveBeenCalled();
+});
+
+test("a hovered row's icon names no key, since the key acts on the selected row", async () => {
+  grid({
+    columns: WITH_AGE,
+    cell: nameOnly,
+    selected: "a1",
+    inline: () => [
+      {
+        id: "cordon",
+        label: "Cordon",
+        icon: Copy,
+        keys: "⇧C",
+        run: vi.fn(),
+      },
+    ],
+  });
+  fireEvent.pointerEnter(rowNamed("gateway-1"));
+  await rest();
+  act(() => {
+    within(rowNamed("gateway-1"))
+      .getByRole("button", { name: "Cordon" })
+      .focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe("Cordon");
+});
+
+test("a hovered row's icons show once the pointer rests on it, and only where the last columns that may be covered have room", async () => {
+  const icons = (name: string) =>
+    within(rowNamed(name))
+      .queryAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label) => label !== "Row actions");
+  const two = () => [
+    { id: "logs", label: "Logs", icon: Copy, run: vi.fn() },
+    { id: "shell", label: "Shell", icon: Copy, run: vi.fn() },
+  ];
+  grid({ columns: WITH_AGE, cell: nameOnly, inline: two });
+  fireEvent.pointerEnter(rowNamed("api-2"));
+  await rest(30);
+  expect(icons("api-2")).toEqual([]);
+  await rest(40);
+  expect(icons("api-2")).toEqual(["Logs", "Shell"]);
+  fireEvent.pointerLeave(rowNamed("api-2"));
+  expect(icons("api-2")).toEqual([]);
+  cleanup();
+
+  grid({
+    columns: [
+      ...WITH_AGE.slice(0, 2),
+      { id: "Age", title: "Age", width: 40, coverable: true },
+    ],
+    cell: nameOnly,
+    inline: two,
+  });
+  fireEvent.pointerEnter(rowNamed("api-2"));
+  await rest();
+  expect(icons("api-2")).toEqual([]);
+  cleanup();
+
+  grid({
+    columns: [WITH_AGE[0], WITH_AGE[2], WITH_AGE[1]].filter(
+      (column) => column !== undefined,
+    ),
+    cell: nameOnly,
+    inline: two,
+  });
+  fireEvent.pointerEnter(rowNamed("api-2"));
+  await rest();
+  expect(icons("api-2")).toEqual([]);
 });
 
 test("a row's actions mount only while the pointer, the focus or the cursor is on it", () => {
   grid({
     selected: "a1",
     menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
-    inline: [{ id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() }],
+    inline: () => [
+      { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+    ],
   });
   const hasActions = (name: string) =>
     within(rowNamed(name)).queryByRole("button", { name: "Row actions" }) !==
@@ -577,6 +667,43 @@ test("a row's actions mount only while the pointer, the focus or the cursor is o
   expect(hasActions("gateway-1")).toBe(true);
   fireEvent.blur(rowNamed("gateway-1"));
   expect(hasActions("gateway-1")).toBe(false);
+});
+
+test("the first column stays at the grid's left edge, beside the marks, only while the grid scrolls sideways and the column leaves the row's actions their room", () => {
+  const columns = (name: number) => [
+    { id: "Name", title: "Name", width: name },
+    { id: "Age", title: "Age", width: 100 },
+  ];
+  const held = () => [
+    within(screen.getByRole("columnheader", { name: "Name" })).getByRole(
+      "button",
+    ).parentElement?.style.left,
+    rowNamed("gateway-1").querySelector<HTMLElement>('[data-column="Name"]')
+      ?.style.left,
+  ];
+
+  const cell = (row: Pod, column: { id: string }) =>
+    column.id === "Name" ? row.name : "4d";
+
+  grid({ columns: columns(300), cell });
+  act(() => {
+    resize();
+  });
+  expect(held()).toEqual(["", ""]);
+  cleanup();
+
+  grid({ columns: columns(900), cell });
+  act(() => {
+    resize();
+  });
+  expect(held()).toEqual(["28px", "28px"]);
+  cleanup();
+
+  grid({ columns: columns(960), cell });
+  act(() => {
+    resize();
+  });
+  expect(held()).toEqual(["", ""]);
 });
 
 test("a row's menu has a column of its own, unless the grid lays it over the row's end", () => {

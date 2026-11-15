@@ -9,10 +9,13 @@ import {
 } from "@twigo/protocol";
 import {
   ActionDropdown,
+  COLUMN_MIN_WIDTH,
   Count,
   DataGrid,
   EmptyState,
+  GUTTERS_WIDTH,
   StatusDot,
+  useWidth,
   type GridColumn,
   type GridItem,
 } from "@twigo/ui";
@@ -20,31 +23,33 @@ import {
   useChanges,
   useListRegistration,
   useWorkbench,
+  type Lookup,
 } from "@twigo/workbench";
+import { CAPABILITY_PREFIXES } from "../capabilities";
 import {
   byHealth,
   columnRule,
-  type CellKind,
+  type ColumnRule,
   HEALTH,
   healthValues,
   rowTone,
   statusColumn,
 } from "../columns";
 import { kindIcon } from "../kinds";
+import { rowState } from "../rowState";
+import { objectOfRow } from "../selection";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { CellView, type ShownColumn } from "./cells";
+import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
 import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
 const GROUP = "group:";
-
-/** The cells a list beside the details keeps. */
-const NARROW: ReadonlySet<CellKind> = new Set(["name", "status", "ratio"]);
 
 /**
  * A list editor's rows (ARCHITECTURE 4.4): the editor's state and its
@@ -58,8 +63,11 @@ export function ResourceGrid(props: {
   /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   services: ListServices;
-  /** Beside the details: only the columns that say what a row is and how it is. */
-  narrow: boolean;
+  /**
+   * Where the selected row's details show: beside the list, with that row's
+   * actions, or over the list's right side, rows' ends included.
+   */
+  details: "beside" | "over" | undefined;
   onActivate: () => void;
 }) {
   const [attempt, setAttempt] = useState(0);
@@ -80,7 +88,7 @@ function Grid({
   resource,
   title,
   services,
-  narrow,
+  details,
   onActivate,
   onRetry,
 }: {
@@ -89,13 +97,21 @@ function Grid({
   resource: Resource;
   title: string;
   services: ListServices;
-  narrow: boolean;
+  details: "beside" | "over" | undefined;
   onActivate: () => void;
   onRetry: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, spaces, menus, keys } = workbench;
-  const { presets, states, selection, statuses, grids, measures } = services;
+  const { backend, spaces, menus, keys, commands, catalog } = workbench;
+  const {
+    presets,
+    states,
+    selection,
+    statuses,
+    grids,
+    measures,
+    capabilities,
+  } = services;
   useChanges(spaces.changes);
   useChanges(presets.changes);
   useChanges(states.changes);
@@ -103,6 +119,7 @@ function Grid({
   useChanges(menus.changes);
   useChanges(keys.changes);
   useChanges(measures.changes);
+  useChanges(capabilities.changes);
   const { gvr } = input;
   const preset = presets.get(gvr);
   const countBy = statusColumn(gvr);
@@ -168,6 +185,7 @@ function Grid({
     },
   );
   const [grid, setGrid] = useState<HTMLElement | null>(null);
+  const width = useWidth(grid);
   // Rust groups nothing by a column the list lacks, such as Namespace in
   // a list of one namespace, and then sends no groups.
   const grouping =
@@ -179,27 +197,76 @@ function Grid({
     rule: columnRule(gvr, column),
     priority: column.priority,
   }));
-  const columns: readonly ShownColumn[] = every.filter(
+  const chosen = every.filter(
     (column) =>
       column.name === "Name" ||
       (column.name !== grouping?.column &&
-        (preset.columns[column.name] ?? column.priority === 0) &&
-        (!narrow || NARROW.has(column.rule.cell))),
+        (preset.columns[column.name] ?? column.priority === 0)),
   );
+  const widthOf = (column: { name: string; rule: ColumnRule }) =>
+    preset.widths[column.name] ?? column.rule.width;
+  const gone = leaving(
+    chosen
+      .filter((column) => column.name === "Name")
+      .reduce((sum, column) => sum + widthOf(column), 0),
+    chosen
+      .filter((column) => column.name !== "Name")
+      .map((column) => ({
+        name: column.name,
+        width: widthOf(column),
+        drop: column.rule.drop,
+        ...(column.rule.into && { into: column.rule.into }),
+      })),
+    width > 0 ? width - GUTTERS_WIDTH : Infinity,
+  );
+  const columns: readonly ShownColumn[] = chosen
+    .filter((column) => !gone.has(column.name))
+    .map((column) => {
+      const merged = chosen.find(
+        (other) =>
+          gone.has(other.name) && other.rule.into?.column === column.name,
+      );
+      return merged ? { ...column, merged } : column;
+    });
   const byName = new Map(columns.map((column) => [column.name, column]));
+  const mergedRoom = (name: string) =>
+    byName.get(name)?.merged?.rule.into?.room ?? 0;
+  const widened = Object.fromEntries(
+    columns
+      .filter(
+        (column) => column.merged && preset.widths[column.name] !== undefined,
+      )
+      .map((column) => [
+        column.name,
+        widthOf(column) + mergedRoom(column.name),
+      ]),
+  );
+  const sorted = shown?.sort;
+  const sortLost =
+    sorted && gone.has(sorted.column)
+      ? `Sorted by ${sorted.column}, ${sorted.descending ? "descending" : "ascending"}: the column has no room at this width.`
+      : undefined;
   const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note = metricsNote(snapshot.metrics, column);
+    const note =
+      metricsNote(snapshot.metrics, column) ??
+      (column.name === "Name" ? sortLost : undefined);
     return {
       id: column.name,
       title: column.name,
-      width: column.rule.width,
+      width: widthOf(column) + mergedRoom(column.name),
       grow: column.rule.grow,
       align: column.rule.align,
       numeric: column.rule.figures,
       descendFirst: column.rule.descendFirst,
+      coverable: column.rule.coverable,
       ...(note !== undefined && { note }),
     };
   });
+  // While a new subscription has no columns yet, what was drawn stays drawn.
+  const [drawnBefore, setDrawnBefore] = useState<readonly string[]>();
+  const drawnNow = every.length > 0 ? [...byName.keys()] : undefined;
+  if (drawnNow && drawnNow.join("\n") !== drawnBefore?.join("\n"))
+    setDrawnBefore(drawnNow);
   const reads = readsMetrics({
     measures:
       every.length > 0
@@ -208,11 +275,13 @@ function Grid({
           ? [...known]
           : undefined,
     drawn: (name) =>
-      byName.has(name) ||
-      (every.length === 0 && preset.columns[name] !== false),
+      every.length > 0
+        ? byName.has(name)
+        : drawnBefore
+          ? drawnBefore.includes(name)
+          : preset.columns[name] !== false,
     sort: query.sort,
     visible,
-    narrow,
   });
   useEffect(() => {
     setMetrics(reads);
@@ -340,10 +409,35 @@ function Grid({
     [register, grids, uri],
   );
   const lookup = keys.lookup(grid);
-  // The grid selects a row before it runs one of the row's inline actions,
-  // so they show and run as for a selected row.
-  const rowLookup = (key: string) =>
-    key === "resource.selected" ? true : lookup(key);
+  const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
+    commands.referenced(prefix),
+  );
+  // The grid selects a row before it runs one of its icons, so they show
+  // and run as for a selected row, with that row's own state and what RBAC
+  // answers for it once the pointer rests on it.
+  const rowLookup = (row: Row): Lookup => {
+    if (row.id === current?.row.id)
+      return (key) => (key === "resource.selected" ? true : lookup(key));
+    const own: Record<string, boolean> = {
+      ...rowState(resource, {
+        gvr,
+        kind: resource.kind,
+        namespaced: resource.namespaced,
+        columns: snapshot.columns,
+        row,
+      }),
+      ...capabilities.hovered(
+        uri,
+        objectOfRow(row.id, resource.namespaced),
+        referenced,
+      ),
+    };
+    return (key) => {
+      if (key === "resource.selected") return true;
+      if (key in own) return own[key];
+      return lookup(key);
+    };
+  };
 
   if (isProblem(snapshot.status.state))
     return (
@@ -360,11 +454,15 @@ function Grid({
     <DataGrid<Row, RowGroup>
       label={title}
       columns={gridColumns}
-      widths={preset.widths}
+      widths={{ ...preset.widths, ...widened }}
       onResize={(column, width) => {
-        presets.resize(gvr, column, width);
+        presets.resize(
+          gvr,
+          column,
+          Math.max(COLUMN_MIN_WIDTH, width - mergedRoom(column)),
+        );
       }}
-      sort={shown?.sort ?? null}
+      sort={sorted ?? null}
       onSort={(sort: Sort) => {
         states.setSort(uri, sort);
       }}
@@ -406,7 +504,30 @@ function Grid({
         selection.mark(uri, ids, marked);
       }}
       menu={workbench.actions("resource/context", lookup)}
-      inline={workbench.actions("resource/inline", rowLookup).flat()}
+      inline={
+        details === "over"
+          ? undefined
+          : (row) =>
+              details === "beside" && row.id === current?.row.id
+                ? []
+                : workbench
+                    .actions("resource/details", rowLookup(row))
+                    .flat()
+                    .filter((action) => action.pinned)
+                    .slice(0, 2)
+      }
+      onRest={(row) =>
+        row.id === current?.row.id
+          ? () => undefined
+          : capabilities.askHovered(
+              uri,
+              input.space,
+              resource.gvr,
+              objectOfRow(row.id, resource.namespaced),
+              referenced,
+              catalog.list,
+            )
+      }
       headerEnd={
         <ActionDropdown
           label="Choose columns"

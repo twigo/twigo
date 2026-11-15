@@ -7,6 +7,8 @@ export interface SegmentedItem<V extends string> {
   readonly value: V;
   readonly label: string;
   readonly count?: number;
+  /** The digits its count keeps room for: `Count`'s `digits`. */
+  readonly digits?: number;
   /** A dot before the label, and the count's colour for an abnormal tone. */
   readonly tone?: Tone;
 }
@@ -56,6 +58,7 @@ export function Segmented<V extends string>({
             <Count
               value={item.count}
               tone={item.tone === "error" && item.count > 0 ? "error" : "idle"}
+              digits={item.digits}
             />
           )}
         </button>

@@ -5,10 +5,13 @@ import {
   type LogsSnapshot,
   type LogTarget,
   type LogView,
+  type StreamState,
+  type ViewState,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
 import { Changes } from "@twigo/workbench";
+import { parseLogsUri } from "../uri";
 import { anchoredMatch, currentMatch, standingMatch } from "./entries";
 
 /** What a logs tab shows (ARCHITECTURE 4.6); its lines live in Rust. */
@@ -75,6 +78,37 @@ const INITIAL: LogsTab = {
   fields: false,
 };
 
+/** The states of a target that stays down until the person acts; the others run, or will by themselves. */
+const DOWN: ReadonlySet<ViewState["state"]> = new Set([
+  "error",
+  "forbidden",
+  "unauthorized",
+]);
+
+/** The states of a stream that reads, or will by itself. */
+const READING: ReadonlySet<StreamState["state"]> = new Set([
+  "queued",
+  "connecting",
+  "following",
+  "waiting",
+]);
+
+/**
+ * Whether a session reads: its target is not down and, once its pods are
+ * known, one of their streams reads, or there are none, as of a workload at
+ * zero replicas, whose pods it waits for by itself.
+ */
+function reads({ status, pods }: LogsSnapshot): boolean {
+  if (DOWN.has(status.state)) return false;
+  return (
+    pods === undefined ||
+    pods.length === 0 ||
+    pods.some((pod) =>
+      pod.containers.some(({ stream }) => READING.has(stream.state)),
+    )
+  );
+}
+
 /**
  * Each logs tab's choices and its session in Rust, by the tab's URI, so a
  * tab that mounts again, as panel tabs do when they show, keeps its lines;
@@ -84,6 +118,7 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
+  readonly #down = new Set<string>();
   /** Where each paused list stands, kept as it scrolls, so a tab that mounts again stands there. */
   readonly #places = new Map<string, LinePlace>();
   /** The pods each tab saw join, from their Joined entries, which stand out in its lines. */
@@ -105,6 +140,20 @@ export class LogsTabs {
       if (after.view !== before.view) session.setView(after.view);
     }
     this.changes.emit();
+  }
+
+  /** A closed tab's choices back for its tab to open with: what it reads and how it shows it, not where it stood. */
+  restore(uri: string, tab: LogsTab): void {
+    const { source, view, wrap, timestamps } = tab;
+    this.#tabs.set(uri, { ...INITIAL, source, view, wrap, timestamps });
+    this.changes.emit();
+  }
+
+  /** How many tabs of a space hold a session that reads. */
+  live(space: string): number {
+    return [...this.#sessions.keys()].filter(
+      (uri) => parseLogsUri(uri)?.space === space && !this.#down.has(uri),
+    ).length;
   }
 
   /**
@@ -233,6 +282,12 @@ export class LogsTabs {
    * newest once its line is gone, and a step that waited for its search.
    */
   #onBatch(uri: string, snapshot: LogsSnapshot): void {
+    const down = !reads(snapshot);
+    if (down !== this.#down.has(uri)) {
+      if (down) this.#down.add(uri);
+      else this.#down.delete(uri);
+      this.changes.emit();
+    }
     for (const entry of snapshot.window?.entries ?? []) {
       if (entry.type !== "joined") continue;
       let joined = this.#joined.get(uri);
@@ -265,6 +320,7 @@ export class LogsTabs {
   closed(uri: string): void {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);
+    this.#down.delete(uri);
     this.#joined.delete(uri);
     this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();

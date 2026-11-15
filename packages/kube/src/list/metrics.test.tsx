@@ -150,7 +150,7 @@ async function sortBy(column: string) {
 }
 
 describe("the main list", () => {
-  withScreenSize(1000);
+  const layout = withScreenSize(1000);
 
   test("shows CPU and Memory by default as kubectl prints them, and a dash for a pod without a sample", async () => {
     await openList();
@@ -222,7 +222,9 @@ describe("the main list", () => {
     expect(header("CPU").getAttribute("aria-describedby")).not.toBeNull();
     const names = () => rows().map((row) => textOf(row, "Name"));
     const before = names();
-    fireEvent.change(filter, { target: { value: "payments" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter rows" }), {
+      target: { value: "payments" },
+    });
     const marks: boolean[] = [];
     for (let step = 0; step < 40; step++) {
       await act(() => vi.advanceTimersByTimeAsync(5));
@@ -389,23 +391,25 @@ describe("the main list", () => {
     expect(sent.reading()).toBe(true);
   });
 
-  test("beside the details the list draws no metric column and reads nothing, sorted by one or not", async () => {
+  test("a list too narrow for its metric columns draws none and reads nothing, unless it is sorted by one, whose sort it keeps", async () => {
     const backend = createMockBackend("ready");
     const sent = spied(backend);
     await openList(backend);
-    await sortBy("CPU");
-    expect(last(sent.reads())).toBe(true);
-    fireEvent.click(rows()[0] ?? document.body);
+    layout.resize(grid(), 530);
     await settle();
     expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
     expect(last(sent.reads())).toBe(false);
-    fireEvent.click(
-      within(
-        screen.getByRole("complementary", { name: "Pod details" }),
-      ).getByRole("button", { name: "Close details" }),
-    );
+    layout.resize(grid(), 1000);
     await settle();
     expect(last(sent.reads())).toBe(true);
+    await sortBy("CPU");
+    layout.resize(grid(), 530);
+    await settle();
+    expect(screen.queryByRole("columnheader", { name: "CPU" })).toBeNull();
+    expect(last(sent.reads())).toBe(true);
+    layout.resize(grid(), 1000);
+    await settle();
+    expect(header("CPU").getAttribute("aria-sort")).toBe("descending");
   });
 
   test("a context without the Metrics API has no metric columns and reads nothing", async () => {
@@ -707,7 +711,7 @@ describe("a kind whose first batches do not know the columns", () => {
 });
 
 describe("a list whose columns are not known yet", () => {
-  withScreenSize(1000);
+  const layout = withScreenSize(1000);
 
   const PODS = "k8s-list://prod-eu/v1/pods";
   const DEPLOYMENTS = "k8s-list://prod-eu/apps/v1/deployments";
@@ -914,12 +918,12 @@ describe("a list whose columns are not known yet", () => {
     expect(first.slice(0, values.length)).not.toContain("–");
   });
 
-  test("the narrow list beside the details says it reads nothing, before its columns and after", async () => {
+  test("a list too narrow for its metric columns reads nothing once it knows its columns", async () => {
     const script = scripted();
     const sent = spied(script.backend);
     await openList(script.backend, PODS);
     await script.send(batch(1, true));
-    fireEvent.click(rows()[0] ?? document.body);
+    layout.resize(grid(), 400);
     await settle();
     expect(last(sent.reads())).toBe(false);
     const before = sent.reads().length;

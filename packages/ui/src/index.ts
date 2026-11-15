@@ -15,6 +15,7 @@ export * from "./components/toast";
 export * from "./components/notify";
 export { fuzzyMatch, type TextMatch, type TextRange } from "./lib/match";
 export { srgbHex } from "./lib/srgb";
+export { useWidth } from "./lib/useWidth";
 export * from "./components/actions";
 export * from "./components/banner";
 export * from "./components/callout";
@@ -43,10 +44,12 @@ export * from "./components/tile";
 export * from "./components/trigger";
 export {
   DataGrid,
+  GUTTERS_WIDTH,
   GridSkeleton,
   ROW_HEIGHT,
   type DataGridProps,
 } from "./grid/DataGrid";
+export { MIN_WIDTH as COLUMN_MIN_WIDTH } from "./grid/fit";
 export type { GridColumn, GridItem, GridSort } from "./grid/types";
 export { Tree, type TreeRow } from "./tree/Tree";
 export * from "./components/histogram";

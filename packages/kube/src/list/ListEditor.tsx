@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { CircleAlert } from "lucide-react";
 import type { Resource } from "@twigo/protocol";
-import { ActionBar, EmptyState, GridSkeleton } from "@twigo/ui";
+import { ActionBar, EmptyState, GridSkeleton, useWidth } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
 import { canShell } from "../exec/kinds";
@@ -13,12 +19,11 @@ import {
 } from "../capabilities";
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
-import { objectOf, objectOfRow } from "../selection";
+import { LIST_URI, objectOf, objectOfRow } from "../selection";
 import { sameGvr, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
-import { useWidth } from "../useWidth";
 import { ViewStatus } from "../ViewStatus";
 import { ResourceGrid } from "./ResourceGrid";
 
@@ -28,9 +33,8 @@ const DOCK_WIDTH = 960;
 /**
  * A `k8s-list://` editor (ARCHITECTURE 4.3, 4.4). Without `ns` in its URI
  * it follows the space's namespace scope. An opened row's details stand
- * beside the list, which narrows to its name, ready and status columns,
- * or slide over it in a narrow editor; marked rows get a bar of what can
- * be done to them.
+ * beside the list, which gives up columns as it narrows, or slide over it
+ * in a narrow editor; marked rows get a bar of what can be done to them.
  */
 export function ListEditor({
   uri,
@@ -170,10 +174,35 @@ function Loaded({
   const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
   const width = useWidth(wrapper);
   const docked = width >= DOCK_WIDTH;
+  const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const listWidth = useWidth(column);
+  const details =
+    !open || selected === undefined ? undefined : docked ? "beside" : "over";
+  const beside = details === "beside";
+  const stripMin = useSyncExternalStore(states.strip.subscribe, () =>
+    beside ? states.stripMin(uri) : 0,
+  );
+  const inspector = beside && listWidth > 0 ? width - listWidth : 0;
+  // Read as the details dock, since the observers report a frame later and
+  // the strip's actions would end past the list's edge until then.
+  useLayoutEffect(() => {
+    if (beside && wrapper && column)
+      states.setInspector(uri, wrapper.clientWidth - column.clientWidth);
+  }, [beside, wrapper, column, states, uri]);
+  useEffect(() => {
+    states.setInspector(uri, inspector);
+  }, [states, uri, inspector]);
+  useEffect(
+    () => () => {
+      states.setInspector(uri, 0);
+    },
+    [states, uri],
+  );
 
   useEffect(() => {
     if (!wrapper) return;
     const scope = keys.scope(wrapper);
+    scope.set(LIST_URI, uri);
     scope.set("detailsOpen", open);
     scope.set("listMarked", marks.size > 0);
     scope.set("resource.selected", selected !== undefined);
@@ -219,14 +248,18 @@ function Loaded({
 
   return (
     <div ref={setWrapper} className="relative flex h-full overflow-hidden">
-      <div className="relative h-full min-w-0 flex-1">
+      <div
+        ref={setColumn}
+        style={beside ? { minWidth: stripMin } : undefined}
+        className="relative h-full min-w-0 flex-1"
+      >
         <ResourceGrid
           uri={uri}
           input={input}
           resource={resource}
           title={title}
           services={services}
-          narrow={open && docked && selected !== undefined}
+          details={details}
           onActivate={() => {
             setOpen(true);
           }}

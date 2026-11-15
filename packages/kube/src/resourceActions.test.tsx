@@ -1,11 +1,30 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { AccessQuery } from "@twigo/protocol";
+import type { AccessQuery, ResourceRef } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { notify } from "@twigo/ui";
+import type { Lookup, Workbench } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
-import { mountKube, openList, settle, withScreenSize } from "../test/workbench";
+import {
+  hoverIcons,
+  mountKube,
+  openList,
+  settle,
+  withScreenSize,
+} from "../test/workbench";
+import { REFUSED_MS } from "./capabilities";
+import { canShell } from "./exec/kinds";
+import { canForward } from "./forward/kinds";
+import { logsKind } from "./logs/entries";
+import { LIST_URI } from "./selection";
 
-withScreenSize(1400);
+const screenSize = withScreenSize(1400);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -148,6 +167,20 @@ async function openInStaging(scenario: "ready" | "viewer", uri: string) {
   });
   await settle(30);
   return workbench;
+}
+
+function reviews(
+  workbench: Workbench,
+  answer: (query: AccessQuery) => boolean[] | Promise<boolean[]>,
+) {
+  const original = workbench.backend.invoke.bind(workbench.backend);
+  return vi
+    .spyOn(workbench.backend, "invoke")
+    .mockImplementation((command: string, request: unknown) =>
+      command === "access_review"
+        ? Promise.resolve(answer(request as AccessQuery))
+        : original(command as never, request as never),
+    );
 }
 
 async function selectFirst(): Promise<HTMLElement> {
@@ -312,22 +345,14 @@ test("a Job that ended offers neither Suspend nor Resume", async () => {
 
 test("the delete of marked rows asks for those rows, not the selected one", async () => {
   const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
-  const original = workbench.backend.invoke.bind(workbench.backend);
   const asked: AccessQuery[] = [];
   let refused: string | null = null;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review")
-        return original(command as never, request as never);
-      const query = request as AccessQuery;
-      asked.push(query);
-      return Promise.resolve(
-        query.checks.map(
-          (check) => !(check.verb === "delete" && check.name === refused),
-        ),
-      );
-    },
-  );
+  reviews(workbench, (query) => {
+    asked.push(query);
+    return query.checks.map(
+      (check) => !(check.verb === "delete" && check.name === refused),
+    );
+  });
   const main = await selectFirst();
   const first = asked
     .flatMap((query) => query.checks)
@@ -346,25 +371,16 @@ test("the delete of marked rows asks for those rows, not the selected one", asyn
 
 test("a row moved onto from one whose delete was refused may be deleted while its own review is out", async () => {
   const workbench = await openInStaging("ready", "k8s-list://staging/v1/pods");
-  const original = workbench.backend.invoke.bind(workbench.backend);
   let refused: string | null = null;
   let held = false;
-  vi.spyOn(workbench.backend, "invoke").mockImplementation(
-    (command: string, request: unknown) => {
-      if (command !== "access_review") {
-        return original(command as never, request as never);
-      }
-      const query = request as AccessQuery;
-      if (held) return new Promise(() => undefined);
-      return Promise.resolve(
-        query.checks.map((check) => {
-          if (check.verb === "delete" && check.name !== null)
-            refused ??= check.name;
-          return !(check.verb === "delete" && check.name === refused);
-        }),
-      );
-    },
-  );
+  reviews(workbench, (query) => {
+    if (held) return new Promise<boolean[]>(() => undefined);
+    return query.checks.map((check) => {
+      if (check.verb === "delete" && check.name !== null)
+        refused ??= check.name;
+      return !(check.verb === "delete" && check.name === refused);
+    });
+  });
   const main = await selectFirst();
   await settle(4);
   const lookup = () => workbench.keys.lookup(main);
@@ -399,4 +415,508 @@ test("marked rows marked again after their marks were cleared are asked about ag
   fireEvent.keyDown(main, { code: "KeyX", key: "x" });
   await settle(4);
   expect(marked()).toBeGreaterThan(once);
+});
+
+function rowOf(
+  resource: string,
+  kind: string,
+  state: Record<string, boolean> = {},
+): Lookup {
+  const [group = "", plural = resource] = resource.includes("/")
+    ? resource.split("/")
+    : ["", resource];
+  const gvr = { group, version: "v1", resource: plural };
+  const values: Record<string, string | boolean> = {
+    "resource.selected": true,
+    "resource.group": group,
+    "resource.kind": kind,
+    "resource.logs": logsKind(gvr) !== undefined,
+    "resource.shell": canShell(gvr),
+    "resource.forward": canForward(gvr),
+    "resource.scalable": [
+      "deployments",
+      "statefulsets",
+      "replicasets",
+    ].includes(plural),
+    ...state,
+  };
+  return (key) =>
+    key in values
+      ? values[key]
+      : key.startsWith("resource.capability.") || key.startsWith("capability.");
+}
+
+test("each kind pins its verbs in their order, and the rest go into More with Delete last in its own group, in the error tone", async () => {
+  const workbench = await mountKube();
+  const pins = (row: Lookup) =>
+    workbench
+      .actions("resource/details", row)
+      .flat()
+      .filter((action) => action.pinned)
+      .map((action) => action.label);
+  const kinds: [Lookup, string[]][] = [
+    [rowOf("pods", "Pod"), ["Logs", "Shell", "Forward"]],
+    [rowOf("apps/deployments", "Deployment"), ["Logs", "Restart", "Scale…"]],
+    [rowOf("apps/statefulsets", "StatefulSet"), ["Logs", "Restart", "Scale…"]],
+    [rowOf("apps/daemonsets", "DaemonSet"), ["Logs", "Restart"]],
+    [rowOf("batch/cronjobs", "CronJob"), ["Trigger", "Suspend"]],
+    [
+      rowOf("batch/cronjobs", "CronJob", { "resource.suspended": true }),
+      ["Trigger", "Resume"],
+    ],
+    [rowOf("nodes", "Node"), ["Cordon", "Drain"]],
+    [
+      rowOf("nodes", "Node", { "resource.cordoned": true }),
+      ["Uncordon", "Drain"],
+    ],
+    [rowOf("services", "Service"), ["Forward"]],
+    [rowOf("apps/replicasets", "ReplicaSet"), ["Forward"]],
+    [rowOf("batch/jobs", "Job"), []],
+    [rowOf("configmaps", "ConfigMap"), []],
+  ];
+  for (const [row, pinned] of kinds) {
+    expect(pins(row)).toEqual(pinned);
+    const groups = workbench.actions("resource/details", row);
+    const last = groups[groups.length - 1];
+    expect(last?.map(({ label, danger }) => ({ label, danger }))).toEqual([
+      { label: "Delete", danger: true },
+    ]);
+    expect(
+      groups
+        .flat()
+        .filter(({ id }) =>
+          ["k8s.resource.yaml", "k8s.resource.openEditor"].includes(id),
+        ),
+    ).toEqual([]);
+  }
+});
+
+test("a pinned write RBAC refuses stays in its place, disabled, saying why, and the context menu leaves it out", async () => {
+  const workbench = await mountKube();
+  const refused = rowOf("apps/deployments", "Deployment", {
+    "resource.capability.patch": false,
+    "resource.capability.patch/scale": false,
+    "resource.capability.delete": false,
+  });
+  const shown = workbench
+    .actions("resource/details", refused)
+    .flat()
+    .map(({ label, pinned, disabled, reason }) => ({
+      label,
+      pinned: pinned === true,
+      disabled,
+      reason,
+    }));
+  expect(shown.filter(({ pinned }) => pinned)).toEqual([
+    { label: "Logs", pinned: true, disabled: false, reason: undefined },
+    {
+      label: "Restart",
+      pinned: true,
+      disabled: true,
+      reason: "You may not restart it",
+    },
+    {
+      label: "Scale…",
+      pinned: true,
+      disabled: true,
+      reason: "You may not scale it",
+    },
+  ]);
+  expect(shown[shown.length - 1]).toEqual({
+    label: "Delete",
+    pinned: false,
+    disabled: true,
+    reason: "You may not delete it",
+  });
+  expect(
+    workbench
+      .actions("resource/context", refused)
+      .flat()
+      .map(({ label }) => label)
+      .filter((label) => ["Restart", "Scale…", "Delete"].includes(label)),
+  ).toEqual([]);
+});
+
+test("a write the context's mode holds, clicked in the details' row, reaches the gate, whose refusal offers the unlock, and runs no further", async () => {
+  const error = vi.spyOn(notify, "error");
+  const workbench = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const subscribe = vi.spyOn(workbench.backend, "subscribe");
+  const row = screen.getAllByRole("row")[1];
+  fireEvent.click(row ?? document.body);
+  await settle(4);
+  const restart = within(
+    screen.getByRole("toolbar", { name: "Deployment actions" }),
+  ).getByRole("button", { name: "Restart" });
+  expect(restart.getAttribute("aria-disabled")).toBeNull();
+  act(() => {
+    restart.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "prod-eu is read-only",
+  );
+  fireEvent.click(restart);
+  await settle(4);
+  expect(invoke).toHaveBeenCalledWith(
+    "command_plan",
+    expect.objectContaining({ action: "restart", space: "prod-eu" }),
+  );
+  expect(
+    subscribe.mock.calls.filter(([command]) => command === "command_execute"),
+  ).toEqual([]);
+  const [message, options] =
+    error.mock.calls[error.mock.calls.length - 1] ?? [];
+  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
+});
+
+function twoOfANamespace(): [HTMLElement, HTMLElement] {
+  const rows = screen.getAllByRole("row").slice(1);
+  const namespaceOf = (row: HTMLElement) =>
+    row.querySelector('[data-column="Namespace"]')?.textContent;
+  for (const row of rows) {
+    const other = rows.find(
+      (candidate) =>
+        candidate !== row && namespaceOf(candidate) === namespaceOf(row),
+    );
+    if (other) return [row, other];
+  }
+  throw new Error("no two rows of one namespace");
+}
+
+test("a hovered row asks RBAC for itself: its refused verb draws enabled until the answer, then disabled with the reason, does not run, and draws no row of its namespace disabled", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const held: (() => void)[] = [];
+  const asked: AccessQuery[] = [];
+  const invoke = reviews(workbench, (query) => {
+    asked.push(query);
+    return new Promise<boolean[]>((resolve) => {
+      held.push(() => {
+        resolve(query.checks.map((check) => check.verb !== "patch"));
+      });
+    });
+  });
+  const [first, second] = twoOfANamespace();
+  const nameOf = (row: HTMLElement) =>
+    row.querySelector('[data-column="Name"]')?.textContent;
+  const restart = (row: HTMLElement) =>
+    within(row).getByRole("button", { name: "Restart" });
+
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(hoverIcons(first)).toEqual(["Logs", "Restart"]);
+  expect(restart(first).getAttribute("aria-disabled")).toBeNull();
+  expect(asked[asked.length - 1]?.checks).toContainEqual(
+    expect.objectContaining({ verb: "patch", name: nameOf(first) }),
+  );
+  for (const answer of held.splice(0)) answer();
+  await settle(1);
+  expect(restart(first).getAttribute("aria-disabled")).toBe("true");
+  act(() => {
+    restart(first).focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "You may not restart it",
+  );
+  fireEvent.click(restart(first));
+  await settle(4);
+  expect(
+    invoke.mock.calls.filter(([command]) => command === "command_plan"),
+  ).toEqual([]);
+
+  fireEvent.pointerLeave(first);
+  fireEvent.pointerEnter(second);
+  await settle(2);
+  expect(held).toHaveLength(1);
+  expect(restart(second).getAttribute("aria-disabled")).toBeNull();
+});
+
+test("a hovered row's refused verb is enabled again once the review asked again fails, as the details' is", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  let answers = true;
+  reviews(workbench, (query) =>
+    answers
+      ? query.checks.map((check) => check.verb !== "patch")
+      : Promise.reject(new Error("no answer")),
+  );
+  const row = screen.getAllByRole("row")[3];
+  if (!row) throw new Error("a list of deployments");
+  const restart = () => within(row).getByRole("button", { name: "Restart" });
+  fireEvent.pointerEnter(row);
+  await settle(2);
+  expect(restart().getAttribute("aria-disabled")).toBe("true");
+  answers = false;
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  await settle(1);
+  expect(restart().getAttribute("aria-disabled")).toBeNull();
+});
+
+test("a hovered row's verb that another resource as a whole refuses is enabled again once the review asked again fails, as the details' is", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/batch/v1/cronjobs",
+  );
+  let answers = true;
+  reviews(workbench, (query) =>
+    answers
+      ? query.checks.map((check) => check.resource !== "jobs")
+      : Promise.reject(new Error("no answer")),
+  );
+  const [first] = twoOfANamespace();
+  const trigger = () => within(first).getByRole("button", { name: "Trigger" });
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(trigger().getAttribute("aria-disabled")).toBe("true");
+  answers = false;
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  await settle(1);
+  expect(trigger().getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(first);
+  await settle(4);
+  const details = screen.getByRole("complementary", { name: /details/ });
+  expect(
+    within(details)
+      .getByRole("button", { name: "Trigger" })
+      .getAttribute("aria-disabled"),
+  ).toBeNull();
+});
+
+test("a hovered row's verb that another resource as a whole refuses draws disabled at once on a row of the same namespace", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/batch/v1/cronjobs",
+  );
+  const held: (() => void)[] = [];
+  reviews(
+    workbench,
+    (query) =>
+      new Promise((resolve) => {
+        held.push(() => {
+          resolve(query.checks.map((check) => check.resource !== "jobs"));
+        });
+      }),
+  );
+  const [first, second] = twoOfANamespace();
+  const trigger = (row: HTMLElement) =>
+    within(row).getByRole("button", { name: "Trigger" });
+
+  fireEvent.pointerEnter(first);
+  await settle(2);
+  expect(trigger(first).getAttribute("aria-disabled")).toBeNull();
+  for (const answer of held.splice(0)) answer();
+  await settle(1);
+  expect(trigger(first).getAttribute("aria-disabled")).toBe("true");
+
+  fireEvent.pointerLeave(first);
+  fireEvent.pointerEnter(second);
+  await settle(2);
+  expect(held).toHaveLength(1);
+  expect(trigger(second).getAttribute("aria-disabled")).toBe("true");
+  act(() => {
+    trigger(second).focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "You may not create Jobs here",
+  );
+});
+
+test("a hovered row is asked about only while its icons show: never where the list leaves them no room, as beside docked details, and no more once the pointer leaves", async () => {
+  const workbench = await openInStaging(
+    "ready",
+    "k8s-list://staging/apps/v1/deployments",
+  );
+  const asked: AccessQuery[] = [];
+  reviews(workbench, (query) => {
+    asked.push(query);
+    return query.checks.map((check) => check.verb !== "patch");
+  });
+  const rows = () => screen.getAllByRole("row").slice(1);
+  const named = (row: HTMLElement) => {
+    const name = row.querySelector('[data-column="Name"]')?.textContent;
+    return asked.filter((query) =>
+      query.checks.some((check) => check.name === name),
+    ).length;
+  };
+
+  const hovered = rows()[2];
+  if (!hovered) throw new Error("a list of deployments");
+  fireEvent.pointerEnter(hovered);
+  await settle(2);
+  expect(hoverIcons(hovered).length).toBeGreaterThan(0);
+  expect(named(hovered)).toBe(1);
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
+  expect(named(hovered)).toBe(2);
+  fireEvent.pointerLeave(hovered);
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS * 3));
+  expect(named(hovered)).toBe(2);
+
+  fireEvent.click(rows()[0] ?? document.body);
+  await settle(8);
+  expect(
+    screen.getByRole("complementary", { name: "Deployment details" }).className,
+  ).not.toContain("absolute");
+  const list = screen.getByRole("grid", { name: "Deployments" });
+  screenSize.resize(list, 300);
+  await settle(2);
+  expect(
+    within(list)
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent),
+  ).toEqual(["", "Name", "Ready", ""]);
+  const before = asked.length;
+  for (const row of rows().slice(1, 9)) {
+    fireEvent.pointerEnter(row);
+    await settle(2);
+    expect(hoverIcons(row)).toEqual([]);
+    fireEvent.pointerLeave(row);
+  }
+  expect(asked.length).toBe(before);
+});
+
+test("a hovered row's verb the context's mode holds runs on that row and meets the gate's refusal, which offers the unlock", async () => {
+  const error = vi.spyOn(notify, "error");
+  const workbench = await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/apps/v1/deployments",
+  );
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const subscribe = vi.spyOn(workbench.backend, "subscribe");
+  const row = screen.getAllByRole("row")[3];
+  if (!row) throw new Error("a list of deployments");
+  const name = row.querySelector('[data-column="Name"]')?.textContent;
+  fireEvent.pointerEnter(row);
+  await settle(2);
+  const restart = within(row).getByRole("button", { name: "Restart" });
+  expect(restart.getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(restart);
+  await settle(4);
+  const plans = invoke.mock.calls.filter(
+    ([command]) => command === "command_plan",
+  );
+  expect(plans).toHaveLength(1);
+  expect(plans[0]?.[1]).toMatchObject({
+    action: "restart",
+    space: "prod-eu",
+    target: { name },
+  });
+  expect(
+    subscribe.mock.calls.filter(([command]) => command === "command_execute"),
+  ).toEqual([]);
+  const [message, options] =
+    error.mock.calls[error.mock.calls.length - 1] ?? [];
+  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(options?.action?.label).toBe("Unlock for 15 minutes");
+});
+
+test("a press that moves no focus, on a hover icon, in the details or on the marked rows' bar of the list beside the active one, acts on that list's rows", async () => {
+  const active = "k8s-list://staging/apps/v1/deployments";
+  const workbench = await openInStaging("ready", active);
+  act(() => {
+    workbench.editors.open(`${active}?q=auth`, { side: true });
+  });
+  await settle(30);
+  const [left, right] = screen.getAllByRole("grid");
+  if (!left || !right) throw new Error("two lists side by side");
+  const rowsOf = (grid: HTMLElement) =>
+    within(grid).getAllByRole("row").slice(1);
+  const nameOf = (row: HTMLElement | undefined) =>
+    row?.querySelector('[data-column="Name"]')?.textContent;
+  const selected = rowsOf(left)[0];
+  const hovered = rowsOf(right)[1];
+  if (!selected || !hovered) throw new Error("rows in both lists");
+  expect(nameOf(hovered)).not.toBe(nameOf(selected));
+  fireEvent.click(selected);
+  await settle(4);
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const planned = () =>
+    invoke.mock.calls
+      .filter(([command]) => command === "command_plan")
+      .map(([, request]) => {
+        const { target, targets } = request as {
+          target?: ResourceRef;
+          targets?: ResourceRef[];
+        };
+        return target?.name ?? targets?.map(({ name }) => name).join();
+      });
+  const press = (element: HTMLElement, name: string | RegExp) => {
+    act(() => {
+      workbench.editors.activate(active);
+    });
+    expect(workbench.editors.active).toBe(active);
+    fireEvent.click(within(element).getByRole("button", { name }));
+  };
+  const restartIn = (element: HTMLElement) => {
+    press(element, "Restart");
+  };
+
+  fireEvent.pointerEnter(hovered);
+  await settle(2);
+  restartIn(hovered);
+  await settle(4);
+  expect(planned()).toEqual([nameOf(hovered)]);
+  fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+  await settle(2);
+
+  fireEvent.click(hovered);
+  await settle(4);
+  const details = screen
+    .getAllByRole("complementary", { name: "Deployment details" })
+    .find((aside) => aside.parentElement?.contains(right));
+  if (!details) throw new Error("the details of the list on the right");
+  restartIn(details);
+  await settle(4);
+  expect(planned()).toEqual([nameOf(hovered), nameOf(hovered)]);
+  fireEvent.click(screen.getByRole("button", { name: /^Cancel/ }));
+  await settle(2);
+
+  fireEvent.click(within(hovered).getByRole("checkbox", { name: "Mark row" }));
+  await settle(2);
+  const bar = screen
+    .getAllByRole("toolbar")
+    .find(
+      (toolbar) =>
+        toolbar.textContent.startsWith("1 marked") &&
+        toolbar.parentElement?.parentElement?.contains(right),
+    );
+  if (!bar) throw new Error("the marked rows' bar of the list on the right");
+  press(bar, /^Delete/);
+  await settle(4);
+  expect(planned()).toEqual([
+    nameOf(hovered),
+    nameOf(hovered),
+    nameOf(hovered),
+  ]);
+});
+
+test("a resource command whose lookup names no list acts on nothing, though a list with a selected row is active", async () => {
+  const uri = "k8s-list://staging/apps/v1/deployments";
+  const workbench = await openInStaging("ready", uri);
+  const grid = screen.getByRole("grid");
+  const row = within(grid).getAllByRole("row")[1];
+  if (!row) throw new Error("a list of deployments");
+  fireEvent.click(row);
+  await settle(4);
+  expect(workbench.editors.active).toBe(uri);
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const inList = workbench.keys.lookup(grid);
+  const nowhere: Lookup = (key) => (key === LIST_URI ? undefined : inList(key));
+  expect(workbench.commands.enabled("k8s.resource.restart", nowhere)).toBe(
+    true,
+  );
+  act(() => {
+    void workbench.commands.execute("k8s.resource.restart", nowhere);
+  });
+  await settle(4);
+  expect(
+    invoke.mock.calls.filter(([command]) => command === "command_plan"),
+  ).toEqual([]);
 });

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -27,8 +28,15 @@ import {
   type Area,
   type Editors,
 } from "../editors/registry";
-import { EditorShownContext, useChanges, useWorkbench } from "../react";
+import {
+  ActionRoomContext,
+  EditorShownContext,
+  useChanges,
+  useWorkbench,
+} from "../react";
 import { PanelBoundary } from "./PanelBoundary";
+import { ACTIONS_PADDING, OVERFLOW_BUTTON } from "./strip";
+import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
 const THEME: DockviewTheme = {
@@ -150,6 +158,7 @@ export function SpaceDock({
         workbench.report(error);
       }
     }
+    if (area === "panel" && ready.groups.length === 0) ready.addGroup();
     setApi(ready);
   };
 
@@ -165,6 +174,23 @@ export function SpaceDock({
         const uri = pressedEditor(api, target);
         if (uri !== undefined) focusLater(workbench.editors, uri);
       }}
+      onKeyDownCapture={(event) => {
+        const { target, key } = event;
+        if (!api || (key !== "Delete" && key !== "Backspace")) return;
+        if (!(target instanceof Element) || !target.matches("[role=tab]")) {
+          return;
+        }
+        const uri = pressedEditor(api, target);
+        if (uri === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const next = neighbourTab(api, target);
+        const dock = event.currentTarget;
+        workbench.editors.dismiss(uri);
+        if (next !== undefined && api.getPanel(next)) {
+          tabElement(dock, next)?.focus();
+        }
+      }}
     >
       <DockviewReact
         theme={theme}
@@ -172,6 +198,7 @@ export function SpaceDock({
         tabComponents={TABS}
         rightHeaderActionsComponent={actions}
         watermarkComponent={watermark}
+        noPanelsOverlay={area === "panel" ? "emptyGroup" : undefined}
         disableAutoResizing
         onReady={onReady}
       />
@@ -200,6 +227,21 @@ function pressedEditor(api: DockviewApi, target: Element): string | undefined {
   if (!target.closest(".dv-void-container")) return undefined;
   const group = api.groups.find((each) => each.element.contains(target));
   return readParams(group?.activePanel?.params)?.uri;
+}
+
+/** The tab dockview focuses after a key closes `tab`: the next in its group, else the previous. */
+function neighbourTab(api: DockviewApi, tab: Element): string | undefined {
+  const panel = api.getPanel(tab.getAttribute("data-tab-panel-id") ?? "");
+  if (!panel) return undefined;
+  const { panels } = panel.group;
+  const at = panels.indexOf(panel);
+  return (panels[at + 1] ?? panels[at - 1])?.id;
+}
+
+function tabElement(dock: Element, id: string): HTMLElement | undefined {
+  return [
+    ...dock.querySelectorAll<HTMLElement>("[role=tab][data-tab-panel-id]"),
+  ].find((tab) => tab.dataset.tabPanelId === id);
 }
 
 /** The browser moves the focus after a press's listeners ran, so the editor takes it a task later. */
@@ -247,15 +289,88 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
   );
 }
 
-export function GroupActions({ activePanel }: IDockviewHeaderActionsProps) {
+/**
+ * The width a group's actions may take without a tab giving way: the
+ * strip's, less every tab at the width it asks for (up to 220 px in the
+ * editor area), the
+ * overflow button and the space after the actions. Undefined until
+ * measured. Each measure also brings the active tab back into view, since
+ * dockview does that only as a tab activates, before the actions settle: by
+ * the tab list's own scroll, as dockview 8.8.3's `Tabs._scrollTabIntoView`
+ * does, since `scrollIntoView` would scroll the split views around the strip
+ * too.
+ */
+function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
+  const [room, setRoom] = useState<number>();
+  useLayoutEffect(() => {
+    const strip = wrapper?.closest<HTMLElement>(
+      ".dv-tabs-and-actions-container",
+    );
+    const list = strip?.querySelector(".dv-tabs-container");
+    if (!wrapper || !strip || !list) return;
+    const measure = () => {
+      const tabs = [...list.children].reduce(
+        (sum, tab) => sum + (tab as HTMLElement).offsetWidth,
+        0,
+      );
+      setRoom(
+        Math.max(
+          0,
+          strip.clientWidth - tabs - OVERFLOW_BUTTON - ACTIONS_PADDING,
+        ),
+      );
+      const active = list.querySelector<HTMLElement>(".dv-active-tab");
+      if (
+        active &&
+        (active.offsetLeft < list.scrollLeft ||
+          active.offsetLeft + active.offsetWidth >
+            list.scrollLeft + list.clientWidth)
+      )
+        list.scrollLeft = active.offsetLeft;
+    };
+    const observer = new ResizeObserver(measure);
+    const watch = () => {
+      observer.disconnect();
+      observer.observe(strip);
+      observer.observe(list);
+      for (const tab of list.children) observer.observe(tab);
+      measure();
+    };
+    const changed = new MutationObserver(watch);
+    changed.observe(list, { childList: true });
+    watch();
+    return () => {
+      observer.disconnect();
+      changed.disconnect();
+    };
+  }, [wrapper]);
+  return room;
+}
+
+export function GroupActions({
+  activePanel,
+  panels,
+}: IDockviewHeaderActionsProps) {
   const { editors } = useWorkbench();
-  const params = readParams(activePanel?.params);
+  const [wrapper, setWrapper] = useState<HTMLDivElement | null>(null);
+  const room = useActionsRoom(wrapper);
+  const params = readParams(
+    activePanel && panels.includes(activePanel)
+      ? activePanel.params
+      : undefined,
+  );
   const provider = params && editors.resolve(params.uri);
   if (!params || !provider?.actions) return null;
   const Actions = provider.actions;
   return (
-    <div className="flex h-full items-center pr-1.5">
-      <Actions uri={params.uri} />
+    <div
+      ref={setWrapper}
+      style={{ paddingRight: ACTIONS_PADDING }}
+      className="flex h-full items-center"
+    >
+      <ActionRoomContext.Provider value={room}>
+        <Actions key={params.uri} uri={params.uri} />
+      </ActionRoomContext.Provider>
     </div>
   );
 }
@@ -267,13 +382,14 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const provider = params && editors.resolve(params.uri);
   const dirty = params !== undefined && editors.isDirty(params.uri);
   return (
-    <div
+    <TabTooltip
+      tooltip={() => params && provider?.tooltip?.(new URL(params.uri))}
       className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
       onAuxClick={(event) => {
-        if (event.button === 1) editors.close(api.id);
+        if (event.button === 1) editors.dismiss(api.id);
       }}
     >
       {params && provider?.icon && (
@@ -291,17 +407,17 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         data-dirty={dirty}
         onClick={(event) => {
           event.stopPropagation();
-          editors.close(api.id);
+          editors.dismiss(api.id);
         }}
         className={cn(
-          "twigo-tab-close -ml-[3px] flex size-5 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded",
           "hover:bg-row-hover",
         )}
       >
         {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
         <X className="twigo-tab-x size-3.5" />
       </button>
-    </div>
+    </TabTooltip>
   );
 }
 

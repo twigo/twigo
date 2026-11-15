@@ -369,8 +369,18 @@ fn a_crashing_container_says_how_it_ended_and_when_it_starts_again() {
     };
     let state = api.state.as_ref().unwrap();
     assert_eq!(
-        (state.text.as_str(), state.tone, state.restarts),
-        ("Waiting · CrashLoopBackOff", Tone::Danger, restarts as u32)
+        (
+            state.text.as_str(),
+            state.tone,
+            state.running,
+            state.restarts
+        ),
+        (
+            "Waiting · CrashLoopBackOff",
+            Tone::Danger,
+            false,
+            restarts as u32
+        )
     );
     assert_eq!(
         shown(field(&api.fields, "Last state")),
@@ -420,6 +430,11 @@ fn a_pod_that_cannot_pull_schedule_or_get_ready_says_why() {
         message.starts_with("Readiness probe failed: dial tcp"),
         "{message}"
     );
+    let [api] = containers(&described["pod-unready"], "core.containers") else {
+        panic!("one container");
+    };
+    let state = api.state.as_ref().unwrap();
+    assert_eq!((state.ready, state.running), (false, true));
     assert!(findings(&described["pod"]).is_empty());
 }
 

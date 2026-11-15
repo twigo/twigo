@@ -24,6 +24,7 @@ import { settle, withScreenSize } from "../../test/workbench";
 import { ctrlC, withTerminalLayout } from "../../test/terminal";
 import { terminalUri } from "../uri";
 import { workbenchKey } from "../xterm/keys";
+import { tabPaths } from "../tabPaths";
 import { createTerminalTabs, registerTerminals } from "./register";
 import type { TerminalTab, TerminalTabs } from "./tabs";
 
@@ -58,7 +59,11 @@ async function mounted(
   const backend = createMockBackend(scenario);
   const workbench = await testWorkbench(scenario, backend, platform);
   const tabs = createTerminalTabs(workbench);
-  registerTerminals(workbench, tabs);
+  registerTerminals(
+    workbench,
+    tabs,
+    tabPaths(workbench, { last: () => undefined }),
+  );
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);
@@ -677,7 +682,11 @@ async function restarted(
   const backend = createMockBackend("ready");
   const workbench = await testWorkbench("ready", backend, "mac");
   const tabs = createTerminalTabs(workbench);
-  registerTerminals(workbench, tabs);
+  registerTerminals(
+    workbench,
+    tabs,
+    tabPaths(workbench, { last: () => undefined }),
+  );
   withNote(workbench);
   await act(() => workbench.spaces.open("qa"));
   act(() => {

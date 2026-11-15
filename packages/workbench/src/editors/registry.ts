@@ -22,6 +22,8 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /** What the tab's tooltip says: where the editor's subject is, from its context down. */
+  readonly tooltip?: (uri: URL) => string | undefined;
   /**
    * The space whose dock the editor belongs in, if it belongs to one: an
    * editor of another space than the one shown waits for that space's dock
@@ -35,6 +37,12 @@ export interface EditorProvider {
   readonly focus?: (uri: string) => void;
   /** What the editor shows at the right of its group's tab strip while it is the group's active one. */
   readonly actions?: ComponentType<EditorProps>;
+  /**
+   * Read as the person closes the editor: what it keeps to come back, as the
+   * function that brings it back where reopening it would open its URI anew.
+   * A session cannot be restored, so a shell's starts a new one.
+   */
+  readonly keep?: (uri: string) => () => void;
 }
 
 /** A place in an editor that `@` in quick access goes to, such as a YAML key. */
@@ -69,6 +77,24 @@ export interface OpenOptions {
 export const EDITOR_COMPONENT = "editor";
 export const EDITOR_TAB = "editor-tab";
 
+const CLOSED_LIMIT = 20;
+
+/**
+ * Layers that give the focus back themselves when they go, and so are not
+ * where it returns to. Dockview's floating group is a `role=dialog` too, and
+ * stays where it is.
+ */
+const LAYERS =
+  "[cmdk-root], [role=dialog]:not(.dv-resize-container), [role=alertdialog], [role=menu], [data-sonner-toaster]";
+
+/** An editor the person closed, as {@link Editors.dismiss} remembers it. */
+interface Closed {
+  readonly uri: string;
+  readonly scheme: string;
+  readonly space: string | undefined;
+  readonly reopen: (() => void) | undefined;
+}
+
 /**
  * Opens editors in the active space's editor area and its panel. Each area
  * attaches its dockview while it is mounted; panels are keyed by URI, so
@@ -99,17 +125,22 @@ export class Editors {
   >();
   /** Titles editors set before their dock was attached, which a restored layout's panels do. */
   readonly #titles = new Map<string, string>();
+  #closing: Closed[] = [];
+  /** The last element outside the panel to hold the focus: where it goes back to when the panel hides. */
+  #outside: HTMLElement | undefined;
   #active: string | undefined;
 
   /**
-   * `reveal` shows a hidden area before an editor opens in it, `saved` reads
-   * the layout a space keeps for an area, and `onScreen` says whether an area
-   * is on screen: not a hidden panel, nor the editor area under a maximized
-   * one, which take no focus.
+   * `reveal` shows a hidden area before an editor opens in it, `hidePanel`
+   * hides the panel and leaves its maximize, `saved` reads the layout a space
+   * keeps for an area, and `onScreen` says whether an area is on screen: not
+   * a hidden panel, nor the editor area under a maximized one, which take no
+   * focus.
    */
   constructor(
     private readonly keys: ContextKeys,
     private readonly reveal: (area: Area) => void,
+    private readonly hidePanel: () => void,
     private readonly saved: (space: string, area: Area) => unknown,
     readonly onScreen: (area: Area) => boolean,
   ) {}
@@ -137,6 +168,10 @@ export class Editors {
   /** The URI of the editor area's active editor; the panel's does not count. */
   get active(): string | undefined {
     return this.#active;
+  }
+
+  holds(area: Area): boolean {
+    return (this.#apis.get(area)?.panels.length ?? 0) > 0;
   }
 
   /** The active editor of an area. */
@@ -188,6 +223,17 @@ export class Editors {
             this.changes.emit();
           })
         : undefined;
+    const focusin = (event: FocusEvent) => {
+      const { target } = event;
+      if (
+        target instanceof HTMLElement &&
+        !this.#inArea("panel", target) &&
+        !target.closest(LAYERS)
+      ) {
+        this.#outside = target;
+      }
+    };
+    if (area === "panel") document.addEventListener("focusin", focusin);
     if (area === "editor") this.#setActive(api.activePanel);
     if (area === this.#front) this.keepFocus(area);
     for (const [uri, later] of [...this.#leaving]) {
@@ -207,6 +253,7 @@ export class Editors {
       active.dispose();
       removal.dispose();
       added?.dispose();
+      if (area === "panel") document.removeEventListener("focusin", focusin);
       if (this.#apis.get(area) === api) {
         this.#apis.delete(area);
         this.#spaces.delete(area);
@@ -364,6 +411,69 @@ export class Editors {
     }
   }
 
+  /**
+   * Closes an editor at the person's own act: its tab's X, a middle click or
+   * a key. The panel's last editor going this way hides the panel, which
+   * leaves its maximize, and gives the focus back to the element that held it
+   * before the panel took it, else to the editor area's active editor; closed
+   * by the app, as {@link close} does, the panel stays as it is. The editor
+   * can be brought back with {@link reopen}.
+   */
+  dismiss(uri: string): void {
+    const open = this.#find(uri);
+    if (!open) {
+      this.close(uri);
+      return;
+    }
+    const provider = this.resolve(uri);
+    if (provider) {
+      this.#closing = [
+        ...this.#closing.filter((closed) => closed.uri !== uri),
+        {
+          uri,
+          scheme: provider.scheme,
+          space: provider.space?.(new URL(uri)),
+          reopen: provider.keep?.(uri),
+        },
+      ].slice(-CLOSED_LIMIT);
+    }
+    const last =
+      open.area === "panel" && this.#apis.get("panel")?.panels.length === 1;
+    if (!last) {
+      this.close(uri);
+      this.changes.emit();
+      return;
+    }
+    this.#waiting.delete(uri);
+    open.panel.api.close();
+    const focused = document.activeElement;
+    const held =
+      focused === null ||
+      focused === document.body ||
+      this.#inArea("panel", focused);
+    const before = this.#outside;
+    this.hidePanel();
+    if (held) this.returnFocus(before);
+    this.changes.emit();
+  }
+
+  /**
+   * The editor the person closed last in a space, whose scheme is `scheme`
+   * when one is given, unless it is open again.
+   */
+  lastClosed(space: string, scheme?: string): string | undefined {
+    return this.#lastClosed(space, scheme)?.uri;
+  }
+
+  /** Brings back what {@link lastClosed} tells of, if there is one. */
+  reopen(space: string, scheme?: string): void {
+    const closed = this.#lastClosed(space, scheme);
+    if (!closed) return;
+    this.#closing.splice(this.#closing.indexOf(closed), 1);
+    if (closed.reopen) closed.reopen();
+    else this.open(closed.uri);
+  }
+
   /** Moves an area's active editor into a new group beside its own. */
   moveActive(side: "right" | "bottom", area: Area = "editor"): void {
     const panel = this.#apis.get(area)?.activePanel;
@@ -389,12 +499,12 @@ export class Editors {
   /**
    * A part that is hidden or covered keeps the focus it held, since it loses
    * its height and not its elements, and the keys go on to what nobody sees.
-   * The focus inside `from` moves to an area's active editor, or off the page
-   * when that area has none.
+   * The focus inside `from` moves to the active editor of the area the person
+   * works in, or off the page when that area has none.
    */
-  releaseFocus(from: Element, to: Area): void {
+  releaseFocus(from: Element): void {
     if (!from.contains(document.activeElement)) return;
-    this.#focusIn(to);
+    this.#focusIn(this.#front);
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && from.contains(focused)) {
       focused.blur();
@@ -480,6 +590,24 @@ export class Editors {
       if (api.groups.some((group) => group.element === element)) return true;
     }
     return false;
+  }
+
+  #lastClosed(space: string, scheme?: string): Closed | undefined {
+    const found = this.#closing.filter(
+      (closed) =>
+        (closed.space === undefined || closed.space === space) &&
+        (scheme === undefined || closed.scheme === scheme) &&
+        !this.#find(closed.uri),
+    );
+    return found[found.length - 1];
+  }
+
+  #inArea(area: Area, element: Element | null): boolean {
+    return (
+      this.#apis
+        .get(area)
+        ?.groups.some((group) => group.element.contains(element)) ?? false
+    );
   }
 
   #inGroup(element: Element | null): boolean {

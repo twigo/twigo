@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
+  hoverIcons,
   mountKube,
   openList,
   settle,
@@ -29,7 +30,7 @@ vi.mock("@twigo/ui", async (original) => {
   };
 });
 
-withScreenSize();
+const layout = withScreenSize(1280);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -372,6 +373,162 @@ test.each([
     expect(
       Number.parseInt(screen.getAllByRole("row")[0]?.style.minWidth ?? "", 10),
     ).toBeLessThanOrEqual(GRID_WIDTH_AT_1280_WITH_EXPLORER);
+  },
+);
+
+const PODS_PRESET = "list//pods";
+
+const shownAt = (width: number) => {
+  layout.resize(grid(), width);
+  return screen
+    .getAllByRole("columnheader")
+    .map((h) => h.firstElementChild?.textContent ?? h.textContent);
+};
+
+test("a list gives up columns as it narrows and takes back the same ones in the same order as it widens, and the person's choices stay as they were", async () => {
+  const backend = createMockBackend("ready");
+  const choices = JSON.stringify({
+    columns: { Restarts: false, Node: true },
+    widths: { Name: 200 },
+  });
+  const set = backend.invoke("state_set", [
+    { space: null, key: PODS_PRESET, value: choices },
+  ]);
+  await act(() => vi.advanceTimersByTimeAsync(50));
+  await set;
+  const workbench = await openList(backend);
+  const stored = async () => {
+    await act(() => workbench.state.settled());
+    const loaded = backend.invoke("state_load", null);
+    await act(() => vi.advanceTimersByTimeAsync(50));
+    return (await loaded).app[PODS_PRESET];
+  };
+  expect(await stored()).toBe(choices);
+  const widths = [1100, 900, 600, 465, 300];
+  const narrowing = widths.map(shownAt);
+  expect(narrowing).toEqual([
+    [
+      ...["", "Name", "Namespace", "Ready", "Status"],
+      ...["CPU", "Memory", "Age", "Node", "", ""],
+    ],
+    [
+      "",
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "CPU",
+      "Memory",
+      "Age",
+      "",
+      "",
+    ],
+    ["", "Name", "Namespace", "Ready", "Status", "", ""],
+    ["", "Name", "Status", "", ""],
+    ["", "Name", "", ""],
+  ]);
+  expect(await stored()).toBe(choices);
+  const widening = [...widths].reverse().map(shownAt).reverse();
+  expect(widening).toEqual(narrowing);
+  expect(await stored()).toBe(choices);
+});
+
+test("the last column to give way is Status, and Ready joins it first", async () => {
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+  );
+  expect(textOf(rows()[0], "Status")).toBe("CrashLoopBackOff");
+  expect(shownAt(420)).toEqual(["", "Name", "Status", ""]);
+  const merged = textOf(rows()[0], "Status");
+  expect(merged).toMatch(/^\d+\/\d+ ?CrashLoopBackOff$/);
+  expect(merged.startsWith("0/")).toBe(true);
+  expect(shownAt(300)).toEqual(["", "Name", ""]);
+});
+
+const trackOf = (name: string) => {
+  const tracks = template().match(/minmax\([^)]*\)|\S+/g) ?? [];
+  const at = screen
+    .getAllByRole("columnheader")
+    .findIndex((each) => each.textContent === name);
+  return tracks[at];
+};
+
+test("Status keeps the room that Ready's value takes when the person sized it, and what the person's drag keeps is the width without that room, never below a column's minimum", async () => {
+  await openList(
+    createMockBackend("ready"),
+    "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
+  );
+  const drag = async (by: number) => {
+    const edge = screen.getByRole("separator", { name: "Resize Status" });
+    fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(edge, { clientX: 300 + by, pointerId: 1 });
+    fireEvent.pointerUp(edge, { pointerId: 1 });
+    await settle(1);
+  };
+  await drag(40);
+  expect(trackOf("Status")).toBe("200px");
+  shownAt(460);
+  expect(trackOf("Status")).toBe("224px");
+  await drag(10);
+  expect(trackOf("Status")).toBe("234px");
+  shownAt(1280);
+  expect(trackOf("Status")).toBe("210px");
+
+  shownAt(460);
+  await drag(-1000);
+  expect(trackOf("Ready")).toBe("56px");
+  expect(trackOf("Status")).toBe("48px");
+  shownAt(1280);
+  expect(trackOf("Status")).toBe("48px");
+});
+
+test("a sort by a column the width has dropped stays, and the Name header says so until the column is back", async () => {
+  await openList();
+  fireEvent.click(within(header("Memory")).getByRole("button"));
+  await settle();
+  const sorted = () => rows().map((row) => textOf(row, "Name"));
+  const order = sorted();
+  expect(header("Memory").getAttribute("aria-sort")).toBe("descending");
+  expect(screen.queryByText(/^Sorted by /)).toBeNull();
+
+  expect(shownAt(600)).toEqual(["", "Name", "Ready", "Status", "Restarts", ""]);
+  await settle();
+  expect(sorted()).toEqual(order);
+  expect(
+    screen.getByText(
+      "Sorted by Memory, descending: the column has no room at this width.",
+    ),
+  ).toBeTruthy();
+
+  layout.resize(grid(), 1280);
+  await settle();
+  expect(header("Memory").getAttribute("aria-sort")).toBe("descending");
+  expect(sorted()).toEqual(order);
+  expect(screen.queryByText(/^Sorted by /)).toBeNull();
+});
+
+test("a width change renders the grid once, for every row at once, and the same width renders nothing", async () => {
+  await openList();
+  const renders = gridRenders.count;
+  layout.resize(grid(), 900);
+  expect(gridRenders.count).toBe(renders + 1);
+  layout.resize(grid(), 900);
+  expect(gridRenders.count).toBe(renders + 1);
+});
+
+test.each([
+  ["every namespace", "k8s-list://prod-eu/v1/pods", true],
+  ["one namespace", "k8s-list://prod-eu/v1/pods?ns=auth", false],
+])(
+  "Namespace is a column of a list of %s only when it says more",
+  async (_, uri, has) => {
+    await openList(createMockBackend("ready"), uri);
+    expect(
+      screen
+        .getAllByRole("columnheader")
+        .some((h) => h.textContent === "Namespace"),
+    ).toBe(has);
   },
 );
 
@@ -826,4 +983,61 @@ test("a header's click folds its group, Left goes from a row to its header, and 
       "Namespace",
     ),
   ).toBeTruthy();
+});
+
+test("a hovered row's verbs read that row's own state, not the selected row's", async () => {
+  const script = scriptedBackend();
+  const workbench = await mountKube(script.backend);
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  await settle(2);
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/nodes");
+  });
+  await settle();
+  act(() => {
+    script.send({
+      seq: 1,
+      total: 3,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        { name: "Version", kind: "string", priority: 0 },
+      ],
+      window: { start: 0, ids: ["dev/a", "dev/b", "dev/c"] },
+      upserts: [
+        ["dev/a", "Ready,SchedulingDisabled"],
+        ["dev/b", "Ready"],
+        ["dev/c", "Ready,SchedulingDisabled"],
+      ].map(([id = "", status]) => ({
+        id,
+        created: null,
+        generated: null,
+        cells: [id.slice(4), status ?? "", "v1.37.1"],
+      })),
+      status: { state: "ready" },
+      counts: null,
+      groups: null,
+      metrics: null,
+    });
+  });
+  await settle(1);
+  focusGrid();
+  key("KeyJ");
+  await settle(1);
+  expect(selectedNames()).toEqual(["a"]);
+  const icons = (name: string) => {
+    const row = rows().find((each) => textOf(each, "Name") === name);
+    if (!row) throw new Error(`no row ${name}`);
+    fireEvent.pointerEnter(row);
+    return row;
+  };
+  const ready = icons("b");
+  await settle(2);
+  expect(hoverIcons(ready)).toEqual(["Cordon", "Drain"]);
+  fireEvent.pointerLeave(ready);
+  const cordoned = icons("c");
+  await settle(2);
+  expect(hoverIcons(cordoned)).toEqual(["Uncordon", "Drain"]);
 });

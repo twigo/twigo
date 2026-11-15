@@ -27,7 +27,7 @@ import {
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
-import { settle, withScreenSize } from "../../test/workbench";
+import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { objectUri, pfUri } from "../uri";
 import { registerForwards } from "./register";
 import { Forwards } from "./service";
@@ -83,7 +83,7 @@ async function mounted(
   const backend = patch ? patching(mock, patch) : mock;
   const workbench = await testWorkbench(scenario, backend);
   const forwards = new Forwards(backend);
-  registerForwards(workbench, forwards);
+  registerForwards(workbench, forwards, bareTabPaths(workbench));
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);
@@ -169,6 +169,18 @@ test("a ready forward's tab is titled by its target and ports, and says where it
   expect(
     screen.queryByText(/Waiting for a place among the context's/),
   ).toBeNull();
+});
+
+test("a forward's tab tooltip is its target's path from the context down, then the port", async () => {
+  const { workbench, start, open } = await mounted();
+  const uri = await open(await start(API, 80));
+  expect(workbench.editors.resolve(uri)?.tooltip?.(new URL(uri))).toBe(
+    "qa › auth › Service › auth-api › http 80",
+  );
+  const gone = pfUri({ space: "qa", id: 41 });
+  expect(
+    workbench.editors.resolve(gone)?.tooltip?.(new URL(gone)),
+  ).toBeUndefined();
 });
 
 test("the target and the pod are links to their objects, which open beside the tab", async () => {
@@ -530,7 +542,7 @@ test("a tab that opens before the core has answered does not say the forward is 
         ? new Promise<never>(() => undefined)
         : backend.subscribe(command, request, onMessage),
   };
-  registerForwards(workbench, new Forwards(held));
+  registerForwards(workbench, new Forwards(held), bareTabPaths(workbench));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");
@@ -583,7 +595,7 @@ test("a resume that fails for another reason than a busy port or the mode is sho
   };
   const workbench = await testWorkbench("live", backend);
   const forwards = new Forwards(backend);
-  registerForwards(workbench, forwards);
+  registerForwards(workbench, forwards, bareTabPaths(workbench));
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");

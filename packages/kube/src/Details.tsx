@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
 import type { ObjectQuery, ObjectRef, Overview, Row } from "@twigo/protocol";
 import {
-  ActionBar,
+  ActionRow,
   cn,
   IconButton,
   LinkButton,
@@ -32,6 +32,7 @@ import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
 const MIN_WIDTH = 320;
+const DEFAULT_WIDTH = 470;
 
 /** How long the selection rests on a row before its object opens (ARCHITECTURE 4.3). */
 export const DWELL_MS = 150;
@@ -65,13 +66,16 @@ export function Details({
   onClose: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, keys, menus } = workbench;
+  const { backend, keys, menus, sizes } = workbench;
   const { discovery, selection, states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
+  useChanges(sizes.changes);
   const resources = useResources(discovery, space);
-  const [width, setWidth] = useState(470);
+  const [dragged, setDragged] = useState<number>();
+  const width =
+    dragged ?? Math.max(MIN_WIDTH, sizes.get("inspector") ?? DEFAULT_WIDTH);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
@@ -131,6 +135,15 @@ export function Details({
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
   const warnings = warningCount(snapshot.overview, snapshot.events?.events);
+  const idle = tab === "overview" && noContainerRuns(snapshot.overview);
+  useEffect(() => {
+    if (!element) return;
+    const scope = keys.scope(element);
+    scope.set("resource.noContainerRuns", idle);
+    return () => {
+      scope.dispose();
+    };
+  }, [keys, element, idle]);
   const now = useNow();
   const lookup = keys.lookup(element);
   const measured = useSyncExternalStore(selection.watch, () =>
@@ -142,11 +155,11 @@ export function Details({
     <aside
       ref={setElement}
       aria-label={`${kind} details`}
-      style={{ width }}
+      style={{ width, ...(docked && { minWidth: MIN_WIDTH }) }}
       className={cn(
         "flex h-full max-w-[85%] flex-col border-l border-border bg-editor",
         docked
-          ? "relative shrink-0"
+          ? "relative"
           : "absolute inset-y-0 right-0 z-10 animate-in shadow-lg animation-duration-150 slide-in-from-right-8",
       )}
     >
@@ -157,17 +170,27 @@ export function Details({
         onPointerDown={(event) => {
           event.preventDefault();
           const start = event.clientX;
-          const from = width;
+          const from = element?.getBoundingClientRect().width ?? width;
           const target = event.currentTarget;
+          let moved = false;
           target.setPointerCapture(event.pointerId);
           const move = (next: PointerEvent) => {
-            setWidth(Math.max(MIN_WIDTH, from + start - next.clientX));
+            moved = true;
+            setDragged(
+              Math.round(Math.max(MIN_WIDTH, from + start - next.clientX)),
+            );
           };
           target.addEventListener("pointermove", move);
           target.addEventListener(
             "pointerup",
             () => {
               target.removeEventListener("pointermove", move);
+              if (moved && element)
+                sizes.set(
+                  "inspector",
+                  Math.round(element.getBoundingClientRect().width),
+                );
+              setDragged(undefined);
             },
             { once: true },
           );
@@ -269,8 +292,8 @@ export function Details({
                   ],
             )}
         </div>
-        <ActionBar
-          inline
+        <ActionRow
+          label={`${kind} actions`}
           actions={workbench.actions("resource/details", lookup)}
           className="-ml-1.5"
         />
@@ -332,6 +355,17 @@ function warningCount(
       .flatMap((section) => section.blocks)
       .flatMap((block) => (block.type === "events" ? block.events : []));
   return (listed ?? []).filter((event) => event.type === "Warning").length;
+}
+
+/** Whether the Overview lists containers and none of them runs: false while it lists none, as before it comes. */
+function noContainerRuns(overview: Overview | undefined): boolean {
+  const containers = (overview?.sections ?? [])
+    .flatMap((section) => section.blocks)
+    .flatMap((block) => (block.type === "containers" ? block.containers : []));
+  return (
+    containers.length > 0 &&
+    containers.every((container) => container.state?.running !== true)
+  );
 }
 
 /** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */

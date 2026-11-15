@@ -5,7 +5,7 @@ import {
   type IDockviewHeaderActionsProps,
 } from "dockview-react";
 import { PanelBottom } from "lucide-react";
-import { EmptyState, InlineActions, KeyHints } from "@twigo/ui";
+import { ActionBar, EmptyState, InlineActions, KeyHints } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { GroupActions, SpaceDock } from "./EditorArea";
 import { useInertWhile } from "./useInertWhile";
@@ -24,11 +24,13 @@ const THEME: DockviewTheme = {
 export function PanelArea() {
   const { spaces, keys, editors } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(editors.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
   const panel = space ? spaces.state(space.id).parts.panel : undefined;
   const visible = panel?.visible ?? false;
   const maximized = visible && (panel?.maximized ?? false);
+  const occupied = editors.holds("panel");
 
   useEffect(() => {
     const element = ref.current;
@@ -43,7 +45,8 @@ export function PanelArea() {
   useEffect(() => {
     keys.set("panelVisible", visible);
     keys.set("panelMaximized", maximized);
-  }, [keys, visible, maximized]);
+    keys.set("panelHasEditor", occupied);
+  }, [keys, visible, maximized, occupied]);
 
   // The editor area it covers went with the focus, if it held it.
   useEffect(() => {
@@ -117,17 +120,28 @@ function PanelGroupActions(props: IDockviewHeaderActionsProps) {
   );
 }
 
-/** What an empty panel shows: how to hide it. */
+/** What an empty panel shows: the space it is empty in, what to start in it, and how to hide it. */
 function EmptyPanel() {
-  const { keybindings } = useWorkbench();
+  const workbench = useWorkbench();
+  const { keybindings, keys, menus, spaces } = workbench;
   useChanges(keybindings.changes);
+  useChanges(keys.changes);
+  useChanges(menus.changes);
+  useChanges(spaces.changes);
   const binding = keybindings.primary("workbench.action.togglePanel");
+  const name = spaces.active?.contexts.join(" + ");
   return (
     <EmptyState
       icon={PanelBottom}
-      title="Nothing open in the panel"
+      title={name === undefined ? "No sessions" : `No sessions in ${name}`}
       className="h-full"
     >
+      <ActionBar
+        inline
+        outlined
+        className="mt-1 gap-2"
+        actions={workbench.actions("panel/empty", keys.lookup(null))}
+      />
       {binding && (
         <KeyHints
           hints={[

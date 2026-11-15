@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useMemo,
   useRef,
@@ -12,6 +13,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronDown, ChevronRight, Ellipsis } from "lucide-react";
 import { cn } from "../lib/cn";
 import type { ListController } from "../lib/list";
+import { useWidth } from "../lib/useWidth";
 import {
   ActionContextMenu,
   ActionDropdown,
@@ -28,6 +30,28 @@ export const ROW_HEIGHT = 26;
 const HEADER_HEIGHT = 28;
 const MARK_WIDTH = 28;
 const ACTIONS_WIDTH = 32;
+/** What a grid with marks takes beside its columns. */
+export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
+/**
+ * A row's first cells stay while the grid scrolls sideways: they cover what
+ * passes under them, and their own tint, which `before` carries, lies over
+ * their fill as the row's does over the grid's. The row's overlays, which
+ * sit at `z-[2]`, lie over them.
+ */
+const HELD =
+  "sticky z-[1] isolate bg-[var(--surface,var(--editor))] before:pointer-events-none before:absolute before:inset-0 before:-z-10";
+const MARK_CELL = "flex justify-center";
+const MARK_CELL_REVEALING = `${MARK_CELL} [&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100`;
+const MARK_HEADER_HELD = `${MARK_CELL} sticky left-0 z-20 bg-inherit`;
+/** How long the pointer rests on a row before its icons show, so that a pass over the rows shows none. */
+const HOVER_MS = 60;
+
+/** How far the icons reach into the actions column: they end 2 px before the ⋯ button, which sits 4 px inside it. */
+const ICONS_REACH = 2;
+
+/** The width of `count` icons over a row's columns: 24 px each, 2 px apart, after 8 px, less what reaches into the actions column. */
+const iconsWidth = (count: number) =>
+  8 + count * 24 + (count - 1) * 2 - ICONS_REACH;
 
 export interface DataGridProps<R, G> {
   readonly label: string;
@@ -79,8 +103,18 @@ export interface DataGridProps<R, G> {
    * part holding the grid sets its own.
    */
   readonly overlayMenu?: boolean;
-  /** Actions with icons that show on a hovered row, run on that row. */
-  readonly inline?: readonly Action[];
+  /**
+   * A row's first actions, as icons over the end of the row once the pointer
+   * rests on it, run on that row; they show only where the columns at the
+   * row's end that may be covered have room for them, and name no keys,
+   * which act on the selected row.
+   */
+  readonly inline?: (row: R) => readonly Action[];
+  /**
+   * A row's icons have come to show, after the pointer rested on it: the
+   * time to ask what they need; what it returns runs once they go.
+   */
+  readonly onRest?: (row: R) => () => void;
   /** At the head of the actions column, such as the choice of columns. */
   readonly headerEnd?: ReactNode;
   /** Skeleton rows until the first rows come. */
@@ -134,7 +168,8 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onMark,
     menu = [],
     overlayMenu = false,
-    inline = [],
+    inline,
+    onRest,
     headerEnd,
     loading,
     empty,
@@ -145,6 +180,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   const ids = useId();
   const rowId = (index: number) => `${ids}-${String(index)}`;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const shown = useWidth(element);
   const [cursor, setCursor] = useState(selected);
   const [followed, setFollowed] = useState(selected);
   if (selected !== followed) {
@@ -366,14 +402,35 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     (marking ? MARK_WIDTH : 0) +
     columns.reduce((sum, column) => sum + widthOf(column), 0) +
     (overlayMenu ? 0 : ACTIONS_WIDTH);
+  // A held first column that reaches the actions column would lie over the
+  // rows' ⋯ and the choice of columns.
+  const holding =
+    shown > 0 &&
+    minWidth > shown &&
+    (marking ? MARK_WIDTH : 0) +
+      (columns[0] ? widthOf(columns[0]) : 0) +
+      (overlayMenu ? 0 : ACTIONS_WIDTH) <=
+      shown;
   // The menu's trigger wraps every row, and opens the selected row's menu
   // unless a row prevents the event's default.
   const withoutMenu = (event: SyntheticEvent) => {
     event.preventDefault();
   };
   const anyMarked = (marked?.size ?? 0) > 0;
+  let room = 0;
+  for (const column of [...columns].reverse()) {
+    if (column.coverable !== true) break;
+    room += widthOf(column);
+  }
   const active = virtual.find(
     (at) => cursor !== undefined && item(at.index)?.id === cursor,
+  );
+  const cellClasses = columns.map((column) =>
+    cn(
+      "truncate px-2",
+      column.align === "end" && "text-right",
+      column.numeric && "tabular-nums",
+    ),
   );
 
   const rows = virtual.map((at) => {
@@ -443,6 +500,25 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       : isCursor
         ? "bg-selected-unfocused group-focus/grid:bg-selected"
         : undefined;
+    const held = holding
+      ? cn(
+          HELD,
+          isMarked
+            ? "before:bg-selected"
+            : isCursor
+              ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
+              : "group-hover/row:before:bg-row-hover",
+        )
+      : undefined;
+    const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
+    const edge =
+      held === undefined
+        ? undefined
+        : target.tone === "error"
+          ? "shadow-[inset_2px_0_0_var(--error)]"
+          : target.tone === "warn"
+            ? "shadow-[inset_2px_0_0_var(--warn)]"
+            : undefined;
     const select = () => {
       setWanted(undefined);
       setCursor(target.id);
@@ -478,34 +554,33 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
                     !overlayMenu && isCursor && "opacity-100",
                   )}
                 >
-                  <Ellipsis aria-hidden className="size-4" />
+                  <Ellipsis aria-hidden className="size-3.5" />
                 </button>
               </ActionDropdown>
             )}
-            {inline.length > 0 && (
-              <div
-                className="absolute inset-y-0 hidden items-center bg-editor group-hover/row:flex"
-                style={{ right: ACTIONS_WIDTH }}
-              >
-                <div
-                  className={cn(
-                    "flex h-full items-center bg-row-hover pl-2",
-                    tint,
-                  )}
-                >
-                  <InlineActions
-                    actions={inline.map((action) => ({
-                      ...action,
-                      run: () => {
-                        select();
-                        action.run();
-                      },
-                    }))}
-                  />
-                </div>
-              </div>
-            )}
           </>
+        }
+        icons={
+          inline &&
+          (() => {
+            const actions = inline(target.data);
+            return (
+              actions.length > 0 &&
+              room >= iconsWidth(actions.length) && (
+                <RowIcons
+                  tint={tint}
+                  actions={actions.map(({ keys: _, ...action }) => ({
+                    ...action,
+                    run: () => {
+                      select();
+                      action.run();
+                    },
+                  }))}
+                  onShow={onRest && (() => onRest(target.data))}
+                />
+              )
+            );
+          })
         }
         onClick={(event) => {
           // A click in a menu the row opened reaches it through the portal.
@@ -525,12 +600,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         {marking && (
           <div
             role="gridcell"
-            className={cn(
-              "flex justify-center",
-              !isMarked &&
-                marked.size === 0 &&
-                "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
-            )}
+            className={held ? cn(markCell, held, edge, "left-0") : markCell}
           >
             <MarkBox
               checked={isMarked}
@@ -541,18 +611,22 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             />
           </div>
         )}
-        {columns.map((column) => {
+        {columns.map((column, order) => {
           const since = flash?.(target.id, column.id);
+          const first = order === 0;
           return (
             <div
               key={column.id}
               role="gridcell"
               data-column={column.id}
-              className={cn(
-                "truncate px-2",
-                column.align === "end" && "text-right",
-                column.numeric && "tabular-nums",
-              )}
+              style={
+                first && held ? { left: marking ? MARK_WIDTH : 0 } : undefined
+              }
+              className={
+                first && held
+                  ? cn(cellClasses[order], held, !marking && edge)
+                  : cellClasses[order]
+              }
             >
               <span
                 key={since ?? "steady"}
@@ -599,7 +673,10 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           }}
         >
           {marking && (
-            <div role="columnheader" className="flex justify-center">
+            <div
+              role="columnheader"
+              className={holding ? MARK_HEADER_HELD : MARK_CELL}
+            >
               {marked.size > 0 && (
                 <MarkBox
                   checked={false}
@@ -612,11 +689,13 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               )}
             </div>
           )}
-          {columns.map((column) => (
+          {columns.map((column, order) => (
             <HeaderCell
               key={column.id}
               column={column}
               width={widthOf(column)}
+              {...(order === 0 &&
+                holding && { held: marking ? MARK_WIDTH : 0 })}
               sort={sort}
               onSort={(next) => {
                 onSort?.(next);
@@ -667,11 +746,13 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
  * A row whose last cell holds its actions, mounted only while they can be
  * reached: one Tooltip per action and a menu on each of a window's rows cost
  * more to render, on every frame of a scroll, than all of the rows' cells.
+ * Its icons mount once the pointer has rested on it.
  */
 function DataRow({
   keepActions,
   overlay,
   actions,
+  icons,
   children,
   ...row
 }: ComponentProps<"div"> & {
@@ -679,10 +760,21 @@ function DataRow({
   /** The row's tint, when the actions lie over its end rather than in a column. */
   overlay: string | undefined;
   actions: ReactNode;
+  icons: (() => ReactNode) | undefined;
 }) {
   const [pointed, setPointed] = useState(false);
+  const [rested, setRested] = useState(false);
   const [focused, setFocused] = useState(false);
   const shown = keepActions || pointed || focused;
+  useEffect(() => {
+    if (!pointed) return;
+    const timer = setTimeout(() => {
+      setRested(true);
+    }, HOVER_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [pointed]);
   return (
     <div
       {...row}
@@ -691,6 +783,7 @@ function DataRow({
       }}
       onPointerLeave={() => {
         setPointed(false);
+        setRested(false);
       }}
       onFocus={() => {
         setFocused(true);
@@ -704,12 +797,13 @@ function DataRow({
       {overlay === undefined ? (
         <div role="gridcell" className="flex items-center justify-center">
           {shown && actions}
+          {rested && icons?.()}
         </div>
       ) : (
         shown && (
           <div
             role="gridcell"
-            className="absolute inset-y-0 right-0 flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
+            className="absolute inset-y-0 right-0 z-[2] flex items-center bg-[var(--surface,var(--editor))] opacity-0 group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100"
           >
             <div className={cn("flex h-full items-center px-1", overlay)}>
               {actions}
@@ -717,6 +811,30 @@ function DataRow({
           </div>
         )
       )}
+    </div>
+  );
+}
+
+/** A row's icons over its end; `onShow` runs once they show, and what it returns once they go. */
+function RowIcons({
+  tint,
+  actions,
+  onShow,
+}: {
+  tint: string | undefined;
+  actions: readonly Action[];
+  onShow: (() => () => void) | undefined;
+}) {
+  const show = useEffectEvent(() => onShow?.());
+  useEffect(() => show(), []);
+  return (
+    <div
+      className="absolute inset-y-0 z-[2] flex items-center bg-editor"
+      style={{ right: ACTIONS_WIDTH - ICONS_REACH }}
+    >
+      <div className={cn("flex h-full items-center bg-row-hover pl-2", tint)}>
+        <InlineActions actions={actions} />
+      </div>
     </div>
   );
 }

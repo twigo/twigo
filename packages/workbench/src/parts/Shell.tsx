@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Allotment, LayoutPriority } from "allotment";
+import { useEffect, useRef, useState } from "react";
+import { Allotment, LayoutPriority, type AllotmentHandle } from "allotment";
 import { Toaster } from "@twigo/ui";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import { useChanges, useWorkbench } from "../react";
@@ -11,6 +11,7 @@ import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
 import { PanelArea } from "./PanelArea";
 import { PartView } from "./PartView";
+import { sideBarShown } from "./sideBarShown";
 import { SpaceRail } from "./SpaceRail";
 import { StatusBar } from "./StatusBar";
 import { TitleBar } from "./TitleBar";
@@ -30,11 +31,14 @@ const DEFAULT_SIZE: Readonly<Record<Location, number>> = {
  * the split views remount with it; sizes are the app's.
  */
 export function Shell() {
-  const { spaces, sizes, keybindings, views } = useWorkbench();
+  const workbench = useWorkbench();
+  const { spaces, sizes, keybindings, views } = workbench;
   useChanges(spaces.changes);
   useChanges(sizes.changes);
   useChanges(views.changes);
   const [panelHeight, setPanelHeight] = useState(0);
+  const split = useRef<AllotmentHandle>(null);
+  const dragging = useRef(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -48,9 +52,7 @@ export function Shell() {
 
   const space = spaces.active;
   const parts = space ? spaces.state(space.id).parts : undefined;
-  const shown = (location: SideBar) =>
-    (parts?.[location].visible ?? false) &&
-    views.containers(location).length > 0;
+  const shown = (location: SideBar) => sideBarShown(workbench, location);
   const panel = parts?.panel.visible ?? false;
   const maximized = panel && (parts?.panel.maximized ?? false);
   const size = (location: Location) =>
@@ -109,12 +111,34 @@ export function Shell() {
           </Allotment.Pane>
           <Allotment.Pane minSize={320} priority={LayoutPriority.High}>
             <Allotment
+              ref={split}
               vertical
               proportionalLayout={false}
               onChange={([, measured]) => {
-                setPanelHeight(Math.round(measured ?? 0));
+                const height = Math.round(measured ?? 0);
+                setPanelHeight(height);
+                const shown = height > 0;
+                if (dragging.current && space && shown !== panel) {
+                  spaces.setPart(
+                    space.id,
+                    "panel",
+                    shown
+                      ? { visible: true, maximized: false }
+                      : { visible: false },
+                  );
+                }
               }}
-              onDragEnd={remember([undefined, "panel"])}
+              onDragStart={() => {
+                dragging.current = true;
+              }}
+              onDragEnd={(measured) => {
+                dragging.current = false;
+                if (!maximized) remember([undefined, "panel"])(measured);
+              }}
+              onReset={() => {
+                sizes.set("panel", DEFAULT_SIZE.panel);
+                split.current?.resize([0, DEFAULT_SIZE.panel]);
+              }}
             >
               <Allotment.Pane
                 minSize={120}
@@ -127,6 +151,7 @@ export function Shell() {
                 minSize={80}
                 preferredSize={size("panel")}
                 visible={panel}
+                snap
               >
                 <PanelBoundary label="Panel">
                   <PanelArea />

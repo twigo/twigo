@@ -20,23 +20,36 @@ interface State {
   readonly focus: boolean;
   /** The view the row's details show, kept as the selection moves. */
   readonly details: ObjectTab;
+  /** The width the details beside the list take from it, in px; 0 without them. */
+  readonly inspector: number;
+  /** The width the list keeps for its group's strip, in px; 0 until the strip's actions have shown their last stage. */
+  readonly stripMin: number;
+  /** By health, and `all`, the most characters its count had while the text was empty. */
+  readonly countDigits: Readonly<Record<string, number>>;
 }
 
 const INITIAL: State = {
   collapsed: new Set(),
   focus: false,
   details: "overview",
+  inspector: 0,
+  stripMin: 0,
+  countDigits: {},
 };
 
 /**
  * What each open list editor shows, by URI (ARCHITECTURE 4.4): its sort,
- * its text filter, its picked health, its collapsed groups, and the asks
- * for its filter field's focus, and the view its details show, so an
- * editor that mounts again shows the same. A list that closes opens again
- * with the text and health of its URI (4.4).
+ * its text filter, its picked health, its collapsed groups, the asks for
+ * its filter field's focus and the view its details show, so an editor that
+ * mounts again shows the same. A list that closes opens again with the text
+ * and health of its URI (4.4). The room its details take from it is 0 once
+ * the editor unmounts, and the width its strip needs stays as its actions
+ * last measured it, as does the room its health counts keep.
  */
 export class ListStates {
   readonly changes = new Changes();
+  /** The strip's measures, which only the strip and a list beside its details read. */
+  readonly strip = new Changes();
   readonly #lists = new Map<string, State>();
 
   #get(uri: string): State {
@@ -46,6 +59,11 @@ export class ListStates {
   #update(uri: string, change: Partial<State>): void {
     this.#lists.set(uri, { ...this.#get(uri), ...change });
     this.changes.emit();
+  }
+
+  #measure(uri: string, change: Partial<State>): void {
+    this.#lists.set(uri, { ...this.#get(uri), ...change });
+    this.strip.emit();
   }
 
   /** Undefined sorts by Name. */
@@ -97,6 +115,39 @@ export class ListStates {
 
   setDetailsTab(uri: string, details: ObjectTab): void {
     if (this.#get(uri).details !== details) this.#update(uri, { details });
+  }
+
+  inspector(uri: string): number {
+    return this.#get(uri).inspector;
+  }
+
+  setInspector(uri: string, inspector: number): void {
+    if (this.#get(uri).inspector !== inspector)
+      this.#measure(uri, { inspector });
+  }
+
+  stripMin(uri: string): number {
+    return this.#get(uri).stripMin;
+  }
+
+  setStripMin(uri: string, stripMin: number): void {
+    if (this.#get(uri).stripMin !== stripMin) this.#measure(uri, { stripMin });
+  }
+
+  countDigits(uri: string): Readonly<Record<string, number>> {
+    return this.#get(uri).countDigits;
+  }
+
+  /** The digits of counts read while the text was empty: what each count keeps room for grows, never shrinks. */
+  seeCountDigits(uri: string, digits: Readonly<Record<string, number>>): void {
+    const kept = this.#get(uri).countDigits;
+    const wider = Object.entries(digits).filter(
+      ([key, count]) => count > (kept[key] ?? 0),
+    );
+    if (wider.length > 0)
+      this.#measure(uri, {
+        countDigits: { ...kept, ...Object.fromEntries(wider) },
+      });
   }
 
   /** The list's editor closed: the text and health picked in it go. */
