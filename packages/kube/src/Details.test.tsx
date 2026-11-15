@@ -243,6 +243,62 @@ describe("in a wide editor", () => {
     expect(attach.textContent).toContain("No container runs");
   });
 
+  test("off the Overview a crash-looping pod's Shell runs, since the details no longer know its containers, which a batch may have started", async () => {
+    const mock = createMockBackend("ready");
+    let send: ((batch: ObjectBatch) => void) | undefined;
+    let last: ObjectBatch | undefined;
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "object_open")
+          return mock.subscribe(command, request, onMessage);
+        const forward = onMessage as (batch: ObjectBatch) => void;
+        send = forward;
+        return mock.subscribe(command, request, (message) => {
+          last = message as ObjectBatch;
+          forward(last);
+        });
+      },
+    };
+    await openList(backend, "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff");
+    const crashing = rows().find(
+      (row) =>
+        row.querySelector('[data-column="Status"]')?.textContent ===
+          "CrashLoopBackOff" &&
+        row.querySelector('[data-column="Ready"]')?.textContent === "0/1",
+    );
+    fireEvent.click(crashing ?? document.body);
+    await settle(8);
+    const shell = () =>
+      within(
+        within(shown()).getByRole("toolbar", { name: "Pod actions" }),
+      ).getByRole("button", { name: "Shell" });
+    expect(shell().getAttribute("aria-disabled")).toBe("true");
+
+    fireEvent.click(tab("YAML"));
+    await settle(8);
+    const batch = last;
+    if (!send || !batch?.manifest) throw new Error("no object batches");
+    const manifest = JSON.parse(batch.manifest) as {
+      status: { containerStatuses: { state: unknown }[] };
+    };
+    for (const status of manifest.status.containerStatuses)
+      status.state = { running: { startedAt: "2026-11-15T10:00:00Z" } };
+    act(() => {
+      send?.({
+        ...batch,
+        seq: batch.seq + 1,
+        overview: null,
+        events: null,
+        related: null,
+        usage: null,
+        manifest: JSON.stringify(manifest),
+      });
+    });
+    await settle(2);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);

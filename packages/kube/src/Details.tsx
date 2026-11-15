@@ -131,7 +131,7 @@ export function Details({
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
   const warnings = warningCount(snapshot.overview, snapshot.events?.events);
-  const idle = noContainerRuns(snapshot.overview);
+  const idle = tab === "overview" && noContainerRuns(snapshot.overview);
   useEffect(() => {
     if (!element) return;
     const scope = keys.scope(element);

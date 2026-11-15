@@ -44,9 +44,9 @@ const CRON_JOB = "resource.group == batch && resource.kind == CronJob";
 const ALWAYS = "true";
 
 /**
- * That a container of the pod runs, as its details' Overview says; the
- * list, the keys and a palette opened outside the details never know, so
- * there `shell_containers` decides.
+ * That a container of the pod runs, as its details' Overview says while
+ * they show it; their other tabs, the list, the keys and a palette opened
+ * outside the details never know, so there `shell_containers` decides.
  */
 const RUNS = {
   when: "!resource.noContainerRuns",
