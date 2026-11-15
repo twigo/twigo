@@ -56,6 +56,8 @@ export interface ColumnRule {
    * takes `room` px more for it.
    */
   readonly into?: { readonly column: string; readonly room: number };
+  /** A hovered row's icons may lie over its cells, as over an age or a measure. */
+  readonly coverable: boolean;
 }
 
 /** The order columns leave a narrowing list: `ColumnRule.drop`. */
@@ -146,7 +148,9 @@ export const IN_FLIGHT =
 
 /** Rules for a column of any kind, by name. */
 const BY_NAME: Readonly<Record<string, Partial<ColumnRule>>> = {
-  Name: { cell: "name", width: 160, grow: true },
+  Name: { cell: "name", width: 160, grow: true, coverable: false },
+  Ready: { coverable: false },
+  Status: { coverable: false },
   Namespace: {
     width: 120,
     secondary: true,
@@ -225,6 +229,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     metric: false,
     flash: true,
     drop: 0,
+    coverable: true,
     ...BY_KIND[column.kind],
     ...BY_NAME[column.name],
     ...BY_RESOURCE[key(gvr, column.name)],

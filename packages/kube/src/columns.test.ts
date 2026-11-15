@@ -243,3 +243,25 @@ test("a column's cells are figures by their cell kind, or by a numeric column ki
   expect(figures("Status")).toBe(false);
   expect(figures("Node")).toBe(false);
 });
+
+test("a hovered row's icons may lie over any column but a Name, a Ready or a Status, whatever their cells", () => {
+  const statefulSets = {
+    group: "apps",
+    version: "v1",
+    resource: "statefulsets",
+  };
+  const jobs = { group: "batch", version: "v1", resource: "jobs" };
+  const coverable = (gvr: typeof PODS, name: string, kind?: Column["kind"]) =>
+    columnRule(gvr, column(name, kind)).coverable;
+  expect(coverable(PODS, "Name")).toBe(false);
+  expect(coverable(PODS, "Ready")).toBe(false);
+  expect(coverable(PODS, "Status")).toBe(false);
+  expect(columnRule(statefulSets, column("Ready")).cell).toBe("text");
+  expect(coverable(statefulSets, "Ready")).toBe(false);
+  expect(coverable(jobs, "Status")).toBe(false);
+  expect(coverable(PODS, "Restarts")).toBe(true);
+  expect(coverable(PODS, "Age", "age")).toBe(true);
+  expect(coverable(PODS, "CPU", "cpu")).toBe(true);
+  expect(coverable(PODS, "Node")).toBe(true);
+  expect(coverable(statefulSets, "Containers")).toBe(true);
+});

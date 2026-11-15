@@ -29,7 +29,6 @@ import { CAPABILITY_PREFIXES } from "../capabilities";
 import {
   byHealth,
   columnRule,
-  type CellKind,
   type ColumnRule,
   HEALTH,
   healthValues,
@@ -51,9 +50,6 @@ import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
 const GROUP = "group:";
-
-/** The cells a hovered row's icons never cover. */
-const NARROW: ReadonlySet<CellKind> = new Set(["name", "status", "ratio"]);
 
 /**
  * A list editor's rows (ARCHITECTURE 4.4): the editor's state and its
@@ -259,7 +255,7 @@ function Grid({
       align: column.rule.align,
       numeric: column.rule.figures,
       descendFirst: column.rule.descendFirst,
-      coverable: !NARROW.has(column.rule.cell),
+      coverable: column.rule.coverable,
       ...(note !== undefined && { note }),
     };
   });
