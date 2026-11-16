@@ -80,6 +80,10 @@
   --well: oklch(0 0 0 / 6%);
   --plate: oklch(1 0 0 / 80%);
 
+  /* A keycap's fill stacks on a field, a hovered button or a selected row,
+     so it stays under --row-active: support text keeps 4.5:1 on it there. */
+  --keycap: oklch(0 0 0 / 5%);
+
   /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
      (never pure gray - that azure tint is the premium tell). */
   --tab-selected-bg: color-mix(in oklab, var(--brand) 8%, var(--card));
@@ -217,6 +221,7 @@
 
   --well: oklch(1 0 0 / 6%);
   --plate: oklch(1 0 0 / 4%);
+  --keycap: oklch(1 0 0 / 5%);
 
   --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
@@ -303,6 +308,7 @@
   --color-selected-unfocused: var(--selected-unfocused);
   --color-well: var(--well);
   --color-plate: var(--plate);
+  --color-keycap: var(--keycap);
   --color-border-subtle: var(--border-subtle);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);

@@ -239,9 +239,16 @@ test("the comment over the roles states the contrast the colours give, to the pr
 });
 
 const WELLED: readonly Surface[] = ["shell", "editor", "card", "popover"];
-const KEYCAPPED: readonly Surface[] = ["shell", "editor"];
-const WELL_TEXTS = ["content", "support", "error", "warn-foreground"] as const;
 const OVERLAY_DIFFERS = 1.1;
+
+function classOf(file: string, pattern: RegExp) {
+  const found = pattern.exec(read(file))?.[1];
+  if (found === undefined)
+    throw new Error(`${file} has nothing like ${pattern}`);
+  return found;
+}
+const keycapFill = classOf("../components/kbd.tsx", /\bbg-([\w-]+)/);
+const WELL_TEXTS = ["content", "support", "error", "warn-foreground"] as const;
 
 interface Reading {
   readonly what: string;
@@ -267,11 +274,10 @@ function overlays(theme: Theme, on: Surface) {
 }
 
 test.each(THEMES)(
-  "%s: a field's well differs from the shell, the editor, a card and a popover, and the typed text, the placeholder and a keycap read on it at 4.5:1 or more",
+  "%s: a field's well differs from the shell, the editor, a card and a popover, and the typed text and the placeholder read on it at 4.5:1 or more",
   (theme) => {
     const found = WELLED.flatMap((on) => {
       const { well } = overlays(theme, on);
-      const keycap = over(colour("var(--row-active)", theme), well);
       return [
         reading(
           `the well against ${on}`,
@@ -288,15 +294,45 @@ test.each(THEMES)(
           textOn("support", theme, well),
           4.5,
         ),
-        ...(KEYCAPPED.includes(on)
-          ? [
-              reading(
-                `support on a keycap in the well on ${on}`,
-                textOn("support", theme, keycap),
-                4.5,
-              ),
-            ]
-          : []),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+const UNDER_A_KEYCAP = ["well", "row-hover", "row-active"] as const;
+
+test.each(THEMES)(
+  "%s: a keycap differs from what it sits on, and its text reads at 4.5:1 or more, on a surface, in a well, over a hovered button, in a hovered field or a selected row, and in a hovered outline button",
+  (theme) => {
+    const keycap = colour(`var(--${keycapFill})`, theme);
+    const hosts: readonly (readonly [string, Color])[] = [
+      ...WELLED.flatMap((on) =>
+        [undefined, ...UNDER_A_KEYCAP].map(
+          (fill) =>
+            [
+              `${fill ?? "bare"} on ${on}`,
+              fill === undefined
+                ? surface(on, theme)
+                : over(colour(`var(--${fill})`, theme), surface(on, theme)),
+            ] as const,
+        ),
+      ),
+      ["a hovered outline button", eightBit(colour("var(--accent)", theme))],
+    ];
+    const found = hosts.flatMap(([what, host]) => {
+      const chip = over(keycap, host);
+      return [
+        reading(
+          `a keycap against ${what}`,
+          host.contrast(chip, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        reading(
+          `support on a keycap on ${what}`,
+          textOn("support", theme, chip),
+          4.5,
+        ),
       ];
     });
     expect(unmet(found)).toEqual([]);

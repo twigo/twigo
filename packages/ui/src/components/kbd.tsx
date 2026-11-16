@@ -12,7 +12,7 @@ export function Kbd({
   return (
     <kbd
       className={cn(
-        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-sm bg-row-active px-1 font-sans text-2xs leading-none text-support",
+        "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-sm bg-keycap px-1 font-sans text-2xs leading-none text-support",
         className,
       )}
     >
