@@ -28,8 +28,6 @@ import type { QueryRow } from "./query";
  */
 export interface MockRow extends QueryRow {
   readonly generated: number | null;
-  /** When the server printed the row's cells, which the durations in them count back from. */
-  readonly received: number;
   readonly fields: Readonly<Record<string, string>>;
   /** What the Metrics API samples for the row, which lists of pods and nodes join. */
   readonly metric?:
@@ -172,7 +170,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           id: job.id,
           namespace: job.namespace,
           created: job.created,
-          received: cluster.now,
+          received: cluster.built,
           labels: {},
           controller:
             job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
@@ -202,74 +200,84 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
     columns: CRONJOB_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
-      cluster.cronJobs.map((cronJob) => ({
-        id: cronJob.id,
-        namespace: cronJob.namespace,
-        created: cronJob.created,
-        received: cluster.now,
-        labels: {},
-        controller: null,
-        cells: namespaced(
-          [
-            cronJob.name,
-            cronJob.schedule,
-            "<none>",
-            cronJob.suspend ? "True" : "False",
-            cluster.jobs.filter(
-              (job) =>
-                job.namespace === cronJob.namespace &&
-                job.owner === cronJob.name &&
-                job.completed === null,
-            ).length,
-            humanDuration(cluster.now - cronJob.lastSchedule),
-            null,
-            "app",
-            "registry.example.com/jobs/app:1.42.0",
-            "<none>",
-          ],
-          cronJob.namespace,
-          withNamespace,
-        ),
-        generated: null,
-        fields: {
-          "metadata.name": cronJob.name,
-          "metadata.namespace": cronJob.namespace,
-        },
-      })),
+      cluster.cronJobs.map((cronJob) => {
+        const lastSchedule = humanDuration(cluster.now - cronJob.lastSchedule);
+        return {
+          id: cronJob.id,
+          namespace: cronJob.namespace,
+          created: cronJob.created,
+          received: cluster.printedAt(cronJob.id, lastSchedule),
+          labels: {},
+          controller: null,
+          cells: namespaced(
+            [
+              cronJob.name,
+              cronJob.schedule,
+              "<none>",
+              cronJob.suspend ? "True" : "False",
+              cluster.jobs.filter(
+                (job) =>
+                  job.namespace === cronJob.namespace &&
+                  job.owner === cronJob.name &&
+                  job.completed === null,
+              ).length,
+              lastSchedule,
+              null,
+              "app",
+              "registry.example.com/jobs/app:1.42.0",
+              "<none>",
+            ],
+            cronJob.namespace,
+            withNamespace,
+          ),
+          generated: null,
+          fields: {
+            "metadata.name": cronJob.name,
+            "metadata.namespace": cronJob.namespace,
+          },
+        };
+      }),
   },
   "/v1/events": {
     columns: EVENT_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
-      events(cluster).map((event) => ({
-        id: `${cluster.context}/${event.pod.namespace}/${event.name}`,
-        namespace: event.pod.namespace,
-        created: event.first,
-        received: cluster.now,
-        labels: {},
-        controller: null,
-        cells: namespaced(
-          [
-            humanDuration(cluster.now - event.last),
-            event.type,
-            event.reason,
-            `pod/${event.pod.name}`,
-            event.container ? `spec.containers{${containerOf(event.pod)}}` : "",
-            event.source,
-            event.message,
-            humanDuration(cluster.now - event.first),
-            event.count,
-            event.name,
-          ],
-          event.pod.namespace,
-          withNamespace,
-        ),
-        generated: null,
-        fields: {
-          "metadata.name": event.name,
-          "metadata.namespace": event.pod.namespace,
-        },
-      })),
+      events(cluster).map((event) => {
+        const id = `${cluster.context}/${event.pod.namespace}/${event.name}`;
+        const lastSeen = humanDuration(cluster.now - event.last);
+        const firstSeen = humanDuration(cluster.now - event.first);
+        return {
+          id,
+          namespace: event.pod.namespace,
+          created: event.first,
+          received: cluster.printedAt(id, lastSeen, firstSeen),
+          labels: {},
+          controller: null,
+          cells: namespaced(
+            [
+              lastSeen,
+              event.type,
+              event.reason,
+              `pod/${event.pod.name}`,
+              event.container
+                ? `spec.containers{${containerOf(event.pod)}}`
+                : "",
+              event.source,
+              event.message,
+              firstSeen,
+              event.count,
+              event.name,
+            ],
+            event.pod.namespace,
+            withNamespace,
+          ),
+          generated: null,
+          fields: {
+            "metadata.name": event.name,
+            "metadata.namespace": event.pod.namespace,
+          },
+        };
+      }),
   },
 };
 

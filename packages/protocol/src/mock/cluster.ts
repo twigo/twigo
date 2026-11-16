@@ -1,4 +1,4 @@
-import { humanDuration, parseDuration } from "@twigo/utils";
+import { humanDuration } from "@twigo/utils";
 import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
 
@@ -14,7 +14,9 @@ export interface Pod {
   ready: number;
   status: string;
   restarts: string;
-  /** When the server printed `restarts`: its age counts back from here. */
+  /** When its last container restarted, which `restarts` prints the age of. */
+  lastRestart: number | null;
+  /** When the server last printed `restarts` differently: its age counts back from here. */
   received: number;
   created: number;
   ip: string;
@@ -120,6 +122,7 @@ export class Cluster {
   now: number;
   /** When the cluster was built: when a row that never changes was received. */
   readonly built: number;
+  readonly #printed = new Map<RowId, { text: string; at: number }>();
   /**
    * What lists have synced, by kind alone for every namespace, else with the
    * namespaces after it: a list of the same namespaces, or of every one,
@@ -240,6 +243,7 @@ export class Cluster {
       status: "Running",
       ready: pod.containers,
       restarts: "0",
+      lastRestart: null,
       received: now,
       created: now,
       version: 0,
@@ -262,6 +266,7 @@ export class Cluster {
       status: "ContainerCreating",
       ready: 0,
       restarts: "0",
+      lastRestart: null,
       received: now,
       created: now,
       version: 0,
@@ -317,6 +322,7 @@ export class Cluster {
         status: "ContainerCreating",
         ready: 0,
         restarts: "0",
+        lastRestart: null,
         received: now,
         created: now,
         node: `${this.context}-node-${Math.floor(this.#rollouts() * this.nodes.length)}`,
@@ -388,6 +394,19 @@ export class Cluster {
     this.version++;
   }
 
+  /**
+   * When the server last printed `id` with the durations it prints now,
+   * `durations`: it prints a row anew only when the row changes, so a
+   * duration's text and the moment it was printed move together.
+   */
+  printedAt(id: RowId, ...durations: string[]): number {
+    const text = durations.join("\n");
+    const held = this.#printed.get(id);
+    if (held?.text === text) return held.at;
+    this.#printed.set(id, { text, at: this.now });
+    return this.now;
+  }
+
   /** Changes `count` distinct random pods. */
   change(count: number, now: number): void {
     const picked = new Set<Pod>();
@@ -401,21 +420,25 @@ export class Cluster {
 
   /** Prints the pod anew at `now`, as the API server does each time it sends a row. */
   #change(pod: Pod, now: number): void {
+    let count = Number.parseInt(pod.restarts, 10);
     const roll = this.#random();
     if (roll < 0.5) {
-      const count = Number.parseInt(pod.restarts, 10) + 1;
-      pod.restarts = `${count} (${Math.ceil(this.#random() * 50)}s ago)`;
+      count++;
+      pod.lastRestart = now - Math.ceil(this.#random() * 50) * 1000;
+    } else if (roll < 0.8) {
+      pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
+      pod.ready = pod.status === "Running" ? pod.containers : 0;
     } else {
-      pod.restarts = printedAgain(pod, now);
-      if (roll < 0.8) {
-        pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
-        pod.ready = pod.status === "Running" ? pod.containers : 0;
-      } else {
-        pod.ready =
-          pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
-      }
+      pod.ready = pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
     }
-    pod.received = now;
+    const printed =
+      pod.lastRestart === null
+        ? `${count}`
+        : `${count} (${humanDuration(now - pod.lastRestart)} ago)`;
+    if (printed !== pod.restarts) {
+      pod.restarts = printed;
+      pod.received = now;
+    }
     pod.version++;
   }
 
@@ -447,6 +470,8 @@ export class Cluster {
         : random() < 0.8
           ? 0
           : 1 + Math.floor(random() * 4);
+    const lastRestart =
+      restarts === 0 ? null : now - restartAge(status, random());
     this.#serial++;
     return {
       id: `${this.context}/${namespace}/${name}`,
@@ -463,9 +488,10 @@ export class Cluster {
             : 0,
       status,
       restarts:
-        restarts === 0
+        lastRestart === null
           ? "0"
-          : `${restarts} (${humanDuration(restartAge(status, random()))} ago)`,
+          : `${restarts} (${humanDuration(now - lastRestart)} ago)`,
+      lastRestart,
       received: now,
       created: created ?? now - Math.floor(random() * random() * 90 * DAY),
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
@@ -488,15 +514,6 @@ function restartAge(status: string, roll: number): number {
   if (roll < 0.7)
     return (60 + Math.floor(((roll - 0.4) / 0.3) * 1380)) * MINUTE;
   return (1440 + Math.floor(((roll - 0.7) / 0.3) * 28 * 1440)) * MINUTE;
-}
-
-/** The Restarts a pod prints at `now`: the age it printed at `received`, grown by the time since. */
-function printedAgain(pod: Pod, now: number): string {
-  const [, count, ago] = /^(\d+) \((.+) ago\)$/.exec(pod.restarts) ?? [];
-  const age = ago === undefined ? undefined : parseDuration(ago);
-  return count === undefined || age === undefined
-    ? pod.restarts
-    : `${count} (${humanDuration(age + now - pod.received)} ago)`;
 }
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */

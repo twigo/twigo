@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { humanDuration, parseDuration } from "@twigo/utils";
-import { Cluster, generatedAt } from "./cluster";
+import { Cluster, generatedAt, type Pod } from "./cluster";
 import { KINDS } from "./kinds";
 
 test("a Deployment's pod is generated from its template hash", () => {
@@ -102,31 +102,43 @@ test("a running pod's last restart is minutes, hours or days old, any other pod'
   expect(other?.every((age) => age <= HOUR - 60_000)).toBe(true);
 });
 
-test("a pod is printed when it is made and again each time it changes, its age grown by the time since", () => {
+test("a pod's Restarts counts from the moment of its last restart, so its age grows across prints", () => {
   const start = Date.UTC(2026, 10, 3);
-  const cluster = new Cluster("prod-eu", 1, start);
-  const [pod] = cluster.pods;
-  if (!pod) throw new Error("no pod");
-  pod.restarts = "2 (5m ago)";
-  expect(pod.received).toBe(start);
-  const sameCount = new Set<number>();
+  const cluster = new Cluster("prod-eu", 400, start);
+  const known = new Map<Pod, { count: number; at: number }>();
+  for (const pod of cluster.pods) {
+    const at = start - 10 * DAY - 23 * HOUR;
+    Object.assign(pod, { restarts: "2 (10d ago)", lastRestart: at });
+    pod.received = start;
+    known.set(pod, { count: 2, at });
+  }
+  let grown = 0;
+  let kept = 0;
   for (let step = 1; step <= 40; step++) {
     const now = start + step * 17 * 60_000;
-    const before = { text: pod.restarts, received: pod.received };
-    cluster.change(1, now);
-    expect(pod.received).toBe(now);
-    if (
-      Number.parseInt(pod.restarts, 10) === Number.parseInt(before.text, 10)
-    ) {
-      const age = (ago(before.text) ?? NaN) + now - before.received;
-      expect(pod.restarts).toBe(
-        `${Number.parseInt(before.text, 10)} (${humanDuration(age)} ago)`,
+    const before = new Map(
+      cluster.pods.map((pod) => [pod, { ...pod }] as const),
+    );
+    cluster.change(cluster.pods.length, now);
+    for (const pod of cluster.pods) {
+      const printed = before.get(pod);
+      const last = known.get(pod);
+      if (!printed || !last) continue;
+      const count = Number.parseInt(pod.restarts, 10);
+      if (count > last.count) {
+        known.set(pod, { count, at: now - (ago(pod.restarts) ?? NaN) });
+      } else {
+        expect(pod.restarts).toBe(
+          `${count} (${humanDuration(now - last.at)} ago)`,
+        );
+        if (now - last.at >= 11 * DAY) grown++;
+      }
+      expect(pod.received).toBe(
+        pod.restarts === printed.restarts ? printed.received : now,
       );
-      sameCount.add(step);
-    } else {
-      expect(ago(pod.restarts)).toBeLessThanOrEqual(50_000);
+      if (pod.restarts === printed.restarts) kept++;
     }
   }
-  expect(sameCount.size).toBeGreaterThan(0);
-  expect(sameCount.size).toBeLessThan(40);
+  expect(grown).toBeGreaterThan(0);
+  expect(kept).toBeGreaterThan(0);
 });

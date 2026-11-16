@@ -106,3 +106,48 @@ test("a pod's failing state comes with the warning Kubernetes reports for it", (
   for (const event of events)
     expect(event.cells[at("Last Seen")]).toMatch(/^\d/);
 });
+
+test("a row is stamped anew only when the durations it prints change", () => {
+  const local = new Cluster("prod-eu", 500, NOW);
+  const kinds: [string, string[]][] = [
+    ["batch/v1/cronjobs", ["Last Schedule"]],
+    ["/v1/events", ["Last Seen", "First Seen"]],
+    ["batch/v1/jobs", []],
+  ];
+  const read = (kind: string, names: string[]) =>
+    new Map(
+      (KINDS[kind]?.rows(local, false) ?? []).map((row) => [
+        row.id,
+        {
+          received: row.received,
+          printed: names.map((name) => row.cells[column(kind, name)]),
+        },
+      ]),
+    );
+  let steady = 0;
+  let stamped = 0;
+  for (const [kind, names] of kinds) {
+    let held = read(kind, names);
+    expect(held.size, kind).toBeGreaterThan(0);
+    for (const seconds of [1, 2, 3, 90, 91, 3600]) {
+      local.now = NOW + seconds * 1000;
+      const next = read(kind, names);
+      for (const [id, row] of next) {
+        const was = held.get(id);
+        if (!was) continue;
+        const same =
+          JSON.stringify(was.printed) === JSON.stringify(row.printed);
+        expect(row.received, `${id} at +${seconds}s`).toBe(
+          same ? was.received : local.now,
+        );
+        if (names.length > 0) {
+          if (same) steady++;
+          else stamped++;
+        }
+      }
+      held = next;
+    }
+  }
+  expect(steady).toBeGreaterThan(0);
+  expect(stamped).toBeGreaterThan(0);
+});
