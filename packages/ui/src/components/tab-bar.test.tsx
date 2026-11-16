@@ -5,6 +5,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
@@ -195,6 +196,20 @@ test("More says that a folded tab holds warnings, and only then", () => {
   fireEvent.click(screen.getByRole("menuitem", { name: /^Events/ }));
   layOut(240, NEEDS);
   expect(more()?.getAttribute("aria-label")).toBe("More");
+});
+
+test("a pick from More puts the focus on the picked tab", async () => {
+  render(<Views />);
+  layOut(240, NEEDS);
+  fireEvent.pointerDown(more() ?? document.body, {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Related/ }));
+  expect(shown()).toEqual(["Related14"]);
+  await waitFor(() => {
+    expect(document.activeElement).toBe(tab("Related"));
+  });
 });
 
 test("the arrows, Home and End move among the tabs that show, and the focus follows", () => {
