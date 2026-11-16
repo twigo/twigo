@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties } from "react";
 import { PanelsTopLeft } from "lucide-react";
-import { cn, EmptyState, InlineActions, Section } from "@twigo/ui";
+import { cn, EmptyState, InlineActions, Section, TabBar } from "@twigo/ui";
 import type { Lookup } from "../contextkey/when";
 import { useChanges, useWorkbench } from "../react";
 import { LOCATION_TITLES, type SideBar, type View } from "../views/registry";
@@ -33,35 +33,24 @@ export function PartView({ location }: { location: SideBar }) {
       style={{ "--surface": "var(--sidebar)" } as CSSProperties}
       className="flex h-full min-h-0 flex-col bg-sidebar"
     >
-      <header className="flex h-[34px] shrink-0 items-center gap-1 pr-2 pl-3">
+      <header className="flex h-8 shrink-0 items-center gap-1 pr-2 pl-3">
         {containers.length < 2 ? (
           <h2 className="font-medium">{container?.title}</h2>
         ) : (
-          <div role="tablist" className="flex items-center gap-1">
-            {containers.map((candidate) => (
-              <button
-                key={candidate.id}
-                type="button"
-                role="tab"
-                aria-selected={candidate.id === container?.id}
-                onClick={() => {
-                  if (space) {
-                    spaces.setPart(space.id, location, {
-                      container: candidate.id,
-                    });
-                  }
-                }}
-                className={cn(
-                  "h-6 rounded px-1.5 text-xs font-medium transition-colors",
-                  candidate.id === container?.id
-                    ? "text-content"
-                    : "text-support hover:text-content",
-                )}
-              >
-                {candidate.title}
-              </button>
-            ))}
-          </div>
+          <TabBar
+            label="Containers"
+            tabs={containers.map(({ id, title }) => ({
+              value: id,
+              label: title,
+            }))}
+            value={container?.id ?? ""}
+            onChange={(next) => {
+              if (space) {
+                spaces.setPart(space.id, location, { container: next });
+              }
+            }}
+            className="min-w-0 flex-1 pl-1"
+          />
         )}
         {shown.length === 1 && shown[0] && (
           <div className="ml-auto flex items-center">
