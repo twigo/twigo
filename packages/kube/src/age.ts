@@ -12,10 +12,18 @@ export function ageRole(ms: number): "text-content" | "text-support" {
 }
 
 /**
- * Whether the "… ago" of a Restarts cell, as kubectl prints it, says the
- * last restart was within the hour; an unknown or unreadable one did not.
+ * The moment a duration the server printed stands for: it printed it when it
+ * sent the row, which `received` says, so it counts back from there. None for
+ * text that is no duration, as `<unknown>`.
  */
-export function restartedRecently(ago: string | undefined): boolean {
-  const ms = ago === undefined ? undefined : parseDuration(ago);
-  return ms !== undefined && ms < RESTART_RECENT_MS;
+export function printedAt(
+  received: string,
+  printed: string,
+): number | undefined {
+  const age = parseDuration(printed);
+  return age === undefined ? undefined : Date.parse(received) - age;
+}
+
+export function restartedRecently(ms: number): boolean {
+  return ms < RESTART_RECENT_MS;
 }

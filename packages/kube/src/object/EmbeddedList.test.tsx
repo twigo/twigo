@@ -263,7 +263,7 @@ test("a node's pod that is not ready and restarted within the hour warns in Read
   const pod = (id: string, ready: string) => ({
     id,
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: new Date().toISOString(),
     generated: null,
     cells: [id, ready, "Running", "1 (46m ago)"],
   });

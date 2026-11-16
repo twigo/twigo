@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { useNow } from "./useNow";
+import { useNow, useNowAs } from "./useNow";
 
 function setHidden(hidden: boolean) {
   vi.spyOn(document, "hidden", "get").mockReturnValue(hidden);
@@ -77,4 +77,21 @@ test("every hook shares one timer until the last unmounts", () => {
   expect(vi.getTimerCount()).toBe(1);
   second.unmount();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+test("a read of the time draws again only when its result changes, on the timer every other hook shares", () => {
+  let renders = 0;
+  const minute = renderHook(() => {
+    renders++;
+    return useNowAs((now) => Math.floor(now / 60_000));
+  });
+  const second = renderHook(() => useNow());
+  expect(vi.getTimerCount()).toBe(1);
+  const before = renders;
+  advance(59_000);
+  expect(renders).toBe(before);
+  expect(second.result.current).toBe(59_000);
+  advance(1000);
+  expect(minute.result.current).toBe(1);
+  expect(renders).toBe(before + 1);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 const TICK_MS = 1000;
 const listeners = new Set<() => void>();
@@ -49,4 +49,15 @@ export function useNow(): number {
     [],
   );
   return now;
+}
+
+/**
+ * What `read` makes of the time, on the same timer as `useNow`: a component
+ * draws again only when the result changes, so a text that moves once a
+ * minute is not drawn every second.
+ */
+export function useNowAs<T extends string | number | boolean | undefined>(
+  read: (now: number) => T,
+): T {
+  return useSyncExternalStore(subscribe, () => read(Date.now()));
 }

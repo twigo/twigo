@@ -1,12 +1,12 @@
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
-import { ageRole, restartedRecently } from "../age";
+import { ageRole, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
-import { useNow } from "../useNow";
+import { useNow, useNowAs } from "../useNow";
 import { measureText } from "./metrics";
 
 /** A column as the grid draws it: where its cells are and how they read. */
@@ -28,6 +28,18 @@ function cellText(cell: Cell): string {
 function Age({ created }: { created: string }) {
   const age = useNow() - Date.parse(created);
   return <span className={ageRole(age)}>{humanDuration(age)}</span>;
+}
+
+/**
+ * A duration the server printed, such as a CronJob's Last Schedule, drawn
+ * from the moment it stands for, so it grows as an Age does.
+ */
+function Since({ text, received }: { text: string; received: string }) {
+  const at = printedAt(received, text);
+  const shown = useNowAs((now) =>
+    at === undefined ? text : humanDuration(now - at),
+  );
+  return <>{shown}</>;
 }
 
 /**
@@ -128,7 +140,9 @@ export function CellView({
         text
       );
     case "restarts":
-      return <Restarts text={text} alarmed={alarmed} />;
+      return <Restarts text={text} received={row.received} alarmed={alarmed} />;
+    case "since":
+      return <Since text={text} received={row.received} />;
     case "text": {
       const tabular = !rule.figures && isTabular(text);
       return rule.secondary || rule.identifier || tabular ? (
@@ -150,13 +164,28 @@ export function CellView({
 
 /**
  * A restart count and how long ago the last was, the count in a column of
- * its own. A restart within the hour is news, in the warning tone unless the
- * row already raises an alarm: a row has one.
+ * its own, the age growing from the moment the server printed it. A restart
+ * within the hour is news, in the warning tone unless the row already raises
+ * an alarm: a row has one.
  */
-function Restarts({ text, alarmed }: { text: string; alarmed: boolean }) {
+function Restarts({
+  text,
+  received,
+  alarmed,
+}: {
+  text: string;
+  received: string;
+  alarmed: boolean;
+}) {
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
-  const recent = !alarmed && restartedRecently(ago);
+  const at = ago === undefined ? undefined : printedAt(received, ago);
+  const shown = useNowAs((now) =>
+    at === undefined ? ago : humanDuration(now - at),
+  );
+  const recent = useNowAs(
+    (now) => !alarmed && at !== undefined && restartedRecently(now - at),
+  );
   return (
     <>
       <span
@@ -168,14 +197,14 @@ function Restarts({ text, alarmed }: { text: string; alarmed: boolean }) {
       >
         {count}
       </span>
-      {ago && (
+      {shown && (
         <span
           className={cn(
             "ml-2",
             recent ? "text-warn-foreground" : "text-support",
           )}
         >
-          {ago} ago
+          {shown} ago
         </span>
       )}
     </>

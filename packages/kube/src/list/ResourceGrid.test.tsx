@@ -360,6 +360,49 @@ test("seconds passing render the ages and not the grid", async () => {
   expect(gridRenders.count).toBe(renders);
 });
 
+test("a restart's age and the end of its warning come in its cell, not in the grid", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  act(() => {
+    script.send({
+      ...batch(1, {}, true),
+      total: 1,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        { name: "Restarts", kind: "string", priority: 0 },
+      ],
+      window: { start: 0, ids: ["a"] },
+      upserts: [
+        {
+          id: "a",
+          created: null,
+          received: new Date().toISOString(),
+          generated: null,
+          cells: ["a", "Running", "3 (59m ago)"],
+        },
+      ],
+    });
+  });
+  await settle(1);
+  const cell = () =>
+    screen
+      .getByText("a")
+      .closest<HTMLElement>("[role=row]")
+      ?.querySelector<HTMLElement>('[data-column="Restarts"]');
+  expect(cell()?.textContent).toBe("359m ago");
+  expect(cell()?.querySelector(".text-warn-foreground")).toBeInstanceOf(
+    Element,
+  );
+  const renders = gridRenders.count;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(61_000);
+  });
+  expect(cell()?.textContent).toBe("360m ago");
+  expect(cell()?.querySelector(".text-warn-foreground")).toBeNull();
+  expect(gridRenders.count).toBe(renders);
+});
+
 test("the name takes the free width until an edge's drag sizes it, and the kind keeps the width", async () => {
   const backend = createMockBackend("ready");
   await openList(backend);
@@ -919,7 +962,7 @@ test("a pod that is not ready and restarted within the hour warns in Ready alone
   const pod = (id: string, ready: string) => ({
     id,
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: new Date().toISOString(),
     generated: null,
     cells: [id, ready, "Running", "1 (46m ago)"],
   });

@@ -13,6 +13,8 @@ export type CellKind =
   | "restarts"
   /** The time since `created`. */
   | "age"
+  /** A time since something else, as the server printed it: `5m`. */
+  | "since"
   /** Measured CPU, nanocores, as kubectl prints it. */
   | "cpu"
   /** Measured memory, bytes, as kubectl prints it. */
@@ -77,6 +79,7 @@ const DROP = {
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
     age: { drop: DROP.age },
+    date: { cell: "since" },
     cpu: {
       cell: "cpu",
       width: 72,
@@ -185,6 +188,9 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     drop: DROP.health,
   },
   "/pods/Restarts": { cell: "restarts", width: 132, drop: DROP.restarts },
+  "batch/cronjobs/Last Schedule": { cell: "since" },
+  "/events/Last Seen": { cell: "since" },
+  "/events/First Seen": { cell: "since" },
   "/nodes/Status": {
     cell: "status",
     width: 160,
@@ -214,6 +220,7 @@ const FIGURE_CELLS: ReadonlySet<CellKind> = new Set([
   "ratio",
   "restarts",
   "age",
+  "since",
   "cpu",
   "memory",
 ]);

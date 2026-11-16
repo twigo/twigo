@@ -1,12 +1,28 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Column, Gvr, Row } from "@twigo/protocol";
 import { columnRule, rowTone, statusColumn } from "../columns";
 import { PODS } from "../kinds";
 import { raisesAlarm } from "./alarm";
 import { CellView, type ShownColumn } from "./cells";
 
-afterEach(cleanup);
+const RECEIVED = "2026-11-16T12:00:00.000Z";
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.setSystemTime(Date.parse(RECEIVED));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+function advance(ms: number) {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
 
 const DEPLOYMENTS: Gvr = {
   group: "apps",
@@ -21,7 +37,7 @@ function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
   const row: Row = {
     id: "r",
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: RECEIVED,
     generated: null,
     cells: [text],
   };
@@ -52,7 +68,7 @@ function text(gvr: Gvr, column: Column, cell: string) {
   const row: Row = {
     id: "r",
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: RECEIVED,
     generated: null,
     cells: [cell],
   };
@@ -99,7 +115,7 @@ const cellOf = (
   const row: Row = {
     id: "r",
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: RECEIVED,
     generated: null,
     cells: [cell],
   };
@@ -218,7 +234,7 @@ function podRow(
   const row: Row = {
     id: "r",
     created: null,
-    received: "2026-11-16T12:00:00.000Z",
+    received: RECEIVED,
     generated: null,
     cells: [ready, status, restartsText],
   };
@@ -287,4 +303,121 @@ test("only a value that is drawn raises the alarm: a Ready the person hid raises
   expect(raisesAlarm(row, [{ ...status, merged: ready }], undefined)).toBe(
     true,
   );
+});
+
+test("a restart within the hour stops warning when the hour passes, with no event from the server", () => {
+  const container = cellOf(
+    PODS,
+    "Restarts",
+    "3 (59m ago)",
+    undefined,
+    "integer",
+  );
+  const warns = () => container.querySelector(".text-warn-foreground") !== null;
+  expect(warns()).toBe(true);
+  advance(30_000);
+  expect(warns()).toBe(true);
+  advance(31_000);
+  expect(warns()).toBe(false);
+  expect(container.textContent).toContain("60m ago");
+});
+
+test("the age of a restart reads as the server prints it and grows with the clock", () => {
+  const ago = (container: HTMLElement) =>
+    container.querySelectorAll("span")[1]?.textContent;
+  const restart = (printed: string) =>
+    cellOf(PODS, "Restarts", `3 (${printed} ago)`, undefined, "integer");
+  const minutes = restart("5m");
+  expect(ago(minutes)).toBe("5m ago");
+  advance(60_000);
+  expect(ago(minutes)).toBe("6m ago");
+  cleanup();
+  vi.setSystemTime(Date.parse(RECEIVED));
+  const seconds = restart("13s");
+  advance(5_000);
+  expect(ago(seconds)).toBe("18s ago");
+  cleanup();
+  vi.setSystemTime(Date.parse(RECEIVED));
+  const days = restart("2d1h");
+  advance(60 * 60_000);
+  expect(ago(days)).toBe("2d2h ago");
+});
+
+test("a row printed again with the age that follows from the first print shows the same age, and a count with no age shows none", () => {
+  const row = (text: string, received: string): Row => ({
+    id: "r",
+    created: null,
+    received,
+    generated: null,
+    cells: [text],
+  });
+  const shown = {
+    name: "Restarts",
+    index: 0,
+    rule: columnRule(PODS, { name: "Restarts", kind: "integer", priority: 0 }),
+  };
+  const draw = (current: Row) => (
+    <CellView row={current} column={shown} tone={undefined} alarmed={false} />
+  );
+  const ago = (container: HTMLElement) =>
+    container.querySelectorAll("span")[1]?.textContent;
+  const { container, rerender } = render(draw(row("3 (47m ago)", RECEIVED)));
+  advance(70_000);
+  expect(ago(container)).toBe("48m ago");
+  rerender(
+    draw(row("3 (48m ago)", new Date(Date.now() - 10_000).toISOString())),
+  );
+  expect(ago(container)).toBe("48m ago");
+  rerender(draw(row("4", new Date().toISOString())));
+  expect(ago(container)).toBeUndefined();
+});
+
+test("a time since something else that the server printed grows too, whether a known column or a date a custom resource prints", () => {
+  const CRONJOBS: Gvr = { group: "batch", version: "v1", resource: "cronjobs" };
+  const EVENTS: Gvr = { group: "", version: "v1", resource: "events" };
+  const WIDGETS: Gvr = {
+    group: "example.com",
+    version: "v1",
+    resource: "widgets",
+  };
+  const cases: [Gvr, string, Column["kind"], string, string][] = [
+    [CRONJOBS, "Last Schedule", "string", "10m", "11m"],
+    [EVENTS, "Last Seen", "string", "119s", "2m59s"],
+    [EVENTS, "First Seen", "string", "3h5m", "3h6m"],
+    [WIDGETS, "Renewed", "date", "5m", "6m"],
+  ];
+  for (const [gvr, name, kind, printed, later] of cases) {
+    vi.setSystemTime(Date.parse(RECEIVED));
+    const container = cellOf(gvr, name, printed, undefined, kind);
+    expect([name, container.textContent]).toEqual([name, printed]);
+    advance(60_000);
+    expect([name, container.textContent]).toEqual([name, later]);
+    cleanup();
+  }
+  for (const [gvr, name, kind, none] of [
+    [CRONJOBS, "Last Schedule", "string", "<none>"],
+    [WIDGETS, "Renewed", "date", "<unknown>"],
+    [WIDGETS, "Renewed", "date", "<invalid>"],
+  ] as const) {
+    vi.setSystemTime(Date.parse(RECEIVED));
+    const container = cellOf(gvr, name, none, undefined, kind);
+    advance(60_000);
+    expect([name, container.textContent]).toEqual([name, none]);
+    cleanup();
+  }
+});
+
+test("what raises a row's alarm does not depend on the time, so the one alarm of a row stays where it is as an hour passes", () => {
+  const states = () => {
+    const { alarmed, toned } = podRow("1/1", "Running", "1 (46m ago)");
+    const failing = podRow("1/1", "CrashLoopBackOff", "1 (46m ago)");
+    cleanup();
+    return { alarmed, toned, failing: [failing.alarmed, failing.toned] };
+  };
+  const before = states();
+  expect(before.toned.Restarts).toBe(true);
+  advance(60 * 60_000);
+  const after = states();
+  expect(after.alarmed).toBe(before.alarmed);
+  expect(after.failing).toEqual(before.failing);
 });
