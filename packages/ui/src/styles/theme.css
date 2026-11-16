@@ -84,11 +84,6 @@
      so it stays under --row-active: support text keeps 4.5:1 on it there. */
   --keycap: oklch(0 0 0 / 5%);
 
-  /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
-     (never pure gray - that azure tint is the premium tell). */
-  --tab-selected-bg: color-mix(in oklab, var(--brand) 8%, var(--card));
-  --tab-selected-border: color-mix(in oklab, var(--brand) 22%, var(--border));
-
   /* A solid inner ring, 3:1 or more against any surface (WCAG 1.4.11), and
      a translucent halo. The nested var(--brand) resolves per theme at use. */
   --focus-ring:
@@ -223,8 +218,6 @@
   --plate: oklch(1 0 0 / 4%);
   --keycap: oklch(1 0 0 / 5%);
 
-  --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
-  --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
   --border-subtle: oklch(1 0 0 / 5%);
 
   --sidebar: oklch(0.218 0.002 250);
