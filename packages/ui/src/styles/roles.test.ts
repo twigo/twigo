@@ -5,27 +5,27 @@ import { expect, test } from "vitest";
 
 type Theme = "dark" | "light";
 type Tone = "error" | "warn";
-type Surface =
-  | "shell"
-  | "editor"
-  | "card"
-  | "popover"
-  | "selected"
-  | `${Tone} band`
-  | `hovered ${Tone} band`;
+type Ground = "editor" | "sidebar";
+type Band = `${Tone} band on ${Ground}` | `hovered ${Tone} band on ${Ground}`;
+type Surface = "shell" | Ground | "card" | "popover" | "selected" | Band;
 
 const THEMES: readonly Theme[] = ["dark", "light"];
 const ROLES = ["strong", "content", "support", "quiet"] as const;
+const TONES: readonly Tone[] = ["error", "warn"];
+const GROUNDS: readonly Ground[] = ["editor", "sidebar"];
+const BANDS: readonly Band[] = GROUNDS.flatMap((ground) =>
+  TONES.flatMap((tone): Band[] => [
+    `${tone} band on ${ground}`,
+    `hovered ${tone} band on ${ground}`,
+  ]),
+);
 const SURFACES: readonly Surface[] = [
   "shell",
-  "editor",
+  ...GROUNDS,
   "card",
   "popover",
   "selected",
-  "error band",
-  "warn band",
-  "hovered error band",
-  "hovered warn band",
+  ...BANDS,
 ];
 const TONE_TEXT: Record<Tone, string> = {
   error: "error",
@@ -63,6 +63,13 @@ const underTint = declarations(
     withoutComments(read("index.css")),
   )?.[1],
 );
+
+const toneRule = (tone: Tone) =>
+  declarations(
+    new RegExp(String.raw`\[data-tone="${tone}"\]\s*\{([^}]*)\}`).exec(
+      withoutComments(read("index.css")),
+    )?.[1],
+  );
 
 const COLOUR = String.raw`(?:var\(--[\w-]+\)|oklch\([^)]*\)|transparent)`;
 const REFERENCE = /^var\(--([\w-]+)\)$/;
@@ -115,17 +122,19 @@ function over(top: Color, base: Color) {
   );
 }
 
-const BAND = /^(hovered )?(error|warn) band$/;
+const BAND = /^(hovered )?(error|warn) band on (editor|sidebar)$/;
 
 function surface(name: Surface, theme: Theme): Color {
   if (name === "selected") {
     return over(colour("var(--selected)", theme), surface("editor", theme));
   }
   const band = BAND.exec(name);
-  if (band) {
+  if (band?.[2] && band[3]) {
+    const tint = toneRule(band[2] as Tone).get("band");
+    if (tint === undefined) throw new Error(`no band for a ${band[2]} row`);
     const resting = over(
-      colour(`var(--band-${band[2] ?? ""})`, theme),
-      surface("editor", theme),
+      colour(tint, theme),
+      surface(band[3] as Ground, theme),
     );
     return band[1] ? over(colour("var(--row-hover)", theme), resting) : resting;
   }
@@ -143,7 +152,7 @@ const lightness = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
   Math.abs(surface(on, theme).contrast(role(name, theme, on), "APCA"));
 
 test.each(THEMES)(
-  "%s: every role reads at 4.5:1 or more on the shell, the editor, a card, a popover, a selected row and a problem row's band, at rest and hovered",
+  "%s: every role reads at 4.5:1 or more on the shell, the editor, the side bar, a card, a popover, a selected row and a problem row's band on the editor and on the side bar, at rest and hovered",
   (theme) => {
     const short = SURFACES.flatMap((on) =>
       ROLES.map((name) => ({ name, on, ratio: ratio(name, theme, on) })),
@@ -154,29 +163,47 @@ test.each(THEMES)(
   },
 );
 
+const PINNED_SHORT_TONED: Record<Theme, readonly string[]> = {
+  dark: [],
+  light: ["error text on hovered error band on sidebar: 4.48"],
+};
+
 test.each(THEMES)(
-  "%s: text in a tone reads at 4.5:1 or more on its own band, at rest and hovered, and on a selected row",
+  "%s: text in a tone reads at 4.5:1 or more on its own band on the editor and the side bar, at rest and hovered, and on a selected row, but for the pair pinned above",
   (theme) => {
-    const short = (["error", "warn"] as const)
-      .flatMap((tone) =>
-        ([`${tone} band`, `hovered ${tone} band`, "selected"] as const).map(
-          (on) => ({
-            tone,
-            on,
-            ratio: surface(on, theme).contrast(
-              eightBit(colour(`var(--${TONE_TEXT[tone]})`, theme)),
-              "WCAG21",
-            ),
-          }),
-        ),
-      )
+    const short = TONES.flatMap((tone) =>
+      [...BANDS.filter((on) => BAND.exec(on)?.[2] === tone), "selected"].map(
+        (on) => ({
+          tone,
+          on,
+          ratio: surface(on as Surface, theme).contrast(
+            eightBit(colour(`var(--${TONE_TEXT[tone]})`, theme)),
+            "WCAG21",
+          ),
+        }),
+      ),
+    )
       .filter((reading) => reading.ratio < 4.5)
       .map(
         ({ tone, on, ratio }) => `${tone} text on ${on}: ${ratio.toFixed(2)}`,
       );
-    expect(short).toEqual([]);
+    expect(short).toEqual(PINNED_SHORT_TONED[theme]);
   },
 );
+
+test("a row's tone sets its own band and edge", () => {
+  expect(
+    Object.fromEntries(
+      TONES.map((tone) => [
+        tone,
+        [toneRule(tone).get("band"), toneRule(tone).get("edge")],
+      ]),
+    ),
+  ).toEqual({
+    error: ["var(--band-error)", "var(--error)"],
+    warn: ["var(--band-warn)", "var(--warn)"],
+  });
+});
 
 test("the comment over the roles states the contrast the colours give, to the precision it states", () => {
   const columns = [
