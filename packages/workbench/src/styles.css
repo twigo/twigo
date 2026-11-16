@@ -190,12 +190,25 @@
    reaches the button: 28 px of margin, the button's 24 and the menu's 4, keeps
    the list from covering the button wherever it is clicked. That box is as
    wide as the room right of the click, so the list takes its natural width
-   and dockview shifts it into view. */
+   and dockview shifts it into view. It shifts it by 10 px inside its area's
+   element, and the area's pane clips what lies outside, so the list is held to
+   that element's size, which is why the element is a container: no wider than
+   it less 10 px on each side, and no taller than what is left under the strip
+   less 10 px, scrolling inside itself past that. Dockview's own cap on the
+   height stays in the `min`. */
+.twigo-dockview {
+  container-type: size;
+}
 .twigo-dockview .dv-tabs-overflow-container {
   box-sizing: border-box;
   width: max-content;
   min-width: 176px;
-  max-width: calc(100vw - 16px);
+  max-width: calc(100cqw - 20px);
+  max-height: min(
+    50vh,
+    400px,
+    calc(100cqh - var(--dv-tabs-and-actions-container-height) - 10px)
+  );
   margin-top: 28px;
   padding: 4px;
   border: 1px solid var(--border);
