@@ -33,16 +33,19 @@ function Age({ created }: { created: string }) {
 /**
  * A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome.
  * `tone` is the row's, from its health column: a row has one alarm, so a
- * ratio beside a toned status is plain.
+ * ratio beside a toned status is plain, and `alarmed` says that the row has
+ * its alarm already (`raisesAlarm`).
  */
 export function CellView({
   row,
   column,
   tone: rowTone,
+  alarmed,
 }: {
   row: Row;
   column: ShownColumn;
   tone: Tone | undefined;
+  alarmed: boolean;
 }) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
@@ -71,7 +74,12 @@ export function CellView({
       const merged = column.merged && (
         <>
           <span className={cn(column.merged.rule.figures && "tabular-nums")}>
-            <CellView row={row} column={column.merged} tone={rowTone} />
+            <CellView
+              row={row}
+              column={column.merged}
+              tone={rowTone}
+              alarmed={alarmed}
+            />
           </span>{" "}
         </>
       );
@@ -120,7 +128,7 @@ export function CellView({
         text
       );
     case "restarts":
-      return <Restarts text={text} tone={rowTone} />;
+      return <Restarts text={text} alarmed={alarmed} />;
     case "text": {
       const tabular = !rule.figures && isTabular(text);
       return rule.secondary || rule.identifier || tabular ? (
@@ -143,12 +151,12 @@ export function CellView({
 /**
  * A restart count and how long ago the last was, the count in a column of
  * its own. A restart within the hour is news, in the warning tone unless the
- * row already carries a tone: a row has one alarm.
+ * row already raises an alarm: a row has one.
  */
-function Restarts({ text, tone }: { text: string; tone: Tone | undefined }) {
+function Restarts({ text, alarmed }: { text: string; alarmed: boolean }) {
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
-  const recent = tone === undefined && restartedRecently(ago);
+  const recent = !alarmed && restartedRecently(ago);
   return (
     <>
       <span

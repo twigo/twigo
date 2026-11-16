@@ -29,6 +29,7 @@ import {
   type CellKind,
 } from "../columns";
 import { kindIcon } from "../kinds";
+import { raisesAlarm } from "../list/alarm";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { metricsNote, readsMetrics } from "../list/metrics";
@@ -234,14 +235,15 @@ export function EmbeddedList({
           onRange={onRange}
           cell={(row, column) => {
             const shown = byName.get(column.id);
+            if (!shown) return undefined;
+            const tone = rowTone(gvr, countBy, snapshot.columns, row);
             return (
-              shown && (
-                <CellView
-                  row={row}
-                  column={shown}
-                  tone={rowTone(gvr, countBy, snapshot.columns, row)}
-                />
-              )
+              <CellView
+                row={row}
+                column={shown}
+                tone={tone}
+                alarmed={raisesAlarm(row, columns, tone)}
+              />
             );
           }}
           selected={selected}

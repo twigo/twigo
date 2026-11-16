@@ -1,9 +1,10 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import type { Column, Gvr, Row } from "@twigo/protocol";
-import { columnRule } from "../columns";
+import { columnRule, rowTone, statusColumn } from "../columns";
 import { PODS } from "../kinds";
-import { CellView } from "./cells";
+import { raisesAlarm } from "./alarm";
+import { CellView, type ShownColumn } from "./cells";
 
 afterEach(cleanup);
 
@@ -19,7 +20,9 @@ const READY: Column = { name: "Ready", kind: "string", priority: 0 };
 function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
   const row: Row = { id: "r", created: null, generated: null, cells: [text] };
   const column = { name: "Ready", index: 0, rule: columnRule(gvr, READY) };
-  return render(<CellView row={row} column={column} tone={tone} />).container;
+  return render(
+    <CellView row={row} column={column} tone={tone} alarmed={false} />,
+  ).container;
 }
 
 const warns = (container: HTMLElement) =>
@@ -42,8 +45,9 @@ test("a Deployment's ready ratio is its health column, so it stays a warning whe
 function text(gvr: Gvr, column: Column, cell: string) {
   const row: Row = { id: "r", created: null, generated: null, cells: [cell] };
   const shown = { name: column.name, index: 0, rule: columnRule(gvr, column) };
-  return render(<CellView row={row} column={shown} tone={undefined} />)
-    .container;
+  return render(
+    <CellView row={row} column={shown} tone={undefined} alarmed={false} />,
+  ).container;
 }
 
 const tabular = (container: HTMLElement) =>
@@ -78,6 +82,7 @@ const cellOf = (
   cell: string,
   tone: "error" | "warn" | undefined,
   kind: Column["kind"] = "string",
+  alarmed = false,
 ) => {
   const row: Row = { id: "r", created: null, generated: null, cells: [cell] };
   const shown = {
@@ -85,7 +90,9 @@ const cellOf = (
     index: 0,
     rule: columnRule(gvr, { name, kind, priority: 0 }),
   };
-  return render(<CellView row={row} column={shown} tone={tone} />).container;
+  return render(
+    <CellView row={row} column={shown} tone={tone} alarmed={alarmed} />,
+  ).container;
 };
 
 const receded = (container: HTMLElement) =>
@@ -131,8 +138,15 @@ test("an abnormal status is in weight 600 beside its dot, a healthy one is not",
   expect(bold(cellOf(PODS, "Ready", "0/1", undefined))).toBeNull();
 });
 
-function restarts(text: string, tone: "error" | "warn" | undefined) {
-  const container = cellOf(PODS, "Restarts", text, tone, "integer");
+function restarts(text: string, alarmed: boolean) {
+  const container = cellOf(
+    PODS,
+    "Restarts",
+    text,
+    undefined,
+    "integer",
+    alarmed,
+  );
   const [count, ago] = Array.from(container.querySelectorAll("span"));
   const role = (span: Element | undefined) =>
     span === undefined
@@ -144,31 +158,96 @@ function restarts(text: string, tone: "error" | "warn" | undefined) {
 }
 
 test("restarts read in three steps: a zero is quiet, a restart within the hour is a warning, any other count is plain with its age in support", () => {
-  expect(restarts("0", undefined)).toEqual({ count: "text-quiet", ago: null });
-  expect(restarts("3 (5m ago)", undefined)).toEqual({
+  expect(restarts("0", false)).toEqual({ count: "text-quiet", ago: null });
+  expect(restarts("3 (5m ago)", false)).toEqual({
     count: "text-warn-foreground",
     ago: "text-warn-foreground",
   });
-  expect(restarts("3 (13s ago)", undefined).count).toBe("text-warn-foreground");
-  expect(restarts("3 (59m ago)", undefined).count).toBe("text-warn-foreground");
+  expect(restarts("3 (13s ago)", false).count).toBe("text-warn-foreground");
+  expect(restarts("3 (59m ago)", false).count).toBe("text-warn-foreground");
   for (const ago of ["60m", "1h", "5h20m", "23h", "2d1h", "12d", "2y1d"]) {
-    expect([ago, restarts(`3 (${ago} ago)`, undefined)]).toEqual([
+    expect([ago, restarts(`3 (${ago} ago)`, false)]).toEqual([
       ago,
       { count: "content", ago: "text-support" },
     ]);
   }
 });
 
-test("a count with no readable age is plain, and a row with a tone has no second alarm", () => {
-  expect(restarts("3", undefined)).toEqual({ count: "content", ago: null });
-  expect(restarts("3 (soon ago)", undefined)).toEqual({
+test("a count with no readable age is plain, and a row that already raises an alarm has no second", () => {
+  expect(restarts("3", false)).toEqual({ count: "content", ago: null });
+  expect(restarts("3 (soon ago)", false)).toEqual({
     count: "content",
     ago: "text-support",
   });
-  for (const tone of ["error", "warn"] as const) {
-    expect(restarts("3 (5m ago)", tone)).toEqual({
-      count: "content",
-      ago: "text-support",
-    });
-  }
+  expect(restarts("3 (5m ago)", true)).toEqual({
+    count: "content",
+    ago: "text-support",
+  });
+});
+
+const POD_COLUMNS: Column[] = [
+  { name: "Ready", kind: "string", priority: 0 },
+  { name: "Status", kind: "string", priority: 0 },
+  { name: "Restarts", kind: "string", priority: 0 },
+];
+
+function podRow(ready: string, status: string, restartsText: string) {
+  const row: Row = {
+    id: "r",
+    created: null,
+    generated: null,
+    cells: [ready, status, restartsText],
+  };
+  const shown = POD_COLUMNS.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(PODS, column),
+  }));
+  const tone = rowTone(PODS, statusColumn(PODS), POD_COLUMNS, row);
+  const alarmed = raisesAlarm(row, shown, tone);
+  const toned = (column: ShownColumn) =>
+    render(
+      <CellView row={row} column={column} tone={tone} alarmed={alarmed} />,
+    ).container.querySelector(".text-warn-foreground, .text-error") !== null;
+  return {
+    alarmed,
+    toned: Object.fromEntries(
+      shown.map((column) => [column.name, toned(column)]),
+    ),
+    row,
+    shown,
+  };
+}
+
+test("a row raises one alarm: a short Ready with a restart 46 minutes ago warns in Ready only, and a restart warns alone where nothing else in the row does", () => {
+  const read = (...cells: [string, string, string]) => {
+    const { alarmed, toned } = podRow(...cells);
+    return { alarmed, toned };
+  };
+  expect(read("0/1", "Running", "1 (46m ago)")).toEqual({
+    alarmed: true,
+    toned: { Ready: true, Status: false, Restarts: false },
+  });
+  expect(read("1/1", "Running", "1 (46m ago)")).toEqual({
+    alarmed: false,
+    toned: { Ready: false, Status: false, Restarts: true },
+  });
+  expect(read("0/1", "Running", "1 (3h ago)")).toEqual({
+    alarmed: true,
+    toned: { Ready: true, Status: false, Restarts: false },
+  });
+  expect(read("0/1", "CrashLoopBackOff", "5 (46m ago)")).toEqual({
+    alarmed: true,
+    toned: { Ready: false, Status: true, Restarts: false },
+  });
+});
+
+test("only a value that is drawn raises the alarm: a Ready the person hid raises none, and one merged into Status does", () => {
+  const { row, shown } = podRow("0/1", "Running", "1 (46m ago)");
+  const [ready, status, restarts] = shown;
+  if (!ready || !status || !restarts) throw new Error("no columns");
+  expect(raisesAlarm(row, [status, restarts], undefined)).toBe(false);
+  expect(raisesAlarm(row, [{ ...status, merged: ready }], undefined)).toBe(
+    true,
+  );
 });

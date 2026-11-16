@@ -42,6 +42,7 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { raisesAlarm } from "./alarm";
 import { CellView, type ShownColumn } from "./cells";
 import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
@@ -473,14 +474,15 @@ function Grid({
       onRange={onRange}
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
+        if (!shownColumn) return undefined;
+        const tone = rowTone(gvr, countBy, snapshot.columns, row);
         return (
-          shownColumn && (
-            <CellView
-              row={row}
-              column={shownColumn}
-              tone={rowTone(gvr, countBy, snapshot.columns, row)}
-            />
-          )
+          <CellView
+            row={row}
+            column={shownColumn}
+            tone={tone}
+            alarmed={raisesAlarm(row, columns, tone)}
+          />
         );
       }}
       group={(group) => (
