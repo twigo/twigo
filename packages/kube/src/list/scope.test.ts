@@ -23,14 +23,14 @@ test("a list reads its own namespaces when its URI names them, else the space's 
   expect(namespacesOf(spaces, input(PODS))).toEqual([]);
 });
 
-test("where a list looks reads the namespaces it is narrowed to before the space's contexts", async () => {
+test("where a list looks reads the space's contexts before the namespaces it is narrowed to", async () => {
   const { spaces } = await testWorkbench();
   expect(whereWords(spaces, "prod-eu", [])).toBe("prod-eu");
   expect(whereWords(spaces, "prod-eu", ["payments"])).toBe(
-    "payments · prod-eu",
+    "prod-eu · payments",
   );
   expect(whereWords(spaces, "prod-eu", ["payments", "auth"])).toBe(
-    "payments, auth · prod-eu",
+    "prod-eu · payments, auth",
   );
   expect(whereWords(spaces, "gone", [])).toBe("gone");
 });

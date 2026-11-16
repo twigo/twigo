@@ -18,8 +18,8 @@ export function showAllNamespaces(
 }
 
 /**
- * Where a list looks, for the words of an empty one: the namespaces it is
- * narrowed to, then the space's contexts, `payments · prod-eu`.
+ * Where a list looks, for the words of an empty one: the space's contexts,
+ * then the namespaces it is narrowed to, `prod-eu · payments`.
  */
 export function whereWords(
   spaces: Workbench["spaces"],
@@ -28,7 +28,7 @@ export function whereWords(
 ): string {
   const contexts = spaces.get(space)?.contexts.join(" + ") ?? space;
   return [
-    ...(namespaces.length > 0 ? [namespaces.join(", ")] : []),
     contexts,
+    ...(namespaces.length > 0 ? [namespaces.join(", ")] : []),
   ].join(" · ");
 }

@@ -111,7 +111,7 @@ test("a space without pods shows the empty state, not an error", async () => {
   expect(screen.getByText("No pods in dev")).toBeTruthy();
 });
 
-test("an empty list names its space, and the namespaces it is narrowed to before it", async () => {
+test("an empty list names its space, then the namespaces it is narrowed to", async () => {
   const workbench = await mountKube(createMockBackend("live"));
   act(() => {
     workbench.spaces.select("dev");
@@ -122,16 +122,24 @@ test("an empty list names its space, and the namespaces it is narrowed to before
     workbench.editors.open("k8s-list://dev/v1/pods");
   });
   await settle(30);
-  expect(screen.getByText("No pods in payments, auth · dev")).toBeTruthy();
+  expect(screen.getByText("No pods in dev · payments, auth")).toBeTruthy();
   expect(
     screen.getByText("Nothing of this kind exists in these namespaces."),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?q=api");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("No matching pods in dev · payments, auth"),
   ).toBeTruthy();
 
   act(() => {
     workbench.editors.open("k8s-list://dev/v1/pods?ns=checkout");
   });
   await settle(30);
-  expect(screen.getByText("No pods in checkout · dev")).toBeTruthy();
+  expect(screen.getByText("No pods in dev · checkout")).toBeTruthy();
 
   act(() => {
     workbench.editors.open("k8s-list://dev/v1/nodes");
