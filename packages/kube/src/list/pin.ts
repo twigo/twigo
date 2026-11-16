@@ -9,7 +9,7 @@ import { namespacesOf } from "./scope";
  * A list as the person has it now, its own namespaces aside: the text and
  * health they set over the ones it opened with.
  */
-export function standing(
+function standing(
   { states }: Pick<ListServices, "states">,
   uri: string,
   input: ListInput,
