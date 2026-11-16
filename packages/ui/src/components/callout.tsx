@@ -38,7 +38,7 @@ export function Callout({
   return (
     <div
       className={cn(
-        "grid gap-1.5 rounded-md px-3 py-2.5",
+        "grid gap-1.5 rounded-lg px-3 py-2.5",
         TINT[tone],
         className,
       )}

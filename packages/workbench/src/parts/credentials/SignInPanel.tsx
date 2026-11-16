@@ -15,7 +15,7 @@ export function SignInPanel({ children }: { children: ReactNode }) {
   return (
     <section
       aria-label="Sign in"
-      className="absolute bottom-full left-0 z-50 mb-1 w-96 rounded-md border border-border bg-popover/90 p-3 text-popover-foreground shadow-lg backdrop-blur-xl"
+      className="absolute bottom-full left-0 z-50 mb-1 w-96 rounded-lg border border-border bg-popover/90 p-3 text-popover-foreground shadow-lg backdrop-blur-xl"
     >
       <IconButton
         icon={X}

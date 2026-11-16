@@ -351,7 +351,9 @@ function ButtonFace({ action, form }: { action: Action; form: Form }) {
     <>
       {Icon && <Icon aria-hidden />}
       {(form !== "icon" || !Icon) && action.label}
-      {form === "full" && action.keys && <Kbd>{action.keys}</Kbd>}
+      {form === "full" && action.keys && (
+        <Kbd className="rounded-xs">{action.keys}</Kbd>
+      )}
       {action.locked && <Lock aria-hidden />}
     </>
   );

@@ -160,7 +160,7 @@ export function ReviewDialog() {
 
 function Command({ plugin }: { plugin: ExecPlugin }) {
   return (
-    <div className="mt-3 rounded-md border border-border bg-muted p-2 font-mono text-2xs leading-[18px]">
+    <div className="mt-3 rounded-lg border border-border bg-muted p-2 font-mono text-2xs leading-[18px]">
       <p className="break-all">
         <span className="font-semibold">{plugin.command}</span>{" "}
         {plugin.args.join(" ")}

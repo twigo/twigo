@@ -12,7 +12,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-baseline rounded bg-muted px-1.5 py-px text-xs break-all",
+        "inline-flex max-w-full items-baseline rounded-sm bg-muted px-1.5 py-px text-xs break-all",
         className,
       )}
     >

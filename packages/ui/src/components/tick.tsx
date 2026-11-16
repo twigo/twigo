@@ -7,8 +7,8 @@ export function Tick({ on }: { on: boolean }) {
       aria-hidden
       className={
         on
-          ? "flex size-3.5 items-center justify-center rounded bg-brand text-brand-foreground"
-          : "size-3.5 rounded shadow-[inset_0_0_0_1px_var(--input)]"
+          ? "flex size-3.5 items-center justify-center rounded-sm bg-brand text-brand-foreground"
+          : "size-3.5 rounded-sm shadow-[inset_0_0_0_1px_var(--input)]"
       }
     >
       {on && <Check className="size-3" />}

@@ -144,7 +144,7 @@ export function MarkBox({
         onToggle(event.shiftKey);
       }}
       className={cn(
-        "flex size-3.5 items-center justify-center rounded-[4px] outline-none focus-visible:shadow-[var(--focus-ring)]",
+        "flex size-3.5 items-center justify-center rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]",
         checked || partial
           ? "bg-brand text-brand-foreground"
           : "shadow-[inset_0_0_0_1px_var(--input)]",

@@ -36,7 +36,7 @@ export function OfferDetail({ words }: { words: OfferWords }) {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                className="justify-self-start rounded text-support underline decoration-dotted underline-offset-2 outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
+                className="justify-self-start rounded-sm text-support underline decoration-dotted underline-offset-2 outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
               >
                 {words.more}
               </button>

@@ -253,7 +253,7 @@ export function ConfirmDialog({
               onClick={onCancel}
             >
               {declines}
-              <Kbd>esc</Kbd>
+              <Kbd className="rounded-xs">esc</Kbd>
             </Button>
             {choices.map(({ label, icon: Icon, destructive }, index) => (
               <Button
@@ -301,7 +301,7 @@ function Listed({ list }: { list: ConfirmList }) {
           {list.items.length.toLocaleString("en")}
         </span>
       </h3>
-      <ul className="max-h-[132px] overflow-y-auto rounded-md py-1 shadow-[inset_0_0_0_1px_var(--border)]">
+      <ul className="max-h-[132px] overflow-y-auto rounded-lg py-1 shadow-[inset_0_0_0_1px_var(--border)]">
         {list.items.map((item) => (
           <li key={item.key} className="flex h-[22px] items-center gap-2 px-2">
             <span className="w-[88px] shrink-0 truncate text-quiet">
@@ -324,7 +324,7 @@ function Listed({ list }: { list: ConfirmList }) {
 function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-1 rounded-md bg-row-active py-1.5 pr-1 pl-2 font-mono text-2xs leading-[18px] text-support">
+    <div className="flex items-start gap-1 rounded-lg bg-row-active py-1.5 pr-1 pl-2 font-mono text-2xs leading-[18px] text-support">
       <code className="min-w-0 flex-1 wrap-anywhere whitespace-pre-wrap select-text">
         {command}
       </code>
