@@ -1,7 +1,6 @@
 import type { Workbench } from "@twigo/workbench";
 import { HEALTH } from "../columns";
 import type { PinnedList } from "../explorer/pinned";
-import { objectOf } from "../selection";
 import type { ListServices } from "../services";
 import { listUri, parseListUri, type ListInput } from "../uri";
 import { namespacesOf } from "./scope";
@@ -34,34 +33,6 @@ export function followingTheSpace(
 ): string | undefined {
   const input = parseListUri(uri);
   return input && listUri(standing(services, uri, input));
-}
-
-/**
- * Puts the list that follows its space in the place of one with namespaces of
- * its own, which keeps its tab's group and position, and carries what the
- * person set in it: the sort, the collapsed groups, the details open and
- * their view, and the selected row where the space's scope still reads it.
- */
-export function followTheSpace(
-  services: Pick<ListServices, "states" | "selection">,
-  { spaces, editors }: Pick<Workbench, "spaces" | "editors">,
-  uri: string,
-): void {
-  const input = parseListUri(uri);
-  const next = followingTheSpace(services, uri);
-  if (!input || next === undefined) return;
-  const { states, selection } = services;
-  states.carry(uri, next);
-  const selected = selection.get(uri);
-  const scope = spaces.state(input.space).namespaces;
-  const namespace = selected && objectOf(selected).namespace;
-  if (
-    selected &&
-    (scope.length === 0 || namespace === undefined || scope.includes(namespace))
-  ) {
-    selection.set(next, selected);
-  }
-  editors.replace(uri, next);
 }
 
 /**

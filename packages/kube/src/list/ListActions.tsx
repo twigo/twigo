@@ -34,7 +34,7 @@ import { servedAs, useResources } from "../discovery";
 import { kindIcon, NAMESPACES } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
-import { followTheSpace, pinOf } from "./pin";
+import { followingTheSpace, pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
 import { namespacesOf, showAllNamespaces } from "./scope";
 import { chipFor, stageFor, type Chip } from "./stages";
@@ -121,9 +121,8 @@ function Actions({
   input: ListInput;
   services: ListServices;
 }) {
-  const workbench = useWorkbench();
-  const { keybindings, spaces, quickAccess } = workbench;
-  const { states, statuses, presets, pinned, discovery, grids } = services;
+  const { keybindings, spaces, quickAccess, editors } = useWorkbench();
+  const { states, statuses, presets, pinned, discovery } = services;
   useChanges(states.changes);
   useChanges(states.strip);
   useChanges(statuses.changes);
@@ -374,12 +373,14 @@ function Actions({
                 own ? "Use the space's namespaces" : "Show all namespaces"
               }
               onClear={() => {
-                if (own) {
-                  followTheSpace(services, workbench, uri);
+                if (!own) {
+                  showAllNamespaces(spaces, input.space);
                   return;
                 }
-                grids.focus(uri);
-                showAllNamespaces(spaces, input.space);
+                const next = followingTheSpace(services, uri);
+                if (next === undefined) return;
+                editors.open(next);
+                editors.close(uri);
               }}
             />
           </span>

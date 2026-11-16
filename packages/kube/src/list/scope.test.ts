@@ -48,21 +48,3 @@ test("a list that follows the space is the list as it stands, text and health ke
     `${PODS}?q=web&l=app%3Dweb&h=warn`,
   );
 });
-
-test("a list that takes another's place carries its sort, collapsed groups and details, and takes its text and health from its URI", () => {
-  const states = new ListStates();
-  const uri = `${PODS}?ns=a,b&q=api`;
-  const next = `${PODS}?q=api`;
-  states.setSort(uri, { column: "Restarts", descending: true });
-  states.toggleGroup(uri, "Pending");
-  states.setDetailsTab(uri, "yaml");
-  states.setDetailsOpen(uri, true);
-  states.setText(uri, "web");
-
-  states.carry(uri, next);
-  expect(states.sort(next)).toEqual({ column: "Restarts", descending: true });
-  expect([...states.collapsed(next)]).toEqual(["Pending"]);
-  expect(states.detailsTab(next)).toBe("yaml");
-  expect(states.detailsOpen(next)).toBe(true);
-  expect(states.text(next)).toBeUndefined();
-});
