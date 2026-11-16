@@ -87,9 +87,9 @@ function EntryView({ entry }: { entry: StatusEntry }) {
     </>
   );
   const className = cn(
-    "flex h-[18px] items-center gap-1.5 rounded-sm px-1.5 whitespace-nowrap tabular-nums",
+    "relative isolate flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums before:absolute before:inset-x-0 before:inset-y-0.75 before:-z-10 before:rounded-sm",
     (entry.run !== undefined || entry.popover !== undefined) &&
-      "outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[inset_var(--focus-ring)]",
+      "outline-none hover:text-content hover:before:bg-row-hover focus-visible:before:shadow-[inset_var(--focus-ring)]",
     entry.accent && ["px-2.5", ACCENT[entry.accent]],
   );
   if (entry.popover) {
@@ -130,23 +130,26 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   // The same element with or without its panel, so the control keeps its
   // focus as the panel opens and closes.
   return (
-    <span className="relative flex">
+    <span className="relative flex h-full">
       {control}
       {entry.panel}
     </span>
   );
 }
 
-/** A coloured context as a block at the bar's start, 3 px in from its left, top and bottom. */
+/**
+ * A coloured context as a block at the bar's start, 3 px in from its left, top
+ * and bottom: the entry's box is the bar's height, and the block is drawn in it.
+ */
 const ACCENT = {
-  red: "bg-context-red-solid text-context-solid-foreground font-medium hover:bg-context-red-solid/90",
+  red: "text-context-solid-foreground font-medium before:bg-context-red-solid hover:before:bg-context-red-solid/90",
   orange:
-    "bg-context-orange-solid text-context-solid-foreground font-medium hover:bg-context-orange-solid/90",
+    "text-context-solid-foreground font-medium before:bg-context-orange-solid hover:before:bg-context-orange-solid/90",
   yellow:
-    "bg-context-yellow-solid text-context-solid-foreground font-medium hover:bg-context-yellow-solid/90",
+    "text-context-solid-foreground font-medium before:bg-context-yellow-solid hover:before:bg-context-yellow-solid/90",
   green:
-    "bg-context-green-solid text-context-solid-foreground font-medium hover:bg-context-green-solid/90",
-  blue: "bg-context-blue-solid text-context-solid-foreground font-medium hover:bg-context-blue-solid/90",
+    "text-context-solid-foreground font-medium before:bg-context-green-solid hover:before:bg-context-green-solid/90",
+  blue: "text-context-solid-foreground font-medium before:bg-context-blue-solid hover:before:bg-context-blue-solid/90",
   purple:
-    "bg-context-purple-solid text-context-solid-foreground font-medium hover:bg-context-purple-solid/90",
+    "text-context-solid-foreground font-medium before:bg-context-purple-solid hover:before:bg-context-purple-solid/90",
 } as const;

@@ -19,7 +19,7 @@ test("the space entry names the active space's context, is filled with its colou
   });
   const entry = () => screen.getByTitle("Switch space");
   const filled = (color: string) =>
-    entry().classList.contains(`bg-context-${color}-solid`);
+    entry().classList.contains(`before:bg-context-${color}-solid`);
   expect(entry().textContent).toBe("prod-eu");
   expect(filled("red")).toBe(true);
 
