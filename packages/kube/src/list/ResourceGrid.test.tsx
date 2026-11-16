@@ -325,14 +325,14 @@ test("the name takes the free width until an edge's drag sizes it, and the kind 
   const backend = createMockBackend("ready");
   await openList(backend);
   expect(template()).toBe(
-    "28px minmax(160px, 1fr) 120px 56px 160px 132px 72px 80px 64px 32px",
+    "28px minmax(160px, 1fr) 120px 56px 168px 132px 72px 80px 64px 32px",
   );
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
   expect(template()).toBe(
-    "28px 260px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px",
+    "28px 260px 120px 56px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px",
   );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
@@ -404,7 +404,7 @@ test("a list gives up columns as it narrows and takes back the same ones in the 
     return (await loaded).app[PODS_PRESET];
   };
   expect(await stored()).toBe(choices);
-  const widths = [1100, 900, 600, 465, 300];
+  const widths = [1100, 900, 608, 465, 300];
   const narrowing = widths.map(shownAt);
   expect(narrowing).toEqual([
     [
@@ -467,15 +467,15 @@ test("Status keeps the room that Ready's value takes when the person sized it, a
     await settle(1);
   };
   await drag(40);
-  expect(trackOf("Status")).toBe("200px");
-  shownAt(460);
-  expect(trackOf("Status")).toBe("224px");
+  expect(trackOf("Status")).toBe("208px");
+  shownAt(470);
+  expect(trackOf("Status")).toBe("232px");
   await drag(10);
-  expect(trackOf("Status")).toBe("234px");
+  expect(trackOf("Status")).toBe("242px");
   shownAt(1280);
-  expect(trackOf("Status")).toBe("210px");
+  expect(trackOf("Status")).toBe("218px");
 
-  shownAt(460);
+  shownAt(470);
   await drag(-1000);
   expect(trackOf("Ready")).toBe("56px");
   expect(trackOf("Status")).toBe("48px");
@@ -557,7 +557,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     fireEvent.doubleClick(edge);
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
+      `28px ${String(name)}px 120px 56px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
 
     const ready = Math.max(
@@ -569,7 +569,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");

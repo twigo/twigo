@@ -177,7 +177,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
   },
   "/pods/Status": {
     cell: "status",
-    width: 160,
+    width: 168,
     groups: true,
     health: true,
     tone: podStatus,
