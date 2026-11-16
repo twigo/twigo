@@ -1,13 +1,14 @@
 //! Sort keys (ARCHITECTURE 3.4): the formats the server prints are parsed,
 //! so that `2/3` sorts as two thirds, `3 (5m ago)` as three restarts and
 //! then five minutes, and `1h5m` as 3,900 seconds; other text sorts
-//! naturally. `packages/protocol/src/mock/query.ts` sorts alike, as the
-//! shared query cases check.
+//! naturally. A column that prints a duration, which stops counting when
+//! the server sends the row, sorts by the moment it stands for instead.
+//! `packages/protocol/src/mock/query.ts` sorts alike, as the shared query
+//! cases check.
 
 use std::cmp::Ordering;
 
-use jiff::Timestamp;
-
+use super::printed::{Printed, count};
 use crate::table::Cell;
 
 /// Variants order first: empty cells, numbers, ratios, then text.
@@ -16,7 +17,8 @@ pub enum SortKey {
     Null,
     /// Numbers, booleans, plain counts, durations in seconds, and the
     /// negated creation time of Age columns, so the youngest come first.
-    /// `then` breaks ties: the duration of a count such as `3 (5m ago)`.
+    /// `then` breaks ties: the duration of a count such as `3 (5m ago)`, or
+    /// the negated moment it stands for.
     Number {
         value: f64,
         then: Option<f64>,
@@ -31,7 +33,7 @@ pub enum SortKey {
 }
 
 impl SortKey {
-    pub fn of(cell: &Cell, created: Option<Timestamp>) -> Self {
+    pub fn of(cell: &Cell, created: Option<i64>) -> Self {
         match cell {
             Cell::Null => SortKey::Null,
             Cell::Bool(value) => number(f64::from(u8::from(*value))),
@@ -39,7 +41,7 @@ impl SortKey {
             Cell::Number(value) => number(*value),
             Cell::Text(text) => Self::text(text),
             Cell::Age => match created {
-                Some(created) => number(-(created.as_millisecond() as f64)),
+                Some(created) => number(-(created as f64)),
                 None => SortKey::Null,
             },
         }
@@ -49,18 +51,8 @@ impl SortKey {
         if let Some(value) = count(text) {
             return number(value);
         }
-        if let Some(seconds) = duration(text) {
-            return number(seconds);
-        }
-        if let Some((count, ago)) = text
-            .strip_suffix(" ago)")
-            .and_then(|rest| rest.split_once(" ("))
-            && let (Some(count), Some(ago)) = (self::count(count), duration(ago))
-        {
-            return SortKey::Number {
-                value: count,
-                then: Some(ago),
-            };
+        if let Some(printed) = Printed::parse(text) {
+            return printed.keyed(printed.ago);
         }
         if let Some((ready, total)) = text.split_once('/')
             && let (Some(ready), Some(total)) = (count(ready), count(total))
@@ -68,6 +60,17 @@ impl SortKey {
             return SortKey::Ratio { ready, total };
         }
         SortKey::Text(text.into())
+    }
+
+    /// A cell that prints a duration, by the moment it stands for, which is
+    /// `received`, the time the server printed it, less its age: the moment
+    /// does not move as time passes, so nothing is sorted again for it.
+    /// The latest comes first, as in an Age column.
+    pub fn printed(text: &str, received: i64) -> Self {
+        match Printed::parse(text) {
+            Some(printed) => printed.keyed(-(received as f64 - printed.ago * 1000.0)),
+            None => Self::text(text),
+        }
     }
 
     fn rank(&self) -> u8 {
@@ -119,6 +122,18 @@ impl Ord for SortKey {
     }
 }
 
+impl Printed<'_> {
+    fn keyed(&self, then: f64) -> SortKey {
+        match self.count.and_then(count) {
+            Some(value) => SortKey::Number {
+                value,
+                then: Some(then),
+            },
+            None => number(then),
+        }
+    }
+}
+
 /// Without negative zero, which `total_cmp` puts before zero.
 fn number(value: f64) -> SortKey {
     SortKey::Number {
@@ -129,45 +144,6 @@ fn number(value: f64) -> SortKey {
 
 fn fraction(ready: f64, total: f64) -> f64 {
     if total == 0.0 { 1.0 } else { ready / total }
-}
-
-/// ASCII digits only, as a count.
-fn count(text: &str) -> Option<f64> {
-    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    text.parse().ok()
-}
-
-/// A duration as Kubernetes prints one, `2y10d`, `5h3m`, `45s`: each unit
-/// at most once, largest first.
-fn duration(text: &str) -> Option<f64> {
-    const UNITS: [(u8, f64); 5] = [
-        (b'y', 365.0 * 86_400.0),
-        (b'd', 86_400.0),
-        (b'h', 3_600.0),
-        (b'm', 60.0),
-        (b's', 1.0),
-    ];
-    let mut rest = text.as_bytes();
-    let mut units = UNITS.iter();
-    let mut seconds = 0.0;
-    if rest.is_empty() {
-        return None;
-    }
-    while !rest.is_empty() {
-        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
-        let (number, after) = rest.split_at(digits);
-        let (&unit, after) = after.split_first()?;
-        if number.is_empty() {
-            return None;
-        }
-        let (_, scale) = units.find(|(name, _)| *name == unit)?;
-        let number: f64 = std::str::from_utf8(number).ok()?.parse().ok()?;
-        seconds += number * scale;
-        rest = after;
-    }
-    Some(seconds)
 }
 
 /// Text in natural order: runs of ASCII digits compare by their value,
@@ -244,10 +220,39 @@ mod tests {
             sorted(&["2d", "5m", "1h5m", "45s", "1y", "90s"]),
             ["45s", "90s", "5m", "1h5m", "2d", "1y"]
         );
-        assert_eq!(duration("5m1h"), None, "units in order only");
-        assert_eq!(duration("5mm"), None);
-        assert_eq!(duration("m"), None);
-        assert_eq!(duration("5"), None);
+    }
+
+    fn sorted_printed(printed: &[(&'static str, i64)]) -> Vec<&'static str> {
+        let mut keys: Vec<_> = printed
+            .iter()
+            .map(|&(text, received)| (SortKey::printed(text, received), text))
+            .collect();
+        keys.sort_by(|a, b| a.0.cmp(&b.0));
+        keys.into_iter().map(|(_, text)| text).collect()
+    }
+
+    #[test]
+    fn printed_durations_sort_by_the_moment_they_stand_for_the_latest_first() {
+        assert_eq!(
+            sorted_printed(&[
+                ("5m", 1_000_000),
+                ("10m", 1_500_000),
+                ("1h", 1_000_000),
+                ("<unknown>", 0),
+            ]),
+            ["10m", "5m", "1h", "<unknown>"],
+            "the moments are 900 s, 700 s and -2,600 s after the epoch"
+        );
+        assert_eq!(
+            sorted_printed(&[
+                ("3 (5m ago)", 1_000_000),
+                ("3 (10m ago)", 1_500_000),
+                ("2", 0),
+                ("12 (1h ago)", 0),
+            ]),
+            ["2", "3 (10m ago)", "3 (5m ago)", "12 (1h ago)"],
+            "by count, then by the moment"
+        );
     }
 
     #[test]
@@ -260,8 +265,14 @@ mod tests {
 
     #[test]
     fn empty_cells_come_first_and_age_puts_the_youngest_first() {
-        let old: Timestamp = "2026-11-01T10:00:00Z".parse().unwrap();
-        let young: Timestamp = "2026-11-02T10:00:00Z".parse().unwrap();
+        let old: i64 = "2026-11-01T10:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
+        let young: i64 = "2026-11-02T10:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .unwrap()
+            .as_millisecond();
         let mut keys = [
             SortKey::of(&Cell::Age, Some(old)),
             SortKey::of(&Cell::Null, None),

@@ -189,9 +189,17 @@ fn an_object_takes_the_time_its_response_arrived() {
     let page = decoder
         .decode_list(include_bytes!("fixtures/pod-object-table-list.json"), at)
         .unwrap();
-    assert!(page.items.iter().all(|pod| pod.meta.received == at));
+    assert!(
+        page.items
+            .iter()
+            .all(|pod| pod.meta.received == at.as_millisecond())
+    );
     let raw = ObjectDecoder::new()
         .decode_list(include_bytes!("fixtures/pod-object-list.json"), at)
         .unwrap();
-    assert!(raw.items.iter().all(|pod| pod.meta.received == at));
+    assert!(
+        raw.items
+            .iter()
+            .all(|pod| pod.meta.received == at.as_millisecond())
+    );
 }

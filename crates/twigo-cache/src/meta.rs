@@ -25,14 +25,29 @@ pub struct Meta {
     pub resource_version: Box<str>,
     pub labels: Labels,
     pub owners: Box<[Owner]>,
-    pub created: Option<Timestamp>,
-    /// When the server's answer that brought the cells arrived. A duration
-    /// the server printed in a cell, such as `3 (5m ago)`, was true at the
-    /// moment it printed it, which this stands for.
-    pub received: Timestamp,
+    /// Unix milliseconds, as is `received`: `i64`s, not `Timestamp`s, to hold
+    /// the size asserted below.
+    pub created: Option<i64>,
+    /// When the server printed the cells that hold a duration. Such a cell,
+    /// `3 (5m ago)` among them, was true at that moment, which its age
+    /// counts back from.
+    pub received: i64,
     /// Where the generated part of the name starts, in UTF-16 units: after
     /// `generateName`, or at the `pod-template-hash` that ends it.
     pub generated: Option<u32>,
+}
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+    size_of::<Meta>() == 128,
+    "a field that grows Meta past 128 bytes moves a stored row's allocation to the next size class: 5,000 rows cost 160 KB more"
+);
+
+impl Meta {
+    pub fn created_at(&self) -> Option<Timestamp> {
+        self.created
+            .and_then(|created| Timestamp::from_millisecond(created).ok())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,8 +147,10 @@ impl RawMeta {
             resource_version: self.resource_version.unwrap_or_default(),
             labels: self.labels,
             owners: self.owner_references.into_iter().map(Owner::from).collect(),
-            created: self.creation_timestamp,
-            received,
+            created: self
+                .creation_timestamp
+                .map(|created| created.as_millisecond()),
+            received: received.as_millisecond(),
             generated,
         })
     }

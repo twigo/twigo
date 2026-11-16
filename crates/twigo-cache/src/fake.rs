@@ -26,7 +26,8 @@ use twigo_ipc::IpcError;
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::credentials::{CredentialError, RunError};
 
-use crate::hub::{Clock, Connect, Hub};
+use crate::hub::{Connect, Hub};
+use crate::upstream::Clock;
 
 type Body = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -303,6 +304,13 @@ impl Fake {
             watch.held = false;
         }
         state.watches = watches;
+    }
+
+    /// Watches from before now get `410 Gone`, as once the server compacted
+    /// its history.
+    pub fn compact(&self) {
+        let mut state = self.state();
+        state.compacted = state.version;
     }
 
     /// Ends every watch as `timeoutSeconds` does.

@@ -22,6 +22,28 @@ pub struct Column {
     pub priority: i32,
 }
 
+impl Column {
+    /// Whether its text cells hold a duration that the server printed when it
+    /// sent the row, which then stops counting: a `date` of a custom
+    /// resource, and the string columns of the built-in printers that print
+    /// one, a pod's `Restarts` (`3 (5m ago)`), a CronJob's `Last Schedule`
+    /// and an event's `Last Seen` and `First Seen`
+    /// (<https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L105>,
+    /// `#L197`, `#L274`, `#L281`).
+    pub fn prints_duration(&self) -> bool {
+        match self.kind {
+            ColumnKind::Date => true,
+            ColumnKind::String => {
+                matches!(
+                    &*self.name,
+                    "Restarts" | "Last Schedule" | "Last Seen" | "First Seen"
+                )
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnKind {
     String,
@@ -50,6 +72,12 @@ pub struct Row {
     pub meta: Meta,
     pub cells: Box<[Cell]>,
 }
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+    size_of::<Row>() == 144,
+    "an `Arc<Row>` is 160 bytes with its counters, which malloc keeps in a size class of that size; a larger row takes the next one"
+);
 
 impl Row {
     /// A Metadata upstream's row.

@@ -1,5 +1,5 @@
 {
-  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind. The CPU and Memory columns of the pods and nodes lists are of kind cpu and memory, whose cells are integers of nanocores and bytes, or null for a row without a sample: Rust joins them from its poller's samples, before the Age column, and a metric is sorted by, with rows without a value last in both directions, and never matched by the text filter, counted, grouped or valued.",
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns, and the time the server printed them in `received`, the epoch when a row has none, which the durations in a Restarts, Last Seen, Last Schedule or First Seen cell, or a date column's, count back from; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind. The CPU and Memory columns of the pods and nodes lists are of kind cpu and memory, whose cells are integers of nanocores and bytes, or null for a row without a sample: Rust joins them from its poller's samples, before the Age column, and a metric is sorted by, with rows without a value last in both directions, and never matched by the text filter, counted, grouped or valued.",
   "context": "kind-test",
   "lists": [
     {
@@ -103,6 +103,7 @@
           "namespace": "alpha",
           "name": "web-10",
           "created": "2026-10-30T09:00:00Z",
+          "received": "2026-11-16T13:30:00Z",
           "labels": {
             "app": "web",
             "tier": "front"
@@ -128,6 +129,7 @@
           "namespace": "alpha",
           "name": "db-1",
           "created": "2026-10-01T00:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
           "labels": {
             "app": "db",
             "tier": "back",
@@ -293,7 +295,7 @@
           }
         },
         {
-          "name": "Restarts by count, then by how long ago",
+          "name": "Restarts by count, then by the moment of the last restart, the latest first",
           "query": {
             "sort": {
               "column": "Restarts",
@@ -309,8 +311,8 @@
               "kind-test/beta/web-09",
               "kind-test/beta/Web-3",
               "kind-test/beta/api-2",
-              "kind-test/alpha/db-1",
               "kind-test/alpha/web-10",
+              "kind-test/alpha/db-1",
               "kind-test/alpha/web-2"
             ]
           }
@@ -328,14 +330,36 @@
             "total": 8,
             "ids": [
               "kind-test/alpha/web-2",
-              "kind-test/alpha/web-10",
               "kind-test/alpha/db-1",
+              "kind-test/alpha/web-10",
               "kind-test/beta/api-2",
               "kind-test/beta/Web-3",
               "kind-test/alpha/web-1",
               "kind-test/beta/api-1",
               "kind-test/beta/web-09"
             ]
+          }
+        },
+        {
+          "name": "the filter never reads the age that Restarts printed",
+          "query": {
+            "text": "5m"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "the filter reads the count of Restarts",
+          "query": {
+            "text": "12"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/alpha/web-2"]
           }
         },
         {
@@ -1716,6 +1740,17 @@
               }
             ]
           }
+        },
+        {
+          "name": "a duration in a column that does not print one is text to the filter",
+          "query": {
+            "text": "1h5m"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/w-a"]
+          }
         }
       ]
     },
@@ -1867,6 +1902,240 @@
                 "counts": []
               }
             ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "events",
+      "namespaced": true,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Last Seen",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Reason",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": "alpha",
+          "name": "e-1",
+          "created": "2026-11-16T10:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["e-1", "2m", "Pulled", null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "e-2",
+          "created": "2026-11-16T10:00:00Z",
+          "received": "2026-11-16T12:30:00Z",
+          "labels": {},
+          "cells": ["e-2", "10m", "Started", null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "e-3",
+          "created": "2026-11-16T10:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["e-3", "1h", "Pulled", null]
+        },
+        {
+          "namespace": "alpha",
+          "name": "e-4",
+          "created": "2026-11-16T10:00:00Z",
+          "labels": {},
+          "cells": ["e-4", "<unknown>", "Created", null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "Last Seen sorts by the moment its age stands for, the latest first",
+          "query": {
+            "namespaces": ["alpha"],
+            "sort": {
+              "column": "Last Seen",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/e-2",
+              "kind-test/alpha/e-1",
+              "kind-test/alpha/e-3",
+              "kind-test/alpha/e-4"
+            ]
+          }
+        },
+        {
+          "name": "descending reverses it, text that is no duration last of all",
+          "query": {
+            "namespaces": ["alpha"],
+            "sort": {
+              "column": "Last Seen",
+              "descending": true
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/e-4",
+              "kind-test/alpha/e-3",
+              "kind-test/alpha/e-1",
+              "kind-test/alpha/e-2"
+            ]
+          }
+        },
+        {
+          "name": "the filter never reads an age that Last Seen printed",
+          "query": {
+            "namespaces": ["alpha"],
+            "text": "10m"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
+          }
+        },
+        {
+          "name": "the filter reads Last Seen text that is no duration",
+          "query": {
+            "namespaces": ["alpha"],
+            "text": "unknown"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/alpha/e-4"]
+          }
+        },
+        {
+          "name": "counts keep the text as it was printed",
+          "query": {
+            "namespaces": ["alpha"],
+            "countBy": "Last Seen"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 4,
+            "ids": [
+              "kind-test/alpha/e-1",
+              "kind-test/alpha/e-2",
+              "kind-test/alpha/e-3",
+              "kind-test/alpha/e-4"
+            ],
+            "counts": [
+              {
+                "value": "10m",
+                "count": 1
+              },
+              {
+                "value": "1h",
+                "count": 1
+              },
+              {
+                "value": "2m",
+                "count": 1
+              },
+              {
+                "value": "<unknown>",
+                "count": 1
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "gadgets",
+      "namespaced": false,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Renewed",
+          "kind": "date",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": null,
+          "name": "g-a",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["g-a", "5m", null]
+        },
+        {
+          "namespace": null,
+          "name": "g-b",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T13:30:00Z",
+          "labels": {},
+          "cells": ["g-b", "1h", null]
+        },
+        {
+          "namespace": null,
+          "name": "g-c",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["g-c", "30s", null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "a date column sorts by the moment its age stands for, the latest first",
+          "query": {
+            "sort": {
+              "column": "Renewed",
+              "descending": false
+            }
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 3,
+            "ids": ["kind-test/g-b", "kind-test/g-c", "kind-test/g-a"]
+          }
+        },
+        {
+          "name": "and the filter reads none of its ages",
+          "query": {
+            "text": "5m"
+          },
+          "window": [0, 50],
+          "expect": {
+            "total": 0,
+            "ids": []
           }
         }
       ]

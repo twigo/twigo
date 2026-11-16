@@ -41,9 +41,9 @@ use crate::object::{Object, ObjectDecoder};
 use crate::request::{Format, field_value};
 use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
-use crate::upstream::{self, Env, Spec, Upstream};
+use crate::upstream::{self, Clock, Env, Spec, Upstream};
 
-pub use crate::upstream::{Clock, Connect, RETRY_WITHIN};
+pub use crate::upstream::{Connect, RETRY_WITHIN};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);

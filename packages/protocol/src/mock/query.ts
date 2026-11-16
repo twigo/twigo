@@ -15,6 +15,8 @@ export interface QueryRow {
   readonly namespace: string | null;
   /** Unix milliseconds. */
   readonly created: number | null;
+  /** Unix milliseconds: when the server printed the cells, which a printed duration in them counts back from. */
+  readonly received: number;
   readonly labels: Readonly<Record<string, string>>;
   /** The uid of the object that controls it. */
   readonly controller: string | null;
@@ -46,10 +48,13 @@ export interface CompiledQuery {
   readonly selector: Selector | null;
   readonly text: TextFilter | null;
   readonly textColumns: readonly number[];
+  /** Which columns hold a duration the server printed. */
+  readonly printed: readonly boolean[];
   readonly sort: {
     at: number;
     descending: boolean;
     age: boolean;
+    printed: boolean;
     /** A measured CPU or memory: numeric, rows without one last in both directions. */
     metric: boolean;
   } | null;
@@ -92,6 +97,7 @@ export function compileQuery(
       query.labelSelector === null ? null : parseSelector(query.labelSelector),
     text: query.text === null ? null : parseText(query.text),
     textColumns,
+    printed: columns.map(printsDuration),
     sort:
       at === null
         ? null
@@ -99,6 +105,7 @@ export function compileQuery(
             at,
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
+            printed: printsDuration(columns[at]),
             metric: isMetric(columns[at]),
           },
     count: query.countBy === null ? null : findText(query.countBy),
@@ -111,6 +118,26 @@ export function compileQuery(
         ? null
         : { at: valuesAt, values: new Set(query.values.values) },
   };
+}
+
+const PRINTS_DURATION: ReadonlySet<string> = new Set([
+  "Restarts",
+  "Last Schedule",
+  "Last Seen",
+  "First Seen",
+]);
+
+/**
+ * Whether a column's text cells hold a duration that the server printed
+ * when it sent the row, which then stops counting: a `date`, and the string
+ * columns of the built-in printers that print one (Rust's
+ * `Column::prints_duration`).
+ */
+export function printsDuration(column: Column | undefined): boolean {
+  return (
+    column?.kind === "date" ||
+    (column?.kind === "string" && PRINTS_DURATION.has(column.name))
+  );
 }
 
 /** Whether a column is a measure of the Metrics API, which no text filter reads. */
@@ -161,7 +188,9 @@ export function runQuery<R extends QueryRow>(
     if (
       compiled.text &&
       !compiled.text.keeps(
-        compiled.textColumns.map((at) => cellText(row.cells[at])),
+        compiled.textColumns.map((at) =>
+          filterText(row.cells[at], compiled.printed[at] === true),
+        ),
       )
     ) {
       continue;
@@ -196,7 +225,7 @@ export function runQuery<R extends QueryRow>(
     row,
     group,
     rank: groupOrder.get(group ?? "") ?? 0,
-    key: sort ? sortKey(row.cells[sort.at], sort.age, row.created) : NULL,
+    key: sort ? sortKey(row.cells[sort.at], sort, row) : NULL,
   }));
   keyed.sort((a, b) => {
     if (sort?.metric) {
@@ -262,6 +291,17 @@ function cellText(cell: Cell | undefined): string {
   return cell === null || cell === undefined ? "" : String(cell);
 }
 
+/**
+ * What the text filter reads of a column: of a duration the server printed,
+ * the count only, since its age on screen is no longer the printed one.
+ */
+function filterText(cell: Cell | undefined, printed: boolean): string {
+  const text = cellText(cell);
+  if (!printed || typeof cell !== "string") return text;
+  const found = parsePrinted(text);
+  return found === null ? text : (found.count ?? "");
+}
+
 /** ASCII letters in lower case, other characters as they are. */
 export function lowerAscii(text: string): string {
   return text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
@@ -318,14 +358,14 @@ function numberKey(value: number, then: number | null = null): SortKey {
 
 function sortKey(
   cell: Cell | undefined,
-  age: boolean,
-  created: number | null,
+  sort: { readonly age: boolean; readonly printed: boolean },
+  row: QueryRow,
 ): SortKey {
-  if (age) return created === null ? NULL : numberKey(-created);
+  if (sort.age) return row.created === null ? NULL : numberKey(-row.created);
   if (cell === null || cell === undefined) return NULL;
   if (typeof cell === "boolean") return numberKey(cell ? 1 : 0);
   if (typeof cell === "number") return numberKey(cell);
-  return textKey(cell);
+  return sort.printed ? printedKey(cell, row.received) : textKey(cell);
 }
 
 function count(text: string): number | null {
@@ -361,20 +401,50 @@ function duration(text: string): number | null {
   return seconds;
 }
 
+/** A duration the server printed: `5m`, or a pod's `3 (5m ago)` with the count of restarts. */
+interface Printed {
+  readonly count: string | null;
+  /** In seconds. */
+  readonly ago: number;
+}
+
+function parsePrinted(text: string): Printed | null {
+  const ago = duration(text);
+  if (ago !== null) return { count: null, ago };
+  if (!text.endsWith(" ago)")) return null;
+  const rest = text.slice(0, -" ago)".length);
+  const at = rest.indexOf(" (");
+  if (at < 0) return null;
+  const counted = rest.slice(0, at);
+  const since = duration(rest.slice(at + 2));
+  return count(counted) === null || since === null
+    ? null
+    : { count: counted, ago: since };
+}
+
+function printedKeyed(printed: Printed, then: number): SortKey {
+  return printed.count === null
+    ? numberKey(then)
+    : numberKey(Number(printed.count), then);
+}
+
+/**
+ * A cell that prints a duration, by the moment it stands for: `received`,
+ * when the server printed it, less its age. The moment does not move as
+ * time passes, and the latest comes first, as in an Age column.
+ */
+function printedKey(text: string, received: number): SortKey {
+  const printed = parsePrinted(text);
+  return printed === null
+    ? textKey(text)
+    : printedKeyed(printed, -(received - printed.ago * 1000));
+}
+
 function textKey(text: string): SortKey {
   const counted = count(text);
   if (counted !== null) return numberKey(counted);
-  const seconds = duration(text);
-  if (seconds !== null) return numberKey(seconds);
-  if (text.endsWith(" ago)")) {
-    const rest = text.slice(0, -" ago)".length);
-    const at = rest.indexOf(" (");
-    if (at >= 0) {
-      const restarts = count(rest.slice(0, at));
-      const ago = duration(rest.slice(at + 2));
-      if (restarts !== null && ago !== null) return numberKey(restarts, ago);
-    }
-  }
+  const printed = parsePrinted(text);
+  if (printed !== null) return printedKeyed(printed, printed.ago);
   const slash = text.indexOf("/");
   if (slash >= 0) {
     const ready = count(text.slice(0, slash));

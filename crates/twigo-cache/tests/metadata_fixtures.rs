@@ -146,5 +146,9 @@ fn a_metadata_row_takes_the_time_its_response_arrived() {
     let page = MetaDecoder
         .decode_list(include_bytes!("fixtures/namespaces-metadata-list.json"), at)
         .unwrap();
-    assert!(page.items.iter().all(|row| row.meta.received == at));
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.meta.received == at.as_millisecond())
+    );
 }

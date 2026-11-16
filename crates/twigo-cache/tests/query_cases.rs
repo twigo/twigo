@@ -38,6 +38,8 @@ struct CaseRow {
     namespace: Option<String>,
     name: String,
     created: Option<jiff::Timestamp>,
+    #[serde(default)]
+    received: jiff::Timestamp,
     labels: BTreeMap<String, String>,
     #[serde(default)]
     owners: Vec<CaseOwner>,
@@ -146,8 +148,8 @@ fn row(row: &CaseRow, cells: Vec<&Value>, columns: &[Column], at: usize) -> Row 
                     controller: owner.controller,
                 })
                 .collect(),
-            created: row.created,
-            received: jiff::Timestamp::UNIX_EPOCH,
+            created: row.created.map(|created| created.as_millisecond()),
+            received: row.received.as_millisecond(),
             generated: None,
         },
         cells,

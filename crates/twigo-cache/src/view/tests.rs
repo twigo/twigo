@@ -35,8 +35,8 @@ fn pod(namespace: &str, name: &str, status: &str, restarts: &str) -> Row {
             resource_version: "1".into(),
             labels: Box::new([("app".into(), name.split('-').next().unwrap_or(name).into())]),
             owners: Box::default(),
-            created: Some(jiff::Timestamp::UNIX_EPOCH),
-            received: jiff::Timestamp::UNIX_EPOCH,
+            created: Some(0),
+            received: 0,
             generated: None,
         },
         cells: Box::new([
@@ -205,7 +205,7 @@ fn a_change_that_shows_nothing_new_sends_nothing() {
 }
 
 fn received(mut row: Row, seconds: i64) -> Row {
-    row.meta.received = jiff::Timestamp::from_second(seconds).unwrap();
+    row.meta.received = seconds * 1000;
     row
 }
 
@@ -228,7 +228,7 @@ fn a_row_sent_again_only_because_it_was_received_again_sends_nothing() {
 }
 
 #[test]
-fn a_row_that_prints_as_it_did_returns_to_the_window_with_the_time_it_first_arrived() {
+fn a_row_that_changes_and_changes_back_between_flushes_returns_with_the_stamp_it_was_sent_with() {
     let mut rig = Rig::new(&query());
     rig.view.set_window(0, 1);
     rig.store
@@ -238,8 +238,10 @@ fn a_row_that_prints_as_it_did_returns_to_the_window_with_the_time_it_first_arri
     rig.flush().unwrap();
 
     rig.store
-        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 400));
-    assert_eq!(rig.flush(), None);
+        .upsert(received(pod("a", "web-1", "NotReady", "3 (5m ago)"), 400));
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 700));
+    assert_eq!(rig.flush(), None, "it reads as it did, so nothing is sent");
 
     rig.view.set_window(1, 2);
     rig.flush().unwrap();
@@ -866,8 +868,7 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
                     STATUSES[random.usize(..STATUSES.len())],
                     RESTARTS[random.usize(..RESTARTS.len())],
                 );
-                row.meta.created =
-                    Some(jiff::Timestamp::from_second(random.i64(0..1_000)).expect("a timestamp"));
+                row.meta.created = Some(random.i64(0..1_000) * 1000);
                 rig.store.upsert(row.clone());
                 rows.insert(key, row);
             }
@@ -1084,7 +1085,7 @@ fn a_row_does_not_take_a_sample_that_was_taken_before_it_was_created() {
         let mut rig = Rig::new(&asked);
         rig.view.set_api(served());
         let mut entered = pod("a", "web-1", "CrashLoopBackOff", "0");
-        entered.meta.created = Some(at(created));
+        entered.meta.created = Some(at(created).as_millisecond());
         rig.store.upsert(entered);
         let batch = rig.flush_with(held).unwrap();
         assert_eq!(

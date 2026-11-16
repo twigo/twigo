@@ -9,6 +9,7 @@
 
 mod filter;
 mod labels;
+mod printed;
 mod sort;
 
 use std::borrow::Cow;
@@ -18,6 +19,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use indexset::BTreeSet;
+use jiff::Timestamp;
 use twigo_ipc::{
     self as ipc, IpcError, ListBatch, ListQuery, MetricsState, RowGroup, RowId, ValueCount,
     ViewState,
@@ -126,6 +128,8 @@ struct Layout {
     sources: Vec<Source>,
     /// What the text filter reads.
     text: Vec<usize>,
+    /// Which of the webview's columns hold a duration the server printed.
+    printed: Vec<bool>,
     sort: Option<usize>,
     descending: bool,
     sort_metric: bool,
@@ -213,12 +217,17 @@ impl Layout {
             .values
             .as_ref()
             .and_then(|(column, values)| Some((find_text(column)?, values.clone())));
+        let printed = sources
+            .iter()
+            .map(|source| matches!(source, Source::Cell(at) if server[*at].prints_duration()))
+            .collect();
         Self {
             server,
             metrics,
             wire,
             sources,
             text,
+            printed,
             sort,
             descending,
             sort_metric,
@@ -255,10 +264,23 @@ impl Layout {
         }
     }
 
+    /// What the text filter reads of a column: of a duration the server
+    /// printed, the count only, since its age on screen is no longer the
+    /// printed one.
+    fn filtered<'a>(&self, row: &'a Row, at: usize) -> Cow<'a, str> {
+        match self.cell(row, None, at) {
+            Cow::Borrowed(Cell::Text(text)) if self.printed[at] => printed::filtered(text).into(),
+            _ => self.text(row, at),
+        }
+    }
+
     fn sort_key(&self, row: &Row, sample: Option<&Sample>) -> SortKey {
-        match self.sort {
-            Some(at) => SortKey::of(&self.cell(row, sample, at), row.meta.created),
-            None => SortKey::Null,
+        let Some(at) = self.sort else {
+            return SortKey::Null;
+        };
+        match &*self.cell(row, sample, at) {
+            Cell::Text(text) if self.printed[at] => SortKey::printed(text, row.meta.received),
+            cell => SortKey::of(cell, row.meta.created),
         }
     }
 
@@ -274,12 +296,16 @@ impl Layout {
             .collect();
         ipc::Row {
             id: RowId(id.to_owned()),
-            created: row.meta.created.map(|created| created.to_string()),
-            received: format!("{:.3}", row.meta.received),
+            created: row.meta.created_at().map(|created| created.to_string()),
+            received: format!("{:.3}", timestamp(row.meta.received)),
             generated: row.meta.generated,
             cells,
         }
     }
+}
+
+fn timestamp(millis: i64) -> Timestamp {
+    Timestamp::from_millisecond(millis).expect("milliseconds that a Timestamp gave")
 }
 
 fn kind(kind: ColumnKind) -> ipc::ColumnKind {
@@ -686,7 +712,7 @@ impl QueryView {
             return;
         }
         if let Some(text) = &self.spec.text
-            && !text.keeps(layout.text.iter().map(|&at| layout.text(&row, at)))
+            && !text.keeps(layout.text.iter().map(|&at| layout.filtered(&row, at)))
         {
             return;
         }

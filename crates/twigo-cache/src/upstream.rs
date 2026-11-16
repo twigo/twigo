@@ -46,7 +46,7 @@ pub type Connect = Arc<
 >;
 
 /// The time now, which stamps what the server answers.
-pub type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
+pub(crate) type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
 
 /// What an upstream watches.
 #[derive(Debug, Clone)]

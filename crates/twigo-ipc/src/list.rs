@@ -201,9 +201,10 @@ pub struct Row {
     pub id: RowId,
     /// RFC 3339; the webview renders Age columns from it.
     pub created: Option<String>,
-    /// RFC 3339; when the core received the row's cells. A duration the
-    /// server printed in them, such as `3 (5m ago)`, counts back from this
-    /// time, so the webview draws it as of now from the two.
+    /// RFC 3339; when the core received the cells of the row that print a
+    /// duration, such as `3 (5m ago)`, which counts back from this time, so
+    /// the webview draws it as of now from the two. It changes only when
+    /// those cells read differently, and a list sorted by them reads it too.
     pub received: String,
     /// Where the generated part of the object's name starts, in UTF-16
     /// units: after its `metadata.generateName`, or at a pod's

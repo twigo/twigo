@@ -1402,9 +1402,10 @@ export type Row = { id: RowId,
  */
 created: string | null, 
 /**
- * RFC 3339; when the core received the row's cells. A duration the
- * server printed in them, such as `3 (5m ago)`, counts back from this
- * time, so the webview draws it as of now from the two.
+ * RFC 3339; when the core received the cells of the row that print a
+ * duration, such as `3 (5m ago)`, which counts back from this time, so
+ * the webview draws it as of now from the two. It changes only when
+ * those cells read differently, and a list sorted by them reads it too.
  */
 received: string, 
 /**

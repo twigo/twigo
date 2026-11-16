@@ -7,7 +7,7 @@ use twigo_kube::client::Budgets;
 use super::*;
 use crate::decode::{DecodeError, Event, Page};
 use crate::fake::Fake;
-use crate::table::Cell;
+use crate::table::{Cell, ColumnKind};
 use crate::upstream::IDLE;
 
 fn pods() -> Resource {
@@ -614,10 +614,24 @@ async fn a_watch_resumed_from_a_compacted_version_relists_with_its_rows() {
 
 struct Printing {
     meta: MetaDecoder,
+    columns: Arc<[Column]>,
     text: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Printing {
+    fn new(text: &Arc<Mutex<HashMap<String, String>>>) -> Self {
+        Self {
+            meta: MetaDecoder,
+            columns: Arc::new([Column {
+                name: "Restarts".into(),
+                kind: ColumnKind::String,
+                format: "".into(),
+                priority: 0,
+            }]),
+            text: Arc::clone(text),
+        }
+    }
+
     fn print(&self, row: &mut Row) {
         let text = self.text.lock().unwrap();
         let printed = text.get(&*row.meta.name).cloned().unwrap_or_default();
@@ -641,17 +655,18 @@ impl Decode for Printing {
         }
         Ok(event)
     }
+
+    fn columns(&self) -> Option<&Arc<[Column]>> {
+        Some(&self.columns)
+    }
 }
 
-fn arrived(upstream: &Upstream<Row>) -> Vec<(String, u64)> {
+fn arrived(upstream: &Upstream<Row>) -> Vec<(String, i64)> {
     let mut arrived: Vec<_> = upstream
         .store
         .items(|_| true)
         .iter()
-        .map(|row| {
-            let since = row.meta.received.duration_since(Timestamp::UNIX_EPOCH);
-            (row.meta.name.to_string(), since.as_secs().unsigned_abs())
-        })
+        .map(|row| (row.meta.name.to_string(), row.meta.received / 1000))
         .collect();
     arrived.sort();
     arrived
@@ -660,7 +675,14 @@ fn arrived(upstream: &Upstream<Row>) -> Vec<(String, u64)> {
 #[tokio::test(start_paused = true)]
 async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_what_did_not_change()
  {
+    for streaming in [true, false] {
+        stamped_as_it_arrives(streaming).await;
+    }
+}
+
+async fn stamped_as_it_arrives(streaming: bool) {
     let fake = Fake::default();
+    fake.state().no_streaming = !streaming;
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("a"), "p2");
     let text = Arc::new(Mutex::new(HashMap::from([
@@ -668,6 +690,7 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
         ("p2".to_owned(), "0".to_owned()),
     ])));
     let (hub, _clients) = fake.hub(Budgets::default());
+    sleep(Duration::from_secs(5)).await;
     let env = Env {
         connect: Arc::clone(&hub.inner.connect),
         clock: Arc::clone(&hub.inner.clock),
@@ -683,22 +706,18 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
     };
     let upstream = Arc::new(Upstream::<Row>::new());
     let mut state = upstream.state();
-    let decoder = Printing {
-        meta: MetaDecoder,
-        text: Arc::clone(&text),
-    };
     let run = tokio::spawn(upstream::run(
         env,
         key.spec(),
-        decoder,
+        Printing::new(&text),
         Arc::clone(&upstream),
     ));
     let ready = |state: &ViewState| *state == ViewState::Ready;
     state.wait_for(ready).await.unwrap();
     assert_eq!(
         arrived(&upstream),
-        [("p1".to_owned(), 0), ("p2".to_owned(), 0)],
-        "the page's rows arrived with it"
+        [("p1".to_owned(), 5), ("p2".to_owned(), 5)],
+        "streaming {streaming}: the rows of the list arrived with it"
     );
 
     sleep(Duration::from_secs(10)).await;
@@ -709,8 +728,8 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
     settle().await;
     assert_eq!(
         arrived(&upstream),
-        [("p1".to_owned(), 10), ("p2".to_owned(), 0)],
-        "an event stamps the row it brings, and no other"
+        [("p1".to_owned(), 15), ("p2".to_owned(), 5)],
+        "streaming {streaming}: an event stamps the row it brings, and no other"
     );
 
     sleep(Duration::from_secs(20)).await;
@@ -718,31 +737,23 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
     settle().await;
     assert_eq!(
         arrived(&upstream),
-        [("p1".to_owned(), 10), ("p2".to_owned(), 0)],
-        "a bookmark brings no row"
+        [("p1".to_owned(), 15), ("p2".to_owned(), 5)],
+        "streaming {streaming}: a bookmark brings no row"
     );
 
     sleep(Duration::from_secs(30)).await;
-    {
-        let mut state = fake.state();
-        state.compacted = u64::MAX;
-        state.hold_initial = true;
-    }
     fake.end_watches();
-    state
-        .wait_for(|state| *state == ViewState::Relisting)
-        .await
-        .unwrap();
     text.lock()
         .unwrap()
         .insert("p2".to_owned(), "1 (3s ago)".to_owned());
-    fake.state().compacted = 0;
-    fake.release_initial();
-    state.wait_for(ready).await.unwrap();
-    assert_eq!(
-        arrived(&upstream),
-        [("p1".to_owned(), 10), ("p2".to_owned(), 60)],
-        "a relist stamps the row whose text changed and keeps the other's"
+    fake.add("pods", Some("a"), "p2");
+    fake.compact();
+    sleep(Duration::from_secs(30)).await;
+    let relisted = arrived(&upstream);
+    assert_eq!(relisted[0], ("p1".to_owned(), 15), "streaming {streaming}");
+    assert!(
+        (65..=75).contains(&relisted[1].1),
+        "streaming {streaming}: a relist stamps the row whose text changed, and keeps the other's: {relisted:?}"
     );
     run.abort();
 }

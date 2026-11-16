@@ -236,7 +236,7 @@ fn at(seconds: i64) -> jiff::Timestamp {
     jiff::Timestamp::from_second(seconds).unwrap()
 }
 
-fn received(events: &[Event]) -> Vec<jiff::Timestamp> {
+fn received(events: &[Event]) -> Vec<i64> {
     events
         .iter()
         .filter_map(|event| match event {
@@ -253,7 +253,11 @@ fn a_row_takes_the_time_its_response_arrived() {
         .decode_list(include_bytes!("fixtures/pods-list.json"), at(10))
         .unwrap();
     assert!(!page.items.is_empty());
-    assert!(page.items.iter().all(|row| row.meta.received == at(10)));
+    assert!(
+        page.items
+            .iter()
+            .all(|row| row.meta.received == at(10).as_millisecond())
+    );
 
     let fixture = include_str!("fixtures/pods-watch.jsonl");
     let events: Vec<Event> = lines(fixture)
@@ -261,13 +265,17 @@ fn a_row_takes_the_time_its_response_arrived() {
         .collect();
     let times = received(&events);
     assert_eq!(times.len(), 6, "a bookmark brings no row");
-    assert!(times.iter().all(|time| *time == at(20)));
+    assert!(times.iter().all(|time| *time == at(20).as_millisecond()));
 
     let raw = include_str!("fixtures/raw-watch.jsonl");
     let events: Vec<Event> = lines(raw)
         .map(|line| TableDecoder::new().decode_event(line, at(30)).unwrap())
         .collect();
-    assert!(received(&events).iter().all(|time| *time == at(30)));
+    assert!(
+        received(&events)
+            .iter()
+            .all(|time| *time == at(30).as_millisecond())
+    );
 }
 
 #[test]
