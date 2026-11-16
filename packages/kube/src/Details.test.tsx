@@ -71,25 +71,6 @@ const EVERY_COLUMN = [
   "",
 ];
 
-describe("the header", () => {
-  withScreenSize(1000);
-
-  test("says the namespace, the kind and the object in that order, the namespace once", async () => {
-    await openList();
-    const row = rows()[0];
-    const namespace =
-      row?.querySelector('[data-column="Namespace"]')?.textContent ?? "";
-    const name = nameOf(row);
-    expect(namespace).not.toBe("");
-    fireEvent.click(row ?? document.body);
-    await settle(1);
-    const header = within(shown()).getByRole("heading", { level: 2 });
-    expect(header.textContent).toBe(`${namespace} › Pod ${name}`);
-    const [first] = within(shown()).getAllByText(namespace);
-    expect(first?.closest("h2")).toBe(header);
-  });
-});
-
 describe("in a wide editor", () => {
   const layout = withScreenSize(1000);
 

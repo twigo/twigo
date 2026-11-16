@@ -200,12 +200,6 @@ export function Details({
           <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
           <h2 className="flex min-w-0 flex-1 items-baseline text-title font-semibold text-strong">
             <span className="min-w-0 truncate text-xs text-support">
-              {namespace !== undefined && (
-                <>
-                  <span className="ident">{namespace}</span>
-                  {" › "}
-                </>
-              )}
               {kind}
             </span>{" "}
             <ObjectName
@@ -247,6 +241,11 @@ export function Details({
             <Pill tone={tone}>{status}</Pill>
           )}
           {[
+            namespace !== undefined && (
+              <span key="namespace" className="ident truncate">
+                {namespace}
+              </span>
+            ),
             owner && (
               <LinkButton
                 key="owner"
