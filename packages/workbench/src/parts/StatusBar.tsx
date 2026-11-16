@@ -86,11 +86,18 @@ function EntryView({ entry }: { entry: StatusEntry }) {
       <span className="truncate">{entry.text}</span>
     </>
   );
+  const interactive = entry.run !== undefined || entry.popover !== undefined;
   const className = cn(
     "relative isolate flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums before:absolute before:inset-x-0 before:inset-y-0.75 before:-z-10 before:rounded-sm",
-    (entry.run !== undefined || entry.popover !== undefined) &&
-      "outline-none hover:text-content hover:before:bg-row-hover focus-visible:before:shadow-[inset_var(--focus-ring)]",
-    entry.accent && ["px-2.5", ACCENT[entry.accent]],
+    interactive &&
+      "outline-none focus-visible:before:shadow-[inset_var(--focus-ring)]",
+    entry.accent
+      ? [
+          "px-2.5 font-medium text-context-solid-foreground",
+          interactive && "hover:before:brightness-90",
+          ACCENT[entry.accent],
+        ]
+      : interactive && "hover:text-content hover:before:bg-row-hover",
   );
   if (entry.popover) {
     const { open, onOpenChange, content } = entry.popover;
@@ -142,14 +149,10 @@ function EntryView({ entry }: { entry: StatusEntry }) {
  * and bottom: the entry's box is the bar's height, and the block is drawn in it.
  */
 const ACCENT = {
-  red: "text-context-solid-foreground font-medium before:bg-context-red-solid hover:before:bg-context-red-solid/90",
-  orange:
-    "text-context-solid-foreground font-medium before:bg-context-orange-solid hover:before:bg-context-orange-solid/90",
-  yellow:
-    "text-context-solid-foreground font-medium before:bg-context-yellow-solid hover:before:bg-context-yellow-solid/90",
-  green:
-    "text-context-solid-foreground font-medium before:bg-context-green-solid hover:before:bg-context-green-solid/90",
-  blue: "text-context-solid-foreground font-medium before:bg-context-blue-solid hover:before:bg-context-blue-solid/90",
-  purple:
-    "text-context-solid-foreground font-medium before:bg-context-purple-solid hover:before:bg-context-purple-solid/90",
+  red: "before:bg-context-red-solid",
+  orange: "before:bg-context-orange-solid",
+  yellow: "before:bg-context-yellow-solid",
+  green: "before:bg-context-green-solid",
+  blue: "before:bg-context-blue-solid",
+  purple: "before:bg-context-purple-solid",
 } as const;

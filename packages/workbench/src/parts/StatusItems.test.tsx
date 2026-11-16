@@ -36,6 +36,16 @@ test("the space entry names the active space's context, is filled with its colou
   expect(workbench.quickAccess.session?.value).toBe("ctx ");
 });
 
+test("the space entry keeps its solid foreground while hovered", async () => {
+  const workbench = await testWorkbench();
+  render(<StatusEntries useEntries={useSpaceEntries} />, {
+    wrapper: inWorkbench(workbench),
+  });
+  const { classList } = screen.getByTitle("Switch space");
+  expect(classList.contains("text-context-solid-foreground")).toBe(true);
+  expect(classList.contains("hover:text-content")).toBe(false);
+});
+
 const settled = () =>
   act(
     () =>
