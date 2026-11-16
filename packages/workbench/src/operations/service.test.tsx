@@ -94,6 +94,7 @@ async function started(
   planned: Plan | IpcError,
   events: OperationEvent[],
   toaster = false,
+  request: PlanRequest = REQUEST,
 ) {
   const { backend, sent } = bus(planned, events);
   const workbench = await testWorkbench("ready", backend);
@@ -101,7 +102,7 @@ async function started(
     render(<Toaster />, { wrapper: inWorkbench(workbench) });
   }
   const report = vi.spyOn(workbench, "report");
-  const outcome = workbench.operations.run(REQUEST, LOOK);
+  const outcome = workbench.operations.run(request, LOOK);
   await act(() => vi.advanceTimersByTimeAsync(0));
   return { workbench, sent, report, outcome };
 }
@@ -268,39 +269,49 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   expect(unlock).toHaveBeenCalledWith("context_unlock", "dev");
 });
 
-test("a policy file's lock is only reported, as nothing in Twigo lifts it", async () => {
+const said = (text: string) =>
+  screen.getAllByRole("alert").find((toast) => toast.textContent.includes(text))
+    ?.textContent;
+
+test("a policy file's lock is only said, as nothing in Twigo lifts it, and its toast leads with the space's tile", async () => {
   const error = vi.spyOn(notify, "error");
   const refused = blocked({
     kind: "policyFile",
     file: "/etc/twigo/policy.json",
     pattern: "dev",
   });
-  const { report, outcome } = await started(refused, []);
+  const { workbench, report, outcome } = await started(refused, [], true);
   await expect(outcome).resolves.toEqual({ state: "refused" });
-  expect(report).toHaveBeenCalledWith(refused);
+  expect(report).not.toHaveBeenCalled();
   expect(error.mock.calls.map(([, options]) => options?.action)).toEqual(
     error.mock.calls.map(() => undefined),
   );
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  expect(said("dev is read-only")).toMatch(/^DEdev is read-only/);
 });
 
-test("a plan that fails for another reason than the gate is failed, not refused", async () => {
+test("a plan that fails for another reason than the gate is failed, not refused, and its toast leads with the space's tile", async () => {
   const gone = new IpcError("notFound", "no preview 1 waits to apply");
-  const { report, outcome } = await started(gone, []);
+  const { report, outcome } = await started(gone, [], true);
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(report).toHaveBeenCalledWith(gone);
+  expect(report).not.toHaveBeenCalled();
+  expect(said("no preview 1")).toMatch(/^DEno preview 1 waits/);
 });
 
-test("a run that fails is reported", async () => {
+test("a run that fails says so, led by the tile of the space it ran in", async () => {
   const error = {
     kind: "conflict" as const,
     message: "pod web-1 was replaced",
   };
-  const { report, outcome } = await started(plan({ kind: "atOnce" }), [
-    { state: "failed", error },
-  ]);
+  const { report, outcome } = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "failed", error }],
+    true,
+  );
   await act(() => vi.advanceTimersByTimeAsync(20));
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(report).toHaveBeenCalledWith(error);
+  expect(report).not.toHaveBeenCalled();
+  expect(said("was replaced")).toMatch(/^DEpod web-1 was replaced/);
 });
 
 test("a second countdown of the same object replaces the first, and ⌘Z cancels only outside a text field", async () => {
@@ -795,15 +806,62 @@ test("a confirmation's dialog leads with the tile of the context's space, and ke
   await expect(asked.outcome).resolves.toEqual({ state: "cancelled" });
 });
 
-test("a toast for a context no space stands for has no tile", async () => {
+const REVEAL: PlanRequest = { action: "reveal", object: 3, key: "token" };
+
+const counted = (context: string) =>
+  screen
+    .getAllByRole("status")
+    .find((toast) => toast.textContent.includes(`${context} · sends in`))
+    ?.textContent;
+
+test("a toast leads with the tile of the space the request is for, whatever context its plan names", async () => {
   const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
   const counting = await started(lone, [], true);
-  const lonely = screen
-    .getAllByRole("status")
-    .find((toast) => toast.textContent.includes("qa · sends in"));
-  expect(lonely?.textContent).toMatch(/^Deleting pod/);
+  expect(counted("qa")).toMatch(/^DEDeleting pod/);
   act(() => {
     counting.workbench.operations.cancelCountdown();
   });
   await counting.outcome;
+});
+
+test("a request that names no space, a Reveal, has its context stand for one, and a context no space stands for has no tile", async () => {
+  const revealing = await started(
+    plan({ kind: "countdown", seconds: 5 }),
+    [],
+    true,
+    REVEAL,
+  );
+  expect(counted("dev")).toMatch(/^DEDeleting pod/);
+  act(() => {
+    revealing.workbench.operations.cancelCountdown();
+  });
+  await revealing.outcome;
+  cleanup();
+
+  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const counting = await started(lone, [], true, REVEAL);
+  expect(counted("qa")).toMatch(/^Deleting pod/);
+  act(() => {
+    counting.workbench.operations.cancelCountdown();
+  });
+  await counting.outcome;
+});
+
+test("a refusal the workbench reports, as a failed command's is, leads with the tile of its context's space, and the app's own failure has none", async () => {
+  const workbench = await testWorkbench();
+  render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.report(
+      blocked({
+        kind: "policyFile",
+        file: "/etc/twigo/policy.json",
+        pattern: "dev",
+      }),
+      "Restart",
+    );
+    workbench.report(new Error("the clipboard is not available"));
+  });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(said("Restart:")).toMatch(/^DERestart: dev is read-only/);
+  expect(said("clipboard")).toMatch(/^the clipboard/);
 });
