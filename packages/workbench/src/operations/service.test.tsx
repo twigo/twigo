@@ -865,3 +865,50 @@ test("a refusal the workbench reports, as a failed command's is, leads with the 
   expect(said("Restart:")).toMatch(/^DERestart: dev is read-only/);
   expect(said("clipboard")).toMatch(/^the clipboard/);
 });
+
+const told = (text: string) =>
+  screen
+    .getAllByRole("status")
+    .find((toast) => toast.textContent.includes(text))?.textContent;
+
+test("a run that ends says so led by the tile of the space it was asked for, whatever context its plan names, as done and as stopped", async () => {
+  const lone = { ...plan({ kind: "atOnce" }), context: "qa" };
+  const done = await started(
+    lone,
+    [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(done.outcome).resolves.toEqual({ state: "done" });
+  expect(told("Deleted pod web-1")).toMatch(/^DEDeleted pod web-1/);
+  cleanup();
+
+  const stopped = await started(
+    lone,
+    [{ state: "stopped", text: "Stopped waiting for pod web-1" }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(stopped.outcome).resolves.toEqual({ state: "stopped" });
+  expect(told("Stopped waiting")).toMatch(/^DEStopped waiting for pod web-1/);
+});
+
+test("a run that Rust refuses to start fails, led by the tile of the space it was asked for", async () => {
+  const { backend } = bus(plan({ kind: "atOnce" }), []);
+  const refusing: Backend = {
+    ...backend,
+    subscribe(command, request, onMessage) {
+      return command === "command_execute"
+        ? Promise.reject(new IpcError("notFound", "no plan 7 waits to run"))
+        : backend.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await testWorkbench("ready", refusing);
+  render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  const report = vi.spyOn(workbench, "report");
+  const outcome = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(report).not.toHaveBeenCalled();
+  expect(said("no plan 7")).toMatch(/^DEno plan 7 waits/);
+});
