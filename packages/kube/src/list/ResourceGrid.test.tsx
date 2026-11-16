@@ -108,7 +108,36 @@ test("a space without pods shows the empty state, not an error", async () => {
     workbench.editors.open("k8s-list://dev/v1/pods");
   });
   await settle(30);
-  expect(screen.getByText("No pods")).toBeTruthy();
+  expect(screen.getByText("No pods in dev")).toBeTruthy();
+});
+
+test("an empty list names its space, and the namespaces it is narrowed to before it", async () => {
+  const workbench = await mountKube(createMockBackend("live"));
+  act(() => {
+    workbench.spaces.select("dev");
+    workbench.spaces.update("dev", (state) => ({
+      ...state,
+      namespaces: ["payments", "auth"],
+    }));
+    workbench.editors.open("k8s-list://dev/v1/pods");
+  });
+  await settle(30);
+  expect(screen.getByText("No pods in payments, auth · dev")).toBeTruthy();
+  expect(
+    screen.getByText("Nothing of this kind exists in these namespaces."),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?ns=checkout");
+  });
+  await settle(30);
+  expect(screen.getByText("No pods in checkout · dev")).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/nodes");
+  });
+  await settle(30);
+  expect(screen.getByText("No nodes in dev")).toBeTruthy();
 });
 
 test.each([
@@ -581,11 +610,11 @@ test("filters that match nothing say so and offer to clear them", async () => {
     createMockBackend("ready"),
     "k8s-list://prod-eu/v1/pods?q=no-such-pod",
   );
-  expect(screen.getByText("No matching pods")).toBeTruthy();
-  expect(screen.queryByText("No pods")).toBeNull();
+  expect(screen.getByText("No matching pods in prod-eu")).toBeTruthy();
+  expect(screen.queryByText("No pods in prod-eu")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   await settle();
-  expect(screen.queryByText("No matching pods")).toBeNull();
+  expect(screen.queryByText("No matching pods in prod-eu")).toBeNull();
   expect(rows().length).toBeGreaterThan(10);
   expect(screen.getByRole("textbox", { name: "Filter rows" })).toHaveProperty(
     "value",
@@ -806,7 +835,9 @@ test.each([
       target: { value: text },
     });
     await settle();
-    expect(screen.queryByText("No matching pods") === null).toBe(matches);
+    expect(screen.queryByText("No matching pods in prod-eu") === null).toBe(
+      matches,
+    );
   },
 );
 

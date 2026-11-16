@@ -47,6 +47,7 @@ import { CellView, type ShownColumn } from "./cells";
 import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
 import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
+import { namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -136,7 +137,7 @@ function Grid({
     space: input.space,
     gvr,
     namespaced: resource.namespaced,
-    namespaces: [...(input.namespaces ?? spaces.state(input.space).namespaces)],
+    namespaces: [...namespacesOf(spaces, input)],
     labelSelector: input.labels ?? null,
     fieldSelector: null,
     owners: null,
@@ -455,6 +456,9 @@ function Grid({
 
   const Icon = kindIcon(gvr);
   const filtered = text !== "" || picked !== undefined;
+  const scope = resource.namespaced ? query.namespaces : [];
+  const narrowed = scope.length > 0;
+  const where = whereWords(spaces, input.space, scope);
   return (
     <DataGrid<Row, RowGroup>
       label={title}
@@ -569,7 +573,7 @@ function Grid({
         filtered ? (
           <EmptyState
             icon={Icon}
-            title={`No matching ${title.toLowerCase()}`}
+            title={`No matching ${title.toLowerCase()} in ${where}`}
             action={{
               label: "Clear filters",
               onClick: () => {
@@ -584,10 +588,14 @@ function Grid({
         ) : (
           <EmptyState
             icon={Icon}
-            title={`No ${title.toLowerCase()}`}
+            title={`No ${title.toLowerCase()} in ${where}`}
             className="py-16"
           >
-            <p>Nothing of this kind exists in the space.</p>
+            <p>
+              {narrowed
+                ? "Nothing of this kind exists in these namespaces."
+                : "Nothing of this kind exists in the space."}
+            </p>
           </EmptyState>
         )
       }

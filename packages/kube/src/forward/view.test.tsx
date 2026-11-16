@@ -244,7 +244,7 @@ test("a failed row carries its tone, and a ready one has none", async () => {
 
 test("with no forwards the view says how to start one", async () => {
   await mounted("live");
-  screen.getByText("No port forwards");
+  screen.getByText("No port forwards in prod-eu");
   screen.getByText(/press f to forward a port of it to this machine/);
   expect(stop()).toBeNull();
 });

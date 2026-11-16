@@ -16,3 +16,19 @@ export function showAllNamespaces(
 ): void {
   spaces.update(space, (state) => ({ ...state, namespaces: [] }));
 }
+
+/**
+ * Where a list looks, for the words of an empty one: the namespaces it is
+ * narrowed to, then the space's contexts, `payments · prod-eu`.
+ */
+export function whereWords(
+  spaces: Workbench["spaces"],
+  space: string,
+  namespaces: readonly string[],
+): string {
+  const contexts = spaces.get(space)?.contexts.join(" + ") ?? space;
+  return [
+    ...(namespaces.length > 0 ? [namespaces.join(", ")] : []),
+    contexts,
+  ].join(" · ");
+}

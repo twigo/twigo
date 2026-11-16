@@ -111,8 +111,16 @@ test("the keys of lists move along its rows and open one", async () => {
 
 test("owners that control nothing list no pods", async () => {
   await shown({ ...NODE_PODS, fieldSelector: null, owners: [] }, vi.fn());
-  expect(screen.getByText("No pods")).toBeDefined();
+  expect(screen.getByText("No pods in prod-eu")).toBeDefined();
   expect(screen.queryByRole("grid")).toBeNull();
+});
+
+test("an empty list of an object's namespace names the namespace before the context", async () => {
+  await shown(
+    { ...NODE_PODS, namespace: "payments", fieldSelector: null, owners: [] },
+    vi.fn(),
+  );
+  expect(screen.getByText("No pods in payments · prod-eu")).toBeDefined();
 });
 
 test("a sort is kept for the kind's next object", async () => {

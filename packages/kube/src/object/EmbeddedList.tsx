@@ -33,6 +33,7 @@ import { decideRows } from "../list/alarm";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { metricsNote, readsMetrics } from "../list/metrics";
+import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
@@ -76,7 +77,7 @@ export function EmbeddedList({
   id: string;
   onOpen: (target: ObjectRef) => void;
 }) {
-  const { backend } = useWorkbench();
+  const { backend, spaces } = useWorkbench();
   const register = useListRegistration(EMBEDDED_KEYS, ["peek", "filter"]);
   const { gvr } = list;
   const countBy = statusColumn(gvr);
@@ -192,7 +193,7 @@ export function EmbeddedList({
   if (!loading && snapshot.total === 0)
     return (
       <EmptyState icon={Icon} density="inline" className="px-0">
-        No {gvr.resource}
+        {`No ${gvr.resource} in ${whereWords(spaces, space, query.namespaces)}`}
       </EmptyState>
     );
   const rows = Math.min(Math.max(snapshot.total, loading ? 3 : 1), VISIBLE);
