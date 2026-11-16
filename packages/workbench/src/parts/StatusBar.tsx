@@ -88,12 +88,12 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   );
   const interactive = entry.run !== undefined || entry.popover !== undefined;
   const className = cn(
-    "relative isolate flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums before:absolute before:inset-x-0 before:inset-y-0.75 before:-z-10 before:rounded-sm",
+    "relative isolate flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums before:absolute before:inset-y-0.75 before:right-0 before:left-0 before:-z-10 before:rounded-sm",
     interactive &&
       "outline-none focus-visible:before:shadow-[inset_var(--focus-ring)]",
     entry.accent
       ? [
-          "px-2.5 font-medium text-context-solid-foreground",
+          "-ml-0.75 pr-2.5 pl-3.25 font-medium text-context-solid-foreground before:left-0.75",
           interactive && "hover:before:brightness-90",
           ACCENT[entry.accent],
         ]
@@ -146,7 +146,8 @@ function EntryView({ entry }: { entry: StatusEntry }) {
 
 /**
  * A coloured context as a block at the bar's start, 3 px in from its left, top
- * and bottom: the entry's box is the bar's height, and the block is drawn in it.
+ * and bottom: the entry's box reaches the bar's edges, and the block is drawn
+ * in it.
  */
 const ACCENT = {
   red: "before:bg-context-red-solid",
