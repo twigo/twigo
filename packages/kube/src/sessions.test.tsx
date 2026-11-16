@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogPod, StreamState, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
-import { WorkbenchView } from "@twigo/workbench";
+import { WorkbenchView, type SessionState } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { bareTabPaths, settle, withScreenSize } from "../test/workbench";
 import { withTerminalLayout } from "../test/terminal";
@@ -198,6 +198,20 @@ test("a session that ends by itself keeps its tab and the panel, and is not coun
   expect(within(statusBar()).queryByText(/sessions?$/)).toBeNull();
 });
 
+test("the tab of each kind of session, logs, shell and terminal, says how its session stands", async () => {
+  const { workbench, run } = await mounted();
+  await run("k8s.logs.open", TARGET);
+  await run("k8s.shell.open", { ...TARGET, container: "api" });
+  await run("k8s.terminal.new");
+  const uris = tabsIn("panel");
+  expect(uris).toHaveLength(3);
+  for (const uri of uris) {
+    expect(workbench.editors.resolve(uri)?.session?.state(uri)).toMatch(
+      /^(connecting|running)$/,
+    );
+  }
+});
+
 const STREAMS: readonly [ViewState, boolean][] = [
   [{ state: "queued" }, true],
   [{ state: "connecting" }, true],
@@ -252,28 +266,32 @@ const counted = () => within(statusBar()).queryByText("1 session") !== null;
 test.each(STREAMS)(
   "a logs session whose target is %j is counted: %s, and the count follows it",
   async (status, shown) => {
-    const { batch } = await hiddenWithLogs();
+    const { batch, logs } = await hiddenWithLogs();
+    const [uri] = tabsIn("panel");
+    if (!uri) throw new Error("no logs tab");
     expect(batch({ status: { state: "ready" } })).toBe(0);
     expect(counted()).toBe(true);
 
     expect(batch({ status })).toBe(shown ? 0 : 1);
     expect(counted()).toBe(shown);
+    expect(logs.state(uri)).toBe(shown ? "running" : "failed");
     expect(batch({ status: { state: "ready" } })).toBe(shown ? 0 : 1);
     expect(counted()).toBe(true);
   },
 );
 
-const POD_STREAMS: readonly [StreamState, boolean][] = [
-  [{ state: "following" }, true],
-  [{ state: "connecting" }, true],
-  [{ state: "queued" }, true],
-  [{ state: "waiting", reason: "CrashLoopBackOff" }, true],
-  [{ state: "ended" }, false],
-  [{ state: "off" }, false],
-  [{ state: "overLimit" }, false],
+const POD_STREAMS: readonly [StreamState, boolean, SessionState][] = [
+  [{ state: "following" }, true, "running"],
+  [{ state: "connecting" }, true, "connecting"],
+  [{ state: "queued" }, true, "connecting"],
+  [{ state: "waiting", reason: "CrashLoopBackOff" }, true, "running"],
+  [{ state: "ended" }, false, "ended"],
+  [{ state: "off" }, false, "ended"],
+  [{ state: "overLimit" }, false, "ended"],
   [
     { state: "error", error: { kind: "unavailable", message: "broken" } },
     false,
+    "failed",
   ],
 ];
 
@@ -291,18 +309,22 @@ const podsWith = (...streams: StreamState[]): LogPod[] => [
 ];
 
 test.each(POD_STREAMS)(
-  "a logs session whose only stream is %j is counted: %s, and the count follows it",
-  async (stream, shown) => {
-    const { batch } = await hiddenWithLogs();
+  "a logs session whose only stream is %j is counted: %s, and its tab says %s",
+  async (stream, shown, state) => {
+    const { batch, logs } = await hiddenWithLogs();
+    const [uri] = tabsIn("panel");
+    if (!uri) throw new Error("no logs tab");
     expect(batch({ pods: podsWith({ state: "following" }) })).toBe(0);
     expect(counted()).toBe(true);
+    expect(logs.state(uri)).toBe("running");
 
-    expect(batch({ pods: podsWith(stream) })).toBe(shown ? 0 : 1);
+    const moves = state === "running" ? 0 : 1;
+    expect(batch({ pods: podsWith(stream) })).toBe(moves);
     expect(counted()).toBe(shown);
-    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(
-      shown ? 0 : 1,
-    );
+    expect(logs.state(uri)).toBe(state);
+    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(moves);
     expect(counted()).toBe(true);
+    expect(logs.state(uri)).toBe("running");
   },
 );
 

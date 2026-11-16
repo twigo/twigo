@@ -60,6 +60,7 @@ export function registerExec(
       return input ? execTitle(input) : uri.href;
     },
     tooltip: (uri) => paths.exec(uri.href),
+    session: tabs,
     icon: ({ className }) => <SquareTerminal className={className} />,
     component: ({ uri }) => <ExecEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <ExecActions uri={uri} tabs={tabs} />,

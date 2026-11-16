@@ -5,12 +5,11 @@ import {
   type LogsSnapshot,
   type LogTarget,
   type LogView,
-  type StreamState,
   type ViewState,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
-import { Changes } from "@twigo/workbench";
+import { Changes, type SessionState } from "@twigo/workbench";
 import { parseLogsUri } from "../uri";
 import { anchoredMatch, currentMatch, standingMatch } from "./entries";
 
@@ -85,29 +84,30 @@ const DOWN: ReadonlySet<ViewState["state"]> = new Set([
   "unauthorized",
 ]);
 
-/** The states of a stream that reads, or will by itself. */
-const READING: ReadonlySet<StreamState["state"]> = new Set([
-  "queued",
-  "connecting",
-  "following",
-  "waiting",
-]);
-
 /**
- * Whether a session reads: its target is not down and, once its pods are
- * known, one of their streams reads, or there are none, as of a workload at
- * zero replicas, whose pods it waits for by itself.
+ * How a tab says a logs session stands: failed while its target is down,
+ * connecting until the first pods come and while their streams queue or
+ * connect, running while one reads, or there are no pods, as of a workload at
+ * zero replicas, whose pods it waits for by itself, and else ended, or failed
+ * if a stream ended in an error.
  */
-function reads({ status, pods }: LogsSnapshot): boolean {
-  if (DOWN.has(status.state)) return false;
-  return (
-    pods === undefined ||
-    pods.length === 0 ||
-    pods.some((pod) =>
-      pod.containers.some(({ stream }) => READING.has(stream.state)),
-    )
+export function logsState({ status, pods }: LogsSnapshot): SessionState {
+  if (DOWN.has(status.state)) return "failed";
+  if (pods === undefined) return "connecting";
+  if (pods.length === 0) return "running";
+  const streams = pods.flatMap((pod) =>
+    pod.containers.map(({ stream }) => stream.state),
   );
+  if (streams.some((state) => state === "following" || state === "waiting")) {
+    return "running";
+  }
+  if (streams.some((state) => state === "queued" || state === "connecting")) {
+    return "connecting";
+  }
+  return streams.includes("error") ? "failed" : "ended";
 }
+
+const READING: ReadonlySet<SessionState> = new Set(["connecting", "running"]);
 
 /**
  * Each logs tab's choices and its session in Rust, by the tab's URI, so a
@@ -118,7 +118,7 @@ export class LogsTabs {
   readonly changes = new Changes();
   readonly #tabs = new Map<string, LogsTab>();
   readonly #sessions = new Map<string, LogsSession>();
-  readonly #down = new Set<string>();
+  readonly #states = new Map<string, SessionState>();
   /** Where each paused list stands, kept as it scrolls, so a tab that mounts again stands there. */
   readonly #places = new Map<string, LinePlace>();
   /** The pods each tab saw join, from their Joined entries, which stand out in its lines. */
@@ -151,9 +151,19 @@ export class LogsTabs {
 
   /** How many tabs of a space hold a session that reads. */
   live(space: string): number {
-    return [...this.#sessions.keys()].filter(
-      (uri) => parseLogsUri(uri)?.space === space && !this.#down.has(uri),
-    ).length;
+    return [...this.#sessions.keys()].filter((uri) => {
+      const state = this.#states.get(uri);
+      return (
+        parseLogsUri(uri)?.space === space &&
+        state !== undefined &&
+        READING.has(state)
+      );
+    }).length;
+  }
+
+  /** How a tab says the session of `uri` stands; none while no tab has opened it. */
+  state(uri: string): SessionState | undefined {
+    return this.#states.get(uri);
   }
 
   /**
@@ -261,7 +271,7 @@ export class LogsTabs {
     });
   }
 
-  /** The tab's session, opened the first time a tab asks for it. */
+  /** The tab's session, opened the first time a tab asks for it. A view asks for it as it renders, so the change it makes is told once the render is done. */
   session(uri: string, target: LogTarget): LogsSession {
     let session = this.#sessions.get(uri);
     if (!session) {
@@ -271,6 +281,10 @@ export class LogsTabs {
         this.#onBatch(uri, opened.getSnapshot());
       });
       this.#sessions.set(uri, opened);
+      this.#states.set(uri, logsState(opened.getSnapshot()));
+      queueMicrotask(() => {
+        this.changes.emit();
+      });
       session = opened;
     }
     return session;
@@ -282,10 +296,9 @@ export class LogsTabs {
    * newest once its line is gone, and a step that waited for its search.
    */
   #onBatch(uri: string, snapshot: LogsSnapshot): void {
-    const down = !reads(snapshot);
-    if (down !== this.#down.has(uri)) {
-      if (down) this.#down.add(uri);
-      else this.#down.delete(uri);
+    const state = logsState(snapshot);
+    if (state !== this.#states.get(uri)) {
+      this.#states.set(uri, state);
       this.changes.emit();
     }
     for (const entry of snapshot.window?.entries ?? []) {
@@ -320,7 +333,7 @@ export class LogsTabs {
   closed(uri: string): void {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);
-    this.#down.delete(uri);
+    this.#states.delete(uri);
     this.#joined.delete(uri);
     this.#places.delete(uri);
     if (this.#tabs.delete(uri)) this.changes.emit();

@@ -58,6 +58,7 @@ export function registerTerminals(
       return input ? terminalTitle(input) : uri.href;
     },
     tooltip: (uri) => paths.terminal(uri.href),
+    session: tabs,
     icon: ({ className }) => <Terminal className={className} />,
     component: ({ uri }) => (
       <TerminalEditor uri={uri} tabs={tabs} offers={offers} />

@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import type { SerializedDockview } from "dockview-react";
 import { afterEach, expect, test, vi } from "vitest";
+import { Changes } from "../changes";
+import type { SessionState } from "../editors/registry";
 import { useActionRoom } from "../react";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
@@ -92,6 +94,64 @@ test("a tab's title past the floor is cut in the middle and keeps the last part 
     (title) => title.textContent === "pods",
   );
   expect(whole?.firstElementChild?.childElementCount).toBe(0);
+});
+
+test("a session's tab says how the session stands: nothing while it runs, a pulse while it connects, ended after its title, an error dot once it failed, and it follows the session", async () => {
+  const workbench = await testWorkbench();
+  const states = new Map<string, SessionState>([
+    ["run", "running"],
+    ["connect", "connecting"],
+    ["end", "ended"],
+    ["fail", "failed"],
+  ]);
+  const changes = new Changes();
+  workbench.editors.register({
+    id: "test.job",
+    scheme: "job",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>body of {uri}</p>,
+    session: { changes, state: (uri) => states.get(new URL(uri).host) },
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    for (const host of states.keys()) {
+      workbench.editors.open(`job://${host}`, { preview: false });
+    }
+  });
+  const tab = (host: string) => {
+    const found = [...document.querySelectorAll(".dv-tab")].find((each) =>
+      each.getAttribute("data-tab-panel-id")?.endsWith(host),
+    );
+    if (!found) throw new Error(`no tab of ${host}`);
+    return found;
+  };
+  const dot = (host: string) => tab(host).querySelector("[role=img]");
+  const stated = (host: string) =>
+    tab(host).querySelector<HTMLElement>("[data-session]")?.dataset.session;
+
+  expect(stated("run")).toBe("running");
+  expect(tab("run").textContent).toBe("run");
+  expect(dot("run")).toBeNull();
+
+  expect(dot("connect")?.getAttribute("aria-label")).toBe("Connecting");
+  expect(dot("connect")?.className).toContain("animate-pulse");
+
+  expect(tab("end").textContent).toBe("endended");
+  expect(dot("end")).toBeNull();
+  expect(stated("end")).toBe("ended");
+
+  expect(dot("fail")?.getAttribute("aria-label")).toBe("Failed");
+  expect(dot("fail")?.className).toContain("bg-error");
+  expect(dot("fail")?.className).not.toContain("animate-pulse");
+  expect(tab("fail").textContent).toBe("fail");
+
+  states.set("connect", "running");
+  states.set("run", "ended");
+  act(() => {
+    changes.emit();
+  });
+  expect(dot("connect")).toBeNull();
+  expect(tab("run").textContent).toBe("runended");
 });
 
 test("an empty editor area shows the first watermark whose when holds, else its key hints", async () => {

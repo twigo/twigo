@@ -35,6 +35,7 @@ export function registerLogs(
         : uri.href;
     },
     tooltip: (uri) => paths.logs(uri.href),
+    session: tabs,
     icon: ({ className }) => <ScrollText className={className} />,
     component: ({ uri }) => <LogsEditor uri={uri} tabs={tabs} />,
     keep: (uri) => {

@@ -25,8 +25,10 @@ import {
   CutInTheMiddle,
   EmptyState,
   KeyHints,
+  StatusDot,
   UnsavedMark,
 } from "@twigo/ui";
+import { Changes } from "../changes";
 import {
   EDITOR_COMPONENT,
   EDITOR_TAB,
@@ -391,15 +393,21 @@ export function GroupActions({
   );
 }
 
+/** What `useChanges` watches for an editor that is no session. */
+const NO_SESSIONS = new Changes();
+
 function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const { editors } = useWorkbench();
   useChanges(editors.changes);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
   const dirty = params !== undefined && editors.isDirty(params.uri);
+  useChanges(provider?.session?.changes ?? NO_SESSIONS);
+  const state = params && provider?.session?.state(params.uri);
   return (
     <TabTooltip
       tooltip={() => params && provider?.tooltip?.(new URL(params.uri))}
+      data-session={state}
       className="flex h-full items-center gap-1.5 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
@@ -421,6 +429,13 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           separator={TITLE_SEPARATOR}
         />
       </span>
+      {state === "ended" && (
+        <span className="shrink-0 text-xs text-quiet">ended</span>
+      )}
+      {state === "connecting" && (
+        <StatusDot tone="idle" pulse label="Connecting" />
+      )}
+      {state === "failed" && <StatusDot tone="error" label="Failed" />}
       <button
         type="button"
         aria-label={`Close ${api.title ?? ""}`}

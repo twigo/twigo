@@ -124,6 +124,10 @@
 .twigo-dockview .dv-tab.dv-inactive-tab .lucide {
   opacity: 0.7;
 }
+/* An ended session's icon is at half strength, its tab active or not. */
+.twigo-dockview .dv-tab [data-session="ended"] .lucide:not(.twigo-tab-x) {
+  opacity: 0.5;
+}
 /* Close shows on the active tab or on hover. */
 .twigo-dockview .dv-tab .twigo-tab-close {
   opacity: 0;

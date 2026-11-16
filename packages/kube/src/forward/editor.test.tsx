@@ -420,22 +420,29 @@ test("Open in Browser opens the local address through the workbench, Copy Addres
   expect(write).toHaveBeenCalledWith("localhost:8080");
 });
 
-test("Stop stops the forward and Start brings it back, from the same tab", async () => {
-  const { start, open, backend } = await mounted();
+test("Stop stops the forward and Start brings it back, from the same tab, which says it ended while it is stopped", async () => {
+  const { workbench, start, open, backend } = await mounted();
   const calls = recording(backend);
   const forward = await start(API, 80);
-  await open(forward);
+  const uri = await open(forward);
+  const tabSays = () => workbench.editors.resolve(uri)?.session?.state(uri);
+  expect(tabSays()).toBe("running");
   fireEvent.click(button("Stop"));
   await settle(6);
   expect(calls("forward_stop")).toEqual([forward.id]);
   expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
   button("Start");
   absent("Stop");
+  expect(tabSays()).toBe("ended");
+  expect(
+    document.querySelector(".dv-tab [data-session=ended]")?.textContent,
+  ).toContain("ended");
 
   fireEvent.click(button("Start"));
   await later(READY_AFTER_MS + 100);
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
   expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+  expect(tabSays()).toBe("running");
 });
 
 test("Remove removes the forward and closes its tab", async () => {
@@ -518,12 +525,13 @@ test("a stopped forward that is moved onto a busy port is not forwarded, and say
   ]);
 });
 
-test("a start that fails says the target's own failure in a toast, which neither bind answer does", async () => {
-  const { start, open } = await mounted("forwardFailed");
+test("a start that fails says the target's own failure in a toast, which neither bind answer does, and its tab says failed", async () => {
+  const { workbench, start, open } = await mounted("forwardFailed");
   const forward = await start(API, 80);
-  await open(forward);
+  const uri = await open(forward);
   fireEvent.click(button("Start"));
   await later(FAILS_AFTER_MS + 100);
+  expect(workbench.editors.resolve(uri)?.session?.state(uri)).toBe("failed");
   const [toast] = live();
   expect(toast).toMatch(
     /^QAauth-api:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
