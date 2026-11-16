@@ -9,6 +9,7 @@ import { afterEach, expect, test } from "vitest";
 import { Changes } from "../changes";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import type { SpaceConnection } from "../spaces/status";
+import { UNLOCK_CONTEXT } from "../spaces/modeCommands";
 import { inWorkbench, testWorkbench } from "../testing";
 import { initials } from "./spaceBadge";
 import { SpaceRail } from "./SpaceRail";
@@ -62,7 +63,37 @@ test("a tile's dot and tooltip follow its connection, and a tile without one has
   expect(screen.getByRole("tooltip").textContent).toBe("staging⌘2Unauthorized");
   fireEvent.blur(tile("staging"));
   fireEvent.focus(tile("prod-eu"));
-  expect(screen.getByRole("tooltip").textContent).toBe("prod-eu⌘1");
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "prod-euProduction · read-only⌘1",
+  );
+});
+
+const lockOf = (name: string) =>
+  screen.getByRole("button", { name }).querySelector<HTMLElement>("[data-lock]")
+    ?.dataset.lock;
+
+test("a tile carries a shut lock while its mode holds writes back, an open one while an unlock lifts that, and none otherwise, with the connection dot beside it", async () => {
+  const workbench = await testWorkbench();
+  workbench.spaceStatus.register({
+    changes: new Changes(),
+    status: () => ({ tone: "ok", label: "Connected" }),
+  });
+  render(<SpaceRail />, { wrapper: inWorkbench(workbench) });
+  expect(lockOf("prod-eu")).toBe("shut");
+  expect(lockOf("staging")).toBeUndefined();
+  expect(lockOf("dev")).toBeUndefined();
+  const tile = screen.getByRole("button", { name: "prod-eu" });
+  expect(tile.querySelector("span.rounded-full")).not.toBeNull();
+
+  await act(() =>
+    workbench.commands.execute(UNLOCK_CONTEXT, workbench.keys.lookup(null)),
+  );
+  expect(lockOf("prod-eu")).toBe("open");
+  expect(tile.querySelector("span.rounded-full")).not.toBeNull();
+  fireEvent.focus(tile);
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "Production · unlocked",
+  );
 });
 
 test("a tile's menu picks the colour of its own space, in a picker that has the focus", async () => {

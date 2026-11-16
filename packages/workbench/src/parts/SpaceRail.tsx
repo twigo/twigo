@@ -1,5 +1,5 @@
-import { Plus } from "lucide-react";
-import type { Space } from "@twigo/protocol";
+import { Lock, LockOpen, Plus } from "lucide-react";
+import type { ContextAccess, Space } from "@twigo/protocol";
 import {
   ActionContextMenu,
   cn,
@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@twigo/ui";
+import { accessOfSpace, chipLabel, lockOf } from "../spaces/modes";
 import type { SpaceConnection } from "../spaces/status";
 import { useChanges, useWorkbench } from "../react";
 import { SpaceTile } from "./SpaceTile";
@@ -19,9 +20,17 @@ import { SpaceTile } from "./SpaceTile";
  */
 export function SpaceRail() {
   const workbench = useWorkbench();
-  const { spaces, keybindings, quickAccess, spaceStatus, keys, menus } =
-    workbench;
+  const {
+    spaces,
+    keybindings,
+    quickAccess,
+    spaceStatus,
+    keys,
+    menus,
+    catalog,
+  } = workbench;
   useChanges(spaces.changes);
+  useChanges(catalog.changes);
   useChanges(menus.changes);
   useChanges(keybindings.changes);
   useChanges(spaceStatus.changes);
@@ -48,6 +57,7 @@ export function SpaceRail() {
               <RailTile
                 space={space}
                 state={spaceStatus.get(space.id)}
+                access={accessOfSpace(catalog, space)}
                 selected={space.id === active}
                 shortcut={binding && keybindings.label(binding.presses)}
                 onSelect={() => {
@@ -77,19 +87,37 @@ export function SpaceRail() {
   );
 }
 
+/** A lock on the tile's bottom left corner, which the connection dot at the right one leaves free. */
+function LockMark({ lock }: { lock: "shut" | "open" }) {
+  const Icon = lock === "open" ? LockOpen : Lock;
+  return (
+    <span
+      aria-hidden
+      data-lock={lock}
+      className="absolute -bottom-1 -left-1 flex size-3.5 items-center justify-center rounded-sm bg-shell text-content"
+    >
+      <Icon className="size-2.5" strokeWidth={2.5} />
+    </span>
+  );
+}
+
 function RailTile({
   space,
   state,
+  access,
   selected,
   shortcut,
   onSelect,
 }: {
   space: Space;
   state: SpaceConnection | undefined;
+  access: ContextAccess | undefined;
   selected: boolean;
   shortcut: string | undefined;
   onSelect: () => void;
 }) {
+  const lock = lockOf(access);
+  const words = lock && access && chipLabel(access);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -115,6 +143,7 @@ function RailTile({
                 : "group-hover:ring-1 group-hover:ring-border"
             }
           >
+            {lock && <LockMark lock={lock} />}
             {state && (
               <StatusDot
                 tone={state.tone}
@@ -128,6 +157,7 @@ function RailTile({
       </TooltipTrigger>
       <TooltipContent side="right" className="flex items-center gap-2">
         <span>{space.contexts.join(" + ")}</span>
+        {words && <span className="text-support">{words}</span>}
         {shortcut && <span className="text-support">{shortcut}</span>}
         {state && <span className="text-support">{state.label}</span>}
       </TooltipContent>
