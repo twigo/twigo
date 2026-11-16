@@ -913,6 +913,82 @@ test("a selected or marked row keeps its tint under the pointer, and a failing o
   expect(row("api-1")).toContain("hover:bg-row-hover");
 });
 
+test("a failing row's band and edge reach what covers its cells: the held first cells, the hover icons and the laid-over menu", async () => {
+  const columns = [
+    { id: "Name", title: "Name", width: 900 },
+    { id: "Age", title: "Age", width: 100, coverable: true },
+  ];
+  const cell = (row: Pod, column: { id: string }) =>
+    column.id === "Name" ? row.name : "4d";
+  const classes = (element: Element | null | undefined) => [
+    ...(element?.classList ?? []),
+  ];
+  const BAND = [
+    "before:bg-(--band)",
+    "group-hover/row:before:bg-(image:--row-hover-layer)",
+  ];
+  const HOVER = ["group-hover/row:before:bg-row-hover"];
+  const EDGE = "shadow-[inset_3px_0_0_var(--edge)]";
+
+  grid({
+    columns,
+    cell,
+    inline: () => [
+      { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+    ],
+  });
+  act(() => {
+    resize();
+  });
+  for (const [name, held, edge] of [
+    ["api-2", BAND, true],
+    ["gateway-1", HOVER, false],
+  ] as const) {
+    const row = rowNamed(name);
+    for (const part of [
+      row.querySelector('[role="gridcell"]'),
+      row.querySelector('[data-column="Name"]'),
+    ]) {
+      expect(classes(part)).toEqual(expect.arrayContaining([...held]));
+    }
+    expect(classes(row.querySelector('[role="gridcell"]')).includes(EDGE)).toBe(
+      edge,
+    );
+  }
+  for (const [name, tint] of [
+    ["api-2", ["bg-(--band)", "bg-(image:--row-hover-layer)"]],
+    ["gateway-1", ["bg-row-hover"]],
+  ] as const) {
+    fireEvent.pointerEnter(rowNamed(name));
+    await rest();
+    const icons = within(rowNamed(name))
+      .getByRole("button", { name: "Copy Name" })
+      .closest(".pl-2");
+    expect(classes(icons)).toEqual(expect.arrayContaining([...tint]));
+    fireEvent.pointerLeave(rowNamed(name));
+  }
+  cleanup();
+
+  grid({
+    columns,
+    cell,
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  for (const [name, tint] of [
+    ["api-2", ["bg-(--band)", "bg-(image:--row-hover-layer)"]],
+    ["gateway-1", ["bg-row-hover"]],
+  ] as const) {
+    fireEvent.pointerEnter(rowNamed(name));
+    const menu = within(rowNamed(name))
+      .getByRole("button", { name: "Row actions" })
+      .closest('[role="gridcell"]');
+    expect(classes(menu?.firstElementChild)).toEqual(
+      expect.arrayContaining([...tint]),
+    );
+  }
+});
+
 test("a column's note is a quiet mark on its header, said in words to a screen reader, and its click still sorts", () => {
   const { handlers } = grid({
     columns: [
