@@ -69,6 +69,65 @@ test("a preview replaces the previous preview, and pinning keeps it", async () =
   ]);
 });
 
+const groupsOf = () =>
+  [...document.querySelectorAll(".dv-groupview")]
+    .map((group) =>
+      [...group.querySelectorAll(".dv-tab")].map(
+        (tab) =>
+          `${tab.textContent}${tab.querySelector("[data-preview=true]") ? " (preview)" : ""}`,
+      ),
+    )
+    .filter((tabs) => tabs.length > 0);
+
+test("a replacement takes the old editor's group and place, a preview if it was one, whichever group is the active one", async () => {
+  const { editors } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("note://b");
+    editors.open("note://c");
+  });
+  act(() => {
+    editors.moveActive("right");
+  });
+  act(() => {
+    editors.open("note://p", { preview: true });
+  });
+  expect(groupsOf()).toEqual([
+    ["a", "b"],
+    ["c", "p (preview)"],
+  ]);
+
+  act(() => {
+    editors.replace("note://a", "note://x");
+  });
+  expect(groupsOf()).toEqual([
+    ["x", "b"],
+    ["c", "p (preview)"],
+  ]);
+
+  act(() => {
+    editors.replace("note://p", "note://q");
+  });
+  expect(groupsOf()).toEqual([
+    ["x", "b"],
+    ["c", "q (preview)"],
+  ]);
+  expect(editors.active).toBe("note://q");
+});
+
+test("a replacement by an editor that is open already shows that one and closes the old", async () => {
+  const { editors, tabs } = await mounted();
+  act(() => {
+    editors.open("note://a");
+    editors.open("note://b");
+  });
+  act(() => {
+    editors.replace("note://a", "note://b");
+  });
+  expect(tabs()).toEqual([{ title: "b", preview: "false" }]);
+  expect(editors.active).toBe("note://b");
+});
+
 test("opening an open URI focuses it; opening it for good pins it", async () => {
   const { editors, tabs } = await mounted();
   act(() => {
