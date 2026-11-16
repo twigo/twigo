@@ -20,7 +20,13 @@ import {
   type IWatermarkPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
-import { cn, EmptyState, KeyHints, UnsavedMark } from "@twigo/ui";
+import {
+  cn,
+  CutInTheMiddle,
+  EmptyState,
+  KeyHints,
+  UnsavedMark,
+} from "@twigo/ui";
 import {
   EDITOR_COMPONENT,
   EDITOR_TAB,
@@ -35,7 +41,13 @@ import {
   useWorkbench,
 } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
-import { ACTIONS_PADDING, OVERFLOW_BUTTON } from "./strip";
+import {
+  ACTIONS_PADDING,
+  OVERFLOW_BUTTON,
+  TABS_GAP,
+  TABS_START,
+  TITLE_FLOOR,
+} from "./strip";
 import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
@@ -292,7 +304,7 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
 /**
  * The width a group's actions may take without a tab giving way: the
  * strip's, less every tab at the width it asks for (up to 220 px in the
- * editor area), the
+ * editor area), the space before the first tab and between the tabs, the
  * overflow button and the space after the actions. Undefined until
  * measured. Each measure also brings the active tab back into view, since
  * dockview does that only as a tab activates, before the actions settle: by
@@ -313,10 +325,14 @@ function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
         (sum, tab) => sum + (tab as HTMLElement).offsetWidth,
         0,
       );
+      const spaces =
+        list.childElementCount === 0
+          ? 0
+          : TABS_START + TABS_GAP * (list.childElementCount - 1);
       setRoom(
         Math.max(
           0,
-          strip.clientWidth - tabs - OVERFLOW_BUTTON - ACTIONS_PADDING,
+          strip.clientWidth - tabs - spaces - OVERFLOW_BUTTON - ACTIONS_PADDING,
         ),
       );
       const active = list.querySelector<HTMLElement>(".dv-active-tab");
@@ -384,7 +400,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   return (
     <TabTooltip
       tooltip={() => params && provider?.tooltip?.(new URL(params.uri))}
-      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-body"
+      className="flex h-full items-center gap-1.5 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
@@ -398,8 +414,12 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           className="size-4 shrink-0 text-support"
         />
       )}
-      <span data-preview={params?.preview ?? false} className="truncate">
-        {api.title}
+      <span data-preview={params?.preview ?? false} className="min-w-0">
+        <CutInTheMiddle
+          text={api.title ?? ""}
+          floor={TITLE_FLOOR}
+          separator={TITLE_SEPARATOR}
+        />
       </span>
       <button
         type="button"
@@ -454,6 +474,8 @@ const HINTS: readonly { command: string; label: string }[] = [
   { command: "workbench.action.showCommands", label: "Show all commands" },
   { command: "workbench.action.quickOpenHelp", label: "Quick access help" },
 ];
+
+const TITLE_SEPARATOR = /[-:/]/;
 
 const COMPONENTS = { [EDITOR_COMPONENT]: EditorPanel };
 const TABS = { [EDITOR_TAB]: EditorTab };

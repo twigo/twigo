@@ -11,7 +11,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { useActionRoom } from "../react";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
-import { STRIP_KEPT, TAB_MAX } from "./strip";
+import { STRIP_KEPT, TAB_MAX, TITLE_FLOOR } from "./strip";
 
 afterEach(() => {
   cleanup();
@@ -63,6 +63,35 @@ test("a saved layout that does not load is reported and leaves an empty area tha
     [...document.querySelectorAll(".dv-tab")].map((tab) => tab.textContent),
   ).toEqual(["b"]);
   expect(screen.getByText("body of note://b")).toBeTruthy();
+});
+
+test("a tab's title past the floor is cut in the middle and keeps the last part of its name, a shorter one is whole", async () => {
+  const workbench = await testWorkbench();
+  workbench.editors.register({
+    id: "test.note",
+    scheme: "note",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>body of {uri}</p>,
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    workbench.editors.open("note://auth-api-1tvckat-tszk7", {
+      preview: false,
+    });
+  });
+  const parts = [
+    ...document.querySelectorAll(".dv-tab [data-preview] > span > span"),
+  ].map((part) => part.textContent);
+  expect(parts).toEqual(["auth-api-1t", "vckat-", "tszk7"]);
+  expect((parts[0] ?? "").length + (parts[2] ?? "").length).toBe(TITLE_FLOOR);
+
+  act(() => {
+    workbench.editors.open("note://pods", { preview: false });
+  });
+  const whole = [...document.querySelectorAll(".dv-tab [data-preview]")].find(
+    (title) => title.textContent === "pods",
+  );
+  expect(whole?.firstElementChild?.childElementCount).toBe(0);
 });
 
 test("an empty editor area shows the first watermark whose when holds, else its key hints", async () => {
@@ -148,7 +177,7 @@ function fakeResizes() {
   };
 }
 
-test("a group's actions get the strip's width less its tabs, the overflow button and the space after them, as the tabs come and go and the strip resizes", async () => {
+test("a group's actions get the strip's width less its tabs, the space before and between them, the overflow button and the space after them, as the tabs come and go and the strip resizes", async () => {
   const resizes = fakeResizes();
   let strip = 900;
   const tabs: Record<string, number> = { "note://a": 120, "note://b": 220 };
@@ -180,23 +209,23 @@ test("a group's actions get the strip's width less its tabs, the overflow button
       workbench.editors.open("note://a", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 726")).toBeTruthy();
+    expect(screen.getByText("room 722")).toBeTruthy();
 
     act(() => {
       workbench.editors.open("note://b", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 506")).toBeTruthy();
+    expect(screen.getByText("room 500")).toBeTruthy();
 
     strip = 700;
     resizes.report(700);
-    expect(screen.getByText("room 306")).toBeTruthy();
+    expect(screen.getByText("room 300")).toBeTruthy();
 
     act(() => {
       workbench.editors.close("note://b");
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 526")).toBeTruthy();
+    expect(screen.getByText("room 522")).toBeTruthy();
   } finally {
     resizes.restore();
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");

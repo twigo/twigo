@@ -67,7 +67,7 @@ const typed = () =>
     ?.value.toString() ?? "";
 
 const withRoom = (room: number) => {
-  layout.resize(strip(), room + 54);
+  layout.resize(strip(), room + 58);
 };
 
 const counted = (row: HTMLElement) =>
