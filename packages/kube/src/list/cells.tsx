@@ -1,7 +1,7 @@
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
-import { ageRole, printedAt, restartedRecently } from "../age";
+import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
@@ -36,9 +36,10 @@ function Age({ created }: { created: string }) {
  */
 function Since({ text, received }: { text: string; received: string }) {
   const at = printedAt(received, text);
-  const shown = useNowAs((now) =>
-    at === undefined ? text : humanDuration(now - at),
-  );
+  const shown = useNowAs((now) => {
+    const age = printedAge(at, now);
+    return age === undefined ? text : humanDuration(age);
+  });
   return <>{shown}</>;
 }
 
@@ -180,12 +181,14 @@ function Restarts({
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
   const at = ago === undefined ? undefined : printedAt(received, ago);
-  const shown = useNowAs((now) =>
-    at === undefined ? ago : humanDuration(now - at),
-  );
-  const recent = useNowAs(
-    (now) => !alarmed && at !== undefined && restartedRecently(now - at),
-  );
+  const shown = useNowAs((now) => {
+    const age = printedAge(at, now);
+    return age === undefined ? ago : humanDuration(age);
+  });
+  const recent = useNowAs((now) => {
+    const age = printedAge(at, now);
+    return !alarmed && age !== undefined && restartedRecently(age);
+  });
   return (
     <>
       <span

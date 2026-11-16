@@ -111,11 +111,12 @@ const cellOf = (
   tone: "error" | "warn" | undefined,
   kind: Column["kind"] = "string",
   alarmed = false,
+  received = RECEIVED,
 ) => {
   const row: Row = {
     id: "r",
     created: null,
-    received: RECEIVED,
+    received,
     generated: null,
     cells: [cell],
   };
@@ -403,6 +404,50 @@ test("a time since something else that the server printed grows too, whether a k
     const container = cellOf(gvr, name, none, undefined, kind);
     advance(60_000);
     expect([name, container.textContent]).toEqual([name, none]);
+    cleanup();
+  }
+});
+
+test("a stamp that cannot be read leaves the text as the server printed it, in the plain step", () => {
+  const unusable = [
+    "not a time",
+    "",
+    new Date(Date.parse(RECEIVED) + 10 * 60_000).toISOString(),
+  ];
+  for (const received of unusable) {
+    vi.setSystemTime(Date.parse(RECEIVED));
+    const restart = cellOf(
+      PODS,
+      "Restarts",
+      "3 (5m ago)",
+      undefined,
+      "integer",
+      false,
+      received,
+    );
+    const [count, ago] = Array.from(restart.querySelectorAll("span"));
+    expect([received, count?.textContent, ago?.textContent]).toEqual([
+      received,
+      "3",
+      "5m ago",
+    ]);
+    expect(restart.querySelector(".text-warn-foreground")).toBeNull();
+    expect(ago?.classList.contains("text-support")).toBe(true);
+    const since = cellOf(
+      { group: "batch", version: "v1", resource: "cronjobs" },
+      "Last Schedule",
+      "1m",
+      undefined,
+      "string",
+      false,
+      received,
+    );
+    advance(60_000);
+    expect([received, restart.textContent, since.textContent]).toEqual([
+      received,
+      "35m ago",
+      "1m",
+    ]);
     cleanup();
   }
 });
