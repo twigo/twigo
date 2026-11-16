@@ -8,8 +8,8 @@ export const TITLE_FLOOR = 16;
 export const TABS_START = 4;
 export const TABS_GAP = 2;
 
-/** What a group's strip keeps free for dockview's overflow button, with room for a count of two digits. */
-export const OVERFLOW_BUTTON = 48;
+/** What a group's strip keeps free for dockview's overflow button: its 24 px and the 4 px after it. */
+export const OVERFLOW_BUTTON = 28;
 
 /** The space after a group's actions, at the strip's right end. */
 export const ACTIONS_PADDING = 6;

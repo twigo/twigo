@@ -269,23 +269,23 @@ test("a group's actions get the strip's width less its tabs, the space before an
       workbench.editors.open("note://a", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 722")).toBeTruthy();
+    expect(screen.getByText("room 742")).toBeTruthy();
 
     act(() => {
       workbench.editors.open("note://b", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 500")).toBeTruthy();
+    expect(screen.getByText("room 520")).toBeTruthy();
 
     strip = 700;
     resizes.report(700);
-    expect(screen.getByText("room 300")).toBeTruthy();
+    expect(screen.getByText("room 320")).toBeTruthy();
 
     act(() => {
       workbench.editors.close("note://b");
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 522")).toBeTruthy();
+    expect(screen.getByText("room 542")).toBeTruthy();
   } finally {
     resizes.restore();
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");

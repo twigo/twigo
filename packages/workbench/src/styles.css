@@ -128,6 +128,57 @@
 .twigo-dockview .dv-tab [data-session="ended"] .lucide:not(.twigo-tab-x) {
   opacity: 0.5;
 }
+/* Dockview's overflow button, when the tabs outgrow the strip: an icon alone,
+   so its count of hidden tabs goes, and 24 px of it with 4 px after it
+   (`OVERFLOW_BUTTON` in strip.ts). */
+.twigo-dockview .dv-tabs-overflow-dropdown-root {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+.twigo-dockview .dv-tabs-overflow-dropdown-default {
+  box-sizing: border-box;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--support);
+}
+.twigo-dockview .dv-tabs-overflow-dropdown-default:hover {
+  border-radius: 6px;
+  background-color: var(--row-hover);
+}
+.twigo-dockview .dv-tabs-overflow-dropdown-default > span {
+  display: none;
+}
+/* Its list opens as Twigo's menus do: a popover of 8 px radius with 4 px of
+   padding, and rows of 28 px with 4 px, one step in. Dockview puts it at the
+   pointer, not under the button, so it is pushed down by half the button and
+   the 4 px of a menu's offset. */
+.twigo-dockview .dv-tabs-overflow-container {
+  box-sizing: border-box;
+  min-width: 176px;
+  margin-top: 16px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background-color: color-mix(in oklab, var(--popover) 90%, transparent);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px);
+  color: var(--popover-foreground);
+}
+.twigo-dockview .dv-tabs-overflow-container .dv-tab {
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 6px 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background-color: transparent;
+}
+.twigo-dockview .dv-tabs-overflow-container .dv-tab:hover {
+  background-color: var(--accent);
+}
 /* Close shows on the active tab or on hover. */
 .twigo-dockview .dv-tab .twigo-tab-close {
   opacity: 0;
