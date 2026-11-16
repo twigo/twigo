@@ -93,6 +93,22 @@
   gap: 2px;
   padding-left: 4px;
 }
+/* The strip's bottom edge is 68 px down, a fractional device pixel at most
+   interface zooms, and the edge of anything drawn there is anti-aliased: the
+   active tab, clipped by its scrolling list at that edge, left a faint row of
+   the strip's line and fill under itself. The list reaches 2 px past the strip,
+   under the content, which paints above it and takes the pointer there, and
+   the active tab's fill goes down to the list's edge. */
+.twigo-dockview .dv-tabs-container {
+  box-sizing: border-box;
+  height: calc(100% + 2px);
+  margin-bottom: -2px;
+  padding-bottom: 2px;
+}
+.twigo-dockview .dv-groupview > .dv-content-container {
+  position: relative;
+  z-index: 1;
+}
 /* A tab keeps a 1 px transparent edge on its left, top and right, so that the
    active tab's line moves nothing. */
 .twigo-dockview .dv-tabs-container > .dv-tab {
@@ -128,6 +144,7 @@
    content. */
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab {
   border-color: var(--border);
+  box-shadow: 0 2px 0 var(--editor);
 }
 /* Dockview's colour rules for a group's tabs outrank any rule of ours on the
    tab itself, so the hover fill goes in by the variables they read. */
