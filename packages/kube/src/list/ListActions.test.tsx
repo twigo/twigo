@@ -6,6 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { createMockBackend } from "@twigo/protocol/mock";
 import { STRIP_KEPT } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
 import { openList, settle, withScreenSize } from "../../test/workbench";
@@ -708,4 +709,46 @@ test("the least a list keeps beside docked details counts the chip at its glyph"
   expect(grid().parentElement?.style.minWidth).toBe(
     `${String(STRIP_KEPT + (TAKES[4] ?? 0) + GAP + CHIP_GLYPH)}px`,
   );
+});
+
+test("the chip keeps its form and the focus on its close mark while the strip narrows, and folds once the focus leaves it", async () => {
+  await scopedList(["payments"]);
+  withRoom(900);
+  const close = screen.getByRole("button", { name: "Show all namespaces" });
+  act(() => {
+    close.focus();
+  });
+  withRoom(100);
+  expect(document.activeElement).toBe(close);
+  expect([stageOf(actions()), formOf()]).toEqual([0, "whole"]);
+
+  act(() => {
+    close.blur();
+  });
+  expect([stageOf(actions()), formOf()]).toEqual([4, "glyph"]);
+});
+
+test("the close mark of a list that follows the space leaves the focus in the list's editor when the wider list has no grid to take it", async () => {
+  laidOutScoped();
+  const workbench = await openList(createMockBackend("rbacNamespaces"));
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["default"],
+    }));
+  });
+  await settle(2);
+  expect(screen.queryByRole("grid")).not.toBeNull();
+
+  const close = screen.getByRole("button", { name: "Show all namespaces" });
+  act(() => {
+    close.focus();
+  });
+  fireEvent.click(close);
+  await settle(3);
+  expect(screen.queryByRole("grid")).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(
+    document.querySelector(".dv-groupview")?.contains(document.activeElement),
+  ).toBe(true);
 });

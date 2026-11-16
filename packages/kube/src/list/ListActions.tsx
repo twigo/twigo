@@ -248,8 +248,10 @@ function Actions({
   // A stage's width is read as it shows, before it paints. While the field
   // or its Clear button has the focus no stage moves, since the text changes
   // the counts' width and a stage that moved would shift the field under the
-  // caret, or replace it and take the focus with it. While the filter's
-  // popover is open the filter stays an icon, wherever the focus is in it.
+  // caret, or replace it and take the focus with it. The same holds while
+  // the focus is in the scope chip, whose close mark a fold would unmount and
+  // drop the focus with. While the filter's popover is open the filter stays
+  // an icon, wherever the focus is in it.
   // The last stage's width is the least a list beside docked details keeps
   // for its strip, so it is read as soon as the row shows what it will, on a
   // turn to that stage and back that never paints, once nothing in the row
@@ -272,20 +274,24 @@ function Actions({
       states.setStripMin(uri, STRIP_KEPT + rest + gap + glyph);
     }
     const left = room - inspector - (rest ?? 0) - gap;
+    const inField = fieldBox.current?.contains(document.activeElement) === true;
+    const inChip = chipBox.current?.contains(document.activeElement) === true;
+    const focused = inField || inChip;
     setChip((was) =>
-      scoped && stage === STAGES.health && rest !== undefined
-        ? chipFor(
-            left,
-            {
-              full: whole,
-              floor,
-              count: several ? count : undefined,
-            },
-            was,
-          )
-        : NO_CHIP,
+      inChip
+        ? was
+        : scoped && stage === STAGES.health && rest !== undefined
+          ? chipFor(
+              left,
+              {
+                full: whole,
+                floor,
+                count: several ? count : undefined,
+              },
+              was,
+            )
+          : NO_CHIP,
     );
-    const focused = fieldBox.current?.contains(document.activeElement) === true;
     if (back.current !== undefined) {
       setStage(back.current);
       back.current = undefined;

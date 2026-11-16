@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Columns3 } from "lucide-react";
 import {
   type ListQuery,
@@ -104,7 +110,8 @@ function Grid({
   onRetry: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, spaces, menus, keys, commands, catalog } = workbench;
+  const { backend, spaces, menus, keys, commands, catalog, editors } =
+    workbench;
   const {
     presets,
     states,
@@ -414,6 +421,12 @@ function Grid({
     },
     [register, grids, uri],
   );
+  const problem = isProblem(snapshot.status.state);
+  // The problem takes the grid's place, and with it the focus it held, which
+  // falls to the page.
+  useLayoutEffect(() => {
+    if (problem) editors.keepFocus("editor");
+  }, [problem, editors]);
   const lookup = keys.lookup(grid);
   const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
     commands.referenced(prefix),
@@ -445,7 +458,7 @@ function Grid({
     };
   };
 
-  if (isProblem(snapshot.status.state))
+  if (problem)
     return (
       <ViewStatus
         status={snapshot.status}
