@@ -517,7 +517,7 @@ describe("an open object", () => {
     await settle(1);
     expect(usage()).toBe(true);
 
-    fireEvent.click(screen.getByText("YAML"));
+    fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
     await settle();
     expect(usage()).toBe(false);
   });
