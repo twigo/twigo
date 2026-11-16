@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 export interface Tab<V extends string> {
   readonly value: V;
@@ -26,7 +27,18 @@ export interface Tab<V extends string> {
 }
 
 const PLATE =
-  "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-body whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]";
+  "h-6 items-center rounded-md px-2 text-body whitespace-nowrap outline-none focus-visible:shadow-[var(--focus-ring)]";
+
+/**
+ * A tab's plate keeps its natural width until its row is too narrow, then
+ * lets the label's column down to 2em and never the count's. A flex item's
+ * own minimum would be the whole label, and below 2em an ellipsis shows a
+ * letter alone, since the first character on a line is clipped, not ellipsed.
+ */
+const TAB_PLATE = cn(
+  PLATE,
+  "inline-grid auto-cols-max grid-flow-col grid-cols-[minmax(2em,max-content)] gap-x-1.5",
+);
 
 /** Below this much spare width a row keeps the fold it narrowed to, so that a width on a boundary does not flicker. */
 const MARGIN = 16;
@@ -64,7 +76,7 @@ function fitFold(
 function Face<V extends string>({ tab }: { tab: Tab<V> }) {
   return (
     <>
-      {tab.label}
+      <span className="truncate">{tab.label}</span>
       {tab.count !== undefined && tab.count > 0 && (
         <span className="inline-flex items-center gap-1 text-label">
           {tab.warn && (
@@ -83,7 +95,7 @@ function Face<V extends string>({ tab }: { tab: Tab<V> }) {
 
 const MORE_PLATE = cn(
   PLATE,
-  "text-support hover:bg-row-hover data-[state=open]:bg-row-hover",
+  "inline-flex shrink-0 gap-1.5 text-support hover:bg-row-hover data-[state=open]:bg-row-hover",
 );
 
 function MoreFace({ warns }: { warns: boolean }) {
@@ -129,7 +141,9 @@ function Measured({
  * others bare until hovered. Tab reaches the shown one, and the keys move
  * between the tabs as the WAI-ARIA tabs pattern has it, showing the tab they
  * reach. As the row narrows the last tabs fold into More, which opens them
- * as a menu; the shown tab never folds.
+ * as a menu; the shown tab never folds, and where even it and More are too
+ * wide for the row its label is cut, down to a floor, and a tooltip says it
+ * whole.
  */
 export function TabBar<V extends string>({
   label,
@@ -153,12 +167,11 @@ export function TabBar<V extends string>({
   const active = tabs.findIndex((tab) => tab.value === value);
   const stages = tabs.map((_, stage) => stage);
   const [count, setCount] = useState(0);
-  const fitted = fitFold(
-    width,
-    stages.map((stage) => needs[stage] ?? 0),
-    count,
-  );
+  const need = stages.map((stage) => needs[stage] ?? 0);
+  const fitted = fitFold(width, need, count);
   if (fitted !== count) setCount(fitted);
+  const last = tabs.length - 1;
+  const cut = fitted === last && width > 0 && (need[last] ?? 0) > width;
   const folded = foldedAt(fitted, active, tabs.length);
   const shown = tabs.filter((_, index) => !folded.has(index));
   const hidden = tabs.filter((_, index) => folded.has(index));
@@ -180,33 +193,38 @@ export function TabBar<V extends string>({
     >
       <div role="tablist" aria-label={label} className="flex gap-0.5">
         {shown.map((tab, index) => (
-          <button
-            key={tab.value}
-            type="button"
-            role="tab"
-            aria-selected={tab.value === value}
-            tabIndex={tab.value === value ? 0 : -1}
-            onClick={() => {
-              onChange(tab.value);
-            }}
-            onKeyDown={(event) => {
-              const to = rovingMove(event.key, index, shown.length);
-              if (to === undefined) return;
-              event.preventDefault();
-              const next = shown[to];
-              if (!next) return;
-              onChange(next.value);
-              event.currentTarget.parentElement
-                ?.querySelectorAll<HTMLElement>('[role="tab"]')
-                [to]?.focus();
-            }}
-            className={cn(
-              PLATE,
-              "text-support hover:bg-row-hover aria-selected:bg-row-active aria-selected:text-content",
-            )}
-          >
-            <Face tab={tab} />
-          </button>
+          <Tooltip key={tab.value}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab.value === value}
+                tabIndex={tab.value === value ? 0 : -1}
+                onClick={() => {
+                  onChange(tab.value);
+                }}
+                onKeyDown={(event) => {
+                  const to = rovingMove(event.key, index, shown.length);
+                  if (to === undefined) return;
+                  event.preventDefault();
+                  const next = shown[to];
+                  if (!next) return;
+                  onChange(next.value);
+                  event.currentTarget.parentElement
+                    ?.querySelectorAll<HTMLElement>('[role="tab"]')
+                    [to]?.focus();
+                }}
+                className={cn(
+                  TAB_PLATE,
+                  cut ? "shrink" : "shrink-0",
+                  "text-support hover:bg-row-hover aria-selected:bg-row-active aria-selected:text-content",
+                )}
+              >
+                <Face tab={tab} />
+              </button>
+            </TooltipTrigger>
+            {cut && <TooltipContent>{tab.label}</TooltipContent>}
+          </Tooltip>
         ))}
       </div>
       {hidden.length > 0 && (
@@ -260,7 +278,7 @@ export function TabBar<V extends string>({
               {tabs.map(
                 (tab, index) =>
                   !away.has(index) && (
-                    <span key={tab.value} className={PLATE}>
+                    <span key={tab.value} className={cn(TAB_PLATE, "shrink-0")}>
                       <Face tab={tab} />
                     </span>
                   ),

@@ -232,6 +232,25 @@ test("a pick from More puts the focus on the picked tab", async () => {
   });
 });
 
+test("where even the last fold is wider than the row, the shown tab keeps its whole name as a tooltip, and only then", async () => {
+  render(<Views />);
+  layOut(149, NEEDS);
+  expect(names()).toEqual(["Overview"]);
+  expect(more()).not.toBeNull();
+  act(() => {
+    tab("Overview").focus();
+  });
+  expect((await screen.findByRole("tooltip")).textContent).toBe("Overview");
+  cleanup();
+  render(<Views />);
+  layOut(150, NEEDS);
+  expect(names()).toEqual(["Overview"]);
+  act(() => {
+    tab("Overview").focus();
+  });
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
 test("the arrows, Home and End move among the tabs that show, and the focus follows", () => {
   render(<Views />);
   layOut(240, NEEDS);
