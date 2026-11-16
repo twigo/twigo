@@ -318,38 +318,6 @@ export class Editors {
   }
 
   /**
-   * Puts an editor of the same kind in another's place: in its group, at its
-   * tab's position and a preview if it was one, so the layout the person
-   * built stays, and the group does not have to be the active one. An editor
-   * already open for `next` is shown where it is, as {@link open} shows it,
-   * and `uri` closes.
-   */
-  replace(uri: string, next: string): void {
-    const old = this.#find(uri);
-    const provider = this.resolve(next);
-    if (!old || !provider || this.#find(next)) {
-      this.open(next);
-      this.close(uri);
-      return;
-    }
-    const { area, api, panel: previous } = old;
-    const group = previous.group;
-    const panel = api.addPanel({
-      id: next,
-      component: EDITOR_COMPONENT,
-      tabComponent: EDITOR_TAB,
-      title: provider.title(new URL(next)),
-      params: { uri: next, preview: paramsOf(previous)?.preview === true },
-      position: {
-        referenceGroup: group,
-        index: group.panels.indexOf(previous),
-      },
-    });
-    this.#focusOpened(area, panel, false);
-    this.close(uri);
-  }
-
-  /**
    * A click on an editor's tab, as VS Code's tab control does on mouse down:
    * the editor shows, its group becomes the active one, and the editor takes
    * the focus through its provider's `focus`. A preview stays one.
@@ -665,12 +633,10 @@ export class Editors {
     return false;
   }
 
-  #find(
-    uri: string,
-  ): { area: Area; api: DockviewApi; panel: IDockviewPanel } | undefined {
+  #find(uri: string): { area: Area; panel: IDockviewPanel } | undefined {
     for (const [area, api] of this.#apis) {
       const panel = api.getPanel(uri);
-      if (panel) return { area, api, panel };
+      if (panel) return { area, panel };
     }
     return undefined;
   }
