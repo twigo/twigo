@@ -20,6 +20,8 @@ interface State {
   readonly focus: boolean;
   /** The view the row's details show, kept as the selection moves. */
   readonly details: ObjectTab;
+  /** Whether the details are open, as the list's editor last showed them. */
+  readonly detailsOpen: boolean;
   /** The width the details beside the list take from it, in px; 0 without them. */
   readonly inspector: number;
   /** The width the list keeps for its group's strip, in px; 0 until the strip's actions have shown their last stage. */
@@ -32,6 +34,7 @@ const INITIAL: State = {
   collapsed: new Set(),
   focus: false,
   details: "overview",
+  detailsOpen: false,
   inspector: 0,
   stripMin: 0,
   countDigits: {},
@@ -44,7 +47,9 @@ const INITIAL: State = {
  * mounts again shows the same. A list that closes opens again with the text
  * and health of its URI (4.4). The room its details take from it is 0 once
  * the editor unmounts, and the width its strip needs stays as its actions
- * last measured it, as does the room its health counts keep.
+ * last measured it, as does the room its health counts keep. Whether its
+ * details are open is the editor's to publish, for the list that takes its
+ * place, and goes with it.
  */
 export class ListStates {
   readonly changes = new Changes();
@@ -117,6 +122,15 @@ export class ListStates {
     if (this.#get(uri).details !== details) this.#update(uri, { details });
   }
 
+  detailsOpen(uri: string): boolean {
+    return this.#get(uri).detailsOpen;
+  }
+
+  setDetailsOpen(uri: string, detailsOpen: boolean): void {
+    if (this.#get(uri).detailsOpen !== detailsOpen)
+      this.#update(uri, { detailsOpen });
+  }
+
   inspector(uri: string): number {
     return this.#get(uri).inspector;
   }
@@ -148,6 +162,21 @@ export class ListStates {
       this.#measure(uri, {
         countDigits: { ...kept, ...Object.fromEntries(wider) },
       });
+  }
+
+  /**
+   * What the list `to` that takes `from`'s place keeps of it: how it is
+   * sorted, its collapsed groups, and the details, open or not, in the view
+   * they show. Its text and health come with its URI.
+   */
+  carry(from: string, to: string): void {
+    const { sort, collapsed, details, detailsOpen } = this.#get(from);
+    this.#update(to, {
+      ...(sort && { sort }),
+      collapsed,
+      details,
+      detailsOpen,
+    });
   }
 
   /** The list's editor closed: the text and health picked in it go. */

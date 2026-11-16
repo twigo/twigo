@@ -147,7 +147,9 @@ function Loaded({
     ...rowState(resource, selected),
     [MARKED_DELETE]: capabilities.marked(uri),
   });
-  const [open, setOpen] = useState(selected?.reveal === true);
+  const [open, setOpen] = useState(
+    selected?.reveal === true || states.detailsOpen(uri),
+  );
   const [revealed, setRevealed] = useState(selected);
   if (selected !== revealed) {
     setRevealed(selected);
@@ -174,6 +176,15 @@ function Loaded({
   useEffect(() => {
     states.setInspector(uri, inspector);
   }, [states, uri, inspector]);
+  useEffect(() => {
+    states.setDetailsOpen(uri, open);
+  }, [states, uri, open]);
+  useEffect(
+    () => () => {
+      states.setDetailsOpen(uri, false);
+    },
+    [states, uri],
+  );
   useEffect(
     () => () => {
       states.setInspector(uri, 0);
