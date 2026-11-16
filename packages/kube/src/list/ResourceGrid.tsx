@@ -42,7 +42,7 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
-import { raisesAlarm } from "./alarm";
+import { decideRows } from "./alarm";
 import { CellView, type ShownColumn } from "./cells";
 import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
@@ -297,6 +297,10 @@ function Grid({
       ),
     [grouping, snapshot.groups, snapshot.total],
   );
+  const decide = decideRows(
+    (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    columns,
+  );
   const item = (index: number): GridItem<Row, RowGroup> | undefined => {
     const slot = items.at(index);
     if (!slot) return undefined;
@@ -310,7 +314,7 @@ function Grid({
     const id = snapshot.ids[slot.row - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const tone = rowTone(gvr, countBy, snapshot.columns, row);
+    const { tone } = decide(row);
     return {
       type: "row",
       id: row.id,
@@ -475,13 +479,13 @@ function Grid({
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
         if (!shownColumn) return undefined;
-        const tone = rowTone(gvr, countBy, snapshot.columns, row);
+        const { tone, alarmed } = decide(row);
         return (
           <CellView
             row={row}
             column={shownColumn}
             tone={tone}
-            alarmed={raisesAlarm(row, columns, tone)}
+            alarmed={alarmed}
           />
         );
       }}

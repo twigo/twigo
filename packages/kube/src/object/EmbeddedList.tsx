@@ -29,7 +29,7 @@ import {
   type CellKind,
 } from "../columns";
 import { kindIcon } from "../kinds";
-import { raisesAlarm } from "../list/alarm";
+import { decideRows } from "../list/alarm";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { metricsNote, readsMetrics } from "../list/metrics";
@@ -145,11 +145,15 @@ export function EmbeddedList({
   useEffect(() => {
     setMetrics(reads);
   }, [setMetrics, reads]);
+  const decide = decideRows(
+    (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    columns,
+  );
   const item = (index: number): GridItem<Row, never> | undefined => {
     const id = snapshot.ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const tone = rowTone(gvr, countBy, snapshot.columns, row);
+    const { tone } = decide(row);
     return {
       type: "row",
       id: row.id,
@@ -236,13 +240,13 @@ export function EmbeddedList({
           cell={(row, column) => {
             const shown = byName.get(column.id);
             if (!shown) return undefined;
-            const tone = rowTone(gvr, countBy, snapshot.columns, row);
+            const { tone, alarmed } = decide(row);
             return (
               <CellView
                 row={row}
                 column={shown}
                 tone={tone}
-                alarmed={raisesAlarm(row, columns, tone)}
+                alarmed={alarmed}
               />
             );
           }}

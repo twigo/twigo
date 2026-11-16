@@ -28,3 +28,29 @@ export function raisesAlarm(
     )
   );
 }
+
+interface RowDecision {
+  readonly tone: Tone | undefined;
+  readonly alarmed: boolean;
+}
+
+/**
+ * A row's tone and alarm, decided once for its item and all its cells. It
+ * remembers rows against the columns of the render that made it, so a grid
+ * makes one in its body and keeps none beyond it.
+ */
+export function decideRows(
+  toneOf: (row: Row) => Tone | undefined,
+  columns: readonly ShownColumn[],
+): (row: Row) => RowDecision {
+  const decided = new Map<Row, RowDecision>();
+  return (row) => {
+    let decision = decided.get(row);
+    if (!decision) {
+      const tone = toneOf(row);
+      decision = { tone, alarmed: raisesAlarm(row, columns, tone) };
+      decided.set(row, decision);
+    }
+    return decision;
+  };
+}
