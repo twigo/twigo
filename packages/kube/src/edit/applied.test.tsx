@@ -50,8 +50,8 @@ test("an applied edit never shows the object as it was, though the object comes 
   });
   await settle();
   act(() => {
-    within(screen.getByRole("group", { name: "Views of the object" }))
-      .getByRole("button", { name: "YAML" })
+    within(screen.getByRole("tablist", { name: "Views of the object" }))
+      .getByRole("tab", { name: "YAML" })
       .click();
   });
   await settle();

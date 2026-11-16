@@ -10,7 +10,7 @@ import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
 import { ListEditor } from "./list/ListEditor";
 import { clusterEntries, listEntries } from "./list/statusEntries";
-import { ObjectEditor, ObjectTabSwitch } from "./object/ObjectEditor";
+import { ObjectActions, ObjectEditor } from "./object/ObjectEditor";
 import { ObjectTabs } from "./object/tabs";
 import {
   listProvider,
@@ -135,7 +135,7 @@ export function registerKube(workbench: Workbench): void {
         edits={services.edits}
       />
     ),
-    actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
+    actions: ({ uri }) => <ObjectActions uri={uri} />,
     focus: (uri) => {
       if (objectTabs.get(uri) === "yaml") services.edits.copies.focus(uri);
     },

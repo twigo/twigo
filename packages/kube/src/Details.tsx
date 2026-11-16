@@ -8,7 +8,6 @@ import {
   LinkButton,
   Pill,
   PropertyList,
-  TabBar,
 } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
@@ -19,7 +18,7 @@ import { KindIcon } from "./KindIcon";
 import { measureText } from "./list/metrics";
 import { ObjectName } from "./ObjectName";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
-import { OBJECT_TABS } from "./object/tabs";
+import { ObjectViews } from "./object/ObjectViews";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
 import { refResource, refUri, useObject } from "./object/useObject";
@@ -134,7 +133,6 @@ export function Details({
     typeof status === "string"
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
-  const warnings = warningCount(snapshot.overview, snapshot.events?.events);
   const idle = tab === "overview" && noContainerRuns(snapshot.overview);
   useEffect(() => {
     if (!element) return;
@@ -298,14 +296,9 @@ export function Details({
           className="-ml-1.5"
         />
       </header>
-      <TabBar
-        label="Views of the object"
-        tabs={OBJECT_TABS.map(({ id, title }) => ({
-          value: id,
-          label: title,
-          ...(id === "events" && { count: warnings, warn: true }),
-        }))}
-        value={tab}
+      <ObjectViews
+        tab={tab}
+        snapshot={snapshot}
         onChange={(next) => {
           states.setDetailsTab(uri, next);
         }}
@@ -342,19 +335,6 @@ export function Details({
       </div>
     </aside>
   );
-}
-
-/** Warning events of the object, from its Overview or its Events view, whichever came. */
-function warningCount(
-  overview: Overview | undefined,
-  events: readonly { readonly type: string }[] | undefined,
-): number {
-  const listed =
-    events ??
-    overview?.sections
-      .flatMap((section) => section.blocks)
-      .flatMap((block) => (block.type === "events" ? block.events : []));
-  return (listed ?? []).filter((event) => event.type === "Warning").length;
 }
 
 /** Whether the Overview lists containers and none of them runs: false while it lists none, as before it comes. */

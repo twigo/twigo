@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import type { ObjectRef } from "@twigo/protocol";
-import { EmptyState, InlineActions, Segmented } from "@twigo/ui";
+import { EmptyState, InlineActions } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import {
   hasStatusSubresource,
@@ -15,8 +15,9 @@ import { logsKind } from "../logs/entries";
 import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
 import { ObjectContent } from "./ObjectContent";
+import { ObjectViews } from "./ObjectViews";
 import type { OverviewStates } from "./overviewStates";
-import { OBJECT_TABS, type ObjectTab, type ObjectTabs } from "./tabs";
+import type { ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
 import { hasUsage } from "./figures";
 import { objectQuery, refUri, useObject } from "./useObject";
@@ -76,61 +77,65 @@ export function ObjectEditor({
     editors.open(next, { preview: true });
   };
   return (
-    <ObjectContent
-      tab={tab}
-      space={input.space}
-      states={overviews}
-      kind={`${input.gvr.group}/${input.gvr.resource}`}
-      snapshot={snapshot}
-      values={values}
-      reveal={reveal}
-      onOpen={open}
-      yaml={(json) => (
-        <YamlTab
-          edits={edits}
-          uri={uri}
+    <div className="flex h-full min-h-0 flex-col bg-editor">
+      <ObjectViews
+        tab={tab}
+        snapshot={snapshot}
+        onChange={(next) => {
+          tabs.set(uri, next);
+        }}
+      />
+      <div className="min-h-0 flex-1">
+        <ObjectContent
+          tab={tab}
           space={input.space}
-          json={json}
-          statusLocked={statusLocked}
+          states={overviews}
+          kind={`${input.gvr.group}/${input.gvr.resource}`}
+          snapshot={snapshot}
+          values={values}
+          reveal={reveal}
+          onOpen={open}
+          yaml={(json) => (
+            <YamlTab
+              edits={edits}
+              uri={uri}
+              space={input.space}
+              json={json}
+              statusLocked={statusLocked}
+            />
+          )}
+          {...(opened !== undefined && {
+            kept: (problem: { title: string; body: string }) => (
+              <YamlTab
+                edits={edits}
+                uri={uri}
+                space={input.space}
+                json={opened}
+                statusLocked={statusLocked}
+                gone={problem}
+              />
+            ),
+          })}
+          {...(input.namespace !== undefined && {
+            onLogs: (choice) => {
+              void commands.execute("k8s.logs.open", keys.lookup(null), {
+                space: input.space,
+                gvr: input.gvr,
+                namespace: input.namespace,
+                name: input.name,
+                ...choice,
+              });
+            },
+          })}
         />
-      )}
-      {...(opened !== undefined && {
-        kept: (problem: { title: string; body: string }) => (
-          <YamlTab
-            edits={edits}
-            uri={uri}
-            space={input.space}
-            json={opened}
-            statusLocked={statusLocked}
-            gone={problem}
-          />
-        ),
-      })}
-      {...(input.namespace !== undefined && {
-        onLogs: (choice) => {
-          void commands.execute("k8s.logs.open", keys.lookup(null), {
-            space: input.space,
-            gvr: input.gvr,
-            namespace: input.namespace,
-            name: input.name,
-            ...choice,
-          });
-        },
-      })}
-    />
+      </div>
+    </div>
   );
 }
 
-/** The editor's views as a switch at the right of its group's tab bar. */
-export function ObjectTabSwitch({
-  uri,
-  tabs,
-}: {
-  uri: string;
-  tabs: ObjectTabs;
-}) {
+/** The editor's own commands, at the right of its group's tab bar. */
+export function ObjectActions({ uri }: { uri: string }) {
   const workbench = useWorkbench();
-  useChanges(tabs.changes);
   useChanges(workbench.menus.changes);
   useChanges(workbench.keys.changes);
   const input = parseObjectUri(uri);
@@ -149,29 +154,16 @@ export function ObjectTabSwitch({
     return lookup(key);
   };
   return (
-    <div className="flex items-center gap-2">
-      <InlineActions
-        actions={workbench
-          .actions(
-            "editor/title",
-            scoped,
-            input?.namespace === undefined
-              ? undefined
-              : { ...input, namespace: input.namespace },
-          )
-          .flat()}
-      />
-      <Segmented<ObjectTab>
-        label="Views of the object"
-        items={OBJECT_TABS.map(({ id, title }) => ({
-          value: id,
-          label: title,
-        }))}
-        value={tabs.get(uri)}
-        onChange={(value) => {
-          tabs.set(uri, value);
-        }}
-      />
-    </div>
+    <InlineActions
+      actions={workbench
+        .actions(
+          "editor/title",
+          scoped,
+          input?.namespace === undefined
+            ? undefined
+            : { ...input, namespace: input.namespace },
+        )
+        .flat()}
+    />
   );
 }
