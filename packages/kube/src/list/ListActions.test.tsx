@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { STRIP_KEPT } from "@twigo/workbench";
+import { tabsIn } from "@twigo/workbench/testing";
 import { openList, settle, withScreenSize } from "../../test/workbench";
 
 const layout = withScreenSize(1280);
@@ -474,4 +475,158 @@ test("the list in the strip is its own: a list with narrower actions does not in
   });
   await settle();
   expect(stageOf(actions())).toBe(3);
+});
+
+const CHIP_FULL = 140;
+const CHIP_FLOOR = 90;
+const GAP = 8;
+
+/** The row's width as the browser lays it out with the scope chip in it: the stage's own, and the chip at its width, cut by the maxWidth its owner gives it down to its floor. */
+function laidOutScoped() {
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const row = screen.queryByRole("button", {
+        name: /to the explorer$/,
+      })?.parentElement;
+      if (!row) return 0;
+      const hidden = row.querySelector(":scope > [aria-hidden]");
+      if (this === hidden?.children[0]) return CHIP_FULL;
+      if (this === hidden?.children[1]) return CHIP_FLOOR;
+      const shown = row.querySelector<HTMLElement>("[aria-label^='Namespace']")
+        ?.parentElement?.parentElement;
+      const set = shown?.firstElementChild
+        ?.getAttribute("style")
+        ?.match(/max-width: (\d+)/)?.[1];
+      const max = set === undefined ? Infinity : Number(set);
+      const chip = Math.max(CHIP_FLOOR, Math.min(CHIP_FULL, max));
+      if (this === shown) return chip;
+      return this === row
+        ? (TAKES[stageOf(this)] ?? 0) + (shown ? GAP + chip : 0)
+        : 0;
+    },
+  });
+}
+
+async function scopedList(names: readonly string[], uri?: string) {
+  laidOutScoped();
+  const workbench = await openList(undefined, uri);
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: names,
+    }));
+  });
+  await settle(1);
+  return workbench;
+}
+
+const chip = (name: string | RegExp = /^Namespaces?: /) =>
+  screen.getByRole("button", { name });
+const noChip = () =>
+  screen.queryByRole("button", { name: /^Namespaces?: / }) === null &&
+  screen.queryByRole("group", { name: /^Namespaces?: / }) === null;
+const chipRoot = () => chip().parentElement;
+
+test("a narrowed scope shows as a chip with the name, and several namespaces as the first and how many more, the whole list in its label", async () => {
+  await scopedList(["payments"]);
+  expect(chip("Namespace: payments").textContent).toBe("payments");
+
+  cleanup();
+  await scopedList(["payments", "auth", "default"]);
+  expect(chip("Namespaces: payments, auth, default").textContent).toMatch(
+    /^payments\s*\+2$/,
+  );
+});
+
+test("no chip while the scope is every namespace, nor on a list of a kind that has no namespaces", async () => {
+  laidOutScoped();
+  const workbench = await openList();
+  expect(noChip()).toBe(true);
+
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments"],
+    }));
+  });
+  await settle(1);
+  expect(noChip()).toBe(false);
+
+  cleanup();
+  await scopedList(["payments"], "k8s-list://prod-eu/v1/nodes");
+  expect(noChip()).toBe(true);
+});
+
+test("a click on the chip opens the namespace picker, and its close mark goes back to every namespace", async () => {
+  const workbench = await scopedList(["payments", "auth"]);
+  fireEvent.click(chip());
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
+
+  fireEvent.click(screen.getByRole("button", { name: "Show all namespaces" }));
+  await settle(1);
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual([]);
+  expect(noChip()).toBe(true);
+});
+
+test("a list pinned with namespaces of its own shows those, as a label whose close mark opens the list on the space's scope", async () => {
+  laidOutScoped();
+  const workbench = await openList(
+    undefined,
+    "k8s-list://prod-eu/v1/pods?ns=checkout&q=api",
+  );
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["payments"],
+  }));
+  await settle(1);
+  expect(
+    screen.getByRole("group", { name: "Namespace: checkout" }).textContent,
+  ).toBe("checkout");
+  expect(screen.queryByRole("button", { name: /^Namespace: / })).toBeNull();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "Use the space's namespaces" }),
+  );
+  await settle(1);
+  const following = "k8s-list://prod-eu/v1/pods?q=api";
+  expect(tabsIn("editor")).toEqual([following]);
+  expect(workbench.editors.active).toBe(following);
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+  expect(chip("Namespace: payments")).toBeTruthy();
+});
+
+test("the chip is the last to give way: the stages go first, then it is cut, down to what holds its name's head and tail", async () => {
+  await scopedList(["payments"]);
+  const seen: [number, string][] = [];
+  for (const room of [
+    900, 848, 847, 808, 807, 588, 587, 478, 477, 450, 300, 100,
+  ]) {
+    withRoom(room);
+    seen.push([stageOf(actions()), chipRoot()?.style.maxWidth ?? "gone"]);
+  }
+  expect(seen).toEqual([
+    [0, ""],
+    [0, ""],
+    [1, ""],
+    [1, ""],
+    [2, ""],
+    [3, ""],
+    [4, ""],
+    [4, ""],
+    [4, "139px"],
+    [4, "112px"],
+    [4, "0px"],
+    [4, "0px"],
+  ]);
+});
+
+test("the least a list keeps beside docked details counts the chip at its floor", async () => {
+  await scopedList(["payments"]);
+  withRoom(900);
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  await settle(1);
+  expect(grid().parentElement?.style.minWidth).toBe(
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0) + GAP + CHIP_FLOOR)}px`,
+  );
 });

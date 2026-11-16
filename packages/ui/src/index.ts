@@ -29,6 +29,7 @@ export * from "./components/link-button";
 export * from "./components/meter";
 export * from "./components/pill";
 export * from "./components/property-list";
+export * from "./components/scope-chip";
 export * from "./components/search-field";
 export * from "./components/section";
 export * from "./components/segmented";

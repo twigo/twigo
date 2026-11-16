@@ -8,6 +8,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  ScopeChip,
   SearchField,
   Segmented,
   StatusDot,
@@ -29,10 +30,13 @@ import {
   statusColumn,
   type Health,
 } from "../columns";
+import { servedAs, useResources } from "../discovery";
+import { kindIcon, NAMESPACES } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
-import { pinOf } from "./pin";
+import { followingTheSpace, pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
+import { namespacesOf, showAllNamespaces } from "./scope";
 import { stageFor } from "./stages";
 
 const ORDER: readonly Health[] = ["error", "warn", "ok"];
@@ -40,9 +44,16 @@ const ORDER: readonly Health[] = ["error", "warn", "ok"];
 /**
  * What the actions give up as their room narrows, one more at each stage:
  * the filter field's key hint, the Group button's label, the filter field
- * for an icon button, the health filter for the choice it is on.
+ * for an icon button, the health filter for the choice it is on. Past the
+ * last stage the scope chip cuts its name, which it never goes below the
+ * head and tail of.
  */
 const STAGES = { keys: 1, group: 2, filter: 3, health: 4 } as const;
+
+/** The row's `gap-2`. */
+const GAP = 8;
+
+const NOTHING = () => undefined;
 
 const ICON_BUTTON =
   "flex size-6 shrink-0 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover";
@@ -64,6 +75,31 @@ export function ListActions({
   return <Actions uri={uri} input={input} services={services} />;
 }
 
+function Scope({
+  names: [first = "", ...more],
+  ...props
+}: {
+  names: readonly string[];
+  maxWidth?: number | undefined;
+  onOpen?: (() => void) | undefined;
+  clearLabel: string;
+  onClear: () => void;
+}) {
+  return (
+    <ScopeChip
+      icon={kindIcon(NAMESPACES)}
+      name={first}
+      more={more.length}
+      label={
+        more.length === 0
+          ? `Namespace: ${first}`
+          : `Namespaces: ${[first, ...more].join(", ")}`
+      }
+      {...props}
+    />
+  );
+}
+
 function Actions({
   uri,
   input,
@@ -73,8 +109,8 @@ function Actions({
   input: ListInput;
   services: ListServices;
 }) {
-  const { keybindings, spaces } = useWorkbench();
-  const { states, statuses, presets, pinned } = services;
+  const { keybindings, spaces, quickAccess, editors } = useWorkbench();
+  const { states, statuses, presets, pinned, discovery } = services;
   useChanges(states.changes);
   useChanges(states.strip);
   useChanges(statuses.changes);
@@ -101,6 +137,13 @@ function Actions({
   const find = keybindings.primary("list.find");
   const pin = pinOf(services, spaces, uri);
   const isPinned = pin !== undefined && pinned.has(input.space, pin.uri);
+  const resources = useResources(discovery, input.space);
+  const namespaces = namespacesOf(spaces, input);
+  const own = input.namespaces !== undefined;
+  const scoped =
+    namespaces.length > 0 &&
+    resources.state === "ready" &&
+    servedAs(resources.value, gvr)?.namespaced === true;
 
   const digits = states.countDigits(uri);
   const items: SegmentedItem<Health | "all">[] = counts
@@ -146,8 +189,13 @@ function Actions({
   });
 
   const [row, setRow] = useState<HTMLDivElement | null>(null);
-  const needs = useRef<number[]>([]);
+  const chipBox = useRef<HTMLSpanElement>(null);
+  const chipFull = useRef<HTMLSpanElement>(null);
+  const chipFloor = useRef<HTMLSpanElement>(null);
+  // What each stage's row takes besides the scope chip, which gives way last.
+  const rests = useRef<number[]>([]);
   const [stage, setStage] = useState(0);
+  const [chipMax, setChipMax] = useState<number>();
   const [filtering, setFiltering] = useState(false);
   const [focusMoves, setFocusMoves] = useState(0);
   const iconFilter = stage >= STAGES.filter;
@@ -160,6 +208,7 @@ function Actions({
     current?.value,
     preset.group,
     groupable.length > 0,
+    scoped && namespaces,
   ]);
   const taken = useWidth(row);
   // What the last stage shows once the list shows its rows: the health
@@ -182,10 +231,26 @@ function Actions({
   // has the focus that the turn would take.
   useLayoutEffect(() => {
     if (room === undefined || !row) return;
-    needs.current[stage] = row.offsetWidth;
+    const gap = scoped ? GAP : 0;
+    const shown = chipBox.current?.offsetWidth ?? 0;
+    rests.current[stage] = row.offsetWidth - shown - gap;
     if (stage === STAGES.health && shows) lastMeasured.current = last;
-    const widest = needs.current[STAGES.health];
-    if (widest !== undefined) states.setStripMin(uri, STRIP_KEPT + widest);
+    const rest = rests.current[STAGES.health];
+    if (rest !== undefined) {
+      states.setStripMin(
+        uri,
+        STRIP_KEPT + rest + gap + (chipFloor.current?.offsetWidth ?? 0),
+      );
+    }
+    const left = room - inspector - (rest ?? 0) - gap;
+    setChipMax(
+      scoped &&
+        stage === STAGES.health &&
+        rest !== undefined &&
+        left < (chipFull.current?.offsetWidth ?? 0)
+        ? Math.max(0, left)
+        : undefined,
+    );
     const focused = fieldBox.current?.contains(document.activeElement) === true;
     if (back.current !== undefined) {
       setStage(back.current);
@@ -198,8 +263,9 @@ function Actions({
       setStage(STAGES.health);
       return;
     }
+    const full = gap + (chipFull.current?.offsetWidth ?? 0);
     const next = stageFor(
-      needs.current,
+      rests.current.map((taken) => taken + full),
       stage,
       room - inspector,
       STAGES.health,
@@ -222,6 +288,7 @@ function Actions({
     shows,
     last,
     wanted,
+    scoped,
     states,
     uri,
   ]);
@@ -264,8 +331,55 @@ function Actions({
       onBlur={() => {
         setFocusMoves((moves) => moves + 1);
       }}
-      className="flex shrink-0 items-center gap-2"
+      className="relative flex shrink-0 items-center gap-2"
     >
+      {scoped && (
+        <>
+          <span ref={chipBox} className="flex shrink-0">
+            <Scope
+              names={namespaces}
+              maxWidth={chipMax}
+              onOpen={
+                own
+                  ? undefined
+                  : () => {
+                      quickAccess.show("ns ");
+                    }
+              }
+              clearLabel={
+                own ? "Use the space's namespaces" : "Show all namespaces"
+              }
+              onClear={() => {
+                if (!own) {
+                  showAllNamespaces(spaces, input.space);
+                  return;
+                }
+                const next = followingTheSpace(services, uri);
+                if (next === undefined) return;
+                editors.open(next);
+                editors.close(uri);
+              }}
+            />
+          </span>
+          <span
+            aria-hidden
+            inert
+            className="invisible absolute top-0 left-0 h-0 overflow-hidden"
+          >
+            <span ref={chipFull} className="flex w-max">
+              <Scope names={namespaces} clearLabel="" onClear={NOTHING} />
+            </span>
+            <span ref={chipFloor} className="flex">
+              <Scope
+                names={namespaces}
+                maxWidth={0}
+                clearLabel=""
+                onClear={NOTHING}
+              />
+            </span>
+          </span>
+        </>
+      )}
       {shows &&
         counts &&
         current &&

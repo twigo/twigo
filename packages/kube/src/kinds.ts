@@ -77,6 +77,11 @@ export function iconKey(gvr: Gvr): string {
 }
 
 export const PODS: Gvr = { group: "", version: "v1", resource: "pods" };
+export const NAMESPACES: Gvr = {
+  group: "",
+  version: "v1",
+  resource: "namespaces",
+};
 
 /** True for the groups Kubernetes itself serves; a custom group holds a dot outside k8s.io. */
 export function isBuiltIn(gvr: Gvr): boolean {
