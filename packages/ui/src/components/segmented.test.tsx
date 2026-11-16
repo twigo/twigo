@@ -29,7 +29,7 @@ function health(value: Health = "all", items = ITEMS) {
 const item = (name: string) =>
   screen.getByRole("button", { name: new RegExp(`^${name}`) });
 
-test("one bordered group, the picked item pressed, and a click picks another", () => {
+test("one group, the picked item pressed, and a click picks another", () => {
   const onChange = health("failing");
   expect(screen.getByRole("group", { name: "Health" })).toBeTruthy();
   expect(

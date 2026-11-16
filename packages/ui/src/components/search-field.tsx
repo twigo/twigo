@@ -37,7 +37,7 @@ export function SearchField({
   return (
     <div
       className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md bg-editor px-2 text-xs text-support shadow-[inset_0_0_0_1px_var(--input)] focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
+        "flex h-6 items-center gap-1.5 rounded-md bg-editor px-2 text-xs text-support focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
         className,
       )}
     >
@@ -72,12 +72,12 @@ export function SearchField({
           onClick={() => {
             onChange("");
           }}
-          className="flex size-4 items-center justify-center rounded hover:bg-row-hover hover:text-content"
+          className="flex size-4 items-center justify-center rounded-xs hover:bg-row-hover hover:text-content"
         >
           <X aria-hidden className="size-3" />
         </button>
       ) : (
-        keys && <Kbd>{keys}</Kbd>
+        keys && <Kbd className="rounded-[3px]">{keys}</Kbd>
       )}
     </div>
   );

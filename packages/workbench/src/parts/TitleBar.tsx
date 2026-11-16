@@ -230,7 +230,7 @@ function CommandCenter({
           style={folded ? undefined : { width: SEARCH_FIELD }}
           className={cn(
             SEARCH,
-            "bg-content/5 shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]",
+            "bg-content/5 outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]",
           )}
         >
           <SearchFace space={space} folded={folded} />
@@ -260,7 +260,11 @@ function SearchFace({
       {!folded && (
         <span className="flex-1 truncate text-left">{searchLabel(space)}</span>
       )}
-      {binding && <Kbd>{keybindings.label(binding.presses)}</Kbd>}
+      {binding && (
+        <Kbd className="rounded-[3px]">
+          {keybindings.label(binding.presses)}
+        </Kbd>
+      )}
     </>
   );
 }
