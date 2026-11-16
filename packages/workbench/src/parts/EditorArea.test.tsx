@@ -160,6 +160,13 @@ test("a session's tab says how the session stands: nothing while it runs, a puls
   expect(dot("fail")?.className).not.toContain("animate-pulse");
   expect(tab("fail").textContent).toBe("fail");
 
+  const after = (host: string) =>
+    tab(host).querySelector("[data-preview]")?.nextElementSibling;
+  expect(after("end")?.textContent).toBe("ended");
+  expect(after("connect")).toBe(dot("connect"));
+  expect(after("fail")).toBe(dot("fail"));
+  expect(after("run")?.tagName).toBe("BUTTON");
+
   states.set("connect", "running");
   states.set("run", "ended");
   act(() => {

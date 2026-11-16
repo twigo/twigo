@@ -1,4 +1,4 @@
-/** The widest an editor tab grows: `styles.css` stops the tab at this width and its title is cut in the middle. */
+/** The widest an editor tab grows while only Close follows its title: `styles.css` caps the title so that the tab comes to this width, and a state mark after the title adds its own. */
 export const TAB_MAX = 220;
 
 /** The characters of an editor tab's title that its cut leaves, head and tail together. */
