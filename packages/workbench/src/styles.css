@@ -104,9 +104,19 @@
   border-bottom: 0;
   border-radius: 6px 6px 0 0;
 }
+/* A title that ends in a name is cut in the middle (CutInTheMiddle), any
+   other at its end. */
+.twigo-dockview .twigo-tab-title[data-cut="middle"] {
+  min-width: 0;
+}
+.twigo-dockview .twigo-tab-title[data-cut="end"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* An editor tab asks for its title's width, up to 220 px, where the title
-   is cut in the middle. A panel tab has no cap, so that a logs title reads
-   whole. */
+   is cut. A panel tab has no cap, so that a logs title reads whole. */
 .twigo-dockview:not(.twigo-panel) .dv-tabs-container > .dv-tab {
   max-width: 220px;
 }

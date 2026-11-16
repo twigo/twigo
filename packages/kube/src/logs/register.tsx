@@ -34,6 +34,7 @@ export function registerLogs(
         ? `Logs · ${logsKind(input.gvr) ?? input.gvr.resource} ${input.name}`
         : uri.href;
     },
+    titleEndTells: true,
     tooltip: (uri) => paths.logs(uri.href),
     session: tabs,
     icon: ({ className }) => <ScrollText className={className} />,

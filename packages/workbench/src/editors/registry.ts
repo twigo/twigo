@@ -32,6 +32,8 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /** The title ends in what tells tabs apart, a name or a port: a tab too narrow for it cuts the title in the middle, else at its end. */
+  readonly titleEndTells?: boolean;
   /** What the tab's tooltip says: where the editor's subject is, from its context down. */
   readonly tooltip?: (uri: URL) => string | undefined;
   /**

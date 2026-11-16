@@ -56,6 +56,7 @@ export function registerForwards(
       const forward = input && forwards.find(input);
       return forward ? forwardTitle(forward) : "Port forward";
     },
+    titleEndTells: true,
     tooltip: (uri) => {
       const input = parsePfUri(uri.href);
       const forward = input && forwards.find(input);

@@ -67,11 +67,18 @@ test("a saved layout that does not load is reported and leaves an empty area tha
   expect(screen.getByText("body of note://b")).toBeTruthy();
 });
 
-test("a tab's title past the floor is cut in the middle and keeps the last part of its name, a shorter one is whole", async () => {
+test("a tab whose title ends in what tells tabs apart cuts it in the middle past the floor and keeps the last part of its name, any other title is left whole for the end to cut", async () => {
   const workbench = await testWorkbench();
   workbench.editors.register({
     id: "test.note",
     scheme: "note",
+    title: (uri) => uri.host,
+    titleEndTells: true,
+    component: ({ uri }) => <p>body of {uri}</p>,
+  });
+  workbench.editors.register({
+    id: "test.list",
+    scheme: "list",
     title: (uri) => uri.host,
     component: ({ uri }) => <p>body of {uri}</p>,
   });
@@ -80,20 +87,28 @@ test("a tab's title past the floor is cut in the middle and keeps the last part 
     workbench.editors.open("note://auth-api-1tvckat-tszk7", {
       preview: false,
     });
-  });
-  const parts = [
-    ...document.querySelectorAll(".dv-tab [data-preview] > span > span"),
-  ].map((part) => part.textContent);
-  expect(parts).toEqual(["auth-api-1t", "vckat-", "tszk7"]);
-  expect((parts[0] ?? "").length + (parts[2] ?? "").length).toBe(TITLE_FLOOR);
-
-  act(() => {
+    workbench.editors.open("list://validating-webhook-configurations", {
+      preview: false,
+    });
     workbench.editors.open("note://pods", { preview: false });
   });
-  const whole = [...document.querySelectorAll(".dv-tab [data-preview]")].find(
-    (title) => title.textContent === "pods",
-  );
-  expect(whole?.firstElementChild?.childElementCount).toBe(0);
+  const title = (text: string) => {
+    const found = [...document.querySelectorAll(".dv-tab [data-preview]")].find(
+      (each) => each.textContent === text,
+    );
+    if (!found) throw new Error(`no tab titled ${text}`);
+    return found;
+  };
+  const parts = (text: string) =>
+    [...(title(text).firstElementChild?.children ?? [])].map(
+      (part) => part.textContent,
+    );
+
+  const cut = parts("auth-api-1tvckat-tszk7");
+  expect(cut).toEqual(["auth-api-1t", "vckat-", "tszk7"]);
+  expect((cut[0] ?? "").length + (cut[2] ?? "").length).toBe(TITLE_FLOOR);
+  expect(parts("pods")).toEqual([]);
+  expect(title("validating-webhook-configurations").children).toHaveLength(0);
 });
 
 test("a session's tab says how the session stands: nothing while it runs, a pulse while it connects, ended after its title, an error dot once it failed, and it follows the session", async () => {

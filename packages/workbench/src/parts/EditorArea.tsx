@@ -422,12 +422,20 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           className="size-4 shrink-0 text-support"
         />
       )}
-      <span data-preview={params?.preview ?? false} className="min-w-0">
-        <CutInTheMiddle
-          text={api.title ?? ""}
-          floor={TITLE_FLOOR}
-          separator={TITLE_SEPARATOR}
-        />
+      <span
+        data-preview={params?.preview ?? false}
+        data-cut={provider?.titleEndTells === true ? "middle" : "end"}
+        className="twigo-tab-title"
+      >
+        {provider?.titleEndTells === true ? (
+          <CutInTheMiddle
+            text={api.title ?? ""}
+            floor={TITLE_FLOOR}
+            separator={TITLE_SEPARATOR}
+          />
+        ) : (
+          api.title
+        )}
       </span>
       {state === "ended" && (
         <span className="shrink-0 text-xs text-quiet">ended</span>
