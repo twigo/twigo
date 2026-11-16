@@ -35,7 +35,7 @@ export function Segmented<V extends string>({
       role="group"
       aria-label={label}
       className={cn(
-        "inline-flex h-6 items-stretch rounded-md bg-row-active p-0.5 text-xs",
+        "inline-flex h-6 items-stretch rounded-md bg-well p-0.5 text-xs",
         className,
       )}
     >
@@ -47,7 +47,7 @@ export function Segmented<V extends string>({
           onClick={() => {
             onChange(item.value);
           }}
-          className="inline-flex items-center gap-1.5 rounded-sm px-2 whitespace-nowrap text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-content/12 aria-pressed:text-content"
+          className="inline-flex items-center gap-1.5 rounded-sm px-2 whitespace-nowrap text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-plate aria-pressed:text-content"
         >
           {item.tone && item.tone !== "ok" && <StatusDot tone={item.tone} />}
           {item.label}

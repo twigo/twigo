@@ -240,6 +240,7 @@ test("the comment over the roles states the contrast the colours give, to the pr
 
 const WELLED: readonly Surface[] = ["shell", "editor", "card", "popover"];
 const KEYCAPPED: readonly Surface[] = ["shell", "editor"];
+const WELL_TEXTS = ["content", "support", "error", "warn-foreground"] as const;
 const OVERLAY_DIFFERS = 1.1;
 
 interface Reading {
@@ -260,14 +261,16 @@ const unmet = (readings: readonly Reading[]) =>
 const textOn = (name: string, theme: Theme, under: Color) =>
   under.contrast(eightBit(colour(`var(--${name})`, theme)), "WCAG21");
 
-const wellOn = (theme: Theme, on: Surface) =>
-  over(colour("var(--well)", theme), surface(on, theme));
+function overlays(theme: Theme, on: Surface) {
+  const well = over(colour("var(--well)", theme), surface(on, theme));
+  return { well, plate: over(colour("var(--plate)", theme), well) };
+}
 
 test.each(THEMES)(
   "%s: a field's well differs from the shell, the editor, a card and a popover, and the typed text, the placeholder and a keycap read on it at 4.5:1 or more",
   (theme) => {
     const found = WELLED.flatMap((on) => {
-      const well = wellOn(theme, on);
+      const { well } = overlays(theme, on);
       const keycap = over(colour("var(--row-active)", theme), well);
       return [
         reading(
@@ -294,6 +297,35 @@ test.each(THEMES)(
               ),
             ]
           : []),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: the pressed plate differs from the track, and support, content and the error and warning tones read at 4.5:1 or more on both, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const { well, plate } = overlays(theme, on);
+      return [
+        reading(
+          `the plate against the track on ${on}`,
+          plate.contrast(well, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        ...WELL_TEXTS.flatMap((name) => [
+          reading(
+            `${name} on the track on ${on}`,
+            textOn(name, theme, well),
+            4.5,
+          ),
+          reading(
+            `${name} on the plate on ${on}`,
+            textOn(name, theme, plate),
+            4.5,
+          ),
+        ]),
       ];
     });
     expect(unmet(found)).toEqual([]);

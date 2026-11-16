@@ -74,9 +74,11 @@
   --band-error: color-mix(in oklab, var(--error) 9%, transparent);
   --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
 
-  /* A well is the resting fill of a text field: an overlay, like the row
-     states, so it differs from every surface it sits on. */
+  /* A well is the resting fill of a text field and of a segmented control's
+     track, and a plate is the picked choice on it. Both are overlays, like
+     the row states, so they differ from every surface they sit on. */
   --well: oklch(0 0 0 / 6%);
+  --plate: oklch(1 0 0 / 80%);
 
   /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
      (never pure gray - that azure tint is the premium tell). */
@@ -214,6 +216,7 @@
   --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
 
   --well: oklch(1 0 0 / 6%);
+  --plate: oklch(1 0 0 / 4%);
 
   --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
@@ -299,6 +302,7 @@
   --color-selected: var(--selected);
   --color-selected-unfocused: var(--selected-unfocused);
   --color-well: var(--well);
+  --color-plate: var(--plate);
   --color-border-subtle: var(--border-subtle);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
