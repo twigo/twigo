@@ -30,7 +30,7 @@ export function StatusBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-support shadow-[inset_0_1px_0_var(--border)]"
+      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.75 text-xs text-support shadow-[inset_0_1px_0_var(--border)]"
     >
       <Side alignment="left" />
       <Side alignment="right" />
@@ -87,10 +87,10 @@ function EntryView({ entry }: { entry: StatusEntry }) {
     </>
   );
   const className = cn(
-    "flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums",
+    "flex h-[18px] items-center gap-1.5 rounded-sm px-1.5 whitespace-nowrap tabular-nums",
     (entry.run !== undefined || entry.popover !== undefined) &&
       "outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[inset_var(--focus-ring)]",
-    entry.accent && ["-ml-0.5 px-2.5", ACCENT[entry.accent]],
+    entry.accent && ["px-2.5", ACCENT[entry.accent]],
   );
   if (entry.popover) {
     const { open, onOpenChange, content } = entry.popover;
@@ -130,17 +130,14 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   // The same element with or without its panel, so the control keeps its
   // focus as the panel opens and closes.
   return (
-    <span className="relative flex h-full">
+    <span className="relative flex">
       {control}
       {entry.panel}
     </span>
   );
 }
 
-/**
- * A coloured context as a fill at the bar's start, flush with its edge, as
- * VS Code fills its remote indicator.
- */
+/** A coloured context as a block at the bar's start, 3 px in from its left, top and bottom. */
 const ACCENT = {
   red: "bg-context-red-solid text-context-solid-foreground font-medium hover:bg-context-red-solid/90",
   orange:
