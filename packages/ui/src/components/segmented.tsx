@@ -47,7 +47,7 @@ export function Segmented<V extends string>({
           onClick={() => {
             onChange(item.value);
           }}
-          className="inline-flex items-center gap-1.5 rounded-sm px-2 whitespace-nowrap text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-plate aria-pressed:text-content"
+          className="inline-flex items-center gap-1.5 rounded-sm px-2 whitespace-nowrap text-support outline-none not-aria-pressed:hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-plate aria-pressed:text-strong"
         >
           {item.tone && item.tone !== "ok" && <StatusDot tone={item.tone} />}
           {item.label}

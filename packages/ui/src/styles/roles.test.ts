@@ -248,7 +248,17 @@ function classOf(file: string, pattern: RegExp) {
   return found;
 }
 const keycapFill = classOf("../components/kbd.tsx", /\bbg-([\w-]+)/);
-const WELL_TEXTS = ["content", "support", "error", "warn-foreground"] as const;
+const pressedText = classOf(
+  "../components/segmented.tsx",
+  /aria-pressed:text-([\w-]+)/,
+);
+const hoveredText = classOf(
+  "../components/segmented.tsx",
+  /hover:text-([\w-]+)/,
+);
+const WELL_TEXTS = [
+  ...new Set([pressedText, "content", "support", "error", "warn-foreground"]),
+];
 
 interface Reading {
   readonly what: string;
@@ -340,7 +350,7 @@ test.each(THEMES)(
 );
 
 test.each(THEMES)(
-  "%s: the pressed plate differs from the track, and support, content and the error and warning tones read at 4.5:1 or more on both, over the shell, the editor, a card and a popover",
+  "%s: the pressed plate differs from the track, and the pressed text, support, content and the error and warning tones read at 4.5:1 or more on both, over the shell, the editor, a card and a popover",
   (theme) => {
     const found = WELLED.flatMap((on) => {
       const { well, plate } = overlays(theme, on);
@@ -363,6 +373,21 @@ test.each(THEMES)(
           ),
         ]),
       ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: the pressed text reads brighter than a hovered neighbour's, on the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.map((on) => {
+      const { well, plate } = overlays(theme, on);
+      return reading(
+        `${pressedText} on the plate on ${on}, against ${hoveredText} on the track`,
+        textOn(pressedText, theme, plate),
+        textOn(hoveredText, theme, well),
+      );
     });
     expect(unmet(found)).toEqual([]);
   },
