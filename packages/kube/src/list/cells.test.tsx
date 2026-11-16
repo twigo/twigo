@@ -191,18 +191,23 @@ const POD_COLUMNS: Column[] = [
   { name: "Restarts", kind: "string", priority: 0 },
 ];
 
-function podRow(ready: string, status: string, restartsText: string) {
+function podRow(
+  ready: string,
+  status: string,
+  restartsText: string,
+  hidden?: string,
+) {
   const row: Row = {
     id: "r",
     created: null,
     generated: null,
     cells: [ready, status, restartsText],
   };
-  const shown = POD_COLUMNS.map((column, index) => ({
-    name: column.name,
-    index,
-    rule: columnRule(PODS, column),
-  }));
+  const shown = POD_COLUMNS.flatMap((column, index) =>
+    column.name === hidden
+      ? []
+      : [{ name: column.name, index, rule: columnRule(PODS, column) }],
+  );
   const tone = rowTone(PODS, statusColumn(PODS), POD_COLUMNS, row);
   const alarmed = raisesAlarm(row, shown, tone);
   const toned = (column: ShownColumn) =>
@@ -239,6 +244,19 @@ test("a row raises one alarm: a short Ready with a restart 46 minutes ago warns 
   expect(read("0/1", "CrashLoopBackOff", "5 (46m ago)")).toEqual({
     alarmed: true,
     toned: { Ready: false, Status: true, Restarts: false },
+  });
+});
+
+test("a toned status alone silences a restart within the hour, whether Ready is full or the person hid it", () => {
+  expect(podRow("1/1", "CrashLoopBackOff", "5 (46m ago)")).toMatchObject({
+    alarmed: true,
+    toned: { Ready: false, Status: true, Restarts: false },
+  });
+  expect(
+    podRow("0/1", "CrashLoopBackOff", "1 (29m ago)", "Ready"),
+  ).toMatchObject({
+    alarmed: true,
+    toned: { Status: true, Restarts: false },
   });
 });
 

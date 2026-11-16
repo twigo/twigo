@@ -871,6 +871,39 @@ test("a failing row carries its tone, a name reads in its parts, and restarts re
   expect(pending?.getAttribute("data-tone")).toBe("warn");
 });
 
+test("a pod that is not ready and restarted within the hour warns in Ready alone, and a ready one in Restarts", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  const pod = (id: string, ready: string) => ({
+    id,
+    created: null,
+    generated: null,
+    cells: [id, ready, "Running", "1 (46m ago)"],
+  });
+  act(() => {
+    script.send({
+      ...batch(1, {}, true),
+      total: 2,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Ready", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        { name: "Restarts", kind: "string", priority: 0 },
+      ],
+      window: { start: 0, ids: ["a", "b"] },
+      upserts: [pod("a", "0/1"), pod("b", "1/1")],
+    });
+  });
+  await settle(1);
+  const warns = (id: string, column: string) =>
+    cellOf(
+      screen.getByText(id).closest<HTMLElement>("[role=row]") ?? undefined,
+      column,
+    )?.querySelector(".text-warn-foreground") instanceof Element;
+  expect([warns("a", "Ready"), warns("a", "Restarts")]).toEqual([true, false]);
+  expect([warns("b", "Ready"), warns("b", "Restarts")]).toEqual([false, true]);
+});
+
 const groupHeaders = () =>
   rows().filter((row) => row.hasAttribute("aria-expanded"));
 const groupOf = (row: HTMLElement) =>
