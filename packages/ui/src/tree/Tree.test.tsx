@@ -103,6 +103,6 @@ test("the active row keeps its tint under the pointer, the others take the hover
     />,
   );
   const row = (name: string) => screen.getByRole("treeitem", { name });
-  expect(row("Pods").className).not.toContain("hover:bg-row-hover");
-  expect(row("Failing pods").className).toContain("hover:bg-row-hover");
+  expect(row("Pods").className).not.toContain("hover:before:bg-row-hover");
+  expect(row("Failing pods").className).toContain("hover:before:bg-row-hover");
 });

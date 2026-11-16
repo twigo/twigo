@@ -27,11 +27,11 @@ export interface TreeRow {
 }
 
 /**
- * A tree of 22 px rows (ARCHITECTURE 4.9), hover and selection as plates
- * inset 6 px from its edges, the rows' content where it was before the
- * inset: a click on a folding row folds it, on a leaf opens it, a double
- * click keeps what it opened. The list commands move through it while it has
- * the focus.
+ * A tree of 22 px rows (ARCHITECTURE 4.9), as wide as the tree so a click
+ * anywhere along one lands, with hover and selection drawn as plates inset
+ * 6 px from its edges: a click on a folding row folds it, on a leaf opens
+ * it, a double click keeps what it opened. The list commands move through it
+ * while it has the focus.
  */
 export function Tree({
   label,
@@ -123,7 +123,7 @@ export function Tree({
       aria-activedescendant={
         current && !current.heading ? rowId(at) : undefined
       }
-      className="group/tree h-full overflow-auto px-1.5 pb-2 outline-none"
+      className="group/tree h-full overflow-auto pb-2 outline-none"
     >
       {rows.map((row, index) =>
         row.heading ? (
@@ -131,7 +131,7 @@ export function Tree({
             key={row.id}
             id={rowId(index)}
             role="presentation"
-            className="flex h-6 items-end px-1.5 pb-1 text-2xs font-semibold text-support"
+            className="flex h-6 items-end px-3 pb-1 text-2xs font-semibold text-support"
           >
             {row.label}
           </div>
@@ -183,19 +183,19 @@ function TreeItem({
       aria-selected={active}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      style={{ paddingLeft: (folds ? 2 : 6) + row.depth * 16 }}
+      style={{ paddingLeft: (folds ? 8 : 12) + row.depth * 16 }}
       className={cn(
-        "relative flex h-[22px] items-center gap-1 rounded-sm pr-2 text-body select-none",
-        active ? "bg-selected-unfocused" : "hover:bg-row-hover",
+        "relative isolate flex h-[22px] items-center gap-1 pr-3.5 text-body select-none before:absolute before:inset-x-1.5 before:inset-y-0 before:-z-10 before:rounded-sm",
+        active ? "before:bg-selected-unfocused" : "hover:before:bg-row-hover",
         cursor &&
-          "group-focus/tree:bg-selected group-focus/tree:hover:bg-selected",
+          "group-focus/tree:before:bg-selected group-focus/tree:hover:before:bg-selected",
       )}
     >
       {Array.from({ length: row.depth }, (_, level) => (
         <span
           key={level}
           aria-hidden
-          style={{ left: 9.5 + level * 16 }}
+          style={{ left: 15.5 + level * 16 }}
           className="pointer-events-none absolute inset-y-0 w-px bg-border"
         />
       ))}
