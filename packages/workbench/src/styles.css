@@ -184,13 +184,19 @@
   display: none;
 }
 /* Its list opens as Twigo's menus do: a popover of 8 px radius with 4 px of
-   padding, and rows of 28 px with 4 px, one step in. Dockview puts it at the
-   pointer, not under the button, so it is pushed down by half the button and
-   the 4 px of a menu's offset. */
+   padding, and rows of 28 px with 4 px, one step in. Dockview 8.8.3 places it
+   at the pointer, as an `absolute` box whose inline `top` and `left` are the
+   click's `clientY` and `clientX` less the root's popover anchor, so no CSS
+   reaches the button: 28 px of margin, the button's 24 and the menu's 4, keeps
+   the list from covering the button wherever it is clicked. That box is as
+   wide as the room right of the click, so the list takes its natural width
+   and dockview shifts it into view. */
 .twigo-dockview .dv-tabs-overflow-container {
   box-sizing: border-box;
+  width: max-content;
   min-width: 176px;
-  margin-top: 16px;
+  max-width: calc(100vw - 16px);
+  margin-top: 28px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
