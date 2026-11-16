@@ -497,8 +497,9 @@ function laidOutScoped() {
       const natural = [CHIP_FULL, CHIP_FLOOR, CHIP_COUNT, CHIP_GLYPH];
       const copy = hidden.indexOf(this);
       if (copy >= 0) return natural[copy] ?? 0;
-      const shown = row.querySelector<HTMLElement>("[aria-label^='Namespace']")
-        ?.parentElement?.parentElement;
+      const shown = row.querySelector<HTMLElement>(
+        "[aria-label^='Namespace'], [aria-label^='This list shows']",
+      )?.parentElement?.parentElement;
       const chip = shown?.firstElementChild;
       const set = chip?.getAttribute("style")?.match(/max-width: (\d+)/)?.[1];
       const max = set === undefined ? Infinity : Number(set);
@@ -531,8 +532,7 @@ async function scopedList(names: readonly string[], uri?: string) {
 const chip = (name: string | RegExp = /^Namespaces?: /) =>
   screen.getByRole("button", { name });
 const noChip = () =>
-  screen.queryByRole("button", { name: /^Namespaces?: / }) === null &&
-  screen.queryByRole("group", { name: /^Namespaces?: / }) === null;
+  screen.queryByRole("button", { name: /^Namespaces?: / }) === null;
 const chipRoot = () => chip().parentElement;
 
 test("a narrowed scope shows as a chip with the name, and several namespaces as the first and how many more, the whole list in its label", async () => {
@@ -576,31 +576,62 @@ test("a click on the chip opens the namespace picker, and its close mark goes ba
   expect(noChip()).toBe(true);
 });
 
-test("a list pinned with namespaces of its own shows those, as a label whose close mark opens the list on the space's scope", async () => {
-  laidOutScoped();
-  const workbench = await openList(
-    undefined,
-    "k8s-list://prod-eu/v1/pods?ns=checkout&q=api",
-  );
-  workbench.spaces.update("prod-eu", (state) => ({
-    ...state,
-    namespaces: ["payments"],
-  }));
-  await settle(1);
-  expect(
-    screen.getByRole("group", { name: "Namespace: checkout" }).textContent,
-  ).toBe("checkout");
-  expect(screen.queryByRole("button", { name: /^Namespace: / })).toBeNull();
+const OWN = "k8s-list://prod-eu/v1/pods?ns=checkout&q=api";
 
-  fireEvent.click(
-    screen.getByRole("button", { name: "Use the space's namespaces" }),
+test("a list pinned with namespaces of its own shows them as a label that no click and no scope changes: no close mark, one tab stop, the names in its tooltip", async () => {
+  laidOutScoped();
+  const workbench = await openList(undefined, OWN);
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments"],
+    }));
+  });
+  await settle(1);
+  const label = screen.getByRole("group", {
+    name: "This list shows checkout whatever the space's scope is",
+  });
+  expect(label.textContent).toBe("checkout");
+  expect(label.tabIndex).toBe(0);
+  expect(
+    screen.queryByRole("button", { name: /namespaces|checkout/i }),
+  ).toBeNull();
+
+  fireEvent.click(label);
+  expect(workbench.quickAccess.session).toBeUndefined();
+  expect(tabsIn("editor")).toEqual([OWN]);
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+
+  act(() => {
+    label.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe("Namespace: checkout");
+});
+
+test("the label of a list with namespaces of its own folds as the chip does and stays one tab stop with every name in its tooltip", async () => {
+  laidOutScoped();
+  await openList(
+    undefined,
+    "k8s-list://prod-eu/v1/pods?ns=payments,auth,default",
   );
   await settle(1);
-  const following = "k8s-list://prod-eu/v1/pods?q=api";
-  expect(tabsIn("editor")).toEqual([following]);
-  expect(workbench.editors.active).toBe(following);
-  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
-  expect(chip("Namespace: payments")).toBeTruthy();
+  const shown = [900, 420, 380].map((room) => {
+    withRoom(room);
+    const label = screen.getByRole("group", { name: /^This list shows/ });
+    act(() => {
+      label.focus();
+    });
+    expect(label.tabIndex).toBe(0);
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "Namespaces: payments, auth, default",
+    );
+    act(() => {
+      label.blur();
+    });
+    return label.textContent.trim();
+  });
+  expect(shown).toEqual(["payments+2", "+2", ""]);
+  expect(screen.queryByRole("button", { name: /namespaces/i })).toBeNull();
 });
 
 const formOf = () => {

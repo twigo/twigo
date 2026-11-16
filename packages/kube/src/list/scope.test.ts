@@ -1,8 +1,6 @@
 import { expect, test } from "vitest";
 import { testWorkbench } from "@twigo/workbench/testing";
-import { ListStates } from "../listState";
 import { parseListUri } from "../uri";
-import { followingTheSpace } from "./pin";
 import { namespacesOf, showAllNamespaces, whereWords } from "./scope";
 
 const PODS = "k8s-list://prod-eu/v1/pods";
@@ -33,18 +31,4 @@ test("where a list looks reads the space's contexts before the namespaces it is 
     "prod-eu · payments, auth",
   );
   expect(whereWords(spaces, "gone", [])).toBe("gone");
-});
-
-test("a list that follows the space is the list as it stands, text and health kept, without namespaces of its own", () => {
-  const states = new ListStates();
-  const uri = `${PODS}?ns=a,b&q=api&l=app%3Dweb&h=error`;
-  expect(followingTheSpace({ states }, uri)).toBe(
-    `${PODS}?q=api&l=app%3Dweb&h=error`,
-  );
-
-  states.setText(uri, "web");
-  states.setHealth(uri, { health: "warn", values: ["Pending"] });
-  expect(followingTheSpace({ states }, uri)).toBe(
-    `${PODS}?q=web&l=app%3Dweb&h=warn`,
-  );
 });

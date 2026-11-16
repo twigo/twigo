@@ -34,7 +34,7 @@ import { servedAs, useResources } from "../discovery";
 import { kindIcon, NAMESPACES } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
-import { followingTheSpace, pinOf } from "./pin";
+import { pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
 import { namespacesOf, showAllNamespaces } from "./scope";
 import { chipFor, stageFor, type Chip } from "./stages";
@@ -87,26 +87,39 @@ export function ListActions({
 }
 
 function Scope({
-  names: [first = "", ...more],
+  names,
+  own,
+  onOpen,
+  onClear,
   ...props
 }: {
   names: readonly string[];
+  own: boolean;
   maxWidth?: number | undefined;
   fold?: Chip["fold"];
   onOpen?: (() => void) | undefined;
-  clearLabel: string;
   onClear: () => void;
 }) {
+  const [first = "", ...more] = names;
+  const tooltip =
+    more.length === 0
+      ? `Namespace: ${first}`
+      : `Namespaces: ${names.join(", ")}`;
   return (
     <ScopeChip
       icon={kindIcon(NAMESPACES)}
       name={first}
       more={more.length}
+      tooltip={tooltip}
       label={
-        more.length === 0
-          ? `Namespace: ${first}`
-          : `Namespaces: ${[first, ...more].join(", ")}`
+        own
+          ? `This list shows ${names.join(", ")} whatever the space's scope is`
+          : tooltip
       }
+      {...(!own && {
+        onOpen,
+        clear: { label: "Show all namespaces", run: onClear },
+      })}
       {...props}
     />
   );
@@ -121,8 +134,8 @@ function Actions({
   input: ListInput;
   services: ListServices;
 }) {
-  const { keybindings, spaces, quickAccess, editors } = useWorkbench();
-  const { states, statuses, presets, pinned, discovery } = services;
+  const { keybindings, spaces, quickAccess } = useWorkbench();
+  const { states, statuses, presets, pinned, discovery, grids } = services;
   useChanges(states.changes);
   useChanges(states.strip);
   useChanges(statuses.changes);
@@ -360,27 +373,15 @@ function Actions({
           <span ref={chipBox} className="flex shrink-0">
             <Scope
               names={namespaces}
+              own={own}
               maxWidth={chip.max}
               fold={chip.fold}
-              onOpen={
-                own
-                  ? undefined
-                  : () => {
-                      quickAccess.show("ns ");
-                    }
-              }
-              clearLabel={
-                own ? "Use the space's namespaces" : "Show all namespaces"
-              }
+              onOpen={() => {
+                quickAccess.show("ns ");
+              }}
               onClear={() => {
-                if (!own) {
-                  showAllNamespaces(spaces, input.space);
-                  return;
-                }
-                const next = followingTheSpace(services, uri);
-                if (next === undefined) return;
-                editors.open(next);
-                editors.close(uri);
+                grids.focus(uri);
+                showAllNamespaces(spaces, input.space);
               }}
             />
           </span>
@@ -394,7 +395,7 @@ function Actions({
               <span key={key} className="flex">
                 <Scope
                   names={namespaces}
-                  clearLabel=""
+                  own={own}
                   onClear={NOTHING}
                   {...form}
                 />

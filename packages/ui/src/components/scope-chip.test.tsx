@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { Folder } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ScopeChip } from "./scope-chip";
@@ -15,8 +21,7 @@ test("a click on the name opens, and the close mark takes the narrowing off, eac
       more={2}
       label="Namespaces: payments, auth, default"
       onOpen={onOpen}
-      clearLabel="Show all namespaces"
-      onClear={onClear}
+      clear={{ label: "Show all namespaces", run: onClear }}
     />,
   );
   const open = screen.getByRole("button", {
@@ -32,23 +37,31 @@ test("a click on the name opens, and the close mark takes the narrowing off, eac
   expect(onOpen).toHaveBeenCalledOnce();
 });
 
-test("a chip without onOpen is a label, and the room its owner leaves it is its maxWidth", () => {
+test("a chip with nothing to act on is a label: one tab stop, no close mark, its tooltip on focus and the room its owner leaves it its maxWidth", () => {
   render(
     <ScopeChip
       icon={Folder}
       name="checkout"
-      label="Namespace: checkout"
-      clearLabel="Clear"
-      onClear={vi.fn()}
+      more={1}
+      label="This list shows checkout, auth whatever the space's scope is"
+      tooltip="Namespaces: checkout, auth"
       maxWidth={112}
     />,
   );
-  const label = screen.getByRole("group", { name: "Namespace: checkout" });
-  expect(
-    screen.queryByRole("button", { name: "Namespace: checkout" }),
-  ).toBeNull();
-  expect(label.textContent).toBe("checkout");
+  const label = screen.getByRole("group", {
+    name: "This list shows checkout, auth whatever the space's scope is",
+  });
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(label.textContent).toMatch(/^checkout\s*\+1$/);
   expect(label.parentElement?.style.maxWidth).toBe("112px");
+  expect(label.tabIndex).toBe(0);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  act(() => {
+    label.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe(
+    "Namespaces: checkout, auth",
+  );
 });
 
 test("a folded chip keeps the glyph, with the count or alone, drops the name and the close mark, and still opens on a click, its label naming everything", () => {
@@ -61,8 +74,7 @@ test("a folded chip keeps the glyph, with the count or alone, drops the name and
       more={2}
       label={names}
       onOpen={onOpen}
-      clearLabel="Show all namespaces"
-      onClear={vi.fn()}
+      clear={{ label: "Show all namespaces", run: vi.fn() }}
       fold={fold}
     />
   );

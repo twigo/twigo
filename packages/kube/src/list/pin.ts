@@ -26,15 +26,6 @@ function standing(
   };
 }
 
-/** The list as it stands without namespaces of its own, which follows its space's scope. */
-export function followingTheSpace(
-  services: Pick<ListServices, "states">,
-  uri: string,
-): string | undefined {
-  const input = parseListUri(uri);
-  return input && listUri(standing(services, uri, input));
-}
-
 /**
  * The list a list editor shows now, as a pin keeps it: its namespaces,
  * text and health baked into the URI, so the pin opens the same rows.

@@ -9,34 +9,35 @@ const PART =
   "flex h-5 items-center rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]";
 
 /**
- * What a view is narrowed to, as a chip with a close mark that takes the
- * narrowing off: the glyph of what it narrows by, the first name cut in the
- * middle, and how many more follow it. A chip with no `onOpen` is a label
- * and its mark. `maxWidth` is the room its owner leaves it; it cuts the name
- * down to what holds its head and tail and the two marks, and no further.
- * Past that its owner folds it: `count` keeps the glyph and how many more
- * follow, `glyph` the glyph alone, and either leaves the name and the close
- * mark out, the label holding every name.
+ * What a view is narrowed to, as a chip: the glyph of what it narrows by, the
+ * first name cut in the middle, and how many more follow it. With `onOpen` a
+ * click on it acts, and with `clear` a close mark takes the narrowing off.
+ * A chip with neither is a label and one tab stop, its tooltip shown on focus
+ * as on hover. `maxWidth` is the room its owner leaves it; it cuts the name
+ * down to what holds its head and tail and the marks, and no further. Past
+ * that its owner folds it: `count` keeps the glyph and how many more follow,
+ * `glyph` the glyph alone, and either leaves the name and the close mark out.
  */
 export function ScopeChip({
   icon: Icon,
   name,
   more = 0,
   label,
+  tooltip = label,
   onOpen,
-  clearLabel,
-  onClear,
+  clear,
   maxWidth,
   fold,
 }: {
   icon: LucideIcon;
   name: string;
   more?: number;
-  /** All the names, which is the chip's accessible name and its tooltip. */
+  /** The chip's accessible name. */
   label: string;
+  /** What hover and focus show: all the names. */
+  tooltip?: string;
   onOpen?: () => void;
-  clearLabel: string;
-  onClear: () => void;
+  clear?: { label: string; run: () => void };
   maxWidth?: number;
   fold?: "count" | "glyph";
 }) {
@@ -75,18 +76,18 @@ export function ScopeChip({
               {face}
             </button>
           ) : (
-            <span role="group" aria-label={label} className={body}>
+            <span role="group" tabIndex={0} aria-label={label} className={body}>
               {face}
             </span>
           )}
         </TooltipTrigger>
-        <TooltipContent className="wrap-anywhere">{label}</TooltipContent>
+        <TooltipContent className="wrap-anywhere">{tooltip}</TooltipContent>
       </Tooltip>
-      {fold === undefined && (
+      {fold === undefined && clear && (
         <button
           type="button"
-          aria-label={clearLabel}
-          onClick={onClear}
+          aria-label={clear.label}
+          onClick={clear.run}
           className={cn(
             PART,
             "size-5 shrink-0 justify-center text-support hover:bg-row-hover hover:text-content",
