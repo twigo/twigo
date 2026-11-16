@@ -4,6 +4,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde::de::{self, Deserializer, IgnoredAny, MapAccess, Visitor};
 
@@ -110,11 +111,11 @@ impl TableDecoder {
         Ok(cells.into_boxed_slice())
     }
 
-    fn table_row(&self, row: RawRow) -> Result<Row, DecodeError> {
+    fn table_row(&self, row: RawRow, received: Timestamp) -> Result<Row, DecodeError> {
         let cells = self.cells(row.cells)?;
         let object = row.object.ok_or(DecodeError::Missing("object"))?;
         Ok(Row {
-            meta: object.metadata.into_meta()?,
+            meta: object.metadata.into_meta(received)?,
             cells,
         })
     }
@@ -146,6 +147,7 @@ impl TableDecoder {
         &mut self,
         kind: EventKind,
         mut table: TableObject,
+        received: Timestamp,
     ) -> Result<Event, DecodeError> {
         self.update_columns(table.column_definitions);
         if table.rows.len() != 1 {
@@ -166,8 +168,10 @@ impl TableDecoder {
                     initial_events_end: metadata.initial_events_end,
                 })
             }
-            EventKind::Added | EventKind::Modified => self.table_row(row).map(Event::Upsert),
-            EventKind::Deleted => self.table_row(row).map(Event::Delete),
+            EventKind::Added | EventKind::Modified => {
+                self.table_row(row, received).map(Event::Upsert)
+            }
+            EventKind::Deleted => self.table_row(row, received).map(Event::Delete),
             EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
         }
     }
@@ -176,7 +180,7 @@ impl TableDecoder {
 impl Decode for TableDecoder {
     type Item = Row;
 
-    fn decode_list(&mut self, body: &[u8]) -> Result<Page, DecodeError> {
+    fn decode_list(&mut self, body: &[u8], received: Timestamp) -> Result<Page, DecodeError> {
         match peek_kind(body)? {
             Kind::Table => {
                 let table: TableObject = serde_json::from_slice(body)?;
@@ -184,7 +188,7 @@ impl Decode for TableDecoder {
                 let rows = table
                     .rows
                     .into_iter()
-                    .map(|row| self.table_row(row))
+                    .map(|row| self.table_row(row, received))
                     .collect::<Result<_, _>>()?;
                 Ok(table.metadata.into_page(rows))
             }
@@ -193,7 +197,7 @@ impl Decode for TableDecoder {
                 let rows = list
                     .items
                     .into_iter()
-                    .map(|item| Ok(self.raw_row(item.metadata.into_meta()?)))
+                    .map(|item| Ok(self.raw_row(item.metadata.into_meta(received)?)))
                     .collect::<Result<_, DecodeError>>()?;
                 Ok(list.metadata.into_page(rows))
             }
@@ -202,13 +206,13 @@ impl Decode for TableDecoder {
         }
     }
 
-    fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
+    fn decode_event(&mut self, line: &[u8], received: Timestamp) -> Result<Event, DecodeError> {
         // Most of a line is managedFields, so a table's event reads it once.
         // Anything else, or a table this cannot read, takes the path below.
         if let Ok(event) = serde_json::from_slice::<TableEvent>(line)
             && event.object.is_table
         {
-            return self.table_event(event.kind, event.object);
+            return self.table_event(event.kind, event.object, received);
         }
         let event: RawEvent<'_> = serde_json::from_slice(line)?;
         let body = event.object.get().as_bytes();
@@ -216,11 +220,13 @@ impl Decode for TableDecoder {
             Kind::Status => Ok(Event::Error(decode::status(body)?)),
             Kind::Table => {
                 let table: TableObject = serde_json::from_slice(body)?;
-                self.table_event(event.kind, table)
+                self.table_event(event.kind, table, received)
             }
             Kind::Other(kind) => {
                 let object: RawObject = serde_json::from_slice(body)?;
-                let event = object.metadata.into_event(event.kind, &kind, |meta| meta)?;
+                let event = object
+                    .metadata
+                    .into_event(event.kind, &kind, received, |meta| meta)?;
                 Ok(match event {
                     Event::Upsert(meta) => Event::Upsert(self.raw_row(meta)),
                     Event::Delete(meta) => Event::Delete(self.raw_row(meta)),

@@ -5,7 +5,9 @@ use twigo_ipc::ViewState;
 use twigo_kube::client::Budgets;
 
 use super::*;
+use crate::decode::{DecodeError, Event, Page};
 use crate::fake::Fake;
+use crate::table::Cell;
 use crate::upstream::IDLE;
 
 fn pods() -> Resource {
@@ -608,6 +610,141 @@ async fn a_watch_resumed_from_a_compacted_version_relists_with_its_rows() {
     ready(&mut pods).await;
     assert_eq!(names(&pods), ["p2"], "the relist's rows replace them");
     assert_eq!(fake.count("sendInitialEvents"), 2);
+}
+
+struct Printing {
+    meta: MetaDecoder,
+    text: Arc<Mutex<HashMap<String, String>>>,
+}
+
+impl Printing {
+    fn print(&self, row: &mut Row) {
+        let text = self.text.lock().unwrap();
+        let printed = text.get(&*row.meta.name).cloned().unwrap_or_default();
+        row.cells = Box::new([Cell::Text(printed.into())]);
+    }
+}
+
+impl Decode for Printing {
+    type Item = Row;
+
+    fn decode_list(&mut self, body: &[u8], received: Timestamp) -> Result<Page, DecodeError> {
+        let mut page = self.meta.decode_list(body, received)?;
+        page.items.iter_mut().for_each(|row| self.print(row));
+        Ok(page)
+    }
+
+    fn decode_event(&mut self, line: &[u8], received: Timestamp) -> Result<Event, DecodeError> {
+        let mut event = self.meta.decode_event(line, received)?;
+        if let Event::Upsert(row) | Event::Delete(row) = &mut event {
+            self.print(row);
+        }
+        Ok(event)
+    }
+}
+
+fn arrived(upstream: &Upstream<Row>) -> Vec<(String, u64)> {
+    let mut arrived: Vec<_> = upstream
+        .store
+        .items(|_| true)
+        .iter()
+        .map(|row| {
+            let since = row.meta.received.duration_since(Timestamp::UNIX_EPOCH);
+            (row.meta.name.to_string(), since.as_secs().unsigned_abs())
+        })
+        .collect();
+    arrived.sort();
+    arrived
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_what_did_not_change()
+ {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("a"), "p2");
+    let text = Arc::new(Mutex::new(HashMap::from([
+        ("p1".to_owned(), "1 (5m ago)".to_owned()),
+        ("p2".to_owned(), "0".to_owned()),
+    ])));
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let env = Env {
+        connect: Arc::clone(&hub.inner.connect),
+        clock: Arc::clone(&hub.inner.clock),
+        cluster: hub.inner.cluster("kind-test"),
+        waiting: Arc::new(|_| {}),
+    };
+    let key = Key {
+        context: "kind-test".to_owned(),
+        resource: pods(),
+        format: Format::Metadata,
+        scope: namespace("a"),
+        field_selector: None,
+    };
+    let upstream = Arc::new(Upstream::<Row>::new());
+    let mut state = upstream.state();
+    let decoder = Printing {
+        meta: MetaDecoder,
+        text: Arc::clone(&text),
+    };
+    let run = tokio::spawn(upstream::run(
+        env,
+        key.spec(),
+        decoder,
+        Arc::clone(&upstream),
+    ));
+    let ready = |state: &ViewState| *state == ViewState::Ready;
+    state.wait_for(ready).await.unwrap();
+    assert_eq!(
+        arrived(&upstream),
+        [("p1".to_owned(), 0), ("p2".to_owned(), 0)],
+        "the page's rows arrived with it"
+    );
+
+    sleep(Duration::from_secs(10)).await;
+    text.lock()
+        .unwrap()
+        .insert("p1".to_owned(), "2 (10s ago)".to_owned());
+    fake.add("pods", Some("a"), "p1");
+    settle().await;
+    assert_eq!(
+        arrived(&upstream),
+        [("p1".to_owned(), 10), ("p2".to_owned(), 0)],
+        "an event stamps the row it brings, and no other"
+    );
+
+    sleep(Duration::from_secs(20)).await;
+    fake.bookmark();
+    settle().await;
+    assert_eq!(
+        arrived(&upstream),
+        [("p1".to_owned(), 10), ("p2".to_owned(), 0)],
+        "a bookmark brings no row"
+    );
+
+    sleep(Duration::from_secs(30)).await;
+    {
+        let mut state = fake.state();
+        state.compacted = u64::MAX;
+        state.hold_initial = true;
+    }
+    fake.end_watches();
+    state
+        .wait_for(|state| *state == ViewState::Relisting)
+        .await
+        .unwrap();
+    text.lock()
+        .unwrap()
+        .insert("p2".to_owned(), "1 (3s ago)".to_owned());
+    fake.state().compacted = 0;
+    fake.release_initial();
+    state.wait_for(ready).await.unwrap();
+    assert_eq!(
+        arrived(&upstream),
+        [("p1".to_owned(), 10), ("p2".to_owned(), 60)],
+        "a relist stamps the row whose text changed and keeps the other's"
+    );
+    run.abort();
 }
 
 #[tokio::test(start_paused = true)]

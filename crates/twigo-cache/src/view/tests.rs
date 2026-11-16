@@ -36,6 +36,7 @@ fn pod(namespace: &str, name: &str, status: &str, restarts: &str) -> Row {
             labels: Box::new([("app".into(), name.split('-').next().unwrap_or(name).into())]),
             owners: Box::default(),
             created: Some(jiff::Timestamp::UNIX_EPOCH),
+            received: jiff::Timestamp::UNIX_EPOCH,
             generated: None,
         },
         cells: Box::new([
@@ -201,6 +202,55 @@ fn a_change_that_shows_nothing_new_sends_nothing() {
     same.meta.resource_version = "2".into();
     rig.store.upsert(same);
     assert_eq!(rig.flush(), None);
+}
+
+fn received(mut row: Row, seconds: i64) -> Row {
+    row.meta.received = jiff::Timestamp::from_second(seconds).unwrap();
+    row
+}
+
+#[test]
+fn a_row_sent_again_only_because_it_was_received_again_sends_nothing() {
+    let mut rig = Rig::new(&query());
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 100));
+    let first = rig.flush().unwrap();
+    assert_eq!(first.upserts[0].received, "1970-01-01T00:01:40.000Z");
+
+    rig.view.apply(Delta::Changed {
+        upserted: vec![Arc::new(received(
+            pod("a", "web-1", "Running", "3 (5m ago)"),
+            400,
+        ))],
+        removed: Vec::new(),
+    });
+    assert_eq!(rig.view.batch(ViewState::Ready), None);
+}
+
+#[test]
+fn a_row_that_prints_as_it_did_returns_to_the_window_with_the_time_it_first_arrived() {
+    let mut rig = Rig::new(&query());
+    rig.view.set_window(0, 1);
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 100));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "0"), 100));
+    rig.flush().unwrap();
+
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 400));
+    assert_eq!(rig.flush(), None);
+
+    rig.view.set_window(1, 2);
+    rig.flush().unwrap();
+    rig.view.set_window(0, 1);
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.upserts[0].received, "1970-01-01T00:01:40.000Z");
+
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "4 (10s ago)"), 700));
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.upserts[0].received, "1970-01-01T00:11:40.000Z");
 }
 
 #[test]

@@ -28,6 +28,8 @@ import type { QueryRow } from "./query";
  */
 export interface MockRow extends QueryRow {
   readonly generated: number | null;
+  /** When the server printed the row's cells, which the durations in them count back from. */
+  readonly received: number;
   readonly fields: Readonly<Record<string, string>>;
   /** What the Metrics API samples for the row, which lists of pods and nodes join. */
   readonly metric?:
@@ -76,6 +78,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: pod.id,
         namespace: pod.namespace,
         created: pod.created,
+        received: pod.received,
         labels: {},
         controller: replicaSetUid(
           cluster.context,
@@ -97,6 +100,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: node.id,
         namespace: null,
         created: node.created,
+        received: cluster.built,
         labels: {},
         controller: null,
         cells: [
@@ -129,6 +133,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: `${cluster.context}/${deployment.namespace}/${deployment.name}`,
         namespace: deployment.namespace,
         created: deployment.created,
+        received: cluster.built,
         labels: { app: deployment.name },
         controller: null,
         cells: namespaced(
@@ -167,6 +172,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           id: job.id,
           namespace: job.namespace,
           created: job.created,
+          received: cluster.now,
           labels: {},
           controller:
             job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
@@ -200,6 +206,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: cronJob.id,
         namespace: cronJob.namespace,
         created: cronJob.created,
+        received: cluster.now,
         labels: {},
         controller: null,
         cells: namespaced(
@@ -238,6 +245,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: `${cluster.context}/${event.pod.namespace}/${event.name}`,
         namespace: event.pod.namespace,
         created: event.first,
+        received: cluster.now,
         labels: {},
         controller: null,
         cells: namespaced(
@@ -301,6 +309,7 @@ export function wireRow(row: MockRow): Row {
   return {
     id: row.id,
     created: row.created === null ? null : new Date(row.created).toISOString(),
+    received: new Date(row.received).toISOString(),
     generated: row.generated,
     cells: [...row.cells],
   };

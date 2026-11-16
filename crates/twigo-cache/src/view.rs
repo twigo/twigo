@@ -275,6 +275,7 @@ impl Layout {
         ipc::Row {
             id: RowId(id.to_owned()),
             created: row.meta.created.map(|created| created.to_string()),
+            received: format!("{:.3}", row.meta.received),
             generated: row.meta.generated,
             cells,
         }

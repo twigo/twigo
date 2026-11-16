@@ -252,6 +252,7 @@ test("a row's tone is the abnormal value of its resource's health column", () =>
   const row = (status: string) => ({
     id: "r",
     created: null,
+    received: "2026-11-16T12:00:00.000Z",
     generated: null,
     cells: ["api", "0/1", status],
   });

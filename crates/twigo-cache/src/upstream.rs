@@ -15,6 +15,7 @@ use std::time::Duration;
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use futures::{AsyncBufRead, AsyncBufReadExt};
 use http::Request;
+use jiff::Timestamp;
 use tokio::sync::watch;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
@@ -22,7 +23,7 @@ use twigo_kube::client::{Clients, Waiting};
 use crate::cluster::Cluster;
 use crate::decode::{Decode, DecodeError, Event};
 use crate::request::{self, Collection, Format, WatchFrom};
-use crate::store::{self, Item, Items, RowKey, Store};
+use crate::store::{Item, Items, RowKey, Store};
 
 /// Items per list page.
 const LIMIT: u32 = 500;
@@ -43,6 +44,9 @@ pub type Connect = Arc<
         + Send
         + Sync,
 >;
+
+/// The time now, which stamps what the server answers.
+pub type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
 
 /// What an upstream watches.
 #[derive(Debug, Clone)]
@@ -166,6 +170,7 @@ impl<T: Item> Upstream<T> {
 /// What a run of the upstream needs from the hub.
 pub(crate) struct Env {
     pub connect: Connect,
+    pub clock: Clock,
     pub cluster: Arc<Cluster>,
     /// Told when a watch waits for the budget, and when it stops waiting,
     /// so the hub can evict an idle upstream.
@@ -463,7 +468,8 @@ where
                     };
                 }
             };
-            let page = match self.decoder.decode_list(body.as_bytes()) {
+            let received = (self.env.clock)();
+            let page = match self.decoder.decode_list(body.as_bytes(), received) {
                 Ok(page) => page,
                 Err(DecodeError::NoColumns) => return Outcome::NoColumns(Next::List),
                 Err(error) => return Outcome::Undecodable(error),
@@ -558,7 +564,8 @@ where
             }
             quiet = false;
             self.backoff = backoff();
-            let event = match self.decoder.decode_event(&line) {
+            let received = (self.env.clock)();
+            let event = match self.decoder.decode_event(&line, received) {
                 Ok(event) => event,
                 Err(DecodeError::NoColumns) => return Outcome::NoColumns(again(&from, &listing)),
                 Err(error) => return Outcome::Undecodable(error),
@@ -613,7 +620,7 @@ where
     fn add(&self, listing: &mut Listing<D::Item>, item: D::Item) {
         listing.loaded = listing.loaded.saturating_add(1);
         match &mut listing.collected {
-            Some(items) => store::collect(items, item),
+            Some(items) => self.upstream.store.collect(items, item),
             None => {
                 self.upstream.store.upsert(item);
                 self.set_phase(Phase::Syncing(listing.loaded));

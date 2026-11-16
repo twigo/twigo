@@ -1,11 +1,13 @@
 use twigo_cache::decode::{Decode, Event};
 use twigo_cache::meta::MetaDecoder;
 
+const RECEIVED: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
+
 fn events(fixture: &str) -> Vec<Event> {
     let mut decoder = MetaDecoder;
     fixture
         .lines()
-        .map(|line| decoder.decode_event(line.as_bytes()).unwrap())
+        .map(|line| decoder.decode_event(line.as_bytes(), RECEIVED).unwrap())
         .collect()
 }
 
@@ -34,7 +36,10 @@ fn summary(events: &[Event]) -> Vec<(&'static str, String)> {
 #[test]
 fn a_metadata_list_keeps_meta_lite_and_no_cells() {
     let page = MetaDecoder
-        .decode_list(include_bytes!("fixtures/namespaces-metadata-list.json"))
+        .decode_list(
+            include_bytes!("fixtures/namespaces-metadata-list.json"),
+            RECEIVED,
+        )
         .unwrap();
     assert_eq!(page.resource_version.as_ref(), "922");
     assert_eq!(page.continue_token, None);
@@ -114,7 +119,10 @@ fn a_metadata_watch_carries_each_change() {
 #[test]
 fn pods_say_where_the_cluster_generated_their_names() {
     let page = MetaDecoder
-        .decode_list(include_bytes!("fixtures/pods-metadata-controllers.json"))
+        .decode_list(
+            include_bytes!("fixtures/pods-metadata-controllers.json"),
+            RECEIVED,
+        )
         .unwrap();
     let generated: Vec<(&str, Option<u32>)> = page
         .items
@@ -130,4 +138,13 @@ fn pods_say_where_the_cluster_generated_their_names() {
             ("db-0", None),
         ]
     );
+}
+
+#[test]
+fn a_metadata_row_takes_the_time_its_response_arrived() {
+    let at = jiff::Timestamp::from_second(10).unwrap();
+    let page = MetaDecoder
+        .decode_list(include_bytes!("fixtures/namespaces-metadata-list.json"), at)
+        .unwrap();
+    assert!(page.items.iter().all(|row| row.meta.received == at));
 }

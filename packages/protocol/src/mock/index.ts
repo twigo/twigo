@@ -690,7 +690,7 @@ export function createMockBackend(
       const due = Math.floor(((Date.now() - started) * rate) / 1000) - applied;
       if (due <= 0) return;
       applied += due;
-      for (const target of clusters.values()) target.change(due);
+      for (const target of clusters.values()) target.change(due, Date.now());
       for (const sub of subscriptions.values()) sub.touch();
     }, RATE_TICK_MS);
   };

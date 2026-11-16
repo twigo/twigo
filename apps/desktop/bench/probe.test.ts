@@ -9,7 +9,13 @@ const COLUMNS: Column[] = [
 ];
 
 function row(id: string, cells: Cell[]): Row {
-  return { id, created: null, generated: null, cells };
+  return {
+    id,
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells,
+  };
 }
 
 function batch(rest: Partial<ListBatch>): ListBatch {

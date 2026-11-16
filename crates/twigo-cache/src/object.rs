@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -37,12 +38,12 @@ impl ObjectDecoder {
         Self::default()
     }
 
-    fn table_object(&self, row: TableRow<'_>) -> Result<Object, DecodeError> {
+    fn table_object(&self, row: TableRow<'_>, received: Timestamp) -> Result<Object, DecodeError> {
         let cells = self.table.cells(row.cells)?;
         let json = row.object.ok_or(DecodeError::Missing("object"))?;
         let parsed: RawObject = serde_json::from_str(json.get())?;
         Ok(Object {
-            meta: parsed.metadata.into_meta()?,
+            meta: parsed.metadata.into_meta(received)?,
             json: json.to_owned(),
             cells,
         })
@@ -57,7 +58,11 @@ impl ObjectDecoder {
 impl Decode for ObjectDecoder {
     type Item = Object;
 
-    fn decode_list(&mut self, body: &[u8]) -> Result<Page<Object>, DecodeError> {
+    fn decode_list(
+        &mut self,
+        body: &[u8],
+        received: Timestamp,
+    ) -> Result<Page<Object>, DecodeError> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct List<'a> {
@@ -75,7 +80,7 @@ impl Decode for ObjectDecoder {
                 let objects = table
                     .rows
                     .into_iter()
-                    .map(|row| self.table_object(row))
+                    .map(|row| self.table_object(row, received))
                     .collect::<Result<_, _>>()?;
                 Ok(table.metadata.into_page(objects))
             }
@@ -89,7 +94,7 @@ impl Decode for ObjectDecoder {
                     .unwrap_or_default()
                     .into_iter()
                     .map(|item| {
-                        let (meta, json) = object(item, item_kind, &list.api_version)?;
+                        let (meta, json) = object(item, item_kind, &list.api_version, received)?;
                         Ok(self.raw_object(meta, json))
                     })
                     .collect::<Result<_, DecodeError>>()?;
@@ -99,7 +104,11 @@ impl Decode for ObjectDecoder {
         }
     }
 
-    fn decode_event(&mut self, line: &[u8]) -> Result<Event<Object>, DecodeError> {
+    fn decode_event(
+        &mut self,
+        line: &[u8],
+        received: Timestamp,
+    ) -> Result<Event<Object>, DecodeError> {
         let event: RawEvent<'_> = serde_json::from_slice(line)?;
         let body = event.object.get().as_bytes();
         match peek_kind(body)? {
@@ -130,16 +139,18 @@ impl Decode for ObjectDecoder {
                         })
                     }
                     EventKind::Added | EventKind::Modified => {
-                        self.table_object(row).map(Event::Upsert)
+                        self.table_object(row, received).map(Event::Upsert)
                     }
-                    EventKind::Deleted => self.table_object(row).map(Event::Delete),
+                    EventKind::Deleted => self.table_object(row, received).map(Event::Delete),
                     EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
                 }
             }
             Kind::Other(kind) => {
                 let parsed: RawObject = serde_json::from_slice(body)?;
                 let json = event.object.to_owned();
-                let event = parsed.metadata.into_event(event.kind, &kind, |meta| meta)?;
+                let event = parsed
+                    .metadata
+                    .into_event(event.kind, &kind, received, |meta| meta)?;
                 Ok(match event {
                     Event::Upsert(meta) => Event::Upsert(self.raw_object(meta, json)),
                     Event::Delete(meta) => Event::Delete(self.raw_object(meta, json)),
@@ -185,6 +196,7 @@ fn object(
     json: &RawValue,
     kind: &str,
     api_version: &str,
+    received: Timestamp,
 ) -> Result<(Meta, Box<RawValue>), DecodeError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -213,5 +225,8 @@ fn object(
         whole.pop();
     }
     whole.push_str(rest);
-    Ok((parsed.metadata.into_meta()?, RawValue::from_string(whole)?))
+    Ok((
+        parsed.metadata.into_meta(received)?,
+        RawValue::from_string(whole)?,
+    ))
 }

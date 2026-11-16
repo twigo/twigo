@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::{BoxFuture, select_all};
+use jiff::Timestamp;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
 };
@@ -42,7 +43,7 @@ use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Env, Spec, Upstream};
 
-pub use crate::upstream::{Connect, RETRY_WITHIN};
+pub use crate::upstream::{Clock, Connect, RETRY_WITHIN};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
@@ -196,6 +197,7 @@ pub struct Hub {
 
 struct Inner {
     connect: Connect,
+    clock: Clock,
     clusters: Mutex<HashMap<String, Arc<Cluster>>>,
     registry: Mutex<Registry>,
 }
@@ -273,9 +275,15 @@ fn failed(state: &ViewState) -> bool {
 
 impl Hub {
     pub fn new(connect: Connect) -> Self {
+        Self::with_clock(connect, Arc::new(Timestamp::now))
+    }
+
+    /// A hub whose rows are stamped by `clock`, which a test sets.
+    pub(crate) fn with_clock(connect: Connect, clock: Clock) -> Self {
         Self {
             inner: Arc::new(Inner {
                 connect,
+                clock,
                 clusters: Mutex::default(),
                 registry: Mutex::default(),
             }),
@@ -642,6 +650,7 @@ impl Hub {
         let waiting = key.clone();
         let env = Env {
             connect: Arc::clone(&self.inner.connect),
+            clock: Arc::clone(&self.inner.clock),
             cluster: self.inner.cluster(&key.context),
             waiting: Arc::new(move |queued| {
                 if let Some(hub) = hub.upgrade() {

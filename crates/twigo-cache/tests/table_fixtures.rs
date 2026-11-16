@@ -1,6 +1,8 @@
 use twigo_cache::decode::{Decode, DecodeError, Event};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row, TableDecoder};
 
+const RECEIVED: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
+
 fn lines(fixture: &str) -> impl Iterator<Item = &[u8]> {
     fixture.lines().map(str::as_bytes)
 }
@@ -20,7 +22,7 @@ fn upsert(event: Event) -> Row {
 fn pod_list_keeps_typed_columns_and_metadata() {
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/pods-list.json"))
+        .decode_list(include_bytes!("fixtures/pods-list.json"), RECEIVED)
         .unwrap();
 
     let columns = decoder.columns().unwrap();
@@ -72,7 +74,7 @@ fn node_list_keeps_its_status_and_age() {
     use ColumnKind::{Age, String};
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/nodes-list.json"))
+        .decode_list(include_bytes!("fixtures/nodes-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(
         layout(decoder.columns().unwrap()),
@@ -114,7 +116,7 @@ fn deployment_counts_are_sent_as_integers_under_string_columns() {
     use ColumnKind::{Age, String};
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/deployments-list.json"))
+        .decode_list(include_bytes!("fixtures/deployments-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(
         layout(decoder.columns().unwrap()),
@@ -150,7 +152,7 @@ fn event_list_has_no_age_and_its_name_last() {
     use ColumnKind::String;
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/events-list.json"))
+        .decode_list(include_bytes!("fixtures/events-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(
         layout(decoder.columns().unwrap()),
@@ -201,7 +203,7 @@ fn watch_columns_come_once_per_connection() {
 
     let mut decoder = TableDecoder::new();
     let events: Vec<Event> = lines(fixture)
-        .map(|line| decoder.decode_event(line).unwrap())
+        .map(|line| decoder.decode_event(line, RECEIVED).unwrap())
         .collect();
     assert_eq!(decoder.columns().unwrap().len(), 9);
 
@@ -230,21 +232,59 @@ fn watch_columns_come_once_per_connection() {
     );
 }
 
+fn at(seconds: i64) -> jiff::Timestamp {
+    jiff::Timestamp::from_second(seconds).unwrap()
+}
+
+fn received(events: &[Event]) -> Vec<jiff::Timestamp> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Upsert(row) | Event::Delete(row) => Some(row.meta.received),
+            Event::Bookmark { .. } | Event::Error(_) => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_row_takes_the_time_its_response_arrived() {
+    let mut decoder = TableDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/pods-list.json"), at(10))
+        .unwrap();
+    assert!(!page.items.is_empty());
+    assert!(page.items.iter().all(|row| row.meta.received == at(10)));
+
+    let fixture = include_str!("fixtures/pods-watch.jsonl");
+    let events: Vec<Event> = lines(fixture)
+        .map(|line| decoder.decode_event(line, at(20)).unwrap())
+        .collect();
+    let times = received(&events);
+    assert_eq!(times.len(), 6, "a bookmark brings no row");
+    assert!(times.iter().all(|time| *time == at(20)));
+
+    let raw = include_str!("fixtures/raw-watch.jsonl");
+    let events: Vec<Event> = lines(raw)
+        .map(|line| TableDecoder::new().decode_event(line, at(30)).unwrap())
+        .collect();
+    assert!(received(&events).iter().all(|time| *time == at(30)));
+}
+
 #[test]
 fn headless_rows_use_the_columns_already_kept() {
     let fixture = include_str!("fixtures/pods-watch.jsonl");
     let mut decoder = TableDecoder::new();
     decoder
-        .decode_event(lines(fixture).next().unwrap())
+        .decode_event(lines(fixture).next().unwrap(), RECEIVED)
         .unwrap();
     let columns = decoder.columns().unwrap().clone();
 
     let headless = lines(fixture).nth(1).unwrap();
-    let row = upsert(decoder.decode_event(headless).unwrap());
+    let row = upsert(decoder.decode_event(headless, RECEIVED).unwrap());
     assert_eq!(row.cells.len(), columns.len());
 
     assert!(matches!(
-        TableDecoder::new().decode_event(headless),
+        TableDecoder::new().decode_event(headless, RECEIVED),
         Err(DecodeError::NoColumns)
     ));
 }
@@ -253,14 +293,16 @@ fn headless_rows_use_the_columns_already_kept() {
 fn identical_columns_keep_the_same_allocation() {
     let mut decoder = TableDecoder::new();
     decoder
-        .decode_list(include_bytes!("fixtures/pods-list.json"))
+        .decode_list(include_bytes!("fixtures/pods-list.json"), RECEIVED)
         .unwrap();
     let before = decoder.columns().unwrap().clone();
     let first_event = include_str!("fixtures/pods-watch.jsonl")
         .lines()
         .next()
         .unwrap();
-    decoder.decode_event(first_event.as_bytes()).unwrap();
+    decoder
+        .decode_event(first_event.as_bytes(), RECEIVED)
+        .unwrap();
     assert!(std::sync::Arc::ptr_eq(&before, decoder.columns().unwrap()));
 }
 
@@ -268,7 +310,10 @@ fn identical_columns_keep_the_same_allocation() {
 fn a_bookmark_can_be_the_event_that_carries_the_columns() {
     let mut decoder = TableDecoder::new();
     let event = decoder
-        .decode_event(include_bytes!("fixtures/pods-watch-bookmark-first.jsonl").trim_ascii())
+        .decode_event(
+            include_bytes!("fixtures/pods-watch-bookmark-first.jsonl").trim_ascii(),
+            RECEIVED,
+        )
         .unwrap();
     assert_eq!(
         event,
@@ -284,7 +329,7 @@ fn a_bookmark_can_be_the_event_that_carries_the_columns() {
 fn a_streaming_list_ends_with_an_annotated_bookmark() {
     let mut decoder = TableDecoder::new();
     let events: Vec<Event> = lines(include_str!("fixtures/pods-watch-initial-events.jsonl"))
-        .map(|line| decoder.decode_event(line).unwrap())
+        .map(|line| decoder.decode_event(line, RECEIVED).unwrap())
         .collect();
     assert_eq!(events.len(), 3);
     assert!(matches!(&events[0], Event::Upsert(row) if &*row.meta.name == "p1"));
@@ -302,7 +347,7 @@ fn a_streaming_list_ends_with_an_annotated_bookmark() {
 fn crd_printer_columns_decode_by_json_type() {
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/widgets-list.json"))
+        .decode_list(include_bytes!("fixtures/widgets-list.json"), RECEIVED)
         .unwrap();
     let columns = decoder.columns().unwrap();
     let kinds: Vec<ColumnKind> = columns.iter().map(|column| column.kind).collect();
@@ -349,11 +394,14 @@ fn crd_printer_columns_decode_by_json_type() {
 fn a_raw_object_falls_back_to_name_and_age() {
     let mut decoder = TableDecoder::new();
     decoder
-        .decode_list(include_bytes!("fixtures/pods-list.json"))
+        .decode_list(include_bytes!("fixtures/pods-list.json"), RECEIVED)
         .unwrap();
     let row = upsert(
         decoder
-            .decode_event(include_bytes!("fixtures/pods-watch-raw-object.jsonl").trim_ascii())
+            .decode_event(
+                include_bytes!("fixtures/pods-watch-raw-object.jsonl").trim_ascii(),
+                RECEIVED,
+            )
             .unwrap(),
     );
     assert_eq!(row.meta.name.as_ref(), "p1");
@@ -374,21 +422,28 @@ fn a_table_may_spell_its_kind_with_an_escape() {
     };
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(escape(include_str!("fixtures/pods-list.json")).as_bytes())
+        .decode_list(
+            escape(include_str!("fixtures/pods-list.json")).as_bytes(),
+            RECEIVED,
+        )
         .unwrap();
     assert!(!page.items.is_empty());
     let line = include_str!("fixtures/pods-watch.jsonl")
         .lines()
         .next()
         .unwrap();
-    assert!(decoder.decode_event(escape(line).as_bytes()).is_ok());
+    assert!(
+        decoder
+            .decode_event(escape(line).as_bytes(), RECEIVED)
+            .is_ok()
+    );
 }
 
 #[test]
 fn a_raw_object_may_have_a_field_named_as_a_tables() {
     let mut decoder = TableDecoder::new();
     let line = br#"{"type":"ADDED","object":{"kind":"Grid","rows":5,"columnDefinitions":"none","metadata":{"name":"g","uid":"u","resourceVersion":"7"}}}"#;
-    let row = upsert(decoder.decode_event(line).unwrap());
+    let row = upsert(decoder.decode_event(line, RECEIVED).unwrap());
     assert_eq!(&*row.meta.name, "g");
 }
 
@@ -397,7 +452,7 @@ fn a_status_in_a_watch_is_an_error_event() {
     let mut decoder = TableDecoder::new();
     let line = br#"{"type":"ERROR","object":{"kind":"Status","status":"Failure","reason":"Expired","code":410,"message":"too old"}}"#;
     assert!(matches!(
-        decoder.decode_event(line).unwrap(),
+        decoder.decode_event(line, RECEIVED).unwrap(),
         Event::Error(_)
     ));
 }
@@ -406,14 +461,14 @@ fn a_status_in_a_watch_is_an_error_event() {
 fn a_table_with_a_row_it_cannot_read_is_an_error() {
     let mut decoder = TableDecoder::new();
     let line = br#"{"type":"MODIFIED","object":{"kind":"Table","rows":[{"cells":5}]}}"#;
-    assert!(decoder.decode_event(line).is_err());
+    assert!(decoder.decode_event(line, RECEIVED).is_err());
 }
 
 #[test]
 fn a_server_without_table_gets_metadata_columns() {
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/raw-list.json"))
+        .decode_list(include_bytes!("fixtures/raw-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(names(decoder.columns().unwrap()), ["Name", "Age"]);
     assert_eq!(page.resource_version.as_ref(), "7");
@@ -424,7 +479,7 @@ fn a_server_without_table_gets_metadata_columns() {
     );
 
     let events: Vec<Event> = lines(include_str!("fixtures/raw-watch.jsonl"))
-        .map(|line| decoder.decode_event(line).unwrap())
+        .map(|line| decoder.decode_event(line, RECEIVED).unwrap())
         .collect();
     assert!(matches!(&events[0], Event::Upsert(row) if &*row.meta.resource_version == "8"));
     assert_eq!(
@@ -444,11 +499,12 @@ fn server_columns_replace_the_metadata_fallback() {
             lines(include_str!("fixtures/raw-watch.jsonl"))
                 .next()
                 .unwrap(),
+            RECEIVED,
         )
         .unwrap();
     assert_eq!(decoder.columns().unwrap().len(), 2);
     decoder
-        .decode_list(include_bytes!("fixtures/pods-list.json"))
+        .decode_list(include_bytes!("fixtures/pods-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(decoder.columns().unwrap().len(), 9);
 }
@@ -461,13 +517,14 @@ fn headless_rows_after_raw_objects_need_a_reconnect() {
             lines(include_str!("fixtures/raw-watch.jsonl"))
                 .next()
                 .unwrap(),
+            RECEIVED,
         )
         .unwrap();
     let headless = lines(include_str!("fixtures/pods-watch.jsonl"))
         .nth(1)
         .unwrap();
     assert!(matches!(
-        decoder.decode_event(headless),
+        decoder.decode_event(headless, RECEIVED),
         Err(DecodeError::NoColumns)
     ));
 }
@@ -475,7 +532,10 @@ fn headless_rows_after_raw_objects_need_a_reconnect() {
 #[test]
 fn component_statuses_have_no_uid() {
     let page = TableDecoder::new()
-        .decode_list(include_bytes!("fixtures/componentstatuses-list.json"))
+        .decode_list(
+            include_bytes!("fixtures/componentstatuses-list.json"),
+            RECEIVED,
+        )
         .unwrap();
     assert_eq!(page.items.len(), 3);
     assert!(page.items.iter().all(|row| row.meta.uid.is_none()));
@@ -485,7 +545,7 @@ fn component_statuses_have_no_uid() {
 fn an_empty_table_may_send_null() {
     let mut decoder = TableDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/metrics-empty.json"))
+        .decode_list(include_bytes!("fixtures/metrics-empty.json"), RECEIVED)
         .unwrap();
     assert!(page.items.is_empty());
     assert!(decoder.columns().is_none());
@@ -505,7 +565,9 @@ fn an_integral_number_stays_a_number() {
         r#"[{"name":"Name","type":"string","format":"name"},{"name":"Ratio","type":"number"}]"#,
         &format!(r#"[{{"cells":["w",1],"object":{OBJECT}}}]"#),
     );
-    let page = TableDecoder::new().decode_list(body.as_bytes()).unwrap();
+    let page = TableDecoder::new()
+        .decode_list(body.as_bytes(), RECEIVED)
+        .unwrap();
     assert_eq!(page.items[0].cells[1], Cell::Number(1.0));
 }
 
@@ -516,7 +578,7 @@ fn an_age_column_is_found_under_any_capitalisation() {
         &format!(r#"[{{"cells":["w","5m"],"object":{OBJECT}}}]"#),
     );
     let mut decoder = TableDecoder::new();
-    let page = decoder.decode_list(body.as_bytes()).unwrap();
+    let page = decoder.decode_list(body.as_bytes(), RECEIVED).unwrap();
     assert_eq!(decoder.columns().unwrap()[1].kind, ColumnKind::Age);
     assert_eq!(page.items[0].cells[1], Cell::Age);
 }
@@ -530,7 +592,7 @@ fn cell_and_row_counts_are_checked() {
         &format!(r#"[{{"cells":["w"],"object":{OBJECT}}}]"#),
     );
     assert!(matches!(
-        TableDecoder::new().decode_list(short.as_bytes()),
+        TableDecoder::new().decode_list(short.as_bytes(), RECEIVED),
         Err(DecodeError::CellCount {
             expected: 2,
             found: 1
@@ -542,7 +604,7 @@ fn cell_and_row_counts_are_checked() {
     );
     let event = format!(r#"{{"type":"ADDED","object":{}}}"#, table(columns, &rows));
     assert!(matches!(
-        TableDecoder::new().decode_event(event.as_bytes()),
+        TableDecoder::new().decode_event(event.as_bytes(), RECEIVED),
         Err(DecodeError::RowCount(2))
     ));
 }
@@ -551,7 +613,7 @@ fn cell_and_row_counts_are_checked() {
 fn a_bookmark_needs_a_resource_version() {
     let event = r#"{"type":"BOOKMARK","object":{"kind":"Thing","apiVersion":"example.com/v1","metadata":{}}}"#;
     assert!(matches!(
-        TableDecoder::new().decode_event(event.as_bytes()),
+        TableDecoder::new().decode_event(event.as_bytes(), RECEIVED),
         Err(DecodeError::Missing("metadata.resourceVersion"))
     ));
 }
@@ -559,7 +621,10 @@ fn a_bookmark_needs_a_resource_version() {
 #[test]
 fn an_error_event_carries_the_status() {
     let event = TableDecoder::new()
-        .decode_event(include_bytes!("fixtures/watch-gone.jsonl").trim_ascii())
+        .decode_event(
+            include_bytes!("fixtures/watch-gone.jsonl").trim_ascii(),
+            RECEIVED,
+        )
         .unwrap();
     let Event::Error(status) = event else {
         panic!("expected an error event, got {event:?}");

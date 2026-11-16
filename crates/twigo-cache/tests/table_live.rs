@@ -16,6 +16,8 @@ use twigo_cache::request::{self, Collection, WatchFrom};
 use twigo_cache::table::{Cell, ColumnKind, Row, TableDecoder};
 use twigo_kube::client::{Clients, Gate, Options};
 
+const RECEIVED: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
+
 const POD_COLUMNS: [&str; 9] = [
     "Name",
     "Ready",
@@ -130,7 +132,7 @@ async fn pods_list_and_watch() {
         .unwrap();
     assert!(body.contains("\"managedFields\""));
     let mut decoder = TableDecoder::new();
-    let page = decoder.decode_list(body.as_bytes()).unwrap();
+    let page = decoder.decode_list(body.as_bytes(), RECEIVED).unwrap();
     let columns = decoder.columns().unwrap().clone();
     let names: Vec<&str> = columns.iter().map(|column| &*column.name).collect();
     assert_eq!(names, POD_COLUMNS);
@@ -169,7 +171,7 @@ async fn pods_list_and_watch() {
             "column definitions only in the first event"
         );
         first = false;
-        match decoder.decode_event(&line).unwrap() {
+        match decoder.decode_event(&line, RECEIVED).unwrap() {
             Event::Upsert(row) => {
                 last_version = row.meta.resource_version.clone();
                 seen.push(("upsert", row.meta.name));
@@ -205,7 +207,7 @@ async fn pods_list_and_watch() {
         has_columns(&line),
         "a new connection sends the columns again"
     );
-    let row = upsert(decoder.decode_event(&line).unwrap());
+    let row = upsert(decoder.decode_event(&line, RECEIVED).unwrap());
     assert_eq!(row.cells.len(), POD_COLUMNS.len());
     assert!(Arc::ptr_eq(&columns, decoder.columns().unwrap()));
 
@@ -240,7 +242,7 @@ async fn streaming_lists_depend_on_the_release() {
     let mut watch = Lines::open(&client, request).await;
     let mut decoder = TableDecoder::new();
     let first = watch.next().await.unwrap();
-    let row = upsert(decoder.decode_event(&first).unwrap());
+    let row = upsert(decoder.decode_event(&first, RECEIVED).unwrap());
     assert_eq!(&*row.meta.name, "p1");
     assert!(has_columns(&first));
     let names: Vec<&str> = decoder
@@ -254,7 +256,7 @@ async fn streaming_lists_depend_on_the_release() {
         let line = watch.next().await.expect("the initial-events-end bookmark");
         if let Event::Bookmark {
             initial_events_end, ..
-        } = decoder.decode_event(&line).unwrap()
+        } = decoder.decode_event(&line, RECEIVED).unwrap()
             && initial_events_end
         {
             break;
@@ -354,7 +356,7 @@ async fn crd_printer_columns() {
         .await
         .unwrap();
     let mut decoder = TableDecoder::new();
-    let page = decoder.decode_list(body.as_bytes()).unwrap();
+    let page = decoder.decode_list(body.as_bytes(), RECEIVED).unwrap();
     let kinds: Vec<ColumnKind> = decoder
         .columns()
         .unwrap()

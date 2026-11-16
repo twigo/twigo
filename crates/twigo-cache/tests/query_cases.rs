@@ -147,6 +147,7 @@ fn row(row: &CaseRow, cells: Vec<&Value>, columns: &[Column], at: usize) -> Row 
                 })
                 .collect(),
             created: row.created,
+            received: jiff::Timestamp::UNIX_EPOCH,
             generated: None,
         },
         cells,

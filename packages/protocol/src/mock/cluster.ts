@@ -1,3 +1,4 @@
+import { humanDuration, parseDuration } from "@twigo/utils";
 import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
 
@@ -13,6 +14,8 @@ export interface Pod {
   ready: number;
   status: string;
   restarts: string;
+  /** When the server printed `restarts`: its age counts back from here. */
+  received: number;
   created: number;
   ip: string;
   node: string;
@@ -115,6 +118,8 @@ export class Cluster {
   version = 0;
   /** When the cluster last changed, which the times its events print count from. */
   now: number;
+  /** When the cluster was built: when a row that never changes was received. */
+  readonly built: number;
   /**
    * What lists have synced, by kind alone for every namespace, else with the
    * namespaces after it: a list of the same namespaces, or of every one,
@@ -132,6 +137,7 @@ export class Cluster {
     now: number,
   ) {
     this.now = now;
+    this.built = now;
     this.#random = mulberry32(hash(context));
     this.#rollouts = mulberry32(hash(`${context}/rollouts`));
     for (let i = 0; i < count; i++) this.pods.push(this.#pod(now));
@@ -192,7 +198,7 @@ export class Cluster {
       const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
       if (pod) targets.add(pod);
     }
-    for (const pod of targets) this.#change(pod);
+    for (const pod of targets) this.#change(pod, now);
     if (this.pods.length > 0) {
       const at = Math.floor(this.#random() * this.pods.length);
       const gone = this.pods[at];
@@ -234,6 +240,7 @@ export class Cluster {
       status: "Running",
       ready: pod.containers,
       restarts: "0",
+      received: now,
       created: now,
       version: 0,
     };
@@ -255,6 +262,7 @@ export class Cluster {
       status: "ContainerCreating",
       ready: 0,
       restarts: "0",
+      received: now,
       created: now,
       version: 0,
     };
@@ -309,6 +317,7 @@ export class Cluster {
         status: "ContainerCreating",
         ready: 0,
         restarts: "0",
+        received: now,
         created: now,
         node: `${this.context}-node-${Math.floor(this.#rollouts() * this.nodes.length)}`,
         version: 0,
@@ -380,27 +389,33 @@ export class Cluster {
   }
 
   /** Changes `count` distinct random pods. */
-  change(count: number): void {
+  change(count: number, now: number): void {
     const picked = new Set<Pod>();
     while (picked.size < Math.min(count, this.pods.length)) {
       const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
       if (pod) picked.add(pod);
     }
-    for (const pod of picked) this.#change(pod);
+    for (const pod of picked) this.#change(pod, now);
     this.version++;
   }
 
-  #change(pod: Pod): void {
+  /** Prints the pod anew at `now`, as the API server does each time it sends a row. */
+  #change(pod: Pod, now: number): void {
     const roll = this.#random();
     if (roll < 0.5) {
       const count = Number.parseInt(pod.restarts, 10) + 1;
       pod.restarts = `${count} (${Math.ceil(this.#random() * 50)}s ago)`;
-    } else if (roll < 0.8) {
-      pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
-      pod.ready = pod.status === "Running" ? pod.containers : 0;
     } else {
-      pod.ready = pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
+      pod.restarts = printedAgain(pod, now);
+      if (roll < 0.8) {
+        pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
+        pod.ready = pod.status === "Running" ? pod.containers : 0;
+      } else {
+        pod.ready =
+          pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
+      }
     }
+    pod.received = now;
     pod.version++;
   }
 
@@ -450,13 +465,38 @@ export class Cluster {
       restarts:
         restarts === 0
           ? "0"
-          : `${restarts} (${1 + Math.floor(random() * 59)}m ago)`,
+          : `${restarts} (${humanDuration(restartAge(status, random()))} ago)`,
+      received: now,
       created: created ?? now - Math.floor(random() * random() * 90 * DAY),
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
       node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
     };
   }
+}
+
+const MINUTE = 60_000;
+
+/**
+ * How long before it is first printed a pod's last restart was: a pod that
+ * is not running restarted minutes ago, a running one minutes, hours or
+ * days ago, which the list's steps of Restarts tell apart.
+ */
+function restartAge(status: string, roll: number): number {
+  if (status !== "Running") return (1 + Math.floor(roll * 59)) * MINUTE;
+  if (roll < 0.4) return (1 + Math.floor((roll / 0.4) * 59)) * MINUTE;
+  if (roll < 0.7)
+    return (60 + Math.floor(((roll - 0.4) / 0.3) * 1380)) * MINUTE;
+  return (1440 + Math.floor(((roll - 0.7) / 0.3) * 28 * 1440)) * MINUTE;
+}
+
+/** The Restarts a pod prints at `now`: the age it printed at `received`, grown by the time since. */
+function printedAgain(pod: Pod, now: number): string {
+  const [, count, ago] = /^(\d+) \((.+) ago\)$/.exec(pod.restarts) ?? [];
+  const age = ago === undefined ? undefined : parseDuration(ago);
+  return count === undefined || age === undefined
+    ? pod.restarts
+    : `${count} (${humanDuration(age + now - pod.received)} ago)`;
 }
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */

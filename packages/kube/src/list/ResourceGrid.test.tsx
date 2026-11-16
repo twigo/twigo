@@ -277,6 +277,7 @@ function batch(
     upserts: Object.entries(restarts).map(([id, value]) => ({
       id,
       created: null,
+      received: "2026-11-16T12:00:00.000Z",
       generated: null,
       cells: [id, value],
     })),
@@ -337,6 +338,7 @@ test("seconds passing render the ages and not the grid", async () => {
         {
           id: "a",
           created: new Date(Date.now() - 5000).toISOString(),
+          received: "2026-11-16T12:00:00.000Z",
           generated: null,
           cells: ["a", null],
         },
@@ -733,6 +735,7 @@ function warnBatch(seq: number, ids: readonly string[], creating: number) {
     upserts: ids.map((id) => ({
       id,
       created: null,
+      received: "2026-11-16T12:00:00.000Z",
       generated: null,
       cells: [id, "Pending"],
     })),
@@ -916,6 +919,7 @@ test("a pod that is not ready and restarted within the hour warns in Ready alone
   const pod = (id: string, ready: string) => ({
     id,
     created: null,
+    received: "2026-11-16T12:00:00.000Z",
     generated: null,
     cells: [id, ready, "Running", "1 (46m ago)"],
   });
@@ -1085,6 +1089,7 @@ test("a hovered row's verbs read that row's own state, not the selected row's", 
       ].map(([id = "", status]) => ({
         id,
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells: [id.slice(4), status ?? "", "v1.37.1"],
       })),

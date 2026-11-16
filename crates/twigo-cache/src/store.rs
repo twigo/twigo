@@ -9,22 +9,51 @@ use tokio::sync::watch;
 
 use crate::meta::Meta;
 use crate::object::Object;
-use crate::table::{Column, Row};
+use crate::table::{Cell, Column, Row};
 
 /// What a store holds: a row, or an editor's object.
 pub trait Item: Send + Sync + 'static {
     fn meta(&self) -> &Meta;
+    fn meta_mut(&mut self) -> &mut Meta;
+    /// What the server printed for it, one per column.
+    fn cells(&self) -> &[Cell];
 }
 
 impl Item for Row {
     fn meta(&self) -> &Meta {
         &self.meta
     }
+
+    fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
+
+    fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
 }
 
 impl Item for Object {
     fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
+
+    fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+}
+
+/// Cells printed again as they were keep the time they first arrived: an age
+/// in them counts back from it, and the earlier receipt is the closer, since
+/// the server prints an age rounded down. The webview, to which a row of
+/// unchanged cells is not sent again, then agrees with the store.
+fn keep_received<T: Item>(item: &mut T, held: Option<&Arc<T>>) {
+    if let Some(held) = held.filter(|held| held.cells() == item.cells()) {
+        item.meta_mut().received = held.meta().received;
     }
 }
 
@@ -161,9 +190,10 @@ impl<T: Item> Store<T> {
         self.contents().items.len()
     }
 
-    pub fn upsert(&self, item: T) {
+    pub fn upsert(&self, mut item: T) {
         let key = RowKey::of(item.meta());
         let mut contents = self.contents();
+        keep_received(&mut item, contents.items.get(&key));
         let change = match contents.items.insert(key.clone(), Arc::new(item)) {
             Some(_) => Change::Modified,
             None => Change::Added,
@@ -184,6 +214,13 @@ impl<T: Item> Store<T> {
         if removed {
             self.changed();
         }
+    }
+
+    /// Inserts `item` into `items`, as a relist collects them.
+    pub fn collect(&self, items: &mut Items<T>, mut item: T) {
+        let key = RowKey::of(item.meta());
+        keep_received(&mut item, self.contents().items.get(&key));
+        items.insert(key, Arc::new(item));
     }
 
     /// Replaces every item, as a relist ends.
@@ -289,11 +326,6 @@ impl<T: Item> Store<T> {
     }
 }
 
-/// Inserts `item` into `items`, as a relist collects them.
-pub fn collect<T: Item>(items: &mut Items<T>, item: T) {
-    items.insert(RowKey::of(item.meta()), Arc::new(item));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +341,7 @@ mod tests {
                 labels: Box::default(),
                 owners: Box::default(),
                 created: None,
+                received: jiff::Timestamp::UNIX_EPOCH,
                 generated: None,
             },
             cells: Box::new([Cell::Text(version.into())]),
@@ -431,7 +464,7 @@ mod tests {
         reset(store.drain(&feed));
         store.upsert(row("a", "1"));
         let mut items = Items::new();
-        collect(&mut items, row("b", "1"));
+        store.collect(&mut items, row("b", "1"));
         store.replace(items);
         assert_eq!(reset(store.drain(&feed)), ["b"]);
 
@@ -440,6 +473,56 @@ mod tests {
         assert_eq!(reset(store.drain(&feed)), ["b"]);
         store.set_columns(Some(&columns));
         assert_eq!(changed(store.drain(&feed)), []);
+    }
+
+    fn printed(uid: &str, version: &str, text: &str, seconds: i64) -> Row {
+        let mut row = row(uid, version);
+        row.cells = Box::new([Cell::Text(text.into())]);
+        row.meta.received = jiff::Timestamp::from_second(seconds).unwrap();
+        row
+    }
+
+    fn received(store: &Store<Row>) -> Vec<(String, i64)> {
+        let mut received: Vec<_> = store
+            .items(|_| true)
+            .iter()
+            .map(|row| {
+                let uid = row.meta.uid.as_deref().unwrap_or_default().to_owned();
+                (uid, row.meta.received.as_second())
+            })
+            .collect();
+        received.sort();
+        received
+    }
+
+    #[test]
+    fn a_print_of_the_same_cells_keeps_the_time_they_arrived() {
+        let store = Store::default();
+        store.upsert(printed("a", "1", "3 (5m ago)", 100));
+        store.upsert(printed("a", "2", "3 (5m ago)", 400));
+        assert_eq!(received(&store), [("a".to_owned(), 100)]);
+        store.upsert(printed("a", "3", "4 (10s ago)", 700));
+        assert_eq!(received(&store), [("a".to_owned(), 700)]);
+    }
+
+    #[test]
+    fn a_relist_keeps_the_time_of_cells_that_did_not_change() {
+        let store = Store::default();
+        store.upsert(printed("same", "1", "3 (5m ago)", 100));
+        store.upsert(printed("changed", "1", "1 (5m ago)", 100));
+        let mut items = Items::new();
+        store.collect(&mut items, printed("same", "2", "3 (5m ago)", 900));
+        store.collect(&mut items, printed("changed", "2", "2 (1m ago)", 900));
+        store.collect(&mut items, printed("new", "1", "0", 900));
+        store.replace(items);
+        assert_eq!(
+            received(&store),
+            [
+                ("changed".to_owned(), 900),
+                ("new".to_owned(), 900),
+                ("same".to_owned(), 100)
+            ]
+        );
     }
 
     #[test]

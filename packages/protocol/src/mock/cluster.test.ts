@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { humanDuration, parseDuration } from "@twigo/utils";
 import { Cluster, generatedAt } from "./cluster";
 import { KINDS } from "./kinds";
 
@@ -80,4 +81,52 @@ test("the mock's pods read as a Deployment's", () => {
       /^[0-9a-z]+-[0-9a-z]{5}$/,
     );
   }
+});
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const ago = (restarts: string) =>
+  parseDuration(/\((.+) ago\)$/.exec(restarts)?.[1] ?? "");
+
+test("a running pod's last restart is minutes, hours or days old, any other pod's minutes", () => {
+  const cluster = new Cluster("prod-eu", 4000, Date.UTC(2026, 10, 3));
+  const restarted = cluster.pods.filter((pod) => pod.restarts !== "0");
+  const [running, other] = [
+    restarted.filter((pod) => pod.status === "Running"),
+    restarted.filter((pod) => pod.status !== "Running"),
+  ].map((pods) => pods.map((pod) => ago(pod.restarts) ?? NaN));
+  expect(running?.some((age) => age < HOUR)).toBe(true);
+  expect(running?.some((age) => age >= HOUR && age < DAY)).toBe(true);
+  expect(running?.some((age) => age >= DAY)).toBe(true);
+  expect(other?.length).toBeGreaterThan(0);
+  expect(other?.every((age) => age <= HOUR - 60_000)).toBe(true);
+});
+
+test("a pod is printed when it is made and again each time it changes, its age grown by the time since", () => {
+  const start = Date.UTC(2026, 10, 3);
+  const cluster = new Cluster("prod-eu", 1, start);
+  const [pod] = cluster.pods;
+  if (!pod) throw new Error("no pod");
+  pod.restarts = "2 (5m ago)";
+  expect(pod.received).toBe(start);
+  const sameCount = new Set<number>();
+  for (let step = 1; step <= 40; step++) {
+    const now = start + step * 17 * 60_000;
+    const before = { text: pod.restarts, received: pod.received };
+    cluster.change(1, now);
+    expect(pod.received).toBe(now);
+    if (
+      Number.parseInt(pod.restarts, 10) === Number.parseInt(before.text, 10)
+    ) {
+      const age = (ago(before.text) ?? NaN) + now - before.received;
+      expect(pod.restarts).toBe(
+        `${Number.parseInt(before.text, 10)} (${humanDuration(age)} ago)`,
+      );
+      sameCount.add(step);
+    } else {
+      expect(ago(pod.restarts)).toBeLessThanOrEqual(50_000);
+    }
+  }
+  expect(sameCount.size).toBeGreaterThan(0);
+  expect(sameCount.size).toBeLessThan(40);
 });

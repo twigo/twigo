@@ -75,8 +75,20 @@ test("the list's first rows are named as the screen's are, once its window start
     ],
     window: { start: 0, ids: ["b", "a"] },
     upserts: [
-      { id: "a", created: null, generated: null, cells: ["api-1", "payments"] },
-      { id: "b", created: null, generated: null, cells: ["api-2", "payments"] },
+      {
+        id: "a",
+        created: null,
+        received: "2026-11-16T12:00:00.000Z",
+        generated: null,
+        cells: ["api-1", "payments"],
+      },
+      {
+        id: "b",
+        created: null,
+        received: "2026-11-16T12:00:00.000Z",
+        generated: null,
+        cells: ["api-2", "payments"],
+      },
     ],
     status: { state: "ready" },
     counts: null,

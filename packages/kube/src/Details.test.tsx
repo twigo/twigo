@@ -496,6 +496,7 @@ function podsBatch(
     upserts: Object.entries(statuses).map(([name, status]) => ({
       id: `prod-eu/default/${name}`,
       created: null,
+      received: "2026-11-16T12:00:00.000Z",
       generated: null,
       cells: [name, status],
     })),
@@ -527,6 +528,7 @@ function measuredBatch(
       {
         id: "prod-eu/default/web-1",
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells: ["web-1", "Running", cpu, memory],
       },

@@ -18,7 +18,13 @@ const NODES: Gvr = { group: "", version: "v1", resource: "nodes" };
 const READY: Column = { name: "Ready", kind: "string", priority: 0 };
 
 function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
-  const row: Row = { id: "r", created: null, generated: null, cells: [text] };
+  const row: Row = {
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: [text],
+  };
   const column = { name: "Ready", index: 0, rule: columnRule(gvr, READY) };
   return render(
     <CellView row={row} column={column} tone={tone} alarmed={false} />,
@@ -43,7 +49,13 @@ test("a Deployment's ready ratio is its health column, so it stays a warning whe
 });
 
 function text(gvr: Gvr, column: Column, cell: string) {
-  const row: Row = { id: "r", created: null, generated: null, cells: [cell] };
+  const row: Row = {
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: [cell],
+  };
   const shown = { name: column.name, index: 0, rule: columnRule(gvr, column) };
   return render(
     <CellView row={row} column={shown} tone={undefined} alarmed={false} />,
@@ -84,7 +96,13 @@ const cellOf = (
   kind: Column["kind"] = "string",
   alarmed = false,
 ) => {
-  const row: Row = { id: "r", created: null, generated: null, cells: [cell] };
+  const row: Row = {
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: [cell],
+  };
   const shown = {
     name,
     index: 0,
@@ -200,6 +218,7 @@ function podRow(
   const row: Row = {
     id: "r",
     created: null,
+    received: "2026-11-16T12:00:00.000Z",
     generated: null,
     cells: [ready, status, restartsText],
   };

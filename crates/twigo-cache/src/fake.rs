@@ -18,6 +18,7 @@ use http::{Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full, StreamBody};
+use jiff::Timestamp;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use tower::BoxError;
@@ -25,7 +26,7 @@ use twigo_ipc::IpcError;
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::credentials::{CredentialError, RunError};
 
-use crate::hub::{Connect, Hub};
+use crate::hub::{Clock, Connect, Hub};
 
 type Body = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -192,7 +193,9 @@ impl Fake {
         Clients::over(service, budgets)
     }
 
-    /// The hub over this server, every context's clients with `budgets`.
+    /// The hub over this server, every context's clients with `budgets`,
+    /// stamping rows by a clock that starts at the epoch and runs with the
+    /// test's paused time.
     pub fn hub(&self, budgets: Budgets) -> (Hub, Arc<Clients>) {
         let clients = self.clients(budgets);
         let connect: Connect = {
@@ -202,7 +205,9 @@ impl Fake {
                 Box::pin(async move { Ok::<_, IpcError>(clients) })
             })
         };
-        (Hub::new(connect), clients)
+        let start = Instant::now();
+        let clock: Clock = Arc::new(move || Timestamp::UNIX_EPOCH + start.elapsed());
+        (Hub::with_clock(connect, clock), clients)
     }
 
     pub fn add(&self, resource: &str, namespace: Option<&str>, name: &str) {

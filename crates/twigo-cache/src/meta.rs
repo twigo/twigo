@@ -26,6 +26,10 @@ pub struct Meta {
     pub labels: Labels,
     pub owners: Box<[Owner]>,
     pub created: Option<Timestamp>,
+    /// When the server's answer that brought the cells arrived. A duration
+    /// the server printed in a cell, such as `3 (5m ago)`, was true at the
+    /// moment it printed it, which this stands for.
+    pub received: Timestamp,
     /// Where the generated part of the name starts, in UTF-16 units: after
     /// `generateName`, or at the `pod-template-hash` that ends it.
     pub generated: Option<u32>,
@@ -47,7 +51,7 @@ pub struct MetaDecoder;
 impl Decode for MetaDecoder {
     type Item = Row;
 
-    fn decode_list(&mut self, body: &[u8]) -> Result<Page, DecodeError> {
+    fn decode_list(&mut self, body: &[u8], received: Timestamp) -> Result<Page, DecodeError> {
         match peek_kind(body)? {
             Kind::Status => Err(DecodeError::UnexpectedKind("Status".into())),
             Kind::Table => Err(DecodeError::UnexpectedKind("Table".into())),
@@ -56,14 +60,14 @@ impl Decode for MetaDecoder {
                 let rows = list
                     .items
                     .into_iter()
-                    .map(|item| item.metadata.into_meta().map(Row::without_cells))
+                    .map(|item| item.metadata.into_meta(received).map(Row::without_cells))
                     .collect::<Result<_, _>>()?;
                 Ok(list.metadata.into_page(rows))
             }
         }
     }
 
-    fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
+    fn decode_event(&mut self, line: &[u8], received: Timestamp) -> Result<Event, DecodeError> {
         let event: RawEvent<'_> = serde_json::from_slice(line)?;
         let body = event.object.get().as_bytes();
         match peek_kind(body)? {
@@ -73,7 +77,7 @@ impl Decode for MetaDecoder {
                 let object: RawObject = serde_json::from_slice(body)?;
                 object
                     .metadata
-                    .into_event(event.kind, &kind, Row::without_cells)
+                    .into_event(event.kind, &kind, received, Row::without_cells)
             }
         }
     }
@@ -118,7 +122,7 @@ pub(crate) struct RawMeta {
 }
 
 impl RawMeta {
-    pub fn into_meta(self) -> Result<Meta, DecodeError> {
+    pub fn into_meta(self, received: Timestamp) -> Result<Meta, DecodeError> {
         let name = self.name.ok_or(DecodeError::Missing("metadata.name"))?;
         let generated = generated(&name, self.generate_name.as_deref(), &self.labels);
         Ok(Meta {
@@ -129,6 +133,7 @@ impl RawMeta {
             labels: self.labels,
             owners: self.owner_references.into_iter().map(Owner::from).collect(),
             created: self.creation_timestamp,
+            received,
             generated,
         })
     }
@@ -139,6 +144,7 @@ impl RawMeta {
         self,
         kind: EventKind,
         object_kind: &str,
+        received: Timestamp,
         item: impl FnOnce(Meta) -> T,
     ) -> Result<Event<T>, DecodeError> {
         match kind {
@@ -146,8 +152,10 @@ impl RawMeta {
                 resource_version: decode::non_empty(self.resource_version)?,
                 initial_events_end: self.initial_events_end,
             }),
-            EventKind::Added | EventKind::Modified => self.into_meta().map(item).map(Event::Upsert),
-            EventKind::Deleted => self.into_meta().map(item).map(Event::Delete),
+            EventKind::Added | EventKind::Modified => {
+                self.into_meta(received).map(item).map(Event::Upsert)
+            }
+            EventKind::Deleted => self.into_meta(received).map(item).map(Event::Delete),
             EventKind::Error => Err(DecodeError::UnexpectedKind(object_kind.into())),
         }
     }
@@ -337,7 +345,7 @@ mod tests {
     fn decoded(metadata: Value) -> Option<u32> {
         serde_json::from_value::<RawMeta>(metadata)
             .unwrap()
-            .into_meta()
+            .into_meta(Timestamp::UNIX_EPOCH)
             .unwrap()
             .generated
     }
