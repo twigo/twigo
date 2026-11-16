@@ -48,7 +48,8 @@
        support   7.8 / 57     8.4 / 58     6.1 / 78     6.5 / 82
        quiet     5.4 / 41     5.7 / 41     4.5 / 69     4.8 / 74
      A selected row's tint and a problem row's band take quiet below 4.5:1,
-     so there it reads as support (index.css). */
+     so there it reads as support (index.css), and so does a placeholder on
+     a field's well. */
   --strong: oklch(0.18 0.004 250);
   --content: oklch(0.25 0.004 250);
   --support: oklch(0.48 0.006 250);
@@ -72,6 +73,10 @@
   /* A problem row's band: its tone over the surface the row sits on. */
   --band-error: color-mix(in oklab, var(--error) 9%, transparent);
   --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
+
+  /* A well is the resting fill of a text field: an overlay, like the row
+     states, so it differs from every surface it sits on. */
+  --well: oklch(0 0 0 / 6%);
 
   /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
      (never pure gray - that azure tint is the premium tell). */
@@ -208,6 +213,8 @@
   --band-error: color-mix(in oklab, var(--error) 9%, transparent);
   --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
 
+  --well: oklch(1 0 0 / 6%);
+
   --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
   --border-subtle: oklch(1 0 0 / 5%);
@@ -291,6 +298,7 @@
   --color-row-active: var(--row-active);
   --color-selected: var(--selected);
   --color-selected-unfocused: var(--selected-unfocused);
+  --color-well: var(--well);
   --color-border-subtle: var(--border-subtle);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);

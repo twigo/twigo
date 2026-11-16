@@ -37,7 +37,7 @@ export function SearchField({
   return (
     <div
       className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md bg-editor px-2 text-xs text-support focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
+        "flex h-6 items-center gap-1.5 rounded-md bg-well px-2 text-xs text-support focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
         className,
       )}
     >
@@ -62,7 +62,7 @@ export function SearchField({
           if (value) onChange("");
           else event.currentTarget.blur();
         }}
-        className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-quiet"
+        className="min-w-0 flex-1 bg-transparent text-content outline-none placeholder:text-support"
       />
       {value && trailing}
       {value ? (

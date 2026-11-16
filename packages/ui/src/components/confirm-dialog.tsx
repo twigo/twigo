@@ -233,7 +233,7 @@ export function ConfirmDialog({
                   onChange={(event) => {
                     setText(event.target.value);
                   }}
-                  className="h-7 rounded-md bg-editor px-2 font-mono text-xs shadow-[inset_0_0_0_1px_var(--input)] outline-none focus:shadow-[inset_0_0_0_1px_var(--ring)]"
+                  className="h-7 rounded-md bg-well px-2 font-mono text-xs outline-none focus:shadow-[inset_0_0_0_1px_var(--ring)]"
                 />
               </div>
             )}

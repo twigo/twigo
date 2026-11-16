@@ -238,6 +238,68 @@ test("the comment over the roles states the contrast the colours give, to the pr
   expect(claimed).toEqual(actual);
 });
 
+const WELLED: readonly Surface[] = ["shell", "editor", "card", "popover"];
+const KEYCAPPED: readonly Surface[] = ["shell", "editor"];
+const OVERLAY_DIFFERS = 1.1;
+
+interface Reading {
+  readonly what: string;
+  readonly value: number;
+  readonly least: number;
+}
+
+const reading = (what: string, value: number, least: number): Reading => ({
+  what,
+  value,
+  least,
+});
+const unmet = (readings: readonly Reading[]) =>
+  readings
+    .filter(({ value, least }) => value < least)
+    .map(({ what, value }) => `${what}: ${value.toFixed(2)}`);
+const textOn = (name: string, theme: Theme, under: Color) =>
+  under.contrast(eightBit(colour(`var(--${name})`, theme)), "WCAG21");
+
+const wellOn = (theme: Theme, on: Surface) =>
+  over(colour("var(--well)", theme), surface(on, theme));
+
+test.each(THEMES)(
+  "%s: a field's well differs from the shell, the editor, a card and a popover, and the typed text, the placeholder and a keycap read on it at 4.5:1 or more",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const well = wellOn(theme, on);
+      const keycap = over(colour("var(--row-active)", theme), well);
+      return [
+        reading(
+          `the well against ${on}`,
+          surface(on, theme).contrast(well, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        reading(
+          `content on the well on ${on}`,
+          textOn("content", theme, well),
+          4.5,
+        ),
+        reading(
+          `support on the well on ${on}`,
+          textOn("support", theme, well),
+          4.5,
+        ),
+        ...(KEYCAPPED.includes(on)
+          ? [
+              reading(
+                `support on a keycap in the well on ${on}`,
+                textOn("support", theme, keycap),
+                4.5,
+              ),
+            ]
+          : []),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
 test.each(THEMES)(
   "%s: strong, content, support and quiet fall in lightness contrast on the editor",
   (theme) => {
