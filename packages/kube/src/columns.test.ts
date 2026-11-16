@@ -68,6 +68,37 @@ test("CPU and Memory are numbers of their own kind: end-aligned, sorted largest 
   });
 });
 
+test("only the health columns and a pod's Ready recede in a healthy row", () => {
+  const nodes = { ...PODS, resource: "nodes" };
+  const deployments = { group: "apps", version: "v1", resource: "deployments" };
+  const receding = (
+    gvr: typeof PODS,
+    names: string[],
+  ): Record<string, boolean> =>
+    Object.fromEntries(
+      names.map((name) => [name, columnRule(gvr, column(name)).recedes]),
+    );
+  expect(
+    receding(PODS, ["Name", "Ready", "Status", "Restarts", "Node"]),
+  ).toEqual({
+    Name: false,
+    Ready: true,
+    Status: true,
+    Restarts: false,
+    Node: false,
+  });
+  expect(receding(nodes, ["Name", "Status", "Roles"])).toEqual({
+    Name: false,
+    Status: true,
+    Roles: false,
+  });
+  expect(receding(deployments, ["Name", "Ready", "Up-to-date"])).toEqual({
+    Name: false,
+    Ready: true,
+    "Up-to-date": false,
+  });
+});
+
 test("a pod's status column is Status, and its abnormal values have tones", () => {
   expect(statusColumn(PODS)).toBe("Status");
   expect(statusColumn({ ...PODS, resource: "services" })).toBeUndefined();

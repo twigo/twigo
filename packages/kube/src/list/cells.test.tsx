@@ -13,6 +13,7 @@ const DEPLOYMENTS: Gvr = {
   resource: "deployments",
 };
 const SERVICES: Gvr = { group: "", version: "v1", resource: "services" };
+const NODES: Gvr = { group: "", version: "v1", resource: "nodes" };
 const READY: Column = { name: "Ready", kind: "string", priority: 0 };
 
 function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
@@ -68,5 +69,106 @@ test("a cell of a column the server declares a string is tabular when its text i
       expected,
     ]);
     cleanup();
+  }
+});
+
+const cellOf = (
+  gvr: Gvr,
+  name: string,
+  cell: string,
+  tone: "error" | "warn" | undefined,
+  kind: Column["kind"] = "string",
+) => {
+  const row: Row = { id: "r", created: null, generated: null, cells: [cell] };
+  const shown = {
+    name,
+    index: 0,
+    rule: columnRule(gvr, { name, kind, priority: 0 }),
+  };
+  return render(<CellView row={row} column={shown} tone={tone} />).container;
+};
+
+const receded = (container: HTMLElement) =>
+  container.querySelector(".text-support")?.textContent ?? null;
+
+test("a healthy row's Ready and Status recede into support, and an abnormal row's do not", () => {
+  const cases: [Gvr, string, string, "error" | "warn" | undefined, boolean][] =
+    [
+      [PODS, "Status", "Running", undefined, true],
+      [PODS, "Ready", "1/1", undefined, true],
+      [PODS, "Status", "CrashLoopBackOff", "error", false],
+      [PODS, "Status", "ContainerCreating", "warn", false],
+      [PODS, "Ready", "0/1", "error", false],
+      [PODS, "Ready", "0/1", undefined, false],
+      [NODES, "Status", "Ready", undefined, true],
+      [NODES, "Status", "NotReady", "error", false],
+      [DEPLOYMENTS, "Ready", "3/3", undefined, true],
+      [DEPLOYMENTS, "Ready", "1/3", "warn", false],
+      [SERVICES, "Type", "ClusterIP", undefined, false],
+    ];
+  for (const [gvr, name, cell, tone, expected] of cases) {
+    expect([
+      name,
+      cell,
+      tone,
+      receded(cellOf(gvr, name, cell, tone)) !== null,
+    ]).toEqual([name, cell, tone, expected]);
+    cleanup();
+  }
+});
+
+test("an abnormal status is in weight 600 beside its dot, a healthy one is not", () => {
+  const bold = (container: HTMLElement) =>
+    container.querySelector(".font-semibold")?.textContent ?? null;
+  expect(bold(cellOf(PODS, "Status", "CrashLoopBackOff", "error"))).toBe(
+    "CrashLoopBackOff",
+  );
+  cleanup();
+  expect(bold(cellOf(PODS, "Status", "Running", undefined))).toBeNull();
+  cleanup();
+  expect(bold(cellOf(DEPLOYMENTS, "Ready", "1/3", "warn"))).toBe("1/3");
+  cleanup();
+  expect(bold(cellOf(PODS, "Ready", "0/1", undefined))).toBeNull();
+});
+
+function restarts(text: string, tone: "error" | "warn" | undefined) {
+  const container = cellOf(PODS, "Restarts", text, tone, "integer");
+  const [count, ago] = Array.from(container.querySelectorAll("span"));
+  const role = (span: Element | undefined) =>
+    span === undefined
+      ? null
+      : (["text-quiet", "text-support", "text-warn-foreground"].find((name) =>
+          span.classList.contains(name),
+        ) ?? "content");
+  return { count: role(count), ago: role(ago) };
+}
+
+test("restarts read in three steps: a zero is quiet, a restart within the hour is a warning, any other count is plain with its age in support", () => {
+  expect(restarts("0", undefined)).toEqual({ count: "text-quiet", ago: null });
+  expect(restarts("3 (5m ago)", undefined)).toEqual({
+    count: "text-warn-foreground",
+    ago: "text-warn-foreground",
+  });
+  expect(restarts("3 (13s ago)", undefined).count).toBe("text-warn-foreground");
+  expect(restarts("3 (59m ago)", undefined).count).toBe("text-warn-foreground");
+  for (const ago of ["60m", "1h", "5h20m", "23h", "2d1h", "12d", "2y1d"]) {
+    expect([ago, restarts(`3 (${ago} ago)`, undefined)]).toEqual([
+      ago,
+      { count: "content", ago: "text-support" },
+    ]);
+  }
+});
+
+test("a count with no readable age is plain, and a row with a tone has no second alarm", () => {
+  expect(restarts("3", undefined)).toEqual({ count: "content", ago: null });
+  expect(restarts("3 (soon ago)", undefined)).toEqual({
+    count: "content",
+    ago: "text-support",
+  });
+  for (const tone of ["error", "warn"] as const) {
+    expect(restarts("3 (5m ago)", tone)).toEqual({
+      count: "content",
+      ago: "text-support",
+    });
   }
 });

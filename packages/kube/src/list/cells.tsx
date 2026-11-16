@@ -1,7 +1,7 @@
 import type { Cell, Row } from "@twigo/protocol";
 import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
-import { ageRole } from "../age";
+import { ageRole, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
@@ -79,13 +79,13 @@ export function CellView({
         return (
           <>
             {merged}
-            {text}
+            {rule.recedes ? <span className="text-support">{text}</span> : text}
           </>
         );
       return (
         <span
           className={cn(
-            "inline-flex items-center gap-1.5",
+            "inline-flex items-center gap-1.5 font-semibold",
             tone === "error" && "text-error",
             tone === "warn" && "text-warn-foreground",
           )}
@@ -103,13 +103,24 @@ export function CellView({
       );
     }
     case "ratio":
-      return rule.tone?.(text) && (rule.health || rowTone === undefined) ? (
-        <span className="text-warn-foreground">{text}</span>
+      if (rule.tone?.(text) && (rule.health || rowTone === undefined))
+        return (
+          <span
+            className={cn(
+              "text-warn-foreground",
+              rule.health && "font-semibold",
+            )}
+          >
+            {text}
+          </span>
+        );
+      return rule.recedes && rowTone === undefined ? (
+        <span className="text-support">{text}</span>
       ) : (
         text
       );
     case "restarts":
-      return <Restarts text={text} />;
+      return <Restarts text={text} tone={rowTone} />;
     case "text": {
       const tabular = !rule.figures && isTabular(text);
       return rule.secondary || rule.identifier || tabular ? (
@@ -129,21 +140,36 @@ export function CellView({
   }
 }
 
-/** A restart count and how long ago the last was, the count in a column of its own. */
-function Restarts({ text }: { text: string }) {
+/**
+ * A restart count and how long ago the last was, the count in a column of
+ * its own. A restart within the hour is news, in the warning tone unless the
+ * row already carries a tone: a row has one alarm.
+ */
+function Restarts({ text, tone }: { text: string; tone: Tone | undefined }) {
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
+  const recent = tone === undefined && restartedRecently(ago);
   return (
     <>
       <span
         className={cn(
           "inline-block w-[3ch] text-right",
           count === "0" && "text-quiet",
+          recent && "text-warn-foreground",
         )}
       >
         {count}
       </span>
-      {ago && <span className="ml-2 text-support">{ago} ago</span>}
+      {ago && (
+        <span
+          className={cn(
+            "ml-2",
+            recent ? "text-warn-foreground" : "text-support",
+          )}
+        >
+          {ago} ago
+        </span>
+      )}
     </>
   );
 }

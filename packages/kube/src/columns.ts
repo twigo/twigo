@@ -41,6 +41,8 @@ export interface ColumnRule {
   readonly health: boolean;
   /** The tone of an abnormal value; healthy values have none. */
   readonly tone?: (text: string) => Tone | undefined;
+  /** In a row with no tone its value reads in support, so that only an abnormal one stands out. */
+  readonly recedes: boolean;
   /** A measure of the Metrics API: the list reads it only while it is drawn or sorted by. */
   readonly metric: boolean;
   /** A changed value flashes; a measure that moves at every poll does not. */
@@ -169,6 +171,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     width: 56,
     align: "end",
     tone: ratio,
+    recedes: true,
     drop: DROP.ready,
     into: { column: "Status", room: 24 },
   },
@@ -178,6 +181,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     groups: true,
     health: true,
     tone: podStatus,
+    recedes: true,
     drop: DROP.health,
   },
   "/pods/Restarts": { cell: "restarts", width: 132, drop: DROP.restarts },
@@ -187,6 +191,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     groups: true,
     health: true,
     tone: nodeStatus,
+    recedes: true,
     drop: DROP.health,
   },
   "apps/deployments/Ready": {
@@ -195,6 +200,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     align: "end",
     health: true,
     tone: ratio,
+    recedes: true,
     drop: DROP.health,
   },
 };
@@ -226,6 +232,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     identifier: false,
     groups: false,
     health: false,
+    recedes: false,
     metric: false,
     flash: true,
     drop: 0,
