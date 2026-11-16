@@ -452,7 +452,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           editors.dismiss(api.id);
         }}
         className={cn(
-          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded-sm",
           "hover:bg-row-hover",
         )}
       >
