@@ -37,7 +37,7 @@ import { parseListUri, type ListInput } from "../uri";
 import { followTheSpace, pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
 import { namespacesOf, showAllNamespaces } from "./scope";
-import { stageFor } from "./stages";
+import { chipFor, stageFor, type Chip } from "./stages";
 
 const ORDER: readonly Health[] = ["error", "warn", "ok"];
 
@@ -45,8 +45,9 @@ const ORDER: readonly Health[] = ["error", "warn", "ok"];
  * What the actions give up as their room narrows, one more at each stage:
  * the filter field's key hint, the Group button's label, the filter field
  * for an icon button, the health filter for the choice it is on. Past the
- * last stage the scope chip cuts its name, which it never goes below the
- * head and tail of.
+ * last stage the scope chip gives way: it cuts its name down to the head and
+ * tail it keeps, then folds to its glyph and how many more follow, then to
+ * its glyph alone.
  */
 const STAGES = { keys: 1, group: 2, filter: 3, health: 4 } as const;
 
@@ -54,6 +55,16 @@ const STAGES = { keys: 1, group: 2, filter: 3, health: 4 } as const;
 const GAP = 8;
 
 const NOTHING = () => undefined;
+
+const NO_CHIP: Chip = {};
+
+/** The chip at its natural size in the forms it takes, in the order `chipFor` reads them. */
+const COPIES = [
+  { key: "whole" },
+  { key: "floor", maxWidth: 0 },
+  { key: "count", fold: "count" },
+  { key: "glyph", fold: "glyph" },
+] as const;
 
 const ICON_BUTTON =
   "flex size-6 shrink-0 items-center justify-center rounded-md text-support outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-hover";
@@ -81,6 +92,7 @@ function Scope({
 }: {
   names: readonly string[];
   maxWidth?: number | undefined;
+  fold?: Chip["fold"];
   onOpen?: (() => void) | undefined;
   clearLabel: string;
   onClear: () => void;
@@ -140,6 +152,7 @@ function Actions({
   const isPinned = pin !== undefined && pinned.has(input.space, pin.uri);
   const resources = useResources(discovery, input.space);
   const namespaces = namespacesOf(spaces, input);
+  const several = namespaces.length > 1;
   const own = input.namespaces !== undefined;
   const scoped =
     namespaces.length > 0 &&
@@ -191,12 +204,11 @@ function Actions({
 
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const chipBox = useRef<HTMLSpanElement>(null);
-  const chipFull = useRef<HTMLSpanElement>(null);
-  const chipFloor = useRef<HTMLSpanElement>(null);
+  const chipCopies = useRef<HTMLSpanElement>(null);
   // What each stage's row takes besides the scope chip, which gives way last.
   const rests = useRef<number[]>([]);
   const [stage, setStage] = useState(0);
-  const [chipMax, setChipMax] = useState<number>();
+  const [chip, setChip] = useState(NO_CHIP);
   const [filtering, setFiltering] = useState(false);
   const [focusMoves, setFocusMoves] = useState(0);
   const iconFilter = stage >= STAGES.filter;
@@ -237,20 +249,29 @@ function Actions({
     rests.current[stage] = row.offsetWidth - shown - gap;
     if (stage === STAGES.health && shows) lastMeasured.current = last;
     const rest = rests.current[STAGES.health];
+    const [whole = 0, floor = 0, count = 0, glyph = 0] = [
+      ...(chipCopies.current?.children ?? []),
+    ].map((copy) =>
+      copy.firstElementChild instanceof HTMLElement
+        ? copy.firstElementChild.offsetWidth
+        : 0,
+    );
     if (rest !== undefined) {
-      states.setStripMin(
-        uri,
-        STRIP_KEPT + rest + gap + (chipFloor.current?.offsetWidth ?? 0),
-      );
+      states.setStripMin(uri, STRIP_KEPT + rest + gap + glyph);
     }
     const left = room - inspector - (rest ?? 0) - gap;
-    setChipMax(
-      scoped &&
-        stage === STAGES.health &&
-        rest !== undefined &&
-        left < (chipFull.current?.offsetWidth ?? 0)
-        ? Math.max(0, left)
-        : undefined,
+    setChip((was) =>
+      scoped && stage === STAGES.health && rest !== undefined
+        ? chipFor(
+            left,
+            {
+              full: whole,
+              floor,
+              count: several ? count : undefined,
+            },
+            was,
+          )
+        : NO_CHIP,
     );
     const focused = fieldBox.current?.contains(document.activeElement) === true;
     if (back.current !== undefined) {
@@ -264,7 +285,7 @@ function Actions({
       setStage(STAGES.health);
       return;
     }
-    const full = gap + (chipFull.current?.offsetWidth ?? 0);
+    const full = gap + whole;
     const next = stageFor(
       rests.current.map((taken) => taken + full),
       stage,
@@ -290,6 +311,7 @@ function Actions({
     last,
     wanted,
     scoped,
+    several,
     states,
     uri,
   ]);
@@ -339,7 +361,8 @@ function Actions({
           <span ref={chipBox} className="flex shrink-0">
             <Scope
               names={namespaces}
-              maxWidth={chipMax}
+              maxWidth={chip.max}
+              fold={chip.fold}
               onOpen={
                 own
                   ? undefined
@@ -361,21 +384,21 @@ function Actions({
             />
           </span>
           <span
+            ref={chipCopies}
             aria-hidden
             inert
             className="invisible absolute top-0 left-0 h-0 overflow-hidden"
           >
-            <span ref={chipFull} className="flex w-max">
-              <Scope names={namespaces} clearLabel="" onClear={NOTHING} />
-            </span>
-            <span ref={chipFloor} className="flex">
-              <Scope
-                names={namespaces}
-                maxWidth={0}
-                clearLabel=""
-                onClear={NOTHING}
-              />
-            </span>
+            {COPIES.map(({ key, ...form }) => (
+              <span key={key} className="flex">
+                <Scope
+                  names={namespaces}
+                  clearLabel=""
+                  onClear={NOTHING}
+                  {...form}
+                />
+              </span>
+            ))}
           </span>
         </>
       )}

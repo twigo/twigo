@@ -12,8 +12,11 @@ const PART =
  * What a view is narrowed to, as a chip with a close mark that takes the
  * narrowing off: the glyph of what it narrows by, the first name cut in the
  * middle, and how many more follow it. A chip with no `onOpen` is a label
- * and its mark. `maxWidth` is the room its owner leaves it; it never gives
- * way below what holds a name's head and tail and the two marks.
+ * and its mark. `maxWidth` is the room its owner leaves it; it cuts the name
+ * down to what holds its head and tail and the two marks, and no further.
+ * Past that its owner folds it: `count` keeps the glyph and how many more
+ * follow, `glyph` the glyph alone, and either leaves the name and the close
+ * mark out, the label holding every name.
  */
 export function ScopeChip({
   icon: Icon,
@@ -24,6 +27,7 @@ export function ScopeChip({
   clearLabel,
   onClear,
   maxWidth,
+  fold,
 }: {
   icon: LucideIcon;
   name: string;
@@ -34,19 +38,26 @@ export function ScopeChip({
   clearLabel: string;
   onClear: () => void;
   maxWidth?: number;
+  fold?: "count" | "glyph";
 }) {
   const face = (
     <>
       <Icon aria-hidden className="size-3.5 shrink-0 text-support" />
-      <CutInTheMiddle text={name} floor={NAME_FLOOR} separator="-" />
-      {more > 0 && (
+      {fold === undefined && (
+        <CutInTheMiddle text={name} floor={NAME_FLOOR} separator="-" />
+      )}
+      {more > 0 && fold !== "glyph" && (
         <span className="shrink-0 font-normal text-support tabular-nums">
           +{more}
         </span>
       )}
     </>
   );
-  const body = cn(PART, "min-w-0 gap-1.5 px-1.5 font-semibold text-content");
+  const body = cn(
+    PART,
+    "min-w-0 gap-1.5 font-semibold text-content",
+    fold === "glyph" ? "w-5 justify-center" : "px-1.5",
+  );
   return (
     <span
       style={{ maxWidth }}
@@ -71,17 +82,19 @@ export function ScopeChip({
         </TooltipTrigger>
         <TooltipContent className="wrap-anywhere">{label}</TooltipContent>
       </Tooltip>
-      <button
-        type="button"
-        aria-label={clearLabel}
-        onClick={onClear}
-        className={cn(
-          PART,
-          "size-5 shrink-0 justify-center text-support hover:bg-row-hover hover:text-content",
-        )}
-      >
-        <X aria-hidden className="size-3" />
-      </button>
+      {fold === undefined && (
+        <button
+          type="button"
+          aria-label={clearLabel}
+          onClick={onClear}
+          className={cn(
+            PART,
+            "size-5 shrink-0 justify-center text-support hover:bg-row-hover hover:text-content",
+          )}
+        >
+          <X aria-hidden className="size-3" />
+        </button>
+      )}
     </span>
   );
 }

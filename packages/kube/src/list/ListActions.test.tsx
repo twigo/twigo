@@ -479,9 +479,10 @@ test("the list in the strip is its own: a list with narrower actions does not in
 
 const CHIP_FULL = 140;
 const CHIP_FLOOR = 90;
+const CHIP_COUNT = 50;
+const CHIP_GLYPH = 24;
 const GAP = 8;
 
-/** The row's width as the browser lays it out with the scope chip in it: the stage's own, and the chip at its width, cut by the maxWidth its owner gives it down to its floor. */
 function laidOutScoped() {
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
     configurable: true,
@@ -490,19 +491,25 @@ function laidOutScoped() {
         name: /to the explorer$/,
       })?.parentElement;
       if (!row) return 0;
-      const hidden = row.querySelector(":scope > [aria-hidden]");
-      if (this === hidden?.children[0]) return CHIP_FULL;
-      if (this === hidden?.children[1]) return CHIP_FLOOR;
+      const hidden = [
+        ...(row.querySelector(":scope > [aria-hidden]")?.children ?? []),
+      ].map((copy) => copy.firstElementChild);
+      const natural = [CHIP_FULL, CHIP_FLOOR, CHIP_COUNT, CHIP_GLYPH];
+      const copy = hidden.indexOf(this);
+      if (copy >= 0) return natural[copy] ?? 0;
       const shown = row.querySelector<HTMLElement>("[aria-label^='Namespace']")
         ?.parentElement?.parentElement;
-      const set = shown?.firstElementChild
-        ?.getAttribute("style")
-        ?.match(/max-width: (\d+)/)?.[1];
+      const chip = shown?.firstElementChild;
+      const set = chip?.getAttribute("style")?.match(/max-width: (\d+)/)?.[1];
       const max = set === undefined ? Infinity : Number(set);
-      const chip = Math.max(CHIP_FLOOR, Math.min(CHIP_FULL, max));
-      if (this === shown) return chip;
+      const width = chip?.textContent.startsWith("+")
+        ? CHIP_COUNT
+        : chip?.textContent === ""
+          ? CHIP_GLYPH
+          : Math.max(CHIP_FLOOR, Math.min(CHIP_FULL, max));
+      if (this === shown) return width;
       return this === row
-        ? (TAKES[stageOf(this)] ?? 0) + (shown ? GAP + chip : 0)
+        ? (TAKES[stageOf(this)] ?? 0) + (shown ? GAP + width : 0)
         : 0;
     },
   });
@@ -596,37 +603,78 @@ test("a list pinned with namespaces of its own shows those, as a label whose clo
   expect(chip("Namespace: payments")).toBeTruthy();
 });
 
-test("the chip is the last to give way: the stages go first, then it is cut, down to what holds its name's head and tail", async () => {
-  await scopedList(["payments"]);
-  const seen: [number, string][] = [];
-  for (const room of [
-    900, 848, 847, 808, 807, 588, 587, 478, 477, 450, 300, 100,
-  ]) {
-    withRoom(room);
-    seen.push([stageOf(actions()), chipRoot()?.style.maxWidth ?? "gone"]);
+const formOf = () => {
+  if (screen.queryByRole("button", { name: "Show all namespaces" }) !== null) {
+    const max = chipRoot()?.style.maxWidth ?? "";
+    return max === "" ? "whole" : max;
   }
-  expect(seen).toEqual([
-    [0, ""],
-    [0, ""],
-    [1, ""],
-    [1, ""],
-    [2, ""],
-    [3, ""],
-    [4, ""],
-    [4, ""],
+  return chip().textContent === "" ? "glyph" : "count";
+};
+
+const seen = (rooms: readonly number[]) =>
+  rooms.map((room) => {
+    withRoom(room);
+    return [stageOf(actions()), formOf()];
+  });
+
+test("the chip is the last to give way: the stages go first, then it is cut, down to what holds its name's head and tail, then folded to its glyph", async () => {
+  await scopedList(["payments"]);
+  expect(
+    seen([900, 848, 847, 808, 807, 588, 587, 478, 477, 450, 428, 427, 100]),
+  ).toEqual([
+    [0, "whole"],
+    [0, "whole"],
+    [1, "whole"],
+    [1, "whole"],
+    [2, "whole"],
+    [3, "whole"],
+    [4, "whole"],
+    [4, "whole"],
     [4, "139px"],
     [4, "112px"],
-    [4, "0px"],
-    [4, "0px"],
+    [4, "90px"],
+    [4, "glyph"],
+    [4, "glyph"],
   ]);
 });
 
-test("the least a list keeps beside docked details counts the chip at its floor", async () => {
+test("several namespaces fold to the glyph and how many more follow before the glyph alone, the names in the label, a click on it still opening the picker, and the close mark gone", async () => {
+  const workbench = await scopedList(["payments", "auth", "default"]);
+  expect(seen([478, 477, 428, 427, 388, 387, 100])).toEqual([
+    [4, "whole"],
+    [4, "139px"],
+    [4, "90px"],
+    [4, "count"],
+    [4, "count"],
+    [4, "glyph"],
+    [4, "glyph"],
+  ]);
+  expect(screen.queryByRole("button", { name: "Show all namespaces" })).toBe(
+    null,
+  );
+  fireEvent.click(chip("Namespaces: payments, auth, default"));
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
+});
+
+test("a chip that folded comes back to a fuller form as the room grows, with a pixel to spare", async () => {
+  await scopedList(["payments", "auth", "default"]);
+  expect(seen([100, 388, 389, 430, 478, 479, 900])).toEqual([
+    [4, "glyph"],
+    [4, "glyph"],
+    [4, "count"],
+    [4, "92px"],
+    [4, "140px"],
+    [4, "whole"],
+    [0, "whole"],
+  ]);
+});
+
+test("the least a list keeps beside docked details counts the chip at its glyph", async () => {
   await scopedList(["payments"]);
   withRoom(900);
   fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
   await settle(1);
   expect(grid().parentElement?.style.minWidth).toBe(
-    `${String(STRIP_KEPT + (TAKES[4] ?? 0) + GAP + CHIP_FLOOR)}px`,
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0) + GAP + CHIP_GLYPH)}px`,
   );
 });

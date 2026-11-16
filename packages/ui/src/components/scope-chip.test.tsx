@@ -50,3 +50,34 @@ test("a chip without onOpen is a label, and the room its owner leaves it is its 
   expect(label.textContent).toBe("checkout");
   expect(label.parentElement?.style.maxWidth).toBe("112px");
 });
+
+test("a folded chip keeps the glyph, with the count or alone, drops the name and the close mark, and still opens on a click, its label naming everything", () => {
+  const onOpen = vi.fn();
+  const names = "Namespaces: payments, auth, default";
+  const chip = (fold: "count" | "glyph") => (
+    <ScopeChip
+      icon={Folder}
+      name="payments"
+      more={2}
+      label={names}
+      onOpen={onOpen}
+      clearLabel="Show all namespaces"
+      onClear={vi.fn()}
+      fold={fold}
+    />
+  );
+  const { rerender } = render(chip("count"));
+  const open = screen.getByRole("button", { name: names });
+  expect(open.textContent).toMatch(/^\s*\+2$/);
+  expect(screen.queryByRole("button", { name: "Show all namespaces" })).toBe(
+    null,
+  );
+  fireEvent.click(open);
+  expect(onOpen).toHaveBeenCalledOnce();
+
+  rerender(chip("glyph"));
+  expect(screen.getByRole("button", { name: names }).textContent).toBe("");
+  expect(screen.queryByRole("button", { name: "Show all namespaces" })).toBe(
+    null,
+  );
+});

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { stageFor } from "./stages";
+import { chipFor, stageFor } from "./stages";
 
 const LAST = 4;
 
@@ -57,4 +57,39 @@ test("a stage not shown yet is tried before the room is given up on", () => {
 test("a stage that proves wider than it was learnt to be is left again at once", () => {
   expect(stageFor([620, 500], 1, 650, LAST)).toBe(0);
   expect(stageFor([700, 500], 0, 650, LAST)).toBe(1);
+});
+
+const CHIP = { full: 140, floor: 90, count: 50 };
+
+test("the scope chip takes the fullest form that fits: whole, cut to the room, the glyph and the count, the glyph", () => {
+  expect(chipFor(140, CHIP, {})).toEqual({});
+  expect(chipFor(139, CHIP, {})).toEqual({ max: 139 });
+  expect(chipFor(90, CHIP, {})).toEqual({ max: 90 });
+  expect(chipFor(89, CHIP, {})).toEqual({ fold: "count" });
+  expect(chipFor(50, CHIP, {})).toEqual({ fold: "count" });
+  expect(chipFor(49, CHIP, {})).toEqual({ fold: "glyph" });
+  expect(chipFor(0, CHIP, {})).toEqual({ fold: "glyph" });
+});
+
+test("a chip of one name has no count to fold to", () => {
+  expect(chipFor(89, { ...CHIP, count: undefined }, {})).toEqual({
+    fold: "glyph",
+  });
+});
+
+test("a chip leaves its form for a fuller one only with a pixel to spare, and for a more folded one at once", () => {
+  expect(chipFor(50, CHIP, { fold: "glyph" })).toEqual({ fold: "glyph" });
+  expect(chipFor(51, CHIP, { fold: "glyph" })).toEqual({ fold: "count" });
+  expect(chipFor(90, CHIP, { fold: "count" })).toEqual({ fold: "count" });
+  expect(chipFor(91, CHIP, { fold: "count" })).toEqual({ max: 91 });
+  expect(chipFor(140, CHIP, { max: 139 })).toEqual({ max: 140 });
+  expect(chipFor(141, CHIP, { max: 139 })).toEqual({});
+  expect(chipFor(89, CHIP, { max: 90 })).toEqual({ fold: "count" });
+});
+
+test("a chip that keeps its form is the same object, so setting it again changes nothing", () => {
+  const cut = { max: 100 };
+  expect(chipFor(100, CHIP, cut)).toBe(cut);
+  const whole = {};
+  expect(chipFor(500, CHIP, whole)).toBe(whole);
 });
