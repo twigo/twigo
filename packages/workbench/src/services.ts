@@ -131,10 +131,12 @@ export class Workbench {
       (error) => {
         this.report(error);
       },
+      this.spaces,
     );
     this.approvals = new Approvals(
       backend,
       () => this.operations.asking !== undefined,
+      this.spaces,
     );
   }
 

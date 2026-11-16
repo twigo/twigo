@@ -49,7 +49,7 @@ export function startForward(
   forwards: Forwards,
 ): (target: ForwardTarget, options: { pick: boolean }) => Promise<void> {
   const { backend, editors, quickAccess } = workbench;
-  const told = tellFailure(forwards);
+  const told = tellFailure(workbench, forwards);
 
   const reveal = (target: ForwardTarget, id: Forward["id"]) => {
     editors.open(pfUri({ space: target.space, id }));
@@ -82,9 +82,16 @@ export function startForward(
       again(null),
     );
     if (!started) return;
-    tellBind(workbench, started, named(target, chosen), again, (forward) => {
-      told(forward);
-      reveal(target, forward.id);
-    });
+    tellBind(
+      workbench,
+      target.space,
+      started,
+      named(target, chosen),
+      again,
+      (forward) => {
+        told(forward);
+        reveal(target, forward.id);
+      },
+    );
   };
 }

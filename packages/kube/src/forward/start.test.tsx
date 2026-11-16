@@ -395,7 +395,7 @@ test("a local port that is in use is not replaced: the toast offers the next, an
   await run;
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so payments-gateway:http is not forwarded.Use 8081",
+    "PE8080 is in use by another process or forward, so payments-gateway:http is not forwarded.Use 8081",
   ]);
   await act(() => vi.advanceTimersByTimeAsync(5000));
   expect(calls("forward_start")).toEqual([
@@ -421,7 +421,7 @@ test("a start that fails opens its tab and says the target's own failure", async
   await act(() => vi.advanceTimersByTimeAsync(FAILS_AFTER_MS + 100));
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
   expect(live()[0]).toMatch(
-    /^payments-gateway:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
+    /^PEpayments-gateway:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
   );
 });
 
@@ -446,7 +446,7 @@ test("a start that the mode refuses starts nothing and says so as a warning in t
   expect(calls("forward_start")).toHaveLength(2);
   const [toast] = live();
   expect(toast).toMatch(
-    /^payments-gateway:http is not forwarded: prod-eu is read-only by prod-eu in \/Library\/Application Support\/Twigo\/policy\.json, so Twigo did not send get pods\/portforward in payments$/,
+    /^PEpayments-gateway:http is not forwarded: prod-eu is read-only by prod-eu in \/Library\/Application Support\/Twigo\/policy\.json, so Twigo did not send get pods\/portforward in payments$/,
   );
   expect(
     document
@@ -495,7 +495,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   };
   await start();
   expect(live()).toEqual([
-    "payments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itUnlock for 15 minutes",
+    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itUnlock for 15 minutes",
   ]);
   fireEvent.click(toastButton("Unlock for 15 minutes"));
   await settle(6);
@@ -511,7 +511,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   });
   await start();
   expect(live()).toEqual([
-    "payments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
+    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
   ]);
 });
 
@@ -523,7 +523,7 @@ test("a busy port's toast that is dismissed starts nothing on the free port", as
   await run;
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so payments-gateway:http is not forwarded.Use 8081",
+    "PE8080 is in use by another process or forward, so payments-gateway:http is not forwarded.Use 8081",
   ]);
   fireEvent.click(toastButton("Dismiss"));
   await settle(8);
@@ -608,7 +608,7 @@ test("a forward the mode refuses in place just after its start is told as a warn
   await run;
   const [toast] = live();
   expect(toast).toMatch(
-    /^payments-gateway:http → 8080 failed: prod-eu is read-only by prod-eu in /,
+    /^PEpayments-gateway:http → 8080 failed: prod-eu is read-only by prod-eu in /,
   );
   const icon = document.querySelector(
     '[data-sonner-toast] svg[class*="text-"]',

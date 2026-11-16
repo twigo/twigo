@@ -11,6 +11,8 @@ import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
+import { spaceMark } from "../parts/spaceMark";
+import type { Spaces } from "../spaces/store";
 import { unlockAction } from "./unlock";
 
 /** The context key that holds while a countdown runs, which ⌘Z cancels. */
@@ -106,7 +108,15 @@ export class Operations {
     private readonly cancelKeys: () => string | undefined,
     private readonly undoKeys: () => string | undefined,
     private readonly report: (error: unknown) => void,
+    private readonly spaces: Pick<Spaces, "ofContext">,
   ) {}
+
+  /** What leads a toast about a context: the tile of its space, which stays whichever space is shown. */
+  #tile(context: string | undefined) {
+    return spaceMark(
+      context === undefined ? undefined : this.spaces.ofContext(context),
+    );
+  }
 
   get asking(): Asking | undefined {
     return this.#asking;
@@ -198,8 +208,12 @@ export class Operations {
       this.report(error);
       return;
     }
-    const { message } = toIpcError(error);
-    notify.error(message, { key: message, action });
+    const { message, blocked } = toIpcError(error);
+    notify.error(message, {
+      key: message,
+      action,
+      tile: this.#tile(blocked?.context),
+    });
   }
 
   #ask(
@@ -265,6 +279,7 @@ export class Operations {
         end(false);
       };
       const toast = notify.countdown({
+        tile: this.#tile(plan.context),
         icon: look.icon,
         message: plan.doing,
         detail: (left) => `${plan.context} · sends in ${String(left)}\u00a0s`,
@@ -324,7 +339,7 @@ export class Operations {
         ) {
           this.#offer(space, plan.context, look, done.text, undoUntil);
         } else if (done !== undefined) {
-          notify.success(done.text);
+          notify.success(done.text, { tile: this.#tile(plan.context) });
         }
         resolve(outcome);
       };
@@ -348,7 +363,7 @@ export class Operations {
             end({ state: "done" }, event);
             return;
           case "stopped":
-            notify.info(event.text);
+            notify.info(event.text, { tile: this.#tile(plan.context) });
             end({ state: "stopped" });
             return;
           case "revealed":
@@ -413,6 +428,7 @@ export class Operations {
   ): void {
     const keys = this.undoKeys();
     const toast = notify.undoable({
+      tile: this.#tile(context),
       icon: CircleCheck,
       message: text,
       detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,

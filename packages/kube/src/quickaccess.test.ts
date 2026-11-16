@@ -111,6 +111,19 @@ test(": with @context opens that context's space first", async () => {
   );
 });
 
+test(": a row that names another space's context leads with its tile, and one that names the space shown, or no context, has none", async () => {
+  const { workbench, run } = await kube();
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  const [elsewhere] = (await run(":deploy payments @kind-local")).items;
+  expect(elsewhere?.tile).toEqual({ name: "kind-local", color: "blue" });
+  expect(elsewhere?.description).toBe("in payments @kind-local");
+  expect((await run(":deploy @prod-eu")).items[0]?.tile).toBeUndefined();
+  expect((await run(":deploy payments")).items[0]?.tile).toBeUndefined();
+  expect(
+    (await run(":deploy payments @nowhere")).items[0]?.tile,
+  ).toBeUndefined();
+});
+
 test("an unknown resource gives nothing to open", async () => {
   const { run } = await kube();
   expect((await run(":gizmos payments")).items).toEqual([]);

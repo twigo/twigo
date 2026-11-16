@@ -17,7 +17,7 @@ export interface QuickPickItem {
   /** Quiet words after the label, such as a namespace. */
   readonly description?: string;
   readonly icon?: ComponentType<{ className?: string }>;
-  /** Two letters of the name on its colour in place of the icon, as the rail draws a space. */
+  /** Two letters of the name on its colour before the icon, as the rail draws a space: a row of another space than the one shown. */
   readonly tile?: {
     readonly name: string;
     readonly color: ContextColor | undefined;

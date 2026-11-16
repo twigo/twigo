@@ -151,7 +151,7 @@ test("⌘⌫ on a row asks the bus to delete it, and its dialog names the cluste
   );
   const dialog = screen.getByRole("dialog");
   expect(dialog.textContent).toMatch(
-    /^Staging.*staging.*Delete pod .+ from staging\?/,
+    /^STStaging.*staging.*Delete pod .+ from staging\?/,
   );
   expect(screen.getByLabelText("Type staging to confirm")).toBeTruthy();
 });

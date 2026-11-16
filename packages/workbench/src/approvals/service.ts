@@ -10,6 +10,8 @@ import type {
 import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import { Changes } from "../changes";
+import { spaceMark } from "../parts/spaceMark";
+import type { Spaces } from "../spaces/store";
 
 /**
  * How the dialog of an ask draws what the request would do. The workbench
@@ -64,6 +66,7 @@ export class Approvals {
   constructor(
     private readonly backend: Backend,
     private readonly covered: () => boolean,
+    private readonly spaces: Pick<Spaces, "ofContext">,
   ) {}
 
   /** The same array until the next change, for `useSyncExternalStore`. */
@@ -135,6 +138,7 @@ export class Approvals {
       } else {
         notify.warning(
           `${ask.process} no longer asks to ${describeAsk(ask)}, so your answer did not reach it`,
+          { tile: spaceMark(this.spaces.ofContext(ask.context)) },
         );
       }
     }
@@ -158,7 +162,9 @@ export class Approvals {
         // The answer in flight says how it went itself, and an ask behind a
         // plan's confirmation was not on screen.
         if (this.#answering !== ask.id && !this.covered()) {
-          notify.info(`${ask.process} no longer asks to ${describeAsk(ask)}`);
+          notify.info(`${ask.process} no longer asks to ${describeAsk(ask)}`, {
+            tile: spaceMark(this.spaces.ofContext(ask.context)),
+          });
         }
       }
     }

@@ -215,3 +215,23 @@ test("with no space for any listed context, the first context's space opens", as
   expect(spaces.list.map((space) => space.id)).toEqual(["kind-local"]);
   expect(spaces.active?.id).toBe("kind-local");
 });
+
+test("the space that stands for a context is its own space of one context, else the first that lists it, else none", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    ...mock,
+    invoke(command, request) {
+      if (command !== "spaces_list") return mock.invoke(command, request);
+      return Promise.resolve([
+        { id: "pair", name: "prod-eu + dev", contexts: ["prod-eu", "dev"] },
+        { id: "dev", name: "dev", contexts: ["dev"] },
+      ] as never);
+    },
+  };
+  const { spaces } = await window(backend);
+  expect(spaces.ofContext("dev")?.id).toBe("dev");
+  expect(spaces.ofContext("prod-eu")?.id).toBe("pair");
+  expect(spaces.ofContext("kind-local")).toBeUndefined();
+  expect(spaces.get("pair")?.name).toBe("prod-eu + dev");
+  expect(spaces.get("nobody")).toBeUndefined();
+});

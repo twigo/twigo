@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
-import { testWorkbench } from "../testing";
+import { inWorkbench, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
@@ -90,9 +90,16 @@ function bus(planned: Plan | IpcError, events: OperationEvent[]) {
   return { backend, sent };
 }
 
-async function started(planned: Plan | IpcError, events: OperationEvent[]) {
+async function started(
+  planned: Plan | IpcError,
+  events: OperationEvent[],
+  toaster = false,
+) {
   const { backend, sent } = bus(planned, events);
   const workbench = await testWorkbench("ready", backend);
+  if (toaster) {
+    render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  }
   const report = vi.spyOn(workbench, "report");
   const outcome = workbench.operations.run(REQUEST, LOOK);
   await act(() => vi.advanceTimersByTimeAsync(0));
@@ -355,10 +362,10 @@ test("a second dialog cancels the first's plan", async () => {
 });
 
 test("a countdown that runs out runs its plan, though its toast's dismissal cancels", async () => {
-  render(<Toaster />);
   const { sent, outcome } = await started(
     plan({ kind: "countdown", seconds: 5 }),
     [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
+    true,
   );
   await act(() => vi.advanceTimersByTimeAsync(5000));
   await act(() => vi.advanceTimersByTimeAsync(1000));
@@ -367,11 +374,12 @@ test("a countdown that runs out runs its plan, though its toast's dismissal canc
 });
 
 test("an action's undo is offered in its space while it lasts, and a later action ends it", async () => {
-  render(<Toaster />);
   const until = Date.now() + 30_000;
-  const scaled = await started(plan({ kind: "atOnce" }), [
-    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
-  ]);
+  const scaled = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "done", text: "Scaled deployment web to 5", undoUntil: until }],
+    true,
+  );
   const { keys, operations } = scaled.workbench;
   await act(() => vi.advanceTimersByTimeAsync(20));
   await expect(scaled.outcome).resolves.toEqual({ state: "done" });
@@ -677,7 +685,10 @@ test("a done run whose undo is not offered still says so", async () => {
   const undone = scaled.workbench.operations.undo("dev");
   await act(() => vi.advanceTimersByTimeAsync(20));
   await undone;
-  expect(success).toHaveBeenCalledWith("Scaled deployment web to 5");
+  expect(success).toHaveBeenCalledWith(
+    "Scaled deployment web to 5",
+    expect.anything(),
+  );
 });
 
 const SHELL: PlanRequest = {
@@ -741,4 +752,58 @@ test("a cancelled shell opens no session", async () => {
   await expect(cancelled).resolves.toEqual({ state: "cancelled" });
   await act(() => vi.advanceTimersByTimeAsync(50));
   expect(commands(sent)).toEqual(["command_plan", "command_cancel"]);
+});
+
+test("a countdown's toast leads with the tile of the context's space, and keeps it when the person goes to another space", async () => {
+  const counting = await started(
+    plan({ kind: "countdown", seconds: 5 }),
+    [],
+    true,
+  );
+  const { workbench } = counting;
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  const counted = (context: string) =>
+    screen
+      .getAllByRole("status")
+      .find((toast) => toast.textContent.includes(`${context} · sends in`));
+  expect(counted("dev")?.textContent).toMatch(/^DEDeleting pod/);
+
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(counted("dev")?.textContent).toMatch(/^DEDeleting pod/);
+  act(() => {
+    workbench.operations.cancelCountdown();
+  });
+  await expect(counting.outcome).resolves.toEqual({ state: "cancelled" });
+});
+
+test("a confirmation's dialog leads with the tile of the context's space, and keeps it when the person goes to another space", async () => {
+  const asked = await started(plan({ kind: "confirm" }), []);
+  render(<WorkbenchView workbench={asked.workbench} />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(within(screen.getByRole("dialog")).getByText("DE")).toBeTruthy();
+
+  act(() => {
+    asked.workbench.spaces.select("staging");
+  });
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toMatch(/^DEDevelopmentdev/);
+  act(() => {
+    asked.workbench.operations.asking?.cancel();
+  });
+  await expect(asked.outcome).resolves.toEqual({ state: "cancelled" });
+});
+
+test("a toast for a context no space stands for has no tile", async () => {
+  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const counting = await started(lone, [], true);
+  const lonely = screen
+    .getAllByRole("status")
+    .find((toast) => toast.textContent.includes("qa · sends in"));
+  expect(lonely?.textContent).toMatch(/^Deleting pod/);
+  act(() => {
+    counting.workbench.operations.cancelCountdown();
+  });
+  await counting.outcome;
 });

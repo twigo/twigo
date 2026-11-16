@@ -44,13 +44,21 @@ interface ToastProps {
   tone: Tone;
   message: ReactNode;
   action: ToastAction | undefined;
+  tile?: ReactNode;
+}
+
+/** What a toast leads with when it speaks about something that is not the app's own, in the icon's column. */
+function Lead({ tile }: { tile: ReactNode }) {
+  return tile ? (
+    <span className="flex h-5 shrink-0 items-center">{tile}</span>
+  ) : null;
 }
 
 /**
  * A toast is a popover surface with the tone as its icon and a thin rule,
  * not a filled box (ARCHITECTURE 4.9).
  */
-export function Toast({ id, tone, message, action }: ToastProps) {
+export function Toast({ id, tone, message, action, tile }: ToastProps) {
   const { icon: Icon, text, rule } = TONE[tone];
   return (
     <div
@@ -58,6 +66,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
       className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3.5 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
       <span className={cn("absolute inset-y-0 left-0 w-0.5", rule)} />
+      <Lead tile={tile} />
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className={cn("size-3.5", text)} />
       </span>
@@ -89,6 +98,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
 }
 
 export interface CountdownToastProps {
+  tile?: ReactNode;
   icon: LucideIcon;
   message: ReactNode;
   /** Says what happens when, from the seconds left: `dev · sends in 4 s`. */
@@ -108,6 +118,7 @@ export interface CountdownToastProps {
  * its owner, not the toast, keeps the time.
  */
 export function CountdownToast({
+  tile,
   icon: Icon,
   message,
   detail,
@@ -137,6 +148,7 @@ export function CountdownToast({
       role="status"
       className="relative flex w-[var(--width)] items-center gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
+      <Lead tile={tile} />
       <Icon aria-hidden className="size-3.5 shrink-0 text-support" />
       <span className="grid min-w-0 flex-1 gap-0.5 leading-5">
         <span className="break-words text-content">{message}</span>
@@ -160,6 +172,7 @@ export function CountdownToast({
 }
 
 export interface ChoiceToastProps {
+  tile?: ReactNode;
   icon: LucideIcon;
   message: ReactNode;
   detail?: ReactNode;
@@ -175,6 +188,7 @@ export interface ChoiceToastProps {
  * nothing.
  */
 export function ChoiceToast({
+  tile,
   icon: Icon,
   message,
   detail,
@@ -186,6 +200,7 @@ export function ChoiceToast({
       role="status"
       className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
+      <Lead tile={tile} />
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className="size-3.5 text-support" />
       </span>

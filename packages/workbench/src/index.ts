@@ -46,6 +46,7 @@ export type {
   Watermark,
 } from "./views/registry";
 export { SpaceTile } from "./parts/SpaceTile";
+export { spaceMark } from "./parts/spaceMark";
 export {
   accessOfSpace,
   chipLabel,

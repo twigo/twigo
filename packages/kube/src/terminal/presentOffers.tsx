@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { FileInput } from "lucide-react";
 import type { KubeconfigOffer, KubeconfigOfferId } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
@@ -7,9 +8,13 @@ import type { KubeconfigOffers } from "./offers";
 
 /**
  * Shows each offer as a toast that stays until it is answered, and takes it
- * down when it is answered or withdrawn.
+ * down when it is answered or withdrawn. The toast leads with the tile of the
+ * context its terminal is pinned to.
  */
-export function presentOffers(offers: KubeconfigOffers): void {
+export function presentOffers(
+  tileOf: (context: string) => ReactNode,
+  offers: KubeconfigOffers,
+): void {
   const shown = new Map<
     KubeconfigOfferId,
     { offer: KubeconfigOffer; busy: boolean; dismiss: () => void }
@@ -27,6 +32,7 @@ export function presentOffers(offers: KubeconfigOffers): void {
       const words = describeOffer(offer);
       const { dismiss } = notify.choice(
         {
+          tile: tileOf(offer.context),
           icon: FileInput,
           message: words.title,
           detail: <OfferDetail words={words} />,

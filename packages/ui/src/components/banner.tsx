@@ -21,12 +21,15 @@ const ICON: Readonly<Record<keyof typeof TINT, string>> = {
  * rest on hue alone.
  */
 export function Banner({
+  lead,
   tone,
   icon: Icon,
   title,
   children,
   action,
 }: {
+  /** What it speaks about, as a tile, which leads it. */
+  lead?: ReactNode;
   tone: keyof typeof TINT;
   icon: LucideIcon;
   title: ReactNode;
@@ -41,6 +44,7 @@ export function Banner({
         TINT[tone],
       )}
     >
+      {lead}
       <Icon aria-hidden className={cn("size-3.5 shrink-0", ICON[tone])} />
       <div className="min-w-0 flex-1 truncate">
         <span className="font-medium">{title}</span>

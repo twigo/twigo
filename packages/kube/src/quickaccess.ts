@@ -77,7 +77,7 @@ export function listProvider(
   workbench: Workbench,
   discovery: Discovery,
 ): QuickAccessProvider {
-  const { spaces, editors } = workbench;
+  const { spaces, editors, catalog, colors } = workbench;
   const titled = (
     resource: Resource,
     extra?: string,
@@ -132,7 +132,22 @@ export function listProvider(
         query.labels,
         query.context && `@${query.context}`,
       ].filter(Boolean);
-      return [titled(resource, parts.join(" "))];
+      const row = titled(resource, parts.join(" "));
+      const elsewhere =
+        query.context !== undefined &&
+        catalog.find(query.context) !== undefined &&
+        !(space.contexts.length === 1 && space.contexts[0] === query.context);
+      return [
+        elsewhere
+          ? {
+              ...row,
+              tile: {
+                name: query.context,
+                color: colors.of(query.context),
+              },
+            }
+          : row,
+      ];
     },
     async accept(item, filter, _context, options) {
       const space = spaces.active;

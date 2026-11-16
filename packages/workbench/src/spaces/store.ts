@@ -138,6 +138,19 @@ export class Spaces {
     return this.list.find((space) => space.id === this.#active);
   }
 
+  get(id: string): Space | undefined {
+    return this.list.find((space) => space.id === id);
+  }
+
+  /** The space that stands for a context: its own space of one context, else the first that lists it. */
+  ofContext(context: string): Space | undefined {
+    return (
+      this.list.find(
+        ({ contexts }) => contexts.length === 1 && contexts[0] === context,
+      ) ?? this.list.find(({ contexts }) => contexts.includes(context))
+    );
+  }
+
   /** Reads the spaces, then selects the one active when the app last ran, else the first. */
   async load(): Promise<void> {
     this.#all = await this.backend.invoke("spaces_list", null);
