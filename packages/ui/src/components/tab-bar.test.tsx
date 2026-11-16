@@ -185,17 +185,37 @@ test("the shown tab never folds, though it is the last", () => {
 test("More says that a folded tab holds warnings, and only then", () => {
   render(<Views />);
   layOut(240, NEEDS);
-  expect(more()?.getAttribute("aria-label")).toBe("More, with warnings");
+  expect(more()?.getAttribute("aria-label")).toBe(
+    "More views of the object, with warnings",
+  );
   fireEvent.click(tab("YAML"));
   layOut(150, NEEDS);
-  expect(more()?.getAttribute("aria-label")).toBe("More, with warnings");
+  expect(more()?.getAttribute("aria-label")).toBe(
+    "More views of the object, with warnings",
+  );
   fireEvent.pointerDown(more() ?? document.body, {
     button: 0,
     ctrlKey: false,
   });
   fireEvent.click(screen.getByRole("menuitem", { name: /^Events/ }));
   layOut(240, NEEDS);
-  expect(more()?.getAttribute("aria-label")).toBe("More");
+  expect(more()?.getAttribute("aria-label")).toBe("More views of the object");
+});
+
+test("More is named for what it holds and keeps its visible word, so that it differs from the More of a row of actions", () => {
+  render(
+    <>
+      <button type="button">More</button>
+      <Views />
+    </>,
+  );
+  layOut(240, NEEDS);
+  const own = screen.getByRole("button", {
+    name: "More views of the object, with warnings",
+  });
+  expect(own.textContent).toContain("More");
+  expect(screen.getAllByRole("button", { name: /^More/ })).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "More" })).toHaveLength(1);
 });
 
 test("a pick from More puts the focus on the picked tab", async () => {

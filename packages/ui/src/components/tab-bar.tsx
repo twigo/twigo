@@ -163,6 +163,7 @@ export function TabBar<V extends string>({
   const shown = tabs.filter((_, index) => !folded.has(index));
   const hidden = tabs.filter((_, index) => folded.has(index));
   const picked = useRef(false);
+  const moreViews = `More ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
   const warns = (at: ReadonlySet<number>) =>
     tabs.some(
       (tab, index) =>
@@ -213,7 +214,9 @@ export function TabBar<V extends string>({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label={warns(folded) ? "More, with warnings" : "More"}
+              aria-label={
+                warns(folded) ? `${moreViews}, with warnings` : moreViews
+              }
               className={MORE_PLATE}
             >
               <MoreFace warns={warns(folded)} />
