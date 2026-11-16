@@ -132,11 +132,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* An editor tab asks for its title's width, so that a tab is 220 px at most
-   (`TAB_MAX` in strip.ts) when nothing follows its title but Close: the title
-   is capped at 220 px less the 63 px the rest of the tab takes, and a state
-   mark grows the tab by its own width. A panel tab has no cap, so that a logs
-   title reads whole. */
+/* An editor tab asks for its title's width, and the title is capped at 220 px
+   (`TAB_MAX` in strip.ts) less the 63 px the rest of the tab takes, so a tab
+   whose title is cut at its end and that only Close follows comes to 220 px.
+   A state mark grows the tab by its own width, and a title cut in the middle
+   never goes below its floor, which can be wider than the cap, so such tabs
+   pass 220 px. A panel tab has no cap, so that a logs title reads whole. */
 .twigo-dockview:not(.twigo-panel) .twigo-tab-title {
   max-width: 157px;
 }

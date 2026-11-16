@@ -305,14 +305,13 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
 
 /**
  * The width a group's actions may take without a tab giving way: the
- * strip's, less every tab at the width it asks for (up to 220 px in the
- * editor area), the space before the first tab and between the tabs, the
- * overflow button and the space after the actions. Undefined until
- * measured. Each measure also brings the active tab back into view, since
- * dockview does that only as a tab activates, before the actions settle: by
- * the tab list's own scroll, as dockview 8.8.3's `Tabs._scrollTabIntoView`
- * does, since `scrollIntoView` would scroll the split views around the strip
- * too.
+ * strip's, less every tab at the width it asks for, the space before the
+ * first tab and between the tabs, the overflow button and the space after the
+ * actions. Undefined until measured. Each measure also brings the active tab
+ * back into view, since dockview does that only as a tab activates, before the
+ * actions settle: by the tab list's own scroll, as dockview 8.8.3's
+ * `Tabs._scrollTabIntoView` does, since `scrollIntoView` would scroll the split
+ * views around the strip too.
  */
 function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
   const [room, setRoom] = useState<number>();

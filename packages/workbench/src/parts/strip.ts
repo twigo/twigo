@@ -1,4 +1,4 @@
-/** The widest an editor tab grows while only Close follows its title: `styles.css` caps the title so that the tab comes to this width, and a state mark after the title adds its own. */
+/** The width of a list's tab in the editor area, the only tab the strip's stages keep room for: its title is cut at its end and only Close follows it, and `styles.css` caps the title so that the tab comes to this width. A tab with a state mark is wider, and so is one whose title is cut in the middle at a floor wider than the cap. */
 export const TAB_MAX = 220;
 
 /** The characters of an editor tab's title that its cut leaves, head and tail together. */
@@ -14,6 +14,6 @@ export const OVERFLOW_BUTTON = 28;
 /** The space after a group's actions, at the strip's right end. */
 export const ACTIONS_PADDING = 6;
 
-/** What a group's strip takes besides its actions, whatever they take: the space before the first tab, the active tab at its widest, the overflow button and the space after the actions. */
+/** What a group's strip takes besides its actions, whatever they take: the space before the first tab, the active list's tab (`TAB_MAX`), the overflow button and the space after the actions. Only a list's actions read it. */
 export const STRIP_KEPT =
   TABS_START + TAB_MAX + OVERFLOW_BUTTON + ACTIONS_PADDING;
