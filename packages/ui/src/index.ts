@@ -22,6 +22,7 @@ export * from "./components/callout";
 export * from "./components/card";
 export * from "./components/chip";
 export * from "./components/count";
+export * from "./components/cut-in-the-middle";
 export * from "./components/icon-button";
 export * from "./components/key-hints";
 export * from "./components/link-button";
