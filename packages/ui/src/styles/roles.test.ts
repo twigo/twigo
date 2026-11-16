@@ -4,7 +4,15 @@ import Color from "colorjs.io";
 import { expect, test } from "vitest";
 
 type Theme = "dark" | "light";
-type Surface = "shell" | "editor" | "card" | "popover" | "selected";
+type Tone = "error" | "warn";
+type Surface =
+  | "shell"
+  | "editor"
+  | "card"
+  | "popover"
+  | "selected"
+  | `${Tone} band`
+  | `hovered ${Tone} band`;
 
 const THEMES: readonly Theme[] = ["dark", "light"];
 const ROLES = ["strong", "content", "support", "quiet"] as const;
@@ -14,7 +22,15 @@ const SURFACES: readonly Surface[] = [
   "card",
   "popover",
   "selected",
+  "error band",
+  "warn band",
+  "hovered error band",
+  "hovered warn band",
 ];
+const TONE_TEXT: Record<Tone, string> = {
+  error: "error",
+  warn: "warn-foreground",
+};
 
 const read = (file: string) =>
   readFileSync(join(import.meta.dirname, file), "utf8");
@@ -42,13 +58,13 @@ const tokens: Record<Theme, Map<string, string>> = {
   light: block(/:root/),
   dark: block(/\.dark/),
 };
-const underCursor = declarations(
-  /\[aria-selected="true"\],\s*\[data-cursor\]\s*\{([^}]*)\}/.exec(
+const underTint = declarations(
+  /\[aria-selected="true"\],\s*\[data-cursor\],\s*\[data-tone\]\s*\{([^}]*)\}/.exec(
     withoutComments(read("index.css")),
   )?.[1],
 );
 
-const COLOUR = String.raw`(?:var\(--[\w-]+\)|oklch\([^)]*\))`;
+const COLOUR = String.raw`(?:var\(--[\w-]+\)|oklch\([^)]*\)|transparent)`;
 const REFERENCE = /^var\(--([\w-]+)\)$/;
 const MIX = new RegExp(
   String.raw`^color-mix\(in oklab, (${COLOUR}) (\d+)%, (${COLOUR})\)$`,
@@ -99,21 +115,27 @@ function over(top: Color, base: Color) {
   );
 }
 
+const BAND = /^(hovered )?(error|warn) band$/;
+
 function surface(name: Surface, theme: Theme): Color {
   if (name === "selected") {
     return over(colour("var(--selected)", theme), surface("editor", theme));
   }
+  const band = BAND.exec(name);
+  if (band) {
+    const resting = over(
+      colour(`var(--band-${band[2] ?? ""})`, theme),
+      surface("editor", theme),
+    );
+    return band[1] ? over(colour("var(--row-hover)", theme), resting) : resting;
+  }
   return eightBit(colour(`var(--${name})`, theme));
 }
 
+const tinted = (on: Surface) => on === "selected" || BAND.test(on);
+
 const role = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
-  eightBit(
-    colour(
-      `var(--${name})`,
-      theme,
-      on === "selected" ? underCursor : undefined,
-    ),
-  );
+  eightBit(colour(`var(--${name})`, theme, tinted(on) ? underTint : undefined));
 
 const ratio = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
   surface(on, theme).contrast(role(name, theme, on), "WCAG21");
@@ -121,13 +143,37 @@ const lightness = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
   Math.abs(surface(on, theme).contrast(role(name, theme, on), "APCA"));
 
 test.each(THEMES)(
-  "%s: every role reads at 4.5:1 or more on the shell, the editor, a card, a popover and a selected row",
+  "%s: every role reads at 4.5:1 or more on the shell, the editor, a card, a popover, a selected row and a problem row's band, at rest and hovered",
   (theme) => {
     const short = SURFACES.flatMap((on) =>
       ROLES.map((name) => ({ name, on, ratio: ratio(name, theme, on) })),
     )
       .filter((reading) => reading.ratio < 4.5)
       .map(({ name, on, ratio }) => `${name} on ${on}: ${ratio.toFixed(2)}`);
+    expect(short).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: text in a tone reads at 4.5:1 or more on its own band, at rest and hovered, and on a selected row",
+  (theme) => {
+    const short = (["error", "warn"] as const)
+      .flatMap((tone) =>
+        ([`${tone} band`, `hovered ${tone} band`, "selected"] as const).map(
+          (on) => ({
+            tone,
+            on,
+            ratio: surface(on, theme).contrast(
+              eightBit(colour(`var(--${TONE_TEXT[tone]})`, theme)),
+              "WCAG21",
+            ),
+          }),
+        ),
+      )
+      .filter((reading) => reading.ratio < 4.5)
+      .map(
+        ({ tone, on, ratio }) => `${tone} text on ${on}: ${ratio.toFixed(2)}`,
+      );
     expect(short).toEqual([]);
   },
 );

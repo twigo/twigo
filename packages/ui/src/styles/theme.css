@@ -47,8 +47,8 @@
        content  12.9 / 85    13.8 / 86    14.9 / 98    16.0 / 103
        support   7.8 / 57     8.4 / 58     6.1 / 78     6.5 / 82
        quiet     5.4 / 41     5.7 / 41     4.5 / 69     4.8 / 74
-     A selected row's tint takes quiet below 4.5:1, so there it reads as
-     support (index.css). */
+     A selected row's tint and a problem row's band take quiet below 4.5:1,
+     so there it reads as support (index.css). */
   --strong: oklch(0.18 0.004 250);
   --content: oklch(0.25 0.004 250);
   --support: oklch(0.48 0.006 250);
@@ -67,6 +67,11 @@
   --row-active: oklch(0 0 0 / 7%);
   --selected: color-mix(in oklab, var(--brand) 10%, oklch(0 0 0 / 4%));
   --selected-unfocused: oklch(0 0 0 / 6%);
+  --row-hover-layer: linear-gradient(var(--row-hover), var(--row-hover));
+
+  /* A problem row's band: its tone over the surface the row sits on. */
+  --band-error: color-mix(in oklab, var(--error) 9%, transparent);
+  --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
 
   /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
      (never pure gray - that azure tint is the premium tell). */
@@ -198,6 +203,10 @@
   --row-active: oklch(1 0 0 / 8%);
   --selected: color-mix(in oklab, var(--brand) 16%, oklch(1 0 0 / 6%));
   --selected-unfocused: oklch(1 0 0 / 8%);
+  --row-hover-layer: linear-gradient(var(--row-hover), var(--row-hover));
+
+  --band-error: color-mix(in oklab, var(--error) 9%, transparent);
+  --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
 
   --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
   --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));

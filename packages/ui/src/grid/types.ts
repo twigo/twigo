@@ -29,7 +29,7 @@ export type GridItem<R, G> =
       readonly type: "row";
       readonly id: string;
       readonly data: R;
-      /** An abnormal row gets an edge in its tone. */
+      /** An abnormal row is drawn as a band in its tone. */
       readonly tone?: Tone;
     }
   | {

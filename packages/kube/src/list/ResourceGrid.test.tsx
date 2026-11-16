@@ -830,7 +830,7 @@ test("the first subscription already carries the column choices the text filter 
   expect(queries).toEqual([{ IP: true }]);
 });
 
-test("a failing row has an edge, a name reads in its parts, and restarts read as a count and its age", async () => {
+test("a failing row carries its tone, a name reads in its parts, and restarts read as a count and its age", async () => {
   await openList();
   const parts = (row: HTMLElement | undefined, column: string) =>
     [
@@ -845,7 +845,7 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
   };
 
   const running = rows().find((row) => textOf(row, "Status") === "Running");
-  expect(running?.className).not.toMatch(/var\(--(error|warn)\)/);
+  expect(running?.hasAttribute("data-tone")).toBe(false);
   const whole = textOf(running, "Name");
   const last = whole.lastIndexOf("-") + 1;
   const cut = whole.lastIndexOf("-", last - 2) + 1;
@@ -860,7 +860,7 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");
-  expect(failing?.className).toContain("var(--error)");
+  expect(failing?.getAttribute("data-tone")).toBe("error");
   const restarts = parts(failing, "Restarts").map((part) => part.textContent);
   expect(restarts).toHaveLength(2);
   expect(restarts[0]).toMatch(/^\d+$/);
@@ -868,7 +868,7 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
 
   const pending = await filter("Pending");
   expect(textOf(pending, "Status")).toBe("Pending");
-  expect(pending?.className).toContain("var(--warn)");
+  expect(pending?.getAttribute("data-tone")).toBe("warn");
 });
 
 const groupHeaders = () =>

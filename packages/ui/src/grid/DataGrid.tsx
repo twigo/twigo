@@ -40,6 +40,17 @@ export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
  */
 const HELD =
   "sticky z-[1] isolate bg-[var(--surface,var(--editor))] before:pointer-events-none before:absolute before:inset-0 before:-z-10";
+/**
+ * A problem row's edge and band, which its tone sets through `--edge` and
+ * `--band` (index.css). The pointer's hover lies over the band; the cursor and
+ * marks take its place, since laid over it they leave text in the tone and in
+ * support below 4.5:1 in the light theme.
+ */
+const EDGE = "shadow-[inset_3px_0_0_var(--edge)]";
+const BAND = "bg-(--band) hover:bg-(image:--row-hover-layer)";
+const BAND_HELD =
+  "before:bg-(--band) group-hover/row:before:bg-(image:--row-hover-layer)";
+const BAND_ENDS = "bg-(--band) bg-(image:--row-hover-layer)";
 const MARK_CELL = "flex justify-center";
 const MARK_CELL_REVEALING = `${MARK_CELL} [&>button]:opacity-0 group-hover/row:[&>button]:opacity-100 focus-within:[&>button]:opacity-100`;
 const MARK_HEADER_HELD = `${MARK_CELL} sticky left-0 z-20 bg-inherit`;
@@ -446,7 +457,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           role="row"
           aria-rowindex={at.index + (header ? 2 : 1)}
           onContextMenu={withoutMenu}
-          className="absolute inset-x-0 top-0 grid items-center border-b border-border-subtle"
+          className="absolute inset-x-0 top-0 grid items-center"
           style={{ ...place, gridTemplateColumns: template }}
         >
           {marking && <div role="gridcell" />}
@@ -495,6 +506,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       );
     }
     const isMarked = marked?.has(target.id) === true;
+    const { tone } = target;
     const tint = isMarked
       ? "bg-selected"
       : isCursor
@@ -507,18 +519,14 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
             ? "before:bg-selected"
             : isCursor
               ? "before:bg-selected-unfocused group-focus/grid:before:bg-selected"
-              : "group-hover/row:before:bg-row-hover",
+              : tone
+                ? BAND_HELD
+                : "group-hover/row:before:bg-row-hover",
         )
       : undefined;
     const markCell = anyMarked ? MARK_CELL : MARK_CELL_REVEALING;
-    const edge =
-      held === undefined
-        ? undefined
-        : target.tone === "error"
-          ? "shadow-[inset_2px_0_0_var(--error)]"
-          : target.tone === "warn"
-            ? "shadow-[inset_2px_0_0_var(--warn)]"
-            : undefined;
+    const edge = held !== undefined && tone ? EDGE : undefined;
+    const ends = tint ?? (tone ? BAND_ENDS : undefined);
     const select = () => {
       setWanted(undefined);
       setCursor(target.id);
@@ -533,7 +541,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         aria-selected={anyMarked ? isMarked : isCursor}
         data-cursor={isCursor || undefined}
         keepActions={isCursor}
-        overlay={overlayMenu ? (tint ?? "bg-row-hover") : undefined}
+        overlay={overlayMenu ? (ends ?? "bg-row-hover") : undefined}
         actions={
           <>
             {menu.length > 0 && (
@@ -568,7 +576,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
               actions.length > 0 &&
               room >= iconsWidth(actions.length) && (
                 <RowIcons
-                  tint={tint}
+                  tint={ends}
                   actions={actions.map(({ keys: _, ...action }) => ({
                     ...action,
                     run: () => {
@@ -589,11 +597,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           onActivate(target.id, target.data);
         }}
         onContextMenu={select}
+        data-tone={tone}
         className={cn(
-          "group/row absolute inset-x-0 top-0 grid items-center border-b border-border-subtle",
-          tint ?? "hover:bg-row-hover",
-          target.tone === "error" && "shadow-[inset_2px_0_0_var(--error)]",
-          target.tone === "warn" && "shadow-[inset_2px_0_0_var(--warn)]",
+          "group/row absolute inset-x-0 top-0 grid items-center",
+          tint ?? (tone ? BAND : "hover:bg-row-hover"),
+          tone && EDGE,
         )}
         style={{ ...place, gridTemplateColumns: template }}
       >
@@ -864,7 +872,7 @@ function SkeletonRows({
       {Array.from({ length: 12 }, (_, row) => (
         <div
           key={row}
-          className="grid items-center border-b border-border-subtle"
+          className="grid items-center"
           style={{ height: ROW_HEIGHT, gridTemplateColumns: template }}
         >
           {marking && <div />}

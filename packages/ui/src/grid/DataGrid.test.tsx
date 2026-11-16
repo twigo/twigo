@@ -176,7 +176,7 @@ function grid(overrides: Props = {}) {
   };
 }
 
-test("group headers come before their rows, a failing row has an edge, and a header's click folds it", () => {
+test("group headers come before their rows, a failing row is a band in its tone, and a header's click folds it", () => {
   const { handlers } = grid();
   const rows = screen.getAllByRole("row").slice(1);
   expect(rows.map((row) => row.textContent)).toEqual([
@@ -186,7 +186,9 @@ test("group headers come before their rows, a failing row has an edge, and a hea
     "edge",
     "gateway-1",
   ]);
-  expect(rows[2]?.className).toContain("var(--error)");
+  expect(rows[2]?.getAttribute("data-tone")).toBe("error");
+  expect(rows[2]?.className).toContain("bg-(--band)");
+  expect(rows[1]?.hasAttribute("data-tone")).toBe(false);
   fireEvent.click(screen.getByText("edge"));
   expect(handlers.onToggleGroup).toHaveBeenCalledWith("g:edge");
 });
@@ -900,13 +902,15 @@ test("loading shows skeleton rows, and an empty grid what its owner gives", () =
   expect(screen.getByText("No pods")).toBeTruthy();
 });
 
-test("a selected or marked row keeps its tint under the pointer, the others take the hover", () => {
-  grid({ selected: "a1", marked: new Set(["e1"]) });
+test("a selected or marked row keeps its tint under the pointer, and a failing one's band gives way to it, the others take the hover", () => {
+  grid({ selected: "a2", marked: new Set(["e1"]) });
   const row = (text: string) =>
     screen.getByText(text).closest<HTMLElement>("[role=row]")?.className;
-  expect(row("api-1")).not.toContain("hover:bg-row-hover");
-  expect(row("gateway-1")).not.toContain("hover:bg-row-hover");
-  expect(row("api-2")).toContain("hover:bg-row-hover");
+  for (const text of ["api-2", "gateway-1"]) {
+    expect(row(text)).not.toContain("hover:bg-");
+    expect(row(text)).not.toContain("bg-(--band)");
+  }
+  expect(row("api-1")).toContain("hover:bg-row-hover");
 });
 
 test("a column's note is a quiet mark on its header, said in words to a screen reader, and its click still sorts", () => {

@@ -233,13 +233,13 @@ test("the local port goes, whole, with the ⋯ that lies over it: on the row's h
     expect(port?.classList.contains(hidden)).toBe(true);
 });
 
-test("a failed row has an edge in its tone, and a ready one has none", async () => {
+test("a failed row carries its tone, and a ready one has none", async () => {
   const { backend } = await mounted();
   await act(() => backend.invoke("forward_resume", { id: 2, local: null }));
   await act(() => vi.advanceTimersByTimeAsync(700));
   const [, ready, failed] = rows();
-  expect(failed?.className).toContain("--error");
-  expect(ready?.className).not.toContain("--error");
+  expect(failed?.getAttribute("data-tone")).toBe("error");
+  expect(ready?.hasAttribute("data-tone")).toBe(false);
 });
 
 test("with no forwards the view says how to start one", async () => {
@@ -501,6 +501,5 @@ test("a forward that the mode refuses is a row in the warning tone that says the
     vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS + 100),
   );
   expect(stateWords(row(0))).toBe("Read-only");
-  expect(row(0).className).toContain("--warn");
-  expect(row(0).className).not.toContain("--error");
+  expect(row(0).getAttribute("data-tone")).toBe("warn");
 });
