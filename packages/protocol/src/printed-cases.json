@@ -170,6 +170,174 @@
       "keeps": true
     },
     {
+      "name": "9m59s printed again within its second and the tolerance",
+      "held": "9m59s",
+      "heldAt": 0,
+      "printed": "9m59s",
+      "at": 2999,
+      "keeps": true
+    },
+    {
+      "name": "9m59s printed again three seconds later, the last of the seconds",
+      "held": "9m59s",
+      "heldAt": 0,
+      "printed": "9m59s",
+      "at": 3000,
+      "keeps": false
+    },
+    {
+      "name": "10m printed again three seconds later, the first of the minutes",
+      "held": "10m",
+      "heldAt": 0,
+      "printed": "10m",
+      "at": 3000,
+      "keeps": true
+    },
+    {
+      "name": "10m printed again a minute and two seconds later",
+      "held": "10m",
+      "heldAt": 0,
+      "printed": "10m",
+      "at": 62000,
+      "keeps": false
+    },
+    {
+      "name": "3h20m printed again a minute and two seconds later: minutes still, though HumanDuration prints hours and minutes",
+      "held": "3h20m",
+      "heldAt": 0,
+      "printed": "3h20m",
+      "at": 62000,
+      "keeps": false
+    },
+    {
+      "name": "7h59m printed again within its minute and the tolerance",
+      "held": "7h59m",
+      "heldAt": 0,
+      "printed": "7h59m",
+      "at": 61999,
+      "keeps": true
+    },
+    {
+      "name": "7h59m printed again a minute and two seconds later, the last of the minutes",
+      "held": "7h59m",
+      "heldAt": 0,
+      "printed": "7h59m",
+      "at": 62000,
+      "keeps": false
+    },
+    {
+      "name": "8h printed again a minute and two seconds later, the first of the hours",
+      "held": "8h",
+      "heldAt": 0,
+      "printed": "8h",
+      "at": 62000,
+      "keeps": true
+    },
+    {
+      "name": "8h printed again an hour and two seconds later",
+      "held": "8h",
+      "heldAt": 0,
+      "printed": "8h",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "2d printed again an hour and two seconds later: hours still, though HumanDuration prints days",
+      "held": "2d",
+      "heldAt": 0,
+      "printed": "2d",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "2d1h printed again an hour and two seconds later",
+      "held": "2d1h",
+      "heldAt": 0,
+      "printed": "2d1h",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "3d4h printed again an hour and two seconds later",
+      "held": "3d4h",
+      "heldAt": 0,
+      "printed": "3d4h",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "7d23h printed again within its hour and the tolerance",
+      "held": "7d23h",
+      "heldAt": 0,
+      "printed": "7d23h",
+      "at": 3601999,
+      "keeps": true
+    },
+    {
+      "name": "7d23h printed again an hour and two seconds later, the last of the hours",
+      "held": "7d23h",
+      "heldAt": 0,
+      "printed": "7d23h",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "8d printed again an hour and two seconds later, the first of the days",
+      "held": "8d",
+      "heldAt": 0,
+      "printed": "8d",
+      "at": 3602000,
+      "keeps": true
+    },
+    {
+      "name": "8d printed again a day and two seconds later",
+      "held": "8d",
+      "heldAt": 0,
+      "printed": "8d",
+      "at": 86402000,
+      "keeps": false
+    },
+    {
+      "name": "2y10d printed again a day and two seconds later: days still, though HumanDuration prints years and days",
+      "held": "2y10d",
+      "heldAt": 0,
+      "printed": "2y10d",
+      "at": 86402000,
+      "keeps": false
+    },
+    {
+      "name": "7y364d printed again within its day and the tolerance",
+      "held": "7y364d",
+      "heldAt": 0,
+      "printed": "7y364d",
+      "at": 86401999,
+      "keeps": true
+    },
+    {
+      "name": "7y364d printed again a day and two seconds later, the last of the days",
+      "held": "7y364d",
+      "heldAt": 0,
+      "printed": "7y364d",
+      "at": 86402000,
+      "keeps": false
+    },
+    {
+      "name": "8y printed again a day and two seconds later, the first of the years",
+      "held": "8y",
+      "heldAt": 0,
+      "printed": "8y",
+      "at": 86402000,
+      "keeps": true
+    },
+    {
+      "name": "9y printed again a year and two seconds later",
+      "held": "9y",
+      "heldAt": 0,
+      "printed": "9y",
+      "at": 31536002000,
+      "keeps": false
+    },
+    {
       "name": "a restart 11 days ago printed again 10 minutes later",
       "held": "3 (11d ago)",
       "heldAt": 0,

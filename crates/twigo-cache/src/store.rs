@@ -629,6 +629,15 @@ mod tests {
     }
 
     #[test]
+    fn a_duration_in_a_column_that_prints_none_does_not_move_the_stamp() {
+        let store = printing(&[("Duration", false), ("Last Schedule", true)]);
+        for (duration, seconds) in [("5m", 100), ("6m", 160), ("7m", 220)] {
+            store.upsert(printed("job", &[duration, "11d"], seconds));
+            assert_eq!(received(&store), [("job".to_owned(), 100)], "{duration}");
+        }
+    }
+
+    #[test]
     fn a_relist_keeps_the_stamp_of_rows_that_print_their_ages_as_they_did() {
         let store = printing(&[("Last Seen", true), ("First Seen", true)]);
         store.upsert(printed("steady", &["11d", "11d"], 100));
