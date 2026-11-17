@@ -1,5 +1,5 @@
 //! The query view under churn (ARCHITECTURE 3.4, 3.5): 5,000 kwok pods whose
-//! restart counts `twigo-bench churn` bumps, followed by a list sorted by
+//! restart counts `twigo-bench churn --bare` bumps, followed by a list sorted by
 //! Restarts that acknowledges each batch as the webview does; once the churn
 //! stops, each window holds what a fresh list sorts there: the top, the rows
 //! where the changed counts give way to the pods it left at 0, and the end.
@@ -258,6 +258,7 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
             "100",
             "--seconds",
             CHURN_SECONDS,
+            "--bare",
             "--log",
         ])
         .arg(&log)

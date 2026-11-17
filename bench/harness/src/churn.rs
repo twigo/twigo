@@ -34,6 +34,8 @@ pub struct Options {
     pub rate: f64,
     pub seconds: Option<f64>,
     pub log: PathBuf,
+    /// Restarts without a crash before them, so the server prints the count alone.
+    pub bare: bool,
 }
 
 /// One line of the log: what changed, and when it was sent and answered, in Unix milliseconds.
@@ -73,24 +75,26 @@ pub fn allowed_context(context: &str) -> bool {
 }
 
 /// A JSON patch that sets the first container's restart count, once that container is `app`,
-/// and the crash that restart followed, at `finished`, so the server prints the count with how
-/// long ago it was (`3 (5s ago)`).
-pub fn restart_patch(restarts: i32, finished: Timestamp) -> json_patch::Patch {
-    let crashed = ContainerState {
-        terminated: Some(ContainerStateTerminated {
-            exit_code: 1,
-            reason: Some("Error".to_owned()),
-            finished_at: Some(Time(finished)),
-            ..ContainerStateTerminated::default()
-        }),
-        ..ContainerState::default()
-    };
-    serde_json::from_value(json!([
-        { "op": "test", "path": "/status/containerStatuses/0/name", "value": CONTAINER },
-        { "op": "replace", "path": "/status/containerStatuses/0/restartCount", "value": restarts },
-        { "op": "add", "path": "/status/containerStatuses/0/lastState", "value": crashed },
-    ]))
-    .expect("a valid JSON patch")
+/// and the crash that restart followed, at `finished` where one is given, so the server prints
+/// the count with how long ago it was (`3 (5s ago)`).
+pub fn restart_patch(restarts: i32, finished: Option<Timestamp>) -> json_patch::Patch {
+    let mut ops = vec![
+        json!({ "op": "test", "path": "/status/containerStatuses/0/name", "value": CONTAINER }),
+        json!({ "op": "replace", "path": "/status/containerStatuses/0/restartCount", "value": restarts }),
+    ];
+    if let Some(finished) = finished {
+        let crashed = ContainerState {
+            terminated: Some(ContainerStateTerminated {
+                exit_code: 1,
+                reason: Some("Error".to_owned()),
+                finished_at: Some(Time(finished)),
+                ..ContainerStateTerminated::default()
+            }),
+            ..ContainerState::default()
+        };
+        ops.push(json!({ "op": "add", "path": "/status/containerStatuses/0/lastState", "value": crashed }));
+    }
+    serde_json::from_value(serde_json::Value::Array(ops)).expect("a valid JSON patch")
 }
 
 fn unix_ms() -> f64 {
@@ -162,10 +166,12 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     let stop = async {
         let _ = tokio::signal::ctrl_c().await;
     };
+    let bare = options.bare;
     let patch = move |name: Arc<str>, restarts: i32| {
         let api = api.clone();
         async move {
-            let patch = Patch::Json::<()>(restart_patch(restarts, Timestamp::now()));
+            let finished = (!bare).then(Timestamp::now);
+            let patch = Patch::Json::<()>(restart_patch(restarts, finished));
             api.patch_status(&name, &PatchParams::default(), &patch)
                 .await
                 .map(drop)
@@ -314,7 +320,7 @@ mod tests {
         let mut pod = json!({
             "status": { "containerStatuses": [{ "name": "app", "restartCount": 3, "lastState": {} }] }
         });
-        json_patch::patch(&mut pod, &restart_patch(4, Timestamp::UNIX_EPOCH)).unwrap();
+        json_patch::patch(&mut pod, &restart_patch(4, Some(Timestamp::UNIX_EPOCH))).unwrap();
         assert_eq!(pod["status"]["containerStatuses"][0]["restartCount"], 4);
         assert_eq!(
             pod["status"]["containerStatuses"][0]["lastState"],
@@ -328,7 +334,19 @@ mod tests {
         let mut other = json!({
             "status": { "containerStatuses": [{ "name": "sidecar", "restartCount": 3 }] }
         });
-        assert!(json_patch::patch(&mut other, &restart_patch(4, Timestamp::UNIX_EPOCH)).is_err());
+        assert!(
+            json_patch::patch(&mut other, &restart_patch(4, Some(Timestamp::UNIX_EPOCH))).is_err()
+        );
+
+        let mut bare = json!({
+            "status": { "containerStatuses": [{ "name": "app", "restartCount": 3, "lastState": {} }] }
+        });
+        json_patch::patch(&mut bare, &restart_patch(4, None)).unwrap();
+        assert_eq!(bare["status"]["containerStatuses"][0]["restartCount"], 4);
+        assert_eq!(
+            bare["status"]["containerStatuses"][0]["lastState"],
+            json!({})
+        );
     }
 
     #[tokio::test]
@@ -364,6 +382,7 @@ users:
             rate: 100.0,
             seconds: Some(1.0),
             log: log.clone(),
+            bare: false,
         })
         .await;
 
