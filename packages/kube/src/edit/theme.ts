@@ -77,7 +77,11 @@ function apply(): void {
 export function followTheme(): void {
   new MutationObserver(apply).observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["class"],
+    attributeFilter: [
+      "class",
+      // @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint
+      "data-neutrals",
+    ],
   });
   apply();
 }

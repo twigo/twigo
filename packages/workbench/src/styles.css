@@ -10,6 +10,10 @@
   --separator-border: var(--border-subtle);
   --focus-border: var(--brand);
 }
+/* @todo: remove the sash switch once the owner has chosen at package 3's checkpoint */
+:root[data-sash="line"] .twigo-workbench {
+  --separator-border: var(--border);
+}
 /* Allotment draws a separator as its pane's ::before at z-index 5; each
    part's content is its own stacking context, so nothing in it (a sticky
    table header at z-index 10) paints over the line. */
@@ -24,6 +28,21 @@
     90deg,
     color-mix(in oklab, var(--twigo-context) 30%, transparent),
     transparent 360px
+  );
+}
+/* @todo: remove the tint switch once the owner has chosen at package 3's checkpoint */
+:root[data-tint="strips"] .twigo-titlebar[data-color] {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--twigo-context) 10%, transparent),
+    color-mix(in oklab, var(--twigo-context) 10%, transparent)
+  );
+}
+/* @todo: remove the tint switch once the owner has chosen at package 3's checkpoint */
+:root[data-tint="strips"] .twigo-dockview {
+  --dv-tabs-and-actions-container-background-color: color-mix(
+    in oklab,
+    var(--twigo-context, var(--shell)) 6%,
+    var(--shell)
   );
 }
 /* A context whose mode wants to be seen (ARCHITECTURE 6.4): the status bar

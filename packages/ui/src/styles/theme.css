@@ -272,6 +272,39 @@
     inset 0 0 0 1px oklch(0.93 0.02 240 / 8%);
 }
 
+/* @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint */
+:root[data-neutrals="own"]:not(.dark) {
+  --background: oklch(0.975 0.008 250);
+  --shell: oklch(0.975 0.008 250);
+  --sidebar: oklch(0.975 0.008 250);
+  --panel: oklch(0.975 0.008 250);
+  --secondary: oklch(0.955 0.008 250);
+  --muted: oklch(0.955 0.008 250);
+  --accent: oklch(0.945 0.008 250);
+  --strong: oklch(0.18 0.008 250);
+  --content: oklch(0.25 0.008 250);
+  --support: oklch(0.48 0.008 250);
+  --quiet: oklch(0.55 0.008 250);
+}
+
+/* @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint */
+:root[data-neutrals="own"].dark {
+  --shell: oklch(0.218 0.008 250);
+  --editor: oklch(0.185 0.008 250);
+  --background: oklch(0.218 0.008 250);
+  --card: oklch(0.25 0.008 250);
+  --popover: oklch(0.27 0.008 250);
+  --secondary: oklch(0.28 0.008 250);
+  --muted: oklch(0.28 0.008 250);
+  --strong: oklch(0.96 0.008 250);
+  --content: oklch(0.9 0.008 250);
+  --support: oklch(0.75 0.008 250);
+  --quiet: oklch(0.65 0.008 250);
+  --accent: oklch(0.3 0.008 250);
+  --sidebar: oklch(0.218 0.008 250);
+  --panel: oklch(0.218 0.008 250);
+}
+
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

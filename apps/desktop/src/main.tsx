@@ -1,3 +1,6 @@
+// @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
+// First, so that `data-rows` is set before `@twigo/ui` reads it.
+import { installVariants } from "./variants";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
@@ -37,6 +40,11 @@ async function start() {
   );
   registerKube(workbench);
   await installZoom(workbench);
+  // @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint
+  // @todo: remove the tint switch once the owner has chosen at package 3's checkpoint
+  // @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
+  // @todo: remove the sash switch once the owner has chosen at package 3's checkpoint
+  installVariants(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;
 }
