@@ -3,6 +3,13 @@ import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
 import { keepsStamp } from "./printed";
 
+/** What a row printed of the moments its cells count back from, and when. */
+interface Printed {
+  readonly moments: readonly number[];
+  readonly texts: readonly string[];
+  readonly at: number;
+}
+
 export interface Pod {
   id: RowId;
   namespace: string;
@@ -123,7 +130,7 @@ export class Cluster {
   now: number;
   /** When the cluster was built: when a row that never changes was received. */
   readonly built: number;
-  readonly #printed = new Map<RowId, { texts: string[]; at: number }>();
+  readonly #printed = new Map<RowId, Printed>();
   /**
    * What lists have synced, by kind alone for every namespace, else with the
    * namespaces after it: a list of the same namespaces, or of every one,
@@ -396,21 +403,32 @@ export class Cluster {
   }
 
   /**
-   * The stamp of `id`, printed now with `durations`, as Rust's store keeps
-   * it: the held one while each duration reads the age it read then, one
-   * step of it not yet gone (`keepsStamp`), else now.
+   * The ages `id` prints of the `moments` its cells count back from, and the
+   * stamp they count from, as the API server prints them when it writes the
+   * row: once, and again only when a moment moves, so the ages in the cells
+   * stay as they were while the clock runs and the webview counts them on.
+   * The stamp stays the held one's while each age reads as it did, one step
+   * of it not yet gone, as Rust's store keeps it (`keepsStamp`), else it is
+   * now.
    */
-  printedAt(id: RowId, ...durations: string[]): number {
+  printed(id: RowId, moments: readonly number[]): Printed {
     const held = this.#printed.get(id);
+    if (
+      held &&
+      moments.every((moment, index) => moment === held.moments[index])
+    )
+      return held;
+    const texts = moments.map((moment) => humanDuration(this.now - moment));
     const at =
       held !== undefined &&
-      durations.every((text, index) =>
+      texts.every((text, index) =>
         keepsStamp(held.texts[index] ?? null, held.at, text, this.now),
       )
         ? held.at
         : this.now;
-    this.#printed.set(id, { texts: durations, at });
-    return at;
+    const printed = { moments, texts, at };
+    this.#printed.set(id, printed);
+    return printed;
   }
 
   /** Changes `count` distinct random pods. */

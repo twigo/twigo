@@ -390,6 +390,42 @@ test("with a rate, a live list changes that many pods a second and no more", asy
   expect(last(batches)?.total).toBe(800);
 });
 
+test("a live list of events sends a row again only when its event repeated", async () => {
+  const sub = await open(
+    "live",
+    query({
+      gvr: { group: "", version: "v1", resource: "events" },
+      sort: { column: "Last Seen", descending: false },
+    }),
+  );
+  await sub.window(0, 50);
+  for (let ms = 0; ms < 1500; ms += 50) {
+    await vi.advanceTimersByTimeAsync(50);
+    await sub.ack();
+  }
+  const from = sub.batches.length;
+  for (let second = 0; second < 10; second++) {
+    await vi.advanceTimersByTimeAsync(1000);
+    await sub.ack();
+  }
+  const names = sub.batches
+    .find((batch) => batch.columns?.length)
+    ?.columns?.map((column) => column.name);
+  const count = names?.indexOf("Count") ?? -1;
+  expect(count).toBeGreaterThan(-1);
+  const counted = new Map<string, unknown>();
+  const unrepeated: string[] = [];
+  sub.batches.forEach((batch, at) => {
+    for (const row of batch.upserts) {
+      if (at >= from && counted.get(row.id) === row.cells[count])
+        unrepeated.push(row.id);
+      counted.set(row.id, row.cells[count]);
+    }
+  });
+  expect(counted.size).toBeGreaterThanOrEqual(50);
+  expect(unrepeated).toEqual([]);
+});
+
 test("rows come sorted by the query's column, and the first batch carries the columns", async () => {
   const sub = await open(
     "ready",

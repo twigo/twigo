@@ -8,7 +8,6 @@ import podsList from "../../../../crates/twigo-cache/tests/fixtures/pods-list.js
 import { humanDuration, parseDuration } from "@twigo/utils";
 import { Cluster } from "./cluster";
 import { KINDS, type MockRow } from "./kinds";
-import { keepsStamp } from "./printed";
 
 const NOW = Date.UTC(2026, 10, 3);
 const cluster = new Cluster("prod-eu", 5000, NOW);
@@ -110,7 +109,7 @@ test("a pod's failing state comes with the warning Kubernetes reports for it", (
     expect(event.cells[at("Last Seen")]).toMatch(/^\d/);
 });
 
-test("a mock row keeps its stamp while it prints the ages it printed, and counts each back to no earlier than its moment", () => {
+test("a mock event and a CronJob stay as printed, with their stamp, while their times stay put", () => {
   const local = new Cluster("prod-eu", 500, NOW);
   const kinds: [string, string[]][] = [
     ["batch/v1/cronjobs", ["Last Schedule"]],
@@ -119,8 +118,6 @@ test("a mock row keeps its stamp while it prints the ages it printed, and counts
   const scheduled = new Map(
     local.cronJobs.map((cronJob) => [cronJob.id, cronJob.lastSchedule]),
   );
-  let kept = 0;
-  let stamped = 0;
   for (const [kind, names] of kinds) {
     local.now = NOW;
     const read = () =>
@@ -133,62 +130,58 @@ test("a mock row keeps its stamp while it prints the ages it printed, and counts
           },
         ]),
       );
-    let held = read();
+    const held = read();
     expect(held.size, kind).toBeGreaterThan(0);
-    for (const seconds of [1, 2, 3, 90, 91, 3600, 90_000]) {
+    for (const [id, row] of held) {
+      const moment = scheduled.get(id);
+      const ago = parseDuration(row.printed[0] ?? "");
+      if (moment !== undefined && ago !== undefined)
+        expect(row.received - ago, id).toBeGreaterThanOrEqual(moment);
+    }
+    for (const seconds of [1, 3, 91, 3600, 90_000]) {
       local.now = NOW + seconds * 1000;
-      const next = read();
-      for (const [id, row] of next) {
-        const was = held.get(id);
-        if (!was) continue;
-        const keeps = row.printed.every((text, at) =>
-          keepsStamp(was.printed[at] ?? null, was.received, text, local.now),
-        );
-        expect(row.received, `${id} at +${seconds}s`).toBe(
-          keeps ? was.received : local.now,
-        );
-        if (keeps) kept++;
-        else stamped++;
-        const moment = scheduled.get(id);
-        const ago = parseDuration(row.printed[0] ?? "");
-        if (moment !== undefined && ago !== undefined)
-          expect(row.received - ago, id).toBeGreaterThanOrEqual(moment);
+      const later = read();
+      let compared = 0;
+      for (const [id, row] of held) {
+        const again = later.get(id);
+        if (!again) continue;
+        expect(again, `${id} at +${seconds}s`).toEqual(row);
+        compared++;
       }
-      held = next;
+      expect(compared, `${kind} at +${seconds}s`).toBeGreaterThan(0);
     }
   }
-  expect(kept).toBeGreaterThan(0);
-  expect(stamped).toBeGreaterThan(0);
   for (const job of KINDS["batch/v1/jobs"]?.rows(local, false) ?? [])
     expect(job.received, job.id).toBe(local.built);
 });
 
-test("a mock event's times stay where they are as the clock moves, so its ages grow", () => {
+test("a mock event's ages grow with the clock as the webview counts them back from its stamp", () => {
   const local = new Cluster("prod-eu", 500, NOW);
-  const read = () =>
+  const drawn = () =>
     new Map(
       (KINDS["/v1/events"]?.rows(local, false) ?? []).map((row) => [
         row.id,
         ["Last Seen", "First Seen"].map(
           (name) =>
-            parseDuration(String(row.cells[column("/v1/events", name)])) ?? NaN,
+            local.now -
+            (row.received -
+              (parseDuration(String(row.cells[column("/v1/events", name)])) ??
+                NaN)),
         ),
       ]),
     );
-  const before = read();
+  const before = drawn();
   local.now = NOW + 2 * 3_600_000;
-  const after = read();
+  const after = drawn();
   let compared = 0;
-  for (const [id, ages] of after) {
-    const was = before.get(id);
-    if (!was) continue;
-    ages.forEach((age, at) => {
-      const then = was[at] ?? NaN;
-      if (then >= 3_600_000) return;
-      expect(age - then, id).toBeGreaterThan(2 * 3_600_000 - 60_000);
-      expect(age - then, id).toBeLessThan(2 * 3_600_000 + 60_000);
-      compared++;
-    });
+  for (const [id, ages] of before) {
+    const later = after.get(id);
+    if (!later) continue;
+    expect(
+      later.map((age, at) => age - (ages[at] ?? NaN)),
+      id,
+    ).toEqual([2 * 3_600_000, 2 * 3_600_000]);
+    compared++;
   }
   expect(compared).toBeGreaterThan(0);
 });

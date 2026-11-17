@@ -59,13 +59,15 @@ const EVENTS: MockKind = {
   rows: (cluster, withNamespace) =>
     events(cluster).map((event) => {
       const id = `${cluster.context}/${event.pod.namespace}/${event.name}`;
-      const lastSeen = humanDuration(cluster.now - event.last);
-      const firstSeen = humanDuration(cluster.now - event.first);
+      const {
+        texts: [lastSeen = "", firstSeen = ""],
+        at,
+      } = cluster.printed(id, [event.last, event.first]);
       return {
         id,
         namespace: event.pod.namespace,
         created: event.first,
-        received: cluster.printedAt(id, lastSeen, firstSeen),
+        received: at,
         labels: {},
         controller: null,
         cells: namespaced(
@@ -247,12 +249,15 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
       cluster.cronJobs.map((cronJob) => {
-        const lastSchedule = humanDuration(cluster.now - cronJob.lastSchedule);
+        const {
+          texts: [lastSchedule = ""],
+          at,
+        } = cluster.printed(cronJob.id, [cronJob.lastSchedule]);
         return {
           id: cronJob.id,
           namespace: cronJob.namespace,
           created: cronJob.created,
-          received: cluster.printedAt(cronJob.id, lastSchedule),
+          received: at,
           labels: {},
           controller: null,
           cells: namespaced(
