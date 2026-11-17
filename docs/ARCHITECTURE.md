@@ -1612,7 +1612,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - the space's home in an empty editor area (4.1), without the mockup's capacity and trend, for which Twigo has no data.
 - **Settled with the owner** on 2026-11-03, from live variants of the Overview (4.3): the object's state before its metadata, and containers as cards whose less used fields fold.
 - **Settled with the owner** on 2026-11-15, from live variants in the app's window after [research](research/typography.md) into contrast, type and rendering: the text roles at their lightness in `theme.css` (0.96, 0.90, 0.75 and 0.65 in dark) over the dimmer set the research measured (0.94, 0.87, 0.71 and 0.61), and the platform's own font smoothing over `antialiased` in the dark theme.
-- **Settled with the owner** on 2026-11-17, from live variants in the mock and in the app's window:
+- **Settled with the owner** on 2026-11-17, from both versions shown to the owner on the running interface, in the mock and in the app's window:
   - neutrals of Twigo's own, chroma 0.008 at hue 250 on surfaces and text at the lightness they had, so the dark editor and shell are `#101316` and `#171A1E` and no longer the `#121314` and `#191A1B` of VS Code's Dark 2026 ([2026-dark.json](https://github.com/microsoft/vscode/blob/1.145.2/extensions/theme-defaults/themes/2026-dark.json#L82-L108));
   - list rows of 24 px under a 28 px header;
   - the sashes in the full hairline, `--border`;
