@@ -241,10 +241,23 @@
 .twigo-dockview .dv-tabs-overflow-container .dv-tab {
   box-sizing: border-box;
   height: 28px;
-  padding: 0 6px 0 8px;
+  padding: 0 8px;
   border: 0;
   border-radius: 4px;
   background-color: transparent;
+  color: var(--popover-foreground);
+}
+/* A row reads as a menu's row: its text step, icon size and gap (`ITEM` in
+   dropdown-menu.tsx). The tab renderer sets 13 px, 16 px and 6 px with utility
+   classes, which only a rule outside the utilities layer outranks. */
+.twigo-dockview .dv-tabs-overflow-container .dv-react-part > * {
+  gap: 8px;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+}
+.twigo-dockview .dv-tabs-overflow-container .lucide:not(.twigo-tab-x) {
+  width: 14px;
+  height: 14px;
 }
 .twigo-dockview .dv-tabs-overflow-container .dv-tab:hover {
   background-color: var(--accent);
