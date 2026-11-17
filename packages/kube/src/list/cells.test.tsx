@@ -341,7 +341,7 @@ test("only a value that is drawn raises the alarm: a Ready the person hid raises
   ).toBe(true);
 });
 
-test("a pod that ran to completion is not short of ready containers: its Ready recedes as a healthy row's does and raises no alarm", () => {
+test("a pod that ran to completion is not short of ready containers and its restarts are no news: nothing in its row raises an alarm", () => {
   expect(receded(ready(PODS, "0/1", undefined, true))).toBe("0/1");
   cleanup();
   expect(warns(ready(PODS, "0/2", undefined, true))).toBe(false);
@@ -357,7 +357,7 @@ test("a pod that ran to completion is not short of ready containers: its Ready r
     ]);
     expect([status, read("0/1", status, "1 (46m ago)")]).toEqual([
       status,
-      { alarmed: false, toned: { ...quiet, Restarts: true } },
+      { alarmed: false, toned: quiet },
     ]);
   }
   const { row, shown } = podRow("0/1", "Completed", "1 (46m ago)");

@@ -154,7 +154,7 @@ export function CellView({
           text={text}
           received={row.received}
           ticks={rule.ticks}
-          alarmed={alarmed}
+          alarmed={alarmed || finished}
         />
       );
     case "since":
@@ -182,7 +182,8 @@ export function CellView({
  * A restart count and how long ago the last was, the count in a column of
  * its own, the age growing from the moment the server printed it where the
  * column `ticks`, else as printed. A restart within the hour is news, in the
- * warning tone unless the row already raises an alarm: a row has one.
+ * warning tone unless the row already raises an alarm, a row having one, or
+ * its object ran to completion, when nothing in it is news any more.
  */
 function Restarts({
   text,
