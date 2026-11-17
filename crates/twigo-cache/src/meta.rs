@@ -28,9 +28,11 @@ pub struct Meta {
     /// Unix milliseconds, as is `received`: `i64`s, not `Timestamp`s, to hold
     /// the size asserted below.
     pub created: Option<i64>,
-    /// When the server printed the cells that hold a duration. Such a cell,
-    /// `3 (5m ago)` among them, was true at that moment, which its age
-    /// counts back from.
+    /// When the core received the cells that hold a duration, a list's
+    /// response headers or a watch event's line, or the stamp the store kept
+    /// for a row whose ages still read as they did (`printed::keeps_stamp`).
+    /// Such a cell, `3 (5m ago)` among them, was true at that moment, which
+    /// its age counts back from.
     pub received: i64,
     /// Where the generated part of the name starts, in UTF-16 units: after
     /// `generateName`, or at the `pod-template-hash` that ends it.

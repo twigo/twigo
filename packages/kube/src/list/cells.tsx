@@ -24,7 +24,7 @@ function cellText(cell: Cell): string {
   return cell === null ? "" : String(cell);
 }
 
-/** An Age from the row's creation: only it ticks, so its row does not render every second. */
+/** An Age from the row's creation, which ticks in a component of its own, so its row does not render every second. */
 function Age({ created }: { created: string }) {
   const age = useNow() - Date.parse(created);
   return <span className={ageRole(age)}>{humanDuration(age)}</span>;
