@@ -1,4 +1,3 @@
-import { installVariants } from "./variants";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { isTauri } from "@tauri-apps/api/core";
@@ -38,7 +37,6 @@ async function start() {
   );
   registerKube(workbench);
   await installZoom(workbench);
-  installVariants(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;
 }
