@@ -43,8 +43,8 @@ const HELD =
 /**
  * A problem row's edge and band, which its tone sets through `--edge` and
  * `--band` (index.css). The pointer's hover lies over the band; the cursor and
- * marks take its place, since laid over it they leave text in the tone and in
- * support below 4.5:1 in the light theme.
+ * marks take its place, since laid over it they leave text in the tone below
+ * 4.5:1 in both themes, and text in support in the light one.
  */
 const EDGE = "shadow-[inset_3px_0_0_var(--edge)]";
 const BAND = "bg-(--band) hover:bg-(image:--row-hover-layer)";
