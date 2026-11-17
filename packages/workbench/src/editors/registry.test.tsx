@@ -426,6 +426,7 @@ test("pressing a tab's X does not activate its tab before the click closes it", 
     screen.getByLabelText("field://c").focus();
   });
   const x = screen.getByRole("button", { name: "Close a" });
+  fireEvent.pointerDown(x, { button: 0 });
   fireEvent.mouseDown(x, { button: 0 });
   await elapse();
   expect(editors.active).toBe("field://c");

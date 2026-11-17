@@ -455,6 +455,9 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         tabIndex={-1}
         aria-label={`Close ${api.title ?? ""}`}
         data-dirty={dirty}
+        onPointerDown={(event) => {
+          event.preventDefault();
+        }}
         onClick={(event) => {
           event.stopPropagation();
           editors.dismiss(api.id);
