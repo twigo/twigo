@@ -172,7 +172,7 @@
   --dv-activegroup-hiddenpanel-tab-background-color: var(--row-hover);
   --dv-inactivegroup-hiddenpanel-tab-background-color: var(--row-hover);
 }
-.twigo-dockview .dv-tab.dv-inactive-tab .lucide {
+.twigo-dockview .dv-tabs-container .dv-tab.dv-inactive-tab .lucide {
   opacity: 0.7;
 }
 /* An ended session's icon is at half strength, its tab active or not. */
@@ -247,9 +247,11 @@
   background-color: transparent;
   color: var(--popover-foreground);
 }
-/* A row reads as a menu's row: its text step, icon size and gap (`ITEM` in
-   dropdown-menu.tsx). The tab renderer sets 13 px, 16 px and 6 px with utility
-   classes, which only a rule outside the utilities layer outranks. */
+/* A row reads as a menu's row: its text step, icon size and colour, and gap
+   (`ITEM` in dropdown-menu.tsx). The tab renderer sets 13 px, 16 px, the
+   support role and 6 px with utility classes, which only a rule outside the
+   utilities layer outranks. The strip's dimming of an inactive tab's icon
+   stops at the strip. */
 .twigo-dockview .dv-tabs-overflow-container .dv-react-part > * {
   gap: 8px;
   font-size: var(--text-xs);
@@ -258,6 +260,7 @@
 .twigo-dockview .dv-tabs-overflow-container .lucide:not(.twigo-tab-x) {
   width: 14px;
   height: 14px;
+  color: var(--popover-foreground);
 }
 .twigo-dockview .dv-tabs-overflow-container .dv-tab:hover {
   background-color: var(--accent);
