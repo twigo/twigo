@@ -8,7 +8,7 @@ paths:
 # Shapes and fills
 
 - One edge per control: a fill or an outline, never both ([decision](../../docs/decisions/shapes-and-fills.md)).
-  A field and a trigger rest on `--well` and hover to `--well-hover`, a keycap is `--keycap`, a pressed choice is `--plate` on a `--well` track; a text field outside `SearchField` takes `bg-well` itself.
+  A field and a toolbar picker that shows its choice (`TriggerButton`) rest on `--well` and hover to `--well-hover`; the list's Group button and `TabBar`'s More are bare with `--row-hover`, the scope chip is `--row-active`, a keycap is `--keycap`, a pressed choice is `--plate` on a `--well` track; a text field outside `SearchField` takes `bg-well` itself.
 - A control's fills are overlays, never a surface token, so they show on the shell, the editor, a card, a popover and a dialog; text on them keeps 4.5:1, which `packages/ui/src/styles/roles.test.ts` holds, and a placeholder on a well is `text-support`.
 - Radius by height: `rounded-sm` (4 px) up to 22 px, `rounded-md` (6 px) from 24 to 32 px, `rounded-lg` (8 px) for cards, popovers, menus, toasts and dialogs; never bare `rounded`.
   An inner radius is the outer one less the gap, never under `rounded-xs` (2 px).

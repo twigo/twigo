@@ -12,7 +12,8 @@ An object's views were drawn three ways, an underlined tab bar in the details, a
 
 - A control has one edge: a fill or an outline, never both.
   - A field rests on a fill, `--well`, takes `--well-hover` under the pointer, and shows a ring only while it has the focus.
-  - A trigger that opens a menu or a picker takes the same fills, and stays lit while its menu is open.
+  - A toolbar picker that shows its choice (`TriggerButton`) takes the same fills, and stays lit while its menu is open.
+  - The list's Group button and `TabBar`'s More are bare, in support, with `--row-hover` under the pointer and while their menu is open; the scope chip sits on `--row-active`, as the shown view's plate does.
   - A keycap is a fill of its own, `--keycap`; the mode chip is its context's tint alone.
   - `Segmented`, for options and filters, is a track on `--well` with 2 px of padding and its pressed choice a plate on `--plate`, its label in the strong role.
 - The fills a control rests and hovers on are overlays, as a row's hover and selection are, so they differ from every surface they sit on: the shell, the editor, a card, a popover, a dialog.
