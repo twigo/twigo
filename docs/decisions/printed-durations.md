@@ -21,7 +21,7 @@ Lists ask for metadata only (3.3), so the times the text came from are not there
 - A row keeps its stamp while every printed duration in it can stand for the moment the held print stands for: it reads the same age, and less than that age's step in `HumanDuration` has passed, give or take 2 s ([duration.go](https://github.com/kubernetes/apimachinery/blob/v0.37.2/pkg/util/duration/duration.go#L48-L93)).
   Otherwise it takes the new stamp, and the view sends the row again.
 - Such a column sorts by the moment it stands for, the latest first, and a pod's Restarts by its count, then that moment; the text filter reads no age in it, a pod's Restarts by its count and nothing of a cell that is only a duration.
-- The mock backend follows the same rules from the same tables, and shared cases hold both sides: `packages/protocol/src/printed-cases.json` for the stamp, `query-cases.json` for the sort and the filter.
+- The mock backend follows the same rules from a copy of `table::PRINTED`, and shared cases hold both sides: `packages/protocol/src/printed-cases.json` for the stamp, `query-cases.json` for the sort and the filter.
 
 ## Why
 
@@ -29,7 +29,7 @@ The time a row's text was true is a fact the core has and the webview lacks, and
 On the wire a row grows by its `"received"`, 38 bytes of JSON, and a batch that carries the columns by 22 bytes for each column that prints a duration.
 
 A stamp that moved whenever the row was printed again would count a new text back from an old print, or an old text from a new one: a pod printed again under the same restart age, by a relist or a change of its status, would draw its age backwards by the time between the two prints.
-Keeping the stamp while the text can still stand for the same moment keeps the age on screen where it was and sends nothing, while an event that repeats, whose Last Seen reads `0s` at each repeat, takes each repeat's stamp.
+Keeping the stamp while the text can still stand for the same moment keeps the age on screen where it was and sends nothing, while an event that repeats 3 s or more apart, whose Last Seen reads `0s` at each repeat, takes each repeat's stamp.
 The 2 s are the margin `HumanDuration` gives clocks out of step ([duration.go](https://github.com/kubernetes/apimachinery/blob/v0.37.2/pkg/util/duration/duration.go#L49-L54)); the latency from the server's print to the stamp was not measured.
 
 The server rounds an age down to its step, so the moment drawn is never earlier than the true one, and an age reads younger than it is by less than its step: the warning of a restart within the hour can outlast the hour by under a minute and never ends early.
