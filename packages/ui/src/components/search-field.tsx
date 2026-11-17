@@ -37,7 +37,7 @@ export function SearchField({
   return (
     <div
       className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md bg-well px-2 text-xs text-support focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
+        "flex h-6 items-center gap-1.5 rounded-md bg-well px-2 text-xs text-support hover:bg-well-hover focus-within:shadow-[inset_0_0_0_1px_var(--ring)]",
         className,
       )}
     >

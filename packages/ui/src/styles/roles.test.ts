@@ -364,6 +364,43 @@ test.each(THEMES)(
   },
 );
 
+const FIELD = "../components/search-field.tsx";
+
+test("a search field rests on a trigger's fill and hovers to a trigger's hovered fill", () => {
+  expect([
+    classOf(FIELD, /\bbg-([\w-]+)/),
+    classOf(FIELD, /hover:bg-([\w-]+)/),
+  ]).toEqual([restFill, hoverFill]);
+});
+
+test.each(THEMES)(
+  "%s: a search field's typed text, placeholder and icon read at 4.5:1 or more on its well and its hovered fill, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const fills = [
+      classOf(FIELD, /\bbg-([\w-]+)/),
+      classOf(FIELD, /hover:bg-([\w-]+)/),
+    ];
+    const texts = [
+      classOf(FIELD, /bg-transparent text-([\w-]+)/),
+      classOf(FIELD, /placeholder:text-([\w-]+)/),
+      classOf(FIELD, /px-2 text-xs text-([\w-]+)/),
+    ];
+    const found = WELLED.flatMap((on) =>
+      fills.flatMap((fill) => {
+        const under = over(colour(`var(--${fill})`, theme), surface(on, theme));
+        return texts.map((name) =>
+          reading(
+            `${name} on ${fill} on ${on}`,
+            textOn(name, theme, under),
+            4.5,
+          ),
+        );
+      }),
+    );
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
 const UNDER_A_KEYCAP = [
   "well",
   "well-hover",
