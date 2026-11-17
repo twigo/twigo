@@ -256,11 +256,13 @@ const hoveredText = classOf(
   "../components/segmented.tsx",
   /hover:text-([\w-]+)/,
 );
-const triggerFills = [
-  classOf("../components/trigger.tsx", /\bbg-([\w-]+)/),
-  classOf("../components/trigger.tsx", /hover:bg-([\w-]+)/),
-  classOf("../components/trigger.tsx", /data-\[state=open\]:bg-([\w-]+)/),
-];
+const restFill = classOf("../components/trigger.tsx", /\bbg-([\w-]+)/);
+const hoverFill = classOf("../components/trigger.tsx", /hover:bg-([\w-]+)/);
+const openFill = classOf(
+  "../components/trigger.tsx",
+  /data-\[state=open\]:bg-([\w-]+)/,
+);
+const triggerFills = [restFill, hoverFill, openFill];
 const TRIGGER_TEXTS = ["content", "support", "error", "warn-foreground"];
 const WELL_TEXTS = [
   ...new Set([pressedText, "content", "support", "error", "warn-foreground"]),
@@ -316,6 +318,33 @@ test.each(THEMES)(
   },
 );
 
+const HOVER_STEP = 1.05;
+
+test.each(THEMES)(
+  "%s: a trigger's hovered fill lies at least a step from its well, and its open fill no nearer than the hovered one, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const fill = (name: string) =>
+        over(colour(`var(--${name})`, theme), surface(on, theme));
+      const step = (name: string) =>
+        fill(restFill).contrast(fill(name), "WCAG21");
+      return [
+        reading(
+          `${hoverFill} against ${restFill} on ${on}`,
+          step(hoverFill),
+          HOVER_STEP,
+        ),
+        reading(
+          `${openFill} against ${restFill} on ${on}`,
+          step(openFill),
+          step(hoverFill),
+        ),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
 test.each(THEMES)(
   "%s: a trigger's text and its icon read at 4.5:1 or more on each fill it takes, at rest, hovered and open, over the shell, the editor, a card and a popover",
   (theme) => {
@@ -335,7 +364,12 @@ test.each(THEMES)(
   },
 );
 
-const UNDER_A_KEYCAP = ["well", "row-hover", "row-active"] as const;
+const UNDER_A_KEYCAP = [
+  "well",
+  "well-hover",
+  "row-hover",
+  "row-active",
+] as const;
 
 test.each(THEMES)(
   "%s: a keycap differs from what it sits on, and its text reads at 4.5:1 or more, on a surface, in a well, over a hovered button, in a hovered field or a selected row, and in a hovered outline button",

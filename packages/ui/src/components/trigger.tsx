@@ -15,7 +15,7 @@ export function TriggerButton({
       type="button"
       className={cn(
         TRIGGER,
-        "outline-none hover:bg-row-active focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-active",
+        "outline-none hover:bg-well-hover focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-well-hover",
         className,
       )}
       {...props}

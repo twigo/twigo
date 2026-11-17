@@ -203,7 +203,7 @@ function CommandCenter({
           style={folded ? undefined : { width: SEARCH_FIELD }}
           className={cn(
             SEARCH,
-            "bg-well outline-none hover:bg-row-active hover:text-content focus-visible:shadow-[var(--focus-ring)]",
+            "bg-well outline-none hover:bg-well-hover hover:text-content focus-visible:shadow-[var(--focus-ring)]",
           )}
         >
           <SearchFace space={space} folded={folded} />
