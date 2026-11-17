@@ -93,7 +93,7 @@ function EntryView({ entry }: { entry: StatusEntry }) {
       "outline-none focus-visible:before:shadow-[inset_var(--focus-ring)]",
     entry.accent
       ? [
-          "-ml-0.75 pr-2.5 pl-3.25 font-medium text-context-solid-foreground before:left-0.75",
+          "-ml-0.75 px-2.5 font-medium text-context-solid-foreground before:inset-y-0 before:rounded-none",
           interactive && "hover:before:brightness-90",
           ACCENT[entry.accent],
         ]
@@ -144,11 +144,7 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   );
 }
 
-/**
- * A coloured context as a block at the bar's start, 3 px in from its left, top
- * and bottom: the entry's box reaches the bar's edges, and the block is drawn
- * in it.
- */
+/** A coloured context as a block filling the bar's start, from its corner. */
 const ACCENT = {
   red: "before:bg-context-red-solid",
   orange: "before:bg-context-orange-solid",
