@@ -146,6 +146,14 @@
   border-color: var(--border);
   box-shadow: 0 2px 0 var(--editor);
 }
+/* Dockview rings a focused tab with an !important outline in the divider's
+   colour, which is transparent here, so the ring is ours. */
+.twigo-dockview .dv-tab:focus-visible::after,
+.twigo-dockview .dv-tab:has(:focus-visible)::after {
+  outline: none !important;
+  border-radius: inherit;
+  box-shadow: inset var(--focus-ring);
+}
 /* Dockview's colour rules for a group's tabs outrank any rule of ours on the
    tab itself, so the hover fill goes in by the variables they read. */
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
