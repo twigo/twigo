@@ -10,11 +10,11 @@ publish.workspace = true
 
 [features]
 # The fake API server of the hub's tests, for the tests of the crates over it.
-test-util = ["dep:bytes", "dep:http-body", "dep:tower", "twigo-kube/test-util"]
+test-util = ["dep:http-body", "dep:tower", "twigo-kube/test-util"]
 
 [dependencies]
 backon.workspace = true
-bytes = { workspace = true, optional = true }
+bytes.workspace = true
 flate2.workspace = true
 form_urlencoded.workspace = true
 futures.workspace = true
@@ -37,7 +37,6 @@ twigo-kube.workspace = true
 twigo-quantity.workspace = true
 
 [dev-dependencies]
-bytes.workspace = true
 dhat.workspace = true
 fastrand.workspace = true
 http-body.workspace = true

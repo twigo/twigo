@@ -847,6 +847,28 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_page_is_stamped_when_its_response_starts_whatever_its_body_takes() {
+    let fake = Fake::default();
+    fake.state().no_streaming = true;
+    fake.state().body_takes = Duration::from_secs(4);
+    for index in 0..1200 {
+        fake.add("pods", Some("a"), &format!("p{index:04}"));
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let mut stamped = std::collections::BTreeMap::new();
+    for row in pods.items() {
+        *stamped.entry(row.meta.received / 1000).or_insert(0) += 1;
+    }
+    assert_eq!(
+        stamped,
+        [(0, 500), (4, 500), (8, 200)].into(),
+        "each page by when its response started, not four seconds on"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     let fake = Fake::default();
     fake.state()

@@ -77,6 +77,8 @@ pub struct State {
     pub not_modified: usize,
     /// Each Metrics API request waits this long before it is answered.
     pub metrics_takes: std::time::Duration,
+    /// A list's body arrives this long after its status and headers.
+    pub body_takes: std::time::Duration,
     /// The most Metrics API requests that waited at once.
     pub metrics_overlap: usize,
     metrics_waiting: usize,
@@ -508,15 +510,16 @@ impl Fake {
             if end < items.len() {
                 metadata["continue"] = json!(format!("{version}:{end}"));
             }
-            return full(
-                StatusCode::OK,
-                json!({
-                    "kind": "PartialObjectMetadataList",
-                    "apiVersion": "meta.k8s.io/v1",
-                    "metadata": metadata,
-                    "items": items[start..end],
-                }),
-            );
+            let page = json!({
+                "kind": "PartialObjectMetadataList",
+                "apiVersion": "meta.k8s.io/v1",
+                "metadata": metadata,
+                "items": items[start..end],
+            });
+            if state.body_takes.is_zero() {
+                return full(StatusCode::OK, page);
+            }
+            return slow(StatusCode::OK, &page, state.body_takes);
         }
         if state.unwatchable.contains(&target.resource) {
             return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
@@ -798,6 +801,19 @@ fn line(value: &Value) -> Bytes {
 fn full(code: StatusCode, value: Value) -> Response<Body> {
     let mut response =
         Response::new(Full::new(Bytes::from(serde_json::to_vec(&value).unwrap())).boxed_unsync());
+    *response.status_mut() = code;
+    response
+}
+
+/// A response whose status and headers come at once and whose body comes after `takes`.
+fn slow(code: StatusCode, value: &Value, takes: std::time::Duration) -> Response<Body> {
+    let (sender, receiver) = mpsc::unbounded();
+    let body = Bytes::from(serde_json::to_vec(value).unwrap());
+    tokio::spawn(async move {
+        tokio::time::sleep(takes).await;
+        let _ = sender.unbounded_send(Ok(Frame::data(body)));
+    });
+    let mut response = stream(receiver);
     *response.status_mut() = code;
     response
 }
