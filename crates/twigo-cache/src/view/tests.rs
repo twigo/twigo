@@ -232,15 +232,15 @@ fn a_row_that_changes_and_changes_back_between_flushes_returns_with_the_stamp_it
     let mut rig = Rig::new(&query());
     rig.view.set_window(0, 1);
     rig.store
-        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 100));
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 100));
     rig.store
         .upsert(received(pod("a", "web-2", "Running", "0"), 100));
     rig.flush().unwrap();
 
     rig.store
-        .upsert(received(pod("a", "web-1", "NotReady", "3 (5m ago)"), 400));
+        .upsert(received(pod("a", "web-1", "NotReady", "3 (11d ago)"), 400));
     rig.store
-        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 700));
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 700));
     assert_eq!(rig.flush(), None, "it reads as it did, so nothing is sent");
 
     rig.view.set_window(1, 2);

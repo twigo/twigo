@@ -74,6 +74,57 @@ pub fn filtered(text: &str) -> &str {
     }
 }
 
+/// How much longer than its step one moment may print the same age, in
+/// milliseconds. The server prints an age down to two seconds below zero
+/// as `0s`, for clocks out of step
+/// (<https://github.com/kubernetes/apimachinery/blob/v0.37.2/pkg/util/duration/duration.go#L49-L54>),
+/// and a row is stamped when its response arrives, after it was printed.
+const TOLERANCE_MS: f64 = 2_000.0;
+
+/// The step `HumanDuration` prints an age of `ago` seconds in, so the age
+/// lies from `ago` to before `ago` plus the step: seconds below ten
+/// minutes, minutes below eight hours, hours below eight days, days below
+/// eight years, then years
+/// (<https://github.com/kubernetes/apimachinery/blob/v0.37.2/pkg/util/duration/duration.go#L48-L93>).
+fn step(ago: f64) -> f64 {
+    const MINUTE: f64 = 60.0;
+    const HOUR: f64 = 60.0 * MINUTE;
+    const DAY: f64 = 24.0 * HOUR;
+    const YEAR: f64 = 365.0 * DAY;
+    if ago < 10.0 * MINUTE {
+        1.0
+    } else if ago < 8.0 * HOUR {
+        MINUTE
+    } else if ago < 8.0 * DAY {
+        HOUR
+    } else if ago < 8.0 * YEAR {
+        DAY
+    } else {
+        YEAR
+    }
+}
+
+/// Whether `held_at`, when `held` was printed, still dates `printed`,
+/// printed at `at`. The webview counts a printed age back from the stamp,
+/// so `printed` must read the age `held` read, and less than that age's
+/// step may have passed, give or take the tolerance: one moment prints the
+/// same age no longer, so the moment moved, as a repeated event's `0s`.
+/// An age that reads otherwise is dated by its own print. Text that is no
+/// duration is drawn as printed: as `printed` it needs no stamp, and as
+/// `held` it dated nothing. Times are Unix milliseconds.
+pub fn keeps_stamp(held: Option<&str>, held_at: i64, printed: Option<&str>, at: i64) -> bool {
+    let Some(printed) = printed.and_then(Printed::parse) else {
+        return true;
+    };
+    let Some(held) = held.and_then(Printed::parse) else {
+        return false;
+    };
+    let passed = (at - held_at) as f64;
+    held.ago == printed.ago
+        && -TOLERANCE_MS <= passed
+        && passed < step(printed.ago) * 1000.0 + TOLERANCE_MS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +174,43 @@ mod tests {
         assert_eq!(filtered("5m"), "");
         assert_eq!(filtered("3"), "3");
         assert_eq!(filtered("<none>"), "<none>");
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Cases {
+        cases: Vec<Case>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Case {
+        name: String,
+        held: Option<String>,
+        held_at: i64,
+        printed: Option<String>,
+        at: i64,
+        keeps: bool,
+    }
+
+    #[test]
+    fn a_stamp_dates_a_print_as_the_shared_cases_say() {
+        let cases: Cases = serde_json::from_str(include_str!(
+            "../../../packages/protocol/src/printed-cases.json"
+        ))
+        .unwrap();
+        let wrong: Vec<&str> = cases
+            .cases
+            .iter()
+            .filter(|case| {
+                keeps_stamp(
+                    case.held.as_deref(),
+                    case.held_at,
+                    case.printed.as_deref(),
+                    case.at,
+                ) != case.keeps
+            })
+            .map(|case| case.name.as_str())
+            .collect();
+        assert_eq!(wrong, Vec::<&str>::new());
     }
 }

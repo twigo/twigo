@@ -1,0 +1,237 @@
+{
+  "about": "Whether the stamp of a held print still dates a new print of a duration, as Rust's store (crates/twigo-cache/src/printed.rs) and the mock (src/mock/printed.test.ts) both decide it: a row keeps its stamp only while every cell that prints a duration does, since the webview counts each such age back from the row's stamp. `held` was printed at `heldAt`, `printed` at `at`, in Unix milliseconds; null is a cell that is no text. The stamp keeps while the new text reads the held age and less than that age's step has passed (a second below ten minutes, a minute below eight hours, an hour below eight days, a day below eight years, then a year), give or take two seconds; text that is no duration needs no stamp, and one that held none dated nothing.",
+  "cases": [
+    {
+      "name": "0s printed again within its second and the tolerance",
+      "held": "0s",
+      "heldAt": 0,
+      "printed": "0s",
+      "at": 2999,
+      "keeps": true
+    },
+    {
+      "name": "0s printed again three seconds later: an event that repeated",
+      "held": "0s",
+      "heldAt": 0,
+      "printed": "0s",
+      "at": 3000,
+      "keeps": false
+    },
+    {
+      "name": "0s printed again 300 seconds later",
+      "held": "0s",
+      "heldAt": 1000000,
+      "printed": "0s",
+      "at": 1300000,
+      "keeps": false
+    },
+    {
+      "name": "45s printed again by a response two seconds late",
+      "held": "45s",
+      "heldAt": 0,
+      "printed": "45s",
+      "at": 2000,
+      "keeps": true
+    },
+    {
+      "name": "45s, then 47s two seconds later: a new age is dated by its own print",
+      "held": "45s",
+      "heldAt": 0,
+      "printed": "47s",
+      "at": 2000,
+      "keeps": false
+    },
+    {
+      "name": "5m3s printed again three seconds later",
+      "held": "5m3s",
+      "heldAt": 0,
+      "printed": "5m3s",
+      "at": 3000,
+      "keeps": false
+    },
+    {
+      "name": "15m printed again within its minute and the tolerance",
+      "held": "15m",
+      "heldAt": 0,
+      "printed": "15m",
+      "at": 61999,
+      "keeps": true
+    },
+    {
+      "name": "15m printed again 62 seconds later",
+      "held": "15m",
+      "heldAt": 0,
+      "printed": "15m",
+      "at": 62000,
+      "keeps": false
+    },
+    {
+      "name": "3h20m printed again a minute later",
+      "held": "3h20m",
+      "heldAt": 0,
+      "printed": "3h20m",
+      "at": 60000,
+      "keeps": true
+    },
+    {
+      "name": "3h20m, then 3h21m a minute later",
+      "held": "3h20m",
+      "heldAt": 0,
+      "printed": "3h21m",
+      "at": 60000,
+      "keeps": false
+    },
+    {
+      "name": "11h printed again within its hour and the tolerance",
+      "held": "11h",
+      "heldAt": 0,
+      "printed": "11h",
+      "at": 3601000,
+      "keeps": true
+    },
+    {
+      "name": "11h printed again an hour and two seconds later",
+      "held": "11h",
+      "heldAt": 0,
+      "printed": "11h",
+      "at": 3602000,
+      "keeps": false
+    },
+    {
+      "name": "3d4h printed again 59 minutes later",
+      "held": "3d4h",
+      "heldAt": 0,
+      "printed": "3d4h",
+      "at": 3540000,
+      "keeps": true
+    },
+    {
+      "name": "11d printed again a minute later",
+      "held": "11d",
+      "heldAt": 0,
+      "printed": "11d",
+      "at": 60000,
+      "keeps": true
+    },
+    {
+      "name": "11d printed again 20 hours later, as one moment printed early in its day would be",
+      "held": "11d",
+      "heldAt": 0,
+      "printed": "11d",
+      "at": 72000000,
+      "keeps": true
+    },
+    {
+      "name": "11d printed again a day and two seconds later",
+      "held": "11d",
+      "heldAt": 0,
+      "printed": "11d",
+      "at": 86402000,
+      "keeps": false
+    },
+    {
+      "name": "11d, then 12d 20 hours later",
+      "held": "11d",
+      "heldAt": 0,
+      "printed": "12d",
+      "at": 72000000,
+      "keeps": false
+    },
+    {
+      "name": "11d printed again with the clock a second behind",
+      "held": "11d",
+      "heldAt": 1000,
+      "printed": "11d",
+      "at": 0,
+      "keeps": true
+    },
+    {
+      "name": "11d printed again with the clock three seconds behind",
+      "held": "11d",
+      "heldAt": 3000,
+      "printed": "11d",
+      "at": 0,
+      "keeps": false
+    },
+    {
+      "name": "2y10d printed again 23 hours later",
+      "held": "2y10d",
+      "heldAt": 0,
+      "printed": "2y10d",
+      "at": 82800000,
+      "keeps": true
+    },
+    {
+      "name": "9y printed again 300 days later, in its year",
+      "held": "9y",
+      "heldAt": 0,
+      "printed": "9y",
+      "at": 25920000000,
+      "keeps": true
+    },
+    {
+      "name": "a restart 11 days ago printed again 10 minutes later",
+      "held": "3 (11d ago)",
+      "heldAt": 0,
+      "printed": "3 (11d ago)",
+      "at": 600000,
+      "keeps": true
+    },
+    {
+      "name": "a restart 5 minutes ago, then 10 minutes ago 300 seconds later: the same restart, dated by the new print",
+      "held": "3 (5m ago)",
+      "heldAt": 0,
+      "printed": "3 (10m ago)",
+      "at": 300000,
+      "keeps": false
+    },
+    {
+      "name": "a restart 11 days ago, then one 5 seconds ago",
+      "held": "3 (11d ago)",
+      "heldAt": 0,
+      "printed": "4 (5s ago)",
+      "at": 60000,
+      "keeps": false
+    },
+    {
+      "name": "a count alone, then a count and the age of its restart",
+      "held": "0",
+      "heldAt": 0,
+      "printed": "1 (3s ago)",
+      "at": 60000,
+      "keeps": false
+    },
+    {
+      "name": "<none>, then a first duration",
+      "held": "<none>",
+      "heldAt": 0,
+      "printed": "5m",
+      "at": 60000,
+      "keeps": false
+    },
+    {
+      "name": "a duration, then text that is no duration and needs no stamp",
+      "held": "5m",
+      "heldAt": 0,
+      "printed": "<none>",
+      "at": 60000,
+      "keeps": true
+    },
+    {
+      "name": "<unknown> printed again",
+      "held": "<unknown>",
+      "heldAt": 0,
+      "printed": "<unknown>",
+      "at": 600000,
+      "keeps": true
+    },
+    {
+      "name": "cells that are no text",
+      "held": null,
+      "heldAt": 0,
+      "printed": null,
+      "at": 600000,
+      "keeps": true
+    }
+  ]
+}

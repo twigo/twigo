@@ -9,7 +9,6 @@
 
 mod filter;
 mod labels;
-mod printed;
 mod sort;
 
 use std::borrow::Cow;
@@ -27,6 +26,7 @@ use twigo_ipc::{
 
 use crate::hub::Delta;
 use crate::metrics::{self, Api, Kind, Sample, Scope};
+use crate::printed;
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 

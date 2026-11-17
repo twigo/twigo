@@ -11,6 +11,7 @@ pub mod hub;
 pub mod meta;
 pub mod metrics;
 pub mod object;
+mod printed;
 pub mod request;
 pub mod store;
 pub mod table;

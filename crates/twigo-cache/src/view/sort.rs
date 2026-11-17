@@ -8,7 +8,7 @@
 
 use std::cmp::Ordering;
 
-use super::printed::{Printed, count};
+use crate::printed::{Printed, count};
 use crate::table::Cell;
 
 /// Variants order first: empty cells, numbers, ratios, then text.
