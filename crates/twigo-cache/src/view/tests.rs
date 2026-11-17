@@ -210,21 +210,59 @@ fn received(mut row: Row, seconds: i64) -> Row {
 }
 
 #[test]
-fn a_row_sent_again_only_because_it_was_received_again_sends_nothing() {
+fn the_same_moment_printed_again_sends_nothing() {
     let mut rig = Rig::new(&query());
     rig.store
-        .upsert(received(pod("a", "web-1", "Running", "3 (5m ago)"), 100));
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 100));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "1 (5m ago)"), 100));
     let first = rig.flush().unwrap();
     assert_eq!(first.upserts[0].received, "1970-01-01T00:01:40.000Z");
 
-    rig.view.apply(Delta::Changed {
-        upserted: vec![Arc::new(received(
-            pod("a", "web-1", "Running", "3 (5m ago)"),
-            400,
-        ))],
-        removed: Vec::new(),
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 400));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "1 (5m ago)"), 101));
+    assert_eq!(rig.flush(), None);
+}
+
+fn cronjob(name: &str, last_schedule: &str, seconds: i64) -> Row {
+    let mut row = received(pod("a", name, "", ""), seconds);
+    row.cells = Box::new([
+        Cell::Text(name.into()),
+        Cell::Text("0 * * * *".into()),
+        Cell::Text(last_schedule.into()),
+        Cell::Age,
+    ]);
+    row
+}
+
+#[test]
+fn a_moved_moment_under_the_same_text_sends_the_row() {
+    let mut sorted = query();
+    sorted.sort = Some(Sort {
+        column: "Last Schedule".to_owned(),
+        descending: false,
     });
-    assert_eq!(rig.view.batch(ViewState::Ready), None);
+    let mut rig = Rig::new(&sorted);
+    rig.store.set_columns(Some(&Arc::from([
+        column("Name", ColumnKind::String, 0),
+        column("Schedule", ColumnKind::String, 0),
+        column("Last Schedule", ColumnKind::String, 0),
+        column("Age", ColumnKind::Age, 0),
+    ])));
+    rig.store.upsert(cronjob("hourly", "25m", 1500));
+    rig.store.upsert(cronjob("other", "20m", 1500));
+    let first = rig.flush().unwrap();
+    assert_eq!(ids(&first), ["kind-test/a/other", "kind-test/a/hourly"]);
+
+    rig.store.upsert(cronjob("hourly", "0s", 3600));
+    rig.store.upsert(cronjob("hourly", "25m", 5100));
+    let batch = rig.flush().expect("the row, whose moment moved");
+    assert_eq!(ids(&batch), ["kind-test/a/hourly", "kind-test/a/other"]);
+    assert_eq!(batch.upserts.len(), 1);
+    assert_eq!(batch.upserts[0].id.0, "kind-test/a/hourly");
+    assert_eq!(batch.upserts[0].received, "1970-01-01T01:25:00.000Z");
 }
 
 #[test]

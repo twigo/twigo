@@ -990,11 +990,13 @@ fn uncount(counts: &mut HashMap<Box<str>, u32>, value: &str) {
     }
 }
 
-/// Nothing the webview shows of the row changed.
+/// Nothing the webview shows of the row changed, its stamp included, which
+/// its printed ages count back from.
 fn unchanged(sent: &Arc<Row>, row: &Arc<Row>) -> bool {
     Arc::ptr_eq(sent, row)
         || (sent.cells == row.cells
             && sent.meta.created == row.meta.created
+            && sent.meta.received == row.meta.received
             && sent.meta.generated == row.meta.generated)
 }
 
