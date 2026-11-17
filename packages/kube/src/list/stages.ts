@@ -27,7 +27,7 @@ export interface Chip {
 }
 
 /** The widths a chip takes in each form at its natural size; `count` is not there for one name. */
-export interface ChipWidths {
+interface ChipWidths {
   readonly full: number;
   readonly floor: number;
   readonly count: number | undefined;

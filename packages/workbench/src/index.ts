@@ -11,7 +11,6 @@ export type {
   EditorProps,
   EditorProvider,
   SessionState,
-  SessionStates,
 } from "./editors/registry";
 export type { RecentEditor, RecentEditors } from "./editors/recent";
 export type { ListTarget } from "./lists/service";
