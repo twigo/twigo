@@ -48,7 +48,7 @@ export function ScopeChip({
         <CutInTheMiddle text={name} floor={NAME_FLOOR} separator="-" />
       )}
       {more > 0 && fold !== "glyph" && (
-        <span className="shrink-0 font-normal text-support tabular-nums">
+        <span className="shrink-0 text-label text-support tabular-nums">
           +{more}
         </span>
       )}
@@ -56,13 +56,13 @@ export function ScopeChip({
   );
   const body = cn(
     PART,
-    "min-w-0 gap-1.5 font-semibold text-content",
+    "min-w-0 gap-1.5 text-content",
     fold === "glyph" ? "w-5 justify-center" : "px-1.5",
   );
   return (
     <span
       style={{ maxWidth }}
-      className="inline-flex h-6 min-w-min shrink-0 items-center gap-0.5 rounded-md bg-row-active p-0.5 text-xs"
+      className="inline-flex h-6 min-w-min shrink-0 items-center gap-0.5 rounded-md bg-row-active p-0.5 text-body"
     >
       <Tooltip>
         <TooltipTrigger asChild>
