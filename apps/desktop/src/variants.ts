@@ -15,23 +15,6 @@ interface Switch {
 }
 
 const SWITCHES: readonly Switch[] = [
-  // @todo: remove the tint switch once the owner has chosen at package 3's checkpoint
-  {
-    name: "tint",
-    label: "Strip Tint",
-    choices: [
-      {
-        value: "none",
-        about:
-          "Neutral tab strips; the title bar's left end fades from the context's colour",
-      },
-      {
-        value: "strips",
-        about:
-          "Both tab strips take 6 % and the title bar an even 10 % of a one-context space's colour",
-      },
-    ],
-  },
   // @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
   {
     name: "rows",
@@ -83,26 +66,7 @@ for (const { name, choices } of SWITCHES) {
  * in `@twigo/ui`). A palette command picks one and keeps the pick in
  * `localStorage`.
  */
-export function installVariants({
-  commands,
-  quickAccess,
-  spaces,
-  colors,
-}: Workbench): void {
-  // @todo: remove the tint switch once the owner has chosen at package 3's checkpoint
-  const followContext = () => {
-    const color =
-      current.get("tint") === "strips" && spaces.active
-        ? colors.ofSpace(spaces.active)
-        : undefined;
-    if (color)
-      root.style.setProperty("--twigo-context", `var(--context-${color})`);
-    else root.style.removeProperty("--twigo-context");
-  };
-  spaces.changes.subscribe(followContext);
-  colors.changes.subscribe(followContext);
-  followContext();
-
+export function installVariants({ commands, quickAccess }: Workbench): void {
   for (const { name, label, choices, reloads } of SWITCHES) {
     commands.register({
       id: `design.variant.${name}`,
@@ -122,7 +86,6 @@ export function installVariants({
         current.set(name, picked.id);
         root.dataset[name] = picked.id;
         localStorage.setItem(`variant.${name}`, picked.id);
-        followContext();
         if (reloads) location.reload();
       },
     });

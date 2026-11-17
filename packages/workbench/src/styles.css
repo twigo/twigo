@@ -30,21 +30,6 @@
     transparent 360px
   );
 }
-/* @todo: remove the tint switch once the owner has chosen at package 3's checkpoint */
-:root[data-tint="strips"] .twigo-titlebar[data-color] {
-  background-image: linear-gradient(
-    color-mix(in oklab, var(--twigo-context) 10%, transparent),
-    color-mix(in oklab, var(--twigo-context) 10%, transparent)
-  );
-}
-/* @todo: remove the tint switch once the owner has chosen at package 3's checkpoint */
-:root[data-tint="strips"] .twigo-dockview {
-  --dv-tabs-and-actions-container-background-color: color-mix(
-    in oklab,
-    var(--twigo-context, var(--shell)) 6%,
-    var(--shell)
-  );
-}
 /* A context whose mode wants to be seen (ARCHITECTURE 6.4): the status bar
    tinted in its colour. */
 .twigo-statusbar[data-strong] {
