@@ -165,7 +165,7 @@ test.each(THEMES)(
 
 const PINNED_SHORT_TONED: Record<Theme, readonly string[]> = {
   dark: [],
-  light: ["error text on hovered error band on sidebar: 4.48"],
+  light: ["error text on hovered error band on sidebar: 4.46"],
 };
 
 test.each(THEMES)(

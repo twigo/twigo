@@ -42,11 +42,7 @@ export class ShellTabs<
     });
     this.#observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: [
-        "class",
-        // @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint
-        "data-neutrals",
-      ],
+      attributeFilter: ["class"],
     });
   }
 

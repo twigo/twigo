@@ -40,7 +40,6 @@ async function start() {
   );
   registerKube(workbench);
   await installZoom(workbench);
-  // @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint
   // @todo: remove the tint switch once the owner has chosen at package 3's checkpoint
   // @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
   // @todo: remove the sash switch once the owner has chosen at package 3's checkpoint

@@ -15,22 +15,6 @@ interface Switch {
 }
 
 const SWITCHES: readonly Switch[] = [
-  // @todo: remove the neutrals switch once the owner has chosen at package 3's checkpoint
-  {
-    name: "neutrals",
-    label: "Neutrals",
-    choices: [
-      {
-        value: "shipped",
-        about: "Greys at chroma 0.002 to 0.006, as VS Code Dark 2026's",
-      },
-      {
-        value: "own",
-        about:
-          "The same lightness at chroma 0.008, hue 250, on surfaces and text",
-      },
-    ],
-  },
   // @todo: remove the tint switch once the owner has chosen at package 3's checkpoint
   {
     name: "tint",
