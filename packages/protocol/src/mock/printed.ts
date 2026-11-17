@@ -3,6 +3,7 @@
  * it: a count, and a duration as Kubernetes prints one (`2y10d`, `5h3m`,
  * `45s`), alone or in a pod's `3 (5m ago)`.
  */
+import { parseDuration } from "@twigo/utils";
 import type { Column, Gvr } from "../generated";
 
 /**
@@ -33,33 +34,9 @@ export function count(text: string): number | null {
   return /^[0-9]+$/.test(text) ? Number(text) : null;
 }
 
-const UNITS: readonly (readonly [string, number])[] = [
-  ["y", 365 * 86_400],
-  ["d", 86_400],
-  ["h", 3_600],
-  ["m", 60],
-  ["s", 1],
-];
-
-/** A duration as Kubernetes prints one, each unit at most once, largest first. */
 function duration(text: string): number | null {
-  if (text === "") return null;
-  let seconds = 0;
-  let unit = 0;
-  let at = 0;
-  while (at < text.length) {
-    let end = at;
-    while (end < text.length && /[0-9]/.test(text.charAt(end))) end++;
-    if (end === at || end === text.length) return null;
-    const name = text.charAt(end);
-    while (unit < UNITS.length && UNITS[unit]?.[0] !== name) unit++;
-    const found = UNITS[unit];
-    if (!found) return null;
-    seconds += Number(text.slice(at, end)) * found[1];
-    unit++;
-    at = end + 1;
-  }
-  return seconds;
+  const ms = parseDuration(text);
+  return ms === undefined ? null : ms / 1000;
 }
 
 /** A duration the server printed: `5m`, or a pod's `3 (5m ago)` with the count of restarts. */

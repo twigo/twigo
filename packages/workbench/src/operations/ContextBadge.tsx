@@ -4,7 +4,7 @@ import type { Environment, Mode } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { contextAccent } from "../spaces/colors";
 import { environmentLabel, modeLabel } from "../spaces/modes";
-import { SpaceTile } from "../parts/SpaceTile";
+import { spaceMark } from "../parts/spaceMark";
 
 /**
  * Where a dialog acts: the tile of the context's space, which stays on the
@@ -29,7 +29,7 @@ export function ContextBadge({
   const Icon = mode === "guarded" ? ShieldAlert : Lock;
   return (
     <>
-      {space && <SpaceTile space={space} size="sm" />}
+      {spaceMark(space)}
       {label && (
         <span
           className="twigo-mode-chip flex h-5 items-center gap-1 rounded-sm px-[7px] text-2xs font-semibold"

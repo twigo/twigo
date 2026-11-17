@@ -40,7 +40,7 @@ export interface ChipWidths {
  */
 const BACK = 1;
 
-const WHOLE: Chip = {};
+export const WHOLE: Chip = {};
 
 /** How folded a chip is: 0 whole, 1 cut, 2 the glyph and the count, 3 the glyph. */
 function levelOf(chip: Chip): number {

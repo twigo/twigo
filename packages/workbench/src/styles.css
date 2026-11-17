@@ -73,6 +73,21 @@
 }
 .twigo-dockview .dv-tabs-container {
   scrollbar-width: none;
+  /* Tabs sit on the strip's bottom edge, 4 px in from its left and 2 px apart
+     (`TABS_START` and `TABS_GAP` in strip.ts). */
+  align-items: flex-end;
+  gap: 2px;
+  padding-left: 4px;
+  /* The strip's bottom edge is 68 px down, a fractional device pixel at most
+     interface zooms, and the edge of anything drawn there is anti-aliased: the
+     active tab, clipped by its scrolling list at that edge, left a faint row of
+     the strip's line and fill under itself. The list reaches 2 px past the
+     strip, under the content, which paints above it and takes the pointer
+     there, and the active tab's fill goes down to the list's edge. */
+  box-sizing: border-box;
+  height: calc(100% + 2px);
+  margin-bottom: -2px;
+  padding-bottom: 2px;
 }
 .twigo-dockview .dv-tabs-container::-webkit-scrollbar {
   display: none;
@@ -84,25 +99,6 @@
    lose: only what has no minimum width shrinks, such as a terminal's chip. */
 .twigo-dockview .dv-right-actions-container {
   flex-shrink: 100000;
-}
-/* Tabs sit on the strip's bottom edge, 4 px in from its left and 2 px apart
-   (`TABS_START` and `TABS_GAP` in strip.ts). */
-.twigo-dockview .dv-tabs-container {
-  align-items: flex-end;
-  gap: 2px;
-  padding-left: 4px;
-}
-/* The strip's bottom edge is 68 px down, a fractional device pixel at most
-   interface zooms, and the edge of anything drawn there is anti-aliased: the
-   active tab, clipped by its scrolling list at that edge, left a faint row of
-   the strip's line and fill under itself. The list reaches 2 px past the strip,
-   under the content, which paints above it and takes the pointer there, and
-   the active tab's fill goes down to the list's edge. */
-.twigo-dockview .dv-tabs-container {
-  box-sizing: border-box;
-  height: calc(100% + 2px);
-  margin-bottom: -2px;
-  padding-bottom: 2px;
 }
 .twigo-dockview .dv-groupview > .dv-content-container {
   position: relative;
@@ -185,7 +181,6 @@
   color: var(--support);
 }
 .twigo-dockview .dv-tabs-overflow-dropdown-default:hover {
-  border-radius: 6px;
   background-color: var(--row-hover);
 }
 .twigo-dockview .dv-tabs-overflow-dropdown-default > span {

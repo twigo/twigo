@@ -37,7 +37,7 @@ import { parseListUri, type ListInput } from "../uri";
 import { pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
 import { namespacesOf, showAllNamespaces } from "./scope";
-import { chipFor, stageFor, type Chip } from "./stages";
+import { chipFor, stageFor, WHOLE, type Chip } from "./stages";
 
 const ORDER: readonly Health[] = ["error", "warn", "ok"];
 
@@ -55,8 +55,6 @@ const STAGES = { keys: 1, group: 2, filter: 3, health: 4 } as const;
 const GAP = 8;
 
 const NOTHING = () => undefined;
-
-const NO_CHIP: Chip = {};
 
 /** The chip at its natural size in the forms it takes, in the order `chipFor` reads them. */
 const COPIES = [
@@ -220,7 +218,7 @@ function Actions({
   // What each stage's row takes besides the scope chip, which gives way last.
   const rests = useRef<number[]>([]);
   const [stage, setStage] = useState(0);
-  const [chip, setChip] = useState(NO_CHIP);
+  const [chip, setChip] = useState(WHOLE);
   const [filtering, setFiltering] = useState(false);
   const [focusMoves, setFocusMoves] = useState(0);
   const iconFilter = stage >= STAGES.filter;
@@ -290,7 +288,7 @@ function Actions({
               },
               was,
             )
-          : NO_CHIP,
+          : WHOLE,
     );
     if (back.current !== undefined) {
       setStage(back.current);

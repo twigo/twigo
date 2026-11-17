@@ -765,6 +765,11 @@ test("a cancelled shell opens no session", async () => {
   expect(commands(sent)).toEqual(["command_plan", "command_cancel"]);
 });
 
+const told = (text: string) =>
+  screen
+    .getAllByRole("status")
+    .find((toast) => toast.textContent.includes(text))?.textContent;
+
 test("a countdown's toast leads with the tile of the context's space, and keeps it when the person goes to another space", async () => {
   const counting = await started(
     plan({ kind: "countdown", seconds: 5 }),
@@ -773,16 +778,12 @@ test("a countdown's toast leads with the tile of the context's space, and keeps 
   );
   const { workbench } = counting;
   expect(workbench.spaces.active?.id).toBe("prod-eu");
-  const counted = (context: string) =>
-    screen
-      .getAllByRole("status")
-      .find((toast) => toast.textContent.includes(`${context} · sends in`));
-  expect(counted("dev")?.textContent).toMatch(/^DEDeleting pod/);
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
 
   act(() => {
     workbench.spaces.select("staging");
   });
-  expect(counted("dev")?.textContent).toMatch(/^DEDeleting pod/);
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
   act(() => {
     workbench.operations.cancelCountdown();
   });
@@ -808,16 +809,10 @@ test("a confirmation's dialog leads with the tile of the context's space, and ke
 
 const REVEAL: PlanRequest = { action: "reveal", object: 3, key: "token" };
 
-const counted = (context: string) =>
-  screen
-    .getAllByRole("status")
-    .find((toast) => toast.textContent.includes(`${context} · sends in`))
-    ?.textContent;
-
 test("a toast leads with the tile of the space the request is for, whatever context its plan names", async () => {
   const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
   const counting = await started(lone, [], true);
-  expect(counted("qa")).toMatch(/^DEDeleting pod/);
+  expect(told("qa · sends in")).toMatch(/^DEDeleting pod/);
   act(() => {
     counting.workbench.operations.cancelCountdown();
   });
@@ -831,7 +826,7 @@ test("a request that names no space, a Reveal, has its context stand for one, an
     true,
     REVEAL,
   );
-  expect(counted("dev")).toMatch(/^DEDeleting pod/);
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
   act(() => {
     revealing.workbench.operations.cancelCountdown();
   });
@@ -840,7 +835,7 @@ test("a request that names no space, a Reveal, has its context stand for one, an
 
   const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
   const counting = await started(lone, [], true, REVEAL);
-  expect(counted("qa")).toMatch(/^Deleting pod/);
+  expect(told("qa · sends in")).toMatch(/^Deleting pod/);
   act(() => {
     counting.workbench.operations.cancelCountdown();
   });
@@ -865,11 +860,6 @@ test("a refusal the workbench reports, as a failed command's is, leads with the 
   expect(said("Restart:")).toMatch(/^DERestart: dev is read-only/);
   expect(said("clipboard")).toMatch(/^the clipboard/);
 });
-
-const told = (text: string) =>
-  screen
-    .getAllByRole("status")
-    .find((toast) => toast.textContent.includes(text))?.textContent;
 
 test("a run that ends says so led by the tile of the space it was asked for, whatever context its plan names, as done and as stopped", async () => {
   const lone = { ...plan({ kind: "atOnce" }), context: "qa" };
