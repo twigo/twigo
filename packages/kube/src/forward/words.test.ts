@@ -8,6 +8,7 @@ import {
   localWords,
   portLabel,
   portWords,
+  sessionOf,
   stateOf,
   targetWords,
   webOf,
@@ -305,4 +306,18 @@ test("a forward listens on its addresses unless it is stopped or the core bound 
   expect(listensOn(forward({ state: { state: "stopped" } }))).toEqual([]);
   expect(listensOn(forward({ addresses: [] }))).toEqual([]);
   expect(listensOn(forward({ state: FAILED }))).toEqual(both);
+});
+
+test("a forward's tab says connecting while it starts or reconnects, nothing while it listens, ended once it is stopped or held by the mode, and failed only when it failed", () => {
+  const of = (state: ForwardState) => sessionOf(forward({ state }));
+  const error = { kind: "unavailable", message: "refused" } as const;
+  expect(of({ state: "starting" })).toBe("connecting");
+  expect(of({ state: "reconnecting", reason: "pod gone" })).toBe("connecting");
+  expect(of({ state: "restored" })).toBe("running");
+  expect(of({ state: "ready" })).toBe("running");
+  expect(of({ state: "stopped" })).toBe("ended");
+  expect(of({ state: "failed", error })).toBe("failed");
+  expect(
+    of(REFUSED({ kind: "policyFile", file: "policy.json", pattern: "dev" })),
+  ).toBe("ended");
 });

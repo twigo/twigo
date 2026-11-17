@@ -74,7 +74,10 @@ impl Live {
                 let mut lines = Box::pin(self.admin.request_stream(watch).await.unwrap());
                 let mut first = Vec::new();
                 lines.read_until(b'\n', &mut first).await.unwrap();
-                if let Event::Error(status) = TableDecoder::new().decode_event(&first).unwrap() {
+                if let Event::Error(status) = TableDecoder::new("pods")
+                    .decode_event(&first, jiff::Timestamp::now())
+                    .unwrap()
+                {
                     assert_eq!(status.code, 410);
                     return;
                 }
@@ -247,6 +250,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
     };
     let env = || Env {
         connect: Arc::clone(&hub.inner.connect),
+        clock: Arc::clone(&hub.inner.clock),
         cluster: hub.inner.cluster(&live.context),
         waiting: Arc::new(|_| {}),
     };
@@ -255,7 +259,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
     let first = tokio::spawn(upstream::run(
         env(),
         key.spec(),
-        TableDecoder::new(),
+        TableDecoder::new(&key.resource.name()),
         Arc::clone(&upstream),
     ));
     state
@@ -288,7 +292,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
     let resumed = tokio::spawn(upstream::resume(
         env(),
         key.spec(),
-        TableDecoder::new(),
+        TableDecoder::new(&key.resource.name()),
         Arc::clone(&upstream),
         "1",
     ));

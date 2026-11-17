@@ -38,6 +38,8 @@ struct CaseRow {
     namespace: Option<String>,
     name: String,
     created: Option<jiff::Timestamp>,
+    #[serde(default)]
+    received: jiff::Timestamp,
     labels: BTreeMap<String, String>,
     #[serde(default)]
     owners: Vec<CaseOwner>,
@@ -104,6 +106,7 @@ fn column(column: &twigo_ipc::Column) -> Option<Column> {
         },
         format: "".into(),
         priority: column.priority,
+        prints_duration: column.prints_duration,
     })
 }
 
@@ -146,7 +149,8 @@ fn row(row: &CaseRow, cells: Vec<&Value>, columns: &[Column], at: usize) -> Row 
                     controller: owner.controller,
                 })
                 .collect(),
-            created: row.created,
+            created: row.created.map(|created| created.as_millisecond()),
+            received: row.received.as_millisecond(),
             generated: None,
         },
         cells,

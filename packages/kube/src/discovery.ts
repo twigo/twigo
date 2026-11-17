@@ -176,6 +176,24 @@ export function sameGvr(a: Gvr, b: Gvr): boolean {
   );
 }
 
+/**
+ * Discovery names each group's preferred version; a list of another
+ * version that the cluster serves has the same kind and scope.
+ */
+export function servedAs(
+  resources: readonly Resource[],
+  gvr: Gvr,
+): Resource | undefined {
+  return (
+    resources.find((candidate) => sameGvr(candidate.gvr, gvr)) ??
+    resources.find(
+      (candidate) =>
+        candidate.gvr.group === gvr.group &&
+        candidate.gvr.resource === gvr.resource,
+    )
+  );
+}
+
 /** A context's Kubernetes version once Rust answers, asked again once its credential comes. */
 export function useClusterVersion(
   discovery: Discovery,

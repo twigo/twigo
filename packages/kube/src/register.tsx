@@ -10,7 +10,7 @@ import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
 import { ListEditor } from "./list/ListEditor";
 import { clusterEntries, listEntries } from "./list/statusEntries";
-import { ObjectEditor, ObjectTabSwitch } from "./object/ObjectEditor";
+import { ObjectActions, ObjectEditor } from "./object/ObjectEditor";
 import { ObjectTabs } from "./object/tabs";
 import {
   listProvider,
@@ -124,6 +124,7 @@ export function registerKube(workbench: Workbench): void {
     scheme: OBJECT_SCHEME,
     space: (uri) => parseObjectUri(uri.href)?.space,
     title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
+    titleEndTells: true,
     tooltip: (uri) => paths.object(uri.href),
     icon: ObjectIcon,
     component: ({ uri }) => (
@@ -135,7 +136,7 @@ export function registerKube(workbench: Workbench): void {
         edits={services.edits}
       />
     ),
-    actions: ({ uri }) => <ObjectTabSwitch uri={uri} tabs={objectTabs} />,
+    actions: ({ uri }) => <ObjectActions uri={uri} />,
     focus: (uri) => {
       if (objectTabs.get(uri) === "yaml") services.edits.copies.focus(uri);
     },
@@ -170,6 +171,7 @@ export function registerKube(workbench: Workbench): void {
           return `${name(input.left)} ↔ ${name(input.right)}`;
       }
     },
+    titleEndTells: true,
     tooltip: (uri) => paths.diff(uri.href),
     icon: ({ className }) => <GitCompare className={className} />,
     component: ({ uri }) => (

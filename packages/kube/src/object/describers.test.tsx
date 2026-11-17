@@ -60,7 +60,9 @@ test.each(Object.keys(RECORDED))(
         if (block.type === "list")
           expect(
             within(region).queryByRole("grid") ??
-              within(region).queryByText(`No ${block.gvr.resource}`),
+              within(region).queryByText(
+                new RegExp(`^No ${block.gvr.resource} in `),
+              ),
           ).not.toBeNull();
       }
     }

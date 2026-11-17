@@ -8,10 +8,12 @@ import {
 } from "@testing-library/react";
 import type { SerializedDockview } from "dockview-react";
 import { afterEach, expect, test, vi } from "vitest";
+import { Changes } from "../changes";
+import type { SessionState } from "../editors/registry";
 import { useActionRoom } from "../react";
 import { testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
-import { STRIP_KEPT, TAB_MAX } from "./strip";
+import { STRIP_KEPT, TAB_MAX, TITLE_FLOOR } from "./strip";
 
 afterEach(() => {
   cleanup();
@@ -63,6 +65,115 @@ test("a saved layout that does not load is reported and leaves an empty area tha
     [...document.querySelectorAll(".dv-tab")].map((tab) => tab.textContent),
   ).toEqual(["b"]);
   expect(screen.getByText("body of note://b")).toBeTruthy();
+});
+
+test("a tab whose title ends in what tells tabs apart cuts it in the middle past the floor and keeps the last part of its name, any other title is left whole for the end to cut", async () => {
+  const workbench = await testWorkbench();
+  workbench.editors.register({
+    id: "test.note",
+    scheme: "note",
+    title: (uri) => uri.host,
+    titleEndTells: true,
+    component: ({ uri }) => <p>body of {uri}</p>,
+  });
+  workbench.editors.register({
+    id: "test.list",
+    scheme: "list",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>body of {uri}</p>,
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    workbench.editors.open("note://auth-api-1tvckat-tszk7", {
+      preview: false,
+    });
+    workbench.editors.open("list://validating-webhook-configurations", {
+      preview: false,
+    });
+    workbench.editors.open("note://pods", { preview: false });
+  });
+  const title = (text: string) => {
+    const found = [...document.querySelectorAll(".dv-tab [data-preview]")].find(
+      (each) => each.textContent === text,
+    );
+    if (!found) throw new Error(`no tab titled ${text}`);
+    return found;
+  };
+  const parts = (text: string) =>
+    [...(title(text).firstElementChild?.children ?? [])].map(
+      (part) => part.textContent,
+    );
+
+  const cut = parts("auth-api-1tvckat-tszk7");
+  expect(cut).toEqual(["auth-api-1t", "vckat-", "tszk7"]);
+  expect((cut[0] ?? "").length + (cut[2] ?? "").length).toBe(TITLE_FLOOR);
+  expect(parts("pods")).toEqual([]);
+  expect(title("validating-webhook-configurations").children).toHaveLength(0);
+});
+
+test("a session's tab says how the session stands: nothing while it runs, a pulse while it connects, ended after its title, an error dot once it failed, and it follows the session", async () => {
+  const workbench = await testWorkbench();
+  const states = new Map<string, SessionState>([
+    ["run", "running"],
+    ["connect", "connecting"],
+    ["end", "ended"],
+    ["fail", "failed"],
+  ]);
+  const changes = new Changes();
+  workbench.editors.register({
+    id: "test.job",
+    scheme: "job",
+    title: (uri) => uri.host,
+    component: ({ uri }) => <p>body of {uri}</p>,
+    session: { changes, state: (uri) => states.get(new URL(uri).host) },
+  });
+  render(<WorkbenchView workbench={workbench} />);
+  act(() => {
+    for (const host of states.keys()) {
+      workbench.editors.open(`job://${host}`, { preview: false });
+    }
+  });
+  const tab = (host: string) => {
+    const found = [...document.querySelectorAll(".dv-tab")].find((each) =>
+      each.getAttribute("data-tab-panel-id")?.endsWith(host),
+    );
+    if (!found) throw new Error(`no tab of ${host}`);
+    return found;
+  };
+  const dot = (host: string) => tab(host).querySelector("[role=img]");
+  const stated = (host: string) =>
+    tab(host).querySelector<HTMLElement>("[data-session]")?.dataset.session;
+
+  expect(stated("run")).toBe("running");
+  expect(tab("run").textContent).toBe("run");
+  expect(dot("run")).toBeNull();
+
+  expect(dot("connect")?.getAttribute("aria-label")).toBe("Connecting");
+  expect(dot("connect")?.className).toContain("animate-pulse");
+
+  expect(tab("end").textContent).toBe("endended");
+  expect(dot("end")).toBeNull();
+  expect(stated("end")).toBe("ended");
+
+  expect(dot("fail")?.getAttribute("aria-label")).toBe("Failed");
+  expect(dot("fail")?.className).toContain("bg-error");
+  expect(dot("fail")?.className).not.toContain("animate-pulse");
+  expect(tab("fail").textContent).toBe("fail");
+
+  const after = (host: string) =>
+    tab(host).querySelector("[data-preview]")?.nextElementSibling;
+  expect(after("end")?.textContent).toBe("ended");
+  expect(after("connect")).toBe(dot("connect"));
+  expect(after("fail")).toBe(dot("fail"));
+  expect(after("run")?.getAttribute("role")).toBe("button");
+
+  states.set("connect", "running");
+  states.set("run", "ended");
+  act(() => {
+    changes.emit();
+  });
+  expect(dot("connect")).toBeNull();
+  expect(tab("run").textContent).toBe("runended");
 });
 
 test("an empty editor area shows the first watermark whose when holds, else its key hints", async () => {
@@ -148,7 +259,7 @@ function fakeResizes() {
   };
 }
 
-test("a group's actions get the strip's width less its tabs, the overflow button and the space after them, as the tabs come and go and the strip resizes", async () => {
+test("a group's actions get the strip's width less its tabs, the space before and between them, the overflow button and the space after them, as the tabs come and go and the strip resizes", async () => {
   const resizes = fakeResizes();
   let strip = 900;
   const tabs: Record<string, number> = { "note://a": 120, "note://b": 220 };
@@ -180,23 +291,23 @@ test("a group's actions get the strip's width less its tabs, the overflow button
       workbench.editors.open("note://a", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 726")).toBeTruthy();
+    expect(screen.getByText("room 742")).toBeTruthy();
 
     act(() => {
       workbench.editors.open("note://b", { preview: false });
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 506")).toBeTruthy();
+    expect(screen.getByText("room 520")).toBeTruthy();
 
     strip = 700;
     resizes.report(700);
-    expect(screen.getByText("room 306")).toBeTruthy();
+    expect(screen.getByText("room 320")).toBeTruthy();
 
     act(() => {
       workbench.editors.close("note://b");
     });
     await act(() => Promise.resolve());
-    expect(screen.getByText("room 526")).toBeTruthy();
+    expect(screen.getByText("room 542")).toBeTruthy();
   } finally {
     resizes.restore();
     Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");

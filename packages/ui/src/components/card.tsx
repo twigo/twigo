@@ -12,7 +12,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "grid gap-2 rounded-md px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--border)]",
+        "grid gap-2 rounded-lg px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--border)]",
         className,
       )}
     >

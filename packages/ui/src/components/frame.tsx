@@ -18,7 +18,7 @@ export function Frame({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-md border border-border",
+        "overflow-hidden rounded-lg border border-border",
         className,
       )}
       style={style}

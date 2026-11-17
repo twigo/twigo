@@ -4,6 +4,7 @@ import { Banner, Button } from "@twigo/ui";
 import { useChanges, useWorkbench } from "../react";
 import { RELOCK_CONTEXT } from "../spaces/modeCommands";
 import { accessOfSpace, countdown } from "../spaces/modes";
+import { spaceMark } from "./spaceMark";
 
 /**
  * Across the window while the active context is unlocked (ARCHITECTURE 6.4),
@@ -18,6 +19,7 @@ export function UnlockBanner() {
   if (!space || until === null) return null;
   return (
     <Banner
+      lead={spaceMark(space)}
       tone="warn"
       icon={LockOpen}
       title={`${space.name} is unlocked.`}

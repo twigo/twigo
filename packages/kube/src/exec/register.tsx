@@ -59,7 +59,9 @@ export function registerExec(
       const input = parseExecUri(uri.href);
       return input ? execTitle(input) : uri.href;
     },
+    titleEndTells: true,
     tooltip: (uri) => paths.exec(uri.href),
+    session: tabs,
     icon: ({ className }) => <SquareTerminal className={className} />,
     component: ({ uri }) => <ExecEditor uri={uri} tabs={tabs} />,
     actions: ({ uri }) => <ExecActions uri={uri} tabs={tabs} />,

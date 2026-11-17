@@ -4,6 +4,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde::de::{self, Deserializer, IgnoredAny, MapAccess, Visitor};
 
@@ -19,7 +20,31 @@ pub struct Column {
     pub kind: ColumnKind,
     pub format: Box<str>,
     pub priority: i32,
+    /// Whether its text cells hold a duration that the server printed when
+    /// it sent the row, which then stops counting: a `date`, and the columns
+    /// of [`PRINTED`].
+    pub prints_duration: bool,
 }
+
+/// The columns of the built-in printers that print a duration in a string,
+/// by kubectl's name of their resource: a pod's `Restarts` (`3 (5m ago)`),
+/// a CronJob's `Last Schedule`, and an event's `Last Seen` and `First Seen`
+/// (<https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L105>,
+/// `#L197`, `#L274`, `#L281`), which `events.k8s.io` serves from the same
+/// storage and printer
+/// (<https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/registry/events/rest/storage_events.go#L55>).
+/// Not by name for any resource: a custom resource's string column holds
+/// what its JSONPath finds, as it is, and only its `date` columns are
+/// printed as a duration
+/// (<https://github.com/kubernetes/apiextensions-apiserver/blob/v0.37.2/pkg/registry/customresource/tableconvertor/tableconvertor.go#L177-L184>).
+const PRINTED: [(&str, &str); 6] = [
+    ("pods", "Restarts"),
+    ("cronjobs.batch", "Last Schedule"),
+    ("events", "Last Seen"),
+    ("events", "First Seen"),
+    ("events.events.k8s.io", "Last Seen"),
+    ("events.events.k8s.io", "First Seen"),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnKind {
@@ -50,6 +75,12 @@ pub struct Row {
     pub cells: Box<[Cell]>,
 }
 
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+    size_of::<Row>() == 144,
+    "an `Arc<Row>` is 160 bytes with its counters, which malloc keeps in a size class of that size; a larger row takes the next one"
+);
+
 impl Row {
     /// A Metadata upstream's row.
     pub fn without_cells(meta: Meta) -> Self {
@@ -66,20 +97,30 @@ impl Row {
 /// reconnects.
 #[derive(Debug, Default)]
 pub struct TableDecoder {
+    resource: Box<str>,
     columns: Option<Arc<[Column]>>,
     synthetic: bool,
 }
 
 impl TableDecoder {
-    pub fn new() -> Self {
-        Self::default()
+    /// A decoder of `resource`'s tables, as kubectl names it: `pods`,
+    /// `cronjobs.batch`.
+    pub fn new(resource: &str) -> Self {
+        Self {
+            resource: resource.into(),
+            columns: None,
+            synthetic: false,
+        }
     }
 
     pub(crate) fn update_columns(&mut self, definitions: Option<Vec<RawColumn>>) {
         let Some(definitions) = definitions.filter(|definitions| !definitions.is_empty()) else {
             return;
         };
-        let columns: Arc<[Column]> = definitions.into_iter().map(Column::from).collect();
+        let columns: Arc<[Column]> = definitions
+            .into_iter()
+            .map(|raw| Column::of(raw, &self.resource))
+            .collect();
         if self.synthetic || self.columns.as_deref() != Some(&columns[..]) {
             self.columns = Some(columns);
             self.synthetic = false;
@@ -110,11 +151,11 @@ impl TableDecoder {
         Ok(cells.into_boxed_slice())
     }
 
-    fn table_row(&self, row: RawRow) -> Result<Row, DecodeError> {
+    fn table_row(&self, row: RawRow, received: Timestamp) -> Result<Row, DecodeError> {
         let cells = self.cells(row.cells)?;
         let object = row.object.ok_or(DecodeError::Missing("object"))?;
         Ok(Row {
-            meta: object.metadata.into_meta()?,
+            meta: object.metadata.into_meta(received)?,
             cells,
         })
     }
@@ -146,6 +187,7 @@ impl TableDecoder {
         &mut self,
         kind: EventKind,
         mut table: TableObject,
+        received: Timestamp,
     ) -> Result<Event, DecodeError> {
         self.update_columns(table.column_definitions);
         if table.rows.len() != 1 {
@@ -166,8 +208,10 @@ impl TableDecoder {
                     initial_events_end: metadata.initial_events_end,
                 })
             }
-            EventKind::Added | EventKind::Modified => self.table_row(row).map(Event::Upsert),
-            EventKind::Deleted => self.table_row(row).map(Event::Delete),
+            EventKind::Added | EventKind::Modified => {
+                self.table_row(row, received).map(Event::Upsert)
+            }
+            EventKind::Deleted => self.table_row(row, received).map(Event::Delete),
             EventKind::Error => Err(DecodeError::UnexpectedKind("Table".into())),
         }
     }
@@ -176,7 +220,7 @@ impl TableDecoder {
 impl Decode for TableDecoder {
     type Item = Row;
 
-    fn decode_list(&mut self, body: &[u8]) -> Result<Page, DecodeError> {
+    fn decode_list(&mut self, body: &[u8], received: Timestamp) -> Result<Page, DecodeError> {
         match peek_kind(body)? {
             Kind::Table => {
                 let table: TableObject = serde_json::from_slice(body)?;
@@ -184,7 +228,7 @@ impl Decode for TableDecoder {
                 let rows = table
                     .rows
                     .into_iter()
-                    .map(|row| self.table_row(row))
+                    .map(|row| self.table_row(row, received))
                     .collect::<Result<_, _>>()?;
                 Ok(table.metadata.into_page(rows))
             }
@@ -193,7 +237,7 @@ impl Decode for TableDecoder {
                 let rows = list
                     .items
                     .into_iter()
-                    .map(|item| Ok(self.raw_row(item.metadata.into_meta()?)))
+                    .map(|item| Ok(self.raw_row(item.metadata.into_meta(received)?)))
                     .collect::<Result<_, DecodeError>>()?;
                 Ok(list.metadata.into_page(rows))
             }
@@ -202,13 +246,13 @@ impl Decode for TableDecoder {
         }
     }
 
-    fn decode_event(&mut self, line: &[u8]) -> Result<Event, DecodeError> {
+    fn decode_event(&mut self, line: &[u8], received: Timestamp) -> Result<Event, DecodeError> {
         // Most of a line is managedFields, so a table's event reads it once.
         // Anything else, or a table this cannot read, takes the path below.
         if let Ok(event) = serde_json::from_slice::<TableEvent>(line)
             && event.object.is_table
         {
-            return self.table_event(event.kind, event.object);
+            return self.table_event(event.kind, event.object, received);
         }
         let event: RawEvent<'_> = serde_json::from_slice(line)?;
         let body = event.object.get().as_bytes();
@@ -216,11 +260,13 @@ impl Decode for TableDecoder {
             Kind::Status => Ok(Event::Error(decode::status(body)?)),
             Kind::Table => {
                 let table: TableObject = serde_json::from_slice(body)?;
-                self.table_event(event.kind, table)
+                self.table_event(event.kind, table, received)
             }
             Kind::Other(kind) => {
                 let object: RawObject = serde_json::from_slice(body)?;
-                let event = object.metadata.into_event(event.kind, &kind, |meta| meta)?;
+                let event = object
+                    .metadata
+                    .into_event(event.kind, &kind, received, |meta| meta)?;
                 Ok(match event {
                     Event::Upsert(meta) => Event::Upsert(self.raw_row(meta)),
                     Event::Delete(meta) => Event::Delete(self.raw_row(meta)),
@@ -251,12 +297,14 @@ fn metadata_columns() -> Arc<[Column]> {
             kind: ColumnKind::String,
             format: "name".into(),
             priority: 0,
+            prints_duration: false,
         },
         Column {
             name: "Age".into(),
             kind: ColumnKind::Age,
             format: "".into(),
             priority: 0,
+            prints_duration: false,
         },
     ])
 }
@@ -310,8 +358,8 @@ pub(crate) struct RawColumn {
     description: Box<str>,
 }
 
-impl From<RawColumn> for Column {
-    fn from(raw: RawColumn) -> Self {
+impl Column {
+    fn of(raw: RawColumn, resource: &str) -> Self {
         // Built-in printers type Age as a string described by creationTimestamp's
         // field doc; CRDs type it as a date, under any capitalisation.
         let age = raw.name.eq_ignore_ascii_case("age")
@@ -325,11 +373,13 @@ impl From<RawColumn> for Column {
             "date" => ColumnKind::Date,
             _ => ColumnKind::Other,
         };
+        let prints_duration = kind == ColumnKind::Date || PRINTED.contains(&(resource, &*raw.name));
         Column {
             name: raw.name,
             kind,
             format: raw.format,
             priority: raw.priority,
+            prints_duration,
         }
     }
 }

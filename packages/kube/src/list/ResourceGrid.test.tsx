@@ -108,7 +108,44 @@ test("a space without pods shows the empty state, not an error", async () => {
     workbench.editors.open("k8s-list://dev/v1/pods");
   });
   await settle(30);
-  expect(screen.getByText("No pods")).toBeTruthy();
+  expect(screen.getByText("No pods in dev")).toBeTruthy();
+});
+
+test("an empty list names its space, then the namespaces it is narrowed to", async () => {
+  const workbench = await mountKube(createMockBackend("live"));
+  act(() => {
+    workbench.spaces.select("dev");
+    workbench.spaces.update("dev", (state) => ({
+      ...state,
+      namespaces: ["payments", "auth"],
+    }));
+    workbench.editors.open("k8s-list://dev/v1/pods");
+  });
+  await settle(30);
+  expect(screen.getByText("No pods in dev · payments, auth")).toBeTruthy();
+  expect(
+    screen.getByText("Nothing of this kind exists in these namespaces."),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?q=api");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("No matching pods in dev · payments, auth"),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?ns=checkout");
+  });
+  await settle(30);
+  expect(screen.getByText("No pods in dev · checkout")).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/nodes");
+  });
+  await settle(30);
+  expect(screen.getByText("No nodes in dev")).toBeTruthy();
 });
 
 test.each([
@@ -135,7 +172,7 @@ test.each([
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
   await openList();
   fireEvent.click(within(header("Ready")).getByRole("button"));
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   for (let i = 0; i < 10; i++) {
     await act(() => vi.advanceTimersByTimeAsync(50));
@@ -233,13 +270,19 @@ function batch(
     columns: first
       ? [
           { name: "Name", kind: "string", priority: 0 },
-          { name: "Restarts", kind: "string", priority: 0 },
+          {
+            name: "Restarts",
+            kind: "string",
+            priority: 0,
+            printsDuration: true,
+          },
         ]
       : null,
     window: first ? { start: 0, ids: IDS } : null,
     upserts: Object.entries(restarts).map(([id, value]) => ({
       id,
       created: null,
+      received: "2026-11-16T12:00:00.000Z",
       generated: null,
       cells: [id, value],
     })),
@@ -300,6 +343,7 @@ test("seconds passing render the ages and not the grid", async () => {
         {
           id: "a",
           created: new Date(Date.now() - 5000).toISOString(),
+          received: "2026-11-16T12:00:00.000Z",
           generated: null,
           cells: ["a", null],
         },
@@ -321,18 +365,66 @@ test("seconds passing render the ages and not the grid", async () => {
   expect(gridRenders.count).toBe(renders);
 });
 
+test("a restart's age and the end of its warning come in its cell, not in the grid", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  act(() => {
+    script.send({
+      ...batch(1, {}, true),
+      total: 1,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        {
+          name: "Restarts",
+          kind: "string",
+          priority: 0,
+          printsDuration: true,
+        },
+      ],
+      window: { start: 0, ids: ["a"] },
+      upserts: [
+        {
+          id: "a",
+          created: null,
+          received: new Date().toISOString(),
+          generated: null,
+          cells: ["a", "Running", "3 (59m ago)"],
+        },
+      ],
+    });
+  });
+  await settle(1);
+  const cell = () =>
+    screen
+      .getByText("a")
+      .closest<HTMLElement>("[role=row]")
+      ?.querySelector<HTMLElement>('[data-column="Restarts"]');
+  expect(cell()?.textContent).toBe("359m ago");
+  expect(cell()?.querySelector(".text-warn-foreground")).toBeInstanceOf(
+    Element,
+  );
+  const renders = gridRenders.count;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(61_000);
+  });
+  expect(cell()?.textContent).toBe("360m ago");
+  expect(cell()?.querySelector(".text-warn-foreground")).toBeNull();
+  expect(gridRenders.count).toBe(renders);
+});
+
 test("the name takes the free width until an edge's drag sizes it, and the kind keeps the width", async () => {
   const backend = createMockBackend("ready");
   await openList(backend);
   expect(template()).toBe(
-    "28px minmax(160px, 1fr) 120px 56px 160px 132px 72px 80px 64px 32px",
+    "28px minmax(160px, 1fr) 120px 56px 168px 132px 72px 80px 64px 32px",
   );
   const edge = screen.getByRole("separator", { name: "Resize Name" });
   fireEvent.pointerDown(edge, { clientX: 300, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerUp(edge, { pointerId: 1 });
   expect(template()).toBe(
-    "28px 260px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px",
+    "28px 260px 120px 56px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px",
   );
   fireEvent.pointerDown(edge, { clientX: 400, pointerId: 1 });
   fireEvent.pointerMove(edge, { clientX: -1000, pointerId: 1 });
@@ -404,7 +496,7 @@ test("a list gives up columns as it narrows and takes back the same ones in the 
     return (await loaded).app[PODS_PRESET];
   };
   expect(await stored()).toBe(choices);
-  const widths = [1100, 900, 600, 465, 300];
+  const widths = [1100, 900, 608, 465, 300];
   const narrowing = widths.map(shownAt);
   expect(narrowing).toEqual([
     [
@@ -467,15 +559,15 @@ test("Status keeps the room that Ready's value takes when the person sized it, a
     await settle(1);
   };
   await drag(40);
-  expect(trackOf("Status")).toBe("200px");
-  shownAt(460);
-  expect(trackOf("Status")).toBe("224px");
+  expect(trackOf("Status")).toBe("208px");
+  shownAt(470);
+  expect(trackOf("Status")).toBe("232px");
   await drag(10);
-  expect(trackOf("Status")).toBe("234px");
+  expect(trackOf("Status")).toBe("242px");
   shownAt(1280);
-  expect(trackOf("Status")).toBe("210px");
+  expect(trackOf("Status")).toBe("218px");
 
-  shownAt(460);
+  shownAt(470);
   await drag(-1000);
   expect(trackOf("Ready")).toBe("56px");
   expect(trackOf("Status")).toBe("48px");
@@ -557,7 +649,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     fireEvent.doubleClick(edge);
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 56px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
+      `28px ${String(name)}px 120px 56px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
 
     const ready = Math.max(
@@ -569,7 +661,7 @@ test("a double click on a header's edge fits the column to its widest text or it
     );
     await settle(1);
     expect(template()).toBe(
-      `28px ${String(name)}px 120px 83px 160px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
+      `28px ${String(name)}px 120px 83px 168px 132px 72px 80px 64px minmax(0px, 1fr) 32px`,
     );
   } finally {
     Reflect.deleteProperty(HTMLElement.prototype, "getBoundingClientRect");
@@ -581,11 +673,11 @@ test("filters that match nothing say so and offer to clear them", async () => {
     createMockBackend("ready"),
     "k8s-list://prod-eu/v1/pods?q=no-such-pod",
   );
-  expect(screen.getByText("No matching pods")).toBeTruthy();
-  expect(screen.queryByText("No pods")).toBeNull();
+  expect(screen.getByText("No matching pods in prod-eu")).toBeTruthy();
+  expect(screen.queryByText("No pods in prod-eu")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   await settle();
-  expect(screen.queryByText("No matching pods")).toBeNull();
+  expect(screen.queryByText("No matching pods in prod-eu")).toBeNull();
   expect(rows().length).toBeGreaterThan(10);
   expect(screen.getByRole("textbox", { name: "Filter rows" })).toHaveProperty(
     "value",
@@ -598,7 +690,7 @@ test("j moves on from the selected row after it scrolled out of the window", asy
   focusGrid();
   key("KeyJ");
   await settle(2);
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -620,7 +712,7 @@ test("a filter typed while j waits for its row drops the move", async () => {
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -643,7 +735,7 @@ test("j pressed after a sort is asked, before its rows arrive, is dropped with t
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   fireEvent.click(within(header("Ready")).getByRole("button"));
@@ -664,7 +756,7 @@ test("a health picked while j waits for its row drops the move", async () => {
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -696,6 +788,7 @@ function warnBatch(seq: number, ids: readonly string[], creating: number) {
     upserts: ids.map((id) => ({
       id,
       created: null,
+      received: "2026-11-16T12:00:00.000Z",
       generated: null,
       cells: [id, "Pending"],
     })),
@@ -768,7 +861,7 @@ test("j pressed after a health is picked, before its rows arrive, is dropped wit
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   fireEvent.click(
@@ -806,7 +899,9 @@ test.each([
       target: { value: text },
     });
     await settle();
-    expect(screen.queryByText("No matching pods") === null).toBe(matches);
+    expect(screen.queryByText("No matching pods in prod-eu") === null).toBe(
+      matches,
+    );
   },
 );
 
@@ -830,7 +925,7 @@ test("the first subscription already carries the column choices the text filter 
   expect(queries).toEqual([{ IP: true }]);
 });
 
-test("a failing row has an edge, a name reads in its parts, and restarts read as a count and its age", async () => {
+test("a failing row carries its tone, a name reads in its parts, and restarts read as a count and its age", async () => {
   await openList();
   const parts = (row: HTMLElement | undefined, column: string) =>
     [
@@ -845,7 +940,7 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
   };
 
   const running = rows().find((row) => textOf(row, "Status") === "Running");
-  expect(running?.className).not.toMatch(/var\(--(error|warn)\)/);
+  expect(running?.hasAttribute("data-tone")).toBe(false);
   const whole = textOf(running, "Name");
   const last = whole.lastIndexOf("-") + 1;
   const cut = whole.lastIndexOf("-", last - 2) + 1;
@@ -860,7 +955,7 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
 
   const failing = await filter("CrashLoopBackOff");
   expect(textOf(failing, "Status")).toBe("CrashLoopBackOff");
-  expect(failing?.className).toContain("var(--error)");
+  expect(failing?.getAttribute("data-tone")).toBe("error");
   const restarts = parts(failing, "Restarts").map((part) => part.textContent);
   expect(restarts).toHaveLength(2);
   expect(restarts[0]).toMatch(/^\d+$/);
@@ -868,7 +963,46 @@ test("a failing row has an edge, a name reads in its parts, and restarts read as
 
   const pending = await filter("Pending");
   expect(textOf(pending, "Status")).toBe("Pending");
-  expect(pending?.className).toContain("var(--warn)");
+  expect(pending?.getAttribute("data-tone")).toBe("warn");
+});
+
+test("a pod that is not ready and restarted within the hour warns in Ready alone, and a ready one in Restarts", async () => {
+  const script = scriptedBackend();
+  await openList(script.backend);
+  const pod = (id: string, ready: string) => ({
+    id,
+    created: null,
+    received: new Date().toISOString(),
+    generated: null,
+    cells: [id, ready, "Running", "1 (46m ago)"],
+  });
+  act(() => {
+    script.send({
+      ...batch(1, {}, true),
+      total: 2,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Ready", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        {
+          name: "Restarts",
+          kind: "string",
+          priority: 0,
+          printsDuration: true,
+        },
+      ],
+      window: { start: 0, ids: ["a", "b"] },
+      upserts: [pod("a", "0/1"), pod("b", "1/1")],
+    });
+  });
+  await settle(1);
+  const warns = (id: string, column: string) =>
+    cellOf(
+      screen.getByText(id).closest<HTMLElement>("[role=row]") ?? undefined,
+      column,
+    )?.querySelector(".text-warn-foreground") instanceof Element;
+  expect([warns("a", "Ready"), warns("a", "Restarts")]).toEqual([true, false]);
+  expect([warns("b", "Ready"), warns("b", "Restarts")]).toEqual([false, true]);
 });
 
 const groupHeaders = () =>
@@ -1013,6 +1147,7 @@ test("a hovered row's verbs read that row's own state, not the selected row's", 
       ].map(([id = "", status]) => ({
         id,
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells: [id.slice(4), status ?? "", "v1.37.1"],
       })),

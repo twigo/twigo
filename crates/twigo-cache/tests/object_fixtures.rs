@@ -2,11 +2,16 @@ use twigo_cache::decode::{Decode, Event};
 use twigo_cache::object::ObjectDecoder;
 use twigo_cache::table::{Cell, ColumnKind};
 
+const RECEIVED: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
+
 #[test]
 fn a_table_list_keeps_the_whole_object_and_its_cells() {
     let mut decoder = ObjectDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/pod-object-table-list.json"))
+        .decode_list(
+            include_bytes!("fixtures/pod-object-table-list.json"),
+            RECEIVED,
+        )
         .unwrap();
     let [pod] = &page.items[..] else {
         panic!("one pod, not {}", page.items.len());
@@ -51,7 +56,7 @@ fn a_table_watch_follows_edits_with_the_columns_of_its_first_event() {
     let mut decoder = ObjectDecoder::new();
     let events: Vec<Event<_>> = include_str!("fixtures/pod-object-table-watch.jsonl")
         .lines()
-        .map(|line| decoder.decode_event(line.as_bytes()).unwrap())
+        .map(|line| decoder.decode_event(line.as_bytes(), RECEIVED).unwrap())
         .collect();
     let summary: Vec<(&str, String)> = events
         .iter()
@@ -101,7 +106,7 @@ fn a_table_watch_follows_edits_with_the_columns_of_its_first_event() {
 fn a_raw_list_keeps_the_whole_object_under_the_metadata_columns() {
     let mut decoder = ObjectDecoder::new();
     let page = decoder
-        .decode_list(include_bytes!("fixtures/pod-object-list.json"))
+        .decode_list(include_bytes!("fixtures/pod-object-list.json"), RECEIVED)
         .unwrap();
     assert_eq!(page.resource_version.as_ref(), "1008");
     let [pod] = &page.items[..] else {
@@ -148,7 +153,7 @@ fn a_raw_watch_follows_its_edits_and_its_deletion() {
     let mut decoder = ObjectDecoder::new();
     let events: Vec<Event<_>> = include_str!("fixtures/pod-object-watch.jsonl")
         .lines()
-        .map(|line| decoder.decode_event(line.as_bytes()).unwrap())
+        .map(|line| decoder.decode_event(line.as_bytes(), RECEIVED).unwrap())
         .collect();
     let summary: Vec<(&str, String)> = events
         .iter()
@@ -175,4 +180,26 @@ fn a_raw_watch_follows_its_edits_and_its_deletion() {
     };
     let json: serde_json::Value = serde_json::from_str(labelled.json.get()).unwrap();
     assert_eq!(json["metadata"]["labels"]["touched"], "yes");
+}
+
+#[test]
+fn an_object_takes_the_time_its_response_arrived() {
+    let at = jiff::Timestamp::from_second(10).unwrap();
+    let mut decoder = ObjectDecoder::new();
+    let page = decoder
+        .decode_list(include_bytes!("fixtures/pod-object-table-list.json"), at)
+        .unwrap();
+    assert!(
+        page.items
+            .iter()
+            .all(|pod| pod.meta.received == at.as_millisecond())
+    );
+    let raw = ObjectDecoder::new()
+        .decode_list(include_bytes!("fixtures/pod-object-list.json"), at)
+        .unwrap();
+    assert!(
+        raw.items
+            .iter()
+            .all(|pod| pod.meta.received == at.as_millisecond())
+    );
 }

@@ -48,6 +48,54 @@ export interface MockKind {
 }
 
 /**
+ * Events, as the kubelet, the scheduler and the node controller report the
+ * pods' states. `events.k8s.io` serves the same objects, from the same
+ * storage and with the same printer
+ * (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/registry/events/rest/storage_events.go#L55).
+ */
+const EVENTS: MockKind = {
+  columns: EVENT_COLUMNS,
+  fields: ["metadata.name", "metadata.namespace"],
+  rows: (cluster, withNamespace) =>
+    events(cluster).map((event) => {
+      const id = `${cluster.context}/${event.pod.namespace}/${event.name}`;
+      const {
+        texts: [lastSeen = "", firstSeen = ""],
+        at,
+      } = cluster.printed(id, [event.last, event.first]);
+      return {
+        id,
+        namespace: event.pod.namespace,
+        created: event.first,
+        received: at,
+        labels: {},
+        controller: null,
+        cells: namespaced(
+          [
+            lastSeen,
+            event.type,
+            event.reason,
+            `pod/${event.pod.name}`,
+            event.container ? `spec.containers{${containerOf(event.pod)}}` : "",
+            event.source,
+            event.message,
+            firstSeen,
+            event.count,
+            event.name,
+          ],
+          event.pod.namespace,
+          withNamespace,
+        ),
+        generated: null,
+        fields: {
+          "metadata.name": event.name,
+          "metadata.namespace": event.pod.namespace,
+        },
+      };
+    }),
+};
+
+/**
  * The kinds the mock serves, by `group/version/resource`. Nodes are those
  * the pods run on, Deployments those the pods' names say own them, and
  * events what the kubelet, the scheduler and the node controller report of
@@ -76,6 +124,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: pod.id,
         namespace: pod.namespace,
         created: pod.created,
+        received: pod.received,
         labels: {},
         controller: replicaSetUid(
           cluster.context,
@@ -97,6 +146,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: node.id,
         namespace: null,
         created: node.created,
+        received: cluster.built,
         labels: {},
         controller: null,
         cells: [
@@ -129,6 +179,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         id: `${cluster.context}/${deployment.namespace}/${deployment.name}`,
         namespace: deployment.namespace,
         created: deployment.created,
+        received: cluster.built,
         labels: { app: deployment.name },
         controller: null,
         cells: namespaced(
@@ -167,6 +218,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
           id: job.id,
           namespace: job.namespace,
           created: job.created,
+          received: cluster.built,
           labels: {},
           controller:
             job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
@@ -175,7 +227,12 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
               job.name,
               status,
               job.completed === null ? "0/1" : "1/1",
-              humanDuration((job.completed ?? cluster.now) - job.created),
+              // Printed when the Job changes, as the API server does
+              // (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1312-L1319):
+              // one that runs reads as at its start, one without a start none.
+              job.started === null
+                ? ""
+                : humanDuration((job.completed ?? job.started) - job.started),
               null,
               "app",
               "registry.example.com/jobs/app:1.42.0",
@@ -196,73 +253,49 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
     columns: CRONJOB_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
-      cluster.cronJobs.map((cronJob) => ({
-        id: cronJob.id,
-        namespace: cronJob.namespace,
-        created: cronJob.created,
-        labels: {},
-        controller: null,
-        cells: namespaced(
-          [
-            cronJob.name,
-            cronJob.schedule,
-            "<none>",
-            cronJob.suspend ? "True" : "False",
-            cluster.jobs.filter(
-              (job) =>
-                job.namespace === cronJob.namespace &&
-                job.owner === cronJob.name &&
-                job.completed === null,
-            ).length,
-            humanDuration(cluster.now - cronJob.lastSchedule),
-            null,
-            "app",
-            "registry.example.com/jobs/app:1.42.0",
-            "<none>",
-          ],
-          cronJob.namespace,
-          withNamespace,
-        ),
-        generated: null,
-        fields: {
-          "metadata.name": cronJob.name,
-          "metadata.namespace": cronJob.namespace,
-        },
-      })),
+      cluster.cronJobs.map((cronJob) => {
+        const {
+          texts: [lastSchedule = ""],
+          at,
+        } = cluster.printed(cronJob.id, [cronJob.lastSchedule]);
+        return {
+          id: cronJob.id,
+          namespace: cronJob.namespace,
+          created: cronJob.created,
+          received: at,
+          labels: {},
+          controller: null,
+          cells: namespaced(
+            [
+              cronJob.name,
+              cronJob.schedule,
+              "<none>",
+              cronJob.suspend ? "True" : "False",
+              cluster.jobs.filter(
+                (job) =>
+                  job.namespace === cronJob.namespace &&
+                  job.owner === cronJob.name &&
+                  job.completed === null,
+              ).length,
+              lastSchedule,
+              null,
+              "app",
+              "registry.example.com/jobs/app:1.42.0",
+              "<none>",
+            ],
+            cronJob.namespace,
+            withNamespace,
+          ),
+          generated: null,
+          fields: {
+            "metadata.name": cronJob.name,
+            "metadata.namespace": cronJob.namespace,
+          },
+        };
+      }),
   },
-  "/v1/events": {
-    columns: EVENT_COLUMNS,
-    fields: ["metadata.name", "metadata.namespace"],
-    rows: (cluster, withNamespace) =>
-      events(cluster).map((event) => ({
-        id: `${cluster.context}/${event.pod.namespace}/${event.name}`,
-        namespace: event.pod.namespace,
-        created: event.first,
-        labels: {},
-        controller: null,
-        cells: namespaced(
-          [
-            humanDuration(cluster.now - event.last),
-            event.type,
-            event.reason,
-            `pod/${event.pod.name}`,
-            event.container ? `spec.containers{${containerOf(event.pod)}}` : "",
-            event.source,
-            event.message,
-            humanDuration(cluster.now - event.first),
-            event.count,
-            event.name,
-          ],
-          event.pod.namespace,
-          withNamespace,
-        ),
-        generated: null,
-        fields: {
-          "metadata.name": event.name,
-          "metadata.namespace": event.pod.namespace,
-        },
-      })),
-  },
+  "/v1/events": EVENTS,
+  "events.k8s.io/v1/events": EVENTS,
 };
 
 /** Statuses of a pod whose containers have never run. */
@@ -301,6 +334,7 @@ export function wireRow(row: MockRow): Row {
   return {
     id: row.id,
     created: row.created === null ? null : new Date(row.created).toISOString(),
+    received: new Date(row.received).toISOString(),
     generated: row.generated,
     cells: [...row.cells],
   };
@@ -398,15 +432,18 @@ interface Event {
 
 /** An event as a pod's state reports it, before its object and times. */
 type Reported = Omit<Event, "pod" | "name" | "first" | "last" | "count"> &
-  Partial<Pick<Event, "count" | "last">>;
+  Partial<Pick<Event, "count" | "first" | "last">>;
 
 const HOUR = 3_600_000;
 
 /**
  * What the pods' states make the cluster report, with the reasons and
  * messages a kind cluster of Kubernetes v1.37.0 recorded for them
- * (crates/twigo-cache/tests/fixtures/events-list.json), and the events of
- * an hour, the API server's default `--event-ttl`.
+ * (crates/twigo-cache/tests/fixtures/events-list.json), first seen no
+ * earlier than an hour before the cluster was built, the API server's
+ * default `--event-ttl`, but a BackOff, which repeats at its pod's last
+ * restart and so lives on, first seen as its pod was created. Their times
+ * stay put, so their ages grow, until a BackOff repeats.
  */
 function events(cluster: Cluster): Event[] {
   const notReady = new Set(
@@ -422,20 +459,18 @@ function events(cluster: Cluster): Event[] {
     const reported: Reported[] = [];
     switch (pod.status) {
       case "CrashLoopBackOff":
-      case "Error": {
-        const [, count = "1", ago = "0"] =
-          /^(\d+)(?: \((\d+)m ago\))?$/.exec(pod.restarts) ?? [];
+      case "Error":
         reported.push({
           type: "Warning",
           reason: "BackOff",
           container: true,
           source: kubelet,
           message: `Back-off restarting failed container ${containerOf(pod)} in pod ${pod.name}_${pod.namespace}(${uid(pod.id)})`,
-          count: Math.max(1, Number(count)),
-          last: cluster.now - Number(ago) * 60_000,
+          count: Math.max(1, Number.parseInt(pod.restarts, 10)),
+          first: pod.created,
+          last: pod.lastRestart ?? undefined,
         });
         break;
-      }
       case "ImagePullBackOff":
         reported.push(
           {
@@ -500,22 +535,23 @@ function events(cluster: Cluster): Event[] {
         },
       );
     }
-    const first = Math.max(pod.created, since);
-    return reported.map(({ count = 1, last, ...event }): Event => ({
-      ...event,
-      pod,
-      name: `${pod.name}.${eventSuffix(pod.id, event.reason)}`,
-      first,
-      // A repeated event keeps its name and moves its last time, as the
-      // recorded ones count up with Last Seen after First Seen.
-      last:
-        last ??
-        Math.max(
+    const earliest = Math.max(pod.created, cluster.built - HOUR);
+    return reported.map(
+      ({ count = 1, first = earliest, last, ...event }): Event => ({
+        ...event,
+        pod,
+        name: `${pod.name}.${eventSuffix(pod.id, event.reason)}`,
+        first,
+        // A repeated event keeps its name and moves its last time, as the
+        // recorded ones count up with Last Seen after First Seen.
+        last: Math.max(
           first,
-          cluster.now - (hash(`${pod.id}/${event.reason}`) % 60) * 60_000,
+          last ??
+            cluster.built - (hash(`${pod.id}/${event.reason}`) % 60) * 60_000,
         ),
-      count,
-    }));
+        count,
+      }),
+    );
   });
 }
 

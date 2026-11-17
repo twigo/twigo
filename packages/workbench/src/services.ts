@@ -16,6 +16,7 @@ import { Keybindings } from "./keybindings/service";
 import { Lists } from "./lists/service";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
+import { spaceMark } from "./parts/spaceMark";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
 import { ContextColors } from "./spaces/colors";
@@ -131,10 +132,12 @@ export class Workbench {
       (error) => {
         this.report(error);
       },
+      this.spaces,
     );
     this.approvals = new Approvals(
       backend,
       () => this.operations.asking !== undefined,
+      this.spaces,
     );
   }
 
@@ -150,11 +153,14 @@ export class Workbench {
     });
   }
 
-  /** Shows a failure the user did not ask to see but must know about. */
+  /** Shows a failure the user did not ask to see but must know about, led by the tile of the space whose context the gate refused. */
   report(error: unknown, command?: string): void {
-    const { message } = toIpcError(error);
+    const { message, blocked } = toIpcError(error);
     const text = command ? `${command}: ${message}` : message;
-    notify.error(text, { key: text });
+    notify.error(text, {
+      key: text,
+      tile: spaceMark(blocked && this.spaces.ofContext(blocked.context)),
+    });
   }
 }
 

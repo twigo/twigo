@@ -111,7 +111,9 @@ Limits:
 
 ## The churn generator
 
-`twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` bumps the restart count of random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app` and replaces its `restartCount`.
+`twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] [--bare] --log FILE` restarts random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app`, replaces its `restartCount` and sets its `lastState` to a crash that finished as the patch is sent.
+The API server prints a restart count with how long ago it was only when the container's `lastState.terminated` is set (`3 (5s ago)`, [printers.go](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1066-L1070)), so without the crash the Restarts cells would print a bare count and the list would draw no age.
+`--bare` leaves the crash out, for `bench/harness/tests/view_live.rs`: it compares the list's windows with a fresh list cell by cell, and a fresh list prints every age anew and orders equal counts by moments the two lists date up to a second apart.
 It paces patches on a fixed interval and skips the ticks it misses, so after a stall it resumes at its rate instead of sending the backlog at once, with at most 64 in flight and never two for one pod, until `--seconds` pass or SIGINT.
 At that bound, or once every pod has a patch in flight, it waits for an answer, still watching for the deadline and SIGINT; the API client has no read timeout, so a patch unanswered after 10 s is logged as an error.
 On stop it logs the answers of the patches still in flight.
@@ -226,13 +228,13 @@ Then with the harness, which samples this for 20 s after its driver has run for 
   It looks the same: the tint within 1 of 255 per channel at six times of the animation, in Chromium and Playwright's WebKit, in both themes, with the pill's bottom edge one device pixel apart in WebKit; a capture of the bench window shows it in a real WKWebView.
 - **The clock.**
   With no changes, the clock of ages was what woke the page: every list rendered its whole window each second for its Age column.
-  Only an age holds the clock now, on one timer for the page.
+  Only the cells that count time hold the clock now, on one timer for the page: an Age draws every second, and a duration the server printed, as a Restarts cell's age, draws again only when its text or its tone changes ([decision](decisions/printed-durations.md)); what that costs in this window is in [`TODO.md`](../TODO.md).
 - **By Restarts the numbers depend on the cluster.**
   Three runs of 673d868 on one cluster read 26.4, 23.9 and 20.4 % over ten minutes, falling as it aged, which fits fewer rows changing places once the top counts are high; not proven.
   So the first table leaves that order out: its builds ran on a cluster of different ages.
 - **Why nothing judges the row.**
   No limit tells the two rows of the second table apart with room for their noise, by Restarts or by Name, so the report shows the number.
-  A test holds each cause instead, in CI, where the bench does not run: `theme.test.ts` that the flash animates only opacity, `seconds passing render the ages and not the grid` that the list leaves the clock alone.
+  A test holds each cause instead, in CI, where the bench does not run: `theme.test.ts` that the flash animates only opacity, `seconds passing render the ages and not the grid` and `a restart's age and the end of its warning come in its cell, not in the grid` that the list leaves the clock alone.
 - **What is left.**
   By Name, in that run of 3237f23: the app's tokio workers 1.6 %, as hidden, WebContent's main thread 2.1 % and its JIT 0.7 %.
   `sample` counted JavaScript in 36 of that thread's 66 active samples by Name and 50 of 116 by Restarts, so a row memo in `DataGrid` could take at most about half of it; not tried.

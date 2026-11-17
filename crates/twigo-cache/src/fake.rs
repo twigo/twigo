@@ -18,6 +18,7 @@ use http::{Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::{BodyExt, Full, StreamBody};
+use jiff::Timestamp;
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use tower::BoxError;
@@ -26,6 +27,7 @@ use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::credentials::{CredentialError, RunError};
 
 use crate::hub::{Connect, Hub};
+use crate::upstream::Clock;
 
 type Body = UnsyncBoxBody<Bytes, Infallible>;
 
@@ -75,6 +77,8 @@ pub struct State {
     pub not_modified: usize,
     /// Each Metrics API request waits this long before it is answered.
     pub metrics_takes: std::time::Duration,
+    /// A list's body arrives this long after its status and headers.
+    pub body_takes: std::time::Duration,
     /// The most Metrics API requests that waited at once.
     pub metrics_overlap: usize,
     metrics_waiting: usize,
@@ -192,7 +196,9 @@ impl Fake {
         Clients::over(service, budgets)
     }
 
-    /// The hub over this server, every context's clients with `budgets`.
+    /// The hub over this server, every context's clients with `budgets`,
+    /// stamping rows by a clock that starts at the epoch and runs with the
+    /// test's paused time.
     pub fn hub(&self, budgets: Budgets) -> (Hub, Arc<Clients>) {
         let clients = self.clients(budgets);
         let connect: Connect = {
@@ -202,7 +208,9 @@ impl Fake {
                 Box::pin(async move { Ok::<_, IpcError>(clients) })
             })
         };
-        (Hub::new(connect), clients)
+        let start = Instant::now();
+        let clock: Clock = Arc::new(move || Timestamp::UNIX_EPOCH + start.elapsed());
+        (Hub::with_clock(connect, clock), clients)
     }
 
     pub fn add(&self, resource: &str, namespace: Option<&str>, name: &str) {
@@ -298,6 +306,13 @@ impl Fake {
             watch.held = false;
         }
         state.watches = watches;
+    }
+
+    /// Watches from before now get `410 Gone`, as once the server compacted
+    /// its history.
+    pub fn compact(&self) {
+        let mut state = self.state();
+        state.compacted = state.version;
     }
 
     /// Ends every watch as `timeoutSeconds` does.
@@ -495,15 +510,16 @@ impl Fake {
             if end < items.len() {
                 metadata["continue"] = json!(format!("{version}:{end}"));
             }
-            return full(
-                StatusCode::OK,
-                json!({
-                    "kind": "PartialObjectMetadataList",
-                    "apiVersion": "meta.k8s.io/v1",
-                    "metadata": metadata,
-                    "items": items[start..end],
-                }),
-            );
+            let page = json!({
+                "kind": "PartialObjectMetadataList",
+                "apiVersion": "meta.k8s.io/v1",
+                "metadata": metadata,
+                "items": items[start..end],
+            });
+            if state.body_takes.is_zero() {
+                return full(StatusCode::OK, page);
+            }
+            return slow(StatusCode::OK, &page, state.body_takes);
         }
         if state.unwatchable.contains(&target.resource) {
             return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
@@ -785,6 +801,19 @@ fn line(value: &Value) -> Bytes {
 fn full(code: StatusCode, value: Value) -> Response<Body> {
     let mut response =
         Response::new(Full::new(Bytes::from(serde_json::to_vec(&value).unwrap())).boxed_unsync());
+    *response.status_mut() = code;
+    response
+}
+
+/// A response whose status and headers come at once and whose body comes after `takes`.
+fn slow(code: StatusCode, value: &Value, takes: std::time::Duration) -> Response<Body> {
+    let (sender, receiver) = mpsc::unbounded();
+    let body = Bytes::from(serde_json::to_vec(value).unwrap());
+    tokio::spawn(async move {
+        tokio::time::sleep(takes).await;
+        let _ = sender.unbounded_send(Ok(Frame::data(body)));
+    });
+    let mut response = stream(receiver);
     *response.status_mut() = code;
     response
 }

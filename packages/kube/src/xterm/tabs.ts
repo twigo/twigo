@@ -1,11 +1,17 @@
-import { Changes } from "@twigo/workbench";
+import { Changes, type SessionState } from "@twigo/workbench";
 import { terminalTheme } from "./theme";
 import type { SessionStart, ShellTerminal } from "./terminal";
+import { sessionState } from "./words";
 
-/** What the registry asks of a tab: a session to start it with, and its terminal. */
-export type Tab<Session> = Pick<ShellTerminal, "term" | "dispose"> & {
+/** What the registry asks of a tab: a session to start it with, its terminal and how it stands. */
+export type Tab<Session> = Pick<
+  ShellTerminal,
+  "term" | "dispose" | "getStatus"
+> & {
   start(session: Session): void;
 };
+
+const RESTORED = { state: "restored" } as const;
 
 /**
  * Each tab's terminal and session by the tab's URI, so a tab that mounts
@@ -50,6 +56,11 @@ export class ShellTabs<
 
   list(): readonly (readonly [string, T])[] {
     return [...this.#tabs];
+  }
+
+  /** How a tab says the session of `uri` stands. A URI with no tab here was restored from the saved layout, and its session has ended. */
+  state(uri: string): SessionState {
+    return sessionState(this.#tabs.get(uri)?.getStatus() ?? RESTORED);
   }
 
   /**

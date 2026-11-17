@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
-import { Cluster, generatedAt } from "./cluster";
+import { humanDuration, parseDuration } from "@twigo/utils";
+import { Cluster, generatedAt, type Pod } from "./cluster";
 import { KINDS } from "./kinds";
 
 test("a Deployment's pod is generated from its template hash", () => {
@@ -80,4 +81,98 @@ test("the mock's pods read as a Deployment's", () => {
       /^[0-9a-z]+-[0-9a-z]{5}$/,
     );
   }
+});
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const ago = (restarts: string) =>
+  parseDuration(/\((.+) ago\)$/.exec(restarts)?.[1] ?? "");
+
+test("a running pod's last restart is minutes, hours or days old, any other pod's minutes", () => {
+  const cluster = new Cluster("prod-eu", 4000, Date.UTC(2026, 10, 3));
+  const restarted = cluster.pods.filter((pod) => pod.restarts !== "0");
+  const [running, other] = [
+    restarted.filter((pod) => pod.status === "Running"),
+    restarted.filter((pod) => pod.status !== "Running"),
+  ].map((pods) => pods.map((pod) => ago(pod.restarts) ?? NaN));
+  expect(running?.some((age) => age < HOUR)).toBe(true);
+  expect(running?.some((age) => age >= HOUR && age < DAY)).toBe(true);
+  expect(running?.some((age) => age >= DAY)).toBe(true);
+  expect(other?.length).toBeGreaterThan(0);
+  expect(other?.every((age) => age <= HOUR - 60_000)).toBe(true);
+});
+
+test("a pod's Restarts counts from the moment of its last restart, so its age grows across prints", () => {
+  const start = Date.UTC(2026, 10, 3);
+  const cluster = new Cluster("prod-eu", 400, start);
+  const known = new Map<Pod, { count: number; at: number }>();
+  for (const pod of cluster.pods) {
+    const at = start - 10 * DAY - 23 * HOUR;
+    Object.assign(pod, { restarts: "2 (10d ago)", lastRestart: at });
+    pod.received = start;
+    known.set(pod, { count: 2, at });
+  }
+  let grown = 0;
+  let kept = 0;
+  for (let step = 1; step <= 40; step++) {
+    const now = start + step * 17 * 60_000;
+    const before = new Map(
+      cluster.pods.map((pod) => [pod, { ...pod }] as const),
+    );
+    cluster.change(cluster.pods.length, now);
+    for (const pod of cluster.pods) {
+      const printed = before.get(pod);
+      const last = known.get(pod);
+      if (!printed || !last) continue;
+      const count = Number.parseInt(pod.restarts, 10);
+      if (count > last.count) {
+        known.set(pod, { count, at: now - (ago(pod.restarts) ?? NaN) });
+      } else {
+        expect(pod.restarts).toBe(
+          `${count} (${humanDuration(now - last.at)} ago)`,
+        );
+        if (now - last.at >= 11 * DAY) grown++;
+      }
+      expect(pod.received).toBe(
+        pod.restarts === printed.restarts ? printed.received : now,
+      );
+      expect(pod.received - (ago(pod.restarts) ?? NaN)).toBeGreaterThanOrEqual(
+        known.get(pod)?.at ?? NaN,
+      );
+      if (pod.restarts === printed.restarts) kept++;
+    }
+  }
+  expect(grown).toBeGreaterThan(0);
+  expect(kept).toBeGreaterThan(0);
+});
+
+const MOMENT = Date.UTC(2026, 10, 3);
+
+function printing() {
+  const cluster = new Cluster("prod-eu", 0, MOMENT);
+  return (now: number, last: number) => {
+    cluster.now = now;
+    return cluster.printed("prod-eu/default/web.1", [last, MOMENT - 2 * DAY]);
+  };
+}
+
+test("a row whose moment moves but prints the same ages keeps the stamp it held", () => {
+  const print = printing();
+  expect(print(MOMENT, MOMENT - 5 * 60_000)).toMatchObject({
+    texts: ["5m", "2d"],
+    at: MOMENT,
+  });
+  expect(print(MOMENT + 1000, MOMENT + 1000 - 5 * 60_000)).toMatchObject({
+    texts: ["5m", "2d"],
+    at: MOMENT,
+  });
+});
+
+test("a row whose moment moves and prints other ages takes the clock as its stamp", () => {
+  const print = printing();
+  print(MOMENT, MOMENT - 5 * 60_000);
+  expect(print(MOMENT + 1000, MOMENT + 1000 - 100_000)).toMatchObject({
+    texts: ["100s", "2d"],
+    at: MOMENT + 1000,
+  });
 });

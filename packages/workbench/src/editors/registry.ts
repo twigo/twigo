@@ -10,6 +10,16 @@ export interface EditorProps {
 /** Where editors open: the editor area, or the panel, which holds sessions such as logs (ARCHITECTURE 4.1). */
 export type Area = "editor" | "panel";
 
+/** How a session stands, as its tab says it: a running session says nothing. */
+export type SessionState = "connecting" | "running" | "ended" | "failed";
+
+/** The sessions of one kind of editor: how each stands by its URI, and when one moves. */
+export interface SessionStates {
+  readonly changes: Changes;
+  /** Undefined for a URI that has no session to tell of. */
+  state(uri: string): SessionState | undefined;
+}
+
 /**
  * An editor pane for a URI scheme (ARCHITECTURE 4.3). The resolver takes the
  * provider with the highest priority, as VS Code's editor resolver does.
@@ -22,6 +32,8 @@ export interface EditorProvider {
   /** Where its editors open; the editor area by default. */
   readonly area?: Area;
   readonly title: (uri: URL) => string;
+  /** The title ends in what tells tabs apart, a name or a port: a tab too narrow for it cuts the title in the middle, else at its end. */
+  readonly titleEndTells?: boolean;
   /** What the tab's tooltip says: where the editor's subject is, from its context down. */
   readonly tooltip?: (uri: URL) => string | undefined;
   /**
@@ -30,6 +42,8 @@ export interface EditorProvider {
    * rather than land in this one's.
    */
   readonly space?: (uri: URL) => string | undefined;
+  /** For an editor that is a session, such as logs or a shell: what its tab says of how the session stands. */
+  readonly session?: SessionStates;
   /** The tab's icon, which may depend on the URI (the kind of a list). */
   readonly icon?: ComponentType<{ uri: string; className?: string }>;
   readonly component: ComponentType<EditorProps>;

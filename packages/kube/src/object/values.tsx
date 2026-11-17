@@ -100,7 +100,7 @@ function LabelChip({ name, value }: { name: string; value: string }) {
           setOpen(!open);
         }}
         className={cn(
-          "max-w-full rounded bg-muted px-1.5 py-px text-left text-xs",
+          "max-w-full rounded-sm bg-muted px-1.5 py-px text-left text-xs",
           open ? "break-all whitespace-pre-wrap" : "block truncate",
         )}
       >

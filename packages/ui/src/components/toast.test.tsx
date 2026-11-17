@@ -516,3 +516,42 @@ test("a choice's button takes a label as long as an absolute path inside the toa
     "min-w-0",
   );
 });
+
+test("a tile leads a toast of any kind, before its icon and its words, and a toast without one has no lead", () => {
+  const tile = <span>PE</span>;
+  const { rerender } = render(
+    <Toast
+      id="t1"
+      tone="info"
+      message="Saved."
+      action={undefined}
+      tile={tile}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toBe("PESaved.");
+  rerender(<Toast id="t1" tone="info" message="Saved." action={undefined} />);
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+
+  rerender(
+    <CountdownToast
+      tile={tile}
+      icon={Trash2}
+      message="Deleting pod web-1"
+      detail={() => "prod-eu · sends in 5 s"}
+      until={Date.now() + 5000}
+      seconds={5}
+      action={{ label: "Cancel", run: () => undefined }}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toMatch(/^PEDeleting pod/);
+
+  rerender(
+    <ChoiceToast
+      tile={tile}
+      icon={CircleCheck}
+      message="Terminal 1 added a context"
+      choices={[{ label: "Dismiss", run: () => undefined }]}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toMatch(/^PETerminal 1/);
+});

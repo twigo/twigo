@@ -488,6 +488,10 @@ test("a manifest applied to another context stays, and a toast says what was mad
     toast.mock.calls[toast.mock.calls.length - 1] ?? [];
   expect(message).toBe("Created ConfigMap default/fresh in staging");
   expect(options?.action?.label).toBe("Open in staging");
+  expect(workbench.spaces.active?.id).toBe("dev");
+  expect(options?.tile).toMatchObject({
+    props: { space: { id: "staging" }, size: "sm" },
+  });
 
   options?.action?.run();
   expect(workbench.spaces.active?.id).toBe("staging");
@@ -538,7 +542,13 @@ test("the toast of a manifest says it updated an object that existed, and names 
   open.mockClear();
   options?.action?.run();
   await vi.waitFor(() => {
-    expect(warning).toHaveBeenCalledWith("dev does not serve Widget");
+    expect(warning).toHaveBeenCalledWith(
+      "dev does not serve Widget",
+      expect.anything(),
+    );
+  });
+  expect(warning.mock.lastCall?.[1]?.tile).toMatchObject({
+    props: { space: { id: "dev" } },
   });
   expect(open).not.toHaveBeenCalled();
 });

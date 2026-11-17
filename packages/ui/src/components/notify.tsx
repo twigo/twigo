@@ -23,13 +23,23 @@ export interface NotifyOptions {
   action?: ToastAction;
   /** A repeat with the same key replaces the toast instead of stacking. */
   key?: string;
+  /** What it speaks about as a tile, which leads it; none for the app's own words. */
+  tile?: ReactNode;
 }
 
 const show =
   (tone: Tone) =>
-  (message: ReactNode, { action, key }: NotifyOptions = {}) =>
+  (message: ReactNode, { action, key, tile }: NotifyOptions = {}) =>
     toast.custom(
-      (id) => <Toast id={id} tone={tone} message={message} action={action} />,
+      (id) => (
+        <Toast
+          id={id}
+          tone={tone}
+          message={message}
+          action={action}
+          tile={tile}
+        />
+      ),
       { duration: DURATION[tone], ...(key !== undefined && { id: key }) },
     );
 

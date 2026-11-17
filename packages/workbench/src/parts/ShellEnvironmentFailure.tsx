@@ -34,7 +34,7 @@ function Details({ failed }: { failed: Failed }) {
   return (
     <>
       {shown && (
-        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted p-2 font-mono text-2xs">
+        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted p-2 font-mono text-2xs">
           {output === "" ? "The shell printed nothing." : output}
         </pre>
       )}

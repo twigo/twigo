@@ -4,17 +4,33 @@ import Color from "colorjs.io";
 import { expect, test } from "vitest";
 
 type Theme = "dark" | "light";
-type Surface = "shell" | "editor" | "card" | "popover" | "selected";
+type Tone = "error" | "warn";
+type Ground = "editor" | "sidebar";
+type Band = `${Tone} band on ${Ground}` | `hovered ${Tone} band on ${Ground}`;
+type Surface = "shell" | Ground | "card" | "popover" | "selected" | Band;
 
 const THEMES: readonly Theme[] = ["dark", "light"];
 const ROLES = ["strong", "content", "support", "quiet"] as const;
+const TONES: readonly Tone[] = ["error", "warn"];
+const GROUNDS: readonly Ground[] = ["editor", "sidebar"];
+const BANDS: readonly Band[] = GROUNDS.flatMap((ground) =>
+  TONES.flatMap((tone): Band[] => [
+    `${tone} band on ${ground}`,
+    `hovered ${tone} band on ${ground}`,
+  ]),
+);
 const SURFACES: readonly Surface[] = [
   "shell",
-  "editor",
+  ...GROUNDS,
   "card",
   "popover",
   "selected",
+  ...BANDS,
 ];
+const TONE_TEXT: Record<Tone, string> = {
+  error: "error",
+  warn: "warn-foreground",
+};
 
 const read = (file: string) =>
   readFileSync(join(import.meta.dirname, file), "utf8");
@@ -42,13 +58,20 @@ const tokens: Record<Theme, Map<string, string>> = {
   light: block(/:root/),
   dark: block(/\.dark/),
 };
-const underCursor = declarations(
-  /\[aria-selected="true"\],\s*\[data-cursor\]\s*\{([^}]*)\}/.exec(
+const underTint = declarations(
+  /\[aria-selected="true"\],\s*\[data-cursor\],\s*\[data-tone\]\s*\{([^}]*)\}/.exec(
     withoutComments(read("index.css")),
   )?.[1],
 );
 
-const COLOUR = String.raw`(?:var\(--[\w-]+\)|oklch\([^)]*\))`;
+const toneRule = (tone: Tone) =>
+  declarations(
+    new RegExp(String.raw`\[data-tone="${tone}"\]\s*\{([^}]*)\}`).exec(
+      withoutComments(read("index.css")),
+    )?.[1],
+  );
+
+const COLOUR = String.raw`(?:var\(--[\w-]+\)|oklch\([^)]*\)|transparent)`;
 const REFERENCE = /^var\(--([\w-]+)\)$/;
 const MIX = new RegExp(
   String.raw`^color-mix\(in oklab, (${COLOUR}) (\d+)%, (${COLOUR})\)$`,
@@ -99,21 +122,29 @@ function over(top: Color, base: Color) {
   );
 }
 
+const BAND = /^(hovered )?(error|warn) band on (editor|sidebar)$/;
+
 function surface(name: Surface, theme: Theme): Color {
   if (name === "selected") {
     return over(colour("var(--selected)", theme), surface("editor", theme));
   }
+  const band = BAND.exec(name);
+  if (band?.[2] && band[3]) {
+    const tint = toneRule(band[2] as Tone).get("band");
+    if (tint === undefined) throw new Error(`no band for a ${band[2]} row`);
+    const resting = over(
+      colour(tint, theme),
+      surface(band[3] as Ground, theme),
+    );
+    return band[1] ? over(colour("var(--row-hover)", theme), resting) : resting;
+  }
   return eightBit(colour(`var(--${name})`, theme));
 }
 
+const tinted = (on: Surface) => on === "selected" || BAND.test(on);
+
 const role = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
-  eightBit(
-    colour(
-      `var(--${name})`,
-      theme,
-      on === "selected" ? underCursor : undefined,
-    ),
-  );
+  eightBit(colour(`var(--${name})`, theme, tinted(on) ? underTint : undefined));
 
 const ratio = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
   surface(on, theme).contrast(role(name, theme, on), "WCAG21");
@@ -121,7 +152,7 @@ const lightness = (name: (typeof ROLES)[number], theme: Theme, on: Surface) =>
   Math.abs(surface(on, theme).contrast(role(name, theme, on), "APCA"));
 
 test.each(THEMES)(
-  "%s: every role reads at 4.5:1 or more on the shell, the editor, a card, a popover and a selected row",
+  "%s: every role reads at 4.5:1 or more on the shell, the editor, the side bar, a card, a popover, a selected row and a problem row's band on the editor and on the side bar, at rest and hovered",
   (theme) => {
     const short = SURFACES.flatMap((on) =>
       ROLES.map((name) => ({ name, on, ratio: ratio(name, theme, on) })),
@@ -131,6 +162,48 @@ test.each(THEMES)(
     expect(short).toEqual([]);
   },
 );
+
+const PINNED_SHORT_TONED: Record<Theme, readonly string[]> = {
+  dark: [],
+  light: ["error text on hovered error band on sidebar: 4.46"],
+};
+
+test.each(THEMES)(
+  "%s: text in a tone reads at 4.5:1 or more on its own band on the editor and the side bar, at rest and hovered, and on a selected row, but for the pair pinned above",
+  (theme) => {
+    const short = TONES.flatMap((tone) =>
+      [...BANDS.filter((on) => BAND.exec(on)?.[2] === tone), "selected"].map(
+        (on) => ({
+          tone,
+          on,
+          ratio: surface(on as Surface, theme).contrast(
+            eightBit(colour(`var(--${TONE_TEXT[tone]})`, theme)),
+            "WCAG21",
+          ),
+        }),
+      ),
+    )
+      .filter((reading) => reading.ratio < 4.5)
+      .map(
+        ({ tone, on, ratio }) => `${tone} text on ${on}: ${ratio.toFixed(2)}`,
+      );
+    expect(short).toEqual(PINNED_SHORT_TONED[theme]);
+  },
+);
+
+test("a row's tone sets its own band and edge", () => {
+  expect(
+    Object.fromEntries(
+      TONES.map((tone) => [
+        tone,
+        [toneRule(tone).get("band"), toneRule(tone).get("edge")],
+      ]),
+    ),
+  ).toEqual({
+    error: ["var(--band-error)", "var(--error)"],
+    warn: ["var(--band-warn)", "var(--warn)"],
+  });
+});
 
 test("the comment over the roles states the contrast the colours give, to the precision it states", () => {
   const columns = [
@@ -164,6 +237,257 @@ test("the comment over the roles states the contrast the colours give, to the pr
   );
   expect(claimed).toEqual(actual);
 });
+
+const WELLED: readonly Surface[] = ["shell", "editor", "card", "popover"];
+const OVERLAY_DIFFERS = 1.1;
+
+function classOf(file: string, pattern: RegExp) {
+  const found = pattern.exec(read(file))?.[1];
+  if (found === undefined)
+    throw new Error(`${file} has nothing like ${pattern}`);
+  return found;
+}
+const keycapFill = classOf("../components/kbd.tsx", /\bbg-([\w-]+)/);
+const pressedText = classOf(
+  "../components/segmented.tsx",
+  /aria-pressed:text-([\w-]+)/,
+);
+const hoveredText = classOf(
+  "../components/segmented.tsx",
+  /hover:text-([\w-]+)/,
+);
+const restFill = classOf("../components/trigger.tsx", /\bbg-([\w-]+)/);
+const hoverFill = classOf("../components/trigger.tsx", /hover:bg-([\w-]+)/);
+const openFill = classOf(
+  "../components/trigger.tsx",
+  /data-\[state=open\]:bg-([\w-]+)/,
+);
+const triggerFills = [restFill, hoverFill, openFill];
+const TRIGGER_TEXTS = ["content", "support", "error", "warn-foreground"];
+const WELL_TEXTS = [
+  ...new Set([pressedText, "content", "support", "error", "warn-foreground"]),
+];
+
+interface Reading {
+  readonly what: string;
+  readonly value: number;
+  readonly least: number;
+}
+
+const reading = (what: string, value: number, least: number): Reading => ({
+  what,
+  value,
+  least,
+});
+const unmet = (readings: readonly Reading[]) =>
+  readings
+    .filter(({ value, least }) => value < least)
+    .map(({ what, value }) => `${what}: ${value.toFixed(2)}`);
+const textOn = (name: string, theme: Theme, under: Color) =>
+  under.contrast(eightBit(colour(`var(--${name})`, theme)), "WCAG21");
+
+function overlays(theme: Theme, on: Surface) {
+  const well = over(colour("var(--well)", theme), surface(on, theme));
+  return { well, plate: over(colour("var(--plate)", theme), well) };
+}
+
+test.each(THEMES)(
+  "%s: a field's well differs from the shell, the editor, a card and a popover, and the typed text and the placeholder read on it at 4.5:1 or more",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const { well } = overlays(theme, on);
+      return [
+        reading(
+          `the well against ${on}`,
+          surface(on, theme).contrast(well, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        reading(
+          `content on the well on ${on}`,
+          textOn("content", theme, well),
+          4.5,
+        ),
+        reading(
+          `support on the well on ${on}`,
+          textOn("support", theme, well),
+          4.5,
+        ),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+const HOVER_STEP = 1.05;
+
+test.each(THEMES)(
+  "%s: a trigger's hovered fill lies at least a step from its well, and its open fill no nearer than the hovered one, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const fill = (name: string) =>
+        over(colour(`var(--${name})`, theme), surface(on, theme));
+      const step = (name: string) =>
+        fill(restFill).contrast(fill(name), "WCAG21");
+      return [
+        reading(
+          `${hoverFill} against ${restFill} on ${on}`,
+          step(hoverFill),
+          HOVER_STEP,
+        ),
+        reading(
+          `${openFill} against ${restFill} on ${on}`,
+          step(openFill),
+          step(hoverFill),
+        ),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: a trigger's text and its icon read at 4.5:1 or more on each fill it takes, at rest, hovered and open, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) =>
+      triggerFills.flatMap((fill) => {
+        const under = over(colour(`var(--${fill})`, theme), surface(on, theme));
+        return TRIGGER_TEXTS.map((name) =>
+          reading(
+            `${name} on ${fill} on ${on}`,
+            textOn(name, theme, under),
+            4.5,
+          ),
+        );
+      }),
+    );
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+const FIELD = "../components/search-field.tsx";
+
+test("a search field rests on a trigger's fill and hovers to a trigger's hovered fill", () => {
+  expect([
+    classOf(FIELD, /\bbg-([\w-]+)/),
+    classOf(FIELD, /hover:bg-([\w-]+)/),
+  ]).toEqual([restFill, hoverFill]);
+});
+
+test.each(THEMES)(
+  "%s: a search field's typed text, placeholder and icon read at 4.5:1 or more on its well and its hovered fill, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const fills = [
+      classOf(FIELD, /\bbg-([\w-]+)/),
+      classOf(FIELD, /hover:bg-([\w-]+)/),
+    ];
+    const texts = [
+      classOf(FIELD, /bg-transparent text-([\w-]+)/),
+      classOf(FIELD, /placeholder:text-([\w-]+)/),
+      classOf(FIELD, /px-2 text-xs text-([\w-]+)/),
+    ];
+    const found = WELLED.flatMap((on) =>
+      fills.flatMap((fill) => {
+        const under = over(colour(`var(--${fill})`, theme), surface(on, theme));
+        return texts.map((name) =>
+          reading(
+            `${name} on ${fill} on ${on}`,
+            textOn(name, theme, under),
+            4.5,
+          ),
+        );
+      }),
+    );
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+const UNDER_A_KEYCAP = [
+  "well",
+  "well-hover",
+  "row-hover",
+  "row-active",
+] as const;
+
+test.each(THEMES)(
+  "%s: a keycap differs from what it sits on, and its text reads at 4.5:1 or more, on a surface, in a well, over a hovered button, in a hovered field or a selected row, and in a hovered outline button",
+  (theme) => {
+    const keycap = colour(`var(--${keycapFill})`, theme);
+    const hosts: readonly (readonly [string, Color])[] = [
+      ...WELLED.flatMap((on) =>
+        [undefined, ...UNDER_A_KEYCAP].map(
+          (fill) =>
+            [
+              `${fill ?? "bare"} on ${on}`,
+              fill === undefined
+                ? surface(on, theme)
+                : over(colour(`var(--${fill})`, theme), surface(on, theme)),
+            ] as const,
+        ),
+      ),
+      ["a hovered outline button", eightBit(colour("var(--accent)", theme))],
+    ];
+    const found = hosts.flatMap(([what, host]) => {
+      const chip = over(keycap, host);
+      return [
+        reading(
+          `a keycap against ${what}`,
+          host.contrast(chip, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        reading(
+          `support on a keycap on ${what}`,
+          textOn("support", theme, chip),
+          4.5,
+        ),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: the pressed plate differs from the track, and the pressed text, support, content and the error and warning tones read at 4.5:1 or more on both, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) => {
+      const { well, plate } = overlays(theme, on);
+      return [
+        reading(
+          `the plate against the track on ${on}`,
+          plate.contrast(well, "WCAG21"),
+          OVERLAY_DIFFERS,
+        ),
+        ...WELL_TEXTS.flatMap((name) => [
+          reading(
+            `${name} on the track on ${on}`,
+            textOn(name, theme, well),
+            4.5,
+          ),
+          reading(
+            `${name} on the plate on ${on}`,
+            textOn(name, theme, plate),
+            4.5,
+          ),
+        ]),
+      ];
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: the pressed text reads brighter than a hovered neighbour's, on the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.map((on) => {
+      const { well, plate } = overlays(theme, on);
+      return reading(
+        `${pressedText} on the plate on ${on}, against ${hoveredText} on the track`,
+        textOn(pressedText, theme, plate),
+        textOn(hoveredText, theme, well),
+      );
+    });
+    expect(unmet(found)).toEqual([]);
+  },
+);
 
 test.each(THEMES)(
   "%s: strong, content, support and quiet fall in lightness contrast on the editor",

@@ -13,8 +13,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
+use bytes::Bytes;
 use futures::{AsyncBufRead, AsyncBufReadExt};
 use http::Request;
+use http_body_util::BodyExt;
+use jiff::Timestamp;
+use kube::client::Body;
 use tokio::sync::watch;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
@@ -22,7 +26,7 @@ use twigo_kube::client::{Clients, Waiting};
 use crate::cluster::Cluster;
 use crate::decode::{Decode, DecodeError, Event};
 use crate::request::{self, Collection, Format, WatchFrom};
-use crate::store::{self, Item, Items, RowKey, Store};
+use crate::store::{Item, Items, RowKey, Store};
 
 /// Items per list page.
 const LIMIT: u32 = 500;
@@ -43,6 +47,9 @@ pub type Connect = Arc<
         + Send
         + Sync,
 >;
+
+/// The time now, which stamps what the server answers.
+pub(crate) type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
 
 /// What an upstream watches.
 #[derive(Debug, Clone)]
@@ -166,6 +173,7 @@ impl<T: Item> Upstream<T> {
 /// What a run of the upstream needs from the hub.
 pub(crate) struct Env {
     pub connect: Connect,
+    pub clock: Clock,
     pub cluster: Arc<Cluster>,
     /// Told when a watch waits for the budget, and when it stops waiting,
     /// so the hub can evict an idle upstream.
@@ -453,8 +461,8 @@ where
         let from = loop {
             let mut request = request::list(&self.collection(), LIMIT, token.as_deref());
             request.extensions_mut().insert(self.list_waiting.clone());
-            let body = match clients.api.request_text(request).await {
-                Ok(body) => body,
+            let (body, received) = match fetch(clients, request, &self.env.clock).await {
+                Ok(page) => page,
                 Err(error) => {
                     return Outcome::Failed {
                         error,
@@ -463,7 +471,7 @@ where
                     };
                 }
             };
-            let page = match self.decoder.decode_list(body.as_bytes()) {
+            let page = match self.decoder.decode_list(&body, received) {
                 Ok(page) => page,
                 Err(DecodeError::NoColumns) => return Outcome::NoColumns(Next::List),
                 Err(error) => return Outcome::Undecodable(error),
@@ -558,7 +566,8 @@ where
             }
             quiet = false;
             self.backoff = backoff();
-            let event = match self.decoder.decode_event(&line) {
+            let received = (self.env.clock)();
+            let event = match self.decoder.decode_event(&line, received) {
                 Ok(event) => event,
                 Err(DecodeError::NoColumns) => return Outcome::NoColumns(again(&from, &listing)),
                 Err(error) => return Outcome::Undecodable(error),
@@ -613,7 +622,7 @@ where
     fn add(&self, listing: &mut Listing<D::Item>, item: D::Item) {
         listing.loaded = listing.loaded.saturating_add(1);
         match &mut listing.collected {
-            Some(items) => store::collect(items, item),
+            Some(items) => self.upstream.store.collect(items, item),
             None => {
                 self.upstream.store.upsert(item);
                 self.set_phase(Phase::Syncing(listing.loaded));
@@ -692,6 +701,27 @@ fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
     if !meta.resource_version.is_empty() {
         from.clone_from(&meta.resource_version);
     }
+}
+
+/// A list page, and when its response started: its status and headers have
+/// arrived, which `Client::send` yields before the body. The server prints a
+/// row's ages as it builds the answer, so a page stamped once its body is
+/// whole, seconds later on a slow link, would count each age from a later
+/// moment than it was printed at. What is left is the server's time from
+/// printing to writing the first bytes, and the network's for them.
+async fn fetch(
+    clients: &Clients,
+    request: Request<Vec<u8>>,
+    clock: &Clock,
+) -> Result<(Bytes, Timestamp), kube::Error> {
+    let response = clients.api.send(request.map(Body::from)).await?;
+    let started = clock();
+    let (parts, body) = response.into_parts();
+    let body = body.collect().await?.to_bytes();
+    if !parts.status.is_success() {
+        return Err(twigo_kube::errors::refused(parts.status, &body));
+    }
+    Ok((body, started))
 }
 
 /// Whether the connection still answers, any status included: a quiet

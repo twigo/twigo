@@ -220,7 +220,7 @@ test.each([
     const core = fakeCore();
     render(<Toaster />);
     const offers = new KubeconfigOffers(core.backend, vi.fn());
-    presentOffers(offers);
+    presentOffers(() => undefined, offers);
     const watching = offers.watch();
     core.answerWatch([]);
     await watching;

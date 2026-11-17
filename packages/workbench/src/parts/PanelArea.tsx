@@ -56,11 +56,7 @@ export function PanelArea() {
   useInertWhile(ref, "panel");
 
   return (
-    <section
-      ref={ref}
-      aria-label="Panel"
-      className="h-full min-h-0 border-t border-border bg-panel"
-    >
+    <section ref={ref} aria-label="Panel" className="h-full min-h-0 bg-panel">
       {space && (
         <SpaceDock
           key={space.id}

@@ -420,22 +420,29 @@ test("Open in Browser opens the local address through the workbench, Copy Addres
   expect(write).toHaveBeenCalledWith("localhost:8080");
 });
 
-test("Stop stops the forward and Start brings it back, from the same tab", async () => {
-  const { start, open, backend } = await mounted();
+test("Stop stops the forward and Start brings it back, from the same tab, which says it ended while it is stopped", async () => {
+  const { workbench, start, open, backend } = await mounted();
   const calls = recording(backend);
   const forward = await start(API, 80);
-  await open(forward);
+  const uri = await open(forward);
+  const tabSays = () => workbench.editors.resolve(uri)?.session?.state(uri);
+  expect(tabSays()).toBe("running");
   fireEvent.click(button("Stop"));
   await settle(6);
   expect(calls("forward_stop")).toEqual([forward.id]);
   expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
   button("Start");
   absent("Stop");
+  expect(tabSays()).toBe("ended");
+  expect(
+    document.querySelector(".dv-tab [data-session=ended]")?.textContent,
+  ).toContain("ended");
 
   fireEvent.click(button("Start"));
   await later(READY_AFTER_MS + 100);
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
   expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
+  expect(tabSays()).toBe("running");
 });
 
 test("Remove removes the forward and closes its tab", async () => {
@@ -486,7 +493,7 @@ test("a local port that is in use starts nothing on another by itself: the next 
   });
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
+    "QA8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
   ]);
   await later(5000);
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: 8080 }]);
@@ -514,19 +521,20 @@ test("a stopped forward that is moved onto a busy port is not forwarded, and say
   });
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so auth-api:http is not forwarded.Use 8081",
+    "QA8080 is in use by another process or forward, so auth-api:http is not forwarded.Use 8081",
   ]);
 });
 
-test("a start that fails says the target's own failure in a toast, which neither bind answer does", async () => {
-  const { start, open } = await mounted("forwardFailed");
+test("a start that fails says the target's own failure in a toast, which neither bind answer does, and its tab says failed", async () => {
+  const { workbench, start, open } = await mounted("forwardFailed");
   const forward = await start(API, 80);
-  await open(forward);
+  const uri = await open(forward);
   fireEvent.click(button("Start"));
   await later(FAILS_AFTER_MS + 100);
+  expect(workbench.editors.resolve(uri)?.session?.state(uri)).toBe("failed");
   const [toast] = live();
   expect(toast).toMatch(
-    /^auth-api:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
+    /^QAauth-api:http → 8080 failed: pod \S+ refused the connection to port 8080: nothing listens on it/,
   );
   expect(toast).not.toContain("in use");
   expect(toast).not.toContain("below 1024");
@@ -571,7 +579,7 @@ test("a busy port's toast that is dismissed moves nothing: the forward stays whe
   });
   await settle(6);
   expect(live()).toEqual([
-    "8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
+    "QA8080 is in use by another process or forward, so auth-api:http stays on 8085.Use 8081",
   ]);
   fireEvent.click(toastButton("Dismiss"));
   await later(5000);
@@ -694,7 +702,7 @@ test("a start that the mode refuses says so as a warning in the gate's words, an
   expect(calls("forward_resume")).toEqual([{ id: forward.id, local: null }]);
   const [toast] = live();
   expect(toast).toMatch(
-    /^auth-api:http is not forwarded: qa is read-only by qa in /,
+    /^QAauth-api:http is not forwarded: qa is read-only by qa in /,
   );
   expect(toast).not.toContain("failed");
   const icon = document.querySelector(

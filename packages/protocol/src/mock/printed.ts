@@ -1,0 +1,101 @@
+/**
+ * The text the API server prints in a cell, as Rust's `printed` module reads
+ * it: a count, and a duration as Kubernetes prints one (`2y10d`, `5h3m`,
+ * `45s`), alone or in a pod's `3 (5m ago)`.
+ */
+import { parseDuration } from "@twigo/utils";
+import type { Column, Gvr } from "../generated";
+
+/**
+ * The columns of the built-in printers that print a duration in a string,
+ * by `group/resource/column`, as Rust's Table decoder knows them
+ * (`table::PRINTED`).
+ */
+const PRINTED: ReadonlySet<string> = new Set([
+  "/pods/Restarts",
+  "batch/cronjobs/Last Schedule",
+  "/events/Last Seen",
+  "/events/First Seen",
+  "events.k8s.io/events/Last Seen",
+  "events.k8s.io/events/First Seen",
+]);
+
+/** `gvr`'s columns as Rust's Table decoder reads them: those that print a duration say so. */
+export function printedColumns(gvr: Gvr, columns: readonly Column[]): Column[] {
+  return columns.map((column) =>
+    column.kind === "date" ||
+    PRINTED.has(`${gvr.group}/${gvr.resource}/${column.name}`)
+      ? { ...column, printsDuration: true }
+      : column,
+  );
+}
+
+export function count(text: string): number | null {
+  return /^[0-9]+$/.test(text) ? Number(text) : null;
+}
+
+function duration(text: string): number | null {
+  const ms = parseDuration(text);
+  return ms === undefined ? null : ms / 1000;
+}
+
+/** A duration the server printed: `5m`, or a pod's `3 (5m ago)` with the count of restarts. */
+export interface Printed {
+  readonly count: string | null;
+  /** In seconds. */
+  readonly ago: number;
+}
+
+export function parsePrinted(text: string): Printed | null {
+  const ago = duration(text);
+  if (ago !== null) return { count: null, ago };
+  if (!text.endsWith(" ago)")) return null;
+  const rest = text.slice(0, -" ago)".length);
+  const at = rest.indexOf(" (");
+  if (at < 0) return null;
+  const counted = rest.slice(0, at);
+  const since = duration(rest.slice(at + 2));
+  return count(counted) === null || since === null
+    ? null
+    : { count: counted, ago: since };
+}
+
+/** How much longer than its step one moment may print the same age, as Rust's `TOLERANCE_MS`. */
+const TOLERANCE_MS = 2000;
+
+const MINUTE = 60;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const YEAR = 365 * DAY;
+
+/** The step `HumanDuration` prints an age of `ago` seconds in, in seconds. */
+function step(ago: number): number {
+  if (ago < 10 * MINUTE) return 1;
+  if (ago < 8 * HOUR) return MINUTE;
+  if (ago < 8 * DAY) return HOUR;
+  if (ago < 8 * YEAR) return DAY;
+  return YEAR;
+}
+
+/**
+ * Whether `heldAt`, when `held` was printed, still dates `printed`, printed
+ * at `at`, as Rust's `printed::keeps_stamp` decides: the same age, less than
+ * its step gone, give or take the tolerance. Times are Unix milliseconds.
+ */
+export function keepsStamp(
+  held: string | null,
+  heldAt: number,
+  printed: string | null,
+  at: number,
+): boolean {
+  const now = printed === null ? null : parsePrinted(printed);
+  if (now === null) return true;
+  const then = held === null ? null : parsePrinted(held);
+  if (then === null) return false;
+  const passed = at - heldAt;
+  return (
+    then.ago === now.ago &&
+    -TOLERANCE_MS <= passed &&
+    passed < step(now.ago) * 1000 + TOLERANCE_MS
+  );
+}

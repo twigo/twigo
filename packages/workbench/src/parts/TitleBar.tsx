@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import {
   cn,
+  CutInTheMiddle,
   Kbd,
   Tooltip,
   TooltipContent,
@@ -10,7 +11,6 @@ import {
 } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
-import { cutText } from "./cutText";
 import { ModeChip, ModeChipCopy } from "./ModeChip";
 import {
   BAR_GAP,
@@ -146,33 +146,6 @@ function Breadcrumb({
   );
 }
 
-/**
- * A text CSS can cut only at its end, cut in the middle instead, with the head
- * and the tail fixed. The middle's floor of 2em holds a whole glyph and the
- * ellipsis: narrower, Chrome clips the ellipsis and leaves a letter that is
- * not in the text. Its `white-space` stays the grid's `pre`, which `truncate`
- * would turn to `nowrap` and drop the spaces at the ends.
- */
-function CutInTheMiddle({
-  text,
-  floor,
-  separator,
-}: {
-  text: string;
-  floor: number;
-  separator: string | RegExp;
-}) {
-  const cut = cutText(text, floor, separator);
-  if (!cut) return <span className="whitespace-pre">{text}</span>;
-  return (
-    <span className="grid grid-cols-[auto_minmax(2em,1fr)_auto] whitespace-pre">
-      <span>{cut.head}</span>
-      <span className="overflow-hidden text-ellipsis">{cut.middle}</span>
-      <span>{cut.tail}</span>
-    </span>
-  );
-}
-
 /** A crumb with no handler is the hidden copy that measures one. */
 function Crumb({
   label,
@@ -230,7 +203,7 @@ function CommandCenter({
           style={folded ? undefined : { width: SEARCH_FIELD }}
           className={cn(
             SEARCH,
-            "bg-content/5 shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-content/8 hover:text-content focus-visible:shadow-[var(--focus-ring)]",
+            "bg-well outline-none hover:bg-well-hover hover:text-content focus-visible:shadow-[var(--focus-ring)]",
           )}
         >
           <SearchFace space={space} folded={folded} />
@@ -260,7 +233,11 @@ function SearchFace({
       {!folded && (
         <span className="flex-1 truncate text-left">{searchLabel(space)}</span>
       )}
-      {binding && <Kbd>{keybindings.label(binding.presses)}</Kbd>}
+      {binding && (
+        <Kbd className="rounded-[3px]">
+          {keybindings.label(binding.presses)}
+        </Kbd>
+      )}
     </>
   );
 }

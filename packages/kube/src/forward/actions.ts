@@ -45,7 +45,7 @@ export function registerForwardActions(
   forwards: Forwards,
 ): void {
   const { backend, commands, editors, menus, quickAccess } = workbench;
-  const told = tellFailure(forwards);
+  const told = tellFailure(workbench, forwards);
 
   /** The forward its caller names, else the one selected in the Port forwards list, whose keys name no one. */
   const forwardOf = (args: unknown): Forward | undefined => {
@@ -64,7 +64,15 @@ export function registerForwardActions(
     );
     if (started) {
       const stays = listensOn(forward).length > 0 ? forward.local : undefined;
-      tellBind(workbench, started, targetWords(forward), again, told, stays);
+      tellBind(
+        workbench,
+        forward.target.space,
+        started,
+        targetWords(forward),
+        again,
+        told,
+        stays,
+      );
     }
   };
 

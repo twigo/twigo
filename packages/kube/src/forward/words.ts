@@ -1,6 +1,6 @@
 import type { Forward } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { modeLabel } from "@twigo/workbench";
+import { modeLabel, type SessionState } from "@twigo/workbench";
 
 /** The target's port as a person names it: `http`, or its number when it has no name. */
 export function portLabel({ port, portName }: Forward): string {
@@ -76,6 +76,22 @@ export function stateOf({ state, queued }: Forward): Shown {
         : { label: "Failed", tone: "error", detail: state.error.message };
     case "stopped":
       return { label: "Stopped", tone: "idle", hollow: true };
+  }
+}
+
+/** How a tab says a forward stands: one that the mode refuses has ended, and only a failure is told as one. */
+export function sessionOf({ state }: Forward): SessionState {
+  switch (state.state) {
+    case "starting":
+    case "reconnecting":
+      return "connecting";
+    case "restored":
+    case "ready":
+      return "running";
+    case "stopped":
+      return "ended";
+    case "failed":
+      return state.error.blocked ? "ended" : "failed";
   }
 }
 

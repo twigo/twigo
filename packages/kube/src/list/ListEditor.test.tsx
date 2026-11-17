@@ -558,9 +558,10 @@ test("opening the object from the details keeps the list in a tab of its own", a
   fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
   await settle();
   const sidebar = screen.getByRole("region", { name: "Primary Side Bar" });
+  const views = screen.getByRole("tablist", { name: "Views of the object" });
   const tabs = screen
     .getAllByRole("tab")
-    .filter((tab) => !sidebar.contains(tab))
+    .filter((tab) => !sidebar.contains(tab) && !views.contains(tab))
     .map((tab) => tab.textContent.trim());
   expect(tabs[0]).toBe("Pods");
   expect(tabs).toHaveLength(2);

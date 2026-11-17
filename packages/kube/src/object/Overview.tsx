@@ -412,7 +412,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
         </Button>
       </div>
       {showing && (
-        <pre className="mb-1 ml-0 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
+        <pre className="mb-1 ml-0 max-h-80 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs break-all whitespace-pre-wrap">
           {shown.value}
           {shown.binary && (
             <span className="mt-1 block font-sans text-support">base64</span>
@@ -490,7 +490,7 @@ function DataRow({
         (read.state === "failed" ? (
           <p className="mb-1 ml-4.5 text-xs text-error">{read.message}</p>
         ) : (
-          <pre className="mb-1 ml-4.5 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
+          <pre className="mb-1 ml-4.5 max-h-80 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
             {read.state === "read" ? read.text : ""}
           </pre>
         ))}

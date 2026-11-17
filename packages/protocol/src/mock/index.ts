@@ -62,6 +62,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
+import { printedColumns } from "./printed";
 import {
   isShellScenario,
   joins,
@@ -690,7 +691,7 @@ export function createMockBackend(
       const due = Math.floor(((Date.now() - started) * rate) / 1000) - applied;
       if (due <= 0) return;
       applied += due;
-      for (const target of clusters.values()) target.change(due);
+      for (const target of clusters.values()) target.change(due, Date.now());
       for (const sub of subscriptions.values()) sub.touch();
     }, RATE_TICK_MS);
   };
@@ -715,7 +716,10 @@ export function createMockBackend(
         );
       }
       const selected = parseFields(query.fieldSelector, kind);
-      const served = queryColumns(kind.columns, query);
+      const served = queryColumns(
+        printedColumns(query.gvr, kind.columns),
+        query,
+      );
       const join =
         kind.metrics && metrics.served
           ? new MetricsJoin(

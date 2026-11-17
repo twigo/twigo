@@ -160,7 +160,7 @@ test("a new manifest, and an object on its YAML tab, ask for the focus of the vi
   await settle();
   expect(asked()).toEqual([manifest]);
 
-  fireEvent.click(screen.getByText("YAML"));
+  fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
   act(() => {
     workbench.editors.open(object);
   });

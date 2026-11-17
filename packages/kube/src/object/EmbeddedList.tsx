@@ -24,14 +24,17 @@ import {
 import {
   cellTone,
   columnRule,
+  rowFinished,
   rowTone,
   statusColumn,
   type CellKind,
 } from "../columns";
 import { kindIcon } from "../kinds";
+import { decideRows } from "../list/alarm";
 import { CellView, type ShownColumn } from "../list/cells";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { metricsNote, readsMetrics } from "../list/metrics";
+import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
@@ -75,7 +78,7 @@ export function EmbeddedList({
   id: string;
   onOpen: (target: ObjectRef) => void;
 }) {
-  const { backend } = useWorkbench();
+  const { backend, spaces } = useWorkbench();
   const register = useListRegistration(EMBEDDED_KEYS, ["peek", "filter"]);
   const { gvr } = list;
   const countBy = statusColumn(gvr);
@@ -144,11 +147,16 @@ export function EmbeddedList({
   useEffect(() => {
     setMetrics(reads);
   }, [setMetrics, reads]);
+  const decide = decideRows(
+    (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    (row) => rowFinished(gvr, countBy, snapshot.columns, row),
+    columns,
+  );
   const item = (index: number): GridItem<Row, never> | undefined => {
     const id = snapshot.ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const tone = rowTone(gvr, countBy, snapshot.columns, row);
+    const { tone } = decide(row);
     return {
       type: "row",
       id: row.id,
@@ -187,7 +195,7 @@ export function EmbeddedList({
   if (!loading && snapshot.total === 0)
     return (
       <EmptyState icon={Icon} density="inline" className="px-0">
-        No {gvr.resource}
+        {`No ${gvr.resource} in ${whereWords(spaces, space, query.namespaces)}`}
       </EmptyState>
     );
   const rows = Math.min(Math.max(snapshot.total, loading ? 3 : 1), VISIBLE);
@@ -234,14 +242,16 @@ export function EmbeddedList({
           onRange={onRange}
           cell={(row, column) => {
             const shown = byName.get(column.id);
+            if (!shown) return undefined;
+            const { tone, alarmed, finished } = decide(row);
             return (
-              shown && (
-                <CellView
-                  row={row}
-                  column={shown}
-                  tone={rowTone(gvr, countBy, snapshot.columns, row)}
-                />
-              )
+              <CellView
+                row={row}
+                column={shown}
+                tone={tone}
+                alarmed={alarmed}
+                finished={finished}
+              />
             );
           }}
           selected={selected}

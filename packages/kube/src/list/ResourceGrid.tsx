@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Columns3 } from "lucide-react";
 import {
   type ListQuery,
@@ -32,6 +38,7 @@ import {
   type ColumnRule,
   HEALTH,
   healthValues,
+  rowFinished,
   rowTone,
   statusColumn,
 } from "../columns";
@@ -42,10 +49,12 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { decideRows } from "./alarm";
 import { CellView, type ShownColumn } from "./cells";
 import { leaving } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
 import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
+import { namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -102,7 +111,8 @@ function Grid({
   onRetry: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, spaces, menus, keys, commands, catalog } = workbench;
+  const { backend, spaces, menus, keys, commands, catalog, editors } =
+    workbench;
   const {
     presets,
     states,
@@ -135,7 +145,7 @@ function Grid({
     space: input.space,
     gvr,
     namespaced: resource.namespaced,
-    namespaces: [...(input.namespaces ?? spaces.state(input.space).namespaces)],
+    namespaces: [...namespacesOf(spaces, input)],
     labelSelector: input.labels ?? null,
     fieldSelector: null,
     owners: null,
@@ -296,6 +306,11 @@ function Grid({
       ),
     [grouping, snapshot.groups, snapshot.total],
   );
+  const decide = decideRows(
+    (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    (row) => rowFinished(gvr, countBy, snapshot.columns, row),
+    columns,
+  );
   const item = (index: number): GridItem<Row, RowGroup> | undefined => {
     const slot = items.at(index);
     if (!slot) return undefined;
@@ -309,7 +324,7 @@ function Grid({
     const id = snapshot.ids[slot.row - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
-    const tone = rowTone(gvr, countBy, snapshot.columns, row);
+    const { tone } = decide(row);
     return {
       type: "row",
       id: row.id,
@@ -408,6 +423,12 @@ function Grid({
     },
     [register, grids, uri],
   );
+  const problem = isProblem(snapshot.status.state);
+  // The problem takes the grid's place, and with it the focus it held, which
+  // falls to the page.
+  useLayoutEffect(() => {
+    if (problem) editors.keepFocus("editor");
+  }, [problem, editors]);
   const lookup = keys.lookup(grid);
   const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
     commands.referenced(prefix),
@@ -439,7 +460,7 @@ function Grid({
     };
   };
 
-  if (isProblem(snapshot.status.state))
+  if (problem)
     return (
       <ViewStatus
         status={snapshot.status}
@@ -450,6 +471,9 @@ function Grid({
 
   const Icon = kindIcon(gvr);
   const filtered = text !== "" || picked !== undefined;
+  const scope = resource.namespaced ? query.namespaces : [];
+  const narrowed = scope.length > 0;
+  const where = whereWords(spaces, input.space, scope);
   return (
     <DataGrid<Row, RowGroup>
       label={title}
@@ -473,14 +497,16 @@ function Grid({
       onRange={onRange}
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
+        if (!shownColumn) return undefined;
+        const { tone, alarmed, finished } = decide(row);
         return (
-          shownColumn && (
-            <CellView
-              row={row}
-              column={shownColumn}
-              tone={rowTone(gvr, countBy, snapshot.columns, row)}
-            />
-          )
+          <CellView
+            row={row}
+            column={shownColumn}
+            tone={tone}
+            alarmed={alarmed}
+            finished={finished}
+          />
         );
       }}
       group={(group) => (
@@ -563,7 +589,7 @@ function Grid({
         filtered ? (
           <EmptyState
             icon={Icon}
-            title={`No matching ${title.toLowerCase()}`}
+            title={`No matching ${title.toLowerCase()} in ${where}`}
             action={{
               label: "Clear filters",
               onClick: () => {
@@ -578,10 +604,14 @@ function Grid({
         ) : (
           <EmptyState
             icon={Icon}
-            title={`No ${title.toLowerCase()}`}
+            title={`No ${title.toLowerCase()} in ${where}`}
             className="py-16"
           >
-            <p>Nothing of this kind exists in the space.</p>
+            <p>
+              {narrowed
+                ? "Nothing of this kind exists in these namespaces."
+                : "Nothing of this kind exists in the space."}
+            </p>
           </EmptyState>
         )
       }

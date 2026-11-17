@@ -39,8 +39,8 @@ async fn resource_version(client: &Client, path: &str) -> Box<str> {
         .request_text(request::list(&Collection::table(path), 1, None))
         .await
         .unwrap();
-    TableDecoder::new()
-        .decode_list(body.as_bytes())
+    TableDecoder::new("pods")
+        .decode_list(body.as_bytes(), jiff::Timestamp::now())
         .unwrap()
         .resource_version
 }

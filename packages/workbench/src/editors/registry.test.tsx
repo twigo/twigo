@@ -7,7 +7,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { click, stripOf, tabOf, testWorkbench } from "../testing";
+import { click, stripOf, tabOf, tabsIn, testWorkbench } from "../testing";
 import type { Workbench } from "../services";
 import { WorkbenchView } from "../WorkbenchView";
 
@@ -426,12 +426,41 @@ test("pressing a tab's X does not activate its tab before the click closes it", 
     screen.getByLabelText("field://c").focus();
   });
   const x = screen.getByRole("button", { name: "Close a" });
+  fireEvent.pointerDown(x, { button: 0 });
   fireEvent.mouseDown(x, { button: 0 });
   await elapse();
   expect(editors.active).toBe("field://c");
   expect(document.activeElement).toBe(screen.getByLabelText("field://c"));
   fireEvent.click(x);
   expect(document.querySelector('[data-tab-panel-id="field://a"]')).toBeNull();
+});
+
+const NATIVE_CONTROLS = "button, select, input, textarea, [contenteditable]";
+
+function pressByAccessibility(tab: HTMLElement) {
+  const target =
+    tab.querySelector(NATIVE_CONTROLS) ?? tab.querySelector(".twigo-tab-title");
+  if (!target) throw new Error("nothing to press in the tab");
+  fireEvent.mouseDown(target, { button: 0, detail: 0 });
+  fireEvent.mouseUp(target, { button: 0, detail: 0 });
+  fireEvent.click(target, { button: 0, detail: 0 });
+}
+
+test("an accessibility press on a tab shows its editor like a click and closes nothing", async () => {
+  const { workbench, editors } = await mounted();
+  withFields(workbench);
+  act(() => {
+    editors.open("field://a");
+    editors.open("field://b");
+  });
+  act(() => {
+    screen.getByLabelText("field://b").focus();
+  });
+  pressByAccessibility(tabOf("field://a"));
+  await elapse();
+  expect(tabsIn("editor")).toEqual(["field://a", "field://b"]);
+  expect(editors.active).toBe("field://a");
+  expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
 });
 
 test("a click on a preview tab shows its editor and leaves it a preview", async () => {

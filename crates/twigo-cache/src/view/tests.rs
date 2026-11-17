@@ -12,6 +12,14 @@ fn column(name: &str, kind: ColumnKind, priority: i32) -> Column {
         kind,
         format: "".into(),
         priority,
+        prints_duration: false,
+    }
+}
+
+fn printing(name: &str) -> Column {
+    Column {
+        prints_duration: true,
+        ..column(name, ColumnKind::String, 0)
     }
 }
 
@@ -20,7 +28,7 @@ fn pod_columns() -> Arc<[Column]> {
         column("Name", ColumnKind::String, 0),
         column("Ready", ColumnKind::String, 0),
         column("Status", ColumnKind::String, 0),
-        column("Restarts", ColumnKind::String, 0),
+        printing("Restarts"),
         column("Age", ColumnKind::Age, 0),
         column("IP", ColumnKind::String, 1),
     ])
@@ -35,7 +43,8 @@ fn pod(namespace: &str, name: &str, status: &str, restarts: &str) -> Row {
             resource_version: "1".into(),
             labels: Box::new([("app".into(), name.split('-').next().unwrap_or(name).into())]),
             owners: Box::default(),
-            created: Some(jiff::Timestamp::UNIX_EPOCH),
+            created: Some(0),
+            received: 0,
             generated: None,
         },
         cells: Box::new([
@@ -201,6 +210,108 @@ fn a_change_that_shows_nothing_new_sends_nothing() {
     same.meta.resource_version = "2".into();
     rig.store.upsert(same);
     assert_eq!(rig.flush(), None);
+}
+
+fn received(mut row: Row, seconds: i64) -> Row {
+    row.meta.received = seconds * 1000;
+    row
+}
+
+#[test]
+fn the_same_moment_printed_again_sends_nothing() {
+    let mut rig = Rig::new(&query());
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 100));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "1 (5m ago)"), 100));
+    let first = rig.flush().unwrap();
+    assert_eq!(first.upserts[0].received, "1970-01-01T00:01:40.000Z");
+
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 400));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "1 (5m ago)"), 101));
+    assert_eq!(rig.flush(), None);
+}
+
+fn cronjob(name: &str, last_schedule: &str, seconds: i64) -> Row {
+    let mut row = received(pod("a", name, "", ""), seconds);
+    row.cells = Box::new([
+        Cell::Text(name.into()),
+        Cell::Text("0 * * * *".into()),
+        Cell::Text(last_schedule.into()),
+        Cell::Age,
+    ]);
+    row
+}
+
+#[test]
+fn a_moved_moment_under_the_same_text_sends_the_row() {
+    let mut sorted = query();
+    sorted.sort = Some(Sort {
+        column: "Last Schedule".to_owned(),
+        descending: false,
+    });
+    let mut rig = Rig::new(&sorted);
+    rig.store.set_columns(Some(&Arc::from([
+        column("Name", ColumnKind::String, 0),
+        column("Schedule", ColumnKind::String, 0),
+        printing("Last Schedule"),
+        column("Age", ColumnKind::Age, 0),
+    ])));
+    rig.store.upsert(cronjob("hourly", "25m", 1500));
+    rig.store.upsert(cronjob("other", "20m", 1500));
+    let first = rig.flush().unwrap();
+    assert_eq!(ids(&first), ["kind-test/a/other", "kind-test/a/hourly"]);
+
+    rig.store.upsert(cronjob("hourly", "0s", 3600));
+    rig.store.upsert(cronjob("hourly", "25m", 5100));
+    let batch = rig.flush().expect("the row, whose moment moved");
+    assert_eq!(ids(&batch), ["kind-test/a/hourly", "kind-test/a/other"]);
+    assert_eq!(batch.upserts.len(), 1);
+    assert_eq!(batch.upserts[0].id.0, "kind-test/a/hourly");
+    assert_eq!(batch.upserts[0].received, "1970-01-01T01:25:00.000Z");
+}
+
+#[test]
+fn a_row_that_changes_and_changes_back_between_flushes_returns_with_the_stamp_it_was_sent_with() {
+    let mut rig = Rig::new(&query());
+    rig.view.set_window(0, 1);
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 100));
+    rig.store
+        .upsert(received(pod("a", "web-2", "Running", "0"), 100));
+    rig.flush().unwrap();
+
+    rig.store
+        .upsert(received(pod("a", "web-1", "NotReady", "3 (11d ago)"), 400));
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "3 (11d ago)"), 700));
+    assert_eq!(rig.flush(), None, "it reads as it did, so nothing is sent");
+
+    rig.view.set_window(1, 2);
+    rig.flush().unwrap();
+    rig.view.set_window(0, 1);
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.upserts[0].received, "1970-01-01T00:01:40.000Z");
+
+    rig.store
+        .upsert(received(pod("a", "web-1", "Running", "4 (10s ago)"), 700));
+    let batch = rig.flush().unwrap();
+    assert_eq!(batch.upserts[0].received, "1970-01-01T00:11:40.000Z");
+}
+
+#[test]
+fn the_columns_say_which_print_a_duration() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    let columns = rig.flush().unwrap().columns.unwrap();
+    let printing: Vec<&str> = columns
+        .iter()
+        .filter(|column| column.prints_duration)
+        .map(|column| column.name.as_str())
+        .collect();
+    assert_eq!(printing, ["Restarts"]);
 }
 
 #[test]
@@ -816,8 +927,7 @@ fn random_change_sets(seeds: std::ops::Range<u64>, names: usize, rounds: usize, 
                     STATUSES[random.usize(..STATUSES.len())],
                     RESTARTS[random.usize(..RESTARTS.len())],
                 );
-                row.meta.created =
-                    Some(jiff::Timestamp::from_second(random.i64(0..1_000)).expect("a timestamp"));
+                row.meta.created = Some(random.i64(0..1_000) * 1000);
                 rig.store.upsert(row.clone());
                 rows.insert(key, row);
             }
@@ -1034,7 +1144,7 @@ fn a_row_does_not_take_a_sample_that_was_taken_before_it_was_created() {
         let mut rig = Rig::new(&asked);
         rig.view.set_api(served());
         let mut entered = pod("a", "web-1", "CrashLoopBackOff", "0");
-        entered.meta.created = Some(at(created));
+        entered.meta.created = Some(at(created).as_millisecond());
         rig.store.upsert(entered);
         let batch = rig.flush_with(held).unwrap();
         assert_eq!(

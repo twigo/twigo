@@ -32,10 +32,10 @@ pub struct Container {
 
 impl Sample {
     /// Taken before an object was created, a sample is of another that had its name.
-    pub fn taken_since(&self, created: Option<Timestamp>) -> bool {
+    pub fn taken_since(&self, created: Option<i64>) -> bool {
         self.sampled
             .zip(created)
-            .is_none_or(|(sampled, created)| sampled >= created)
+            .is_none_or(|(sampled, created)| sampled.as_millisecond() >= created)
     }
 }
 

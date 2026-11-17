@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
@@ -51,13 +52,22 @@ pub enum DecodeError {
 }
 
 /// Decodes the responses of one upstream: its list pages and the events of
-/// its watch connections.
+/// its watch connections, each item stamped with the time the response
+/// `received` arrived.
 pub trait Decode: Send + 'static {
     type Item;
 
-    fn decode_list(&mut self, body: &[u8]) -> Result<Page<Self::Item>, DecodeError>;
+    fn decode_list(
+        &mut self,
+        body: &[u8],
+        received: Timestamp,
+    ) -> Result<Page<Self::Item>, DecodeError>;
 
-    fn decode_event(&mut self, line: &[u8]) -> Result<Event<Self::Item>, DecodeError>;
+    fn decode_event(
+        &mut self,
+        line: &[u8],
+        received: Timestamp,
+    ) -> Result<Event<Self::Item>, DecodeError>;
 
     /// The columns of a Table upstream; the decoder keeps them across pages
     /// and reconnects.

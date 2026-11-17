@@ -1,0 +1,26 @@
+import type { Workbench } from "@twigo/workbench";
+import type { ListInput } from "../uri";
+
+/** The namespaces a list reads: its own when its URI names them, else its space's scope. */
+export function namespacesOf(
+  spaces: Workbench["spaces"],
+  input: ListInput,
+): readonly string[] {
+  return input.namespaces ?? spaces.state(input.space).namespaces;
+}
+
+/**
+ * Where a list looks, for the words of an empty one: the space's contexts,
+ * then the namespaces it is narrowed to, `prod-eu · payments`.
+ */
+export function whereWords(
+  spaces: Workbench["spaces"],
+  space: string,
+  namespaces: readonly string[],
+): string {
+  const contexts = spaces.get(space)?.contexts.join(" + ") ?? space;
+  return [
+    contexts,
+    ...(namespaces.length > 0 ? [namespaces.join(", ")] : []),
+  ].join(" · ");
+}

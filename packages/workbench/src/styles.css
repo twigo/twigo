@@ -36,18 +36,17 @@
 .twigo-mode-chip {
   color: var(--twigo-context-ink);
   background: color-mix(in oklab, var(--twigo-context) 14%, transparent);
-  box-shadow: inset 0 0 0 1px
-    color-mix(in oklab, var(--twigo-context) 38%, transparent);
 }
-/* Dockview on the design tokens. Tabs connect to their editor (VS Code
+/* Dockview on the design tokens. Tabs connect to their content (VS Code
    1.144 dropped detached pill tabs for this): the strip takes the shell's
-   surface, the active tab the editor's, open into it. */
+   surface, the active tab the editor's, open into it, in the editor area and
+   in the panel alike. */
 .twigo-dockview.dockview-theme-light {
   color-scheme: light;
   --dv-background-color: var(--editor);
   --dv-group-view-background-color: var(--editor);
   --dv-tabs-and-actions-container-background-color: var(--shell);
-  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tabs-and-actions-container-height: 32px;
   --dv-tabs-and-actions-container-font-size: var(--text-body);
   --dv-activegroup-visiblepanel-tab-background-color: var(--editor);
   --dv-activegroup-visiblepanel-tab-color: var(--content);
@@ -74,6 +73,21 @@
 }
 .twigo-dockview .dv-tabs-container {
   scrollbar-width: none;
+  /* Tabs sit on the strip's bottom edge, 4 px in from its left and 2 px apart
+     (`TABS_START` and `TABS_GAP` in strip.ts). */
+  align-items: flex-end;
+  gap: 2px;
+  padding-left: 4px;
+  /* The strip's bottom edge is 68 px down, a fractional device pixel at most
+     interface zooms, and the edge of anything drawn there is anti-aliased: the
+     active tab, clipped by its scrolling list at that edge, left a faint row of
+     the strip's line and fill under itself. The list reaches 2 px past the
+     strip, under the content, which paints above it and takes the pointer
+     there, and the active tab's fill goes down to the list's edge. */
+  box-sizing: border-box;
+  height: calc(100% + 2px);
+  margin-bottom: -2px;
+  padding-bottom: 2px;
 }
 .twigo-dockview .dv-tabs-container::-webkit-scrollbar {
   display: none;
@@ -86,32 +100,153 @@
 .twigo-dockview .dv-right-actions-container {
   flex-shrink: 100000;
 }
-/* An editor tab asks for its title's width, up to 220 px, where the title
-   cuts. A panel tab has none, so that a logs title reads whole. */
-.twigo-dockview:not(.twigo-panel) .dv-tabs-container > .dv-tab {
-  max-width: 220px;
+.twigo-dockview .dv-groupview > .dv-content-container {
+  position: relative;
+  z-index: 1;
 }
-/* Centred above the strip's bottom line, a little high, since lowercase
-   titles read low when their capitals are centred. */
+/* A tab keeps a 1 px transparent edge on its left, top and right, so that the
+   active tab's line moves nothing. */
 .twigo-dockview .dv-tabs-container > .dv-tab {
-  padding: 0 2px 2px 4px;
+  box-sizing: border-box;
+  height: 28px;
+  min-width: 72px;
+  padding: 0 6px 0 10px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
 }
-/* The active tab covers the strip's bottom line. Above it and left of the
-   first tab the part's own separators already draw a line; a second one
-   there would double it. */
-.twigo-dockview .dv-tab.dv-active-tab {
-  box-shadow:
-    inset 1px 0 0 var(--border),
-    inset -1px 0 0 var(--border);
+/* A title that ends in a name is cut in the middle, and never below its floor:
+   a box narrower than the cut's head, middle and tail would draw them over what
+   follows the title. Any other title is cut at its end. */
+.twigo-dockview .twigo-tab-title[data-cut="middle"] {
+  min-width: min-content;
 }
-.twigo-dockview .dv-tab.dv-active-tab:first-child {
-  box-shadow: inset -1px 0 0 var(--border);
+.twigo-dockview .twigo-tab-title[data-cut="end"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* An editor tab asks for its title's width, and the title is capped at 220 px
+   (`TAB_MAX` in strip.ts) less the 63 px the rest of the tab takes, so a tab
+   whose title is cut at its end and that only Close follows comes to 220 px.
+   A state mark grows the tab by its own width, and a title cut in the middle
+   never goes below its floor, which can be wider than the cap, so such tabs
+   pass 220 px. A panel tab has no cap, so that a logs title reads whole. */
+.twigo-dockview:not(.twigo-panel) .twigo-tab-title {
+  max-width: 157px;
+}
+/* The active tab covers the strip's bottom line, so it opens into its
+   content. */
+.twigo-dockview .dv-tabs-container > .dv-tab.dv-active-tab {
+  border-color: var(--border);
+  box-shadow: 0 2px 0 var(--editor);
+}
+/* Dockview rings a focused tab with an !important outline in the divider's
+   colour, which is transparent here, so the ring is ours. */
+.twigo-dockview .dv-tab:focus-visible::after,
+.twigo-dockview .dv-tab:has(:focus-visible)::after {
+  outline: none !important;
+  border-radius: inherit;
+  box-shadow: inset var(--focus-ring);
+}
+/* Dockview's colour rules for a group's tabs outrank any rule of ours on the
+   tab itself, so the hover fill goes in by the variables they read. */
 .twigo-dockview .dv-tabs-container > .dv-tab.dv-inactive-tab:hover {
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--row-hover);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--row-hover);
+}
+.twigo-dockview .dv-tabs-container .dv-tab.dv-inactive-tab .lucide {
+  opacity: 0.7;
+}
+/* An ended session's icon is at half strength, its tab active or not. */
+.twigo-dockview .dv-tab [data-session="ended"] .lucide:not(.twigo-tab-x) {
+  opacity: 0.5;
+}
+/* Dockview's overflow button, when the tabs outgrow the strip: an icon alone,
+   so its count of hidden tabs goes, and 24 px of it with 4 px after it
+   (`OVERFLOW_BUTTON` in strip.ts). */
+.twigo-dockview .dv-tabs-overflow-dropdown-root {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+.twigo-dockview .dv-tabs-overflow-dropdown-default {
+  box-sizing: border-box;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--support);
+}
+.twigo-dockview .dv-tabs-overflow-dropdown-default:hover {
   background-color: var(--row-hover);
 }
-.twigo-dockview .dv-tab.dv-inactive-tab .lucide {
-  opacity: 0.7;
+.twigo-dockview .dv-tabs-overflow-dropdown-default > span {
+  display: none;
+}
+/* Its list opens as Twigo's menus do: a popover of 8 px radius with 4 px of
+   padding, and rows of 28 px with 4 px, one step in. Dockview 8.8.3 places it
+   at the pointer, as an `absolute` box whose inline `top` and `left` are the
+   click's `clientY` and `clientX` less the root's popover anchor, so no CSS
+   reaches the button: 28 px of margin, the button's 24 and the menu's 4, keeps
+   the list from covering the button wherever it is clicked. That box is as
+   wide as the room right of the click, so the list takes its natural width
+   and dockview shifts it into view. It shifts it by 10 px inside its area's
+   element, and the area's pane clips what lies outside, so the list is held to
+   that element's size, which is why the element is a container: no wider than
+   it less 10 px on each side, and no taller than what is left under the strip
+   less 10 px, scrolling inside itself past that. Dockview's own cap on the
+   height stays in the `min`. */
+.twigo-dockview {
+  container-type: size;
+}
+.twigo-dockview .dv-tabs-overflow-container {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 176px;
+  max-width: calc(100cqw - 20px);
+  max-height: min(
+    50vh,
+    400px,
+    calc(100cqh - var(--dv-tabs-and-actions-container-height) - 10px)
+  );
+  margin-top: 28px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background-color: color-mix(in oklab, var(--popover) 90%, transparent);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(24px);
+  color: var(--popover-foreground);
+}
+.twigo-dockview .dv-tabs-overflow-container .dv-tab {
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background-color: transparent;
+  color: var(--popover-foreground);
+}
+/* A row reads as a menu's row: its text step, icon size and colour, and gap
+   (`ITEM` in dropdown-menu.tsx). The tab renderer sets 13 px, 16 px, the
+   support role and 6 px with utility classes, which only a rule outside the
+   utilities layer outranks. The strip's dimming of an inactive tab's icon
+   stops at the strip. */
+.twigo-dockview .dv-tabs-overflow-container .dv-react-part > * {
+  gap: 8px;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+}
+.twigo-dockview .dv-tabs-overflow-container .lucide:not(.twigo-tab-x) {
+  width: 14px;
+  height: 14px;
+  color: var(--popover-foreground);
+}
+.twigo-dockview .dv-tabs-overflow-container .dv-tab:hover {
+  background-color: var(--accent);
 }
 /* Close shows on the active tab or on hover. */
 .twigo-dockview .dv-tab .twigo-tab-close {
@@ -142,22 +277,4 @@
 /* A preview tab's title is italic until the tab is pinned (ARCHITECTURE 4.3). */
 .twigo-dockview .dv-tab [data-preview="true"] {
   font-style: italic;
-}
-
-/* The panel's tabs sit on the shell and mark the active one with a line
-   under its title, as the panel's mockup draws them: the panel holds
-   sessions, not documents, so its tabs do not open into their content. */
-.twigo-dockview.twigo-panel.dockview-theme-light {
-  --dv-tabs-and-actions-container-height: 32px;
-  --dv-activegroup-visiblepanel-tab-background-color: transparent;
-  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
-  --dv-background-color: var(--editor);
-  --dv-group-view-background-color: var(--editor);
-}
-.twigo-dockview.twigo-panel .dv-tab.dv-active-tab,
-.twigo-dockview.twigo-panel .dv-tab.dv-active-tab:first-child {
-  box-shadow: inset 0 -2px 0 var(--content);
-}
-.twigo-dockview.twigo-panel .dv-inactive-group .dv-tab.dv-active-tab {
-  box-shadow: inset 0 -2px 0 var(--quiet);
 }

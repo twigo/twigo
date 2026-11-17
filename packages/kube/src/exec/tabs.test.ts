@@ -609,6 +609,31 @@ test("a session that waits is live, and the tab says it queued", async () => {
   expect(tab.live).toBe(true);
 });
 
+test("the state a tab says follows the session, each change of it is told, and a URI with no tab has ended", async () => {
+  const { tabs, mounted, opens } = setup();
+  expect(tabs.state(URI)).toBe("ended");
+  await mounted();
+  expect(tabs.state(URI)).toBe("connecting");
+  const told = vi.fn();
+  tabs.changes.subscribe(told);
+  const send = (
+    message: Parameters<NonNullable<(typeof opens)[0]>["send"]>[0],
+  ) => {
+    told.mockClear();
+    opens[0]?.send(message);
+    return told.mock.calls.length;
+  };
+  expect(send({ state: "queued" })).toBe(1);
+  expect(tabs.state(URI)).toBe("connecting");
+  expect(send({ state: "running" })).toBe(1);
+  expect(tabs.state(URI)).toBe("running");
+  expect(send({ state: "ended", end: { reason: "exited", code: 1 } })).toBe(1);
+  expect(tabs.state(URI)).toBe("ended");
+
+  tabs.start(ATTACH_URI, ATTACH, shell(8));
+  expect(tabs.state(ATTACH_URI)).toBe("connecting");
+});
+
 test("a link opens only on a modifier click, and only as http or https", async () => {
   const { mounted, openUrl } = setup();
   const tab = await mounted();

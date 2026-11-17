@@ -19,7 +19,7 @@ test("the space entry names the active space's context, is filled with its colou
   });
   const entry = () => screen.getByTitle("Switch space");
   const filled = (color: string) =>
-    entry().classList.contains(`bg-context-${color}-solid`);
+    entry().classList.contains(`before:bg-context-${color}-solid`);
   expect(entry().textContent).toBe("prod-eu");
   expect(filled("red")).toBe(true);
 
@@ -34,6 +34,16 @@ test("the space entry names the active space's context, is filled with its colou
 
   fireEvent.click(entry());
   expect(workbench.quickAccess.session?.value).toBe("ctx ");
+});
+
+test("the space entry keeps its solid foreground while hovered", async () => {
+  const workbench = await testWorkbench();
+  render(<StatusEntries useEntries={useSpaceEntries} />, {
+    wrapper: inWorkbench(workbench),
+  });
+  const { classList } = screen.getByTitle("Switch space");
+  expect(classList.contains("text-context-solid-foreground")).toBe(true);
+  expect(classList.contains("hover:text-content")).toBe(false);
 });
 
 const settled = () =>

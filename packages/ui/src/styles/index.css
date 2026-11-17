@@ -47,8 +47,19 @@
   }
 
   [aria-selected="true"],
-  [data-cursor] {
+  [data-cursor],
+  [data-tone] {
     --quiet: var(--support);
+  }
+
+  [data-tone="error"] {
+    --band: var(--band-error);
+    --edge: var(--error);
+  }
+
+  [data-tone="warn"] {
+    --band: var(--band-warn);
+    --edge: var(--warn);
   }
 
   /* Native <button> doesn't show the pointer cursor and Tailwind's reset

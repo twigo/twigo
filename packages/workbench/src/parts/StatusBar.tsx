@@ -30,7 +30,7 @@ export function StatusBar() {
         color &&
         ({ "--twigo-context": `var(--context-${color})` } as CSSProperties)
       }
-      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.5 text-xs text-support shadow-[inset_0_1px_0_var(--border)]"
+      className="twigo-statusbar flex h-6 shrink-0 items-center justify-between gap-2 bg-shell px-0.75 text-xs text-support shadow-[inset_0_1px_0_var(--border)]"
     >
       <Side alignment="left" />
       <Side alignment="right" />
@@ -86,11 +86,18 @@ function EntryView({ entry }: { entry: StatusEntry }) {
       <span className="truncate">{entry.text}</span>
     </>
   );
+  const interactive = entry.run !== undefined || entry.popover !== undefined;
   const className = cn(
-    "flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums",
-    (entry.run !== undefined || entry.popover !== undefined) &&
-      "outline-none hover:bg-row-hover hover:text-content focus-visible:shadow-[inset_var(--focus-ring)]",
-    entry.accent && ["-ml-0.5 px-2.5", ACCENT[entry.accent]],
+    "relative isolate flex h-full items-center gap-1.5 px-1.5 whitespace-nowrap tabular-nums before:absolute before:inset-y-0.75 before:right-0 before:left-0 before:-z-10 before:rounded-sm",
+    interactive &&
+      "outline-none focus-visible:before:shadow-[inset_var(--focus-ring)]",
+    entry.accent
+      ? [
+          "-ml-0.75 px-2.5 font-medium text-context-solid-foreground before:inset-y-0 before:rounded-none",
+          interactive && "hover:before:brightness-90",
+          ACCENT[entry.accent],
+        ]
+      : interactive && "hover:text-content hover:before:bg-row-hover",
   );
   if (entry.popover) {
     const { open, onOpenChange, content } = entry.popover;
@@ -137,19 +144,12 @@ function EntryView({ entry }: { entry: StatusEntry }) {
   );
 }
 
-/**
- * A coloured context as a fill at the bar's start, flush with its edge, as
- * VS Code fills its remote indicator.
- */
+/** A coloured context as a block filling the bar's start, from its corner. */
 const ACCENT = {
-  red: "bg-context-red-solid text-context-solid-foreground font-medium hover:bg-context-red-solid/90",
-  orange:
-    "bg-context-orange-solid text-context-solid-foreground font-medium hover:bg-context-orange-solid/90",
-  yellow:
-    "bg-context-yellow-solid text-context-solid-foreground font-medium hover:bg-context-yellow-solid/90",
-  green:
-    "bg-context-green-solid text-context-solid-foreground font-medium hover:bg-context-green-solid/90",
-  blue: "bg-context-blue-solid text-context-solid-foreground font-medium hover:bg-context-blue-solid/90",
-  purple:
-    "bg-context-purple-solid text-context-solid-foreground font-medium hover:bg-context-purple-solid/90",
+  red: "before:bg-context-red-solid",
+  orange: "before:bg-context-orange-solid",
+  yellow: "before:bg-context-yellow-solid",
+  green: "before:bg-context-green-solid",
+  blue: "before:bg-context-blue-solid",
+  purple: "before:bg-context-purple-solid",
 } as const;

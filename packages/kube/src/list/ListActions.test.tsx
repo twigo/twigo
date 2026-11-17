@@ -6,7 +6,9 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { createMockBackend } from "@twigo/protocol/mock";
 import { STRIP_KEPT } from "@twigo/workbench";
+import { tabsIn } from "@twigo/workbench/testing";
 import { openList, settle, withScreenSize } from "../../test/workbench";
 
 const layout = withScreenSize(1280);
@@ -65,7 +67,7 @@ const typed = () =>
     ?.value.toString() ?? "";
 
 const withRoom = (room: number) => {
-  layout.resize(strip(), room + 54);
+  layout.resize(strip(), room + 38);
 };
 
 const counted = (row: HTMLElement) =>
@@ -474,4 +476,279 @@ test("the list in the strip is its own: a list with narrower actions does not in
   });
   await settle();
   expect(stageOf(actions())).toBe(3);
+});
+
+const CHIP_FULL = 140;
+const CHIP_FLOOR = 90;
+const CHIP_COUNT = 50;
+const CHIP_GLYPH = 24;
+const GAP = 8;
+
+function laidOutScoped() {
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const row = screen.queryByRole("button", {
+        name: /to the explorer$/,
+      })?.parentElement;
+      if (!row) return 0;
+      const hidden = [
+        ...(row.querySelector(":scope > [aria-hidden]")?.children ?? []),
+      ].map((copy) => copy.firstElementChild);
+      const natural = [CHIP_FULL, CHIP_FLOOR, CHIP_COUNT, CHIP_GLYPH];
+      const copy = hidden.indexOf(this);
+      if (copy >= 0) return natural[copy] ?? 0;
+      const shown = row.querySelector<HTMLElement>(
+        "[aria-label^='Namespace'], [aria-label^='This list shows']",
+      )?.parentElement?.parentElement;
+      const chip = shown?.firstElementChild;
+      const set = chip?.getAttribute("style")?.match(/max-width: (\d+)/)?.[1];
+      const max = set === undefined ? Infinity : Number(set);
+      const width = chip?.textContent.startsWith("+")
+        ? CHIP_COUNT
+        : chip?.textContent === ""
+          ? CHIP_GLYPH
+          : Math.max(CHIP_FLOOR, Math.min(CHIP_FULL, max));
+      if (this === shown) return width;
+      return this === row
+        ? (TAKES[stageOf(this)] ?? 0) + (shown ? GAP + width : 0)
+        : 0;
+    },
+  });
+}
+
+async function scopedList(names: readonly string[], uri?: string) {
+  laidOutScoped();
+  const workbench = await openList(undefined, uri);
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: names,
+    }));
+  });
+  await settle(1);
+  return workbench;
+}
+
+const chip = (name: string | RegExp = /^Namespaces?: /) =>
+  screen.getByRole("button", { name });
+const noChip = () =>
+  screen.queryByRole("button", { name: /^Namespaces?: / }) === null;
+const chipRoot = () => chip().parentElement;
+
+test("a narrowed scope shows as a chip with the name, and several namespaces as the first and how many more, the whole list in its label", async () => {
+  await scopedList(["payments"]);
+  expect(chip("Namespace: payments").textContent).toBe("payments");
+
+  cleanup();
+  await scopedList(["payments", "auth", "default"]);
+  expect(chip("Namespaces: payments, auth, default").textContent).toMatch(
+    /^payments\s*\+2$/,
+  );
+});
+
+test("no chip while the scope is every namespace, nor on a list of a kind that has no namespaces", async () => {
+  laidOutScoped();
+  const workbench = await openList();
+  expect(noChip()).toBe(true);
+
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments"],
+    }));
+  });
+  await settle(1);
+  expect(noChip()).toBe(false);
+
+  cleanup();
+  await scopedList(["payments"], "k8s-list://prod-eu/v1/nodes");
+  expect(noChip()).toBe(true);
+});
+
+test("a click on the chip opens the namespace picker, and its close mark goes back to every namespace", async () => {
+  const workbench = await scopedList(["payments", "auth"]);
+  fireEvent.click(chip());
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
+
+  fireEvent.click(screen.getByRole("button", { name: "Show all namespaces" }));
+  await settle(1);
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual([]);
+  expect(noChip()).toBe(true);
+});
+
+const OWN = "k8s-list://prod-eu/v1/pods?ns=checkout&q=api";
+
+test("a list pinned with namespaces of its own shows them as a label that no click and no scope changes: no close mark, one tab stop, the names in its tooltip", async () => {
+  laidOutScoped();
+  const workbench = await openList(undefined, OWN);
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["payments"],
+    }));
+  });
+  await settle(1);
+  const label = screen.getByRole("group", {
+    name: "This list shows checkout whatever the space's scope is",
+  });
+  expect(label.textContent).toBe("checkout");
+  expect(label.tabIndex).toBe(0);
+  expect(
+    screen.queryByRole("button", { name: /namespaces|checkout/i }),
+  ).toBeNull();
+
+  fireEvent.click(label);
+  expect(workbench.quickAccess.session).toBeUndefined();
+  expect(tabsIn("editor")).toEqual([OWN]);
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+
+  act(() => {
+    label.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toBe("Namespace: checkout");
+});
+
+test("the label of a list with namespaces of its own folds as the chip does and stays one tab stop with every name in its tooltip", async () => {
+  laidOutScoped();
+  await openList(
+    undefined,
+    "k8s-list://prod-eu/v1/pods?ns=payments,auth,default",
+  );
+  await settle(1);
+  const shown = [900, 420, 380].map((room) => {
+    withRoom(room);
+    const label = screen.getByRole("group", { name: /^This list shows/ });
+    act(() => {
+      label.focus();
+    });
+    expect(label.tabIndex).toBe(0);
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "Namespaces: payments, auth, default",
+    );
+    act(() => {
+      label.blur();
+    });
+    return label.textContent.trim();
+  });
+  expect(shown).toEqual(["payments+2", "+2", ""]);
+  expect(screen.queryByRole("button", { name: /namespaces/i })).toBeNull();
+});
+
+const formOf = () => {
+  if (screen.queryByRole("button", { name: "Show all namespaces" }) !== null) {
+    const max = chipRoot()?.style.maxWidth ?? "";
+    return max === "" ? "whole" : max;
+  }
+  return chip().textContent === "" ? "glyph" : "count";
+};
+
+const seen = (rooms: readonly number[]) =>
+  rooms.map((room) => {
+    withRoom(room);
+    return [stageOf(actions()), formOf()];
+  });
+
+test("the chip is the last to give way: the stages go first, then it is cut, down to what holds its name's head and tail, then folded to its glyph", async () => {
+  await scopedList(["payments"]);
+  expect(
+    seen([900, 848, 847, 808, 807, 588, 587, 478, 477, 450, 428, 427, 100]),
+  ).toEqual([
+    [0, "whole"],
+    [0, "whole"],
+    [1, "whole"],
+    [1, "whole"],
+    [2, "whole"],
+    [3, "whole"],
+    [4, "whole"],
+    [4, "whole"],
+    [4, "139px"],
+    [4, "112px"],
+    [4, "90px"],
+    [4, "glyph"],
+    [4, "glyph"],
+  ]);
+});
+
+test("several namespaces fold to the glyph and how many more follow before the glyph alone, the names in the label, a click on it still opening the picker, and the close mark gone", async () => {
+  const workbench = await scopedList(["payments", "auth", "default"]);
+  expect(seen([478, 477, 428, 427, 388, 387, 100])).toEqual([
+    [4, "whole"],
+    [4, "139px"],
+    [4, "90px"],
+    [4, "count"],
+    [4, "count"],
+    [4, "glyph"],
+    [4, "glyph"],
+  ]);
+  expect(screen.queryByRole("button", { name: "Show all namespaces" })).toBe(
+    null,
+  );
+  fireEvent.click(chip("Namespaces: payments, auth, default"));
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
+});
+
+test("a chip that folded comes back to a fuller form as the room grows, with a pixel to spare", async () => {
+  await scopedList(["payments", "auth", "default"]);
+  expect(seen([100, 388, 389, 430, 478, 479, 900])).toEqual([
+    [4, "glyph"],
+    [4, "glyph"],
+    [4, "count"],
+    [4, "92px"],
+    [4, "140px"],
+    [4, "whole"],
+    [0, "whole"],
+  ]);
+});
+
+test("the least a list keeps beside docked details counts the chip at its glyph", async () => {
+  await scopedList(["payments"]);
+  withRoom(900);
+  fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
+  await settle(1);
+  expect(grid().parentElement?.style.minWidth).toBe(
+    `${String(STRIP_KEPT + (TAKES[4] ?? 0) + GAP + CHIP_GLYPH)}px`,
+  );
+});
+
+test("the chip keeps its form and the focus on its close mark while the strip narrows, and folds once the focus leaves it", async () => {
+  await scopedList(["payments"]);
+  withRoom(900);
+  const close = screen.getByRole("button", { name: "Show all namespaces" });
+  act(() => {
+    close.focus();
+  });
+  withRoom(100);
+  expect(document.activeElement).toBe(close);
+  expect([stageOf(actions()), formOf()]).toEqual([0, "whole"]);
+
+  act(() => {
+    close.blur();
+  });
+  expect([stageOf(actions()), formOf()]).toEqual([4, "glyph"]);
+});
+
+test("the close mark of a list that follows the space leaves the focus in the list's editor when the wider list has no grid to take it", async () => {
+  laidOutScoped();
+  const workbench = await openList(createMockBackend("rbacNamespaces"));
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["default"],
+    }));
+  });
+  await settle(2);
+  expect(screen.queryByRole("grid")).not.toBeNull();
+
+  const close = screen.getByRole("button", { name: "Show all namespaces" });
+  act(() => {
+    close.focus();
+  });
+  fireEvent.click(close);
+  await settle(3);
+  expect(screen.queryByRole("grid")).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(
+    document.querySelector(".dv-groupview")?.contains(document.activeElement),
+  ).toBe(true);
 });

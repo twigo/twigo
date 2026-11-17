@@ -14,6 +14,7 @@ async function told(local: number, why: "inUse" | "notPermitted") {
   const again = vi.fn();
   tellBind(
     workbench,
+    "prod-eu",
     { outcome: "busy", local, why, free: local + 1 },
     "web:http",
     again,
@@ -57,6 +58,7 @@ test("a busy answer asks nothing again until the button for the free port is pre
   const done = vi.fn();
   tellBind(
     workbench,
+    "prod-eu",
     { outcome: "busy", local: 8080, why: "inUse", free: 8081 },
     "web:http",
     again,

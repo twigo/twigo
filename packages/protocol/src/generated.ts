@@ -233,7 +233,13 @@ export type Column = { name: string, kind: ColumnKind,
 /**
  * 0 is shown by default; higher only in the wide view.
  */
-priority: number, };
+priority: number, 
+/**
+ * Its text cells hold a duration the server printed, alone (`5m`) or
+ * after a pod's count of restarts (`3 (5m ago)`), which counts back
+ * from the row's `received`; absent where false, as for most columns.
+ */
+printsDuration?: boolean, };
 
 export type ColumnKind = "string" | "integer" | "number" | "boolean" | "date" | "age" | "cpu" | "memory" | "other";
 
@@ -1401,6 +1407,15 @@ export type Row = { id: RowId,
  * RFC 3339; the webview renders Age columns from it.
  */
 created: string | null, 
+/**
+ * RFC 3339; when the core received the print of the durations in the
+ * columns that say `printsDuration`, such as `3 (5m ago)`, which count
+ * back from this time, so the webview draws them as of now. It moves
+ * when such a duration reads another age, or the same one after its
+ * step (an event that repeated), and a list sorted by those columns
+ * reads it too.
+ */
+received: string, 
 /**
  * Where the generated part of the object's name starts, in UTF-16
  * units: after its `metadata.generateName`, or at a pod's

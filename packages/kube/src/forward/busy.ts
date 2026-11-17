@@ -1,6 +1,6 @@
 import { toIpcError, type Forward, type ForwardStarted } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
-import { unlockAction, type Workbench } from "@twigo/workbench";
+import { spaceMark, unlockAction, type Workbench } from "@twigo/workbench";
 import type { Forwards } from "./service";
 import { targetWords } from "./words";
 
@@ -45,6 +45,7 @@ export async function unlessRefused<T>(
     });
     notify.warning(`${what} is not forwarded: ${message}`, {
       key: `forward-refused:${what}`,
+      tile: spaceMark(workbench.spaces.ofContext(blocked.context)),
       ...(action && { action }),
     });
     return undefined;
@@ -61,6 +62,7 @@ export async function unlessRefused<T>(
  */
 export function tellBind(
   workbench: Workbench,
+  space: string,
   started: ForwardStarted,
   what: string,
   again: (local: number) => Promise<ForwardStarted>,
@@ -74,7 +76,7 @@ export function tellBind(
   const retry = async (local: number): Promise<void> => {
     try {
       const answer = await unlessRefused(workbench, what, () => again(local));
-      if (answer) tellBind(workbench, answer, what, again, done, stays);
+      if (answer) tellBind(workbench, space, answer, what, again, done, stays);
     } catch (error) {
       workbench.report(error);
     }
@@ -86,6 +88,7 @@ export function tellBind(
       : `${what} stays on ${String(stays)}`;
   notify.warning(`${words}, so ${left}.`, {
     key: `forward-busy:${what}`,
+    tile: spaceMark(workbench.spaces.get(space)),
     action: {
       label: `Use ${String(started.free)}`,
       run: () => {
@@ -99,7 +102,10 @@ export function tellBind(
  * Tells a start that did not come to be: a forward that fails before it was
  * ever ready says the target's own failure, which neither bind answer does.
  */
-export function tellFailure(forwards: Forwards): (forward: Forward) => void {
+export function tellFailure(
+  workbench: Workbench,
+  forwards: Forwards,
+): (forward: Forward) => void {
   return (forward) => {
     void forwards.settled(forward).then((settled) => {
       if (settled?.state.state !== "failed") return;
@@ -107,7 +113,10 @@ export function tellFailure(forwards: Forwards): (forward: Forward) => void {
       const tell = error.blocked ? notify.warning : notify.error;
       tell(
         `${targetWords(settled)} → ${String(settled.local)} failed: ${error.message}`,
-        { key: `forward-failed:${String(settled.id)}` },
+        {
+          key: `forward-failed:${String(settled.id)}`,
+          tile: spaceMark(workbench.spaces.get(settled.target.space)),
+        },
       );
     });
   };

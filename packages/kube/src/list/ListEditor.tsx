@@ -20,7 +20,7 @@ import {
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
 import { LIST_URI, objectOf, objectOfRow } from "../selection";
-import { sameGvr, useResources } from "../discovery";
+import { servedAs, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
@@ -45,7 +45,7 @@ export function ListEditor({
   const resources = useResources(services.discovery, input?.space ?? "");
   const resource =
     input && resources.state === "ready"
-      ? servedAs(resources.value, input)
+      ? servedAs(resources.value, input.gvr)
       : undefined;
   const title = resource
     ? pluralTitle(resource.kind, resource.gvr.resource)
@@ -83,24 +83,6 @@ export function ListEditor({
       title={title}
       services={services}
     />
-  );
-}
-
-/**
- * Discovery names each group's preferred version; a list of another
- * version that the cluster serves has the same kind and scope.
- */
-function servedAs(
-  resources: readonly Resource[],
-  input: ListInput,
-): Resource | undefined {
-  return (
-    resources.find((candidate) => sameGvr(candidate.gvr, input.gvr)) ??
-    resources.find(
-      (candidate) =>
-        candidate.gvr.group === input.gvr.group &&
-        candidate.gvr.resource === input.gvr.resource,
-    )
   );
 }
 

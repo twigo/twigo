@@ -1,5 +1,14 @@
+import { humanDuration } from "@twigo/utils";
 import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
+import { keepsStamp } from "./printed";
+
+/** What a row printed of the moments its cells count back from, and when. */
+interface Printed {
+  readonly moments: readonly number[];
+  readonly texts: readonly string[];
+  readonly at: number;
+}
 
 export interface Pod {
   id: RowId;
@@ -13,6 +22,10 @@ export interface Pod {
   ready: number;
   status: string;
   restarts: string;
+  /** When its last container restarted, which `restarts` prints the age of. */
+  lastRestart: number | null;
+  /** The stamp the age in `restarts` counts back from, as Rust's store keeps it (`keepsStamp`). */
+  received: number;
   created: number;
   ip: string;
   node: string;
@@ -79,6 +92,12 @@ export interface Job {
   /** The CronJob that made it. */
   owner: string | null;
   suspend: boolean;
+  /**
+   * When its controller started it, as its `status.startTime`: none while it
+   * is suspended, and the time it resumes
+   * (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/controller/job/job_controller.go#L1166-L1193).
+   */
+  started: number | null;
   /** When it ran to completion; none while it runs. */
   completed: number | null;
   created: number;
@@ -115,6 +134,9 @@ export class Cluster {
   version = 0;
   /** When the cluster last changed, which the times its events print count from. */
   now: number;
+  /** When the cluster was built: when a row that never changes was received. */
+  readonly built: number;
+  readonly #printed = new Map<RowId, Printed>();
   /**
    * What lists have synced, by kind alone for every namespace, else with the
    * namespaces after it: a list of the same namespaces, or of every one,
@@ -132,6 +154,7 @@ export class Cluster {
     now: number,
   ) {
     this.now = now;
+    this.built = now;
     this.#random = mulberry32(hash(context));
     this.#rollouts = mulberry32(hash(`${context}/rollouts`));
     for (let i = 0; i < count; i++) this.pods.push(this.#pod(now));
@@ -174,6 +197,7 @@ export class Cluster {
         name: job,
         owner: name,
         suspend: false,
+        started: lastSchedule,
         completed: lastSchedule + Math.floor(5_000 + random() * 60_000),
         created: lastSchedule,
       });
@@ -192,12 +216,13 @@ export class Cluster {
       const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
       if (pod) targets.add(pod);
     }
-    for (const pod of targets) this.#change(pod);
+    for (const pod of targets) this.#change(pod, now);
     if (this.pods.length > 0) {
       const at = Math.floor(this.#random() * this.pods.length);
       const gone = this.pods[at];
       const fresh = this.#pod(now, now);
       if (gone) {
+        this.#forget(gone);
         // Its ReplicaSet replaces it, so its Deployment keeps its count.
         const name = `${gone.generateName}${fresh.name.slice(fresh.generateName.length)}`;
         this.pods.splice(at, 1, {
@@ -234,9 +259,12 @@ export class Cluster {
       status: "Running",
       ready: pod.containers,
       restarts: "0",
+      lastRestart: null,
+      received: now,
       created: now,
       version: 0,
     };
+    this.#forget(pod);
     this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
@@ -255,9 +283,12 @@ export class Cluster {
       status: "ContainerCreating",
       ready: 0,
       restarts: "0",
+      lastRestart: null,
+      received: now,
       created: now,
       version: 0,
     };
+    this.#forget(pod);
     this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
@@ -272,6 +303,7 @@ export class Cluster {
 
   /** Deletes a Deployment, and its pods with it, as the garbage collector does. */
   deleteDeployment(namespace: string, name: string): void {
+    for (const pod of this.podsOf(namespace, name)) this.#forget(pod);
     const kept = this.pods.filter(
       (pod) => pod.namespace !== namespace || deploymentOf(pod) !== name,
     );
@@ -309,6 +341,8 @@ export class Cluster {
         status: "ContainerCreating",
         ready: 0,
         restarts: "0",
+        lastRestart: null,
+        received: now,
         created: now,
         node: `${this.context}-node-${Math.floor(this.#rollouts() * this.nodes.length)}`,
         version: 0,
@@ -317,7 +351,10 @@ export class Cluster {
     const going = [...pods]
       .sort((a, b) => b.created - a.created)
       .slice(0, Math.max(0, pods.length - replicas));
-    for (const pod of going) this.pods.splice(this.pods.indexOf(pod), 1);
+    for (const pod of going) {
+      this.#forget(pod);
+      this.pods.splice(this.pods.indexOf(pod), 1);
+    }
     if (replicas === 0) this.emptied.set(key, template);
     else this.emptied.delete(key);
     this.now = now;
@@ -366,6 +403,7 @@ export class Cluster {
       name,
       owner: cronJob,
       suspend: false,
+      started: now,
       completed: null,
       created: now,
     });
@@ -374,33 +412,81 @@ export class Cluster {
   }
 
   /** Suspends a Job or a CronJob, or resumes it. */
-  suspend(of: CronJob | Job, suspend: boolean): void {
+  suspend(of: CronJob | Job, suspend: boolean, now: number): void {
     of.suspend = suspend;
+    if ("started" in of) of.started = suspend ? null : now;
     this.version++;
   }
 
+  /** Forgets what was printed for a pod's events, whose ids start with the pod's own. */
+  #forget(pod: Pod): void {
+    const prefix = `${pod.id}.`;
+    for (const id of this.#printed.keys())
+      if (id.startsWith(prefix)) this.#printed.delete(id);
+  }
+
+  /**
+   * The ages `id` prints of the `moments` its cells count back from, and the
+   * stamp they count from, as the API server prints them when it writes the
+   * row: once, and again only when a moment moves, so the ages in the cells
+   * stay as they were while the clock runs and the webview counts them on.
+   * The stamp stays the held one's while each age reads as it did, one step
+   * of it not yet gone, as Rust's store keeps it (`keepsStamp`), else it is
+   * now.
+   */
+  printed(id: RowId, moments: readonly number[]): Printed {
+    const held = this.#printed.get(id);
+    if (
+      held &&
+      moments.every((moment, index) => moment === held.moments[index])
+    )
+      return held;
+    const texts = moments.map((moment) => humanDuration(this.now - moment));
+    const at =
+      held !== undefined &&
+      texts.every((text, index) =>
+        keepsStamp(held.texts[index] ?? null, held.at, text, this.now),
+      )
+        ? held.at
+        : this.now;
+    const printed = { moments, texts, at };
+    this.#printed.set(id, printed);
+    return printed;
+  }
+
   /** Changes `count` distinct random pods. */
-  change(count: number): void {
+  change(count: number, now: number): void {
     const picked = new Set<Pod>();
     while (picked.size < Math.min(count, this.pods.length)) {
       const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
       if (pod) picked.add(pod);
     }
-    for (const pod of picked) this.#change(pod);
+    for (const pod of picked) this.#change(pod, now);
+    this.now = now;
     this.version++;
   }
 
-  #change(pod: Pod): void {
+  /** Prints the pod anew at `now`, as the API server does each time it sends a row. */
+  #change(pod: Pod, now: number): void {
+    let count = Number.parseInt(pod.restarts, 10);
     const roll = this.#random();
     if (roll < 0.5) {
-      const count = Number.parseInt(pod.restarts, 10) + 1;
-      pod.restarts = `${count} (${Math.ceil(this.#random() * 50)}s ago)`;
+      count++;
+      pod.lastRestart = now - Math.ceil(this.#random() * 50) * 1000;
     } else if (roll < 0.8) {
       pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
       pod.ready = pod.status === "Running" ? pod.containers : 0;
     } else {
       pod.ready = pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
     }
+    const printed =
+      pod.lastRestart === null
+        ? `${count}`
+        : `${count} (${humanDuration(now - pod.lastRestart)} ago)`;
+    if (!keepsStamp(pod.restarts, pod.received, printed, now)) {
+      pod.received = now;
+    }
+    pod.restarts = printed;
     pod.version++;
   }
 
@@ -432,6 +518,8 @@ export class Cluster {
         : random() < 0.8
           ? 0
           : 1 + Math.floor(random() * 4);
+    const lastRestart =
+      restarts === 0 ? null : now - restartAge(status, random());
     this.#serial++;
     return {
       id: `${this.context}/${namespace}/${name}`,
@@ -448,15 +536,32 @@ export class Cluster {
             : 0,
       status,
       restarts:
-        restarts === 0
+        lastRestart === null
           ? "0"
-          : `${restarts} (${1 + Math.floor(random() * 59)}m ago)`,
+          : `${restarts} (${humanDuration(now - lastRestart)} ago)`,
+      lastRestart,
+      received: now,
       created: created ?? now - Math.floor(random() * random() * 90 * DAY),
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
       node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
     };
   }
+}
+
+const MINUTE = 60_000;
+
+/**
+ * How long before it is first printed a pod's last restart was: a pod that
+ * is not running restarted minutes ago, a running one minutes, hours or
+ * days ago, which the list's steps of Restarts tell apart.
+ */
+function restartAge(status: string, roll: number): number {
+  if (status !== "Running") return (1 + Math.floor(roll * 59)) * MINUTE;
+  if (roll < 0.4) return (1 + Math.floor((roll / 0.4) * 59)) * MINUTE;
+  if (roll < 0.7)
+    return (60 + Math.floor(((roll - 0.4) / 0.3) * 1380)) * MINUTE;
+  return (1440 + Math.floor(((roll - 0.7) / 0.3) * 28 * 1440)) * MINUTE;
 }
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
-import { testWorkbench } from "../testing";
+import { inWorkbench, testWorkbench } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
@@ -90,11 +90,19 @@ function bus(planned: Plan | IpcError, events: OperationEvent[]) {
   return { backend, sent };
 }
 
-async function started(planned: Plan | IpcError, events: OperationEvent[]) {
+async function started(
+  planned: Plan | IpcError,
+  events: OperationEvent[],
+  toaster = false,
+  request: PlanRequest = REQUEST,
+) {
   const { backend, sent } = bus(planned, events);
   const workbench = await testWorkbench("ready", backend);
+  if (toaster) {
+    render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  }
   const report = vi.spyOn(workbench, "report");
-  const outcome = workbench.operations.run(REQUEST, LOOK);
+  const outcome = workbench.operations.run(request, LOOK);
   await act(() => vi.advanceTimersByTimeAsync(0));
   return { workbench, sent, report, outcome };
 }
@@ -261,39 +269,49 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   expect(unlock).toHaveBeenCalledWith("context_unlock", "dev");
 });
 
-test("a policy file's lock is only reported, as nothing in Twigo lifts it", async () => {
+const said = (text: string) =>
+  screen.getAllByRole("alert").find((toast) => toast.textContent.includes(text))
+    ?.textContent;
+
+test("a policy file's lock is only said, as nothing in Twigo lifts it, and its toast leads with the space's tile", async () => {
   const error = vi.spyOn(notify, "error");
   const refused = blocked({
     kind: "policyFile",
     file: "/etc/twigo/policy.json",
     pattern: "dev",
   });
-  const { report, outcome } = await started(refused, []);
+  const { workbench, report, outcome } = await started(refused, [], true);
   await expect(outcome).resolves.toEqual({ state: "refused" });
-  expect(report).toHaveBeenCalledWith(refused);
+  expect(report).not.toHaveBeenCalled();
   expect(error.mock.calls.map(([, options]) => options?.action)).toEqual(
     error.mock.calls.map(() => undefined),
   );
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  expect(said("dev is read-only")).toMatch(/^DEdev is read-only/);
 });
 
-test("a plan that fails for another reason than the gate is failed, not refused", async () => {
+test("a plan that fails for another reason than the gate is failed, not refused, and its toast leads with the space's tile", async () => {
   const gone = new IpcError("notFound", "no preview 1 waits to apply");
-  const { report, outcome } = await started(gone, []);
+  const { report, outcome } = await started(gone, [], true);
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(report).toHaveBeenCalledWith(gone);
+  expect(report).not.toHaveBeenCalled();
+  expect(said("no preview 1")).toMatch(/^DEno preview 1 waits/);
 });
 
-test("a run that fails is reported", async () => {
+test("a run that fails says so, led by the tile of the space it ran in", async () => {
   const error = {
     kind: "conflict" as const,
     message: "pod web-1 was replaced",
   };
-  const { report, outcome } = await started(plan({ kind: "atOnce" }), [
-    { state: "failed", error },
-  ]);
+  const { report, outcome } = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "failed", error }],
+    true,
+  );
   await act(() => vi.advanceTimersByTimeAsync(20));
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(report).toHaveBeenCalledWith(error);
+  expect(report).not.toHaveBeenCalled();
+  expect(said("was replaced")).toMatch(/^DEpod web-1 was replaced/);
 });
 
 test("a second countdown of the same object replaces the first, and ⌘Z cancels only outside a text field", async () => {
@@ -355,10 +373,10 @@ test("a second dialog cancels the first's plan", async () => {
 });
 
 test("a countdown that runs out runs its plan, though its toast's dismissal cancels", async () => {
-  render(<Toaster />);
   const { sent, outcome } = await started(
     plan({ kind: "countdown", seconds: 5 }),
     [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
+    true,
   );
   await act(() => vi.advanceTimersByTimeAsync(5000));
   await act(() => vi.advanceTimersByTimeAsync(1000));
@@ -367,11 +385,12 @@ test("a countdown that runs out runs its plan, though its toast's dismissal canc
 });
 
 test("an action's undo is offered in its space while it lasts, and a later action ends it", async () => {
-  render(<Toaster />);
   const until = Date.now() + 30_000;
-  const scaled = await started(plan({ kind: "atOnce" }), [
-    { state: "done", text: "Scaled deployment web to 5", undoUntil: until },
-  ]);
+  const scaled = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "done", text: "Scaled deployment web to 5", undoUntil: until }],
+    true,
+  );
   const { keys, operations } = scaled.workbench;
   await act(() => vi.advanceTimersByTimeAsync(20));
   await expect(scaled.outcome).resolves.toEqual({ state: "done" });
@@ -677,7 +696,10 @@ test("a done run whose undo is not offered still says so", async () => {
   const undone = scaled.workbench.operations.undo("dev");
   await act(() => vi.advanceTimersByTimeAsync(20));
   await undone;
-  expect(success).toHaveBeenCalledWith("Scaled deployment web to 5");
+  expect(success).toHaveBeenCalledWith(
+    "Scaled deployment web to 5",
+    expect.anything(),
+  );
 });
 
 const SHELL: PlanRequest = {
@@ -741,4 +763,142 @@ test("a cancelled shell opens no session", async () => {
   await expect(cancelled).resolves.toEqual({ state: "cancelled" });
   await act(() => vi.advanceTimersByTimeAsync(50));
   expect(commands(sent)).toEqual(["command_plan", "command_cancel"]);
+});
+
+const told = (text: string) =>
+  screen
+    .getAllByRole("status")
+    .find((toast) => toast.textContent.includes(text))?.textContent;
+
+test("a countdown's toast leads with the tile of the context's space, and keeps it when the person goes to another space", async () => {
+  const counting = await started(
+    plan({ kind: "countdown", seconds: 5 }),
+    [],
+    true,
+  );
+  const { workbench } = counting;
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
+
+  act(() => {
+    workbench.spaces.select("staging");
+  });
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
+  act(() => {
+    workbench.operations.cancelCountdown();
+  });
+  await expect(counting.outcome).resolves.toEqual({ state: "cancelled" });
+});
+
+test("a confirmation's dialog leads with the tile of the context's space, and keeps it when the person goes to another space", async () => {
+  const asked = await started(plan({ kind: "confirm" }), []);
+  render(<WorkbenchView workbench={asked.workbench} />);
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(within(screen.getByRole("dialog")).getByText("DE")).toBeTruthy();
+
+  act(() => {
+    asked.workbench.spaces.select("staging");
+  });
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.textContent).toMatch(/^DEDevelopmentdev/);
+  act(() => {
+    asked.workbench.operations.asking?.cancel();
+  });
+  await expect(asked.outcome).resolves.toEqual({ state: "cancelled" });
+});
+
+const REVEAL: PlanRequest = { action: "reveal", object: 3, key: "token" };
+
+test("a toast leads with the tile of the space the request is for, whatever context its plan names", async () => {
+  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const counting = await started(lone, [], true);
+  expect(told("qa · sends in")).toMatch(/^DEDeleting pod/);
+  act(() => {
+    counting.workbench.operations.cancelCountdown();
+  });
+  await counting.outcome;
+});
+
+test("a request that names no space, a Reveal, has its context stand for one, and a context no space stands for has no tile", async () => {
+  const revealing = await started(
+    plan({ kind: "countdown", seconds: 5 }),
+    [],
+    true,
+    REVEAL,
+  );
+  expect(told("dev · sends in")).toMatch(/^DEDeleting pod/);
+  act(() => {
+    revealing.workbench.operations.cancelCountdown();
+  });
+  await revealing.outcome;
+  cleanup();
+
+  const lone = { ...plan({ kind: "countdown", seconds: 5 }), context: "qa" };
+  const counting = await started(lone, [], true, REVEAL);
+  expect(told("qa · sends in")).toMatch(/^Deleting pod/);
+  act(() => {
+    counting.workbench.operations.cancelCountdown();
+  });
+  await counting.outcome;
+});
+
+test("a refusal the workbench reports, as a failed command's is, leads with the tile of its context's space, and the app's own failure has none", async () => {
+  const workbench = await testWorkbench();
+  render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.report(
+      blocked({
+        kind: "policyFile",
+        file: "/etc/twigo/policy.json",
+        pattern: "dev",
+      }),
+      "Restart",
+    );
+    workbench.report(new Error("the clipboard is not available"));
+  });
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(said("Restart:")).toMatch(/^DERestart: dev is read-only/);
+  expect(said("clipboard")).toMatch(/^the clipboard/);
+});
+
+test("a run that ends says so led by the tile of the space it was asked for, whatever context its plan names, as done and as stopped", async () => {
+  const lone = { ...plan({ kind: "atOnce" }), context: "qa" };
+  const done = await started(
+    lone,
+    [{ state: "done", text: "Deleted pod web-1", undoUntil: null }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(done.outcome).resolves.toEqual({ state: "done" });
+  expect(told("Deleted pod web-1")).toMatch(/^DEDeleted pod web-1/);
+  cleanup();
+
+  const stopped = await started(
+    lone,
+    [{ state: "stopped", text: "Stopped waiting for pod web-1" }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(stopped.outcome).resolves.toEqual({ state: "stopped" });
+  expect(told("Stopped waiting")).toMatch(/^DEStopped waiting for pod web-1/);
+});
+
+test("a run that Rust refuses to start fails, led by the tile of the space it was asked for", async () => {
+  const { backend } = bus(plan({ kind: "atOnce" }), []);
+  const refusing: Backend = {
+    ...backend,
+    subscribe(command, request, onMessage) {
+      return command === "command_execute"
+        ? Promise.reject(new IpcError("notFound", "no plan 7 waits to run"))
+        : backend.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await testWorkbench("ready", refusing);
+  render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  const report = vi.spyOn(workbench, "report");
+  const outcome = workbench.operations.run(REQUEST, LOOK);
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(report).not.toHaveBeenCalled();
+  expect(said("no plan 7")).toMatch(/^DEno plan 7 waits/);
 });

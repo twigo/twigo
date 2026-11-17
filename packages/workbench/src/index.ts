@@ -7,7 +7,11 @@ export {
 } from "./commands/nativeMenu";
 export type { Scope } from "./contextkey/service";
 export type { ContextValue, Lookup } from "./contextkey/when";
-export type { EditorProps, EditorProvider } from "./editors/registry";
+export type {
+  EditorProps,
+  EditorProvider,
+  SessionState,
+} from "./editors/registry";
 export type { RecentEditor, RecentEditors } from "./editors/recent";
 export type { ListTarget } from "./lists/service";
 export { useListRegistration } from "./lists/react";
@@ -46,6 +50,7 @@ export type {
   Watermark,
 } from "./views/registry";
 export { SpaceTile } from "./parts/SpaceTile";
+export { spaceMark } from "./parts/spaceMark";
 export {
   accessOfSpace,
   chipLabel,

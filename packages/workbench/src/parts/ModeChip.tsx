@@ -37,7 +37,7 @@ const NO_TYPE = "none";
 type TypeChoice = Environment | typeof NO_TYPE;
 
 const CHIP =
-  "mx-1 flex h-5 shrink-0 items-center gap-1 rounded px-[7px] text-2xs font-semibold whitespace-nowrap";
+  "mx-1 flex h-5 shrink-0 items-center gap-1 rounded-sm px-[7px] text-2xs font-semibold whitespace-nowrap";
 
 function useChip() {
   const { spaces, catalog } = useWorkbench();

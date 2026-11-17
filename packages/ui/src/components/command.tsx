@@ -95,7 +95,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex h-[26px] select-none items-center gap-2 rounded px-2 text-body outline-none",
+        "relative flex h-[26px] select-none items-center gap-2 rounded-sm px-2 text-body outline-none",
         "data-[selected=true]:bg-row-active",
         "data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50",
         "[&_svg]:shrink-0",

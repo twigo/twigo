@@ -162,7 +162,7 @@ impl Pod {
             uid: object.meta.uid.as_deref()?.into(),
             name: (&*object.meta.name).into(),
             generated: object.meta.generated,
-            created: object.meta.created,
+            created: object.meta.created_at(),
             version: object.meta.resource_version.clone(),
             status,
             json,

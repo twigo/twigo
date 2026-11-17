@@ -120,6 +120,7 @@ function batch(seq: number, known: boolean): ListBatch {
       ? ["a", "b"].map((id) => ({
           id,
           created: null,
+          received: "2026-11-16T12:00:00.000Z",
           generated: null,
           cells: [id, "Running", 10_000_000, 64 * 1024 * 1024],
         }))
@@ -495,6 +496,7 @@ describe("a poll", () => {
       upserts: Object.entries(cpu).map(([id, nanocores]) => ({
         id,
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells: [id, restarts[id] ?? "0", nanocores, 64 * 1024 * 1024],
       })),
@@ -584,6 +586,7 @@ describe("a column named like a measure", () => {
       ].map((cells) => ({
         id: cells[0] ?? "",
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells,
       })),
@@ -726,6 +729,7 @@ describe("a list whose columns are not known yet", () => {
       upserts: ["a", "b"].map((id) => ({
         id,
         created: null,
+        received: "2026-11-16T12:00:00.000Z",
         generated: null,
         cells: [id, "Ready"],
       })),

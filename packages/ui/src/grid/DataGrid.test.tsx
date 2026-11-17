@@ -77,7 +77,7 @@ function scrollable(rows: number): HTMLElement {
   const element = screen.getByRole("grid");
   Object.defineProperty(element, "scrollHeight", {
     configurable: true,
-    value: 28 + rows * 26,
+    value: 28 + rows * 24,
   });
   Object.defineProperty(element, "scrollTo", {
     configurable: true,
@@ -176,7 +176,7 @@ function grid(overrides: Props = {}) {
   };
 }
 
-test("group headers come before their rows, a failing row has an edge, and a header's click folds it", () => {
+test("group headers come before their rows, a failing row is a band in its tone, and a header's click folds it", () => {
   const { handlers } = grid();
   const rows = screen.getAllByRole("row").slice(1);
   expect(rows.map((row) => row.textContent)).toEqual([
@@ -186,7 +186,9 @@ test("group headers come before their rows, a failing row has an edge, and a hea
     "edge",
     "gateway-1",
   ]);
-  expect(rows[2]?.className).toContain("var(--error)");
+  expect(rows[2]?.getAttribute("data-tone")).toBe("error");
+  expect(rows[2]?.className).toContain("bg-(--band)");
+  expect(rows[1]?.hasAttribute("data-tone")).toBe(false);
   fireEvent.click(screen.getByText("edge"));
   expect(handlers.onToggleGroup).toHaveBeenCalledWith("g:edge");
 });
@@ -201,7 +203,7 @@ test("without a header the rows start at the top and count from one", () => {
   expect(first?.getAttribute("aria-rowindex")).toBe("1");
   expect(second?.getAttribute("aria-rowindex")).toBe("2");
   expect(first?.style.transform).toBe("translateY(0px)");
-  expect(second?.style.transform).toBe("translateY(26px)");
+  expect(second?.style.transform).toBe("translateY(24px)");
 });
 
 test("a click selects and opens a row, its box marks it", () => {
@@ -450,7 +452,7 @@ test("a move to a row still loading is dropped once the list no longer reaches i
 
 test("without a cursor, a move lands on the first row below the header", () => {
   const { handlers, controller } = grid(list(PODS));
-  scroll(scrollable(PODS.length), 1040);
+  scroll(scrollable(PODS.length), 960);
   act(() => {
     controller()?.move(1);
   });
@@ -515,7 +517,7 @@ test("whatever a row holds sits in one of its cells", () => {
 });
 
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
-  const { controller } = grid({ ...list(PODS), selected: "p22" });
+  const { controller } = grid({ ...list(PODS), selected: "p24" });
   const element = scrollable(PODS.length);
   act(() => {
     controller()?.move(1);
@@ -529,7 +531,7 @@ test("a move down scrolls the cursor's row clear of the bottom, a move up clear 
   act(() => {
     again.controller()?.move(-1);
   });
-  expect(scrolled.scrollTop).toBe(234);
+  expect(scrolled.scrollTop).toBe(216);
 });
 
 const WITH_AGE = [
@@ -900,13 +902,91 @@ test("loading shows skeleton rows, and an empty grid what its owner gives", () =
   expect(screen.getByText("No pods")).toBeTruthy();
 });
 
-test("a selected or marked row keeps its tint under the pointer, the others take the hover", () => {
-  grid({ selected: "a1", marked: new Set(["e1"]) });
+test("a selected or marked row keeps its tint under the pointer, and a failing one's band gives way to it, the others take the hover", () => {
+  grid({ selected: "a2", marked: new Set(["e1"]) });
   const row = (text: string) =>
     screen.getByText(text).closest<HTMLElement>("[role=row]")?.className;
-  expect(row("api-1")).not.toContain("hover:bg-row-hover");
-  expect(row("gateway-1")).not.toContain("hover:bg-row-hover");
-  expect(row("api-2")).toContain("hover:bg-row-hover");
+  for (const text of ["api-2", "gateway-1"]) {
+    expect(row(text)).not.toContain("hover:bg-");
+    expect(row(text)).not.toContain("bg-(--band)");
+  }
+  expect(row("api-1")).toContain("hover:bg-row-hover");
+});
+
+test("a failing row's band and edge reach what covers its cells: the held first cells, the hover icons and the laid-over menu", async () => {
+  const columns = [
+    { id: "Name", title: "Name", width: 900 },
+    { id: "Age", title: "Age", width: 100, coverable: true },
+  ];
+  const cell = (row: Pod, column: { id: string }) =>
+    column.id === "Name" ? row.name : "4d";
+  const classes = (element: Element | null | undefined) => [
+    ...(element?.classList ?? []),
+  ];
+  const BAND = [
+    "before:bg-(--band)",
+    "group-hover/row:before:bg-(image:--row-hover-layer)",
+  ];
+  const HOVER = ["group-hover/row:before:bg-row-hover"];
+  const EDGE = "shadow-[inset_3px_0_0_var(--edge)]";
+
+  grid({
+    columns,
+    cell,
+    inline: () => [
+      { id: "copy", label: "Copy Name", icon: Copy, run: vi.fn() },
+    ],
+  });
+  act(() => {
+    resize();
+  });
+  for (const [name, held, edge] of [
+    ["api-2", BAND, true],
+    ["gateway-1", HOVER, false],
+  ] as const) {
+    const row = rowNamed(name);
+    for (const part of [
+      row.querySelector('[role="gridcell"]'),
+      row.querySelector('[data-column="Name"]'),
+    ]) {
+      expect(classes(part)).toEqual(expect.arrayContaining([...held]));
+    }
+    expect(classes(row.querySelector('[role="gridcell"]')).includes(EDGE)).toBe(
+      edge,
+    );
+  }
+  for (const [name, tint] of [
+    ["api-2", ["bg-(--band)", "bg-(image:--row-hover-layer)"]],
+    ["gateway-1", ["bg-row-hover"]],
+  ] as const) {
+    fireEvent.pointerEnter(rowNamed(name));
+    await rest();
+    const icons = within(rowNamed(name))
+      .getByRole("button", { name: "Copy Name" })
+      .closest(".pl-2");
+    expect(classes(icons)).toEqual(expect.arrayContaining([...tint]));
+    fireEvent.pointerLeave(rowNamed(name));
+  }
+  cleanup();
+
+  grid({
+    columns,
+    cell,
+    overlayMenu: true,
+    menu: [[{ id: "copy", label: "Copy Name", run: vi.fn() }]],
+  });
+  for (const [name, tint] of [
+    ["api-2", ["bg-(--band)", "bg-(image:--row-hover-layer)"]],
+    ["gateway-1", ["bg-row-hover"]],
+  ] as const) {
+    fireEvent.pointerEnter(rowNamed(name));
+    const menu = within(rowNamed(name))
+      .getByRole("button", { name: "Row actions" })
+      .closest('[role="gridcell"]');
+    expect(classes(menu?.firstElementChild)).toEqual(
+      expect.arrayContaining([...tint]),
+    );
+  }
 });
 
 test("a column's note is a quiet mark on its header, said in words to a screen reader, and its click still sorts", () => {

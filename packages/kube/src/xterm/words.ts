@@ -1,5 +1,6 @@
 import type { ShellEnd } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
+import type { SessionState } from "@twigo/workbench";
 import type { SessionStatus } from "./terminal";
 
 /** What a tab says of an ending, in the tab and once in the scrollback (ARCHITECTURE 4.6). */
@@ -73,5 +74,20 @@ export function stateOf(status: SessionStatus): {
       const { label, tone } = ending(status.end);
       return { label, tone };
     }
+  }
+}
+
+/** How a tab says a shell's session stands; a failure, the tone that errors, is told apart from an ending. */
+export function sessionState(status: SessionStatus): SessionState {
+  switch (status.state) {
+    case "queued":
+    case "connecting":
+      return "connecting";
+    case "running":
+      return "running";
+    case "restored":
+      return "ended";
+    case "ended":
+      return ending(status.end).tone === "error" ? "failed" : "ended";
   }
 }

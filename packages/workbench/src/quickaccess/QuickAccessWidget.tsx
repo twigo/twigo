@@ -289,15 +289,14 @@ function Row({
       onSelect={onAccept}
       className={item.tile ? "h-9" : undefined}
     >
-      {item.tile ? (
+      {item.tile && (
         <Tile
           letters={initials(item.tile.name)}
           color={item.tile.color}
           size="sm"
         />
-      ) : (
-        Icon && <Icon aria-hidden className="size-3.5 text-support" />
       )}
+      {Icon && <Icon aria-hidden className="size-3.5 text-support" />}
       <HighlightedLabel
         text={item.label}
         ranges={item.matches ?? []}

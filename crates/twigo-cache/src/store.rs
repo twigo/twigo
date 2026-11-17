@@ -9,22 +9,81 @@ use tokio::sync::watch;
 
 use crate::meta::Meta;
 use crate::object::Object;
-use crate::table::{Column, Row};
+use crate::printed;
+use crate::table::{Cell, Column, Row};
+
+mod stamped {
+    use crate::meta::Meta;
+
+    /// What only the store does to an item: stamps it.
+    pub trait Stamped {
+        fn meta_mut(&mut self) -> &mut Meta;
+    }
+}
 
 /// What a store holds: a row, or an editor's object.
-pub trait Item: Send + Sync + 'static {
+pub trait Item: stamped::Stamped + Send + Sync + 'static {
     fn meta(&self) -> &Meta;
+    /// What the server printed for it, one per column.
+    fn cells(&self) -> &[Cell];
+}
+
+impl stamped::Stamped for Row {
+    fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
 }
 
 impl Item for Row {
     fn meta(&self) -> &Meta {
         &self.meta
     }
+
+    fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+}
+
+impl stamped::Stamped for Object {
+    fn meta_mut(&mut self) -> &mut Meta {
+        &mut self.meta
+    }
 }
 
 impl Item for Object {
     fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+}
+
+/// An item keeps the held one's stamp, whatever else changed, while each of
+/// its cells that print a duration still dates from it
+/// (`printed::keeps_stamp`): the webview counts those ages back from the
+/// stamp, so a row printed again sends nothing. A changed age, or a
+/// repeated event's `0s`, takes the new stamp.
+fn keep_received<T: Item>(columns: Option<&[Column]>, item: &mut T, held: Option<&Arc<T>>) {
+    let Some(held) = held.filter(|held| held.cells().len() == item.cells().len()) else {
+        return;
+    };
+    fn text(cell: &Cell) -> Option<&str> {
+        match cell {
+            Cell::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+    let (held_at, at) = (held.meta().received, item.meta().received);
+    let same = columns
+        .unwrap_or_default()
+        .iter()
+        .zip(held.cells().iter().zip(item.cells()))
+        .filter(|(column, _)| column.prints_duration)
+        .all(|(_, (held, new))| printed::keeps_stamp(text(held), held_at, text(new), at));
+    if same {
+        item.meta_mut().received = held_at;
     }
 }
 
@@ -161,9 +220,14 @@ impl<T: Item> Store<T> {
         self.contents().items.len()
     }
 
-    pub fn upsert(&self, item: T) {
+    pub fn upsert(&self, mut item: T) {
         let key = RowKey::of(item.meta());
         let mut contents = self.contents();
+        keep_received(
+            contents.columns.as_deref(),
+            &mut item,
+            contents.items.get(&key),
+        );
         let change = match contents.items.insert(key.clone(), Arc::new(item)) {
             Some(_) => Change::Modified,
             None => Change::Added,
@@ -184,6 +248,19 @@ impl<T: Item> Store<T> {
         if removed {
             self.changed();
         }
+    }
+
+    /// Inserts `item` into `items`, as a relist collects them.
+    pub fn collect(&self, items: &mut Items<T>, mut item: T) {
+        let key = RowKey::of(item.meta());
+        let contents = self.contents();
+        keep_received(
+            contents.columns.as_deref(),
+            &mut item,
+            contents.items.get(&key),
+        );
+        drop(contents);
+        items.insert(key, Arc::new(item));
     }
 
     /// Replaces every item, as a relist ends.
@@ -289,15 +366,10 @@ impl<T: Item> Store<T> {
     }
 }
 
-/// Inserts `item` into `items`, as a relist collects them.
-pub fn collect<T: Item>(items: &mut Items<T>, item: T) {
-    items.insert(RowKey::of(item.meta()), Arc::new(item));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::table::Cell;
+    use crate::table::{Cell, ColumnKind};
 
     fn row(uid: &str, version: &str) -> Row {
         Row {
@@ -309,6 +381,7 @@ mod tests {
                 labels: Box::default(),
                 owners: Box::default(),
                 created: None,
+                received: 0,
                 generated: None,
             },
             cells: Box::new([Cell::Text(version.into())]),
@@ -431,7 +504,7 @@ mod tests {
         reset(store.drain(&feed));
         store.upsert(row("a", "1"));
         let mut items = Items::new();
-        collect(&mut items, row("b", "1"));
+        store.collect(&mut items, row("b", "1"));
         store.replace(items);
         assert_eq!(reset(store.drain(&feed)), ["b"]);
 
@@ -440,6 +513,151 @@ mod tests {
         assert_eq!(reset(store.drain(&feed)), ["b"]);
         store.set_columns(Some(&columns));
         assert_eq!(changed(store.drain(&feed)), []);
+    }
+
+    fn printing(columns: &[(&str, bool)]) -> Store<Row> {
+        let store = Store::default();
+        let columns: Arc<[Column]> = columns
+            .iter()
+            .map(|&(name, prints_duration)| Column {
+                name: name.into(),
+                kind: ColumnKind::String,
+                format: "".into(),
+                priority: 0,
+                prints_duration,
+            })
+            .collect();
+        store.set_columns(Some(&columns));
+        store
+    }
+
+    fn pods() -> Store<Row> {
+        printing(&[("Status", false), ("Restarts", true)])
+    }
+
+    fn printed(uid: &str, cells: &[&str], seconds: i64) -> Row {
+        let mut row = row(uid, "1");
+        row.cells = cells.iter().map(|&text| Cell::Text(text.into())).collect();
+        row.meta.received = seconds * 1000;
+        row
+    }
+
+    fn received(store: &Store<Row>) -> Vec<(String, i64)> {
+        let mut received: Vec<_> = store
+            .items(|_| true)
+            .iter()
+            .map(|row| {
+                let uid = row.meta.uid.as_deref().unwrap_or_default().to_owned();
+                (uid, row.meta.received / 1000)
+            })
+            .collect();
+        received.sort();
+        received
+    }
+
+    #[test]
+    fn a_repeating_event_takes_the_stamp_of_each_repeat() {
+        let store = printing(&[
+            ("Last Seen", true),
+            ("Reason", false),
+            ("First Seen", true),
+            ("Count", false),
+        ]);
+        for (count, seconds) in [(2, 1000), (3, 1300), (4, 1600), (5, 4600)] {
+            let count = count.to_string();
+            store.upsert(printed("e", &["0s", "BackOff", "10d", &count], seconds));
+            assert_eq!(received(&store), [("e".to_owned(), seconds)], "{count}");
+        }
+    }
+
+    fn dated(store: &Store<Row>) -> Vec<(String, i64, Option<i64>)> {
+        let mut dated: Vec<_> = store
+            .items(|_| true)
+            .iter()
+            .map(|row| {
+                let stamp = row.meta.received / 1000;
+                let age = match row.cells.last() {
+                    Some(Cell::Text(text)) => printed::Printed::parse(text).map(|at| at.ago as i64),
+                    _ => None,
+                };
+                (row.meta.name.to_string(), stamp, age.map(|age| stamp - age))
+            })
+            .collect();
+        dated.sort();
+        dated
+    }
+
+    #[test]
+    fn a_pod_that_turns_not_ready_and_back_keeps_the_moment_of_its_last_restart() {
+        let store = pods();
+        for (status, days, minutes, seconds) in [
+            ("Running", "3 (11d ago)", "1 (2m ago)", 100),
+            ("NotReady", "3 (11d ago)", "1 (7m ago)", 400),
+            ("Running", "3 (11d ago)", "1 (12m ago)", 700),
+        ] {
+            store.upsert(printed("days", &[status, days], seconds));
+            store.upsert(printed("minutes", &[status, minutes], seconds));
+            assert_eq!(
+                dated(&store),
+                [
+                    ("days".to_owned(), 100, Some(100 - 950_400)),
+                    ("minutes".to_owned(), seconds, Some(-20))
+                ],
+                "{status} at {seconds}"
+            );
+        }
+        store.upsert(printed("days", &["Running", "4 (5s ago)"], 1000));
+        assert_eq!(dated(&store)[0], ("days".to_owned(), 1000, Some(995)));
+    }
+
+    #[test]
+    fn a_heartbeat_takes_the_stamp_of_each_beat() {
+        let store = printing(&[("Ready", false), ("Seen", true)]);
+        for (ready, seen, seconds, beat) in [
+            ("True", "0s", 100, 100),
+            ("True", "0s", 110, 110),
+            ("False", "3s", 113, 110),
+            ("False", "0s", 120, 120),
+        ] {
+            store.upsert(printed("node", &[ready, seen], seconds));
+            assert_eq!(
+                dated(&store),
+                [("node".to_owned(), seconds, Some(beat))],
+                "{seconds}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_duration_in_a_column_that_prints_none_does_not_move_the_stamp() {
+        let store = printing(&[("Duration", false), ("Last Schedule", true)]);
+        for (duration, seconds) in [("5m", 100), ("6m", 160), ("7m", 220)] {
+            store.upsert(printed("job", &[duration, "11d"], seconds));
+            assert_eq!(received(&store), [("job".to_owned(), 100)], "{duration}");
+        }
+    }
+
+    #[test]
+    fn a_relist_keeps_the_stamp_of_rows_that_print_their_ages_as_they_did() {
+        let store = printing(&[("Last Seen", true), ("First Seen", true)]);
+        store.upsert(printed("steady", &["11d", "11d"], 100));
+        store.upsert(printed("aged", &["10m", "2h"], 100));
+        store.upsert(printed("repeated", &["0s", "3d"], 100));
+        let mut items = Items::new();
+        store.collect(&mut items, printed("steady", &["11d", "11d"], 160));
+        store.collect(&mut items, printed("aged", &["11m", "2h1m"], 160));
+        store.collect(&mut items, printed("repeated", &["0s", "3d"], 160));
+        store.collect(&mut items, printed("new", &["0s", "0s"], 160));
+        store.replace(items);
+        assert_eq!(
+            dated(&store),
+            [
+                ("aged".to_owned(), 160, Some(160 - 7_260)),
+                ("new".to_owned(), 160, Some(160)),
+                ("repeated".to_owned(), 160, Some(160 - 259_200)),
+                ("steady".to_owned(), 100, Some(100 - 950_400))
+            ]
+        );
     }
 
     #[test]

@@ -20,7 +20,15 @@ import {
   type IWatermarkPanelProps,
 } from "dockview-react";
 import { FileQuestion, X } from "lucide-react";
-import { cn, EmptyState, KeyHints, UnsavedMark } from "@twigo/ui";
+import {
+  cn,
+  CutInTheMiddle,
+  EmptyState,
+  KeyHints,
+  StatusDot,
+  UnsavedMark,
+} from "@twigo/ui";
+import { Changes } from "../changes";
 import {
   EDITOR_COMPONENT,
   EDITOR_TAB,
@@ -35,7 +43,13 @@ import {
   useWorkbench,
 } from "../react";
 import { PanelBoundary } from "./PanelBoundary";
-import { ACTIONS_PADDING, OVERFLOW_BUTTON } from "./strip";
+import {
+  ACTIONS_PADDING,
+  OVERFLOW_BUTTON,
+  TABS_GAP,
+  TABS_START,
+  TITLE_FLOOR,
+} from "./strip";
 import { TabTooltip } from "./TabTooltip";
 import { useInertWhile } from "./useInertWhile";
 
@@ -210,7 +224,10 @@ export function SpaceDock({
 function isPlainPress(event: MouseEvent): boolean {
   return (
     event.button === 0 &&
-    !(event.target instanceof Element && event.target.closest("button"))
+    !(
+      event.target instanceof Element &&
+      event.target.closest("button, [role=button]")
+    )
   );
 }
 
@@ -291,14 +308,13 @@ function EditorPanel({ params: raw, api }: IDockviewPanelProps) {
 
 /**
  * The width a group's actions may take without a tab giving way: the
- * strip's, less every tab at the width it asks for (up to 220 px in the
- * editor area), the
- * overflow button and the space after the actions. Undefined until
- * measured. Each measure also brings the active tab back into view, since
- * dockview does that only as a tab activates, before the actions settle: by
- * the tab list's own scroll, as dockview 8.8.3's `Tabs._scrollTabIntoView`
- * does, since `scrollIntoView` would scroll the split views around the strip
- * too.
+ * strip's, less every tab at the width it asks for, the space before the
+ * first tab and between the tabs, the overflow button and the space after the
+ * actions. Undefined until measured. Each measure also brings the active tab
+ * back into view, since dockview does that only as a tab activates, before the
+ * actions settle: by the tab list's own scroll, as dockview 8.8.3's
+ * `Tabs._scrollTabIntoView` does, since `scrollIntoView` would scroll the split
+ * views around the strip too.
  */
 function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
   const [room, setRoom] = useState<number>();
@@ -313,10 +329,14 @@ function useActionsRoom(wrapper: HTMLElement | null): number | undefined {
         (sum, tab) => sum + (tab as HTMLElement).offsetWidth,
         0,
       );
+      const spaces =
+        list.childElementCount === 0
+          ? 0
+          : TABS_START + TABS_GAP * (list.childElementCount - 1);
       setRoom(
         Math.max(
           0,
-          strip.clientWidth - tabs - OVERFLOW_BUTTON - ACTIONS_PADDING,
+          strip.clientWidth - tabs - spaces - OVERFLOW_BUTTON - ACTIONS_PADDING,
         ),
       );
       const active = list.querySelector<HTMLElement>(".dv-active-tab");
@@ -375,16 +395,22 @@ export function GroupActions({
   );
 }
 
+/** What `useChanges` watches for an editor that is no session. */
+const NO_SESSIONS = new Changes();
+
 function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
   const { editors } = useWorkbench();
   useChanges(editors.changes);
   const params = readParams(raw);
   const provider = params && editors.resolve(params.uri);
   const dirty = params !== undefined && editors.isDirty(params.uri);
+  useChanges(provider?.session?.changes ?? NO_SESSIONS);
+  const state = params && provider?.session?.state(params.uri);
   return (
     <TabTooltip
       tooltip={() => params && provider?.tooltip?.(new URL(params.uri))}
-      className="flex h-full items-center gap-1.5 pr-[3px] pl-2 text-body"
+      data-session={state}
+      className="flex h-full items-center gap-1.5 text-body"
       onDoubleClick={() => {
         if (params) editors.pin(params.uri);
       }}
@@ -398,25 +424,52 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
           className="size-4 shrink-0 text-support"
         />
       )}
-      <span data-preview={params?.preview ?? false} className="truncate">
-        {api.title}
+      <span
+        data-preview={params?.preview ?? false}
+        data-cut={provider?.titleEndTells === true ? "middle" : "end"}
+        className="twigo-tab-title"
+      >
+        {provider?.titleEndTells === true ? (
+          <CutInTheMiddle
+            text={api.title ?? ""}
+            floor={TITLE_FLOOR}
+            separator={TITLE_SEPARATOR}
+          />
+        ) : (
+          api.title
+        )}
       </span>
-      <button
-        type="button"
+      {state === "ended" && (
+        <span className="shrink-0 text-xs text-quiet">ended</span>
+      )}
+      {state === "connecting" && (
+        <StatusDot tone="idle" pulse label="Connecting" />
+      )}
+      {state === "failed" && <StatusDot tone="error" label="Failed" />}
+      {/* Not a <button>: an accessibility press on a role=tab element clicks
+          the native control inside it, which would close the tab instead of
+          selecting it:
+          https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/accessibility/AccessibilityNodeObject.cpp#L1603-L1678 */}
+      <div
+        role="button"
+        tabIndex={-1}
         aria-label={`Close ${api.title ?? ""}`}
         data-dirty={dirty}
+        onPointerDown={(event) => {
+          event.preventDefault();
+        }}
         onClick={(event) => {
           event.stopPropagation();
           editors.dismiss(api.id);
         }}
         className={cn(
-          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded",
+          "twigo-tab-close -ml-[3px] flex size-5 shrink-0 items-center justify-center rounded-sm",
           "hover:bg-row-hover",
         )}
       >
         {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
         <X className="twigo-tab-x size-3.5" />
-      </button>
+      </div>
     </TabTooltip>
   );
 }
@@ -454,6 +507,8 @@ const HINTS: readonly { command: string; label: string }[] = [
   { command: "workbench.action.showCommands", label: "Show all commands" },
   { command: "workbench.action.quickOpenHelp", label: "Quick access help" },
 ];
+
+const TITLE_SEPARATOR = /[-:/]/;
 
 const COMPONENTS = { [EDITOR_COMPONENT]: EditorPanel };
 const TABS = { [EDITOR_TAB]: EditorTab };

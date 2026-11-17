@@ -3,6 +3,7 @@ import { HEALTH } from "../columns";
 import type { PinnedList } from "../explorer/pinned";
 import type { ListServices } from "../services";
 import { listUri, parseListUri } from "../uri";
+import { namespacesOf } from "./scope";
 
 /**
  * The list a list editor shows now, as a pin keeps it: its namespaces,
@@ -18,7 +19,7 @@ export function pinOf(
   const text = states.text(uri) ?? input.text;
   const picked = states.health(uri);
   const health = picked === null ? undefined : (picked?.health ?? input.health);
-  const namespaces = input.namespaces ?? spaces.state(input.space).namespaces;
+  const namespaces = namespacesOf(spaces, input);
   return {
     uri: listUri({
       space: input.space,

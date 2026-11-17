@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
   EmbeddedList as Spec,
+  ListBatch,
   ObjectRef,
   RequestOf,
 } from "@twigo/protocol";
@@ -110,8 +111,16 @@ test("the keys of lists move along its rows and open one", async () => {
 
 test("owners that control nothing list no pods", async () => {
   await shown({ ...NODE_PODS, fieldSelector: null, owners: [] }, vi.fn());
-  expect(screen.getByText("No pods")).toBeDefined();
+  expect(screen.getByText("No pods in prod-eu")).toBeDefined();
   expect(screen.queryByRole("grid")).toBeNull();
+});
+
+test("an empty list of an object's namespace names the context before the namespace", async () => {
+  await shown(
+    { ...NODE_PODS, namespace: "payments", fieldSelector: null, owners: [] },
+    vi.fn(),
+  );
+  expect(screen.getByText("No pods in prod-eu · payments")).toBeDefined();
 });
 
 test("a sort is kept for the kind's next object", async () => {
@@ -233,4 +242,62 @@ test("a Metrics API that does not answer is said in the header's mark", async ()
   expect(screen.getByRole("columnheader", { name: "CPU" }).textContent).toMatch(
     /metrics-server does not answer/,
   );
+});
+
+test("a node's pod that is not ready and restarted within the hour warns in Ready alone, and a ready one in Restarts", async () => {
+  const mock = createMockBackend("ready");
+  let send: ((batch: ListBatch) => void) | undefined;
+  const backend: Backend = {
+    invoke: (command, request) =>
+      command.startsWith("list_")
+        ? Promise.resolve(null as never)
+        : mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command !== "list_subscribe")
+        return mock.subscribe(command, request, onMessage);
+      send = onMessage;
+      return Promise.resolve(1 as never);
+    },
+  };
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
+  const pod = (id: string, ready: string) => ({
+    id,
+    created: null,
+    received: new Date().toISOString(),
+    generated: null,
+    cells: [id, ready, "Running", "1 (46m ago)"],
+  });
+  act(() => {
+    send?.({
+      seq: 1,
+      total: 2,
+      columns: [
+        { name: "Name", kind: "string", priority: 0 },
+        { name: "Ready", kind: "string", priority: 0 },
+        { name: "Status", kind: "string", priority: 0 },
+        {
+          name: "Restarts",
+          kind: "string",
+          priority: 0,
+          printsDuration: true,
+        },
+      ],
+      window: { start: 0, ids: ["a", "b"] },
+      upserts: [pod("a", "0/1"), pod("b", "1/1")],
+      status: { state: "ready" },
+      counts: null,
+      groups: null,
+      metrics: null,
+    });
+  });
+  await settle(1);
+  const warns = (id: string, column: string) =>
+    screen
+      .getByText(id)
+      .closest("[role=row]")
+      ?.querySelector(
+        `[data-column="${column}"] .text-warn-foreground`,
+      ) instanceof Element;
+  expect([warns("a", "Ready"), warns("a", "Restarts")]).toEqual([true, false]);
+  expect([warns("b", "Ready"), warns("b", "Restarts")]).toEqual([false, true]);
 });

@@ -1,6 +1,6 @@
 import { RotateCcw, Terminal } from "lucide-react";
 import * as v from "valibot";
-import type { Workbench } from "@twigo/workbench";
+import { spaceMark, type Workbench } from "@twigo/workbench";
 import type { TabPaths } from "../tabPaths";
 import {
   parseTerminalUri,
@@ -44,7 +44,7 @@ export function registerTerminals(
   const offers = new KubeconfigOffers(backend, (error) => {
     workbench.report(error);
   });
-  presentOffers(offers);
+  presentOffers((context) => spaceMark(spaces.ofContext(context)), offers);
   offers.watch().catch((error: unknown) => {
     workbench.report(error);
   });
@@ -58,6 +58,7 @@ export function registerTerminals(
       return input ? terminalTitle(input) : uri.href;
     },
     tooltip: (uri) => paths.terminal(uri.href),
+    session: tabs,
     icon: ({ className }) => <Terminal className={className} />,
     component: ({ uri }) => (
       <TerminalEditor uri={uri} tabs={tabs} offers={offers} />

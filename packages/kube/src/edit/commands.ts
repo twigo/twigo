@@ -14,7 +14,12 @@ import {
 } from "lucide-react";
 import { toIpcError, type ObjectRef, type ResourceRef } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
-import type { ContextValue, MenuId, Workbench } from "@twigo/workbench";
+import {
+  spaceMark,
+  type ContextValue,
+  type MenuId,
+  type Workbench,
+} from "@twigo/workbench";
 import { sameGvr, type Discovery } from "../discovery";
 import { refUri } from "../object/useObject";
 import type { ObjectTabs } from "../object/tabs";
@@ -213,6 +218,7 @@ export function registerEdits(
 
   const nameOf = (space: string): string =>
     spaces.list.find(({ id }) => id === space)?.name ?? space;
+  const tileOf = (space: string) => spaceMark(spaces.get(space));
 
   /**
    * Opens the object a manifest made once the space's discovery says where its
@@ -223,7 +229,9 @@ export function registerEdits(
     try {
       const uri = refUri(space, await discovery.resources(space), made.ref);
       if (uri === undefined) {
-        notify.warning(`${nameOf(space)} does not serve ${made.ref.kind}`);
+        notify.warning(`${nameOf(space)} does not serve ${made.ref.kind}`, {
+          tile: tileOf(space),
+        });
         return false;
       }
       editors.open(uri, { preserveFocus: true });
@@ -231,6 +239,7 @@ export function registerEdits(
     } catch (error) {
       notify.error(
         `Cannot open ${made.what} in ${nameOf(space)}: ${toIpcError(error).message}`,
+        { tile: tileOf(space) },
       );
       return false;
     }
@@ -270,14 +279,17 @@ export function registerEdits(
             : "Updated";
       notify.success(
         made ? `${verb} ${made.what} in ${name}` : `Applied to ${name}`,
-        made && {
-          action: {
-            label: `Open in ${name}`,
-            run: () => {
-              spaces.select(target);
-              void openMade(target, made);
+        {
+          tile: tileOf(target),
+          ...(made && {
+            action: {
+              label: `Open in ${name}`,
+              run: () => {
+                spaces.select(target);
+                void openMade(target, made);
+              },
             },
-          },
+          }),
         },
       );
       back(uri, true);
@@ -472,7 +484,9 @@ export function registerEdits(
         const last = answered(uri);
         if (last?.answer.state !== "ready") return;
         if (last.subject.text !== copies.get(uri)?.text) {
-          notify.info("The YAML changed after this preview: apply it again.");
+          notify.info("The YAML changed after this preview: apply it again.", {
+            tile: tileOf(last.subject.space),
+          });
           return;
         }
         await confirm(uri, last.answer.id, Check);

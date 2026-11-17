@@ -63,7 +63,7 @@ export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
                 Request body
               </h3>
               <pre
-                className={`${CODE} max-h-32 overflow-y-auto rounded-md bg-row-active px-2 py-1.5 whitespace-pre-wrap`}
+                className={`${CODE} max-h-32 overflow-y-auto rounded-lg bg-row-active px-2 py-1.5 whitespace-pre-wrap`}
               >
                 {detail.body}
               </pre>
@@ -112,7 +112,7 @@ function Changes({
         role="group"
         aria-label="Changes"
         data-owns-escape
-        className="overflow-hidden rounded-md shadow-[inset_0_0_0_1px_var(--border)]"
+        className="overflow-hidden rounded-lg shadow-[inset_0_0_0_1px_var(--border)]"
       >
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
           <DiffView

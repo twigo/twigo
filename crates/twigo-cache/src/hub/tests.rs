@@ -5,7 +5,10 @@ use twigo_ipc::ViewState;
 use twigo_kube::client::Budgets;
 
 use super::*;
+use crate::decode::{DecodeError, Event, Page};
 use crate::fake::Fake;
+use crate::printed::Printed;
+use crate::table::{Cell, ColumnKind};
 use crate::upstream::IDLE;
 
 fn pods() -> Resource {
@@ -610,6 +613,200 @@ async fn a_watch_resumed_from_a_compacted_version_relists_with_its_rows() {
     assert_eq!(fake.count("sendInitialEvents"), 2);
 }
 
+type Restarts = Arc<Mutex<HashMap<String, (u32, Option<i64>)>>>;
+
+struct Printing {
+    meta: MetaDecoder,
+    columns: Arc<[Column]>,
+    restarts: Restarts,
+}
+
+impl Printing {
+    fn new(restarts: &Restarts) -> Self {
+        Self {
+            meta: MetaDecoder,
+            columns: Arc::new([Column {
+                name: "Restarts".into(),
+                kind: ColumnKind::String,
+                format: "".into(),
+                priority: 0,
+                prints_duration: true,
+            }]),
+            restarts: Arc::clone(restarts),
+        }
+    }
+
+    fn print(&self, row: &mut Row) {
+        let restarts = self.restarts.lock().unwrap();
+        let (count, last) = restarts.get(&*row.meta.name).copied().unwrap_or_default();
+        let printed = match last {
+            None => count.to_string(),
+            Some(last) => format!("{count} ({} ago)", human(row.meta.received / 1000 - last)),
+        };
+        row.cells = Box::new([Cell::Text(printed.into())]);
+    }
+}
+
+fn human(seconds: i64) -> String {
+    match seconds {
+        ..120 => format!("{seconds}s"),
+        _ if seconds % 60 == 0 => format!("{}m", seconds / 60),
+        _ => format!("{}m{}s", seconds / 60, seconds % 60),
+    }
+}
+
+impl Decode for Printing {
+    type Item = Row;
+
+    fn decode_list(&mut self, body: &[u8], received: Timestamp) -> Result<Page, DecodeError> {
+        let mut page = self.meta.decode_list(body, received)?;
+        page.items.iter_mut().for_each(|row| self.print(row));
+        Ok(page)
+    }
+
+    fn decode_event(&mut self, line: &[u8], received: Timestamp) -> Result<Event, DecodeError> {
+        let mut event = self.meta.decode_event(line, received)?;
+        if let Event::Upsert(row) | Event::Delete(row) = &mut event {
+            self.print(row);
+        }
+        Ok(event)
+    }
+
+    fn columns(&self) -> Option<&Arc<[Column]>> {
+        Some(&self.columns)
+    }
+}
+
+fn arrived(upstream: &Upstream<Row>) -> Vec<(String, i64, Option<i64>)> {
+    let mut arrived: Vec<_> = upstream
+        .store
+        .items(|_| true)
+        .iter()
+        .map(|row| {
+            let stamp = row.meta.received / 1000;
+            let ago = match &row.cells[..] {
+                [Cell::Text(text)] => Printed::parse(text).map(|printed| printed.ago as i64),
+                _ => None,
+            };
+            (row.meta.name.to_string(), stamp, ago.map(|ago| stamp - ago))
+        })
+        .collect();
+    arrived.sort();
+    arrived
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_what_prints_as_it_did()
+ {
+    for streaming in [true, false] {
+        stamped_as_it_arrives(streaming).await;
+    }
+}
+
+async fn stamped_as_it_arrives(streaming: bool) {
+    let fake = Fake::default();
+    fake.state().no_streaming = !streaming;
+    for name in ["p1", "p2", "p3"] {
+        fake.add("pods", Some("a"), name);
+    }
+    let restarts: Restarts = Arc::new(Mutex::new(HashMap::from([
+        ("p1".to_owned(), (1, Some(-295))),
+        ("p2".to_owned(), (0, None)),
+        ("p3".to_owned(), (0, None)),
+    ])));
+    let (hub, _clients) = fake.hub(Budgets::default());
+    sleep(Duration::from_secs(5)).await;
+    let env = Env {
+        connect: Arc::clone(&hub.inner.connect),
+        clock: Arc::clone(&hub.inner.clock),
+        cluster: hub.inner.cluster("kind-test"),
+        waiting: Arc::new(|_| {}),
+    };
+    let key = Key {
+        context: "kind-test".to_owned(),
+        resource: pods(),
+        format: Format::Metadata,
+        scope: namespace("a"),
+        field_selector: None,
+    };
+    let upstream = Arc::new(Upstream::<Row>::new());
+    let mut state = upstream.state();
+    let run = tokio::spawn(upstream::run(
+        env,
+        key.spec(),
+        Printing::new(&restarts),
+        Arc::clone(&upstream),
+    ));
+    let ready = |state: &ViewState| *state == ViewState::Ready;
+    state.wait_for(ready).await.unwrap();
+    assert_eq!(
+        arrived(&upstream),
+        [
+            ("p1".to_owned(), 5, Some(-295)),
+            ("p2".to_owned(), 5, None),
+            ("p3".to_owned(), 5, None)
+        ],
+        "streaming {streaming}: the rows of the list arrived with it"
+    );
+
+    sleep(Duration::from_secs(10)).await;
+    restarts
+        .lock()
+        .unwrap()
+        .insert("p1".to_owned(), (2, Some(5)));
+    fake.add("pods", Some("a"), "p1");
+    settle().await;
+    assert_eq!(
+        arrived(&upstream),
+        [
+            ("p1".to_owned(), 15, Some(5)),
+            ("p2".to_owned(), 5, None),
+            ("p3".to_owned(), 5, None)
+        ],
+        "streaming {streaming}: an event stamps the row it brings, and no other"
+    );
+
+    sleep(Duration::from_secs(20)).await;
+    fake.bookmark();
+    settle().await;
+    assert_eq!(
+        arrived(&upstream),
+        [
+            ("p1".to_owned(), 15, Some(5)),
+            ("p2".to_owned(), 5, None),
+            ("p3".to_owned(), 5, None)
+        ],
+        "streaming {streaming}: a bookmark brings no row"
+    );
+
+    sleep(Duration::from_secs(30)).await;
+    fake.end_watches();
+    restarts
+        .lock()
+        .unwrap()
+        .insert("p2".to_owned(), (1, Some(62)));
+    fake.add("pods", Some("a"), "p2");
+    fake.compact();
+    sleep(Duration::from_secs(30)).await;
+    let relisted = arrived(&upstream);
+    let [(_, older, p1), (_, restarted, p2), (_, kept, _)] = relisted[..] else {
+        panic!("three rows: {relisted:?}");
+    };
+    assert!(
+        (65..=75).contains(&older) && p1 == Some(5),
+        "streaming {streaming}: a relist that prints an age older stamps the row anew, from the same moment: {relisted:?}"
+    );
+    assert!(
+        (65..=75).contains(&restarted) && p2 == Some(62),
+        "streaming {streaming}: a relist stamps the row that restarted: {relisted:?}"
+    );
+    assert_eq!(
+        kept, 5,
+        "streaming {streaming}: and keeps the stamp of a row it prints as it was"
+    );
+    run.abort();
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() {
     let fake = Fake::default();
@@ -646,6 +843,28 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
         fake.count("resourceVersion=1200"),
         1,
         "watched from the list's version"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_page_is_stamped_when_its_response_starts_whatever_its_body_takes() {
+    let fake = Fake::default();
+    fake.state().no_streaming = true;
+    fake.state().body_takes = Duration::from_secs(4);
+    for index in 0..1200 {
+        fake.add("pods", Some("a"), &format!("p{index:04}"));
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let mut stamped = std::collections::BTreeMap::new();
+    for row in pods.items() {
+        *stamped.entry(row.meta.received / 1000).or_insert(0) += 1;
+    }
+    assert_eq!(
+        stamped,
+        [(0, 500), (4, 500), (8, 200)].into(),
+        "each page by when its response started, not four seconds on"
     );
 }
 

@@ -14,8 +14,8 @@ export interface SegmentedItem<V extends string> {
 }
 
 /**
- * One choice among a few, as one bordered control: the health filter of a
- * list, the level of a log. The picked item reads as pressed.
+ * One choice among a few, as plates on one track: the health filter of a
+ * list, the level of a log. The picked plate reads as pressed.
  */
 export function Segmented<V extends string>({
   label,
@@ -35,11 +35,11 @@ export function Segmented<V extends string>({
       role="group"
       aria-label={label}
       className={cn(
-        "inline-flex h-6 items-stretch overflow-hidden rounded-md text-xs shadow-[inset_0_0_0_1px_var(--border)]",
+        "inline-flex h-6 items-stretch rounded-md bg-well p-0.5 text-xs",
         className,
       )}
     >
-      {items.map((item, index) => (
+      {items.map((item) => (
         <button
           key={item.value}
           type="button"
@@ -47,10 +47,7 @@ export function Segmented<V extends string>({
           onClick={() => {
             onChange(item.value);
           }}
-          className={cn(
-            "inline-flex items-center gap-1.5 px-2 whitespace-nowrap text-support outline-none hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-row-active aria-pressed:text-content",
-            index > 0 && "border-l border-border",
-          )}
+          className="inline-flex items-center gap-1.5 rounded-sm px-2 whitespace-nowrap text-support outline-none not-aria-pressed:hover:text-content focus-visible:shadow-[inset_var(--focus-ring)] aria-pressed:bg-plate aria-pressed:text-strong"
         >
           {item.tone && item.tone !== "ok" && <StatusDot tone={item.tone} />}
           {item.label}

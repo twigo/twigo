@@ -10,10 +10,12 @@ import { initials } from "./spaceBadge";
  */
 export function SpaceTile({
   space,
+  size,
   className,
   children,
 }: {
   space: Space;
+  size?: "sm" | "md";
   className?: string;
   /** Drawn over the tile, such as the rail's connection dot. */
   children?: ReactNode;
@@ -24,6 +26,7 @@ export function SpaceTile({
     <Tile
       letters={initials(space.name)}
       color={colors.ofSpace(space)}
+      {...(size && { size })}
       className={className}
     >
       {children}

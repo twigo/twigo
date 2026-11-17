@@ -82,6 +82,19 @@ export function chipLabel(access: ContextAccess): string | undefined {
 }
 
 /**
+ * What a lock says of a context: shut while its mode holds writes back, open
+ * while an unlock lifts that, none for a context that lets them through,
+ * guarded ones included, which ask first and hold nothing back.
+ */
+export function lockOf(
+  access: ContextAccess | undefined,
+): "shut" | "open" | undefined {
+  if (access === undefined) return undefined;
+  if (access.unlockedUntil !== null) return "open";
+  return access.mode === "read-only" ? "shut" : undefined;
+}
+
+/**
  * What the active space's context will answer a write or an exec while its
  * mode is read-only, as its keys say: `prod-eu is read-only`. A space of
  * several contexts has no one mode, so it says nothing, and the gate decides.

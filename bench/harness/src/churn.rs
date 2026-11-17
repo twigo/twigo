@@ -1,5 +1,5 @@
-//! The churn generator: bumps the restart count of random pods of the `bench/bench` Deployment
-//! (`bench/pods.sh`) through the status subresource at a steady rate, and logs every change.
+//! The churn generator: restarts random pods of the `bench/bench` Deployment (`bench/pods.sh`)
+//! through the status subresource at a steady rate, and logs every change.
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use k8s_openapi::api::core::v1::Pod;
+use k8s_openapi::api::core::v1::{ContainerState, ContainerStateTerminated, Pod};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
+use k8s_openapi::jiff::Timestamp;
 use kube::api::{ListParams, Patch, PatchParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
@@ -32,6 +34,8 @@ pub struct Options {
     pub rate: f64,
     pub seconds: Option<f64>,
     pub log: PathBuf,
+    /// Restarts without a crash before them, so the server prints the count alone.
+    pub bare: bool,
 }
 
 /// One line of the log: what changed, and when it was sent and answered, in Unix milliseconds.
@@ -70,13 +74,27 @@ pub fn allowed_context(context: &str) -> bool {
     context.starts_with("kind-") || context.starts_with("kwok-")
 }
 
-/// A JSON patch that sets the first container's restart count, once that container is `app`.
-pub fn restart_patch(restarts: i32) -> json_patch::Patch {
-    serde_json::from_value(json!([
-        { "op": "test", "path": "/status/containerStatuses/0/name", "value": CONTAINER },
-        { "op": "replace", "path": "/status/containerStatuses/0/restartCount", "value": restarts },
-    ]))
-    .expect("a valid JSON patch")
+/// A JSON patch that sets the first container's restart count, once that container is `app`,
+/// and the crash that restart followed, at `finished` where one is given, so the server prints
+/// the count with how long ago it was (`3 (5s ago)`).
+pub fn restart_patch(restarts: i32, finished: Option<Timestamp>) -> json_patch::Patch {
+    let mut ops = vec![
+        json!({ "op": "test", "path": "/status/containerStatuses/0/name", "value": CONTAINER }),
+        json!({ "op": "replace", "path": "/status/containerStatuses/0/restartCount", "value": restarts }),
+    ];
+    if let Some(finished) = finished {
+        let crashed = ContainerState {
+            terminated: Some(ContainerStateTerminated {
+                exit_code: 1,
+                reason: Some("Error".to_owned()),
+                finished_at: Some(Time(finished)),
+                ..ContainerStateTerminated::default()
+            }),
+            ..ContainerState::default()
+        };
+        ops.push(json!({ "op": "add", "path": "/status/containerStatuses/0/lastState", "value": crashed }));
+    }
+    serde_json::from_value(serde_json::Value::Array(ops)).expect("a valid JSON patch")
 }
 
 fn unix_ms() -> f64 {
@@ -148,10 +166,12 @@ pub async fn run(options: Options) -> Result<Summary, String> {
     let stop = async {
         let _ = tokio::signal::ctrl_c().await;
     };
+    let bare = options.bare;
     let patch = move |name: Arc<str>, restarts: i32| {
         let api = api.clone();
         async move {
-            let patch = Patch::Json::<()>(restart_patch(restarts));
+            let finished = (!bare).then(Timestamp::now);
+            let patch = Patch::Json::<()>(restart_patch(restarts, finished));
             api.patch_status(&name, &PatchParams::default(), &patch)
                 .await
                 .map(drop)
@@ -298,15 +318,35 @@ mod tests {
     #[test]
     fn the_patch_tests_the_container_and_sets_its_restarts() {
         let mut pod = json!({
-            "status": { "containerStatuses": [{ "name": "app", "restartCount": 3 }] }
+            "status": { "containerStatuses": [{ "name": "app", "restartCount": 3, "lastState": {} }] }
         });
-        json_patch::patch(&mut pod, &restart_patch(4)).unwrap();
+        json_patch::patch(&mut pod, &restart_patch(4, Some(Timestamp::UNIX_EPOCH))).unwrap();
         assert_eq!(pod["status"]["containerStatuses"][0]["restartCount"], 4);
+        assert_eq!(
+            pod["status"]["containerStatuses"][0]["lastState"],
+            json!({ "terminated": {
+                "exitCode": 1,
+                "reason": "Error",
+                "finishedAt": "1970-01-01T00:00:00Z",
+            } })
+        );
 
         let mut other = json!({
             "status": { "containerStatuses": [{ "name": "sidecar", "restartCount": 3 }] }
         });
-        assert!(json_patch::patch(&mut other, &restart_patch(4)).is_err());
+        assert!(
+            json_patch::patch(&mut other, &restart_patch(4, Some(Timestamp::UNIX_EPOCH))).is_err()
+        );
+
+        let mut bare = json!({
+            "status": { "containerStatuses": [{ "name": "app", "restartCount": 3, "lastState": {} }] }
+        });
+        json_patch::patch(&mut bare, &restart_patch(4, None)).unwrap();
+        assert_eq!(bare["status"]["containerStatuses"][0]["restartCount"], 4);
+        assert_eq!(
+            bare["status"]["containerStatuses"][0]["lastState"],
+            json!({})
+        );
     }
 
     #[tokio::test]
@@ -342,6 +382,7 @@ users:
             rate: 100.0,
             seconds: Some(1.0),
             log: log.clone(),
+            bare: false,
         })
         .await;
 

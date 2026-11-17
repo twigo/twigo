@@ -44,20 +44,29 @@ interface ToastProps {
   tone: Tone;
   message: ReactNode;
   action: ToastAction | undefined;
+  tile?: ReactNode;
+}
+
+/** What a toast leads with when it speaks about something that is not the app's own, in the icon's column. */
+function Lead({ tile }: { tile: ReactNode }) {
+  return tile ? (
+    <span className="flex h-5 shrink-0 items-center">{tile}</span>
+  ) : null;
 }
 
 /**
  * A toast is a popover surface with the tone as its icon and a thin rule,
  * not a filled box (ARCHITECTURE 4.9).
  */
-export function Toast({ id, tone, message, action }: ToastProps) {
+export function Toast({ id, tone, message, action, tile }: ToastProps) {
   const { icon: Icon, text, rule } = TONE[tone];
   return (
     <div
       role={tone === "error" || tone === "warning" ? "alert" : "status"}
-      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3.5 font-sans text-xs shadow-lg backdrop-blur-xl"
+      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3.5 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
       <span className={cn("absolute inset-y-0 left-0 w-0.5", rule)} />
+      <Lead tile={tile} />
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className={cn("size-3.5", text)} />
       </span>
@@ -70,7 +79,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
               action.run();
               toast.dismiss(id);
             }}
-            className="-ml-1.5 rounded px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+            className="-ml-1.5 rounded-sm px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
           >
             {action.label}
           </button>
@@ -80,7 +89,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
         type="button"
         aria-label="Dismiss"
         onClick={() => toast.dismiss(id)}
-        className="flex size-5 shrink-0 items-center justify-center rounded text-support transition-colors hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+        className="flex size-5 shrink-0 items-center justify-center rounded-sm text-support transition-colors hover:bg-row-hover hover:text-content focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
       >
         <X className="size-3.5" />
       </button>
@@ -89,6 +98,7 @@ export function Toast({ id, tone, message, action }: ToastProps) {
 }
 
 export interface CountdownToastProps {
+  tile?: ReactNode;
   icon: LucideIcon;
   message: ReactNode;
   /** Says what happens when, from the seconds left: `dev · sends in 4 s`. */
@@ -108,6 +118,7 @@ export interface CountdownToastProps {
  * its owner, not the toast, keeps the time.
  */
 export function CountdownToast({
+  tile,
   icon: Icon,
   message,
   detail,
@@ -135,8 +146,9 @@ export function CountdownToast({
   return (
     <div
       role="status"
-      className="relative flex w-[var(--width)] items-center gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
+      className="relative flex w-[var(--width)] items-center gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
+      <Lead tile={tile} />
       <Icon aria-hidden className="size-3.5 shrink-0 text-support" />
       <span className="grid min-w-0 flex-1 gap-0.5 leading-5">
         <span className="break-words text-content">{message}</span>
@@ -148,7 +160,7 @@ export function CountdownToast({
         className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium text-content shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-accent focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
       >
         {action.label}
-        {action.keys && <Kbd>{action.keys}</Kbd>}
+        {action.keys && <Kbd className="rounded-[3px]">{action.keys}</Kbd>}
       </button>
       <span
         aria-hidden
@@ -160,6 +172,7 @@ export function CountdownToast({
 }
 
 export interface ChoiceToastProps {
+  tile?: ReactNode;
   icon: LucideIcon;
   message: ReactNode;
   detail?: ReactNode;
@@ -175,6 +188,7 @@ export interface ChoiceToastProps {
  * nothing.
  */
 export function ChoiceToast({
+  tile,
   icon: Icon,
   message,
   detail,
@@ -184,8 +198,9 @@ export function ChoiceToast({
   return (
     <div
       role="status"
-      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-md border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
+      className="relative flex w-[var(--width)] items-start gap-2 overflow-hidden rounded-lg border border-border bg-popover/90 py-2 pr-2 pl-3 font-sans text-xs shadow-lg backdrop-blur-xl"
     >
+      <Lead tile={tile} />
       <span className="flex h-5 shrink-0 items-center">
         <Icon aria-hidden className="size-3.5 text-support" />
       </span>

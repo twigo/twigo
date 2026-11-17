@@ -13,6 +13,7 @@ import {
   useListRegistration,
   useWorkbench,
 } from "@twigo/workbench";
+import { whereWords } from "../list/scope";
 import { pfUri } from "../uri";
 import { ForwardLine } from "./ForwardLine";
 import { forwardKeys, withForward } from "./keys";
@@ -44,7 +45,7 @@ function SpaceForwards({
   space: string;
 }) {
   const workbench = useWorkbench();
-  const { editors, keys, menus } = workbench;
+  const { editors, keys, menus, spaces } = workbench;
   useChanges(forwards.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
@@ -113,7 +114,7 @@ function SpaceForwards({
       empty={
         <EmptyState
           icon={ArrowLeftRight}
-          title="No port forwards"
+          title={`No port forwards in ${whereWords(spaces, space, [])}`}
           className="py-16"
         >
           <p>

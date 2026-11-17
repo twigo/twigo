@@ -18,6 +18,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use indexset::BTreeSet;
+use jiff::Timestamp;
 use twigo_ipc::{
     self as ipc, IpcError, ListBatch, ListQuery, MetricsState, RowGroup, RowId, ValueCount,
     ViewState,
@@ -25,6 +26,7 @@ use twigo_ipc::{
 
 use crate::hub::Delta;
 use crate::metrics::{self, Api, Kind, Sample, Scope};
+use crate::printed;
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 
@@ -150,6 +152,7 @@ impl Layout {
                     name: name.to_owned(),
                     kind,
                     priority: 0,
+                    prints_duration: false,
                 });
                 sources.push(Source::Metric(metric));
             }
@@ -164,6 +167,7 @@ impl Layout {
                 name: column.name.to_string(),
                 kind: kind(column.kind),
                 priority: column.priority,
+                prints_duration: column.prints_duration,
             });
             sources.push(Source::Cell(at));
             if at == 0 && spec.namespace_column {
@@ -171,6 +175,7 @@ impl Layout {
                     name: NAMESPACE.to_owned(),
                     kind: ipc::ColumnKind::String,
                     priority: 0,
+                    prints_duration: false,
                 });
                 sources.push(Source::Namespace);
             }
@@ -255,10 +260,27 @@ impl Layout {
         }
     }
 
+    /// What the text filter reads of a column: of a duration the server
+    /// printed, the count only, since its age on screen is no longer the
+    /// printed one.
+    fn filtered<'a>(&self, row: &'a Row, at: usize) -> Cow<'a, str> {
+        match self.cell(row, None, at) {
+            Cow::Borrowed(Cell::Text(text)) if self.wire[at].prints_duration => {
+                printed::filtered(text).into()
+            }
+            _ => self.text(row, at),
+        }
+    }
+
     fn sort_key(&self, row: &Row, sample: Option<&Sample>) -> SortKey {
-        match self.sort {
-            Some(at) => SortKey::of(&self.cell(row, sample, at), row.meta.created),
-            None => SortKey::Null,
+        let Some(at) = self.sort else {
+            return SortKey::Null;
+        };
+        match &*self.cell(row, sample, at) {
+            Cell::Text(text) if self.wire[at].prints_duration => {
+                SortKey::printed(text, row.meta.received)
+            }
+            cell => SortKey::of(cell, row.meta.created),
         }
     }
 
@@ -274,7 +296,12 @@ impl Layout {
             .collect();
         ipc::Row {
             id: RowId(id.to_owned()),
-            created: row.meta.created.map(|created| created.to_string()),
+            created: row.meta.created_at().map(|created| created.to_string()),
+            received: format!(
+                "{:.3}",
+                Timestamp::from_millisecond(row.meta.received)
+                    .expect("milliseconds that a Timestamp gave")
+            ),
             generated: row.meta.generated,
             cells,
         }
@@ -685,7 +712,7 @@ impl QueryView {
             return;
         }
         if let Some(text) = &self.spec.text
-            && !text.keeps(layout.text.iter().map(|&at| layout.text(&row, at)))
+            && !text.keeps(layout.text.iter().map(|&at| layout.filtered(&row, at)))
         {
             return;
         }
@@ -963,11 +990,13 @@ fn uncount(counts: &mut HashMap<Box<str>, u32>, value: &str) {
     }
 }
 
-/// Nothing the webview shows of the row changed.
+/// Nothing the webview shows of the row changed, its stamp included, which
+/// its printed ages count back from.
 fn unchanged(sent: &Arc<Row>, row: &Arc<Row>) -> bool {
     Arc::ptr_eq(sent, row)
         || (sent.cells == row.cells
             && sent.meta.created == row.meta.created
+            && sent.meta.received == row.meta.received
             && sent.meta.generated == row.meta.generated)
 }
 

@@ -56,8 +56,8 @@ async fn main() {
             ))
             .await
             .unwrap();
-        token = TableDecoder::new()
-            .decode_list(body.as_bytes())
+        token = TableDecoder::new("pods")
+            .decode_list(body.as_bytes(), jiff::Timestamp::now())
             .unwrap()
             .continue_token;
         bodies.push(body);
@@ -68,10 +68,15 @@ async fn main() {
     let body_bytes: usize = bodies.iter().map(String::len).sum();
 
     let before = heap();
-    let mut decoder = TableDecoder::new();
+    let mut decoder = TableDecoder::new("pods");
     let mut rows: Vec<Row> = Vec::new();
     for body in &bodies {
-        rows.extend(decoder.decode_list(body.as_bytes()).unwrap().items);
+        rows.extend(
+            decoder
+                .decode_list(body.as_bytes(), jiff::Timestamp::now())
+                .unwrap()
+                .items,
+        );
     }
     rows.shrink_to_fit();
     let after = heap();

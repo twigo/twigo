@@ -38,3 +38,18 @@ export function humanDuration(ms: number): string {
   }
   return `${years}y`;
 }
+
+const UNITS = /^(?:(\d+)y)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
+
+/**
+ * The inverse of `humanDuration`: reads a duration as kubectl prints it,
+ * years, days, hours, minutes and seconds in that order (`2d1h`, `5m30s`),
+ * and returns undefined for anything else, as `<unknown>` and `<invalid>`.
+ */
+export function parseDuration(text: string): number | undefined {
+  const match = text === "" ? null : UNITS.exec(text);
+  if (!match) return undefined;
+  const [, y, d, h, m, s] = match;
+  const hours = (Number(y ?? 0) * 365 + Number(d ?? 0)) * 24 + Number(h ?? 0);
+  return ((hours * 60 + Number(m ?? 0)) * 60 + Number(s ?? 0)) * 1000;
+}

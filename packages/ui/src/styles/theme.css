@@ -22,15 +22,15 @@
 
   /* Neutral greys with a trace of the brand hue: an app's chrome, not a
      tinted dashboard. Content surfaces stay white so data reads on paper. */
-  --background: oklch(0.975 0.002 250);
+  --background: oklch(0.975 0.008 250);
   --card: oklch(1 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: var(--content);
   --primary: oklch(0.3 0.006 250);
   --primary-foreground: oklch(0.985 0.002 250);
-  --secondary: oklch(0.955 0.002 250);
+  --secondary: oklch(0.955 0.008 250);
   --secondary-foreground: var(--content);
-  --muted: oklch(0.955 0.002 250);
+  --muted: oklch(0.955 0.008 250);
   /* Four text roles; a component names the role of what it shows.
        strong   an object's title, section titles, the name in the row under
                 the cursor
@@ -43,17 +43,18 @@
      and the editor; every role is 4.5:1 or more on the card, the popover and
      a selected row as well (WCAG 1.4.3):
                 dark shell   dark editor  light shell  light editor
-       strong   15.5 / 98    16.6 / 99    17.5 / 100   18.8 / 105
+       strong   15.5 / 98    16.6 / 98    17.5 / 100   18.8 / 105
        content  12.9 / 85    13.8 / 86    14.9 / 98    16.0 / 103
-       support   7.8 / 57     8.4 / 58     6.1 / 78     6.5 / 82
-       quiet     5.4 / 41     5.7 / 41     4.5 / 69     4.8 / 74
-     A selected row's tint takes quiet below 4.5:1, so there it reads as
-     support (index.css). */
-  --strong: oklch(0.18 0.004 250);
-  --content: oklch(0.25 0.004 250);
-  --support: oklch(0.48 0.006 250);
-  --quiet: oklch(0.55 0.005 250);
-  --accent: oklch(0.945 0.003 250);
+       support   7.8 / 57     8.4 / 58     6.1 / 77     6.5 / 82
+       quiet     5.4 / 41     5.8 / 42     4.5 / 69     4.8 / 74
+     A selected row's tint and a problem row's band take quiet below 4.5:1,
+     so there it reads as support (index.css), and so does a placeholder on
+     a field's well. */
+  --strong: oklch(0.18 0.008 250);
+  --content: oklch(0.25 0.008 250);
+  --support: oklch(0.48 0.008 250);
+  --quiet: oklch(0.55 0.008 250);
+  --accent: oklch(0.945 0.008 250);
   --accent-foreground: var(--content);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
@@ -67,11 +68,25 @@
   --row-active: oklch(0 0 0 / 7%);
   --selected: color-mix(in oklab, var(--brand) 10%, oklch(0 0 0 / 4%));
   --selected-unfocused: oklch(0 0 0 / 6%);
+  --row-hover-layer: linear-gradient(var(--row-hover), var(--row-hover));
 
-  /* Selected editor-tab chip: a faint azure-tinted raised fill + tinted border
-     (never pure gray - that azure tint is the premium tell). */
-  --tab-selected-bg: color-mix(in oklab, var(--brand) 8%, var(--card));
-  --tab-selected-border: color-mix(in oklab, var(--brand) 22%, var(--border));
+  /* A problem row's band: its tone over the surface the row sits on. */
+  --band-error: color-mix(in oklab, var(--error) 9%, transparent);
+  --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
+
+  /* A well is the resting fill of a text field and of a segmented control's
+     track, and a plate is the picked choice on it. Both are overlays, like
+     the row states, so they differ from every surface they sit on.
+     A field or trigger under the pointer, or open, takes --well-hover in the
+     well's place: --row-active lies too near the well to read as a change. */
+  --well: oklch(0 0 0 / 6%);
+  --well-hover: oklch(0 0 0 / 8.5%);
+  --plate: oklch(1 0 0 / 80%);
+
+  /* A keycap's fill stacks on a field, a hovered button or field or a
+     selected row, so the fills under it stay under --row-active and
+     --well-hover: support text keeps 4.5:1 on it there. */
+  --keycap: oklch(0 0 0 / 5%);
 
   /* A solid inner ring, 3:1 or more against any surface (WCAG 1.4.11), and
      a translucent halo. The nested var(--brand) resolves per theme at use. */
@@ -85,12 +100,12 @@
   /* The shell carries the title bar, the space rail and the status bar.
      The side bars and the panel share its tone; the editor is the one
      surface that stands out: white on light, darkest on dark. */
-  --shell: oklch(0.975 0.002 250);
+  --shell: oklch(0.975 0.008 250);
   --editor: oklch(1 0 0);
 
-  --sidebar: oklch(0.975 0.002 250);
+  --sidebar: oklch(0.975 0.008 250);
   --sidebar-border: oklch(0.915 0.003 250);
-  --panel: oklch(0.975 0.002 250);
+  --panel: oklch(0.975 0.008 250);
 
   /* Tones (ARCHITECTURE 4.9). --warn fills dots and edges; as text it is
      --warn-foreground. Text in a tone reads at 4.5:1 on the shell, the
@@ -171,22 +186,22 @@
      white. The editor is the darkest surface, 0.185 under a 0.218 shell,
      as VS Code's Dark 2026, JetBrains Islands and Zed draw it; card 0.25
      and popover 0.27 float above both. */
-  --shell: oklch(0.218 0.002 250);
-  --editor: oklch(0.185 0.002 250);
-  --background: oklch(0.218 0.002 250);
-  --card: oklch(0.25 0.003 250);
-  --popover: oklch(0.27 0.003 250);
+  --shell: oklch(0.218 0.008 250);
+  --editor: oklch(0.185 0.008 250);
+  --background: oklch(0.218 0.008 250);
+  --card: oklch(0.25 0.008 250);
+  --popover: oklch(0.27 0.008 250);
   --popover-foreground: var(--content);
   --primary: oklch(0.87 0.002 250);
   --primary-foreground: oklch(0.218 0.002 250);
-  --secondary: oklch(0.28 0.003 250);
+  --secondary: oklch(0.28 0.008 250);
   --secondary-foreground: var(--content);
-  --muted: oklch(0.28 0.003 250);
-  --strong: oklch(0.96 0.002 250);
-  --content: oklch(0.9 0.002 250);
-  --support: oklch(0.75 0.003 250);
-  --quiet: oklch(0.65 0.003 250);
-  --accent: oklch(0.3 0.003 250);
+  --muted: oklch(0.28 0.008 250);
+  --strong: oklch(0.96 0.008 250);
+  --content: oklch(0.9 0.008 250);
+  --support: oklch(0.75 0.008 250);
+  --quiet: oklch(0.65 0.008 250);
+  --accent: oklch(0.3 0.008 250);
   --accent-foreground: var(--content);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
@@ -198,14 +213,21 @@
   --row-active: oklch(1 0 0 / 8%);
   --selected: color-mix(in oklab, var(--brand) 16%, oklch(1 0 0 / 6%));
   --selected-unfocused: oklch(1 0 0 / 8%);
+  --row-hover-layer: linear-gradient(var(--row-hover), var(--row-hover));
 
-  --tab-selected-bg: color-mix(in oklab, var(--brand) 14%, var(--card));
-  --tab-selected-border: color-mix(in oklab, var(--brand) 30%, var(--border));
+  --band-error: color-mix(in oklab, var(--error) 9%, transparent);
+  --band-warn: color-mix(in oklab, var(--warn) 7%, transparent);
+
+  --well: oklch(1 0 0 / 6%);
+  --well-hover: oklch(1 0 0 / 8%);
+  --plate: oklch(1 0 0 / 4%);
+  --keycap: oklch(1 0 0 / 5%);
+
   --border-subtle: oklch(1 0 0 / 5%);
 
-  --sidebar: oklch(0.218 0.002 250);
+  --sidebar: oklch(0.218 0.008 250);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --panel: oklch(0.218 0.002 250);
+  --panel: oklch(0.218 0.008 250);
 
   --ok: oklch(0.72 0.15 150);
   --warn: oklch(0.78 0.15 75);
@@ -282,6 +304,10 @@
   --color-row-active: var(--row-active);
   --color-selected: var(--selected);
   --color-selected-unfocused: var(--selected-unfocused);
+  --color-well: var(--well);
+  --color-well-hover: var(--well-hover);
+  --color-plate: var(--plate);
+  --color-keycap: var(--keycap);
   --color-border-subtle: var(--border-subtle);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);

@@ -198,6 +198,20 @@ test("a session that ends by itself keeps its tab and the panel, and is not coun
   expect(within(statusBar()).queryByText(/sessions?$/)).toBeNull();
 });
 
+test("the tab of each kind of session, logs, shell and terminal, says how its session stands", async () => {
+  const { workbench, run } = await mounted();
+  await run("k8s.logs.open", TARGET);
+  await run("k8s.shell.open", { ...TARGET, container: "api" });
+  await run("k8s.terminal.new");
+  const uris = tabsIn("panel");
+  expect(uris).toHaveLength(3);
+  for (const uri of uris) {
+    expect(workbench.editors.resolve(uri)?.session?.state(uri)).toMatch(
+      /^(connecting|running)$/,
+    );
+  }
+});
+
 const STREAMS: readonly [ViewState, boolean][] = [
   [{ state: "queued" }, true],
   [{ state: "connecting" }, true],
@@ -252,12 +266,15 @@ const counted = () => within(statusBar()).queryByText("1 session") !== null;
 test.each(STREAMS)(
   "a logs session whose target is %j is counted: %s, and the count follows it",
   async (status, shown) => {
-    const { batch } = await hiddenWithLogs();
+    const { batch, logs } = await hiddenWithLogs();
+    const [uri] = tabsIn("panel");
+    if (!uri) throw new Error("no logs tab");
     expect(batch({ status: { state: "ready" } })).toBe(0);
     expect(counted()).toBe(true);
 
     expect(batch({ status })).toBe(shown ? 0 : 1);
     expect(counted()).toBe(shown);
+    expect(logs.state(uri)).toBe(shown ? "running" : "failed");
     expect(batch({ status: { state: "ready" } })).toBe(shown ? 0 : 1);
     expect(counted()).toBe(true);
   },
@@ -291,20 +308,34 @@ const podsWith = (...streams: StreamState[]): LogPod[] => [
 ];
 
 test.each(POD_STREAMS)(
-  "a logs session whose only stream is %j is counted: %s, and the count follows it",
+  "a logs session whose only stream is %j is counted: %s",
   async (stream, shown) => {
     const { batch } = await hiddenWithLogs();
-    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(0);
+    batch({ pods: podsWith({ state: "following" }) });
     expect(counted()).toBe(true);
 
-    expect(batch({ pods: podsWith(stream) })).toBe(shown ? 0 : 1);
+    batch({ pods: podsWith(stream) });
     expect(counted()).toBe(shown);
-    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(
-      shown ? 0 : 1,
-    );
+    batch({ pods: podsWith({ state: "following" }) });
     expect(counted()).toBe(true);
   },
 );
+
+test("the tab of a logs session says connecting, then running, then ended as its streams do, and a batch that keeps what it says is no change", async () => {
+  const { workbench, batch } = await hiddenWithLogs();
+  const [uri] = tabsIn("panel");
+  if (!uri) throw new Error("no logs tab");
+  const says = () => workbench.editors.resolve(uri)?.session?.state(uri);
+  expect(batch({ pods: podsWith({ state: "connecting" }) })).toBe(1);
+  expect(says()).toBe("connecting");
+  expect(batch({ pods: podsWith({ state: "following" }) })).toBe(1);
+  expect(says()).toBe("running");
+  expect(
+    batch({ pods: podsWith({ state: "following" }, { state: "ended" }) }),
+  ).toBe(0);
+  expect(batch({ pods: podsWith({ state: "ended" }) })).toBe(1);
+  expect(says()).toBe("ended");
+});
 
 test("a logs session is counted while one of its streams reads, though the others ended", async () => {
   const { batch } = await hiddenWithLogs();

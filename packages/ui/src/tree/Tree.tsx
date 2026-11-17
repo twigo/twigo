@@ -27,9 +27,11 @@ export interface TreeRow {
 }
 
 /**
- * A tree of 22 px rows (ARCHITECTURE 4.9): a click on a folding row folds
- * it, on a leaf opens it, a double click keeps what it opened. The list
- * commands move through it while it has the focus.
+ * A tree of 22 px rows (ARCHITECTURE 4.9), as wide as the tree so a click
+ * anywhere along one lands, with hover and selection drawn as plates inset
+ * 6 px from its edges: a click on a folding row folds it, on a leaf opens
+ * it, a double click keeps what it opened. The list commands move through it
+ * while it has the focus.
  */
 export function Tree({
   label,
@@ -183,10 +185,10 @@ function TreeItem({
       onDoubleClick={onDoubleClick}
       style={{ paddingLeft: (folds ? 8 : 12) + row.depth * 16 }}
       className={cn(
-        "relative flex h-[22px] items-center gap-1 pr-2 text-body select-none",
-        active ? "bg-selected-unfocused" : "hover:bg-row-hover",
+        "relative isolate flex h-[22px] items-center gap-1 pr-3.5 text-body select-none before:absolute before:inset-x-1.5 before:inset-y-0 before:-z-10 before:rounded-sm",
+        active ? "before:bg-selected-unfocused" : "hover:before:bg-row-hover",
         cursor &&
-          "group-focus/tree:bg-selected group-focus/tree:hover:bg-selected",
+          "group-focus/tree:before:bg-selected group-focus/tree:hover:before:bg-selected",
       )}
     >
       {Array.from({ length: row.depth }, (_, level) => (

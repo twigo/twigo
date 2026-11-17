@@ -203,7 +203,11 @@ test("an ask withdrawn on screen closes the dialog and says so; one that waits l
   withdraw(1);
   expect(info).toHaveBeenCalledExactlyOnceWith(
     "Terminal 1 no longer asks to patch deployments/web in default on staging",
+    expect.anything(),
   );
+  expect(info.mock.lastCall?.[1]?.tile).toMatchObject({
+    props: { space: { id: "staging" } },
+  });
   expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
   expect(screen.queryByText(/^\d+ of \d+$/)).toBeNull();
 
@@ -431,6 +435,7 @@ test("an ask withdrawn while its answer is on its way closes the dialog, and the
   await waitFor(() => {
     expect(warning).toHaveBeenCalledExactlyOnceWith(
       "Terminal 1 no longer asks to patch deployments/web in default on staging, so your answer did not reach it",
+      expect.anything(),
     );
   });
   expect(info).not.toHaveBeenCalled();
@@ -553,6 +558,7 @@ test("an ask withdrawn behind a plan's confirmation leaves without a word, as it
   withdraw(2);
   expect(info).toHaveBeenCalledExactlyOnceWith(
     "Terminal 2 no longer asks to patch deployments/web in default on staging",
+    expect.anything(),
   );
 });
 
@@ -673,4 +679,16 @@ test("an answer goes to the ask the dialog showed, and to none when that ask has
 
   await act(() => workbench.approvals.answer(2, "lasting"));
   expect(answers).toEqual([{ id: 2, answer: "lasting", typed: null }]);
+});
+
+test("an ask's dialog leads with the tile of its context's space, and keeps it when the person goes to another space", async () => {
+  const { workbench, raise } = await broker();
+  raise(ask(1));
+  expect(workbench.spaces.active?.id).toBe("prod-eu");
+  expect(dialog(/^Allow Terminal 1 /).textContent).toMatch(/^STStaging/);
+
+  act(() => {
+    workbench.spaces.select("dev");
+  });
+  expect(dialog(/^Allow Terminal 1 /).textContent).toMatch(/^STStaging/);
 });

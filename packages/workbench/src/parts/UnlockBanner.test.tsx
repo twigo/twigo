@@ -69,3 +69,12 @@ test("Lock now ends it", async () => {
   expect(screen.queryByText(/is unlocked/)).toBeNull();
   expect(catalog.find("prod-eu")?.access.mode).toBe("read-only");
 });
+
+test("it leads with the tile of the space it speaks about", async () => {
+  const { commands, keys } = await mounted();
+  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  expect(
+    screen.getByText("prod-eu is unlocked.").parentElement?.parentElement
+      ?.textContent,
+  ).toMatch(/^PEprod-eu is unlocked\./);
+});

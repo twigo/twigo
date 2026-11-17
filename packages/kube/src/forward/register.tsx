@@ -15,7 +15,7 @@ import { canForward } from "./kinds";
 import type { Forwards } from "./service";
 import { startForward } from "./start";
 import { forwardEntries } from "./statusEntries";
-import { forwardTitle } from "./words";
+import { forwardTitle, sessionOf } from "./words";
 
 /** A `k8s.forward.open` request: a target, and whether to pick its port whatever the number. */
 const REQUEST = v.object({
@@ -56,10 +56,19 @@ export function registerForwards(
       const forward = input && forwards.find(input);
       return forward ? forwardTitle(forward) : "Port forward";
     },
+    titleEndTells: true,
     tooltip: (uri) => {
       const input = parsePfUri(uri.href);
       const forward = input && forwards.find(input);
       return forward && paths.forward(forward);
+    },
+    session: {
+      changes: forwards.changes,
+      state: (uri) => {
+        const input = parsePfUri(uri);
+        const forward = input && forwards.find(input);
+        return forward && sessionOf(forward);
+      },
     },
     icon: ({ className }) => <ArrowLeftRight className={className} />,
     component: ({ uri }) => <ForwardEditor uri={uri} forwards={forwards} />,

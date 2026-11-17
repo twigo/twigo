@@ -1,8 +1,9 @@
 //! The bench harness's tools (ARCHITECTURE 3.8), run by `bench/harness.sh`:
 //!
-//! - `twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` bumps
-//!   restart counts of the `bench/bench` pods until S seconds pass or SIGINT, logs each change
-//!   as a JSON line, and prints a summary. The kubeconfig defaults to `TWIGO_TEST_KUBECONFIG`.
+//! - `twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] [--bare] --log FILE`
+//!   restarts `bench/bench` pods after a crash, or bumps their counts alone with `--bare`, until
+//!   S seconds pass or SIGINT, logs each change as a JSON line, and prints a summary. The
+//!   kubeconfig defaults to `TWIGO_TEST_KUBECONFIG`.
 //! - `twigo-bench launch <program> [args…]` becomes the program, responsible for itself, so
 //!   that its WebKit processes are told apart from those of the terminal it was started from.
 //! - `twigo-bench sample <pid>` prints the memory and CPU time of the app and of the WebKit
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str =
-    "usage: twigo-bench churn [--kubeconfig PATH] [--rate N] [--seconds S] --log FILE
+    "usage: twigo-bench churn [--kubeconfig PATH] [--rate N] [--seconds S] [--bare] --log FILE
        twigo-bench launch <program> [args...]
        twigo-bench sample <pid>
        twigo-bench report <dir>";
@@ -44,8 +45,13 @@ fn main() -> ExitCode {
 
 fn churn(args: &[String]) -> Result<(), String> {
     let (mut kubeconfig, mut rate, mut seconds, mut log) = (None, 100.0, None, None);
+    let mut bare = false;
     let mut args = args.iter();
     while let Some(flag) = args.next() {
+        if flag == "--bare" {
+            bare = true;
+            continue;
+        }
         let value = args.next().ok_or(USAGE)?;
         let number = || value.parse::<f64>().ok().filter(|n| *n > 0.0).ok_or(USAGE);
         match flag.as_str() {
@@ -61,6 +67,7 @@ fn churn(args: &[String]) -> Result<(), String> {
         rate,
         seconds,
         log: log.ok_or(USAGE)?,
+        bare,
     };
     let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let summary = runtime.block_on(churn::run(options))?;

@@ -121,7 +121,7 @@ function Card({
 }) {
   const named = item.key !== String(index);
   return (
-    <div className="rounded-md border border-border-subtle px-3 py-2">
+    <div className="rounded-lg border border-border-subtle px-3 py-2">
       <div className="mb-1.5 text-xs text-support">
         {named ? (
           <span className="text-body font-medium text-content">{item.key}</span>

@@ -8,9 +8,11 @@ import type {
   SubscriptionId,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { notify } from "@twigo/ui";
+import { notify, type ToastAction } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
+import { spaceMark } from "../parts/spaceMark";
+import type { Spaces } from "../spaces/store";
 import { unlockAction } from "./unlock";
 
 /** The context key that holds while a countdown runs, which ⌘Z cancels. */
@@ -44,6 +46,11 @@ export interface Running {
   readonly context: string;
   readonly text: string;
   readonly stop: () => void;
+}
+
+/** The space a request is for; a Reveal and a shell name none. */
+function spaceOf(request: PlanRequest): string | undefined {
+  return "space" in request ? request.space : undefined;
 }
 
 /** A space's undo while it lasts. */
@@ -106,7 +113,20 @@ export class Operations {
     private readonly cancelKeys: () => string | undefined,
     private readonly undoKeys: () => string | undefined,
     private readonly report: (error: unknown) => void,
+    private readonly spaces: Pick<Spaces, "get" | "ofContext">,
   ) {}
+
+  /**
+   * What leads a toast about a run: the tile of its space, which stays
+   * whichever space is shown. A request that names no space, a Reveal or a
+   * shell, has its context stand for one.
+   */
+  #tile(space: string | undefined, context: string | undefined) {
+    if (space !== undefined) return spaceMark(this.spaces.get(space));
+    return spaceMark(
+      context === undefined ? undefined : this.spaces.ofContext(context),
+    );
+  }
 
   get asking(): Asking | undefined {
     return this.#asking;
@@ -132,7 +152,11 @@ export class Operations {
     try {
       plan = await this.backend.invoke("command_plan", request);
     } catch (error) {
-      this.#refused(error);
+      this.#fail(
+        error,
+        spaceOf(request),
+        unlockAction(this.backend, error, this.report),
+      );
       return {
         state: toIpcError(error).blocked === undefined ? "failed" : "refused",
       };
@@ -147,7 +171,7 @@ export class Operations {
       }
       undo.plan = plan.id;
     }
-    const agreed = await this.#ask(plan, look, JSON.stringify(request));
+    const agreed = await this.#ask(plan, look, request);
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
@@ -169,7 +193,14 @@ export class Operations {
             }
           }
         : undefined;
-    return this.#execute(plan, agreed.typed, space, look, taken);
+    return this.#execute(
+      plan,
+      agreed.typed,
+      space,
+      spaceOf(request),
+      look,
+      taken,
+    );
   }
 
   /** Puts back the space's last action while its undo lasts, as ⌘Z does; a second press while it goes does nothing. */
@@ -188,24 +219,24 @@ export class Operations {
   }
 
   /**
-   * Says why a plan was refused; a context that is read-only by what the
-   * person may lift offers the unlock right there, which a policy file's
-   * lock or a context no source lists does not.
+   * Says why a plan was refused or a run failed, led by its space's tile as
+   * what the run says when it goes well is. A context that is read-only by
+   * what the person may lift offers the unlock right there (`action`), which
+   * a policy file's lock or a context no source lists does not.
    */
-  #refused(error: unknown): void {
-    const action = unlockAction(this.backend, error, this.report);
-    if (!action) {
-      this.report(error);
-      return;
-    }
-    const { message } = toIpcError(error);
-    notify.error(message, { key: message, action });
+  #fail(error: unknown, space: string | undefined, action?: ToastAction): void {
+    const { message, blocked } = toIpcError(error);
+    notify.error(message, {
+      key: message,
+      tile: this.#tile(space, blocked?.context),
+      ...(action && { action }),
+    });
   }
 
   #ask(
     plan: Plan,
     look: Look,
-    request: string,
+    request: PlanRequest,
   ): Promise<{ typed: string | undefined } | undefined> {
     const { friction } = plan;
     if (friction.kind === "atOnce") {
@@ -237,13 +268,14 @@ export class Operations {
     });
   }
 
-  /** `request` names what the plan acts on, so a second countdown of it replaces the first. */
+  /** The request names what the plan acts on, so a second countdown of it replaces the first. */
   #countdown(
     plan: Plan,
     seconds: number,
     look: Look,
-    request: string,
+    asked: PlanRequest,
   ): Promise<{ typed: undefined } | undefined> {
+    const request = JSON.stringify(asked);
     this.#countdowns.find((other) => other.request === request)?.cancel();
     return new Promise((resolve) => {
       const until = Date.now() + seconds * 1000;
@@ -265,6 +297,7 @@ export class Operations {
         end(false);
       };
       const toast = notify.countdown({
+        tile: this.#tile(spaceOf(asked), plan.context),
         icon: look.icon,
         message: plan.doing,
         detail: (left) => `${plan.context} · sends in ${String(left)}\u00a0s`,
@@ -291,6 +324,7 @@ export class Operations {
     plan: Plan,
     typed: string | undefined,
     space: string | undefined,
+    home: string | undefined,
     look: Look,
     taken: (() => void) | undefined,
   ): Promise<Outcome> {
@@ -324,7 +358,9 @@ export class Operations {
         ) {
           this.#offer(space, plan.context, look, done.text, undoUntil);
         } else if (done !== undefined) {
-          notify.success(done.text);
+          notify.success(done.text, {
+            tile: this.#tile(home, plan.context),
+          });
         }
         resolve(outcome);
       };
@@ -348,7 +384,9 @@ export class Operations {
             end({ state: "done" }, event);
             return;
           case "stopped":
-            notify.info(event.text);
+            notify.info(event.text, {
+              tile: this.#tile(home, plan.context),
+            });
             end({ state: "stopped" });
             return;
           case "revealed":
@@ -367,7 +405,7 @@ export class Operations {
             });
             return;
           case "failed":
-            this.report(event.error);
+            this.#fail(event.error, home);
             end({ state: "failed" });
             return;
         }
@@ -379,7 +417,7 @@ export class Operations {
           told,
         )
         .then(begin, (error: unknown) => {
-          this.report(error);
+          this.#fail(error, home);
           end({ state: "failed" });
         });
     });
@@ -413,6 +451,7 @@ export class Operations {
   ): void {
     const keys = this.undoKeys();
     const toast = notify.undoable({
+      tile: this.#tile(space, context),
       icon: CircleCheck,
       message: text,
       detail: (left) => `${context} · undo for ${String(left)}\u00a0s`,

@@ -7,6 +7,7 @@ interface CaseRow {
   namespace: string | null;
   name: string;
   created: string | null;
+  received?: string;
   labels: Record<string, string>;
   owners?: { uid: string; controller: boolean }[];
   cells: Cell[];
@@ -37,6 +38,7 @@ test("only the choices' own keys count, not Object.prototype's", () => {
       id: "w",
       namespace: null,
       created: null,
+      received: 0,
       labels: {},
       controller: null,
       cells: ["w", "x"],
@@ -79,6 +81,7 @@ for (const list of CASES.lists) {
           id: `${CASES.context}/${row.namespace === null ? "" : `${row.namespace}/`}${row.name}`,
           namespace: row.namespace,
           created: row.created === null ? null : Date.parse(row.created),
+          received: row.received === undefined ? 0 : Date.parse(row.received),
           labels: row.labels,
           controller:
             row.owners?.find((owner) => owner.controller)?.uid ?? null,
