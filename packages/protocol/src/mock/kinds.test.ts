@@ -5,7 +5,7 @@ import eventsList from "../../../../crates/twigo-cache/tests/fixtures/events-lis
 import jobsList from "../../../../crates/twigo-cache/tests/fixtures/jobs-list.json";
 import nodesList from "../../../../crates/twigo-cache/tests/fixtures/nodes-list.json";
 import podsList from "../../../../crates/twigo-cache/tests/fixtures/pods-list.json";
-import { parseDuration } from "@twigo/utils";
+import { humanDuration, parseDuration } from "@twigo/utils";
 import { Cluster } from "./cluster";
 import { KINDS, type MockRow } from "./kinds";
 import { keepsStamp } from "./printed";
@@ -160,4 +160,69 @@ test("a mock row keeps its stamp while it prints the ages it printed, and counts
   expect(stamped).toBeGreaterThan(0);
   for (const job of KINDS["batch/v1/jobs"]?.rows(local, false) ?? [])
     expect(job.received, job.id).toBe(local.built);
+});
+
+test("a mock event's times stay where they are as the clock moves, so its ages grow", () => {
+  const local = new Cluster("prod-eu", 500, NOW);
+  const read = () =>
+    new Map(
+      (KINDS["/v1/events"]?.rows(local, false) ?? []).map((row) => [
+        row.id,
+        ["Last Seen", "First Seen"].map(
+          (name) =>
+            parseDuration(String(row.cells[column("/v1/events", name)])) ?? NaN,
+        ),
+      ]),
+    );
+  const before = read();
+  local.now = NOW + 2 * 3_600_000;
+  const after = read();
+  let compared = 0;
+  for (const [id, ages] of after) {
+    const was = before.get(id);
+    if (!was) continue;
+    ages.forEach((age, at) => {
+      const then = was[at] ?? NaN;
+      if (then >= 3_600_000) return;
+      expect(age - then, id).toBeGreaterThan(2 * 3_600_000 - 60_000);
+      expect(age - then, id).toBeLessThan(2 * 3_600_000 + 60_000);
+      compared++;
+    });
+  }
+  expect(compared).toBeGreaterThan(0);
+});
+
+test("a BackOff event repeats with its pod's restarts, whatever the age of the last", () => {
+  const local = new Cluster("prod-eu", 500, NOW);
+  const pod = local.pods.find((candidate) => candidate.status !== "Pending");
+  if (!pod) throw new Error("no pod");
+  Object.assign(pod, {
+    status: "CrashLoopBackOff",
+    restarts: "4 (3h ago)",
+    lastRestart: NOW - 3 * 3_600_000,
+  });
+  const backOff = () => {
+    const row = (KINDS["/v1/events"]?.rows(local, false) ?? []).find(
+      (event) =>
+        event.cells[column("/v1/events", "Object")] === `pod/${pod.name}` &&
+        event.cells[column("/v1/events", "Reason")] === "BackOff",
+    );
+    if (!row) throw new Error("no BackOff");
+    return {
+      lastSeen: row.cells[column("/v1/events", "Last Seen")],
+      firstSeen: row.cells[column("/v1/events", "First Seen")],
+      count: row.cells[column("/v1/events", "Count")],
+      received: row.received,
+    };
+  };
+  const firstSeen = humanDuration(NOW - pod.created);
+  expect(backOff()).toMatchObject({ lastSeen: "3h", firstSeen, count: 4 });
+  local.now = NOW + 60_000;
+  Object.assign(pod, { restarts: "5 (2s ago)", lastRestart: local.now - 2000 });
+  expect(backOff()).toEqual({
+    lastSeen: "2s",
+    firstSeen: humanDuration(local.now - pod.created),
+    count: 5,
+    received: local.now,
+  });
 });

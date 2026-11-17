@@ -415,15 +415,18 @@ interface Event {
 
 /** An event as a pod's state reports it, before its object and times. */
 type Reported = Omit<Event, "pod" | "name" | "first" | "last" | "count"> &
-  Partial<Pick<Event, "count" | "last">>;
+  Partial<Pick<Event, "count" | "first" | "last">>;
 
 const HOUR = 3_600_000;
 
 /**
  * What the pods' states make the cluster report, with the reasons and
  * messages a kind cluster of Kubernetes v1.37.0 recorded for them
- * (crates/twigo-cache/tests/fixtures/events-list.json), and the events of
- * an hour, the API server's default `--event-ttl`.
+ * (crates/twigo-cache/tests/fixtures/events-list.json), first seen no
+ * earlier than an hour before the cluster was built, the API server's
+ * default `--event-ttl`, but a BackOff, which repeats at its pod's last
+ * restart and so lives on, first seen as its pod was created. Their times
+ * stay put, so their ages grow, until a BackOff repeats.
  */
 function events(cluster: Cluster): Event[] {
   const notReady = new Set(
@@ -439,20 +442,18 @@ function events(cluster: Cluster): Event[] {
     const reported: Reported[] = [];
     switch (pod.status) {
       case "CrashLoopBackOff":
-      case "Error": {
-        const [, count = "1", ago = "0"] =
-          /^(\d+)(?: \((\d+)m ago\))?$/.exec(pod.restarts) ?? [];
+      case "Error":
         reported.push({
           type: "Warning",
           reason: "BackOff",
           container: true,
           source: kubelet,
           message: `Back-off restarting failed container ${containerOf(pod)} in pod ${pod.name}_${pod.namespace}(${uid(pod.id)})`,
-          count: Math.max(1, Number(count)),
-          last: cluster.now - Number(ago) * 60_000,
+          count: Math.max(1, Number.parseInt(pod.restarts, 10)),
+          first: pod.created,
+          last: pod.lastRestart ?? undefined,
         });
         break;
-      }
       case "ImagePullBackOff":
         reported.push(
           {
@@ -517,22 +518,23 @@ function events(cluster: Cluster): Event[] {
         },
       );
     }
-    const first = Math.max(pod.created, since);
-    return reported.map(({ count = 1, last, ...event }): Event => ({
-      ...event,
-      pod,
-      name: `${pod.name}.${eventSuffix(pod.id, event.reason)}`,
-      first,
-      // A repeated event keeps its name and moves its last time, as the
-      // recorded ones count up with Last Seen after First Seen.
-      last:
-        last ??
-        Math.max(
+    const earliest = Math.max(pod.created, cluster.built - HOUR);
+    return reported.map(
+      ({ count = 1, first = earliest, last, ...event }): Event => ({
+        ...event,
+        pod,
+        name: `${pod.name}.${eventSuffix(pod.id, event.reason)}`,
+        first,
+        // A repeated event keeps its name and moves its last time, as the
+        // recorded ones count up with Last Seen after First Seen.
+        last: Math.max(
           first,
-          cluster.now - (hash(`${pod.id}/${event.reason}`) % 60) * 60_000,
+          last ??
+            cluster.built - (hash(`${pod.id}/${event.reason}`) % 60) * 60_000,
         ),
-      count,
-    }));
+        count,
+      }),
+    );
   });
 }
 
