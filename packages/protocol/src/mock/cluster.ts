@@ -222,6 +222,7 @@ export class Cluster {
       const gone = this.pods[at];
       const fresh = this.#pod(now, now);
       if (gone) {
+        this.#forget(gone);
         // Its ReplicaSet replaces it, so its Deployment keeps its count.
         const name = `${gone.generateName}${fresh.name.slice(fresh.generateName.length)}`;
         this.pods.splice(at, 1, {
@@ -263,6 +264,7 @@ export class Cluster {
       created: now,
       version: 0,
     };
+    this.#forget(pod);
     this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
@@ -286,6 +288,7 @@ export class Cluster {
       created: now,
       version: 0,
     };
+    this.#forget(pod);
     this.pods.splice(this.pods.indexOf(pod), 1, next);
     this.now = now;
     this.version++;
@@ -300,6 +303,7 @@ export class Cluster {
 
   /** Deletes a Deployment, and its pods with it, as the garbage collector does. */
   deleteDeployment(namespace: string, name: string): void {
+    for (const pod of this.podsOf(namespace, name)) this.#forget(pod);
     const kept = this.pods.filter(
       (pod) => pod.namespace !== namespace || deploymentOf(pod) !== name,
     );
@@ -347,7 +351,10 @@ export class Cluster {
     const going = [...pods]
       .sort((a, b) => b.created - a.created)
       .slice(0, Math.max(0, pods.length - replicas));
-    for (const pod of going) this.pods.splice(this.pods.indexOf(pod), 1);
+    for (const pod of going) {
+      this.#forget(pod);
+      this.pods.splice(this.pods.indexOf(pod), 1);
+    }
     if (replicas === 0) this.emptied.set(key, template);
     else this.emptied.delete(key);
     this.now = now;
@@ -411,6 +418,13 @@ export class Cluster {
     this.version++;
   }
 
+  /** Forgets what was printed for a pod's events, whose ids start with the pod's own. */
+  #forget(pod: Pod): void {
+    const prefix = `${pod.id}.`;
+    for (const id of this.#printed.keys())
+      if (id.startsWith(prefix)) this.#printed.delete(id);
+  }
+
   /**
    * The ages `id` prints of the `moments` its cells count back from, and the
    * stamp they count from, as the API server prints them when it writes the
@@ -448,6 +462,7 @@ export class Cluster {
       if (pod) picked.add(pod);
     }
     for (const pod of picked) this.#change(pod, now);
+    this.now = now;
     this.version++;
   }
 

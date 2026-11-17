@@ -6,7 +6,7 @@ import jobsList from "../../../../crates/twigo-cache/tests/fixtures/jobs-list.js
 import nodesList from "../../../../crates/twigo-cache/tests/fixtures/nodes-list.json";
 import podsList from "../../../../crates/twigo-cache/tests/fixtures/pods-list.json";
 import { humanDuration, parseDuration } from "@twigo/utils";
-import { Cluster } from "./cluster";
+import { Cluster, deploymentOf, type Pod } from "./cluster";
 import { KINDS, type MockRow } from "./kinds";
 
 const NOW = Date.UTC(2026, 10, 3);
@@ -219,6 +219,75 @@ test("a BackOff event repeats with its pod's restarts, whatever the age of the l
     count: 5,
     received: local.now,
   });
+});
+
+test("the events of a cluster that changes as time passes print ages, never <invalid>", () => {
+  const local = new Cluster("prod-eu", 400, NOW);
+  for (let step = 1; step <= 20; step++) local.change(40, NOW + step * 60_000);
+  const lastSeen = column("/v1/events", "Last Seen");
+  const printed = (KINDS["/v1/events"]?.rows(local, false) ?? []).map(
+    (row) => row.cells[lastSeen],
+  );
+  expect(printed.length).toBeGreaterThan(0);
+  expect(printed).not.toContain("<invalid>");
+});
+
+const GOING: [string, (cluster: Cluster, pod: Pod) => void][] = [
+  ["deleted", (cluster, pod) => cluster.deletePod(pod, NOW)],
+  ["rolled out", (cluster, pod) => cluster.rollOut(pod, NOW)],
+  [
+    "scaled away",
+    (cluster, pod) => cluster.scale(pod.namespace, deploymentOf(pod), 0, NOW),
+  ],
+  [
+    "taken with its Deployment",
+    (cluster, pod) =>
+      cluster.deleteDeployment(pod.namespace, deploymentOf(pod)),
+  ],
+];
+
+function crashLooping() {
+  const local = new Cluster("prod-eu", 100, NOW);
+  for (const pod of local.pods) pod.status = "CrashLoopBackOff";
+  return local;
+}
+
+function warmed(cluster: Cluster) {
+  const moments = [NOW - 60_000, NOW - 120_000];
+  const held = new Map<string, ReturnType<Cluster["printed"]>>();
+  for (const { id } of KINDS["/v1/events"]?.rows(cluster, false) ?? [])
+    held.set(id, cluster.printed(id, moments));
+  return (pod: Pod) =>
+    [...held]
+      .filter(([id]) => id.startsWith(`${pod.id}.`))
+      .map(([id, print]) => cluster.printed(id, moments) === print);
+}
+
+test.each(GOING)(
+  "what the cluster printed for the events of a pod that is %s goes with it",
+  (_, go) => {
+    const local = crashLooping();
+    const pod = local.pods[0];
+    if (!pod) throw new Error("no pod");
+    const held = warmed(local);
+    expect(held(pod).length).toBeGreaterThan(0);
+    expect(held(pod).every(Boolean)).toBe(true);
+    go(local, pod);
+    expect(held(pod).some(Boolean)).toBe(false);
+  },
+);
+
+test("what the cluster printed for the events of a pod that the churn replaces goes with it", () => {
+  const local = crashLooping();
+  const held = warmed(local);
+  const before = [...local.pods];
+  local.churn(0, [], NOW);
+  const gone = before.filter((pod) => !local.pods.includes(pod));
+  expect(gone).toHaveLength(1);
+  for (const pod of gone) {
+    expect(held(pod).length).toBeGreaterThan(0);
+    expect(held(pod).some(Boolean)).toBe(false);
+  }
 });
 
 function triggered() {
