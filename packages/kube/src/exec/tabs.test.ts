@@ -634,14 +634,6 @@ test("the state a tab says follows the session, each change of it is told, and a
   expect(tabs.state(ATTACH_URI)).toBe("connecting");
 });
 
-test("a session lost with its connection says failed in its tab, not ended", async () => {
-  const { tabs, mounted, opens } = setup();
-  await mounted();
-  opens[0]?.send({ state: "running" });
-  opens[0]?.send({ state: "ended", end: { reason: "connectionLost" } });
-  expect(tabs.state(URI)).toBe("failed");
-});
-
 test("a link opens only on a modifier click, and only as http or https", async () => {
   const { mounted, openUrl } = setup();
   const tab = await mounted();

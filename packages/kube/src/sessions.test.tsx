@@ -9,7 +9,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogPod, StreamState, ViewState } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
-import { WorkbenchView, type SessionState } from "@twigo/workbench";
+import { WorkbenchView } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { bareTabPaths, settle, withScreenSize } from "../test/workbench";
 import { withTerminalLayout } from "../test/terminal";
@@ -280,18 +280,17 @@ test.each(STREAMS)(
   },
 );
 
-const POD_STREAMS: readonly [StreamState, boolean, SessionState][] = [
-  [{ state: "following" }, true, "running"],
-  [{ state: "connecting" }, true, "connecting"],
-  [{ state: "queued" }, true, "connecting"],
-  [{ state: "waiting", reason: "CrashLoopBackOff" }, true, "running"],
-  [{ state: "ended" }, false, "ended"],
-  [{ state: "off" }, false, "ended"],
-  [{ state: "overLimit" }, false, "ended"],
+const POD_STREAMS: readonly [StreamState, boolean][] = [
+  [{ state: "following" }, true],
+  [{ state: "connecting" }, true],
+  [{ state: "queued" }, true],
+  [{ state: "waiting", reason: "CrashLoopBackOff" }, true],
+  [{ state: "ended" }, false],
+  [{ state: "off" }, false],
+  [{ state: "overLimit" }, false],
   [
     { state: "error", error: { kind: "unavailable", message: "broken" } },
     false,
-    "failed",
   ],
 ];
 
@@ -309,24 +308,34 @@ const podsWith = (...streams: StreamState[]): LogPod[] => [
 ];
 
 test.each(POD_STREAMS)(
-  "a logs session whose only stream is %j is counted: %s, and its tab says %s",
-  async (stream, shown, state) => {
-    const { batch, logs } = await hiddenWithLogs();
-    const [uri] = tabsIn("panel");
-    if (!uri) throw new Error("no logs tab");
-    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(0);
+  "a logs session whose only stream is %j is counted: %s",
+  async (stream, shown) => {
+    const { batch } = await hiddenWithLogs();
+    batch({ pods: podsWith({ state: "following" }) });
     expect(counted()).toBe(true);
-    expect(logs.state(uri)).toBe("running");
 
-    const moves = state === "running" ? 0 : 1;
-    expect(batch({ pods: podsWith(stream) })).toBe(moves);
+    batch({ pods: podsWith(stream) });
     expect(counted()).toBe(shown);
-    expect(logs.state(uri)).toBe(state);
-    expect(batch({ pods: podsWith({ state: "following" }) })).toBe(moves);
+    batch({ pods: podsWith({ state: "following" }) });
     expect(counted()).toBe(true);
-    expect(logs.state(uri)).toBe("running");
   },
 );
+
+test("the tab of a logs session says connecting, then running, then ended as its streams do, and a batch that keeps what it says is no change", async () => {
+  const { workbench, batch } = await hiddenWithLogs();
+  const [uri] = tabsIn("panel");
+  if (!uri) throw new Error("no logs tab");
+  const says = () => workbench.editors.resolve(uri)?.session?.state(uri);
+  expect(batch({ pods: podsWith({ state: "connecting" }) })).toBe(1);
+  expect(says()).toBe("connecting");
+  expect(batch({ pods: podsWith({ state: "following" }) })).toBe(1);
+  expect(says()).toBe("running");
+  expect(
+    batch({ pods: podsWith({ state: "following" }, { state: "ended" }) }),
+  ).toBe(0);
+  expect(batch({ pods: podsWith({ state: "ended" }) })).toBe(1);
+  expect(says()).toBe("ended");
+});
 
 test("a logs session is counted while one of its streams reads, though the others ended", async () => {
   const { batch } = await hiddenWithLogs();

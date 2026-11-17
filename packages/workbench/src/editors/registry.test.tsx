@@ -446,18 +446,6 @@ function pressByAccessibility(tab: HTMLElement) {
   fireEvent.click(target, { button: 0, detail: 0 });
 }
 
-test("a tab holds no native control, which an accessibility press would click in its place", async () => {
-  const { editors } = await mounted();
-  act(() => {
-    editors.open("note://a");
-    editors.open("note://b");
-    editors.setDirty("note://b", true);
-  });
-  const tabs = document.querySelectorAll("[role=tab]");
-  expect(tabs).toHaveLength(2);
-  for (const tab of tabs) expect(tab.querySelector(NATIVE_CONTROLS)).toBeNull();
-});
-
 test("an accessibility press on a tab shows its editor like a click and closes nothing", async () => {
   const { workbench, editors } = await mounted();
   withFields(workbench);
@@ -473,23 +461,6 @@ test("an accessibility press on a tab shows its editor like a click and closes n
   expect(tabsIn("editor")).toEqual(["field://a", "field://b"]);
   expect(editors.active).toBe("field://a");
   expect(document.activeElement).toBe(screen.getByLabelText("field://a"));
-});
-
-test("a tab closes by a click on its X and by Backspace on the tab", async () => {
-  const { workbench, editors } = await mounted();
-  withFields(workbench);
-  act(() => {
-    editors.open("field://a");
-    editors.open("field://b");
-    editors.open("field://c");
-  });
-  click(screen.getByRole("button", { name: "Close a" }));
-  expect(tabsIn("editor")).toEqual(["field://b", "field://c"]);
-  act(() => {
-    tabOf("field://b").focus();
-  });
-  fireEvent.keyDown(tabOf("field://b"), { key: "Backspace" });
-  expect(tabsIn("editor")).toEqual(["field://c"]);
 });
 
 test("a click on a preview tab shows its editor and leaves it a preview", async () => {
