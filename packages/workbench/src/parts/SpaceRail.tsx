@@ -94,7 +94,7 @@ function LockMark({ lock }: { lock: "shut" | "open" }) {
     <span
       aria-hidden
       data-lock={lock}
-      className="absolute -bottom-1 -left-1 flex size-3.5 items-center justify-center rounded-sm bg-shell text-content"
+      className="absolute -bottom-[5px] -left-[5px] flex size-[13px] items-center justify-center rounded-sm bg-shell text-content"
     >
       <Icon className="size-2.5" strokeWidth={2.5} />
     </span>
