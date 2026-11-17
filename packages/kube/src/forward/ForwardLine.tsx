@@ -26,7 +26,7 @@ export function ForwardLine({ forward }: { forward: Forward }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex w-full min-w-0 items-center">
+        <span className="inline-flex w-full min-w-0 items-center align-top">
           <StatusDot
             tone={tone}
             pulse={pulse}

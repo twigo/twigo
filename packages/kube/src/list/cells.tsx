@@ -106,7 +106,7 @@ export function CellView({
       return (
         <span
           className={cn(
-            "inline-flex items-center gap-1.5 font-semibold",
+            "inline-flex items-center gap-1.5 align-top font-semibold",
             tone === "error" && "text-error",
             tone === "warn" && "text-warn-foreground",
           )}
