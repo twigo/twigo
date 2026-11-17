@@ -98,7 +98,7 @@ export function compileQuery(
       query.labelSelector === null ? null : parseSelector(query.labelSelector),
     text: query.text === null ? null : parseText(query.text),
     textColumns,
-    printed: columns.map(printsDuration),
+    printed: columns.map((column) => column.printsDuration === true),
     sort:
       at === null
         ? null
@@ -106,7 +106,7 @@ export function compileQuery(
             at,
             descending: sorted !== null && (query.sort?.descending ?? false),
             age: columns[at]?.kind === "age",
-            printed: printsDuration(columns[at]),
+            printed: columns[at]?.printsDuration === true,
             metric: isMetric(columns[at]),
           },
     count: query.countBy === null ? null : findText(query.countBy),
@@ -119,26 +119,6 @@ export function compileQuery(
         ? null
         : { at: valuesAt, values: new Set(query.values.values) },
   };
-}
-
-const PRINTS_DURATION: ReadonlySet<string> = new Set([
-  "Restarts",
-  "Last Schedule",
-  "Last Seen",
-  "First Seen",
-]);
-
-/**
- * Whether a column's text cells hold a duration that the server printed
- * when it sent the row, which then stops counting: a `date`, and the string
- * columns of the built-in printers that print one (Rust's
- * `Column::prints_duration`).
- */
-export function printsDuration(column: Column | undefined): boolean {
-  return (
-    column?.kind === "date" ||
-    (column?.kind === "string" && PRINTS_DURATION.has(column.name))
-  );
 }
 
 /** Whether a column is a measure of the Metrics API, which no text filter reads. */

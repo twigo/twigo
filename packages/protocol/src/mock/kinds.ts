@@ -48,6 +48,52 @@ export interface MockKind {
 }
 
 /**
+ * Events, as the kubelet, the scheduler and the node controller report the
+ * pods' states. `events.k8s.io` serves the same objects, from the same
+ * storage and with the same printer
+ * (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/registry/events/rest/storage_events.go#L55).
+ */
+const EVENTS: MockKind = {
+  columns: EVENT_COLUMNS,
+  fields: ["metadata.name", "metadata.namespace"],
+  rows: (cluster, withNamespace) =>
+    events(cluster).map((event) => {
+      const id = `${cluster.context}/${event.pod.namespace}/${event.name}`;
+      const lastSeen = humanDuration(cluster.now - event.last);
+      const firstSeen = humanDuration(cluster.now - event.first);
+      return {
+        id,
+        namespace: event.pod.namespace,
+        created: event.first,
+        received: cluster.printedAt(id, lastSeen, firstSeen),
+        labels: {},
+        controller: null,
+        cells: namespaced(
+          [
+            lastSeen,
+            event.type,
+            event.reason,
+            `pod/${event.pod.name}`,
+            event.container ? `spec.containers{${containerOf(event.pod)}}` : "",
+            event.source,
+            event.message,
+            firstSeen,
+            event.count,
+            event.name,
+          ],
+          event.pod.namespace,
+          withNamespace,
+        ),
+        generated: null,
+        fields: {
+          "metadata.name": event.name,
+          "metadata.namespace": event.pod.namespace,
+        },
+      };
+    }),
+};
+
+/**
  * The kinds the mock serves, by `group/version/resource`. Nodes are those
  * the pods run on, Deployments those the pods' names say own them, and
  * events what the kubelet, the scheduler and the node controller report of
@@ -238,47 +284,8 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         };
       }),
   },
-  "/v1/events": {
-    columns: EVENT_COLUMNS,
-    fields: ["metadata.name", "metadata.namespace"],
-    rows: (cluster, withNamespace) =>
-      events(cluster).map((event) => {
-        const id = `${cluster.context}/${event.pod.namespace}/${event.name}`;
-        const lastSeen = humanDuration(cluster.now - event.last);
-        const firstSeen = humanDuration(cluster.now - event.first);
-        return {
-          id,
-          namespace: event.pod.namespace,
-          created: event.first,
-          received: cluster.printedAt(id, lastSeen, firstSeen),
-          labels: {},
-          controller: null,
-          cells: namespaced(
-            [
-              lastSeen,
-              event.type,
-              event.reason,
-              `pod/${event.pod.name}`,
-              event.container
-                ? `spec.containers{${containerOf(event.pod)}}`
-                : "",
-              event.source,
-              event.message,
-              firstSeen,
-              event.count,
-              event.name,
-            ],
-            event.pod.namespace,
-            withNamespace,
-          ),
-          generated: null,
-          fields: {
-            "metadata.name": event.name,
-            "metadata.namespace": event.pod.namespace,
-          },
-        };
-      }),
-  },
+  "/v1/events": EVENTS,
+  "events.k8s.io/v1/events": EVENTS,
 };
 
 /** Statuses of a pod whose containers have never run. */

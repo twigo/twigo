@@ -34,6 +34,7 @@ test("each kind's columns are those kube-apiserver sent, by name and priority", 
     "batch/v1/jobs": jobsList,
     "batch/v1/cronjobs": cronjobsList,
     "/v1/events": eventsList,
+    "events.k8s.io/v1/events": eventsList,
   };
   expect(Object.keys(KINDS).sort()).toEqual(Object.keys(recorded).sort());
   for (const [kind, list] of Object.entries(recorded)) {

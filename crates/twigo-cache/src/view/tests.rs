@@ -12,6 +12,14 @@ fn column(name: &str, kind: ColumnKind, priority: i32) -> Column {
         kind,
         format: "".into(),
         priority,
+        prints_duration: false,
+    }
+}
+
+fn printing(name: &str) -> Column {
+    Column {
+        prints_duration: true,
+        ..column(name, ColumnKind::String, 0)
     }
 }
 
@@ -20,7 +28,7 @@ fn pod_columns() -> Arc<[Column]> {
         column("Name", ColumnKind::String, 0),
         column("Ready", ColumnKind::String, 0),
         column("Status", ColumnKind::String, 0),
-        column("Restarts", ColumnKind::String, 0),
+        printing("Restarts"),
         column("Age", ColumnKind::Age, 0),
         column("IP", ColumnKind::String, 1),
     ])
@@ -248,7 +256,7 @@ fn a_moved_moment_under_the_same_text_sends_the_row() {
     rig.store.set_columns(Some(&Arc::from([
         column("Name", ColumnKind::String, 0),
         column("Schedule", ColumnKind::String, 0),
-        column("Last Schedule", ColumnKind::String, 0),
+        printing("Last Schedule"),
         column("Age", ColumnKind::Age, 0),
     ])));
     rig.store.upsert(cronjob("hourly", "25m", 1500));
@@ -291,6 +299,19 @@ fn a_row_that_changes_and_changes_back_between_flushes_returns_with_the_stamp_it
         .upsert(received(pod("a", "web-1", "Running", "4 (10s ago)"), 700));
     let batch = rig.flush().unwrap();
     assert_eq!(batch.upserts[0].received, "1970-01-01T00:11:40.000Z");
+}
+
+#[test]
+fn the_columns_say_which_print_a_duration() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    let columns = rig.flush().unwrap().columns.unwrap();
+    let printing: Vec<&str> = columns
+        .iter()
+        .filter(|column| column.prints_duration)
+        .map(|column| column.name.as_str())
+        .collect();
+    assert_eq!(printing, ["Restarts"]);
 }
 
 #[test]

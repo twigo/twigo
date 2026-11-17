@@ -62,6 +62,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
+import { printedColumns } from "./printed";
 import {
   isShellScenario,
   joins,
@@ -715,7 +716,10 @@ export function createMockBackend(
         );
       }
       const selected = parseFields(query.fieldSelector, kind);
-      const served = queryColumns(kind.columns, query);
+      const served = queryColumns(
+        printedColumns(query.gvr, kind.columns),
+        query,
+      );
       const join =
         kind.metrics && metrics.served
           ? new MetricsJoin(

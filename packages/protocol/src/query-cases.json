@@ -1,5 +1,5 @@
 {
-  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns, and the time the server printed them in `received`, the epoch when a row has none, which the durations in a Restarts, Last Seen, Last Schedule or First Seen cell, or a date column's, count back from; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind. The CPU and Memory columns of the pods and nodes lists are of kind cpu and memory, whose cells are integers of nanocores and bytes, or null for a row without a sample: Rust joins them from its poller's samples, before the Age column, and a metric is sorted by, with rows without a value last in both directions, and never matched by the text filter, counted, grouped or valued.",
+  "about": "Query cases that the mock (src/mock/query.test.ts) and Rust's query view (crates/twigo-cache/tests/query_cases.rs) both run, so they sort, filter, count, group and window alike (ARCHITECTURE 3.4). Rows hold the server's cells, null in Age columns, and the time the server printed them in `received`, the epoch when a row has none, which the durations of a column that says `printsDuration` count back from, as the core's Table decoder says of a pod's Restarts, a CronJob's Last Schedule, an event's Last Seen and First Seen, and a date column; each list's rows pass through its namespaces first, as the hub's upstreams do. A case's query lists only what it sets; ids are in the window's order, and the window indexes the rows of the groups not collapsed; a case that sets groupBy expects its groups, none without `groups`; and a case that expects `refused` expects the query refused with that error kind. The CPU and Memory columns of the pods and nodes lists are of kind cpu and memory, whose cells are integers of nanocores and bytes, or null for a row without a sample: Rust joins them from its poller's samples, before the Age column, and a metric is sorted by, with rows without a value last in both directions, and never matched by the text filter, counted, grouped or valued.",
   "context": "kind-test",
   "lists": [
     {
@@ -24,7 +24,8 @@
         {
           "name": "Restarts",
           "kind": "string",
-          "priority": 0
+          "priority": 0,
+          "printsDuration": true
         },
         {
           "name": "CPU",
@@ -1918,7 +1919,8 @@
         {
           "name": "Last Seen",
           "kind": "string",
-          "priority": 0
+          "priority": 0,
+          "printsDuration": true
         },
         {
           "name": "Reason",
@@ -2078,7 +2080,8 @@
         {
           "name": "Renewed",
           "kind": "date",
-          "priority": 0
+          "priority": 0,
+          "printsDuration": true
         },
         {
           "name": "Age",
@@ -2136,6 +2139,80 @@
           "expect": {
             "total": 0,
             "ids": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "crontabs",
+      "namespaced": false,
+      "columns": [
+        {
+          "name": "Name",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Restarts",
+          "kind": "string",
+          "priority": 0
+        },
+        {
+          "name": "Age",
+          "kind": "age",
+          "priority": 0
+        }
+      ],
+      "rows": [
+        {
+          "namespace": null,
+          "name": "c-a",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["c-a", "5m", null]
+        },
+        {
+          "namespace": null,
+          "name": "c-b",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T12:30:00Z",
+          "labels": {},
+          "cells": ["c-b", "10m", null]
+        },
+        {
+          "namespace": null,
+          "name": "c-c",
+          "created": "2026-11-01T00:00:00Z",
+          "received": "2026-11-16T12:00:00Z",
+          "labels": {},
+          "cells": ["c-c", "1h", null]
+        }
+      ],
+      "cases": [
+        {
+          "name": "a column named as a pod's Restarts that prints no duration sorts as text, durations by their seconds",
+          "query": {
+            "sort": {
+              "column": "Restarts",
+              "descending": false
+            }
+          },
+          "window": [0, 10],
+          "expect": {
+            "total": 3,
+            "ids": ["kind-test/c-a", "kind-test/c-b", "kind-test/c-c"]
+          }
+        },
+        {
+          "name": "and the filter reads its text",
+          "query": {
+            "text": "10m"
+          },
+          "window": [0, 10],
+          "expect": {
+            "total": 1,
+            "ids": ["kind-test/c-b"]
           }
         }
       ]

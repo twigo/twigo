@@ -201,10 +201,12 @@ pub struct Row {
     pub id: RowId,
     /// RFC 3339; the webview renders Age columns from it.
     pub created: Option<String>,
-    /// RFC 3339; when the core received the cells of the row that print a
-    /// duration, such as `3 (5m ago)`, which counts back from this time, so
-    /// the webview draws it as of now from the two. It changes only when
-    /// those cells read differently, and a list sorted by them reads it too.
+    /// RFC 3339; when the core received the print of the durations in the
+    /// columns that say `printsDuration`, such as `3 (5m ago)`, which count
+    /// back from this time, so the webview draws them as of now. It moves
+    /// when such a duration reads another age, or the same one after its
+    /// step (an event that repeated), and a list sorted by those columns
+    /// reads it too.
     pub received: String,
     /// Where the generated part of the object's name starts, in UTF-16
     /// units: after its `metadata.generateName`, or at a pod's
@@ -227,11 +229,17 @@ pub enum Cell {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct Column {
     pub name: String,
     pub kind: ColumnKind,
     /// 0 is shown by default; higher only in the wide view.
     pub priority: i32,
+    /// Its text cells hold a duration the server printed, alone (`5m`) or
+    /// after a pod's count of restarts (`3 (5m ago)`), which counts back
+    /// from the row's `received`; absent where false, as for most columns.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prints_duration: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

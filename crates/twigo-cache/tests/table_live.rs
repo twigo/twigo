@@ -131,7 +131,7 @@ async fn pods_list_and_watch() {
         .await
         .unwrap();
     assert!(body.contains("\"managedFields\""));
-    let mut decoder = TableDecoder::new();
+    let mut decoder = TableDecoder::new("pods");
     let page = decoder.decode_list(body.as_bytes(), RECEIVED).unwrap();
     let columns = decoder.columns().unwrap().clone();
     let names: Vec<&str> = columns.iter().map(|column| &*column.name).collect();
@@ -240,7 +240,7 @@ async fn streaming_lists_depend_on_the_release() {
     }
 
     let mut watch = Lines::open(&client, request).await;
-    let mut decoder = TableDecoder::new();
+    let mut decoder = TableDecoder::new("pods");
     let first = watch.next().await.unwrap();
     let row = upsert(decoder.decode_event(&first, RECEIVED).unwrap());
     assert_eq!(&*row.meta.name, "p1");
@@ -355,7 +355,7 @@ async fn crd_printer_columns() {
         .request_text(request::list(&Collection::table(&path), 500, None))
         .await
         .unwrap();
-    let mut decoder = TableDecoder::new();
+    let mut decoder = TableDecoder::new("widgets.test.twigo.io");
     let page = decoder.decode_list(body.as_bytes(), RECEIVED).unwrap();
     let kinds: Vec<ColumnKind> = decoder
         .columns()

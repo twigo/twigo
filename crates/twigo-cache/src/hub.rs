@@ -622,7 +622,9 @@ trait Spawn<T> {
 impl Spawn<Row> for Hub {
     fn spawn(&self, key: &Key, upstream: Arc<Upstream<Row>>, run: u64) -> JoinHandle<()> {
         match key.format {
-            Format::Table => self.start(key, TableDecoder::new(), upstream, run),
+            Format::Table => {
+                self.start(key, TableDecoder::new(&key.resource.name()), upstream, run)
+            }
             Format::Metadata => self.start(key, MetaDecoder, upstream, run),
             Format::Object => unreachable!("an Object upstream keeps objects"),
         }
@@ -631,7 +633,7 @@ impl Spawn<Row> for Hub {
 
 impl Spawn<Object> for Hub {
     fn spawn(&self, key: &Key, upstream: Arc<Upstream<Object>>, run: u64) -> JoinHandle<()> {
-        self.start(key, ObjectDecoder::new(), upstream, run)
+        self.start(key, ObjectDecoder::new(&key.resource.name()), upstream, run)
     }
 }
 

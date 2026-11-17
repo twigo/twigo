@@ -128,8 +128,6 @@ struct Layout {
     sources: Vec<Source>,
     /// What the text filter reads.
     text: Vec<usize>,
-    /// Which of the webview's columns hold a duration the server printed.
-    printed: Vec<bool>,
     sort: Option<usize>,
     descending: bool,
     sort_metric: bool,
@@ -154,6 +152,7 @@ impl Layout {
                     name: name.to_owned(),
                     kind,
                     priority: 0,
+                    prints_duration: false,
                 });
                 sources.push(Source::Metric(metric));
             }
@@ -168,6 +167,7 @@ impl Layout {
                 name: column.name.to_string(),
                 kind: kind(column.kind),
                 priority: column.priority,
+                prints_duration: column.prints_duration,
             });
             sources.push(Source::Cell(at));
             if at == 0 && spec.namespace_column {
@@ -175,6 +175,7 @@ impl Layout {
                     name: NAMESPACE.to_owned(),
                     kind: ipc::ColumnKind::String,
                     priority: 0,
+                    prints_duration: false,
                 });
                 sources.push(Source::Namespace);
             }
@@ -217,17 +218,12 @@ impl Layout {
             .values
             .as_ref()
             .and_then(|(column, values)| Some((find_text(column)?, values.clone())));
-        let printed = sources
-            .iter()
-            .map(|source| matches!(source, Source::Cell(at) if server[*at].prints_duration()))
-            .collect();
         Self {
             server,
             metrics,
             wire,
             sources,
             text,
-            printed,
             sort,
             descending,
             sort_metric,
@@ -269,7 +265,9 @@ impl Layout {
     /// printed one.
     fn filtered<'a>(&self, row: &'a Row, at: usize) -> Cow<'a, str> {
         match self.cell(row, None, at) {
-            Cow::Borrowed(Cell::Text(text)) if self.printed[at] => printed::filtered(text).into(),
+            Cow::Borrowed(Cell::Text(text)) if self.wire[at].prints_duration => {
+                printed::filtered(text).into()
+            }
             _ => self.text(row, at),
         }
     }
@@ -279,7 +277,9 @@ impl Layout {
             return SortKey::Null;
         };
         match &*self.cell(row, sample, at) {
-            Cell::Text(text) if self.printed[at] => SortKey::printed(text, row.meta.received),
+            Cell::Text(text) if self.wire[at].prints_duration => {
+                SortKey::printed(text, row.meta.received)
+            }
             cell => SortKey::of(cell, row.meta.created),
         }
     }

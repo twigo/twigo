@@ -28,14 +28,17 @@ pub struct Object {
 /// object besides its cells, and keeps the columns as the Table decoder
 /// does; a server without Table sends raw objects, which get the metadata
 /// columns.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ObjectDecoder {
     table: TableDecoder,
 }
 
 impl ObjectDecoder {
-    pub fn new() -> Self {
-        Self::default()
+    /// A decoder of `resource`'s objects, as kubectl names it.
+    pub fn new(resource: &str) -> Self {
+        Self {
+            table: TableDecoder::new(resource),
+        }
     }
 
     fn table_object(&self, row: TableRow<'_>, received: Timestamp) -> Result<Object, DecodeError> {

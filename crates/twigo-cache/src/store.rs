@@ -80,7 +80,7 @@ fn keep_received<T: Item>(columns: Option<&[Column]>, item: &mut T, held: Option
         .unwrap_or_default()
         .iter()
         .zip(held.cells().iter().zip(item.cells()))
-        .filter(|(column, _)| column.prints_duration())
+        .filter(|(column, _)| column.prints_duration)
         .all(|(_, (held, new))| printed::keeps_stamp(text(held), held_at, text(new), at));
     if same {
         item.meta_mut().received = held_at;
@@ -515,15 +515,16 @@ mod tests {
         assert_eq!(changed(store.drain(&feed)), []);
     }
 
-    fn printing(columns: &[(&str, ColumnKind)]) -> Store<Row> {
+    fn printing(columns: &[(&str, bool)]) -> Store<Row> {
         let store = Store::default();
         let columns: Arc<[Column]> = columns
             .iter()
-            .map(|&(name, kind)| Column {
+            .map(|&(name, prints_duration)| Column {
                 name: name.into(),
-                kind,
+                kind: ColumnKind::String,
                 format: "".into(),
                 priority: 0,
+                prints_duration,
             })
             .collect();
         store.set_columns(Some(&columns));
@@ -531,10 +532,7 @@ mod tests {
     }
 
     fn pods() -> Store<Row> {
-        printing(&[
-            ("Status", ColumnKind::String),
-            ("Restarts", ColumnKind::String),
-        ])
+        printing(&[("Status", false), ("Restarts", true)])
     }
 
     fn printed(uid: &str, cells: &[&str], seconds: i64) -> Row {
@@ -560,10 +558,10 @@ mod tests {
     #[test]
     fn a_repeating_event_takes_the_stamp_of_each_repeat() {
         let store = printing(&[
-            ("Last Seen", ColumnKind::String),
-            ("Reason", ColumnKind::String),
-            ("First Seen", ColumnKind::String),
-            ("Count", ColumnKind::String),
+            ("Last Seen", true),
+            ("Reason", false),
+            ("First Seen", true),
+            ("Count", false),
         ]);
         for (count, seconds) in [(2, 1000), (3, 1300), (4, 1600), (5, 4600)] {
             let count = count.to_string();
@@ -614,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_heartbeat_takes_the_stamp_of_each_beat() {
-        let store = printing(&[("Ready", ColumnKind::String), ("Seen", ColumnKind::Date)]);
+        let store = printing(&[("Ready", false), ("Seen", true)]);
         for (ready, seen, seconds, beat) in [
             ("True", "0s", 100, 100),
             ("True", "0s", 110, 110),
@@ -632,10 +630,7 @@ mod tests {
 
     #[test]
     fn a_relist_keeps_the_stamp_of_rows_that_print_their_ages_as_they_did() {
-        let store = printing(&[
-            ("Last Seen", ColumnKind::String),
-            ("First Seen", ColumnKind::String),
-        ]);
+        let store = printing(&[("Last Seen", true), ("First Seen", true)]);
         store.upsert(printed("steady", &["11d", "11d"], 100));
         store.upsert(printed("aged", &["10m", "2h"], 100));
         store.upsert(printed("repeated", &["0s", "3d"], 100));

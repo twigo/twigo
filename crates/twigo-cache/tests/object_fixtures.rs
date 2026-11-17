@@ -6,7 +6,7 @@ const RECEIVED: jiff::Timestamp = jiff::Timestamp::UNIX_EPOCH;
 
 #[test]
 fn a_table_list_keeps_the_whole_object_and_its_cells() {
-    let mut decoder = ObjectDecoder::new();
+    let mut decoder = ObjectDecoder::new("pods");
     let page = decoder
         .decode_list(
             include_bytes!("fixtures/pod-object-table-list.json"),
@@ -53,7 +53,7 @@ fn a_table_list_keeps_the_whole_object_and_its_cells() {
 
 #[test]
 fn a_table_watch_follows_edits_with_the_columns_of_its_first_event() {
-    let mut decoder = ObjectDecoder::new();
+    let mut decoder = ObjectDecoder::new("pods");
     let events: Vec<Event<_>> = include_str!("fixtures/pod-object-table-watch.jsonl")
         .lines()
         .map(|line| decoder.decode_event(line.as_bytes(), RECEIVED).unwrap())
@@ -104,7 +104,7 @@ fn a_table_watch_follows_edits_with_the_columns_of_its_first_event() {
 
 #[test]
 fn a_raw_list_keeps_the_whole_object_under_the_metadata_columns() {
-    let mut decoder = ObjectDecoder::new();
+    let mut decoder = ObjectDecoder::new("pods");
     let page = decoder
         .decode_list(include_bytes!("fixtures/pod-object-list.json"), RECEIVED)
         .unwrap();
@@ -150,7 +150,7 @@ fn a_raw_list_keeps_the_whole_object_under_the_metadata_columns() {
 
 #[test]
 fn a_raw_watch_follows_its_edits_and_its_deletion() {
-    let mut decoder = ObjectDecoder::new();
+    let mut decoder = ObjectDecoder::new("pods");
     let events: Vec<Event<_>> = include_str!("fixtures/pod-object-watch.jsonl")
         .lines()
         .map(|line| decoder.decode_event(line.as_bytes(), RECEIVED).unwrap())
@@ -185,7 +185,7 @@ fn a_raw_watch_follows_its_edits_and_its_deletion() {
 #[test]
 fn an_object_takes_the_time_its_response_arrived() {
     let at = jiff::Timestamp::from_second(10).unwrap();
-    let mut decoder = ObjectDecoder::new();
+    let mut decoder = ObjectDecoder::new("pods");
     let page = decoder
         .decode_list(include_bytes!("fixtures/pod-object-table-list.json"), at)
         .unwrap();
@@ -194,7 +194,7 @@ fn an_object_takes_the_time_its_response_arrived() {
             .iter()
             .all(|pod| pod.meta.received == at.as_millisecond())
     );
-    let raw = ObjectDecoder::new()
+    let raw = ObjectDecoder::new("pods")
         .decode_list(include_bytes!("fixtures/pod-object-list.json"), at)
         .unwrap();
     assert!(

@@ -3,6 +3,31 @@
  * it: a count, and a duration as Kubernetes prints one (`2y10d`, `5h3m`,
  * `45s`), alone or in a pod's `3 (5m ago)`.
  */
+import type { Column, Gvr } from "../generated";
+
+/**
+ * The columns of the built-in printers that print a duration in a string,
+ * by `group/resource/column`, as Rust's Table decoder knows them
+ * (`table::PRINTED`).
+ */
+const PRINTED: ReadonlySet<string> = new Set([
+  "/pods/Restarts",
+  "batch/cronjobs/Last Schedule",
+  "/events/Last Seen",
+  "/events/First Seen",
+  "events.k8s.io/events/Last Seen",
+  "events.k8s.io/events/First Seen",
+]);
+
+/** `gvr`'s columns as Rust's Table decoder reads them: those that print a duration say so. */
+export function printedColumns(gvr: Gvr, columns: readonly Column[]): Column[] {
+  return columns.map((column) =>
+    column.kind === "date" ||
+    PRINTED.has(`${gvr.group}/${gvr.resource}/${column.name}`)
+      ? { ...column, printsDuration: true }
+      : column,
+  );
+}
 
 export function count(text: string): number | null {
   return /^[0-9]+$/.test(text) ? Number(text) : null;

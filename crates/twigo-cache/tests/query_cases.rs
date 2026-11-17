@@ -106,6 +106,7 @@ fn column(column: &twigo_ipc::Column) -> Option<Column> {
         },
         format: "".into(),
         priority: column.priority,
+        prints_duration: column.prints_duration,
     })
 }
 

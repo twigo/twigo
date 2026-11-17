@@ -630,6 +630,7 @@ impl Printing {
                 kind: ColumnKind::String,
                 format: "".into(),
                 priority: 0,
+                prints_duration: true,
             }]),
             restarts: Arc::clone(restarts),
         }
