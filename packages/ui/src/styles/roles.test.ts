@@ -256,6 +256,12 @@ const hoveredText = classOf(
   "../components/segmented.tsx",
   /hover:text-([\w-]+)/,
 );
+const triggerFills = [
+  classOf("../components/trigger.tsx", /\bbg-([\w-]+)/),
+  classOf("../components/trigger.tsx", /hover:bg-([\w-]+)/),
+  classOf("../components/trigger.tsx", /data-\[state=open\]:bg-([\w-]+)/),
+];
+const TRIGGER_TEXTS = ["content", "support", "error", "warn-foreground"];
 const WELL_TEXTS = [
   ...new Set([pressedText, "content", "support", "error", "warn-foreground"]),
 ];
@@ -306,6 +312,25 @@ test.each(THEMES)(
         ),
       ];
     });
+    expect(unmet(found)).toEqual([]);
+  },
+);
+
+test.each(THEMES)(
+  "%s: a trigger's text and its icon read at 4.5:1 or more on each fill it takes, at rest, hovered and open, over the shell, the editor, a card and a popover",
+  (theme) => {
+    const found = WELLED.flatMap((on) =>
+      triggerFills.flatMap((fill) => {
+        const under = over(colour(`var(--${fill})`, theme), surface(on, theme));
+        return TRIGGER_TEXTS.map((name) =>
+          reading(
+            `${name} on ${fill} on ${on}`,
+            textOn(name, theme, under),
+            4.5,
+          ),
+        );
+      }),
+    );
     expect(unmet(found)).toEqual([]);
   },
 );

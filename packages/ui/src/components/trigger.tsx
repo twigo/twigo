@@ -3,14 +3,24 @@ import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
 const TRIGGER =
-  "inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs shadow-[inset_0_0_0_1px_var(--border)] outline-none hover:bg-row-hover focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-active";
+  "inline-flex h-6.5 shrink-0 items-center gap-1.5 rounded-md bg-well px-2 text-xs";
 
-/** A toolbar's bordered button that opens a menu or a picker, lit while it is open. */
+/** A toolbar's button on a field's fill that opens a menu or a picker, lit while hovered or open. */
 export function TriggerButton({
   className,
   ...props
 }: ComponentProps<"button">) {
-  return <button type="button" className={cn(TRIGGER, className)} {...props} />;
+  return (
+    <button
+      type="button"
+      className={cn(
+        TRIGGER,
+        "outline-none hover:bg-row-active focus-visible:shadow-[var(--focus-ring)] data-[state=open]:bg-row-active",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 /** What a trigger's choice narrowed to, in the trigger's place, with a ✕ that clears it. */
