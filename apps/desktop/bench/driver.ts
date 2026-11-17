@@ -130,6 +130,18 @@ function cellText(row: HTMLElement, position: number): string | undefined {
   );
 }
 
+/**
+ * The count a Restarts cell shows, without how long ago the last restart was,
+ * which the cell draws after it in a span of its own.
+ */
+function shownCount(row: HTMLElement, position: number): string | undefined {
+  return (
+    row
+      .querySelectorAll(':scope > [role="gridcell"][data-column]')
+      [position]?.querySelector("[data-fit] > span")?.textContent ?? undefined
+  );
+}
+
 function onScreen(table: HTMLElement, row: HTMLElement): boolean {
   const top =
     table.querySelector('[aria-rowindex="1"]')?.getBoundingClientRect()
@@ -368,10 +380,11 @@ async function changes(
     for (const [id, text] of pending) {
       const index = list.indexOf(id);
       const row = index < 0 ? null : rowAt(table, index);
+      const count = /^\d+/.exec(text)?.[0];
       if (!row || !onScreen(table, row)) {
         result.offscreen++;
         pending.delete(id);
-      } else if (cellText(row, position) === text) {
+      } else if (count !== undefined && shownCount(row, position) === count) {
         shown.push({ id, text });
         pending.delete(id);
       } else if (now - (arrived.get(id) ?? now) > PAINT_TIMEOUT_MS) {

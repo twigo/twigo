@@ -111,7 +111,8 @@ Limits:
 
 ## The churn generator
 
-`twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` bumps the restart count of random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app` and replaces its `restartCount`.
+`twigo-bench churn [--kubeconfig PATH] [--rate 100] [--seconds S] --log FILE` restarts random pods of `bench/bench` through the status subresource: a JSON patch that tests that the first container is `app`, replaces its `restartCount` and sets its `lastState` to a crash that finished as the patch is sent.
+The API server prints a restart count with how long ago it was only when the container's `lastState.terminated` is set (`3 (5s ago)`, [printers.go](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1066-L1070)), so without the crash the Restarts cells would print a bare count and the list would draw no age.
 It paces patches on a fixed interval and skips the ticks it misses, so after a stall it resumes at its rate instead of sending the backlog at once, with at most 64 in flight and never two for one pod, until `--seconds` pass or SIGINT.
 At that bound, or once every pod has a patch in flight, it waits for an answer, still watching for the deadline and SIGINT; the API client has no read timeout, so a patch unanswered after 10 s is logged as an error.
 On stop it logs the answers of the patches still in flight.
