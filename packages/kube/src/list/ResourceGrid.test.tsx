@@ -270,7 +270,12 @@ function batch(
     columns: first
       ? [
           { name: "Name", kind: "string", priority: 0 },
-          { name: "Restarts", kind: "string", priority: 0 },
+          {
+            name: "Restarts",
+            kind: "string",
+            priority: 0,
+            printsDuration: true,
+          },
         ]
       : null,
     window: first ? { start: 0, ids: IDS } : null,
@@ -370,7 +375,12 @@ test("a restart's age and the end of its warning come in its cell, not in the gr
       columns: [
         { name: "Name", kind: "string", priority: 0 },
         { name: "Status", kind: "string", priority: 0 },
-        { name: "Restarts", kind: "string", priority: 0 },
+        {
+          name: "Restarts",
+          kind: "string",
+          priority: 0,
+          printsDuration: true,
+        },
       ],
       window: { start: 0, ids: ["a"] },
       upserts: [
@@ -974,7 +984,12 @@ test("a pod that is not ready and restarted within the hour warns in Ready alone
         { name: "Name", kind: "string", priority: 0 },
         { name: "Ready", kind: "string", priority: 0 },
         { name: "Status", kind: "string", priority: 0 },
-        { name: "Restarts", kind: "string", priority: 0 },
+        {
+          name: "Restarts",
+          kind: "string",
+          priority: 0,
+          printsDuration: true,
+        },
       ],
       window: { start: 0, ids: ["a", "b"] },
       upserts: [pod("a", "0/1"), pod("b", "1/1")],

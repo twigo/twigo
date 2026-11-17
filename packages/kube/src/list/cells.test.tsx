@@ -109,9 +109,17 @@ const cellOf = (
   name: string,
   cell: string,
   tone: "error" | "warn" | undefined,
-  kind: Column["kind"] = "string",
-  alarmed = false,
-  received = RECEIVED,
+  {
+    kind = "string",
+    printsDuration = false,
+    alarmed = false,
+    received = RECEIVED,
+  }: {
+    kind?: Column["kind"];
+    printsDuration?: boolean;
+    alarmed?: boolean;
+    received?: string;
+  } = {},
 ) => {
   const row: Row = {
     id: "r",
@@ -123,7 +131,7 @@ const cellOf = (
   const shown = {
     name,
     index: 0,
-    rule: columnRule(gvr, { name, kind, priority: 0 }),
+    rule: columnRule(gvr, { name, kind, priority: 0, printsDuration }),
   };
   return render(
     <CellView row={row} column={shown} tone={tone} alarmed={alarmed} />,
@@ -174,14 +182,11 @@ test("an abnormal status is in weight 600 beside its dot, a healthy one is not",
 });
 
 function restarts(text: string, alarmed: boolean) {
-  const container = cellOf(
-    PODS,
-    "Restarts",
-    text,
-    undefined,
-    "integer",
+  const container = cellOf(PODS, "Restarts", text, undefined, {
+    kind: "integer",
+    printsDuration: true,
     alarmed,
-  );
+  });
   const [count, ago] = Array.from(container.querySelectorAll("span"));
   const role = (span: Element | undefined) =>
     span === undefined
@@ -223,7 +228,7 @@ test("a count with no readable age is plain, and a row that already raises an al
 const POD_COLUMNS: Column[] = [
   { name: "Ready", kind: "string", priority: 0 },
   { name: "Status", kind: "string", priority: 0 },
-  { name: "Restarts", kind: "string", priority: 0 },
+  { name: "Restarts", kind: "string", priority: 0, printsDuration: true },
 ];
 
 function podRow(
@@ -307,13 +312,10 @@ test("only a value that is drawn raises the alarm: a Ready the person hid raises
 });
 
 test("a restart within the hour stops warning when the hour passes, with no event from the server", () => {
-  const container = cellOf(
-    PODS,
-    "Restarts",
-    "3 (59m ago)",
-    undefined,
-    "integer",
-  );
+  const container = cellOf(PODS, "Restarts", "3 (59m ago)", undefined, {
+    kind: "integer",
+    printsDuration: true,
+  });
   const warns = () => container.querySelector(".text-warn-foreground") !== null;
   expect(warns()).toBe(true);
   advance(30_000);
@@ -327,7 +329,10 @@ test("the age of a restart reads as the server prints it and grows with the cloc
   const ago = (container: HTMLElement) =>
     container.querySelectorAll("span")[1]?.textContent;
   const restart = (printed: string) =>
-    cellOf(PODS, "Restarts", `3 (${printed} ago)`, undefined, "integer");
+    cellOf(PODS, "Restarts", `3 (${printed} ago)`, undefined, {
+      kind: "integer",
+      printsDuration: true,
+    });
   const minutes = restart("5m");
   expect(ago(minutes)).toBe("5m ago");
   advance(60_000);
@@ -355,7 +360,12 @@ test("a row printed again with the age that follows from the first print shows t
   const shown = {
     name: "Restarts",
     index: 0,
-    rule: columnRule(PODS, { name: "Restarts", kind: "integer", priority: 0 }),
+    rule: columnRule(PODS, {
+      name: "Restarts",
+      kind: "integer",
+      priority: 0,
+      printsDuration: true,
+    }),
   };
   const draw = (current: Row) => (
     <CellView row={current} column={shown} tone={undefined} alarmed={false} />
@@ -389,7 +399,10 @@ test("a time since something else that the server printed grows too, whether a k
   ];
   for (const [gvr, name, kind, printed, later] of cases) {
     vi.setSystemTime(Date.parse(RECEIVED));
-    const container = cellOf(gvr, name, printed, undefined, kind);
+    const container = cellOf(gvr, name, printed, undefined, {
+      kind,
+      printsDuration: true,
+    });
     expect([name, container.textContent]).toEqual([name, printed]);
     advance(60_000);
     expect([name, container.textContent]).toEqual([name, later]);
@@ -401,9 +414,54 @@ test("a time since something else that the server printed grows too, whether a k
     [WIDGETS, "Renewed", "date", "<invalid>"],
   ] as const) {
     vi.setSystemTime(Date.parse(RECEIVED));
-    const container = cellOf(gvr, name, none, undefined, kind);
+    const container = cellOf(gvr, name, none, undefined, {
+      kind,
+      printsDuration: true,
+    });
     advance(60_000);
     expect([name, container.textContent]).toEqual([name, none]);
+    cleanup();
+  }
+});
+
+test("a cell ticks where the core says its column prints a duration, in any resource, and is drawn as printed where it does not, whatever its name", () => {
+  const cases: [Gvr, string, boolean, string, string][] = [
+    [
+      { group: "events.k8s.io", version: "v1", resource: "events" },
+      "Last Seen",
+      true,
+      "5m",
+      "6m",
+    ],
+    [
+      { group: "example.com", version: "v1", resource: "crontabs" },
+      "Last Seen",
+      false,
+      "5m",
+      "5m",
+    ],
+    [
+      { group: "", version: "v1", resource: "events" },
+      "Last Seen",
+      false,
+      "5m",
+      "5m",
+    ],
+    [PODS, "Restarts", true, "3 (5m ago)", "36m ago"],
+    [PODS, "Restarts", false, "3 (5m ago)", "35m ago"],
+  ];
+  for (const [gvr, name, printsDuration, printed, later] of cases) {
+    vi.setSystemTime(Date.parse(RECEIVED));
+    const container = cellOf(gvr, name, printed, undefined, {
+      printsDuration,
+    });
+    advance(60_000);
+    expect([gvr.group, name, printsDuration, container.textContent]).toEqual([
+      gvr.group,
+      name,
+      printsDuration,
+      later,
+    ]);
     cleanup();
   }
 });
@@ -416,15 +474,11 @@ test("a stamp that cannot be read leaves the text as the server printed it, in t
   ];
   for (const received of unusable) {
     vi.setSystemTime(Date.parse(RECEIVED));
-    const restart = cellOf(
-      PODS,
-      "Restarts",
-      "3 (5m ago)",
-      undefined,
-      "integer",
-      false,
+    const restart = cellOf(PODS, "Restarts", "3 (5m ago)", undefined, {
+      kind: "integer",
+      printsDuration: true,
       received,
-    );
+    });
     const [count, ago] = Array.from(restart.querySelectorAll("span"));
     expect([received, count?.textContent, ago?.textContent]).toEqual([
       received,
@@ -438,9 +492,7 @@ test("a stamp that cannot be read leaves the text as the server printed it, in t
       "Last Schedule",
       "1m",
       undefined,
-      "string",
-      false,
-      received,
+      { printsDuration: true, received },
     );
     advance(60_000);
     expect([received, restart.textContent, since.textContent]).toEqual([

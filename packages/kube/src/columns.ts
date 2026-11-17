@@ -50,6 +50,12 @@ export interface ColumnRule {
   /** A changed value flashes; a measure that moves at every poll does not. */
   readonly flash: boolean;
   /**
+   * Its text is a duration the server printed, or ends in one as a pod's
+   * Restarts does, which the core says (`printsDuration`): it is drawn from
+   * the moment it stands for, so it grows as an Age does.
+   */
+  readonly ticks: boolean;
+  /**
    * Where the column goes as its list narrows: the lowest leaves first, and
    * among equals the one on the right. A column nobody ranked leaves before
    * every ranked one.
@@ -79,7 +85,6 @@ const DROP = {
 const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   {
     age: { drop: DROP.age },
-    date: { cell: "since" },
     cpu: {
       cell: "cpu",
       width: 72,
@@ -188,9 +193,6 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     drop: DROP.health,
   },
   "/pods/Restarts": { cell: "restarts", width: 132, drop: DROP.restarts },
-  "batch/cronjobs/Last Schedule": { cell: "since" },
-  "/events/Last Seen": { cell: "since" },
-  "/events/First Seen": { cell: "since" },
   "/nodes/Status": {
     cell: "status",
     width: 160,
@@ -229,8 +231,9 @@ const FIGURE_CELLS: ReadonlySet<CellKind> = new Set([
 export function columnRule(gvr: Gvr, column: Column): ColumnRule {
   const numeric = column.kind === "integer" || column.kind === "number";
   const age = column.kind === "age";
+  const ticks = column.printsDuration === true;
   const rule: Omit<ColumnRule, "figures"> = {
-    cell: age ? "age" : "text",
+    cell: age ? "age" : ticks ? "since" : "text",
     width: age ? 64 : numeric ? 88 : 140,
     grow: false,
     align: age || numeric ? "end" : "start",
@@ -242,6 +245,7 @@ export function columnRule(gvr: Gvr, column: Column): ColumnRule {
     recedes: false,
     metric: false,
     flash: true,
+    ticks,
     drop: 0,
     coverable: true,
     ...BY_KIND[column.kind],

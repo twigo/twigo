@@ -141,7 +141,14 @@ export function CellView({
         text
       );
     case "restarts":
-      return <Restarts text={text} received={row.received} alarmed={alarmed} />;
+      return (
+        <Restarts
+          text={text}
+          received={row.received}
+          ticks={rule.ticks}
+          alarmed={alarmed}
+        />
+      );
     case "since":
       return <Since text={text} received={row.received} />;
     case "text": {
@@ -165,22 +172,24 @@ export function CellView({
 
 /**
  * A restart count and how long ago the last was, the count in a column of
- * its own, the age growing from the moment the server printed it. A restart
- * within the hour is news, in the warning tone unless the row already raises
- * an alarm: a row has one.
+ * its own, the age growing from the moment the server printed it where the
+ * column `ticks`, else as printed. A restart within the hour is news, in the
+ * warning tone unless the row already raises an alarm: a row has one.
  */
 function Restarts({
   text,
   received,
+  ticks,
   alarmed,
 }: {
   text: string;
   received: string;
+  ticks: boolean;
   alarmed: boolean;
 }) {
   const match = /^(\d+)(?: \((.+) ago\))?$/.exec(text);
   const [, count = text, ago] = match ?? [];
-  const at = ago === undefined ? undefined : printedAt(received, ago);
+  const at = ticks && ago !== undefined ? printedAt(received, ago) : undefined;
   const shown = useNowAs((now) => {
     const age = printedAge(at, now);
     return age === undefined ? ago : humanDuration(age);
