@@ -10,21 +10,9 @@ interface Switch {
   readonly label: string;
   /** The first is the default. */
   readonly choices: readonly [Choice, ...Choice[]];
-  /** A choice that the page reads once, before its first render, takes a reload. */
-  readonly reloads?: true;
 }
 
 const SWITCHES: readonly Switch[] = [
-  // @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
-  {
-    name: "rows",
-    label: "Row Height",
-    reloads: true,
-    choices: [
-      { value: "26", about: "Rows of 26 px" },
-      { value: "24", about: "Rows of 24 px" },
-    ],
-  },
   // @todo: remove the sash switch once the owner has chosen at package 3's checkpoint
   {
     name: "sash",
@@ -60,21 +48,18 @@ for (const { name, choices } of SWITCHES) {
 
 /**
  * Sets `data-<name>` on the root for each switch: from the address in the
- * browser (`?variant=neutrals:own,tint:strips,rows:24,sash:line`), else from
- * the last pick, else the default. The values are set when this module loads,
- * so main.tsx imports it before anything that reads them at load (`ROW_HEIGHT`
- * in `@twigo/ui`). A palette command picks one and keeps the pick in
- * `localStorage`.
+ * browser (`?variant=sash:line`), else from the last pick, else the default.
+ * A palette command picks one and keeps the pick in `localStorage`.
  */
 export function installVariants({ commands, quickAccess }: Workbench): void {
-  for (const { name, label, choices, reloads } of SWITCHES) {
+  for (const { name, label, choices } of SWITCHES) {
     commands.register({
       id: `design.variant.${name}`,
       title: `${label}…`,
       category: "Design Variant",
       run: async () => {
         const picked = await quickAccess.pick(
-          reloads ? `${label} (reloads the window)` : label,
+          label,
           choices.map(({ value, about }) => ({
             id: value,
             label: value,
@@ -86,7 +71,6 @@ export function installVariants({ commands, quickAccess }: Workbench): void {
         current.set(name, picked.id);
         root.dataset[name] = picked.id;
         localStorage.setItem(`variant.${name}`, picked.id);
-        if (reloads) location.reload();
       },
     });
   }

@@ -23,11 +23,10 @@ import {
 } from "../components/actions";
 import { Skeleton } from "../components/skeleton";
 import { fitWidth } from "./fit";
-// @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
-import { ROW_HEIGHT } from "./rowHeight";
 import { HeaderCell, MarkBox } from "./header";
 import type { GridColumn, GridItem, GridSort } from "./types";
 
+export const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 28;
 const MARK_WIDTH = 28;
 const ACTIONS_WIDTH = 32;

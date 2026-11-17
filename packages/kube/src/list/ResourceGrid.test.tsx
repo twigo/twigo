@@ -172,7 +172,7 @@ test.each([
 test("a scroll during a resubscribe reaches the new subscription before it shows", async () => {
   await openList();
   fireEvent.click(within(header("Ready")).getByRole("button"));
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   for (let i = 0; i < 10; i++) {
     await act(() => vi.advanceTimersByTimeAsync(50));
@@ -690,7 +690,7 @@ test("j moves on from the selected row after it scrolled out of the window", asy
   focusGrid();
   key("KeyJ");
   await settle(2);
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -712,7 +712,7 @@ test("a filter typed while j waits for its row drops the move", async () => {
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -735,7 +735,7 @@ test("j pressed after a sort is asked, before its rows arrive, is dropped with t
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   fireEvent.click(within(header("Ready")).getByRole("button"));
@@ -756,7 +756,7 @@ test("a health picked while j waits for its row drops the move", async () => {
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   key("KeyJ");
@@ -861,7 +861,7 @@ test("j pressed after a health is picked, before its rows arrive, is dropped wit
   key("KeyJ");
   await settle(2);
   const first = textOf(rows()[0], "Name");
-  grid().scrollTop = 3000 * 26;
+  grid().scrollTop = 3000 * 24;
   fireEvent.scroll(grid());
   await settle();
   fireEvent.click(

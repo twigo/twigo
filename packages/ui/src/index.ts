@@ -48,10 +48,9 @@ export {
   DataGrid,
   GUTTERS_WIDTH,
   GridSkeleton,
+  ROW_HEIGHT,
   type DataGridProps,
 } from "./grid/DataGrid";
-// @todo: remove the rows switch once the owner has chosen at package 3's checkpoint
-export { ROW_HEIGHT } from "./grid/rowHeight";
 export { MIN_WIDTH as COLUMN_MIN_WIDTH } from "./grid/fit";
 export type { GridColumn, GridItem, GridSort } from "./grid/types";
 export { Tree, type TreeRow } from "./tree/Tree";

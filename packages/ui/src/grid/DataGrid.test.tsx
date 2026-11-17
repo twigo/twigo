@@ -77,7 +77,7 @@ function scrollable(rows: number): HTMLElement {
   const element = screen.getByRole("grid");
   Object.defineProperty(element, "scrollHeight", {
     configurable: true,
-    value: 28 + rows * 26,
+    value: 28 + rows * 24,
   });
   Object.defineProperty(element, "scrollTo", {
     configurable: true,
@@ -203,7 +203,7 @@ test("without a header the rows start at the top and count from one", () => {
   expect(first?.getAttribute("aria-rowindex")).toBe("1");
   expect(second?.getAttribute("aria-rowindex")).toBe("2");
   expect(first?.style.transform).toBe("translateY(0px)");
-  expect(second?.style.transform).toBe("translateY(26px)");
+  expect(second?.style.transform).toBe("translateY(24px)");
 });
 
 test("a click selects and opens a row, its box marks it", () => {
@@ -452,7 +452,7 @@ test("a move to a row still loading is dropped once the list no longer reaches i
 
 test("without a cursor, a move lands on the first row below the header", () => {
   const { handlers, controller } = grid(list(PODS));
-  scroll(scrollable(PODS.length), 1040);
+  scroll(scrollable(PODS.length), 960);
   act(() => {
     controller()?.move(1);
   });
@@ -517,7 +517,7 @@ test("whatever a row holds sits in one of its cells", () => {
 });
 
 test("a move down scrolls the cursor's row clear of the bottom, a move up clear of the sticky header", () => {
-  const { controller } = grid({ ...list(PODS), selected: "p22" });
+  const { controller } = grid({ ...list(PODS), selected: "p24" });
   const element = scrollable(PODS.length);
   act(() => {
     controller()?.move(1);
@@ -531,7 +531,7 @@ test("a move down scrolls the cursor's row clear of the bottom, a move up clear 
   act(() => {
     again.controller()?.move(-1);
   });
-  expect(scrolled.scrollTop).toBe(234);
+  expect(scrolled.scrollTop).toBe(216);
 });
 
 const WITH_AGE = [
