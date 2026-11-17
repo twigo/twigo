@@ -136,6 +136,9 @@ test("a pod's Restarts counts from the moment of its last restart, so its age gr
       expect(pod.received).toBe(
         pod.restarts === printed.restarts ? printed.received : now,
       );
+      expect(pod.received - (ago(pod.restarts) ?? NaN)).toBeGreaterThanOrEqual(
+        known.get(pod)?.at ?? NaN,
+      );
       if (pod.restarts === printed.restarts) kept++;
     }
   }

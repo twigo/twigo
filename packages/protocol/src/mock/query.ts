@@ -7,6 +7,7 @@ import type {
   RowId,
   ValueCount,
 } from "../generated";
+import { count, parsePrinted, type Printed } from "./printed";
 import { parseSelector, type Selector } from "./selector";
 
 /** A row as a query reads it: the webview's cells, Namespace included. */
@@ -366,60 +367,6 @@ function sortKey(
   if (typeof cell === "boolean") return numberKey(cell ? 1 : 0);
   if (typeof cell === "number") return numberKey(cell);
   return sort.printed ? printedKey(cell, row.received) : textKey(cell);
-}
-
-function count(text: string): number | null {
-  return /^[0-9]+$/.test(text) ? Number(text) : null;
-}
-
-const UNITS: readonly (readonly [string, number])[] = [
-  ["y", 365 * 86_400],
-  ["d", 86_400],
-  ["h", 3_600],
-  ["m", 60],
-  ["s", 1],
-];
-
-/** A duration as Kubernetes prints one, each unit at most once, largest first. */
-function duration(text: string): number | null {
-  if (text === "") return null;
-  let seconds = 0;
-  let unit = 0;
-  let at = 0;
-  while (at < text.length) {
-    let end = at;
-    while (end < text.length && /[0-9]/.test(text.charAt(end))) end++;
-    if (end === at || end === text.length) return null;
-    const name = text.charAt(end);
-    while (unit < UNITS.length && UNITS[unit]?.[0] !== name) unit++;
-    const found = UNITS[unit];
-    if (!found) return null;
-    seconds += Number(text.slice(at, end)) * found[1];
-    unit++;
-    at = end + 1;
-  }
-  return seconds;
-}
-
-/** A duration the server printed: `5m`, or a pod's `3 (5m ago)` with the count of restarts. */
-interface Printed {
-  readonly count: string | null;
-  /** In seconds. */
-  readonly ago: number;
-}
-
-function parsePrinted(text: string): Printed | null {
-  const ago = duration(text);
-  if (ago !== null) return { count: null, ago };
-  if (!text.endsWith(" ago)")) return null;
-  const rest = text.slice(0, -" ago)".length);
-  const at = rest.indexOf(" (");
-  if (at < 0) return null;
-  const counted = rest.slice(0, at);
-  const since = duration(rest.slice(at + 2));
-  return count(counted) === null || since === null
-    ? null
-    : { count: counted, ago: since };
 }
 
 function printedKeyed(printed: Printed, then: number): SortKey {

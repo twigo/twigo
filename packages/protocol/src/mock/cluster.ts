@@ -1,6 +1,7 @@
 import { humanDuration } from "@twigo/utils";
 import type { Cell, RowId } from "../generated";
 import { NAMESPACES, WORKLOADS } from "./fixtures";
+import { keepsStamp } from "./printed";
 
 export interface Pod {
   id: RowId;
@@ -16,7 +17,7 @@ export interface Pod {
   restarts: string;
   /** When its last container restarted, which `restarts` prints the age of. */
   lastRestart: number | null;
-  /** When the server last printed `restarts` differently: its age counts back from here. */
+  /** The stamp the age in `restarts` counts back from, as Rust's store keeps it (`keepsStamp`). */
   received: number;
   created: number;
   ip: string;
@@ -122,7 +123,7 @@ export class Cluster {
   now: number;
   /** When the cluster was built: when a row that never changes was received. */
   readonly built: number;
-  readonly #printed = new Map<RowId, { text: string; at: number }>();
+  readonly #printed = new Map<RowId, { texts: string[]; at: number }>();
   /**
    * What lists have synced, by kind alone for every namespace, else with the
    * namespaces after it: a list of the same namespaces, or of every one,
@@ -395,16 +396,21 @@ export class Cluster {
   }
 
   /**
-   * When the server last printed `id` with the durations it prints now,
-   * `durations`: it prints a row anew only when the row changes, so a
-   * duration's text and the moment it was printed move together.
+   * The stamp of `id`, printed now with `durations`, as Rust's store keeps
+   * it: the held one while each duration reads the age it read then, one
+   * step of it not yet gone (`keepsStamp`), else now.
    */
   printedAt(id: RowId, ...durations: string[]): number {
-    const text = durations.join("\n");
     const held = this.#printed.get(id);
-    if (held?.text === text) return held.at;
-    this.#printed.set(id, { text, at: this.now });
-    return this.now;
+    const at =
+      held !== undefined &&
+      durations.every((text, index) =>
+        keepsStamp(held.texts[index] ?? null, held.at, text, this.now),
+      )
+        ? held.at
+        : this.now;
+    this.#printed.set(id, { texts: durations, at });
+    return at;
   }
 
   /** Changes `count` distinct random pods. */
@@ -435,10 +441,10 @@ export class Cluster {
       pod.lastRestart === null
         ? `${count}`
         : `${count} (${humanDuration(now - pod.lastRestart)} ago)`;
-    if (printed !== pod.restarts) {
-      pod.restarts = printed;
+    if (!keepsStamp(pod.restarts, pod.received, printed, now)) {
       pod.received = now;
     }
+    pod.restarts = printed;
     pod.version++;
   }
 
