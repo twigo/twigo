@@ -33,7 +33,12 @@ export function PartView({ location }: { location: SideBar }) {
       style={{ "--surface": "var(--sidebar)" } as CSSProperties}
       className="flex h-full min-h-0 flex-col bg-sidebar"
     >
-      <header className="flex h-8 shrink-0 items-center gap-1 pr-2 pl-3">
+      <header
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-1 pr-2",
+          containers.length < 2 && "pl-3",
+        )}
+      >
         {containers.length < 2 ? (
           <h2 className="font-medium">{container?.title}</h2>
         ) : (
@@ -49,7 +54,7 @@ export function PartView({ location }: { location: SideBar }) {
                 spaces.setPart(space.id, location, { container: next });
               }
             }}
-            className="min-w-0 flex-1 pl-1"
+            className="min-w-0 flex-1"
           />
         )}
         {shown.length === 1 && shown[0] && (
