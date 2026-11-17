@@ -9,14 +9,6 @@ export function namespacesOf(
   return input.namespaces ?? spaces.state(input.space).namespaces;
 }
 
-/** Back to every namespace of the space, which is what no scope means. */
-export function showAllNamespaces(
-  spaces: Workbench["spaces"],
-  space: string,
-): void {
-  spaces.update(space, (state) => ({ ...state, namespaces: [] }));
-}
-
 /**
  * Where a list looks, for the words of an empty one: the space's contexts,
  * then the namespaces it is narrowed to, `prod-eu · payments`.

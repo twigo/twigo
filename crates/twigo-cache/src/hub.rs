@@ -633,7 +633,7 @@ impl Spawn<Row> for Hub {
 
 impl Spawn<Object> for Hub {
     fn spawn(&self, key: &Key, upstream: Arc<Upstream<Object>>, run: u64) -> JoinHandle<()> {
-        self.start(key, ObjectDecoder::new(&key.resource.name()), upstream, run)
+        self.start(key, ObjectDecoder::new(), upstream, run)
     }
 }
 

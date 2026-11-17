@@ -36,7 +36,7 @@ import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
 import { pinOf } from "./pin";
 import { SHOWS_ROWS } from "./listStatus";
-import { namespacesOf, showAllNamespaces } from "./scope";
+import { namespacesOf } from "./scope";
 import { chipFor, stageFor, WHOLE, type Chip } from "./stages";
 
 const ORDER: readonly Health[] = ["error", "warn", "ok"];
@@ -385,7 +385,10 @@ function Actions({
               }}
               onClear={() => {
                 grids.focus(uri);
-                showAllNamespaces(spaces, input.space);
+                spaces.update(input.space, (state) => ({
+                  ...state,
+                  namespaces: [],
+                }));
               }}
             />
           </span>

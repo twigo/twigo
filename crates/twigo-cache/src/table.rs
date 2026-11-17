@@ -95,7 +95,7 @@ impl Row {
 /// of its watch connections. The server sends column definitions only in the
 /// first object of each response, so the decoder keeps them across pages and
 /// reconnects.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TableDecoder {
     resource: Box<str>,
     columns: Option<Arc<[Column]>>,

@@ -297,15 +297,15 @@ impl Layout {
         ipc::Row {
             id: RowId(id.to_owned()),
             created: row.meta.created_at().map(|created| created.to_string()),
-            received: format!("{:.3}", timestamp(row.meta.received)),
+            received: format!(
+                "{:.3}",
+                Timestamp::from_millisecond(row.meta.received)
+                    .expect("milliseconds that a Timestamp gave")
+            ),
             generated: row.meta.generated,
             cells,
         }
     }
-}
-
-fn timestamp(millis: i64) -> Timestamp {
-    Timestamp::from_millisecond(millis).expect("milliseconds that a Timestamp gave")
 }
 
 fn kind(kind: ColumnKind) -> ipc::ColumnKind {

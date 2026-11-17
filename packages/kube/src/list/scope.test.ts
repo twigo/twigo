@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { testWorkbench } from "@twigo/workbench/testing";
 import { parseListUri } from "../uri";
-import { namespacesOf, showAllNamespaces, whereWords } from "./scope";
+import { namespacesOf, whereWords } from "./scope";
 
 const PODS = "k8s-list://prod-eu/v1/pods";
 
@@ -16,9 +16,6 @@ test("a list reads its own namespaces when its URI names them, else the space's 
   spaces.update("prod-eu", (state) => ({ ...state, namespaces: ["auth"] }));
   expect(namespacesOf(spaces, input(`${PODS}?ns=a,b`))).toEqual(["a", "b"]);
   expect(namespacesOf(spaces, input(PODS))).toEqual(["auth"]);
-
-  showAllNamespaces(spaces, "prod-eu");
-  expect(namespacesOf(spaces, input(PODS))).toEqual([]);
 });
 
 test("where a list looks reads the space's contexts before the namespaces it is narrowed to", async () => {
