@@ -24,6 +24,7 @@ import {
 import {
   cellTone,
   columnRule,
+  rowFinished,
   rowTone,
   statusColumn,
   type CellKind,
@@ -148,6 +149,7 @@ export function EmbeddedList({
   }, [setMetrics, reads]);
   const decide = decideRows(
     (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    (row) => rowFinished(gvr, countBy, snapshot.columns, row),
     columns,
   );
   const item = (index: number): GridItem<Row, never> | undefined => {
@@ -241,13 +243,14 @@ export function EmbeddedList({
           cell={(row, column) => {
             const shown = byName.get(column.id);
             if (!shown) return undefined;
-            const { tone, alarmed } = decide(row);
+            const { tone, alarmed, finished } = decide(row);
             return (
               <CellView
                 row={row}
                 column={shown}
                 tone={tone}
                 alarmed={alarmed}
+                finished={finished}
               />
             );
           }}

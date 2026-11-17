@@ -47,18 +47,21 @@ function Since({ text, received }: { text: string; received: string }) {
  * A cell by its column's rule (ARCHITECTURE 4.4): data stays near-monochrome.
  * `tone` is the row's, from its health column: a row has one alarm, so a
  * ratio beside a toned status is plain, and `alarmed` says that the row has
- * its alarm already (`raisesAlarm`).
+ * its alarm already (`raisesAlarm`). `finished` says that the row's object
+ * ran to completion, so its ratio is not short.
  */
 export function CellView({
   row,
   column,
   tone: rowTone,
   alarmed,
+  finished,
 }: {
   row: Row;
   column: ShownColumn;
   tone: Tone | undefined;
   alarmed: boolean;
+  finished: boolean;
 }) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
@@ -92,6 +95,7 @@ export function CellView({
               column={column.merged}
               tone={rowTone}
               alarmed={alarmed}
+              finished={finished}
             />
           </span>{" "}
         </>
@@ -124,7 +128,11 @@ export function CellView({
       );
     }
     case "ratio":
-      if (rule.tone?.(text) && (rule.health || rowTone === undefined))
+      if (
+        !finished &&
+        rule.tone?.(text) &&
+        (rule.health || rowTone === undefined)
+      )
         return (
           <span
             className={cn(

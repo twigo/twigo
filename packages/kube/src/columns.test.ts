@@ -6,6 +6,7 @@ import {
   columnRule,
   healthValues,
   IN_FLIGHT,
+  rowFinished,
   rowTone,
   statusColumn,
   worstHealth,
@@ -260,6 +261,80 @@ test("a row's tone is the abnormal value of its resource's health column", () =>
     "warn",
   );
   expect(rowTone(PODS, undefined, columns, row("Error"))).toBeUndefined();
+});
+
+test("a pod is finished by the words kubectl prints for one that ran to completion, and by no other status", () => {
+  const columns = [column("Name"), column("Ready"), column("Status")];
+  const row = (status: string) => ({
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: ["job-x7k2p", "0/1", status],
+  });
+  const finished = (statuses: readonly string[]) =>
+    statuses.map((status) => [
+      status,
+      rowFinished(PODS, "Status", columns, row(status)),
+    ]);
+  const ended = ["Completed", "Succeeded", "ExitCode:0"];
+  const other = [
+    "Running",
+    "Pending",
+    "ContainerCreating",
+    "PodInitializing",
+    "NotReady",
+    "Terminating",
+    "Unknown",
+    "Error",
+    "OOMKilled",
+    "ContainerCannotRun",
+    "DeadlineExceeded",
+    "Evicted",
+    "ExitCode:1",
+    "Signal:9",
+    "CrashLoopBackOff",
+    "ImagePullBackOff",
+    "Init:Error",
+    "Init:ExitCode:1",
+    "Init:0/2",
+  ];
+  expect(finished(ended)).toEqual(ended.map((status) => [status, true]));
+  expect(finished(other)).toEqual(other.map((status) => [status, false]));
+  expect(rowFinished(PODS, undefined, columns, row("Completed"))).toBe(false);
+});
+
+test("only a pod's Status can finish a row: a Deployment's, a node's and a Job's values never do", () => {
+  const nodes = { ...PODS, resource: "nodes" };
+  const deployments = { group: "apps", version: "v1", resource: "deployments" };
+  const jobs = { group: "batch", version: "v1", resource: "jobs" };
+  const row = (...cells: string[]) => ({
+    id: "r",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells,
+  });
+  expect(
+    rowFinished(nodes, "Status", [column("Status")], row("Completed")),
+  ).toBe(false);
+  expect(rowFinished(deployments, "Ready", [column("Ready")], row("0/1"))).toBe(
+    false,
+  );
+  expect(
+    rowFinished(
+      jobs,
+      "Status",
+      [column("Status"), column("Completions")],
+      row("Complete", "1/1"),
+    ),
+  ).toBe(false);
+  expect(columnRule(deployments, column("Ready")).tone?.("0/1")).toBe("warn");
+  expect(
+    columnRule({ ...deployments, resource: "statefulsets" }, column("Ready"))
+      .tone,
+  ).toBeUndefined();
+  expect(columnRule(jobs, column("Completions")).tone).toBeUndefined();
 });
 
 test("a column's cells are figures by their cell kind, or by a numeric column kind", () => {

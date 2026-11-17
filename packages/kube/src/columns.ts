@@ -43,6 +43,8 @@ export interface ColumnRule {
   readonly health: boolean;
   /** The tone of an abnormal value; healthy values have none. */
   readonly tone?: (text: string) => Tone | undefined;
+  /** Whether a value of this health column says the object ran to completion, so its row's ratios are not short. */
+  readonly finished?: (text: string) => boolean;
   /** In a row with no tone its value reads in support, so that only an abnormal one stands out. */
   readonly recedes: boolean;
   /** A measure of the Metrics API: the list reads it only while it is drawn or sorted by. */
@@ -106,6 +108,24 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
   };
 
 /**
+ * What a pod's Status says when it ran to completion: a container's
+ * terminated reason `Completed`, else the phase `Succeeded` or `ExitCode:0`
+ * ([`printPod`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L975-L979),
+ * [its containers](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1075-L1082)).
+ * Its containers are no longer meant to be ready: printPod counts one ready
+ * only while it runs
+ * ([L1086-L1089](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1086-L1089)),
+ * so Ready reads `0/1`. A `Completed` beside a container that still runs
+ * prints as `Running` or `NotReady`
+ * ([L1093-L1101](https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1093-L1101)).
+ */
+const POD_ENDED: ReadonlySet<string> = new Set([
+  "Completed",
+  "Succeeded",
+  "ExitCode:0",
+]);
+
+/**
  * A pod's Status as Kubernetes prints it (printPod in kubernetes v1.37.1
  * pkg/printers/internalversion/printers.go): the phase or the pod's
  * reason; a container's waiting or terminated reason, else `Signal:N` or
@@ -114,12 +134,7 @@ const BY_KIND: Readonly<Partial<Record<Column["kind"], Partial<ColumnRule>>>> =
  * Kubelets, runtimes and admission keep adding reasons (`OutOfcpu`,
  * `NodeAffinity`), so a status neither healthy nor waiting fails.
  */
-const POD_HEALTHY: ReadonlySet<string> = new Set([
-  "Running",
-  "Completed",
-  "Succeeded",
-  "ExitCode:0",
-]);
+const POD_HEALTHY: ReadonlySet<string> = new Set(["Running", ...POD_ENDED]);
 const POD_WAITING: ReadonlySet<string> = new Set([
   "Pending",
   "ContainerCreating",
@@ -189,6 +204,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
     groups: true,
     health: true,
     tone: podStatus,
+    finished: (text) => POD_ENDED.has(text),
     recedes: true,
     drop: DROP.health,
   },
@@ -273,6 +289,16 @@ export function cellTone(
   return BY_RESOURCE[key(gvr, column)]?.tone?.(text);
 }
 
+function healthText(
+  health: string,
+  columns: readonly Column[],
+  row: Row,
+): string | undefined {
+  const status: Cell | undefined =
+    row.cells[columns.findIndex((column) => column.name === health)];
+  return typeof status === "string" ? status : undefined;
+}
+
 /** The tone of a row's value in its resource's health column, if it is abnormal. */
 export function rowTone(
   gvr: Gvr,
@@ -281,9 +307,23 @@ export function rowTone(
   row: Row,
 ): Tone | undefined {
   if (health === undefined) return undefined;
-  const status: Cell | undefined =
-    row.cells[columns.findIndex((column) => column.name === health)];
-  return typeof status === "string" ? cellTone(gvr, health, status) : undefined;
+  const status = healthText(health, columns, row);
+  return status === undefined ? undefined : cellTone(gvr, health, status);
+}
+
+/** Whether a row's value in its resource's health column says the object ran to completion. */
+export function rowFinished(
+  gvr: Gvr,
+  health: string | undefined,
+  columns: readonly Column[],
+  row: Row,
+): boolean {
+  if (health === undefined) return false;
+  const status = healthText(health, columns, row);
+  return (
+    status !== undefined &&
+    BY_RESOURCE[key(gvr, health)]?.finished?.(status) === true
+  );
 }
 
 /** A row's health by its status column: healthy, or the tone of an abnormal state. */

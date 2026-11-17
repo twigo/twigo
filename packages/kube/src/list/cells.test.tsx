@@ -1,7 +1,7 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Column, Gvr, Row } from "@twigo/protocol";
-import { columnRule, rowTone, statusColumn } from "../columns";
+import { columnRule, rowFinished, rowTone, statusColumn } from "../columns";
 import { PODS } from "../kinds";
 import { raisesAlarm } from "./alarm";
 import { CellView, type ShownColumn } from "./cells";
@@ -33,7 +33,12 @@ const SERVICES: Gvr = { group: "", version: "v1", resource: "services" };
 const NODES: Gvr = { group: "", version: "v1", resource: "nodes" };
 const READY: Column = { name: "Ready", kind: "string", priority: 0 };
 
-function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
+function ready(
+  gvr: Gvr,
+  text: string,
+  tone: "error" | "warn" | undefined,
+  finished = false,
+) {
   const row: Row = {
     id: "r",
     created: null,
@@ -43,7 +48,13 @@ function ready(gvr: Gvr, text: string, tone: "error" | "warn" | undefined) {
   };
   const column = { name: "Ready", index: 0, rule: columnRule(gvr, READY) };
   return render(
-    <CellView row={row} column={column} tone={tone} alarmed={false} />,
+    <CellView
+      row={row}
+      column={column}
+      tone={tone}
+      alarmed={false}
+      finished={finished}
+    />,
   ).container;
 }
 
@@ -74,7 +85,13 @@ function text(gvr: Gvr, column: Column, cell: string) {
   };
   const shown = { name: column.name, index: 0, rule: columnRule(gvr, column) };
   return render(
-    <CellView row={row} column={shown} tone={undefined} alarmed={false} />,
+    <CellView
+      row={row}
+      column={shown}
+      tone={undefined}
+      alarmed={false}
+      finished={false}
+    />,
   ).container;
 }
 
@@ -134,7 +151,13 @@ const cellOf = (
     rule: columnRule(gvr, { name, kind, priority: 0, printsDuration }),
   };
   return render(
-    <CellView row={row} column={shown} tone={tone} alarmed={alarmed} />,
+    <CellView
+      row={row}
+      column={shown}
+      tone={tone}
+      alarmed={alarmed}
+      finished={false}
+    />,
   ).container;
 };
 
@@ -250,10 +273,17 @@ function podRow(
       : [{ name: column.name, index, rule: columnRule(PODS, column) }],
   );
   const tone = rowTone(PODS, statusColumn(PODS), POD_COLUMNS, row);
-  const alarmed = raisesAlarm(row, shown, tone);
+  const finished = rowFinished(PODS, statusColumn(PODS), POD_COLUMNS, row);
+  const alarmed = raisesAlarm(row, shown, tone, finished);
   const toned = (column: ShownColumn) =>
     render(
-      <CellView row={row} column={column} tone={tone} alarmed={alarmed} />,
+      <CellView
+        row={row}
+        column={column}
+        tone={tone}
+        alarmed={alarmed}
+        finished={finished}
+      />,
     ).container.querySelector(".text-warn-foreground, .text-error") !== null;
   return {
     alarmed,
@@ -305,10 +335,49 @@ test("only a value that is drawn raises the alarm: a Ready the person hid raises
   const { row, shown } = podRow("0/1", "Running", "1 (46m ago)");
   const [ready, status, restarts] = shown;
   if (!ready || !status || !restarts) throw new Error("no columns");
-  expect(raisesAlarm(row, [status, restarts], undefined)).toBe(false);
-  expect(raisesAlarm(row, [{ ...status, merged: ready }], undefined)).toBe(
-    true,
-  );
+  expect(raisesAlarm(row, [status, restarts], undefined, false)).toBe(false);
+  expect(
+    raisesAlarm(row, [{ ...status, merged: ready }], undefined, false),
+  ).toBe(true);
+});
+
+test("a pod that ran to completion is not short of ready containers: its Ready recedes as a healthy row's does and raises no alarm", () => {
+  expect(receded(ready(PODS, "0/1", undefined, true))).toBe("0/1");
+  cleanup();
+  expect(warns(ready(PODS, "0/2", undefined, true))).toBe(false);
+  const read = (...cells: [string, string, string]) => {
+    const { alarmed, toned } = podRow(...cells);
+    return { alarmed, toned };
+  };
+  const quiet = { Ready: false, Status: false, Restarts: false };
+  for (const status of ["Completed", "Succeeded", "ExitCode:0"]) {
+    expect([status, read("0/1", status, "0")]).toEqual([
+      status,
+      { alarmed: false, toned: quiet },
+    ]);
+    expect([status, read("0/1", status, "1 (46m ago)")]).toEqual([
+      status,
+      { alarmed: false, toned: { ...quiet, Restarts: true } },
+    ]);
+  }
+  const { row, shown } = podRow("0/1", "Completed", "1 (46m ago)");
+  const [ready0, status, restarts] = shown;
+  if (!ready0 || !status || !restarts) throw new Error("no columns");
+  expect(
+    raisesAlarm(row, [{ ...status, merged: ready0 }], undefined, true),
+  ).toBe(false);
+});
+
+test("a pod that ended badly keeps its tone in its Status, and Ready beside it stays plain", () => {
+  for (const status of ["Error", "OOMKilled", "ExitCode:1", "Signal:9"]) {
+    expect([status, podRow("0/1", status, "1 (46m ago)")]).toMatchObject([
+      status,
+      {
+        alarmed: true,
+        toned: { Ready: false, Status: true, Restarts: false },
+      },
+    ]);
+  }
 });
 
 test("a restart within the hour stops warning when the hour passes, with no event from the server", () => {
@@ -368,7 +437,13 @@ test("a row printed again with the age that follows from the first print shows t
     }),
   };
   const draw = (current: Row) => (
-    <CellView row={current} column={shown} tone={undefined} alarmed={false} />
+    <CellView
+      row={current}
+      column={shown}
+      tone={undefined}
+      alarmed={false}
+      finished={false}
+    />
   );
   const ago = (container: HTMLElement) =>
     container.querySelectorAll("span")[1]?.textContent;

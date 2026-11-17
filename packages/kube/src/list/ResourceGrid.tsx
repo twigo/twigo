@@ -38,6 +38,7 @@ import {
   type ColumnRule,
   HEALTH,
   healthValues,
+  rowFinished,
   rowTone,
   statusColumn,
 } from "../columns";
@@ -307,6 +308,7 @@ function Grid({
   );
   const decide = decideRows(
     (row) => rowTone(gvr, countBy, snapshot.columns, row),
+    (row) => rowFinished(gvr, countBy, snapshot.columns, row),
     columns,
   );
   const item = (index: number): GridItem<Row, RowGroup> | undefined => {
@@ -496,13 +498,14 @@ function Grid({
       cell={(row, column) => {
         const shownColumn = byName.get(column.id);
         if (!shownColumn) return undefined;
-        const { tone, alarmed } = decide(row);
+        const { tone, alarmed, finished } = decide(row);
         return (
           <CellView
             row={row}
             column={shownColumn}
             tone={tone}
             alarmed={alarmed}
+            finished={finished}
           />
         );
       }}

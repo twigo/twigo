@@ -5,16 +5,19 @@ import type { ShownColumn } from "./cells";
 /**
  * Whether a row already raises its alarm in what is drawn: its own tone, from
  * its health column, or a ratio that draws a tone of its own, such as a pod's
- * short Ready. A signal of lower rank stays plain beside it.
+ * short Ready. A signal of lower rank stays plain beside it. A finished
+ * object's ratio is short of nothing, so it draws no tone.
  */
 export function raisesAlarm(
   row: Row,
   columns: readonly ShownColumn[],
   rowTone: Tone | undefined,
+  finished: boolean,
 ): boolean {
   const draws = (column: ShownColumn) => {
     const cell = row.cells[column.index];
     return (
+      !finished &&
       column.rule.cell === "ratio" &&
       typeof cell === "string" &&
       column.rule.tone?.(cell) !== undefined
@@ -31,6 +34,7 @@ export function raisesAlarm(
 
 interface RowDecision {
   readonly tone: Tone | undefined;
+  readonly finished: boolean;
   readonly alarmed: boolean;
 }
 
@@ -41,6 +45,7 @@ interface RowDecision {
  */
 export function decideRows(
   toneOf: (row: Row) => Tone | undefined,
+  finishedOf: (row: Row) => boolean,
   columns: readonly ShownColumn[],
 ): (row: Row) => RowDecision {
   const decided = new Map<Row, RowDecision>();
@@ -48,7 +53,12 @@ export function decideRows(
     let decision = decided.get(row);
     if (!decision) {
       const tone = toneOf(row);
-      decision = { tone, alarmed: raisesAlarm(row, columns, tone) };
+      const finished = finishedOf(row);
+      decision = {
+        tone,
+        finished,
+        alarmed: raisesAlarm(row, columns, tone, finished),
+      };
       decided.set(row, decision);
     }
     return decision;
