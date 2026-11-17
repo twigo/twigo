@@ -145,3 +145,34 @@ test("a pod's Restarts counts from the moment of its last restart, so its age gr
   expect(grown).toBeGreaterThan(0);
   expect(kept).toBeGreaterThan(0);
 });
+
+const MOMENT = Date.UTC(2026, 10, 3);
+
+function printing() {
+  const cluster = new Cluster("prod-eu", 0, MOMENT);
+  return (now: number, last: number) => {
+    cluster.now = now;
+    return cluster.printed("prod-eu/default/web.1", [last, MOMENT - 2 * DAY]);
+  };
+}
+
+test("a row whose moment moves but prints the same ages keeps the stamp it held", () => {
+  const print = printing();
+  expect(print(MOMENT, MOMENT - 5 * 60_000)).toMatchObject({
+    texts: ["5m", "2d"],
+    at: MOMENT,
+  });
+  expect(print(MOMENT + 1000, MOMENT + 1000 - 5 * 60_000)).toMatchObject({
+    texts: ["5m", "2d"],
+    at: MOMENT,
+  });
+});
+
+test("a row whose moment moves and prints other ages takes the clock as its stamp", () => {
+  const print = printing();
+  print(MOMENT, MOMENT - 5 * 60_000);
+  expect(print(MOMENT + 1000, MOMENT + 1000 - 100_000)).toMatchObject({
+    texts: ["100s", "2d"],
+    at: MOMENT + 1000,
+  });
+});
