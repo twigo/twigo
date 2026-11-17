@@ -227,7 +227,12 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
               job.name,
               status,
               job.completed === null ? "0/1" : "1/1",
-              humanDuration((job.completed ?? cluster.now) - job.created),
+              // Printed when the Job changes, as the API server does
+              // (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1312-L1319):
+              // one that runs reads as at its start, one without a start none.
+              job.started === null
+                ? ""
+                : humanDuration((job.completed ?? job.started) - job.started),
               null,
               "app",
               "registry.example.com/jobs/app:1.42.0",

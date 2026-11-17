@@ -220,3 +220,49 @@ test("a BackOff event repeats with its pod's restarts, whatever the age of the l
     received: local.now,
   });
 });
+
+function triggered() {
+  const local = new Cluster("prod-eu", 500, NOW);
+  const [cronJob] = local.cronJobs;
+  if (!cronJob) throw new Error("no CronJob");
+  local.trigger(cronJob.namespace, cronJob.name, "run-1", NOW);
+  const job = local.jobs.find((candidate) => candidate.name === "run-1");
+  if (!job) throw new Error("no Job");
+  const read = () => {
+    const row = (KINDS["batch/v1/jobs"]?.rows(local, false) ?? []).find(
+      (candidate) => candidate.id === job.id,
+    );
+    if (!row) throw new Error("no row");
+    return row;
+  };
+  return { local, job, read };
+}
+
+test("a running Job's row is the same on every read while the Job does not change", () => {
+  const { local, read } = triggered();
+  const running = read();
+  expect(running.cells[column("batch/v1/jobs", "Status")]).toBe("Running");
+  for (const seconds of [1, 2, 3, 4, 5, 90]) {
+    local.now = NOW + seconds * 1000;
+    expect(read(), `at +${seconds}s`).toEqual(running);
+  }
+});
+
+test("a Job's Duration changes when it is suspended, resumed or completes, and not as the clock runs", () => {
+  const { local, job, read } = triggered();
+  const duration = () => read().cells[column("batch/v1/jobs", "Duration")];
+  expect(duration()).toBe("0s");
+  local.now = NOW + 1500;
+  local.suspend(job, true, local.now);
+  expect(duration()).toBe("");
+  local.now = NOW + 3000;
+  expect(duration()).toBe("");
+  local.suspend(job, false, local.now);
+  expect(duration()).toBe("0s");
+  local.now = NOW + 6000;
+  expect(duration()).toBe("0s");
+  job.completed = NOW + 7000;
+  expect(duration()).toBe("4s");
+  local.now = NOW + 90_000;
+  expect(duration()).toBe("4s");
+});

@@ -1567,7 +1567,7 @@ export class MockBus {
 
   /** Suspends a Job or a CronJob, or resumes it; a resumed Job runs again. */
   #switch(cluster: Cluster, found: CronJob | Job, suspend: boolean): void {
-    cluster.suspend(found, suspend);
+    cluster.suspend(found, suspend, Date.now());
     if (!suspend && "completed" in found) this.#runs(cluster, found);
   }
 

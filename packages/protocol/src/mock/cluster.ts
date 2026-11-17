@@ -92,6 +92,12 @@ export interface Job {
   /** The CronJob that made it. */
   owner: string | null;
   suspend: boolean;
+  /**
+   * When its controller started it, as its `status.startTime`: none while it
+   * is suspended, and the time it resumes
+   * (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/controller/job/job_controller.go#L1166-L1193).
+   */
+  started: number | null;
   /** When it ran to completion; none while it runs. */
   completed: number | null;
   created: number;
@@ -191,6 +197,7 @@ export class Cluster {
         name: job,
         owner: name,
         suspend: false,
+        started: lastSchedule,
         completed: lastSchedule + Math.floor(5_000 + random() * 60_000),
         created: lastSchedule,
       });
@@ -389,6 +396,7 @@ export class Cluster {
       name,
       owner: cronJob,
       suspend: false,
+      started: now,
       completed: null,
       created: now,
     });
@@ -397,8 +405,9 @@ export class Cluster {
   }
 
   /** Suspends a Job or a CronJob, or resumes it. */
-  suspend(of: CronJob | Job, suspend: boolean): void {
+  suspend(of: CronJob | Job, suspend: boolean, now: number): void {
     of.suspend = suspend;
+    if ("started" in of) of.started = suspend ? null : now;
     this.version++;
   }
 
