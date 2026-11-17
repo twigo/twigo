@@ -1145,9 +1145,13 @@ mod tests {
             })
         };
         let overview = || Overview {
+            header: twigo_ipc::Header::default(),
             sections: vec![twigo_ipc::Section {
                 id: "core.diagnostics".to_owned(),
                 title: "Diagnostics".to_owned(),
+                summary: Vec::new(),
+                tone: None,
+                fold: twigo_ipc::Fold::Open,
                 blocks: vec![Block::Diagnostics {
                     findings: vec![twigo_ipc::Finding {
                         tone: twigo_ipc::Tone::Danger,

@@ -133,6 +133,9 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     Described {
         findings,
         sections: vec![Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.claim".to_owned(),
             title: "Claim".to_owned(),
             blocks: vec![Block::Fields { fields: fields.0 }],

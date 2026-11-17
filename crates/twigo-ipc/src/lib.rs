@@ -56,9 +56,10 @@ pub use logs::{
 };
 pub use object::{
     Block, Condition, Container, ContainerRole, ContainerState, ContainerUsage, DataEntry,
-    EmbeddedList, EventList, Field, Finding, FindingLogs, GetValues, Label, Measure, ObjectBatch,
-    ObjectEvent, ObjectParts, ObjectQuery, ObjectRef, OpenObject, Overview, Related, RelatedObject,
-    Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
+    EmbeddedList, EventList, Field, Finding, FindingLogs, Fold, GetValues, Header, Label, Measure,
+    ObjectBatch, ObjectEvent, ObjectParts, ObjectQuery, ObjectRef, OpenObject, Overview, Printed,
+    Related, RelatedObject, Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
+    Vital,
 };
 pub use schema::SchemaQuery;
 pub use shell::{

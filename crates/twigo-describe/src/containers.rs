@@ -376,7 +376,11 @@ fn env(container: &Value, pod: Option<&Value>, namespace: Option<&str>) -> Vec<F
                 .unwrap_or_default();
             plain(format!("from {source}"))
         };
-        fields.push(Field { label: name, value });
+        fields.push(Field {
+            label: name,
+            value,
+            default: false,
+        });
     }
     for source in container["envFrom"].as_array().into_iter().flatten() {
         let (kind, reference, noun) = if source["configMapRef"].is_object() {
@@ -395,6 +399,7 @@ fn env(container: &Value, pod: Option<&Value>, namespace: Option<&str>) -> Vec<F
             shown.push_str(", optional");
         }
         fields.push(Field {
+            default: false,
             label: "From".to_owned(),
             value: link(kind, namespace, name, shown),
         });
@@ -506,6 +511,7 @@ fn mounts(container: &Value) -> Vec<Field> {
                 flags.push(format!("path={path:?}"));
             }
             Field {
+                default: false,
                 label: text(&mount["mountPath"]).unwrap_or_default(),
                 value: plain(format!(
                     "{} ({})",
@@ -522,6 +528,7 @@ fn mounts(container: &Value) -> Vec<Field> {
         .collect();
     devices.sort_by_key(|device| device["devicePath"].as_str().unwrap_or_default());
     fields.extend(devices.into_iter().map(|device| Field {
+        default: false,
         label: text(&device["devicePath"]).unwrap_or_default(),
         value: plain(format!(
             "{} (device)",

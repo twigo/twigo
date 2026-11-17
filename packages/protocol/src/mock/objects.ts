@@ -477,7 +477,7 @@ function withContainers(overview: Overview, pod: Pod): Overview {
         const text = resourcesText(resources);
         return text === ""
           ? []
-          : [{ label, value: { type: "text" as const, text } }];
+          : [{ label, value: { type: "text" as const, text }, default: false }];
       }),
     ];
     return index === 0
@@ -503,6 +503,7 @@ function withContainers(overview: Overview, pod: Pod): Overview {
         };
   };
   return {
+    ...overview,
     sections: overview.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) => {
@@ -534,6 +535,7 @@ function renamed(overview: Overview, query: ObjectQuery): Overview {
     return value;
   };
   return {
+    ...overview,
     sections: overview.sections.map((section) =>
       section.id !== "core.metadata"
         ? section
@@ -577,6 +579,7 @@ function withLastLines(overview: Overview): Overview {
         }
       : block;
   return {
+    ...overview,
     sections: overview.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map(filled),
@@ -602,6 +605,7 @@ function listing(
     return { ...block, namespace: query.namespace, owners };
   };
   return {
+    ...overview,
     sections: overview.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map(rewired),

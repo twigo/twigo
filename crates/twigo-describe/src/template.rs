@@ -41,6 +41,9 @@ pub(crate) fn section(template: &Value, namespace: Option<&str>) -> Section {
             .flat_map(|section| section.blocks),
     );
     Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.template".to_owned(),
         title: "Pod template".to_owned(),
         blocks,
@@ -57,6 +60,9 @@ pub(crate) fn owned_list(
     owners: Vec<String>,
 ) -> Section {
     Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: id.to_owned(),
         title: title.to_owned(),
         blocks: vec![Block::List(EmbeddedList {

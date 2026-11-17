@@ -17,6 +17,9 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     let spec = &pod["spec"];
     let namespace = text(&pod["metadata"]["namespace"]);
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.pod".to_owned(),
         title: "Pod".to_owned(),
         blocks: vec![Block::Fields {
@@ -24,12 +27,18 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         }],
     }];
     sections.extend(containers::block(spec, Some(pod)).map(|block| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.containers".to_owned(),
         title: "Containers".to_owned(),
         blocks: vec![block],
     }));
     sections.extend(
         volumes::block(spec, namespace.as_deref()).map(|block| Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.volumes".to_owned(),
             title: "Volumes".to_owned(),
             blocks: vec![block],
@@ -201,6 +210,9 @@ pub(crate) fn scheduling(spec: &Value) -> Option<Section> {
         });
     }
     (!blocks.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.scheduling".to_owned(),
         title: "Scheduling".to_owned(),
         blocks,

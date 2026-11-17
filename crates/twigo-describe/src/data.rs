@@ -40,6 +40,9 @@ pub(crate) fn config_map(input: &Input<'_>) -> Described {
     Described {
         findings: Vec::new(),
         sections: vec![Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.data".to_owned(),
             title: "Data".to_owned(),
             blocks,
@@ -52,6 +55,7 @@ pub(crate) fn secret(input: &Input<'_>) -> Described {
     let mut fields = Vec::new();
     if let Some(kind) = text(&object["type"]) {
         fields.push(Field {
+            default: false,
             label: "Type".to_owned(),
             value: Shown::Text { text: kind },
         });
@@ -79,6 +83,9 @@ pub(crate) fn secret(input: &Input<'_>) -> Described {
     Described {
         findings: Vec::new(),
         sections: vec![Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.data".to_owned(),
             title: "Data".to_owned(),
             blocks,
@@ -90,6 +97,7 @@ fn immutable(object: &Value) -> Vec<Block> {
     match object["immutable"].as_bool() {
         Some(true) => vec![Block::Fields {
             fields: vec![Field {
+                default: false,
                 label: "Immutable".to_owned(),
                 value: Shown::Text {
                     text: "true".to_owned(),

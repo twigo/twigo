@@ -73,6 +73,9 @@ pub(crate) fn deployment(input: &Input<'_>) -> Described {
     );
 
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.deployment".to_owned(),
         title: "Deployment".to_owned(),
         blocks: vec![Block::Fields { fields: fields.0 }],
@@ -178,6 +181,7 @@ fn rollout(
     if let Found::Unavailable { message } = found {
         blocks.push(Block::Fields {
             fields: vec![twigo_ipc::Field {
+                default: false,
                 label: "ReplicaSets".to_owned(),
                 value: plain(message.clone()),
             }],
@@ -250,6 +254,9 @@ fn rollout(
         }
     }
     Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.rollout".to_owned(),
         title: "Rollout".to_owned(),
         blocks,
@@ -423,6 +430,9 @@ pub(crate) fn stateful_set(input: &Input<'_>) -> Described {
     fields.text("Current revision", &status["currentRevision"]);
     fields.text("Update revision", &status["updateRevision"]);
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.statefulset".to_owned(),
         title: "StatefulSet".to_owned(),
         blocks: vec![Block::Fields { fields: fields.0 }],
@@ -468,6 +478,9 @@ fn claim_templates(templates: &Value) -> Option<Section> {
         })
         .collect();
     (!rows.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.claims".to_owned(),
         title: "Volume claims".to_owned(),
         blocks: vec![Block::Table {
@@ -536,6 +549,9 @@ pub(crate) fn daemon_set(input: &Input<'_>) -> Described {
         findings,
         sections: vec![
             Section {
+                summary: Vec::new(),
+                tone: None,
+                fold: twigo_ipc::Fold::Open,
                 id: "core.daemonset".to_owned(),
                 title: "DaemonSet".to_owned(),
                 blocks: vec![Block::Fields { fields: fields.0 }],

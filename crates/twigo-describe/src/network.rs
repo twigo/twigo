@@ -142,6 +142,9 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
     fields.flag("Publish not-ready", &spec["publishNotReadyAddresses"]);
     let slices = slices_of(fact(input.facts, &slices_need(object)), &name);
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.service".to_owned(),
         title: "Service".to_owned(),
         blocks: vec![Block::Fields { fields: fields.0 }],
@@ -181,6 +184,9 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
         .collect();
     if !rows.is_empty() {
         sections.push(Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.ports".to_owned(),
             title: "Ports".to_owned(),
             blocks: vec![Block::Table {
@@ -256,6 +262,9 @@ fn endpoint_table(slices: &[&Value], namespace: Option<&str>) -> Option<Section>
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0));
     (!rows.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.endpoints".to_owned(),
         title: "Endpoints".to_owned(),
         blocks: vec![Block::Table {
@@ -340,6 +349,9 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         },
     );
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.ingress".to_owned(),
         title: "Ingress".to_owned(),
         blocks: vec![Block::Fields { fields: fields.0 }],
@@ -360,6 +372,9 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
     }
     if !rows.is_empty() {
         sections.push(Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.rules".to_owned(),
             title: "Rules".to_owned(),
             blocks: vec![Block::Table {
@@ -386,6 +401,9 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         .collect();
     if !tls.is_empty() {
         sections.push(Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.tls".to_owned(),
             title: "TLS".to_owned(),
             blocks: vec![Block::Table {

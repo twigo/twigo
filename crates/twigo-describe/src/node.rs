@@ -158,12 +158,18 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         _ => None,
     };
     let mut sections = vec![Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.node".to_owned(),
         title: "Node".to_owned(),
         blocks: vec![Block::Fields { fields: fields.0 }],
     }];
     sections.push(resources(node, running.as_deref(), pods));
     sections.push(Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.pods".to_owned(),
         title: "Pods".to_owned(),
         blocks: vec![Block::List(EmbeddedList {
@@ -186,6 +192,9 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         sections.extend(resource_slices(objects));
     }
     sections.push(Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.system".to_owned(),
         title: "System".to_owned(),
         blocks: vec![Block::Fields { fields: system.0 }],
@@ -233,6 +242,9 @@ fn resource_slices(slices: &[Value]) -> Option<Section> {
         ]);
     }
     (!rows.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.resourceslices".to_owned(),
         title: "Resource slices".to_owned(),
         blocks: vec![Block::Table {
@@ -346,6 +358,7 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
     if let Some(Found::Unavailable { message }) = pods {
         blocks.push(Block::Fields {
             fields: vec![twigo_ipc::Field {
+                default: false,
                 label: "Pods".to_owned(),
                 value: plain(message.clone()),
             }],
@@ -358,6 +371,9 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
         rows,
     });
     Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.resources".to_owned(),
         title: "Resources".to_owned(),
         blocks,
@@ -455,6 +471,9 @@ fn pod_resources(node: &Value, pods: &[&Value]) -> Option<Section> {
         })
         .collect();
     (!rows.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.podresources".to_owned(),
         title: "Pod resources".to_owned(),
         blocks: vec![Block::Table {

@@ -156,6 +156,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const node = RECORDED.node?.overview;
   if (!node) throw new Error("the node");
   const beating: Document = {
+    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
     sections: node.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>

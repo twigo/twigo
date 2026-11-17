@@ -17,6 +17,9 @@ pub(crate) fn section(id: &str, title: &str, value: &Value, skip: &[&str]) -> Op
         _ => Vec::new(),
     };
     (!nodes.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: id.to_owned(),
         title: title.to_owned(),
         blocks: vec![Block::Tree { nodes }],

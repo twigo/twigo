@@ -18,10 +18,14 @@ const KEYS = 2000;
 
 function configMap(): Document {
   return {
+    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
     sections: [
       {
         id: "core.data",
         title: "Data",
+        summary: [],
+        tone: null,
+        fold: "open",
         blocks: [
           {
             type: "data",
@@ -80,10 +84,20 @@ test("a link opens the object it points at", () => {
       kind="/pods"
       space="kind-test"
       overview={{
+        header: {
+          owner: null,
+          node: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
         sections: [
           {
             id: "core.metadata",
             title: "Metadata",
+            summary: [],
+            tone: null,
+            fold: "open",
             blocks: [
               {
                 type: "fields",
@@ -91,6 +105,7 @@ test("a link opens the object it points at", () => {
                   {
                     label: "Controlled by",
                     value: { type: "link", target, text: "ReplicaSet/web-1" },
+                    default: false,
                   },
                 ],
               },
@@ -131,10 +146,14 @@ test("a section folds by its title, and stays folded for the kind's next object"
 
 function data(readable: boolean, bytes = 3): Document {
   return {
+    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
     sections: [
       {
         id: "core.data",
         title: "Data",
+        summary: [],
+        tone: null,
+        fold: "open",
         blocks: [
           {
             type: "data",
@@ -227,10 +246,20 @@ test("events that cannot be listed say why instead of none", () => {
       kind="/pods"
       space="kind-test"
       overview={{
+        header: {
+          owner: null,
+          node: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
         sections: [
           {
             id: "core.events",
             title: "Events",
+            summary: [],
+            tone: null,
+            fold: "open",
             blocks: [
               {
                 type: "events",
@@ -255,10 +284,20 @@ test("a multiline value keeps its lines", () => {
       kind="/pods"
       space="kind-test"
       overview={{
+        header: {
+          owner: null,
+          node: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
         sections: [
           {
             id: "core.spec",
             title: "Spec",
+            summary: [],
+            tone: null,
+            fold: "open",
             blocks: [
               {
                 type: "tree",
@@ -294,10 +333,20 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
       kind="/pods"
       space="kind-test"
       overview={{
+        header: {
+          owner: null,
+          node: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
         sections: [
           {
             id: "core.conditions",
             title: "Conditions",
+            summary: [],
+            tone: null,
+            fold: "open",
             blocks: [
               {
                 type: "conditions",
@@ -310,6 +359,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     message: "containers with unready status: [api]",
                     lastTransition: AT,
                     lastHeartbeat: null,
+                    explained: false,
                   },
                   {
                     type: "PodScheduled",
@@ -319,6 +369,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     message: null,
                     lastTransition: AT,
                     lastHeartbeat: null,
+                    explained: false,
                   },
                   {
                     type: "DisruptionTarget",
@@ -328,6 +379,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     message: null,
                     lastTransition: AT,
                     lastHeartbeat: null,
+                    explained: false,
                   },
                   {
                     type: "Initialized",
@@ -337,6 +389,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
                     message: null,
                     lastTransition: AT,
                     lastHeartbeat: null,
+                    explained: false,
                   },
                 ],
               },

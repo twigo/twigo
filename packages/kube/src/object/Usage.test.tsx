@@ -107,6 +107,9 @@ const TITLES: Readonly<Record<string, string>> = {
 const SECTION = (id: string): Document["sections"][number] => ({
   id,
   title: TITLES[id] ?? id,
+  summary: [],
+  tone: null,
+  fold: "open",
   blocks: [],
 });
 
@@ -123,11 +126,15 @@ const CONTAINER = (name: string): Container => ({
 });
 
 const LISTED: Document = {
+  header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
   sections: [
     SECTION("core.pod"),
     {
       id: "core.containers",
       title: "Containers",
+      summary: [],
+      tone: null,
+      fold: "open",
       blocks: [
         {
           type: "containers",
@@ -151,7 +158,16 @@ function shown(
   const states = new OverviewStates();
   render(
     <Overview
-      overview={{ sections: [SECTION(first), SECTION("core.metadata")] }}
+      overview={{
+        header: {
+          owner: null,
+          node: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
+        sections: [SECTION(first), SECTION("core.metadata")],
+      }}
       space="prod-eu"
       states={states}
       kind={kind}
@@ -354,6 +370,7 @@ test("a usage that waits draws the rows it names, whatever the Overview lists, w
 
 test("a node's usage that waits is its pair of empty meters", () => {
   listed(WAITING_NODE, "/nodes", {
+    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
     sections: [SECTION("core.node"), SECTION("core.metadata")],
   });
   const section = usageSection();

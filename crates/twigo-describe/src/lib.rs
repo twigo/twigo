@@ -29,8 +29,9 @@ mod workloads;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub use twigo_ipc::Printed;
 use twigo_ipc::{
-    Block, Condition, EventList, Field, Finding, Overview, Section, Tone, Value as Shown,
+    Block, Condition, EventList, Field, Finding, Header, Overview, Section, Tone, Value as Shown,
 };
 
 pub use events::{event, newest_first};
@@ -46,13 +47,6 @@ pub struct Input<'a> {
     pub events: &'a EventList,
     /// The objects its describer [`needs`], each once it is listed.
     pub facts: &'a [Fact],
-}
-
-/// A cell the server printed for the object, as text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Printed {
-    pub column: String,
-    pub value: String,
 }
 
 /// Objects of one resource a describer reads besides its own.
@@ -199,6 +193,9 @@ pub fn describe(input: Input<'_>) -> Overview {
     let mut sections = Vec::new();
     if !described.findings.is_empty() {
         sections.push(Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.diagnostics".to_owned(),
             title: "Diagnostics".to_owned(),
             blocks: vec![Block::Diagnostics {
@@ -212,11 +209,20 @@ pub fn describe(input: Input<'_>) -> Overview {
     sections.extend(own);
     sections.push(metadata::section(object));
     sections.push(Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.events".to_owned(),
         title: "Events".to_owned(),
         blocks: vec![Block::Events(input.events.clone())],
     });
-    Overview { sections }
+    Overview {
+        header: Header {
+            printed: input.printed.to_vec(),
+            ..Header::default()
+        },
+        sections,
+    }
 }
 
 fn describer(object: &Value) -> Option<&'static Describer> {
@@ -248,12 +254,16 @@ fn generic(object: &Value, printed: &[Printed]) -> Vec<Section> {
     let mut sections = Vec::new();
     if !printed.is_empty() {
         sections.push(Section {
+            summary: Vec::new(),
+            tone: None,
+            fold: twigo_ipc::Fold::Open,
             id: "core.summary".to_owned(),
             title: "Summary".to_owned(),
             blocks: vec![Block::Fields {
                 fields: printed
                     .iter()
                     .map(|cell| Field {
+                        default: false,
                         label: cell.column.clone(),
                         value: Shown::Text {
                             text: cell.value.clone(),
@@ -354,6 +364,7 @@ fn conditions(object: &Value) -> Option<Section> {
                 _ => Tone::Neutral,
             };
             Some(Condition {
+                explained: false,
                 kind,
                 status,
                 tone,
@@ -365,6 +376,9 @@ fn conditions(object: &Value) -> Option<Section> {
         })
         .collect();
     (!conditions.is_empty()).then(|| Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.conditions".to_owned(),
         title: "Conditions".to_owned(),
         blocks: vec![Block::Conditions { conditions }],

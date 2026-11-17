@@ -15,6 +15,7 @@ pub(crate) fn section(object: &Value) -> Section {
     let mut fields = Vec::new();
     let mut add = |label: &str, value: Shown| {
         fields.push(Field {
+            default: false,
             label: label.to_owned(),
             value,
         });
@@ -96,6 +97,9 @@ pub(crate) fn section(object: &Value) -> Section {
         add("UID", Shown::Text { text: uid });
     }
     Section {
+        summary: Vec::new(),
+        tone: None,
+        fold: twigo_ipc::Fold::Open,
         id: "core.metadata".to_owned(),
         title: "Metadata".to_owned(),
         blocks: vec![Block::Fields { fields }],

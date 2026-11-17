@@ -58,6 +58,7 @@ pub(crate) struct Fields(pub Vec<Field>);
 impl Fields {
     pub fn add(&mut self, label: &str, value: Shown) -> &mut Self {
         self.0.push(Field {
+            default: false,
             label: label.to_owned(),
             value,
         });

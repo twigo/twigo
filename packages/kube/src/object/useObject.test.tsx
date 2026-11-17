@@ -34,7 +34,19 @@ const PARTS = {
 };
 
 function document(name: string): Overview {
-  return { sections: [{ id: name, title: name, blocks: [] }] };
+  return {
+    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    sections: [
+      {
+        id: name,
+        title: name,
+        summary: [],
+        tone: null,
+        fold: "open",
+        blocks: [],
+      },
+    ],
+  };
 }
 
 /** A backend whose opens answer with an id at once and send a batch when told to. */

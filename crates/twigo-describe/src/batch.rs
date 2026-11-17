@@ -78,6 +78,9 @@ pub(crate) fn job(input: &Input<'_>) -> Described {
         findings: job_findings(object),
         sections: vec![
             Section {
+                summary: Vec::new(),
+                tone: None,
+                fold: twigo_ipc::Fold::Open,
                 id: "core.job".to_owned(),
                 title: "Job".to_owned(),
                 blocks: vec![Block::Fields { fields: fields.0 }],
@@ -222,6 +225,9 @@ pub(crate) fn cron_job(input: &Input<'_>) -> Described {
         findings: cron_findings(status),
         sections: vec![
             Section {
+                summary: Vec::new(),
+                tone: None,
+                fold: twigo_ipc::Fold::Open,
                 id: "core.cronjob".to_owned(),
                 title: "CronJob".to_owned(),
                 blocks: vec![Block::Fields { fields: fields.0 }],
