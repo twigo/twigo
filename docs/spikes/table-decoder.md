@@ -38,7 +38,7 @@ Checked against the apiserver source at v1.37.0 unless a release is named, and a
    - The decoder recognises all three and stores `Cell::Age`, which the UI renders from `meta.created`.
    - The default table convertor's `Created At` column is an absolute RFC 3339 time ([table.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/registry/rest/table.go#L54-L57)) and stays text.
 7. **CRD `date` columns** are rendered as a duration when encoded, "303d" ([tableconvertor.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor/tableconvertor.go#L177-L185)).
-   They stay text and change only with the next modify event.
+   They stay text and change only with the next modify event; the webview draws them from the time the row's cells arrived (ARCHITECTURE 3.4).
    Missing JSONPath values are `null` cells.
 8. **Priority.**
    Pods put IP, Node, Nominated Node and Readiness Gates at priority 1; CRD printer columns carry their own.
@@ -100,6 +100,7 @@ A dhat counting allocator measures requested bytes retained after decoding:
 | Table row (`twigo_cache::table::Row`)          | 3.4 MiB    | 704 B    |
 
 - A row costs half of a `PartialObjectMeta<Pod>` without managedFields: it keeps meta-lite and the cells, and none of the other metadata.
+  Since these runs meta-lite also keeps `received`, the time the row's cells arrived, which the webview counts printed durations back from (ARCHITECTURE 3.4): `Meta` is 128 bytes and `Row` 144, held by const assertions, and this table was not measured again.
 - Decoding the 5,000 rows allocated 12.7 MiB in all, little more than the responses themselves.
 - A second run after the review fixes gave the same rows, and object representations within 0.2 MiB of these.
 - Three runs on 2026-10-31 with the HTTP/2 `api` client of `Clients`, which the example now uses, gave the same rows and the same 12.7 MiB, and object representations within 0.3 MiB of these.

@@ -227,13 +227,13 @@ Then with the harness, which samples this for 20 s after its driver has run for 
   It looks the same: the tint within 1 of 255 per channel at six times of the animation, in Chromium and Playwright's WebKit, in both themes, with the pill's bottom edge one device pixel apart in WebKit; a capture of the bench window shows it in a real WKWebView.
 - **The clock.**
   With no changes, the clock of ages was what woke the page: every list rendered its whole window each second for its Age column.
-  Only an age holds the clock now, on one timer for the page.
+  Only the cells that count time hold the clock now, on one timer for the page: an Age draws every second, and a duration the server printed, as a Restarts cell's age, draws again only when its text or its tone changes ([decision](decisions/printed-durations.md)); what that costs in this window is in [`TODO.md`](../TODO.md).
 - **By Restarts the numbers depend on the cluster.**
   Three runs of 673d868 on one cluster read 26.4, 23.9 and 20.4 % over ten minutes, falling as it aged, which fits fewer rows changing places once the top counts are high; not proven.
   So the first table leaves that order out: its builds ran on a cluster of different ages.
 - **Why nothing judges the row.**
   No limit tells the two rows of the second table apart with room for their noise, by Restarts or by Name, so the report shows the number.
-  A test holds each cause instead, in CI, where the bench does not run: `theme.test.ts` that the flash animates only opacity, `seconds passing render the ages and not the grid` that the list leaves the clock alone.
+  A test holds each cause instead, in CI, where the bench does not run: `theme.test.ts` that the flash animates only opacity, `seconds passing render the ages and not the grid` and `a restart's age and the end of its warning come in its cell, not in the grid` that the list leaves the clock alone.
 - **What is left.**
   By Name, in that run of 3237f23: the app's tokio workers 1.6 %, as hidden, WebContent's main thread 2.1 % and its JIT 0.7 %.
   `sample` counted JavaScript in 36 of that thread's 66 active samples by Name and 50 of 116 by Restarts, so a row memo in `DataGrid` could take at most about half of it; not tried.
