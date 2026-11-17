@@ -4,15 +4,10 @@
 /* The workbench's parts on the design tokens of packages/ui (ARCHITECTURE 4.9).
    Imported by the app after @twigo/ui/styles.css. */
 
-/* Allotment's separator between the parts, on the design tokens: the tone
-   changes across a sash, so the subtle line is enough. */
+/* Allotment's separator between the parts, on the design tokens. */
 .twigo-workbench {
-  --separator-border: var(--border-subtle);
-  --focus-border: var(--brand);
-}
-/* @todo: remove the sash switch once the owner has chosen at package 3's checkpoint */
-:root[data-sash="line"] .twigo-workbench {
   --separator-border: var(--border);
+  --focus-border: var(--brand);
 }
 /* Allotment draws a separator as its pane's ::before at z-index 5; each
    part's content is its own stacking context, so nothing in it (a sticky

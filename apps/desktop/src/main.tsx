@@ -38,7 +38,6 @@ async function start() {
   );
   registerKube(workbench);
   await installZoom(workbench);
-  // @todo: remove the sash switch once the owner has chosen at package 3's checkpoint
   installVariants(workbench);
   if (isTauri() && workbench.platform === "mac") installNativeMenu(workbench);
   return <WorkbenchView workbench={workbench} />;

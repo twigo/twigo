@@ -12,23 +12,7 @@ interface Switch {
   readonly choices: readonly [Choice, ...Choice[]];
 }
 
-const SWITCHES: readonly Switch[] = [
-  // @todo: remove the sash switch once the owner has chosen at package 3's checkpoint
-  {
-    name: "sash",
-    label: "Sashes",
-    choices: [
-      {
-        value: "subtle",
-        about: "The side bars' and the panel's edge in --border-subtle",
-      },
-      {
-        value: "line",
-        about: "The side bars' and the panel's edge in --border",
-      },
-    ],
-  },
-];
+const SWITCHES: readonly Switch[] = [];
 
 const root = document.documentElement;
 const address = new URLSearchParams(location.search).get("variant") ?? "";
