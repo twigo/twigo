@@ -224,7 +224,10 @@ export function SpaceDock({
 function isPlainPress(event: MouseEvent): boolean {
   return (
     event.button === 0 &&
-    !(event.target instanceof Element && event.target.closest("button"))
+    !(
+      event.target instanceof Element &&
+      event.target.closest("button, [role=button]")
+    )
   );
 }
 
@@ -443,8 +446,13 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
         <StatusDot tone="idle" pulse label="Connecting" />
       )}
       {state === "failed" && <StatusDot tone="error" label="Failed" />}
-      <button
-        type="button"
+      {/* Not a <button>: an accessibility press on a role=tab element clicks
+          the native control inside it, which would close the tab instead of
+          selecting it:
+          https://github.com/WebKit/WebKit/blob/WebKit-7625.2.8.11.9/Source/WebCore/accessibility/AccessibilityNodeObject.cpp#L1603-L1678 */}
+      <div
+        role="button"
+        tabIndex={-1}
         aria-label={`Close ${api.title ?? ""}`}
         data-dirty={dirty}
         onClick={(event) => {
@@ -458,7 +466,7 @@ function EditorTab({ api, params: raw }: IDockviewPanelHeaderProps) {
       >
         {dirty && <UnsavedMark className="twigo-tab-unsaved" />}
         <X className="twigo-tab-x size-3.5" />
-      </button>
+      </div>
     </TabTooltip>
   );
 }

@@ -165,7 +165,7 @@ test("a session's tab says how the session stands: nothing while it runs, a puls
   expect(after("end")?.textContent).toBe("ended");
   expect(after("connect")).toBe(dot("connect"));
   expect(after("fail")).toBe(dot("fail"));
-  expect(after("run")?.tagName).toBe("BUTTON");
+  expect(after("run")?.getAttribute("role")).toBe("button");
 
   states.set("connect", "running");
   states.set("run", "ended");
