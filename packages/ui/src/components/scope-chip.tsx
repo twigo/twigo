@@ -93,7 +93,7 @@ export function ScopeChip({
             "size-5 shrink-0 justify-center text-support hover:bg-row-hover hover:text-content",
           )}
         >
-          <X aria-hidden className="size-3" />
+          <X aria-hidden className="size-3.5" />
         </button>
       )}
     </span>
