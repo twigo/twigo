@@ -523,7 +523,7 @@ fn findings(input: &Input<'_>) -> (Vec<(Finding, Option<&'static str>)>, Vec<&'s
     if status["phase"] == "Failed" {
         let reason = text(&status["reason"]);
         let own = message(&status["message"]);
-        let (cause, why) = if own.is_some() {
+        let (cause, why) = if own.is_some() || disrupted_after(pod) {
             (None, None)
         } else {
             disruption(pod)
@@ -624,6 +624,24 @@ fn disruption(pod: &Value) -> (Option<String>, Option<String>) {
         target.and_then(|target| text(&target["reason"])),
         target.and_then(|target| message(&target["message"])),
     )
+}
+
+/// Whether the pod's DisruptionTarget came after its containers' last
+/// finish. The eviction API marks a pod that has finished all the same
+/// before it deletes it
+/// ([`eviction.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/registry/core/pod/storage/eviction.go#L318-L356)),
+/// so such a disruption is not why the pod failed.
+fn disrupted_after(pod: &Value) -> bool {
+    let at = |value: &Value| value.as_str().and_then(|at| at.parse::<Timestamp>().ok());
+    let finish = ["initContainerStatuses", "containerStatuses"]
+        .into_iter()
+        .flat_map(|statuses| pod["status"][statuses].as_array().into_iter().flatten())
+        .filter_map(|status| at(&status["state"]["terminated"]["finishedAt"]))
+        .max();
+    let disrupted = condition(pod, DISRUPTION)
+        .filter(|target| target["status"] == "True")
+        .and_then(|target| at(&target["lastTransitionTime"]));
+    matches!((disrupted, finish), (Some(disrupted), Some(finish)) if disrupted > finish)
 }
 
 /// A pod asked to stop that has not finished: since when, and how long it

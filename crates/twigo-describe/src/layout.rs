@@ -108,16 +108,21 @@ pub(crate) const NODE: Layout = Layout {
         "NetworkUnavailable",
     ],
     follows: &[],
-    good_when_true: Some(ready),
+    good_when_true: Some(healthy),
     unknown: Tone::Warning,
 };
 
 /// A node's `Ready` and the types that end in it, which the EKS node
 /// monitoring agent adds (`KernelReady`, `NetworkingReady`, …) and sets True
 /// on a healthy node, as its own health check reads them
-/// ([`health.go`](https://github.com/aws/eks-node-monitoring-agent/blob/v1.7.7/e2e/monitoring/health.go#L104)).
-fn ready(kind: &str) -> bool {
-    kind.ends_with("Ready")
+/// ([`health.go`](https://github.com/aws/eks-node-monitoring-agent/blob/v1.7.7/e2e/monitoring/health.go#L104));
+/// and the types that end in `Healthy`, which Azure's cluster health monitor
+/// adds as `kubernetes.azure.com/NodeHealthy`, True when its checks pass
+/// ([spec](https://github.com/Azure/cluster-health-monitor/blob/v0.0.46/spec/components/checknodehealth-controller.md?plain=1#L82-L86)).
+/// An `…Unhealthy`, such as node-problem-detector's `KubeletUnhealthy`, is
+/// not one of them.
+fn healthy(kind: &str) -> bool {
+    kind.ends_with("Ready") || kind.ends_with("Healthy")
 }
 
 pub(crate) const JOB: Layout = Layout {

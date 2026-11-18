@@ -2396,6 +2396,55 @@ fn a_failed_pod_with_no_message_takes_its_disruptions_reason_and_message() {
 }
 
 #[test]
+fn a_failed_pods_disruption_is_its_reason_only_if_it_came_before_its_containers_finished() {
+    let disrupted = |at: &str| {
+        edited("pod", |recorded| {
+            let status = &mut recorded.object["status"];
+            status["phase"] = "Failed".into();
+            status["containerStatuses"][0]["state"] = serde_json::json!({
+                "terminated": { "exitCode": 1, "reason": "Error", "finishedAt": "2026-11-03T10:05:00Z" },
+            });
+            status["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "type": "DisruptionTarget", "status": "True",
+                    "reason": "EvictionByEvictionAPI", "message": "Eviction API: evicting",
+                    "lastTransitionTime": at,
+                }));
+            for kind in FOLLOW {
+                set_condition(recorded, kind, "False", "PodFailed");
+            }
+        })
+    };
+
+    let before = disrupted("2026-11-03T10:04:59Z");
+    let finding = &findings(&before)[0];
+    assert_eq!(
+        text(&finding.detail),
+        "DisruptionTarget: EvictionByEvictionAPI."
+    );
+    assert_eq!(finding.message.as_deref(), Some("Eviction API: evicting"));
+    assert!(condition(&before, "DisruptionTarget").explained);
+
+    let together = disrupted("2026-11-03T10:05:00Z");
+    assert!(condition(&together, "DisruptionTarget").explained);
+
+    let after = disrupted("2026-11-03T10:05:01Z");
+    let finding = &findings(&after)[0];
+    assert_eq!(
+        (text(&finding.detail), finding.message.as_deref()),
+        (String::new(), None),
+        "the pod failed on its own, and a drain came after"
+    );
+    assert!(!condition(&after, "DisruptionTarget").explained);
+    assert_eq!(
+        text(&section(&after, "core.conditions").summary),
+        "DisruptionTarget is True · 1 of 2 ok"
+    );
+}
+
+#[test]
 fn a_condition_whose_status_is_unknown_is_not_ok() {
     let silent = edited("node", |recorded| {
         for condition in recorded.object["status"]["conditions"]
@@ -2537,6 +2586,44 @@ fn a_pod_whose_init_containers_run_has_its_conditions_folded_and_one_that_crashe
         "an init container's crash loop is what its restarts led to"
     );
     assert_eq!(vitals(&starting)[1], ("Restarts", "0".to_owned(), None));
+}
+
+#[test]
+fn a_node_condition_that_ends_in_healthy_is_good_news_while_it_is_true() {
+    let monitored = |health: &str, unhealthy: &str| {
+        edited("node", |recorded| {
+            recorded.object["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .extend([
+                    serde_json::json!({ "type": "kubernetes.azure.com/NodeHealthy", "status": health }),
+                    serde_json::json!({ "type": "KubeletUnhealthy", "status": unhealthy }),
+                ]);
+        })
+    };
+    let well = monitored("True", "False");
+    assert_eq!(
+        [
+            condition(&well, "Ready").tone,
+            condition(&well, "kubernetes.azure.com/NodeHealthy").tone,
+            condition(&well, "KubeletUnhealthy").tone,
+        ],
+        [Tone::Success; 3]
+    );
+    let conditions = section(&well, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, "6 of 6 ok".to_owned())
+    );
+
+    let ill = monitored("False", "True");
+    assert_eq!(
+        [
+            condition(&ill, "kubernetes.azure.com/NodeHealthy").tone,
+            condition(&ill, "KubeletUnhealthy").tone,
+        ],
+        [Tone::Warning, Tone::Danger]
+    );
 }
 
 #[test]
