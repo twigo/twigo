@@ -55,6 +55,7 @@ function doc(
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],
@@ -109,6 +110,7 @@ function shown(
       kind="/pods"
       object={object}
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />,
   );
   return { states, pages, view };
@@ -308,6 +310,7 @@ const nested: Document = {
     owner: null,
     node: null,
     created: null,
+    generated: null,
     printed: [],
     sentence: [],
     vitals: [],

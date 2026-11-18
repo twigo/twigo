@@ -70,6 +70,7 @@ const filterOf = (source: string) => {
 
 test("without a filter the default fields hide, and show once revealed", () => {
   const hidden = viewOf(POD, null, false);
+  expect(hidden.whole).toBe(true);
   expect(hidden.defaults).toBe(3);
   expect(hidden.folds).toBe(true);
   expect(hidden.blocks).toEqual([
@@ -99,6 +100,7 @@ test("a match in the rows keeps those rows only, and finds a hidden default", ()
   ]);
   expect(view.matches).toBe(1);
   expect(view.folds).toBe(false);
+  expect(view.whole).toBe(false);
 });
 
 test("a value matches as well as a label, in any case", () => {
@@ -109,8 +111,39 @@ test("a value matches as well as a label, in any case", () => {
   ]);
 });
 
+test("a sentence of text and times matches by what it reads, its time as its date", () => {
+  const at = "2026-11-07T13:14:31Z";
+  const exited: Section = {
+    ...POD,
+    blocks: [
+      {
+        type: "fields",
+        fields: [
+          {
+            label: "Last exit",
+            value: {
+              type: "spans",
+              spans: [
+                { type: "text", text: "code 137 (OOMKilled) · " },
+                { type: "ago", at },
+              ],
+            },
+            default: false,
+          },
+        ],
+      },
+    ],
+  };
+  expect(viewOf(exited, filterOf("oomkilled"), false).matches).toBe(1);
+  expect(
+    viewOf(exited, filterOf(new Date(at).toLocaleString()), false).matches,
+  ).toBe(1);
+  expect(viewOf(exited, filterOf("code 2"), false).matches).toBe(0);
+});
+
 test("a section whose title matches stays whole, its defaults hidden as before", () => {
   const view = viewOf(POD, filterOf("pod"), false);
+  expect(view.whole).toBe(true);
   expect(view.matches).toBe(1);
   expect(view.blocks).toEqual([
     { type: "fields", fields: [field("Node", "worker-3")] },
@@ -169,6 +202,7 @@ const PAGE: Overview = {
     owner: null,
     node: null,
     created: null,
+    generated: null,
     printed: [],
     sentence: [],
     vitals: [],
@@ -421,6 +455,7 @@ test("a page counts its matching rows and the sections that hold them, the usage
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],

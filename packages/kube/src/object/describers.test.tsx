@@ -29,6 +29,7 @@ async function shown(name: string) {
       states={new OverviewStates()}
       kind="/pods"
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />,
     { wrapper: inWorkbench(workbench) },
   );
@@ -111,7 +112,11 @@ test("a crashing pod says why first, and its container's card folds its details"
   expect(
     within(containers).getByText("Waiting · CrashLoopBackOff"),
   ).toBeDefined();
-  expect(within(containers).getByText("Last state")).toBeDefined();
+  expect(
+    within(containers).getByText("Last exit").nextElementSibling?.textContent,
+  ).toMatch(/^code 1 \(Error\) · .+ ago$/);
+  for (const folded of ["Last state", "Started", "Requests", "Limits"])
+    expect(within(containers).queryByText(folded)).toBeNull();
   expect(within(containers).queryByText("Command")).toBeNull();
   expect(
     within(containers).getByRole("button", { name: /^Details \d+$/ }),
@@ -131,6 +136,7 @@ test("a finding that comes or goes is announced once, and its tone has a name", 
       states={new OverviewStates()}
       kind="/pods"
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />
   );
   const { rerender } = render(view(crashing), {
@@ -161,6 +167,7 @@ test("a container's folds stay open for the kind's next object", async () => {
         states={states}
         kind={kind}
         onOpen={() => undefined}
+        onEvents={() => undefined}
       />,
       { wrapper: inWorkbench(workbench) },
     );
@@ -190,6 +197,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],
@@ -218,6 +226,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
       states={new OverviewStates()}
       kind="/nodes"
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />,
     { wrapper: inWorkbench(workbench) },
   );

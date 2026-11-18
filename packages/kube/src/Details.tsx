@@ -1,24 +1,18 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef, Overview, Row } from "@twigo/protocol";
-import {
-  ActionRow,
-  cn,
-  IconButton,
-  LinkButton,
-  Pill,
-  PropertyList,
-} from "@twigo/ui";
+import type { ObjectQuery, ObjectRef, Row } from "@twigo/protocol";
+import { ActionRow, cn, IconButton, PropertyList } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import { ageRole } from "./age";
-import { cellTone, columnRule, statusColumn } from "./columns";
+import { columnRule } from "./columns";
 import { useResources } from "./discovery";
-import { KindIcon } from "./KindIcon";
 import { measureText } from "./list/metrics";
-import { ObjectName } from "./ObjectName";
+import { noContainerRuns } from "./object/noContainerRuns";
+import { ObjectHeader } from "./object/ObjectHeader";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { ObjectViews } from "./object/ObjectViews";
+import { Vitals } from "./object/Vitals";
+import { useHeader } from "./object/useHeader";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
 import { OBJECT_FILTERED, OBJECT_URI, useFiltered } from "./object/pageStates";
@@ -106,10 +100,10 @@ export function Details({
     backend,
     rested === query ? query : undefined,
     {
-      overview: tab === "overview",
+      overview: true,
       manifest: tab === "yaml",
       events: tab === "events",
-      related: true,
+      related: tab === "related",
       usage: asked,
     },
   );
@@ -119,22 +113,24 @@ export function Details({
     const next = refUri(space, resources.value, target);
     if (next) onOpen(next);
   };
-  const owner = snapshot.related?.owners.find(
-    (candidate) => candidate.controller,
-  );
+  const header = snapshot.overview?.header;
+  const owner = header?.owner ?? undefined;
   const ownerGvr =
     owner && resources.state === "ready"
-      ? refResource(resources.value, owner.target)?.gvr
+      ? refResource(resources.value, owner)?.gvr
       : undefined;
-  const statusAt = selected.columns.findIndex(
-    (column) => column.name === statusColumn(gvr),
-  );
-  const status = statusAt < 0 ? undefined : row.cells[statusAt];
-  const tone =
-    typeof status === "string"
-      ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
-      : undefined;
-  const idle = tab === "overview" && noContainerRuns(snapshot.overview);
+  const cellOf = (column: string) => {
+    const cell =
+      row.cells[selected.columns.findIndex((c) => c.name === column)];
+    return typeof cell === "string" ? cell : undefined;
+  };
+  const { verdict, strip, line } = useHeader({
+    gvr,
+    header,
+    usage: snapshot.usage,
+    row: cellOf,
+  });
+  const idle = noContainerRuns(snapshot.overview);
   const page = tab === "overview";
   const filtered = useFiltered(services.pages, uri) && page;
   useEffect(() => {
@@ -201,107 +197,60 @@ export function Details({
         }}
         className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
       />
-      <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2.5 pr-2 pb-2 pl-3.5">
-        <div className="flex items-center gap-1.5">
-          <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
-          <h2 className="flex min-w-0 flex-1 items-baseline text-title font-semibold text-strong">
-            <span className="min-w-0 truncate text-xs text-support">
-              {kind}
-            </span>{" "}
-            <ObjectName
-              name={name}
-              generated={row.generated}
-              className="max-w-full shrink-0 pl-1.5 text-strong"
+      <ObjectHeader
+        gvr={gvr}
+        kind={kind}
+        name={name}
+        generated={row.generated}
+        controls={
+          <>
+            <IconButton
+              icon={Copy}
+              label="Copy Name"
+              onClick={() => {
+                void workbench.commands.execute(
+                  "k8s.resource.copyName",
+                  lookup,
+                );
+              }}
             />
-          </h2>
-          <IconButton
-            icon={Copy}
-            label="Copy Name"
-            onClick={() => {
-              void workbench.commands.execute("k8s.resource.copyName", lookup);
-            }}
+            <IconButton
+              icon={SquareArrowOutUpRight}
+              label="Open in an editor"
+              onClick={() => {
+                onOpen(
+                  objectUri({
+                    space,
+                    gvr,
+                    ...(namespace !== undefined && { namespace }),
+                    name,
+                  }),
+                );
+              }}
+            />
+            <IconButton
+              icon={X}
+              label="Close details"
+              keys="esc"
+              onClick={onClose}
+            />
+          </>
+        }
+        namespace={namespace}
+        owner={owner && { target: owner, gvr: ownerGvr }}
+        node={header?.node ?? undefined}
+        created={header?.created ?? row.created ?? undefined}
+        verdict={verdict}
+        sentence={header?.sentence ?? []}
+        verdictLine={line}
+        onOpen={open}
+        actions={
+          <ActionRow
+            label={`${kind} actions`}
+            actions={workbench.actions("resource/details", lookup)}
           />
-          <IconButton
-            icon={SquareArrowOutUpRight}
-            label="Open in an editor"
-            onClick={() => {
-              onOpen(
-                objectUri({
-                  space,
-                  gvr,
-                  ...(namespace !== undefined && { namespace }),
-                  name,
-                }),
-              );
-            }}
-          />
-          <IconButton
-            icon={X}
-            label="Close details"
-            keys="esc"
-            onClick={onClose}
-          />
-        </div>
-        <div className="flex min-w-0 items-center gap-2 text-xs text-support">
-          {tone && typeof status === "string" && (
-            <Pill tone={tone}>{status}</Pill>
-          )}
-          {[
-            namespace !== undefined && (
-              <span key="namespace" className="ident truncate">
-                {namespace}
-              </span>
-            ),
-            owner && (
-              <LinkButton
-                key="owner"
-                onClick={() => {
-                  open(owner.target);
-                }}
-                className="flex min-w-0 items-center gap-1"
-              >
-                {ownerGvr && (
-                  <KindIcon gvr={ownerGvr} className="size-3 shrink-0" />
-                )}
-                <span className="ident truncate">
-                  {owner.target.kind} {owner.target.name}
-                </span>
-              </LinkButton>
-            ),
-            row.created && (
-              <span
-                key="age"
-                className={cn(
-                  "shrink-0 tabular-nums",
-                  ageRole(now - Date.parse(row.created)),
-                )}
-              >
-                {humanDuration(now - Date.parse(row.created))}
-              </span>
-            ),
-          ]
-            .filter(Boolean)
-            .flatMap((part, index) =>
-              index === 0
-                ? [part]
-                : [
-                    <span
-                      key={`dot-${String(index)}`}
-                      aria-hidden
-                      className="text-quiet"
-                    >
-                      ·
-                    </span>,
-                    part,
-                  ],
-            )}
-        </div>
-        <ActionRow
-          label={`${kind} actions`}
-          actions={workbench.actions("resource/details", lookup)}
-          className="-ml-1.5"
-        />
-      </header>
+        }
+      />
       <ObjectViews
         tab={tab}
         snapshot={snapshot}
@@ -312,6 +261,7 @@ export function Details({
         uri={uri}
         kind={kind}
       />
+      {page && <Vitals cells={strip} verdict={verdict} layout="strip" />}
       <div className="min-h-0 flex-1 overflow-auto">
         {snapshot.overview || tab !== "overview" ? (
           <ObjectContent
@@ -326,6 +276,9 @@ export function Details({
             values={values}
             reveal={reveal}
             onOpen={open}
+            onEvents={() => {
+              states.setDetailsTab(uri, "events");
+            }}
             {...(namespace !== undefined && {
               onLogs: (choice) => {
                 void workbench.commands.execute("k8s.logs.open", lookup, {
@@ -346,17 +299,6 @@ export function Details({
         )}
       </div>
     </aside>
-  );
-}
-
-/** Whether the Overview lists containers and none of them runs: false while it lists none, as before it comes. */
-function noContainerRuns(overview: Overview | undefined): boolean {
-  const containers = (overview?.sections ?? [])
-    .flatMap((section) => section.blocks)
-    .flatMap((block) => (block.type === "containers" ? block.containers : []));
-  return (
-    containers.length > 0 &&
-    containers.every((container) => container.state?.running !== true)
   );
 }
 

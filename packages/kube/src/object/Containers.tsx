@@ -1,4 +1,4 @@
-import { Fragment, useId } from "react";
+import { Fragment, useId, useState } from "react";
 import type {
   Container,
   ContainerRole,
@@ -7,7 +7,14 @@ import type {
   ObjectRef,
   ShownUsage,
 } from "@twigo/protocol";
-import { Card, CopyButton, Pill, PropertyList, type Property } from "@twigo/ui";
+import {
+  Card,
+  cn,
+  CopyButton,
+  Pill,
+  PropertyList,
+  type Property,
+} from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { DefaultsLink, FieldValue } from "./defaults";
 import type { OverviewStates } from "./overviewStates";
@@ -15,7 +22,9 @@ import { isNumeric } from "./numeric";
 import { CONTAINER_GROUPS, containerGroup, defaultsId } from "./pageFilter";
 import type { GroupFolds } from "./pageStates";
 import { TONE } from "./tone";
-import { LABEL } from "./figures";
+import { LABEL, WIDEST } from "./figures";
+import { useClientWidth, useFits } from "./pageStage";
+import { usePropertyColumns } from "./propertyColumns";
 import { ContainerMeter, UsageNote } from "./Usage";
 import { rowOf } from "./stacking";
 import { ImageName } from "./values";
@@ -28,13 +37,16 @@ const ROLE: Readonly<Record<ContainerRole, string | null>> = {
 };
 
 /**
- * A pod's containers, or a pod template's, as cards (ARCHITECTURE 4.3):
- * the name, its state and ports, the image, its state's times, resources
- * and use; the rest of what kubectl describe prints of it, its details,
- * variables and mounts, is one line of counts whose groups open in place,
- * and while the page's filter holds text, a group it narrowed draws open. A
- * group's fields that hold the cluster's default hide behind a link at its
- * end, unless the filter narrowed the group.
+ * A pod's containers, or a pod template's, as cards (ARCHITECTURE 4.3): the
+ * name, its state and ports, the image, how it last ended and its use; the
+ * rest of what kubectl describe prints of it, its details, variables and
+ * mounts, is one line of counts whose groups open in place, and while the
+ * page's filter holds text, a group it narrowed draws open. A group's fields
+ * that hold the cluster's default hide behind a link at its end, unless the
+ * filter narrowed the group. The cards sit two side by side where the page
+ * runs its property rows in two columns. How much a share says beside its
+ * meter is decided once for every card, from a hidden copy of a card holding
+ * the widest row.
  */
 export function Containers({
   containers,
@@ -53,18 +65,55 @@ export function Containers({
   groups: GroupFolds | undefined;
 }) {
   useChanges(states.changes);
+  const [room, setRoom] = useState<HTMLElement | null>(null);
+  const [widest, setWidest] = useState<HTMLElement | null>(null);
+  const said = useFits(useClientWidth(room), useClientWidth(widest));
+  const columns = usePropertyColumns();
   return (
-    <div className="flex flex-col gap-2">
+    <div className={cn("relative grid gap-2", columns === 2 && "grid-cols-2")}>
       {usage &&
         usage.state !== "ready" &&
         containers.some(({ state }) => state?.running) && (
-          <UsageNote state={usage.state} />
+          <div className="col-span-full">
+            <UsageNote state={usage.state} />
+          </div>
         )}
+      {usage?.state === "ready" && (
+        <div
+          aria-hidden
+          className="pointer-events-none invisible absolute col-start-1 row-start-1 h-0 w-full overflow-hidden"
+        >
+          <Card>
+            <PropertyList
+              items={[
+                {
+                  key: "widest",
+                  label: "",
+                  value: (
+                    <span ref={setRoom} className="block">
+                      <span ref={setWidest} className="block w-max">
+                        <ContainerMeter
+                          resource="memory"
+                          measure={WIDEST}
+                          waiting={false}
+                          name=""
+                          said
+                        />
+                      </span>
+                    </span>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+        </div>
+      )}
       {containers.map((container) => (
         <ContainerCard
           key={`${container.role}/${container.name}`}
           container={container}
           usage={usage}
+          said={said}
           fold={(title) => {
             const id = containerGroup(container.name, title);
             const normally = states.open(kind, id, false);
@@ -106,6 +155,7 @@ const NOTHING: Measure = {
 function meterRows(
   usage: ShownUsage | undefined,
   { name, state }: Container,
+  said: boolean,
 ): Property[] {
   if (usage?.state !== "ready") return [];
   const named = usage.containers.find((each) => each.name === name);
@@ -119,6 +169,7 @@ function meterRows(
         measure={named?.[resource] ?? NOTHING}
         waiting={usage.waiting}
         name={name}
+        said={said}
       />
     ),
   }));
@@ -140,17 +191,19 @@ type Fold = (title: string) => GroupState;
 function ContainerCard({
   container,
   usage,
+  said,
   fold,
   onOpen,
 }: {
   container: Container;
   usage: ShownUsage | undefined;
+  said: boolean;
   fold: Fold;
   onOpen: (target: ObjectRef) => void;
 }) {
   const { name, role, image, state, ports, fields, details, env, mounts } =
     container;
-  const meters = meterRows(usage, container);
+  const meters = meterRows(usage, container, said);
   const groups = [
     {
       title: CONTAINER_GROUPS.details,
@@ -169,7 +222,7 @@ function ContainerCard({
     .filter((group) => group.fields.length > 0)
     .map((group) => ({ ...group, state: fold(group.title) }));
   return (
-    <Card>
+    <Card className="content-start">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-semibold">{name}</span>
         {ROLE[role] && (

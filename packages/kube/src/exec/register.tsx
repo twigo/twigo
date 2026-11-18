@@ -205,12 +205,6 @@ export function registerExec(
   });
   // It acts on the object its caller names, so the palette has nothing to give it.
   menus.append("commandPalette", { command: "k8s.shell.open", when: "false" });
-  menus.append("editor/title", {
-    command: "k8s.shell.open",
-    group: "navigation",
-    order: 1,
-    when: "resource.shell",
-  });
 
   const uriOf = (args: unknown): string | undefined => {
     const parsed = v.safeParse(URI_ARGUMENT, args);

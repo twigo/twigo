@@ -4,6 +4,7 @@ import type { TreeNode } from "@twigo/protocol";
 import { Chip, PropertyList } from "@twigo/ui";
 import { isFigures } from "../tabular";
 import { treeGroup } from "./pageFilter";
+import { usePropertyColumns } from "./propertyColumns";
 import type { GroupFolds } from "./pageStates";
 
 /**
@@ -25,6 +26,7 @@ export function Properties({
   path?: readonly string[];
   groups: GroupFolds | undefined;
 }) {
+  const columns = usePropertyColumns();
   const plain = nodes.filter(
     (node) =>
       node.value.type === "scalar" ||
@@ -36,6 +38,7 @@ export function Properties({
     <div className="flex flex-col gap-2">
       {plain.length > 0 && (
         <PropertyList
+          columns={columns}
           items={plain.map((node) => ({
             key: node.key,
             label: node.label,

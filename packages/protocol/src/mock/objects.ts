@@ -437,6 +437,9 @@ function resourcesText({ cpu, memory }: ContainerSpec["request"]): string {
     .join(", ");
 }
 
+/** What the card's details lead with, which the mock says of its own pod and not as the recording does. */
+const CARD_DETAILS = ["Started", "Requests", "Limits"];
+
 /** One running pod in four has finished an init container, which its Overview lists and its usage does not. */
 export function finishedInit(pod: Pod): boolean {
   return (
@@ -493,17 +496,26 @@ function withContainers(overview: Overview, pod: Pod): Overview {
           : [{ label, value: { type: "text" as const, text }, default: false }];
       },
     );
-    const { state, fields } = cardOf(pod, index);
+    const { state, fields, details } = cardOf(pod, index);
     const own: Container = {
       ...first,
       name: spec.name,
       image: imageOf(pod, spec.name),
       state,
-      fields: [...fields, ...requested],
+      fields,
+      details: [...details, ...requested],
     };
     return index === 0
-      ? own
-      : { ...own, ports: [], details: [], env: [], mounts: [] };
+      ? {
+          ...own,
+          details: [
+            ...own.details,
+            ...first.details.filter(
+              ({ label }) => !CARD_DETAILS.includes(label),
+            ),
+          ],
+        }
+      : { ...own, ports: [], env: [], mounts: [] };
   };
   return {
     ...overview,

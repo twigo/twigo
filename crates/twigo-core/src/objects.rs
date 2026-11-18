@@ -699,12 +699,15 @@ impl Shown<'_> {
             overview: object
                 .filter(|_| parts.overview && dirty.overview)
                 .map(|object| {
-                    twigo_describe::describe(Input {
+                    let mut overview = twigo_describe::describe(Input {
                         object,
                         printed,
                         events,
                         facts,
-                    })
+                    });
+                    overview.header.generated =
+                        twigo_cache::meta::generated_in(&object["metadata"]);
+                    overview
                 }),
             manifest: object
                 .filter(|_| parts.manifest && dirty.manifest)
@@ -1054,6 +1057,39 @@ mod tests {
             !sent.contains("hunter2") && !sent.contains("aHVudGVyMg"),
             "{sent}"
         );
+    }
+
+    #[test]
+    fn an_open_pods_header_says_where_its_name_was_generated_as_its_row_does() {
+        let pod = json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "api-7f9c8d6b5-x2kq9",
+                "namespace": "payments",
+                "generateName": "api-7f9c8d6b5-",
+                "labels": { "pod-template-hash": "7f9c8d6b5" },
+            },
+        });
+        let related = Related::default();
+        let batch = Shown {
+            parts: ObjectParts {
+                overview: true,
+                manifest: false,
+                events: false,
+                related: false,
+                usage: false,
+            },
+            dirty: &Dirty::all(),
+            object: Some(&pod),
+            printed: &[],
+            events: &EventList::default(),
+            related: &related,
+            facts: &[],
+            usage: None,
+        }
+        .batch(1, ViewState::Ready);
+        assert_eq!(batch.overview.unwrap().header.generated, Some(4));
     }
 
     #[test]

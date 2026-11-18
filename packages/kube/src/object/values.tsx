@@ -73,6 +73,12 @@ export function ValueView({
       );
     case "labels":
       return <Labels labels={value.labels} />;
+    case "spans":
+      return (
+        <span className="break-words">
+          <Sentence spans={value.spans} />
+        </span>
+      );
     case "list":
       return (
         <ul className="flex flex-col gap-1">
@@ -243,37 +249,55 @@ export function Age({
   );
 }
 
+function spanText(span: Span, now: number): string {
+  switch (span.type) {
+    case "text":
+      return span.text;
+    case "ago":
+      return `${humanDuration(Math.max(0, now - Date.parse(span.at)))} ago`;
+    case "until": {
+      const when = Date.parse(span.at);
+      return when > now ? `in ${humanDuration(when - now)}` : "now";
+    }
+  }
+}
+
 /** A sentence of text and times, the times read as it shows. */
 export function Sentence({ spans }: { spans: readonly Span[] }) {
   const now = useNow();
   return (
     <>
-      {spans.map((span, index) => {
-        switch (span.type) {
-          case "text":
-            return <span key={index}>{span.text}</span>;
-          case "ago": {
-            const when = Date.parse(span.at);
-            return (
-              <span key={index} title={new Date(when).toLocaleString()}>
-                {humanDuration(Math.max(0, now - when))} ago
-              </span>
-            );
-          }
-          case "until": {
-            const when = Date.parse(span.at);
-            return (
-              <span
-                key={index}
-                title={new Date(when).toLocaleString()}
-                className="tabular-nums"
-              >
-                {when > now ? `in ${humanDuration(when - now)}` : "now"}
-              </span>
-            );
-          }
-        }
-      })}
+      {spans.map((span, index) =>
+        span.type === "text" ? (
+          <span key={index}>{span.text}</span>
+        ) : (
+          <span
+            key={index}
+            title={new Date(Date.parse(span.at)).toLocaleString()}
+            className={span.type === "until" ? "tabular-nums" : undefined}
+          >
+            {spanText(span, now)}
+          </span>
+        ),
+      )}
     </>
+  );
+}
+
+export function SaidLine({
+  spans,
+  className,
+}: {
+  spans: readonly Span[];
+  className?: string;
+}) {
+  const now = useNow();
+  return (
+    <span
+      title={spans.map((span) => spanText(span, now)).join("")}
+      className={cn("min-w-0 truncate", className)}
+    >
+      <Sentence spans={spans} />
+    </span>
   );
 }

@@ -22,6 +22,7 @@ export function stacks(value: Value): boolean {
     case "time":
     case "link":
     case "toned":
+    case "spans":
       return false;
   }
 }
@@ -39,6 +40,12 @@ export function copyText(value: Value): string | undefined {
       return value.text === "" ? undefined : value.text;
     case "time":
       return value.at;
+    case "spans":
+      return (
+        value.spans
+          .map((span) => (span.type === "text" ? span.text : span.at))
+          .join("") || undefined
+      );
     case "labels":
       return (
         value.labels

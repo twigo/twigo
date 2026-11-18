@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { Cell, Column, Resource } from "@twigo/protocol";
 import { replicasOf } from "./resourceActions";
 import { rowState } from "./rowState";
-import type { Selected } from "./selection";
+import { cellsOf, type Selected } from "./selection";
 
 function resource(group: string, kind: string): Resource {
   return {
@@ -15,7 +15,7 @@ function resource(group: string, kind: string): Resource {
   };
 }
 
-function selected(columns: string[], cells: Cell[]): Selected {
+function row(columns: string[], cells: Cell[]): Selected {
   return {
     gvr: { group: "", version: "v1", resource: "x" },
     kind: "X",
@@ -34,6 +34,9 @@ function selected(columns: string[], cells: Cell[]): Selected {
     },
   };
 }
+
+const selected = (columns: string[], cells: Cell[]) =>
+  cellsOf(row(columns, cells));
 
 test("a row says whether its node is cordoned and its job suspended", () => {
   const node = resource("", "Node");
@@ -80,4 +83,5 @@ test("a row says the replicas its object wants", () => {
   expect(replicasOf(selected(["Name", "Status"], ["x", "Running"]))).toBe(
     undefined,
   );
+  expect(replicasOf(selected(["Name", "Desired"], ["rs", "3"]))).toBe(3);
 });

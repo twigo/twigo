@@ -342,7 +342,7 @@ test.each([
   },
 );
 
-test("the object editors of a Service and a workload offer Forward in their title, and others do not", async () => {
+test("the object editors of a Service and a workload offer Forward in their header, and others do not", async () => {
   const { workbench } = await listed();
   const titleHas = async (uri: string) => {
     act(() => {
@@ -363,7 +363,7 @@ test("the object editors of a Service and a workload offer Forward in their titl
   expect(await titleHas("k8s://prod-eu//v1/nodes/prod-eu-node-1")).toBe(false);
 });
 
-test("Forward in an object editor's title starts the object's port", async () => {
+test("Forward in an object editor's header starts the object's port", async () => {
   const { workbench, calls } = await listed();
   act(() => {
     workbench.editors.open(

@@ -10,6 +10,7 @@ async function withEveryEnablement() {
   workbench.keys.set("treeFocus", true);
   workbench.keys.set("resource.namespaced", true);
   workbench.keys.set("detailsOpen", true);
+  workbench.keys.set("list.uri", "k8s-list://dev/v1/pods");
   workbench.keys.set("object.uri", "k8s-list://dev/v1/pods");
   workbench.keys.set("object.filtered", true);
   workbench.keys.set("listMarked", true);

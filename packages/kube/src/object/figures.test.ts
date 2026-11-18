@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Measure } from "@twigo/protocol";
-import { figure, hasUsage } from "./figures";
+import { figure, hasUsage, shareText, WIDEST } from "./figures";
 
 const MI = 1024 * 1024;
 
@@ -126,4 +126,18 @@ test("a bar is the whole of its limit with the request marked, and of a little p
     figure("memory", measure({ used: 30 * MI, request: 16 * MI })).bar?.max,
   ).toBe(37.5 * MI);
   expect(figure("memory", measure({ used: 5 * MI })).bar).toBeNull();
+});
+
+test("a share holds four digits, and from 10,000 % on it reads >9999%", () => {
+  expect(shareText(0)).toBe("0%");
+  expect(shareText(9999)).toBe("9999%");
+  expect(shareText(10_000)).toBe(">9999%");
+  expect(shareText(102_300)).toBe(">9999%");
+});
+
+test("the widest row is a four-digit figure and the widest share a request can be overrun to", () => {
+  const widest = figure("memory", WIDEST);
+  expect(widest.used).toBe("1023Mi");
+  expect(widest.base).toBe("request");
+  expect(shareText(widest.percent ?? 0)).toBe(">9999%");
 });

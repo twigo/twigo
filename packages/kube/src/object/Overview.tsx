@@ -16,14 +16,21 @@ import type {
   DataEntry,
   EventList,
   Field,
+  ObjectEvent,
   ObjectRef,
   Overview as Document,
   Section,
   ShownUsage,
-  Tone,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
+import {
+  Button,
+  cn,
+  LinkButton,
+  PropertyList,
+  Section as Folding,
+  Table,
+} from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
@@ -31,14 +38,17 @@ import { DefaultsLink, FieldValue } from "./defaults";
 import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
+import { usePropertyColumns } from "./propertyColumns";
 import type { OverviewStates } from "./overviewStates";
 import {
   compile,
   defaultsId,
-  USAGE_TITLE,
+  keeps,
   viewOf,
   type SectionView,
 } from "./pageFilter";
+import { outlineOf, type Outline } from "./outline";
+import { scrollToSection } from "./place";
 import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
 import { isNumeric, numericColumns } from "./numeric";
@@ -46,8 +56,6 @@ import { unexplained } from "./conditions";
 import { UsageView } from "./Usage";
 import { rowOf } from "./stacking";
 import { Age, Prose, Sentence, ValueView } from "./values";
-
-const USAGE = "core.usage";
 
 export interface OverviewProps {
   readonly overview: Document;
@@ -70,8 +78,12 @@ export interface OverviewProps {
   readonly reveal?: Reveal | undefined;
   /** Opens a container's logs from a finding about it. */
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
+  /** Shows the object's Events view, which keeps every event where the section lists the newest. */
+  readonly onEvents: () => void;
   /** What the object uses, once it has come: a node's section follows the Diagnostics, a pod's containers draw their own. */
   readonly usage?: ShownUsage | undefined;
+  /** The full page, which opens every section but the Metadata. */
+  readonly fullPage?: boolean;
 }
 
 /**
@@ -95,7 +107,9 @@ export function Overview({
   values,
   reveal,
   onLogs,
+  onEvents,
   usage,
+  fullPage = false,
 }: OverviewProps) {
   useChanges(states.changes);
   useChanges(pages.changes);
@@ -111,6 +125,13 @@ export function Overview({
       ?.focus();
     pages.matched(uri);
   }, [goToMatch, pages, uri]);
+  const reach = pages.reaching(uri);
+  useEffect(() => {
+    if (reach === undefined) return;
+    const scroller = pages.scroller(uri);
+    if (scroller) scrollToSection(scroller, reach);
+    pages.reached(uri);
+  }, [reach, pages, uri]);
   const titles = overview.sections.flatMap((section) =>
     section.blocks.flatMap((block) =>
       block.type === "diagnostics"
@@ -118,35 +139,21 @@ export function Overview({
         : [],
     ),
   );
-  const parts: Part[] = overview.sections.map((section) => {
-    const revealed = states.open(kind, defaultsId(section.id), false);
+  const parts: Part[] = outlineOf(
+    overview,
+    usage !== undefined && kind === "/nodes",
+    fullPage,
+  ).map((entry) => {
+    const section = overview.sections.find(({ id }) => id === entry.id);
+    const revealed = states.open(kind, defaultsId(entry.id), false);
     return {
-      id: section.id,
-      title: section.title,
-      fold: section.fold,
-      summary: section.summary,
-      tone: section.tone === null ? undefined : EDGE[section.tone],
+      ...entry,
       revealed,
-      view: viewOf(section, filter, revealed),
+      view: section && viewOf(section, filter, revealed),
     };
   });
-  if (usage && kind === "/nodes") {
-    parts.splice(overview.sections[0]?.id === "core.diagnostics" ? 1 : 0, 0, {
-      id: USAGE,
-      title: USAGE_TITLE,
-      fold: "open",
-      summary: [],
-      tone: undefined,
-      revealed: false,
-      view: undefined,
-    });
-  }
   const shown = filter
-    ? parts.filter((part) =>
-        part.view === undefined
-          ? filter.keeps([part.title])
-          : part.view.matches > 0,
-      )
+    ? parts.filter((part) => keeps(filter, part.view, part.title))
     : parts;
   const identity = `${space}/${object}`;
   const isOpen = ({ id, fold }: Part) =>
@@ -207,6 +214,7 @@ export function Overview({
             values={values}
             reveal={reveal}
             onLogs={onLogs}
+            onEvents={onEvents}
             usage={usage}
           />
         )}
@@ -225,23 +233,10 @@ export function Overview({
 }
 
 /** A section as the Overview draws it: what its header says, and, but for the usage section, what its blocks leave of it. */
-interface Part {
-  readonly id: string;
-  readonly title: string;
-  readonly fold: Section["fold"];
-  readonly summary: Section["summary"];
-  readonly tone: "error" | "warn" | undefined;
+interface Part extends Outline {
   readonly revealed: boolean;
   readonly view: SectionView | undefined;
 }
-
-/** The tone of the edge on the header of a section that holds what is wrong; the others have none. */
-const EDGE: Readonly<Record<Tone, "error" | "warn" | undefined>> = {
-  danger: "error",
-  warning: "warn",
-  success: undefined,
-  neutral: undefined,
-};
 
 function SectionBlocks({
   section,
@@ -255,6 +250,7 @@ function SectionBlocks({
   values,
   reveal,
   onLogs,
+  onEvents,
   usage,
 }: {
   section: Pick<Section, "id" | "title">;
@@ -269,6 +265,7 @@ function SectionBlocks({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
+  onEvents: OverviewProps["onEvents"];
   usage: OverviewProps["usage"];
 }) {
   return (
@@ -279,6 +276,7 @@ function SectionBlocks({
           section={section}
           block={block}
           groups={groups}
+          whole={view.whole}
           space={space}
           states={states}
           kind={kind}
@@ -286,6 +284,7 @@ function SectionBlocks({
           values={values}
           reveal={reveal}
           onLogs={onLogs}
+          onEvents={onEvents}
           usage={usage}
         />
       ))}
@@ -334,6 +333,7 @@ function BlockView({
   section,
   block,
   groups,
+  whole,
   space,
   states,
   kind,
@@ -341,12 +341,14 @@ function BlockView({
   values,
   reveal,
   onLogs,
+  onEvents,
   usage,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
   section: Pick<Section, "id" | "title">;
   block: Block;
   groups: GroupFolds | undefined;
+  whole: boolean;
   space: string;
   states: OverviewStates;
   kind: string;
@@ -354,6 +356,7 @@ function BlockView({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
+  onEvents: OverviewProps["onEvents"];
   usage: OverviewProps["usage"];
 }) {
   switch (block.type) {
@@ -372,7 +375,7 @@ function BlockView({
     case "tree":
       return <Properties nodes={block.nodes} depth={0} groups={groups} />;
     case "events":
-      return <Events list={block} />;
+      return <NewestEvents list={block} onAll={onEvents} whole={whole} />;
     case "diagnostics":
       return <Diagnostics findings={block.findings} onLogs={onLogs} />;
     case "containers":
@@ -420,8 +423,10 @@ function Fields({
   fields: readonly Field[];
   onOpen: (target: ObjectRef) => void;
 }) {
+  const columns = usePropertyColumns();
   return (
     <PropertyList
+      columns={columns}
       items={fields.map((field) => ({
         key: field.label,
         label: field.label,
@@ -666,6 +671,41 @@ function DataRow({
           </pre>
         ))}
     </li>
+  );
+}
+
+const NEWEST = 3;
+
+/**
+ * The newest events of an object, its warnings first, and a link to the Events
+ * view, which keeps the whole list, where there are more. Where the page's
+ * filter keeps the section by its rows, it draws every event the filter keeps,
+ * since the filter shows what a fold hides, and the link goes: its count would
+ * be the filter's.
+ */
+function NewestEvents({
+  list,
+  onAll,
+  whole,
+}: {
+  list: EventList;
+  onAll: () => void;
+  whole: boolean;
+}) {
+  const { events } = list;
+  const warned = (event: ObjectEvent) => event.type === "Warning";
+  const ordered = [
+    ...events.filter(warned),
+    ...events.filter((event) => !warned(event)),
+  ];
+  const shown = whole ? ordered.slice(0, NEWEST) : ordered;
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <Events list={{ ...list, events: shown }} />
+      {whole && events.length > shown.length && (
+        <LinkButton onClick={onAll}>All {events.length} events</LinkButton>
+      )}
+    </div>
   );
 }
 

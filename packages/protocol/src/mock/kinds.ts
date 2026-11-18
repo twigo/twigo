@@ -364,7 +364,7 @@ export function wireRow(row: MockRow): Row {
   };
 }
 
-function podGenerated(pod: Pod): number | null {
+export function podGenerated(pod: Pod): number | null {
   return generatedAt(pod.name, pod.generateName, {
     "pod-template-hash": pod.templateHash,
   });

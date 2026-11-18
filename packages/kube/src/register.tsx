@@ -10,7 +10,8 @@ import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
 import { ListEditor } from "./list/ListEditor";
 import { clusterEntries, listEntries } from "./list/statusEntries";
-import { ObjectActions, ObjectEditor } from "./object/ObjectEditor";
+import { ObjectEditor } from "./object/ObjectEditor";
+import { OverviewStates } from "./object/overviewStates";
 import { OBJECT_FILTERED, OBJECT_URI } from "./object/pageStates";
 import { ObjectTabs } from "./object/tabs";
 import {
@@ -120,6 +121,7 @@ export function registerKube(workbench: Workbench): void {
   });
 
   const objectTabs = new ObjectTabs();
+  const fullPages = new OverviewStates();
   editors.register({
     id: "kube.object",
     scheme: OBJECT_SCHEME,
@@ -136,9 +138,10 @@ export function registerKube(workbench: Workbench): void {
         pages={services.pages}
         tabs={objectTabs}
         edits={services.edits}
+        capabilities={services.capabilities}
+        fullPages={fullPages}
       />
     ),
-    actions: ({ uri }) => <ObjectActions uri={uri} />,
     focus: (uri) => {
       const tab = objectTabs.get(uri);
       if (tab === "yaml") services.edits.copies.focus(uri);

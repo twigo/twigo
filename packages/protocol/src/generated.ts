@@ -280,13 +280,16 @@ state: ContainerState | null,
  */
 ports: Array<string>, 
 /**
- * What its card shows: its state's times, how it last ended, its
- * resources.
+ * What its card shows: how it ended, as its code and when, `Exited` for
+ * a termination that is its state now, whose reason the state says, and
+ * `Last exit`, with its reason, for an earlier one. Empty for a container
+ * that never ended.
  */
 fields: Array<Field>, 
 /**
- * What else kubectl describe prints of it, folded: the last
- * termination's message, command, probes, security, image and
+ * What else kubectl describe prints of it, folded: when it started, the
+ * last termination's message, its requests and limits, command,
+ * arguments, working directory, pull policy, probes, security, image and
  * container IDs.
  */
 details: Array<Field>, 
@@ -682,6 +685,13 @@ node: string | null,
  * object opened on its own has no list row to take it from.
  */
 created: string | null, 
+/**
+ * Where the generated part of its name starts, in UTF-16 units, as a
+ * list row's [`generated`](crate::Row::generated) says it, so that an
+ * object opened on its own cuts its name as the list does. The core
+ * fills it: the rule lives with the rows.
+ */
+generated: number | null, 
 /**
  * The cells the server prints for it in a list, Name, Namespace and Age
  * left out, from which the page takes the word of its list's health
@@ -1793,7 +1803,7 @@ cpu: Measure, memory: Measure,
  */
 containers: Array<ContainerUsage>, };
 
-export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, };
+export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, } | { "type": "spans", spans: Array<Span>, };
 
 export type ValueCount = { value: string, count: number, };
 

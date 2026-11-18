@@ -62,6 +62,8 @@ export interface SectionView {
   readonly defaults: number;
   /** The link at its end, which hides and shows its defaults, is offered. */
   readonly folds: boolean;
+  /** There is no filter or its title matches, so it is drawn as it is without one; otherwise it is what the filter kept of its rows. */
+  readonly whole: boolean;
 }
 
 /**
@@ -93,7 +95,8 @@ export function viewOf(
     defaults,
     folds: defaults > 0,
   };
-  if (filter === null) return { ...whole, narrowed: new Set(), matches: 0 };
+  if (filter === null)
+    return { ...whole, narrowed: new Set(), matches: 0, whole: true };
   const titled = !filter.negated && filter.keeps([section.title]);
   const narrowed = new Set<string>();
   const rows = narrow(
@@ -103,14 +106,29 @@ export function viewOf(
     narrowed,
   );
   if (titled)
-    return { ...whole, narrowed: new Set(), matches: rows.matches + 1 };
+    return {
+      ...whole,
+      narrowed: new Set(),
+      matches: rows.matches + 1,
+      whole: true,
+    };
   return {
     blocks: rows.blocks,
     narrowed,
     matches: rows.matches,
     defaults,
     folds: false,
+    whole: false,
   };
+}
+
+/** Whether a filter keeps a section: a row of it matches, or, for the usage section, which the document does not hold, its title. */
+export function keeps(
+  filter: TextFilter,
+  view: SectionView | undefined,
+  title: string,
+): boolean {
+  return view === undefined ? filter.keeps([title]) : view.matches > 0;
 }
 
 function withoutDefaults(blocks: readonly Block[]): Block[] {
@@ -399,6 +417,16 @@ function valueTexts(value: Value): string[] {
       return [value.text];
     case "time":
       return [new Date(value.at).toLocaleString()];
+    case "spans":
+      return [
+        value.spans
+          .map((span) =>
+            span.type === "text"
+              ? span.text
+              : new Date(span.at).toLocaleString(),
+          )
+          .join(""),
+      ];
     case "link":
       return [value.text];
     case "labels":

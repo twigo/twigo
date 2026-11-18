@@ -94,12 +94,6 @@ export function registerForwards(
     command: "k8s.forward.open",
     when: "false",
   });
-  menus.append("editor/title", {
-    command: "k8s.forward.open",
-    group: "navigation",
-    order: 3,
-    when: "resource.forward",
-  });
 
   views.registerContainer({
     id: FORWARDS_CONTAINER,

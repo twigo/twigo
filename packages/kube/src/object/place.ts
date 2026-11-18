@@ -33,6 +33,11 @@ function scrollTo(scroller: HTMLElement, place: Place): number {
   return scroller.scrollTop;
 }
 
+/** Scrolls so that the section is at the top of what `scroller` shows. */
+export function scrollToSection(scroller: HTMLElement, section: string): void {
+  scrollTo(scroller, { section, offset: 0 });
+}
+
 /**
  * Opens `scroller` at `place`, if there is one, and keeps it there while what
  * the page holds grows, as a usage that comes after the rest does, until the

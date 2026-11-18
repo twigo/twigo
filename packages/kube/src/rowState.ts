@@ -1,5 +1,4 @@
 import type { Cell, Resource } from "@twigo/protocol";
-import type { Selected } from "./selection";
 
 /**
  * What a selected row's cells say of its object, as context keys of its
@@ -58,23 +57,17 @@ const STATES: readonly {
   },
 ];
 
-/** The keys of the selected row's state, for its resource's kind. */
+/** The keys of an object's state, for its resource's kind, from its cells; false for all while it has none. */
 export function rowState(
   resource: Resource,
-  selected: Selected | undefined,
+  cell: ((column: string) => Cell | undefined) | undefined,
 ): Record<string, boolean> {
   const keys: Record<string, boolean> = {};
   for (const state of STATES) {
     if (state.group !== resource.gvr.group || state.kind !== resource.kind) {
       continue;
     }
-    const at = selected?.columns.findIndex(
-      (column) => column.name === state.column,
-    );
-    keys[state.key] =
-      selected !== undefined &&
-      at !== undefined &&
-      state.holds(selected.row.cells[at]);
+    keys[state.key] = cell !== undefined && state.holds(cell(state.column));
   }
   return keys;
 }

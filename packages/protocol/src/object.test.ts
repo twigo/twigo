@@ -31,6 +31,7 @@ const DOCUMENT: Overview = {
     owner: null,
     node: null,
     created: null,
+    generated: null,
     printed: [],
     sentence: [],
     vitals: [],

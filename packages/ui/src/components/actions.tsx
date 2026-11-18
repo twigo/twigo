@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import { Check, ChevronDown, Lock, type LucideIcon } from "lucide-react";
@@ -525,6 +526,70 @@ const MORE_FACE = (
 const sized = (form: Form, action: Action) =>
   cn(BUTTON, form === "icon" && action.icon && "px-1.5");
 
+/** The tab stop of a row's button and the arrows, Home and End between its buttons. */
+function useRoving(count: number) {
+  const [active, setActive] = useState(0);
+  const focused = Math.min(active, count - 1);
+  return {
+    roving: (index: number) => ({
+      tabIndex: index === focused ? 0 : -1,
+      onFocus: () => {
+        setActive(index);
+      },
+    }),
+    onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
+      // The row's own buttons; a key in More's menu, which React bubbles
+      // here through its portal, is not one of them.
+      const items = [
+        ...event.currentTarget.querySelectorAll<HTMLElement>(":scope > button"),
+      ];
+      const from = items.indexOf(event.target as HTMLElement);
+      if (from < 0) return;
+      const to = rovingMove(event.key, from, items.length);
+      if (to === undefined) return;
+      event.preventDefault();
+      setActive(to);
+      items[to]?.focus();
+    },
+  };
+}
+
+/** An action of a row as a button in the form its stage gives it, with a tooltip where its keys or label are hidden or it has a reason. */
+function RowButton({
+  action,
+  form,
+  roving,
+}: {
+  action: Action;
+  form: Form;
+  roving: { tabIndex: number; onFocus: () => void };
+}) {
+  const hides =
+    (form === "icon" && action.icon !== undefined) ||
+    (form !== "full" && action.keys !== undefined);
+  return (
+    <ButtonTooltip action={action} told={hides || action.reason !== undefined}>
+      <button
+        type="button"
+        aria-label={action.label}
+        aria-disabled={action.disabled === true || undefined}
+        {...roving}
+        onClick={() => {
+          if (!action.disabled) action.run();
+        }}
+        className={cn(
+          sized(form, action),
+          action.danger && "text-error",
+          lockTone(action),
+          action.disabled && "opacity-50 hover:bg-transparent",
+        )}
+      >
+        <ButtonFace action={action} form={form} />
+      </button>
+    </ButtonTooltip>
+  );
+}
+
 /**
  * An object's actions as one row (ARCHITECTURE 4.3): its pinned actions in
  * their places with their labels and keys, a disabled one saying why in its
@@ -560,73 +625,27 @@ export function ActionRow({
     stage,
   );
   if (fitted !== stage) setStage(fitted);
-  const [active, setActive] = useState(0);
-  const count = pinned.length + 1;
-  const focused = Math.min(active, count - 1);
-  const roving = (index: number) => ({
-    tabIndex: index === focused ? 0 : -1,
-    onFocus: () => {
-      setActive(index);
-    },
-  });
+  const { roving, onKeyDown } = useRoving(pinned.length + 1);
 
   return (
     <div
       ref={setElement}
       role="toolbar"
       aria-label={label}
-      onKeyDown={(event) => {
-        // The row's own buttons; a key in More's menu, which React bubbles
-        // here through its portal, is not one of them.
-        const items = [
-          ...event.currentTarget.querySelectorAll<HTMLElement>(
-            ":scope > button",
-          ),
-        ];
-        const from = items.indexOf(event.target as HTMLElement);
-        if (from < 0) return;
-        const to = rovingMove(event.key, from, items.length);
-        if (to === undefined) return;
-        event.preventDefault();
-        setActive(to);
-        items[to]?.focus();
-      }}
+      onKeyDown={onKeyDown}
       className={cn(
         "relative flex min-w-0 items-center gap-1 text-xs whitespace-nowrap",
         className,
       )}
     >
-      {pinned.map((action, index) => {
-        const form = formAt(fitted, index, pinned.length);
-        const hides =
-          (form === "icon" && action.icon !== undefined) ||
-          (form !== "full" && action.keys !== undefined);
-        return (
-          <ButtonTooltip
-            key={action.id}
-            action={action}
-            told={hides || action.reason !== undefined}
-          >
-            <button
-              type="button"
-              aria-label={action.label}
-              aria-disabled={action.disabled === true || undefined}
-              {...roving(index)}
-              onClick={() => {
-                if (!action.disabled) action.run();
-              }}
-              className={cn(
-                sized(form, action),
-                action.danger && "text-error",
-                lockTone(action),
-                action.disabled && "opacity-50 hover:bg-transparent",
-              )}
-            >
-              <ButtonFace action={action} form={form} />
-            </button>
-          </ButtonTooltip>
-        );
-      })}
+      {pinned.map((action, index) => (
+        <RowButton
+          key={action.id}
+          action={action}
+          form={formAt(fitted, index, pinned.length)}
+          roving={roving(index)}
+        />
+      ))}
       <ActionDropdown actions={rest} label="More">
         <button type="button" {...roving(pinned.length)} className={MORE}>
           {MORE_FACE}
@@ -650,6 +669,61 @@ export function ActionRow({
           </Measured>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Every action of an object in one row, for a page that has the room
+ * (ARCHITECTURE 4.3): each with its label and keys, in its groups with a
+ * separator between them, and the group that destroys apart at the far
+ * right. The page decides that the room is there, so the row measures
+ * nothing. One tab stop, and the arrows, Home and End move along it.
+ */
+export function FullActionRow({
+  actions,
+  label,
+  className,
+}: {
+  actions: ActionGroups;
+  /** The toolbar's accessible name. */
+  label: string;
+  className?: string;
+}) {
+  const { roving, onKeyDown } = useRoving(actions.flat().length);
+  let at = 0;
+  return (
+    <div
+      role="toolbar"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className={cn(
+        "flex min-w-0 items-center gap-1 text-xs whitespace-nowrap",
+        className,
+      )}
+    >
+      {actions.map((group, index) => {
+        const apart = group.every((action) => action.danger === true);
+        return (
+          <Fragment key={group[0]?.id ?? index}>
+            {apart ? (
+              <span aria-hidden className="ml-auto" />
+            ) : (
+              index > 0 && (
+                <span aria-hidden className="mx-1 h-4 w-px bg-border" />
+              )
+            )}
+            {group.map((action) => (
+              <RowButton
+                key={action.id}
+                action={action}
+                form="full"
+                roving={roving(at++)}
+              />
+            ))}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

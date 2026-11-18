@@ -44,7 +44,7 @@ import {
 } from "../columns";
 import { kindIcon } from "../kinds";
 import { rowState } from "../rowState";
-import { objectOfRow } from "../selection";
+import { cellsOf, objectOfRow } from "../selection";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
@@ -419,13 +419,16 @@ function Grid({
     if (row.id === current?.row.id)
       return (key) => (key === "resource.selected" ? true : lookup(key));
     const own: Record<string, boolean> = {
-      ...rowState(resource, {
-        gvr,
-        kind: resource.kind,
-        namespaced: resource.namespaced,
-        columns: snapshot.columns,
-        row,
-      }),
+      ...rowState(
+        resource,
+        cellsOf({
+          gvr,
+          kind: resource.kind,
+          namespaced: resource.namespaced,
+          columns: snapshot.columns,
+          row,
+        }),
+      ),
       ...capabilities.hovered(
         uri,
         objectOfRow(row.id, resource.namespaced),

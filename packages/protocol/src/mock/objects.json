@@ -5,6 +5,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:30Z",
+        "generated": null,
         "printed": [
           {
             "column": "Data",
@@ -150,6 +151,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Schedule",
@@ -578,6 +580,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Desired",
@@ -944,6 +947,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:30Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -1343,7 +1347,8 @@
                   "ports": [
                     "8080/TCP (http)"
                   ],
-                  "fields": [
+                  "fields": [],
+                  "details": [
                     {
                       "label": "Requests",
                       "value": {
@@ -1359,9 +1364,7 @@
                         "text": "memory 64Mi"
                       },
                       "default": false
-                    }
-                  ],
-                  "details": [
+                    },
                     {
                       "label": "Image pull policy",
                       "value": {
@@ -1660,6 +1663,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Class",
@@ -1984,6 +1988,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Status",
@@ -2448,6 +2453,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:07:19Z",
+        "generated": null,
         "printed": [
           {
             "column": "Status",
@@ -3831,6 +3837,7 @@
         },
         "node": "twigo-overviews-control-plane",
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -3885,7 +3892,7 @@
           "summary": [
             {
               "type": "text",
-              "text": "1"
+              "text": "1 running"
             }
           ],
           "tone": null,
@@ -3908,7 +3915,8 @@
                   "ports": [
                     "8080/TCP (http)"
                   ],
-                  "fields": [
+                  "fields": [],
+                  "details": [
                     {
                       "label": "Started",
                       "value": {
@@ -3932,9 +3940,7 @@
                         "text": "memory 64Mi"
                       },
                       "default": false
-                    }
-                  ],
-                  "details": [
+                    },
                     {
                       "label": "Image pull policy",
                       "value": {
@@ -4565,6 +4571,7 @@
         },
         "node": "twigo-overviews-control-plane",
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -4707,18 +4714,19 @@
                   "ports": [],
                   "fields": [
                     {
-                      "label": "Last state",
+                      "label": "Last exit",
                       "value": {
-                        "type": "text",
-                        "text": "Terminated · Error · exit code 1"
-                      },
-                      "default": false
-                    },
-                    {
-                      "label": "Last finished",
-                      "value": {
-                        "type": "time",
-                        "at": "2026-11-17T21:10:08Z"
+                        "type": "spans",
+                        "spans": [
+                          {
+                            "type": "text",
+                            "text": "code 1 (Error) · "
+                          },
+                          {
+                            "type": "ago",
+                            "at": "2026-11-17T21:10:08Z"
+                          }
+                        ]
                       },
                       "default": false
                     }
@@ -5279,6 +5287,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -5740,6 +5749,7 @@
         "owner": null,
         "node": "twigo-overviews-control-plane",
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -6349,6 +6359,7 @@
         "owner": null,
         "node": "twigo-overviews-control-plane",
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",
@@ -6463,7 +6474,8 @@
                     "restarts": 0
                   },
                   "ports": [],
-                  "fields": [
+                  "fields": [],
+                  "details": [
                     {
                       "label": "Started",
                       "value": {
@@ -6471,9 +6483,7 @@
                         "at": "2026-11-17T21:08:32Z"
                       },
                       "default": false
-                    }
-                  ],
-                  "details": [
+                    },
                     {
                       "label": "Image pull policy",
                       "value": {
@@ -6989,6 +6999,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Status",
@@ -7357,6 +7368,7 @@
         },
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Desired",
@@ -8359,6 +8371,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:30Z",
+        "generated": null,
         "printed": [
           {
             "column": "Type",
@@ -8516,6 +8529,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Type",
@@ -8860,6 +8874,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:07:38Z",
+        "generated": null,
         "printed": [],
         "sentence": [],
         "vitals": []
@@ -9149,6 +9164,7 @@
         "owner": null,
         "node": null,
         "created": "2026-11-17T21:08:31Z",
+        "generated": null,
         "printed": [
           {
             "column": "Ready",

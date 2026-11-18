@@ -39,6 +39,7 @@ function document(name: string): Overview {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],

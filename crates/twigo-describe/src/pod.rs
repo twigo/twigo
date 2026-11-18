@@ -80,7 +80,12 @@ fn containers_summary(block: &Block) -> Vec<Span> {
     let unready = states()
         .filter(|state| state.tone == Tone::Warning && state.running && !state.ready)
         .count();
-    let mut summary = Summary::default().part(containers.len().to_string());
+    let running = states().filter(|state| state.running).count();
+    let mut summary = Summary::default().part(if failing == 0 && unready == 0 && running > 0 {
+        format!("{running} running")
+    } else {
+        containers.len().to_string()
+    });
     if failing > 0 {
         summary = summary.part(format!("{failing} failing"));
     }

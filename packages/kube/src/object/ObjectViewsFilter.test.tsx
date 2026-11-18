@@ -30,6 +30,7 @@ const snapshot: ObjectSnapshot = {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],

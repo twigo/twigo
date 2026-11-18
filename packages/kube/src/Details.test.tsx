@@ -11,7 +11,9 @@ import type {
   ListBatch,
   ObjectBatch,
   ObjectEvent,
+  ObjectParts,
   Overview,
+  RequestOf,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
@@ -165,25 +167,66 @@ describe("in a wide editor", () => {
     expect(workbench.sizes.get("inspector")).toBe(900);
   });
 
-  test("the header shows the row's status as a pill, and its controlling owner opens the owner", async () => {
+  test("the header shows the row's status as a pill, and its top owner and its node open", async () => {
     const workbench = await openList(
       createMockBackend("ready"),
       "k8s-list://prod-eu/v1/pods?q=CrashLoopBackOff",
     );
     fireEvent.click(rows()[0] ?? document.body);
     await settle();
-    const header = shown().querySelector("header");
-    const pill = within(header ?? document.body).getByText("CrashLoopBackOff");
-    expect(pill.className).toContain("text-error");
-    const owner = within(header ?? document.body).getByRole("button", {
-      name: /^ReplicaSet /,
-    });
-    const name = owner.textContent.replace(/^ReplicaSet /, "");
+    const header = within(shown().querySelector("header") ?? document.body);
+    const verdict = within(header.getByRole("group", { name: "Verdict" }));
+    expect(verdict.getByText("CrashLoopBackOff").className).toContain(
+      "text-error",
+    );
+    expect(verdict.getByText(/^Container \w+ keeps crashing$/)).toBeTruthy();
+    const owner = header.getByRole("button", { name: /^Deployment / });
+    const name = owner.ariaLabel?.replace(/^Deployment /, "");
     fireEvent.click(owner);
     await settle();
-    expect(workbench.editors.active).toBe(
-      `k8s://prod-eu/apps/v1/replicasets/overview/${name}`,
+    expect(workbench.editors.active).toMatch(
+      new RegExp(`^k8s://prod-eu/apps/v1/deployments/[^/]+/${name}$`),
     );
+
+    const node = header.getByRole("button", { name: /^Node / });
+    fireEvent.click(node);
+    await settle();
+    expect(workbench.editors.active).toMatch(
+      /^k8s:\/\/prod-eu\/\/v1\/nodes\/[^/]+$/,
+    );
+  });
+
+  test("a kind whose list has no health column, and whose object says nothing, has no third line", async () => {
+    await openList(
+      createMockBackend("ready"),
+      "k8s-list://prod-eu/batch/v1/jobs",
+    );
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle();
+    const job = screen.getByRole("complementary", { name: "Job details" });
+    const header = within(job.querySelector("header") ?? document.body);
+    expect(header.queryByRole("group", { name: "Verdict" })).toBeNull();
+  });
+
+  test("arrowing along pods, the strip keeps its four cells while the next object comes", async () => {
+    await openList();
+    focusGrid();
+    key("KeyJ");
+    key("Space", { key: " " });
+    await settle(8);
+    const strip = () => within(shown()).getByLabelText("Vitals");
+    const terms = () =>
+      within(strip())
+        .getAllByRole("term")
+        .map((term) => term.textContent);
+    expect(terms()).toEqual(["Ready", "Restarts", "CPU", "Memory"]);
+    key("KeyJ");
+    expect(terms()).toEqual(["Ready", "Restarts", "CPU", "Memory"]);
+    const cpu = () =>
+      within(strip()).getByText("CPU", { selector: "dt" }).nextElementSibling;
+    expect(cpu()?.textContent).toBe("–");
+    await settle(8);
+    expect(terms()).toEqual(["Ready", "Restarts", "CPU", "Memory"]);
   });
 
   test("e opens the details on YAML, and the view stays as the selection moves", async () => {
@@ -311,10 +354,11 @@ describe("in a wide editor", () => {
     expect(attach.textContent).toContain("No container runs");
   });
 
-  test("off the Overview a crash-looping pod's Shell runs, since the details no longer know its containers, which a batch may have started", async () => {
+  test("a crash-looping pod's Shell is as disabled on the YAML view as on the Overview, and runs on both once a batch lists a running container", async () => {
     const mock = createMockBackend("ready");
     let send: ((batch: ObjectBatch) => void) | undefined;
-    let last: ObjectBatch | undefined;
+    let described: Overview | undefined;
+    let seq = 0;
     const backend: Backend = {
       invoke: (command, request) => mock.invoke(command, request),
       subscribe(command, request, onMessage) {
@@ -323,8 +367,10 @@ describe("in a wide editor", () => {
         const forward = onMessage as (batch: ObjectBatch) => void;
         send = forward;
         return mock.subscribe(command, request, (message) => {
-          last = message as ObjectBatch;
-          forward(last);
+          const batch = message as ObjectBatch;
+          described = batch.overview ?? described;
+          seq = batch.seq;
+          forward(batch);
         });
       },
     };
@@ -345,26 +391,164 @@ describe("in a wide editor", () => {
 
     fireEvent.click(tab("YAML"));
     await settle(8);
-    const batch = last;
-    if (!send || !batch?.manifest) throw new Error("no object batches");
-    const manifest = JSON.parse(batch.manifest) as {
-      status: { containerStatuses: { state: unknown }[] };
+    expect(shell().getAttribute("aria-disabled")).toBe("true");
+
+    if (!send || !described) throw new Error("no object batches");
+    const running: Overview = {
+      ...described,
+      sections: described.sections.map((section) => ({
+        ...section,
+        blocks: section.blocks.map((block) =>
+          block.type === "containers"
+            ? {
+                ...block,
+                containers: block.containers.map((container) => ({
+                  ...container,
+                  state: container.state && {
+                    ...container.state,
+                    running: true,
+                  },
+                })),
+              }
+            : block,
+        ),
+      })),
     };
-    for (const status of manifest.status.containerStatuses)
-      status.state = { running: { startedAt: "2026-11-15T10:00:00Z" } };
     act(() => {
       send?.({
-        ...batch,
-        seq: batch.seq + 1,
-        overview: null,
+        seq: seq + 1,
+        status: { state: "ready" },
+        exists: true,
+        overview: running,
+        manifest: null,
         events: null,
         related: null,
         usage: null,
-        manifest: JSON.stringify(manifest),
       });
     });
     await settle(2);
     expect(shell().getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(tab("Overview"));
+    await settle(2);
+    expect(shell().getAttribute("aria-disabled")).toBeNull();
+  });
+
+  test("a kind with neither a health column nor vitals holds its third line while the next object comes, if the last one had a sentence", async () => {
+    const mock = createMockBackend("ready");
+    let said = "";
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "object_open")
+          return mock.subscribe(command, request, onMessage);
+        const send = onMessage as (batch: ObjectBatch) => void;
+        const { name } = (request as RequestOf<"object_open">).object;
+        return mock.subscribe(command, request, (message) => {
+          const batch = message as ObjectBatch;
+          send({
+            ...batch,
+            overview: batch.overview && {
+              ...batch.overview,
+              header: {
+                ...batch.overview.header,
+                vitals: [],
+                sentence:
+                  name === said ? [{ type: "text", text: "Is stale" }] : [],
+              },
+            },
+          });
+        });
+      },
+    };
+    await openList(backend, "k8s-list://prod-eu/batch/v1/jobs");
+    const [first, second] = rows();
+    said = nameOf(first);
+    const line = () =>
+      within(
+        screen.getByRole("complementary", { name: "Job details" }),
+      ).queryByRole("group", { name: "Verdict" });
+    fireEvent.click(first ?? document.body);
+    await settle(8);
+    expect(line()?.textContent).toBe("Is stale");
+    fireEvent.click(second ?? document.body);
+    await settle(1);
+    expect(line()).not.toBeNull();
+    await settle(8);
+    expect(line()).toBeNull();
+  });
+
+  test("the details follow the Overview on every view, and the related objects only on their own", async () => {
+    const backend = createMockBackend("ready");
+    const subscribe = vi.spyOn(backend, "subscribe");
+    const invoke = vi.spyOn(backend, "invoke");
+    const parts = (): ObjectParts => {
+      const sent = invoke.mock.calls.filter(
+        ([command]) => command === "object_set_parts",
+      );
+      const last = sent[sent.length - 1];
+      if (last) return (last[1] as RequestOf<"object_set_parts">).parts;
+      const opened = subscribe.mock.calls.filter(
+        ([command]) => command === "object_open",
+      );
+      return (opened[opened.length - 1]?.[1] as RequestOf<"object_open">).parts;
+    };
+    await openList(backend);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(8);
+    expect(parts()).toMatchObject({ overview: true, related: false });
+    for (const [name, own] of [
+      ["YAML", { manifest: true, related: false }],
+      ["Events", { events: true, related: false }],
+      ["Related", { related: true }],
+    ] as const) {
+      fireEvent.click(tab(name));
+      await settle(4);
+      expect(parts(), name).toMatchObject({ overview: true, ...own });
+    }
+  });
+
+  test("the pill says the row's word until the object comes and the word the object printed once it has, which the YAML view shows alike", async () => {
+    const mock = createMockBackend("ready");
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "object_open")
+          return mock.subscribe(command, request, onMessage);
+        const send = onMessage as (batch: ObjectBatch) => void;
+        return mock.subscribe(command, request, (message) => {
+          const batch = message as ObjectBatch;
+          send({
+            ...batch,
+            overview: batch.overview && {
+              ...batch.overview,
+              header: {
+                ...batch.overview.header,
+                printed: batch.overview.header.printed.map((cell) =>
+                  cell.column === "Status"
+                    ? { ...cell, value: "Terminating" }
+                    : cell,
+                ),
+              },
+            },
+          });
+        });
+      },
+    };
+    await openList(backend);
+    const running = rows().find(
+      (row) =>
+        row.querySelector('[data-column="Status"]')?.textContent === "Running",
+    );
+    fireEvent.click(running ?? document.body);
+    const verdict = () =>
+      within(shown()).getByRole("group", { name: "Verdict" }).textContent;
+    await settle(1);
+    expect(verdict()).toMatch(/^Running/);
+    await settle(6);
+    expect(verdict()).toMatch(/^Terminating/);
+    fireEvent.click(tab("YAML"));
+    await settle(4);
+    expect(verdict()).toMatch(/^Terminating/);
   });
 
   test("the Events tab counts the object's warnings", async () => {
@@ -427,6 +611,23 @@ describe("in a narrow editor", () => {
       fireEvent.pointerLeave(row);
     }
     expect(reviews()).toBe(before);
+  });
+
+  test("before the object comes the header already says the row's word, in its tone", async () => {
+    const script = scriptedPods(true);
+    await openList(script.backend);
+    act(() => {
+      script.send(podsBatch(1, { "web-1": "CrashLoopBackOff" }, true));
+    });
+    await settle(1);
+    fireEvent.click(rows()[0] ?? document.body);
+    await settle(1);
+    const verdict = within(
+      within(shown()).getByRole("group", { name: "Verdict" }),
+    );
+    expect(verdict.getByText("CrashLoopBackOff").className).toContain(
+      "text-error",
+    );
   });
 
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {
@@ -558,6 +759,7 @@ function withWarnings(count: number): Backend {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],

@@ -33,6 +33,18 @@ test("a time reads as its age alone, and its date is in its tooltip", () => {
   );
 });
 
+test("a sentence of text and times reads as one line, its age ticking from its moment", () => {
+  const at = new Date(Date.now() - (11 * 24 * 60 + 30) * 60_000).toISOString();
+  const { container } = view({
+    type: "spans",
+    spans: [
+      { type: "text", text: "code 1 (Error) · " },
+      { type: "ago", at },
+    ],
+  });
+  expect(container.textContent).toBe("code 1 (Error) · 11d ago");
+});
+
 test("a name that is a link has its whole text in its tooltip, where its copy icon hides the end of a cut one", () => {
   const text = "payments-api-production-checkout-7d9f8c6b5-x2x4q";
   const { container } = view({

@@ -147,6 +147,7 @@ const HEADER: Document["header"] = {
   owner: null,
   node: null,
   created: null,
+  generated: null,
   printed: [],
   sentence: [],
   vitals: [],
@@ -191,6 +192,7 @@ function shown(
       states={states}
       kind={kind}
       onOpen={() => undefined}
+      onEvents={() => undefined}
       usage={usage}
     />,
   );
@@ -211,6 +213,7 @@ function listed(
       states={states}
       kind={kind}
       onOpen={() => undefined}
+      onEvents={() => undefined}
       usage={usage}
     />
   );
@@ -225,16 +228,20 @@ const containersSection = () =>
   screen.getByRole("region", { name: "Containers" });
 const labels = () =>
   within(containersSection()).getAllByText(/^(CPU|Memory)$/).length;
+const rowsOf = (scope: HTMLElement) =>
+  [...scope.querySelectorAll("dd")].filter((value) =>
+    /^(CPU|Memory)$/.test(value.previousElementSibling?.textContent ?? ""),
+  );
 const lines = (scope: HTMLElement) =>
-  [...scope.querySelectorAll("dd")]
-    .filter((value) =>
-      /^(CPU|Memory)$/.test(value.previousElementSibling?.textContent ?? ""),
-    )
-    .map((value) =>
-      [...(value.firstElementChild?.children ?? [])].map((line) =>
-        line.textContent.replace(/\u200b/g, ""),
-      ),
-    );
+  rowsOf(scope).map((value) =>
+    [...(value.firstElementChild?.children ?? [])]
+      .filter((part) => part.getAttribute("aria-hidden") !== "true")
+      .filter(
+        (part) =>
+          !["meter", "progressbar"].includes(part.getAttribute("role") ?? ""),
+      )
+      .map((part) => part.textContent.replace(/\u200b/g, "")),
+  );
 const meterNames = (scope: HTMLElement) =>
   within(scope)
     .getAllByRole("meter")
@@ -252,12 +259,12 @@ test("each container draws its own CPU and Memory against request and limit, and
   ]);
   expect(within(section).queryByText("Pod")).toBeNull();
   expect(lines(section)).toEqual([
-    ["No data yet", ""],
-    ["No data yet", ""],
-    ["25% of limit", "100m"],
-    ["46% of limit", "60Mi"],
-    ["125% of request", "20m"],
-    ["93% of limit", "30Mi"],
+    ["No data yet"],
+    ["No data yet"],
+    ["100m", "25%"],
+    ["60Mi", "46%"],
+    ["20m", "125%"],
+    ["30Mi", "93%"],
   ]);
   expect(
     within(section)
@@ -439,7 +446,7 @@ test("a usage that waits draws the rows of every running container, with an empt
     expect(meter.getAttribute("aria-valuetext")).toBe("Loading");
   }
   expect(within(section).queryAllByRole("meter")).toHaveLength(0);
-  expect(lines(section)).toEqual(Array.from({ length: 6 }, () => ["", ""]));
+  expect(lines(section)).toEqual(Array.from({ length: 6 }, () => [""]));
   expect(labels()).toBe(6);
 
   answer({ ...POD, containers: POD.containers.slice(0, 1) });
@@ -457,30 +464,30 @@ const REQUESTED = measure({ used: 20_000_000, request: 16_000_000 });
 const BARE = measure({ used: 20_000_000 });
 
 test.each<[string, ShownUsage, string[], string]>([
-  ["waits with a limit", WAITING_POD, ["", ""], "progressbar"],
+  ["waits with a limit", WAITING_POD, [""], "progressbar"],
   [
     "waits with neither request nor limit",
     {
       ...WAITING_POD,
       containers: [{ name: "api", cpu: NOTHING, memory: NOTHING }],
     },
-    ["", ""],
+    [""],
     "none",
   ],
-  ["has a limit and a request", POD, ["25% of limit", "100m"], "meter"],
+  ["has a limit and a request", POD, ["100m", "25%"], "meter"],
   [
     "has a request only",
     {
       ...POD,
       containers: [{ name: "api", cpu: REQUESTED, memory: REQUESTED }],
     },
-    ["125% of request", "20m"],
+    ["20m", "125%"],
     "meter",
   ],
   [
     "has neither",
     { ...POD, containers: [{ name: "api", cpu: BARE, memory: BARE }] },
-    ["20m", ""],
+    ["20m"],
     "none",
   ],
   [
@@ -489,22 +496,19 @@ test.each<[string, ShownUsage, string[], string]>([
       ...POD,
       containers: [{ name: "api", cpu: NOTHING, memory: NOTHING }],
     },
-    ["No data yet", ""],
+    ["No data yet"],
     "none",
   ],
 ])(
-  "a container's row is two lines whatever it says, the figure on the first only where it has no base to hold it against: it %s",
+  "a container's row is one line whatever it says, led by text so that its label keeps its place: it %s",
   (_, usage, cpu, meter) => {
     listed(usage, "/pods", POD_OF(RUNNING("api")));
     const section = containersSection();
-    const rows = [...section.querySelectorAll("dd")].filter((value) =>
-      /^(CPU|Memory)$/.test(value.previousElementSibling?.textContent ?? ""),
-    );
+    const rows = rowsOf(section);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.children).toHaveLength(1);
-      expect(row.firstElementChild?.children).toHaveLength(2);
-      const first = row.firstElementChild?.firstElementChild?.firstElementChild;
+      const first = row.firstElementChild?.firstElementChild;
       expect(first?.textContent).toBe("\u200b");
       expect(first?.getAttribute("aria-hidden")).toBe("true");
     }
@@ -517,6 +521,79 @@ test.each<[string, ShownUsage, string[], string]>([
     }
   },
 );
+
+const CAPPED: ShownUsage = {
+  ...POD,
+  containers: [
+    {
+      name: "api",
+      cpu: measure({ used: 9_999_000_000, request: 100_000_000 }),
+      memory: measure({ used: 1023 * MI, request: MI }),
+    },
+  ],
+};
+
+test("a share of 10,000 % or more reads >9999% with the exact share in its tooltip, and 9,999 % is drawn whole", () => {
+  listed(CAPPED, "/pods", POD_OF(RUNNING("api")));
+  const section = containersSection();
+  expect(lines(section)).toEqual([
+    ["9999m", "9999%"],
+    ["1023Mi", ">9999%"],
+  ]);
+  expect(
+    rowsOf(section).map((row) =>
+      row.querySelector("[title]")?.getAttribute("title"),
+    ),
+  ).toEqual(["of request", "102300% of request"]);
+});
+
+const sized = (room: number, widest: number) =>
+  vi
+    .spyOn(HTMLElement.prototype, "clientWidth", "get")
+    .mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("w-max") ? widest : room;
+    });
+
+test("a capped share still holds its exact share in its tooltip where the part has room to say its base in words", () => {
+  sized(300, 230);
+  listed(CAPPED, "/pods", POD_OF(RUNNING("api")));
+  const section = containersSection();
+  expect(lines(section)).toEqual([
+    ["9999m", "9999%of request"],
+    ["1023Mi", ">9999%of request"],
+  ]);
+  expect(
+    rowsOf(section).map((row) =>
+      row.querySelector("[title]")?.getAttribute("title"),
+    ),
+  ).toEqual([undefined, "102300% of request"]);
+});
+
+test("a share says its base in words where the part has room for its widest row with 16 px to spare, once for every row, and by its tooltip where it has not", () => {
+  const share = () => lines(containersSection())[2]?.[1];
+  const tip = () =>
+    rowsOf(containersSection())[2]
+      ?.querySelector("[title]")
+      ?.getAttribute("title");
+  const width = sized(300, 230);
+  const answer = listed(POD, "/pods");
+  expect(share()).toBe("25%of limit");
+  expect(tip()).toBeUndefined();
+  for (const [room, said] of [
+    [245, true],
+    [231, true],
+    [229, false],
+    [245, false],
+    [246, true],
+  ] as const) {
+    width.mockRestore();
+    sized(room, 230);
+    answer({ ...POD });
+    expect(share(), String(room)).toBe(said ? "25%of limit" : "25%");
+    expect(tip(), String(room)).toBe(said ? undefined : "of limit");
+  }
+  vi.restoreAllMocks();
+});
 
 test("a node's usage that waits is its pair of empty meters", () => {
   listed(WAITING_NODE, "/nodes", {
@@ -562,7 +639,7 @@ test("a node's section folds, and the kind remembers it", () => {
 });
 
 describe("an open object", () => {
-  withScreenSize(1000);
+  const layout = withScreenSize(1000);
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -623,11 +700,19 @@ describe("an open object", () => {
 
   const usageArea = () => region("Usage") ?? region("Containers");
 
+  const drawnMeters = (
+    scope: Element | null | undefined,
+    role: "meter" | "progressbar",
+  ) =>
+    [...(scope?.querySelectorAll(`[role="${role}"]`) ?? [])].filter(
+      (meter) => meter.closest("[aria-hidden]") === null,
+    );
+
   const drawn = () => {
     const usage = usageArea();
     if (!usage) return "none";
-    if (usage.querySelector('[role="progressbar"]')) return "empty";
-    if (usage.querySelector('[role="meter"]')) return "figures";
+    if (drawnMeters(usage, "progressbar").length > 0) return "empty";
+    if (drawnMeters(usage, "meter").length > 0) return "figures";
     return /metrics-server does not answer|may not read metrics/.test(
       usage.textContent,
     )
@@ -639,10 +724,15 @@ describe("an open object", () => {
     overview: region("Metadata") !== null,
     state: drawn(),
     rows: [
-      ...(usageArea()?.querySelectorAll(
-        '[role="progressbar"], [role="meter"]',
-      ) ?? []),
-    ].map((meter) => meter.getAttribute("aria-label")),
+      ...drawnMeters(usageArea(), "progressbar"),
+      ...drawnMeters(usageArea(), "meter"),
+    ]
+      .sort((a, b) =>
+        a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
+          ? -1
+          : 1,
+      )
+      .map((meter) => meter.getAttribute("aria-label")),
   });
 
   async function frames(ms = 600, step = 10) {
@@ -670,7 +760,7 @@ describe("an open object", () => {
     return states;
   }
 
-  test("an open pod's Overview shows its usage while the document is visible, and the part follows the tab", async () => {
+  test("an open pod's Overview shows its usage while the document is visible, and the part follows the summary column, which the Overview alone shows under 900 px", async () => {
     const backend = createMockBackend("ready");
     const usage = spied(backend);
     const workbench = await mountKube(backend);
@@ -696,7 +786,14 @@ describe("an open object", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
     await settle();
+    expect(usage()).toBe(true);
+
+    layout.resize(screen.getByRole("region", { name: /^Pod / }), 700);
+    await settle();
     expect(usage()).toBe(false);
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    await settle();
+    expect(usage()).toBe(true);
   });
 
   test("an open pod behind another tab asks for no usage, and asks again once shown", async () => {

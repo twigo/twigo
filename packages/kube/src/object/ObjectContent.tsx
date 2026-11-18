@@ -37,6 +37,8 @@ export function ObjectContent({
   kept,
   onOpen,
   onLogs,
+  onEvents,
+  fullPage,
 }: {
   tab: ObjectTab;
   /** The object's space, which its Overview's live lists query. */
@@ -60,6 +62,9 @@ export function ObjectContent({
   kept?: (problem: { title: string; body: string }) => ReactNode;
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
+  onEvents: OverviewProps["onEvents"];
+  /** The full page, whose sections open but the Metadata. */
+  fullPage?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const overview = tab === "overview" && snapshot.overview !== undefined;
@@ -104,7 +109,9 @@ export function ObjectContent({
               values={values}
               reveal={reveal}
               onLogs={onLogs}
+              onEvents={onEvents}
               usage={snapshot.usage}
+              {...(fullPage !== undefined && { fullPage })}
             />
           )}
         </Shown>

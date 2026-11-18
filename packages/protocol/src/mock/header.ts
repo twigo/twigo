@@ -25,6 +25,7 @@ import {
   deploymentCells,
   deployments,
   nodeCells,
+  podGenerated,
   type Deployment,
 } from "./kinds";
 import { cronJobPage, jobPage } from "./jobs";
@@ -86,6 +87,7 @@ function podHeader(recorded: Overview, pod: Pod): Header {
     },
     node: pod.status === "Pending" ? null : pod.node,
     created: recorded.header.created,
+    generated: podGenerated(pod),
     printed: printed(POD_COLUMNS, podCells(pod, false)),
     sentence,
     vitals: [
@@ -292,6 +294,7 @@ function deploymentPage(
     owner: null,
     node: null,
     created: recorded.header.created,
+    generated: null,
     printed: printed(DEPLOYMENT_COLUMNS, deploymentCells(deployment, false)),
     sentence: finding
       ? words(finding.title)
@@ -491,6 +494,7 @@ function nodePage(recorded: Overview, node: Node, cluster: Cluster): Overview {
     owner: null,
     node: null,
     created: recorded.header.created,
+    generated: null,
     printed: printed(NODE_COLUMNS, nodeCells(node, cluster.context)),
     sentence: findings[0]
       ? words(findings[0].title)

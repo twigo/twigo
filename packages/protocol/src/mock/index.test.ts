@@ -15,8 +15,10 @@ import {
   containerOf,
   deploymentOf,
   finishedAt,
+  generatedAt,
   imageOf,
   podCells,
+  restartCount,
   type Pod,
 } from "./cluster";
 import { POD_COUNT } from "./fixtures";
@@ -1245,10 +1247,24 @@ test("a mock pod's Containers summary counts the cards it lists", async () => {
     const failing = cards.filter(
       (card) => card.state?.tone === "danger",
     ).length;
+    const unready = cards.filter(
+      ({ state }) => state?.tone === "warning" && state.running && !state.ready,
+    ).length;
+    const running = cards.filter((card) => card.state?.running).length;
     expect(said(containers.summary), pod.name).toBe(
-      `${String(cards.length)}${failing > 0 ? ` · ${String(failing)} failing` : ""}`,
+      failing === 0 && unready === 0 && running > 0
+        ? `${String(running)} running`
+        : `${String(cards.length)}${failing > 0 ? ` · ${String(failing)} failing` : ""}${unready > 0 ? ` · ${String(unready)} not ready` : ""}`,
     );
   }
+  const healthy = pods.find(
+    (pod) => pod.status === "Running" && pod.ready === pod.containers,
+  );
+  if (!healthy) throw new Error("prod-eu has a healthy pod of two containers");
+  const quiet = await described("pods", "", healthy.namespace, healthy.name);
+  expect(said(sectionOf(quiet, "core.containers").summary)).toBe(
+    `${String(healthy.containers)} running`,
+  );
   const two = crashing.find((pod) => pod.containers === 2);
   if (!two)
     throw new Error("prod-eu has a crash-looping pod of two containers");
@@ -1577,11 +1593,13 @@ test("a completed mock pod shows its containers terminated and its readiness as 
         running: false,
         restarts: index === 0 ? Number.parseInt(pod.restarts, 10) : 0,
       });
-      const exit = card.fields.find(({ label }) => label === "Exit code");
-      expect(exit?.value).toEqual({ type: "text", text: "exit code 0" });
-      const ended = card.fields.find(({ label }) => label === "Finished");
-      expect(ended?.value).toEqual({
-        type: "time",
+      expect(card.fields.map(({ label }) => label)).toEqual(
+        index === 0 && pod.lastRestart !== null && restartCount(pod) > 0
+          ? ["Exited", "Last exit"]
+          : ["Exited"],
+      );
+      expect(exitOf(card.fields, "Exited")).toEqual({
+        how: "code 0 · ",
         at: new Date(finishedAt(pod)).toISOString(),
       });
     }
@@ -1735,6 +1753,18 @@ function timeOf(fields: readonly Field[], label: string): string | undefined {
   return value?.type === "time" ? value.at : undefined;
 }
 
+function exitOf(
+  fields: readonly Field[],
+  label = "Last exit",
+): { how: string; at: string } | undefined {
+  const value = fields.find((field) => field.label === label)?.value;
+  if (value?.type !== "spans") return undefined;
+  const [how, when] = value.spans;
+  return how?.type === "text" && when?.type === "ago"
+    ? { how: how.text, at: when.at }
+    : undefined;
+}
+
 test("a mock pod's first container, image and events are its Deployment's and its own", () => {
   const cluster = new Cluster("qa", POD_COUNT.qa ?? 0, Date.now());
   for (const status of [
@@ -1789,6 +1819,18 @@ test("a mock pod's first container, image and events are its Deployment's and it
   );
 });
 
+test("a mock pod's header says where its name was generated, as its row does", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pod = cluster.pods[0];
+  if (!pod) throw new Error("prod-eu has pods");
+  const page = opened(cluster, "", "pods", pod.namespace, pod.name);
+  const row = generatedAt(pod.name, pod.generateName, {
+    "pod-template-hash": pod.templateHash,
+  });
+  expect(row).not.toBeNull();
+  expect(page.header.generated).toBe(row);
+});
+
 test("a mock pod's restarts are the same in its header, its first container and its finding", () => {
   const cluster = new Cluster("prod-eu", 5000, Date.now());
   for (const status of ["Running", "CrashLoopBackOff", "Error", "Completed"]) {
@@ -1810,19 +1852,27 @@ test("a mock pod's restarts are the same in its header, its first container and 
     expect(restarts?.note, status).toEqual([{ type: "ago", at }]);
     const [card] = cardsOf(page).filter(({ role }) => role !== "init");
     expect(card?.state?.restarts, status).toBe(count);
-    expect(timeOf(card?.fields ?? [], "Last finished"), status).toBe(at);
-    expect(
-      card?.fields.find(({ label }) => label === "Last state")?.value,
-      status,
-    ).toEqual({ type: "text", text: "Terminated · Error · exit code 1" });
-    if (status === "Running" || status === "Completed" || status === "Error") {
-      expect(timeOf(card?.fields ?? [], "Started"), status).toBe(at);
-    }
-    if (status === "Completed") {
+    const ended = status === "Completed" || status === "Error";
+    if (ended) {
+      const exited = exitOf(card?.fields ?? [], "Exited");
       expect(Date.parse(at), "it restarted before it finished").toBeLessThan(
-        Date.parse(timeOf(card?.fields ?? [], "Finished") ?? ""),
+        Date.parse(exited?.at ?? ""),
+      );
+      expect(exited?.how, status).toBe(
+        status === "Completed" ? "code 0 · " : "code 1 · ",
       );
     }
+    expect(exitOf(card?.fields ?? []), status).toEqual({
+      how: "code 1 (Error) · ",
+      at,
+    });
+    if (status === "Running" || status === "Completed" || status === "Error") {
+      expect(timeOf(card?.details ?? [], "Started"), status).toBe(at);
+    }
+    expect(
+      card?.fields.map(({ label }) => label),
+      "the row says it once",
+    ).toEqual(ended ? ["Exited", "Last exit"] : ["Last exit"]);
     if (status === "CrashLoopBackOff") {
       const [finding] = findingsOf(page);
       const [shown, next] = ["ago", "until"].map((type) =>
@@ -1911,9 +1961,7 @@ test("a ContainerCreating mock pod waits in every container, and an Error one ha
     ready: false,
     running: false,
   });
-  expect(
-    first?.fields.find(({ label }) => label === "Exit code")?.value,
-  ).toEqual({ type: "text", text: "exit code 1" });
+  expect(exitOf(first?.fields ?? [], "Exited")?.how).toBe("code 1 · ");
   for (const other of others) expect(other.state?.ready, other.name).toBe(true);
   const regular = cardsOf(failed).filter(({ role }) => role !== "init");
   expect(

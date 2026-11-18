@@ -80,6 +80,17 @@ test.each<[string, Value, string | undefined]>([
   ],
   ["a time, as the moment it stands for", { type: "time", at: AT }, AT],
   [
+    "a sentence, its times as the moments they stand for",
+    {
+      type: "spans",
+      spans: [
+        { type: "text", text: "code 1 (Error) · " },
+        { type: "ago", at: AT },
+      ],
+    },
+    `code 1 (Error) · ${AT}`,
+  ],
+  [
     "labels, a line each",
     {
       type: "labels",

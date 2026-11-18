@@ -264,6 +264,13 @@ fn shown(value: &Shown) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         Shown::List { items } => items.iter().map(shown).collect::<Vec<_>>().join(" | "),
+        Shown::Spans { spans } => spans
+            .iter()
+            .map(|span| match span {
+                Span::Text { text } => text.clone(),
+                Span::Ago { at } | Span::Until { at } => at.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -370,9 +377,37 @@ fn a_crashing_container_says_how_it_ended_and_when_it_starts_again() {
         )
     );
     assert_eq!(
-        shown(field(&api.fields, "Last state")),
-        "Terminated · Error · exit code 1"
+        shown(field(&api.fields, "Last exit")),
+        format!("code 1 (Error) · {finished}")
     );
+    let labels: Vec<&str> = api
+        .fields
+        .iter()
+        .map(|field| field.label.as_str())
+        .collect();
+    assert_eq!(labels, ["Last exit"], "the block's rows say one thing once");
+    let details: Vec<&str> = api
+        .details
+        .iter()
+        .map(|field| field.label.as_str())
+        .collect();
+    assert_eq!(details[0], "Last message");
+}
+
+#[test]
+fn a_running_container_says_when_it_started_in_its_details_and_has_no_row_of_its_own() {
+    let described = described();
+    let [app] = containers(&described["pod"], "core.containers") else {
+        panic!("one container");
+    };
+    assert!(app.fields.is_empty(), "{:?}", app.fields);
+    let started =
+        recorded_object("pod")["status"]["containerStatuses"][0]["state"]["running"]["startedAt"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    assert_eq!(shown(field(&app.details, "Started")), started);
+    assert!(app.details.iter().any(|field| field.label == "Requests"));
 }
 
 #[test]
@@ -1509,7 +1544,7 @@ fn each_section_answers_the_commonest_question_while_it_is_folded() {
     let pod = &described["pod"];
     let ip = recorded.object["status"]["podIP"].as_str().unwrap();
     let node = recorded.object["spec"]["nodeName"].as_str().unwrap();
-    assert_eq!(summary(pod, "core.containers"), "1");
+    assert_eq!(summary(pod, "core.containers"), "1 running");
     assert_eq!(summary(pod, "core.conditions"), "5 of 5 ok");
     assert_eq!(summary(pod, "core.placement"), format!("{node} · {ip}"));
     let volumes = recorded.object["spec"]["volumes"].as_array().unwrap().len();
@@ -1542,6 +1577,21 @@ fn each_section_answers_the_commonest_question_while_it_is_folded() {
         summary(&described["pod-unready"], "core.containers"),
         "1 · 1 not ready"
     );
+    let two = edited("pod", |recorded| {
+        let mut sidecar = recorded.object["spec"]["containers"][0].clone();
+        sidecar["name"] = "sidecar".into();
+        recorded.object["spec"]["containers"]
+            .as_array_mut()
+            .unwrap()
+            .push(sidecar);
+        let mut status = recorded.object["status"]["containerStatuses"][0].clone();
+        status["name"] = "sidecar".into();
+        recorded.object["status"]["containerStatuses"]
+            .as_array_mut()
+            .unwrap()
+            .push(status);
+    });
+    assert_eq!(summary(&two, "core.containers"), "2 running");
 
     let claimed = edited("pod", |recorded| {
         recorded.object["spec"]["volumes"]

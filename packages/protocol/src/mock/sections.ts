@@ -32,16 +32,19 @@ export function counted(count: number, noun: string): string {
   return count === 1 ? `1 ${noun}` : `${String(count)} ${noun}s`;
 }
 
-/** `2 · 1 failing`: the cards of a pod's containers, as Rust's Containers section says them. */
+/** `2 running`, `2 · 1 failing`: the cards of a pod's containers, as Rust's Containers section says them. */
 export function containersSummary(containers: readonly Container[]): Span[] {
   const states = containers.flatMap(({ state }) => (state ? [state] : []));
   const failing = states.filter(({ tone }) => tone === "danger").length;
   const unready = states.filter(
     ({ tone, running, ready }) => tone === "warning" && running && !ready,
   ).length;
+  const running = states.filter((state) => state.running).length;
   return words(
     [
-      String(containers.length),
+      failing === 0 && unready === 0 && running > 0
+        ? `${String(running)} running`
+        : String(containers.length),
       ...(failing > 0 ? [`${String(failing)} failing`] : []),
       ...(unready > 0 ? [`${String(unready)} not ready`] : []),
     ].join(" · "),

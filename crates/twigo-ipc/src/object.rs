@@ -162,6 +162,11 @@ pub struct Header {
     /// RFC 3339, `metadata.creationTimestamp`: the object's age, which an
     /// object opened on its own has no list row to take it from.
     pub created: Option<String>,
+    /// Where the generated part of its name starts, in UTF-16 units, as a
+    /// list row's [`generated`](crate::Row::generated) says it, so that an
+    /// object opened on its own cuts its name as the list does. The core
+    /// fills it: the rule lives with the rows.
+    pub generated: Option<u32>,
     /// The cells the server prints for it in a list, Name, Namespace and Age
     /// left out, from which the page takes the word of its list's health
     /// column, so the two always say the same.
@@ -311,11 +316,14 @@ pub struct Container {
     pub state: Option<ContainerState>,
     /// As kubectl prints them: `8080/TCP (http)`.
     pub ports: Vec<String>,
-    /// What its card shows: its state's times, how it last ended, its
-    /// resources.
+    /// What its card shows: how it ended, as its code and when, `Exited` for
+    /// a termination that is its state now, whose reason the state says, and
+    /// `Last exit`, with its reason, for an earlier one. Empty for a container
+    /// that never ended.
     pub fields: Vec<Field>,
-    /// What else kubectl describe prints of it, folded: the last
-    /// termination's message, command, probes, security, image and
+    /// What else kubectl describe prints of it, folded: when it started, the
+    /// last termination's message, its requests and limits, command,
+    /// arguments, working directory, pull policy, probes, security, image and
     /// container IDs.
     pub details: Vec<Field>,
     /// Each variable by name, then each source of many as "From".
@@ -411,6 +419,11 @@ pub enum Value {
     Toned {
         text: String,
         tone: Tone,
+    },
+    /// Text and times in one line that ticks, such as `code 1 (Error) · 11d
+    /// ago`.
+    Spans {
+        spans: Vec<Span>,
     },
 }
 

@@ -7,12 +7,23 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Condition, Overview as Document, Value } from "@twigo/protocol";
+import type {
+  Condition,
+  ObjectEvent,
+  Overview as Document,
+  Value,
+} from "@twigo/protocol";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
+import { compile, matchesIn } from "./pageFilter";
 import { PageStates } from "./pageStates";
 
-const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
+const PAGE = {
+  pages: new PageStates(),
+  uri: "k8s://test",
+  object: "a",
+  onEvents: () => undefined,
+};
 
 afterEach(() => {
   cleanup();
@@ -26,6 +37,7 @@ function configMap(): Document {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],
@@ -101,6 +113,7 @@ test("a link opens the object it points at", () => {
           owner: null,
           node: null,
           created: null,
+          generated: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -165,6 +178,7 @@ function data(readable: boolean, bytes = 3): Document {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],
@@ -277,6 +291,7 @@ test("events that cannot be listed say why instead of none", () => {
           owner: null,
           node: null,
           created: null,
+          generated: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -306,6 +321,156 @@ test("events that cannot be listed say why instead of none", () => {
   expect(document.body.textContent).not.toContain("No events");
 });
 
+function eventsPage(events: ObjectEvent[]): Document {
+  return {
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      generated: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
+    sections: [
+      {
+        id: "core.events",
+        title: "Events",
+        summary: [],
+        tone: null,
+        fold: "open",
+        blocks: [{ type: "events", events, listed: true, unavailable: null }],
+      },
+    ],
+  };
+}
+
+const NOTE = (reason: string, type: ObjectEvent["type"]): ObjectEvent => ({
+  type,
+  reason,
+  message: `${reason} happened`,
+  source: "kubelet",
+  count: 1,
+  first: null,
+  last: "2026-11-02T21:04:52Z",
+  fieldPath: null,
+});
+
+test("the Overview lists an object's three newest events, its warnings first, and points to the Events view for the rest", () => {
+  const onEvents = vi.fn();
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={eventsPage([
+        NOTE("Started", "Normal"),
+        NOTE("Created", "Normal"),
+        NOTE("BackOff", "Warning"),
+        NOTE("Pulled", "Normal"),
+        NOTE("Scheduled", "Normal"),
+      ])}
+      onOpen={() => undefined}
+      onEvents={onEvents}
+    />,
+  );
+  const section = screen.getByRole("region", { name: "Events" });
+  expect(
+    within(section)
+      .getAllByRole("listitem")
+      .map((item) => /^[A-Za-z]+/.exec(item.textContent)?.[0]),
+  ).toEqual(["BackOff", "Started", "Created"]);
+  fireEvent.click(
+    within(section).getByRole("button", { name: "All 5 events" }),
+  );
+  expect(onEvents).toHaveBeenCalledTimes(1);
+});
+
+test("under the page's filter the events section lists every event the filter keeps and links to nothing, and the count agrees", () => {
+  const pages = new PageStates();
+  pages.setText(PAGE.uri, "kubelet");
+  const overview = eventsPage([
+    NOTE("Started", "Normal"),
+    NOTE("Created", "Normal"),
+    { ...NOTE("Scheduled", "Normal"), source: "scheduler" },
+    NOTE("BackOff", "Warning"),
+    NOTE("Pulled", "Normal"),
+  ]);
+  const { filter } = compile("kubelet");
+  if (!filter) throw new Error("a filter");
+  render(
+    <Overview
+      {...PAGE}
+      pages={pages}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={overview}
+      onOpen={() => undefined}
+    />,
+  );
+  const section = screen.getByRole("region", { name: "Events" });
+  expect(
+    within(section)
+      .getAllByRole("listitem")
+      .map((item) => /^[A-Za-z]+/.exec(item.textContent)?.[0]),
+  ).toEqual(["BackOff", "Started", "Created", "Pulled"]);
+  expect(within(section).queryByRole("button", { name: /^All / })).toBeNull();
+  expect(matchesIn(overview, filter, false).matches).toBe(4);
+});
+
+test("a filter that matches the events section's title keeps it whole: the newest three and the link to all of them", () => {
+  const pages = new PageStates();
+  pages.setText(PAGE.uri, "Events");
+  render(
+    <Overview
+      {...PAGE}
+      pages={pages}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={eventsPage([
+        NOTE("Started", "Normal"),
+        NOTE("Created", "Normal"),
+        NOTE("BackOff", "Warning"),
+        NOTE("Pulled", "Normal"),
+        NOTE("Scheduled", "Normal"),
+      ])}
+      onOpen={() => undefined}
+    />,
+  );
+  const section = screen.getByRole("region", { name: "Events" });
+  expect(
+    within(section)
+      .getAllByRole("listitem")
+      .map((item) => /^[A-Za-z]+/.exec(item.textContent)?.[0]),
+  ).toEqual(["BackOff", "Started", "Created"]);
+  expect(
+    within(section).getByRole("button", { name: "All 5 events" }),
+  ).toBeDefined();
+});
+
+test("three events or fewer are all there is, and none points to the Events view", () => {
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={eventsPage([
+        NOTE("Started", "Normal"),
+        NOTE("Created", "Normal"),
+        NOTE("Scheduled", "Normal"),
+      ])}
+      onOpen={() => undefined}
+      onEvents={() => undefined}
+    />,
+  );
+  expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  expect(screen.queryByRole("button", { name: /^All / })).toBeNull();
+});
+
 test("a multiline value keeps its lines", () => {
   render(
     <Overview
@@ -318,6 +483,7 @@ test("a multiline value keeps its lines", () => {
           owner: null,
           node: null,
           created: null,
+          generated: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -369,6 +535,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
           owner: null,
           node: null,
           created: null,
+          generated: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -500,6 +667,7 @@ function conditionLines(conditions: Condition[]) {
           owner: null,
           node: null,
           created: null,
+          generated: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -658,6 +826,7 @@ function fields(...rows: [string, Value][]): Document {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],

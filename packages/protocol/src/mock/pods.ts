@@ -25,7 +25,6 @@ import {
   event,
   fieldText,
   swapped,
-  text,
   withEvents,
   words,
 } from "./sections";
@@ -48,18 +47,23 @@ const time = (label: string, moment: number): Field => ({
   default: false,
 });
 
-const said = (label: string, value: string): Field => ({
+/**
+ * How a container ended and when, as Rust's card says it: `code 1 (Error) · 11d
+ * ago` for an earlier end, and `code 1 · 11d ago` for one that is its state
+ * now, whose reason its state says.
+ */
+const exit = (label: string, how: string, moment: number): Field => ({
   label,
-  value: text(value),
+  value: {
+    type: "spans",
+    spans: [{ type: "text", text: `${how} · ` }, ago(moment)],
+  },
   default: false,
 });
 
 function lastRun(pod: Pod): Field[] {
   return restartCount(pod) > 0 && pod.lastRestart !== null
-    ? [
-        said("Last state", "Terminated · Error · exit code 1"),
-        time("Last finished", pod.lastRestart),
-      ]
+    ? [exit("Last exit", "code 1 (Error)", pod.lastRestart)]
     : [];
 }
 
@@ -72,14 +76,15 @@ const running: ContainerState = {
 };
 
 /**
- * The state and the times of the pod's `index`th container, as its status
- * and its row say: the first container is the one that restarts, crashes,
- * errors or cannot start, the others run.
+ * The state of the pod's `index`th container, how it last ended in its row
+ * and when it started in its details, as its status and its row say: the
+ * first container is the one that restarts, crashes, errors or cannot start,
+ * the others run.
  */
 export function cardOf(
   pod: Pod,
   index: number,
-): { state: ContainerState | null; fields: Field[] } {
+): { state: ContainerState | null; fields: Field[]; details: Field[] } {
   const first = index === 0;
   const restarts = first ? restartCount(pod) : 0;
   const started = first ? ranFrom(pod) : pod.created + CONTAINER_START;
@@ -91,18 +96,14 @@ export function cardOf(
     finished: number,
   ) => ({
     state: {
-      text: label,
+      text: `Terminated · ${label}`,
       tone,
       ready: false,
       running: false,
       restarts,
     },
-    fields: [
-      said("Exit code", `exit code ${String(code)}`),
-      time("Started", started),
-      time("Finished", finished),
-      ...last,
-    ],
+    fields: [exit("Exited", `code ${String(code)}`, finished), ...last],
+    details: [time("Started", started)],
   });
   const waiting = (reason: string, tone: ContainerState["tone"]) => ({
     state: {
@@ -113,26 +114,26 @@ export function cardOf(
       restarts,
     },
     fields: last,
+    details: [],
   });
+  const up = {
+    state: running,
+    fields: [],
+    details: [time("Started", started)],
+  };
   switch (pod.status) {
     case "Pending":
-      return { state: null, fields: [] };
+      return { state: null, fields: [], details: [] };
     case "ContainerCreating":
       return waiting("ContainerCreating", "neutral");
     case "Completed":
-      return ended("Terminated · Completed", "neutral", 0, finishedAt(pod));
+      return ended("Completed", "neutral", 0, finishedAt(pod));
     case "Error":
-      return first
-        ? ended("Terminated · Error", "danger", 1, erroredAt(pod))
-        : { state: running, fields: [time("Started", started)] };
+      return first ? ended("Error", "danger", 1, erroredAt(pod)) : up;
     case "CrashLoopBackOff":
-      return first
-        ? waiting("CrashLoopBackOff", "danger")
-        : { state: running, fields: [time("Started", started)] };
+      return first ? waiting("CrashLoopBackOff", "danger") : up;
     case "ImagePullBackOff":
-      return first
-        ? waiting("ImagePullBackOff", "danger")
-        : { state: running, fields: [time("Started", started)] };
+      return first ? waiting("ImagePullBackOff", "danger") : up;
     default:
       return {
         state:
@@ -145,7 +146,8 @@ export function cardOf(
                 restarts,
               }
             : { ...running, restarts },
-        fields: [time("Started", started), ...last],
+        fields: last,
+        details: [time("Started", started)],
       };
   }
 }

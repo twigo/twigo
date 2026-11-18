@@ -276,6 +276,7 @@ pub fn describe(input: Input<'_>) -> Overview {
             owner: header::owner(object, input.facts),
             node,
             created: text(&object["metadata"]["creationTimestamp"]),
+            generated: None,
             printed: input.printed.to_vec(),
             sentence: header::sentence(&findings, sentence),
             vitals,

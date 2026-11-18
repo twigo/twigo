@@ -51,6 +51,7 @@ function yamlOf(snapshot: ObjectSnapshot, kept?: boolean) {
         ),
       })}
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />,
   );
 }

@@ -58,6 +58,7 @@ function overview(ids: string[]): Overview {
       owner: null,
       node: null,
       created: null,
+      generated: null,
       printed: [],
       sentence: [],
       vitals: [],
@@ -91,6 +92,7 @@ function shown(pages: PageStates, object: string, ids = ["a", "b", "c"]) {
       }}
       values={undefined}
       onOpen={() => undefined}
+      onEvents={() => undefined}
     />
   );
 }

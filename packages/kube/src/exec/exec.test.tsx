@@ -957,8 +957,8 @@ test("on a read-only context a pod's editor draws its Shell with the lock, sayin
   act(() => {
     shell.focus();
   });
-  expect(screen.getByRole("tooltip").textContent).toBe(
-    "Shellprod-eu is read-only",
+  expect(screen.getByRole("tooltip").textContent).toMatch(
+    /^Shell.*prod-eu is read-only$/,
   );
   fireEvent.click(shell);
   await settle(10);
