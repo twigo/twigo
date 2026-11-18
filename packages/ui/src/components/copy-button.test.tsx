@@ -38,3 +38,18 @@ test("a clipboard that refuses says it could not copy", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Copy image" }));
   await screen.findByRole("button", { name: "Could not copy" });
 });
+
+test("a floated button floats at the end of its line and takes no place of its own, and one that is not lies over the end of its ancestor", () => {
+  render(
+    <>
+      <CopyButton text="x" label="Copy floated" floated />
+      <CopyButton text="x" label="Copy over" />
+    </>,
+  );
+  const floated = screen.getByRole("button", { name: "Copy floated" });
+  const over = screen.getByRole("button", { name: "Copy over" });
+  expect(floated.className).toContain("float-right");
+  expect(floated.className).not.toContain("absolute");
+  expect(over.className).toContain("absolute");
+  expect(over.className).not.toContain("float-right");
+});
