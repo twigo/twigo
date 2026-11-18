@@ -76,3 +76,17 @@ test("the middle is measured in the font of the element, so the same text takes 
   expect(middleOf(small.container)).toHaveLength(3);
   expect(middleOf(large.container)).toEqual([]);
 });
+
+test("an element outside the document is not measured, so a text there is whole and never cut with a gap", () => {
+  const container = document.createElement("div");
+  const { container: out } = render(
+    <CutInTheMiddle
+      text="payments-api-production-checkout"
+      floor={16}
+      separator="-"
+    />,
+    { container },
+  );
+  expect(parts(out)).toEqual([]);
+  expect(out.textContent).toBe("payments-api-production-checkout");
+});

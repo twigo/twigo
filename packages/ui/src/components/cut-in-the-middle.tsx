@@ -23,8 +23,11 @@ export function CutInTheMiddle({
 }) {
   const box = useRef<HTMLSpanElement>(null);
   const [font, setFont] = useState<Font>();
+  // That this runs before the first paint, and not after it, is held only in a
+  // browser: jsdom paints nothing, so its tests cannot tell it from an effect.
   useLayoutEffect(() => {
-    if (box.current) setFont(fontOf(box.current));
+    const read = box.current && fontOf(box.current);
+    if (read) setFont(read);
   });
   const cut =
     font && cutText(text, floor, separator, (part) => emWidth(part, font));

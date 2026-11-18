@@ -11,14 +11,18 @@ let set = "";
 /**
  * The font of an element's text, from its computed style, which asks the
  * engine for no layout. A font read before is the same object, so a part
- * can tell by identity that its font did not change.
+ * can tell by identity that its font did not change. None for an element
+ * outside the document, whose computed style is empty: a width in em of it
+ * would be no number.
  */
-export function fontOf(element: Element): Font {
+export function fontOf(element: Element): Font | undefined {
   const style = getComputedStyle(element);
+  const size = parseFloat(style.fontSize);
+  if (!Number.isFinite(size)) return undefined;
   const css = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
   let font = fonts.get(css);
   if (!font) {
-    font = { css, size: parseFloat(style.fontSize) };
+    font = { css, size };
     fonts.set(css, font);
   }
   return font;
