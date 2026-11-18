@@ -13,9 +13,9 @@ export function FieldValue({
 }): ReactNode {
   const value = <ValueView value={field.value} onOpen={onOpen} />;
   return field.default ? (
-    <span className="text-support">
+    <span className="flex flex-wrap items-baseline gap-x-1.5 text-support">
       {value}
-      <Chip className="ml-1.5 text-2xs">default</Chip>
+      <Chip className="text-2xs">default</Chip>
     </span>
   ) : (
     value
