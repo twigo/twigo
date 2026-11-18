@@ -1,12 +1,52 @@
 import { expect, test } from "vitest";
-import { cutText } from "./cutText";
+import { cutText as cutWith } from "./cutText";
 
 const NAME = /[:/]/;
+
+const flat = (text: string) => text.length * 0.5;
+const cutText = (text: string, floor: number, separator: string | RegExp) =>
+  cutWith(text, floor, separator, flat);
+
+const NARROW = new Set("iljtf1-.");
+const WIDE = new Set("WM");
+const glyphs = (text: string) => {
+  let sum = 0;
+  for (const char of text) {
+    sum += NARROW.has(char) ? 0.3 : WIDE.has(char) ? 1 : 0.55;
+  }
+  return sum;
+};
 
 test("a text of the floor's length or less is never cut", () => {
   expect(cutText("a".repeat(28), 28, NAME)).toBeUndefined();
   expect(cutText("prod-eu", 28, NAME)).toBeUndefined();
   expect(cutText("All namespaces", 16, ", ")).toBeUndefined();
+});
+
+test("a text past its floor is cut where its middle measures more than 2em, whatever the count of characters", () => {
+  const name = (length: number) => "a".repeat(length);
+  for (const length of [25, 26, 27, 28]) {
+    expect(cutText(name(length), 24, "-")).toBeUndefined();
+  }
+  expect(cutText(name(29), 24, "-")).toMatchObject({ middle: name(5) });
+  expect(cutWith("W".repeat(27), 24, "-", glyphs)).toMatchObject({
+    middle: "WWW",
+  });
+});
+
+test("a middle of narrow glyphs that is no wider than 2em leaves the text whole, so the track keeps no gap", () => {
+  expect(
+    cutWith("kubernetes12-ljt-controlplane", 24, "-", glyphs),
+  ).toBeUndefined();
+  expect(
+    cutWith("kubernetes12ilitfcontrolplane", 24, "-", glyphs),
+  ).toBeUndefined();
+  expect(
+    cutWith("kubernetes12rl-jtcontrolplane", 24, "-", glyphs),
+  ).toBeUndefined();
+  expect(
+    cutWith("kubernetes12-ljtr-controlplane", 24, "-", glyphs),
+  ).toMatchObject({ middle: "-ljtr-" });
 });
 
 test("a name keeps the part after its last : or / when that is short", () => {

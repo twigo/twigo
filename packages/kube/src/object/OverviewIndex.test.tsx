@@ -379,18 +379,14 @@ test("a group that kept rows draws open while the filter holds text, and the per
   });
   expect(screen.getByText("POD_IP")).toBeTruthy();
   expect(screen.queryByText("LOG")).toBeNull();
-  expect(groupButton(/^Environment/).getAttribute("aria-expanded")).toBe(
-    "true",
-  );
-  fireEvent.click(groupButton(/^Environment/));
-  expect(groupButton(/^Environment/).getAttribute("aria-expanded")).toBe(
-    "false",
-  );
+  expect(groupButton(/^Env /).getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(groupButton(/^Env /));
+  expect(groupButton(/^Env /).getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByText("POD_IP")).toBeNull();
   expect(states.open("/pods", "containers/api/Environment", false)).toBe(false);
-  fireEvent.click(groupButton(/^Environment/));
+  fireEvent.click(groupButton(/^Env /));
   expect(screen.getByText("POD_IP")).toBeTruthy();
-  fireEvent.click(groupButton(/^Environment/));
+  fireEvent.click(groupButton(/^Env /));
   act(() => {
     pages.setText(URI, "pod_i");
   });
@@ -426,4 +422,57 @@ test("a group kept whole by its section's title, a container's name or its own n
   });
   expect(screen.getByText("POD_IP")).toBeTruthy();
   expect(screen.queryByText("LOG")).toBeNull();
+});
+
+const defaulted: Document = {
+  header: nested.header,
+  sections: [
+    {
+      id: "core.containers",
+      title: "Containers",
+      summary: [],
+      tone: null,
+      fold: "open",
+      blocks: [
+        {
+          type: "containers",
+          containers: [
+            {
+              name: "api",
+              role: "regular",
+              image: "registry.example/api:1",
+              state: null,
+              ports: [],
+              fields: [],
+              details: [
+                field("Command", "sh -c run"),
+                field("Image pull policy", "IfNotPresent", true),
+              ],
+              env: [],
+              mounts: [],
+            } satisfies Container,
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+test("the filter finds a container's default and shows it without its link, while a container it keeps whole keeps its default behind the group's count", () => {
+  const { pages } = shown(defaulted);
+  fireEvent.click(groupButton(/^Details /));
+  expect(screen.queryByText("Image pull policy")).toBeNull();
+  expect(screen.getByRole("button", { name: "1 default" })).toBeTruthy();
+  act(() => {
+    pages.setText(URI, "ifnotpresent");
+  });
+  expect(screen.getByText("Image pull policy")).toBeTruthy();
+  expect(screen.queryByText("Command")).toBeNull();
+  expect(screen.queryByRole("button", { name: /default/ })).toBeNull();
+  act(() => {
+    pages.setText(URI, "api");
+  });
+  expect(screen.getByText("Command")).toBeTruthy();
+  expect(screen.queryByText("Image pull policy")).toBeNull();
+  expect(screen.getByRole("button", { name: "1 default" })).toBeTruthy();
 });

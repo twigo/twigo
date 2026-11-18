@@ -23,27 +23,29 @@ import type {
   Tone,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import {
-  Button,
-  Chip,
-  cn,
-  PropertyList,
-  Section as Folding,
-  Table,
-} from "@twigo/ui";
+import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
+import { DefaultsLink, FieldValue } from "./defaults";
 import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
-import { compile, USAGE_TITLE, viewOf, type SectionView } from "./pageFilter";
+import {
+  compile,
+  defaultsId,
+  USAGE_TITLE,
+  viewOf,
+  type SectionView,
+} from "./pageFilter";
 import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
 import { isNumeric, numericColumns } from "./numeric";
+import { unexplained } from "./conditions";
 import { UsageView } from "./Usage";
-import { Age, Sentence, ValueView } from "./values";
+import { rowOf } from "./stacking";
+import { Age, Prose, Sentence, ValueView } from "./values";
 
 const USAGE = "core.usage";
 
@@ -68,7 +70,7 @@ export interface OverviewProps {
   readonly reveal?: Reveal | undefined;
   /** Opens a container's logs from a finding about it. */
   readonly onLogs?: ((choice: FindingLogsChoice) => void) | undefined;
-  /** What the object uses, once it has come: its section follows the Diagnostics. */
+  /** What the object uses, once it has come: a node's section follows the Diagnostics, a pod's containers draw their own. */
   readonly usage?: ShownUsage | undefined;
 }
 
@@ -128,7 +130,7 @@ export function Overview({
       view: viewOf(section, filter, revealed),
     };
   });
-  if (usage) {
+  if (usage && kind === "/nodes") {
     parts.splice(overview.sections[0]?.id === "core.diagnostics" ? 1 : 0, 0, {
       id: USAGE,
       title: USAGE_TITLE,
@@ -166,6 +168,7 @@ export function Overview({
     set: (id, open) => {
       pages.setGroup(uri, `${part.id}/${id}`, open);
     },
+    narrowed: (id) => narrowed.has(id),
   });
   const opens = shown.map(isOpen);
   const rendered = shown.map((part, index) => {
@@ -190,7 +193,7 @@ export function Overview({
         className={spacing}
       >
         {part.view === undefined ? (
-          usage && <UsageView usage={usage} node={kind === "/nodes"} />
+          usage && <UsageView usage={usage} />
         ) : (
           <SectionBlocks
             section={part}
@@ -204,6 +207,7 @@ export function Overview({
             values={values}
             reveal={reveal}
             onLogs={onLogs}
+            usage={usage}
           />
         )}
       </Folding>
@@ -239,8 +243,6 @@ const EDGE: Readonly<Record<Tone, "error" | "warn" | undefined>> = {
   neutral: undefined,
 };
 
-const defaultsId = (section: string) => `${section}/defaults`;
-
 function SectionBlocks({
   section,
   view,
@@ -253,6 +255,7 @@ function SectionBlocks({
   values,
   reveal,
   onLogs,
+  usage,
 }: {
   section: Pick<Section, "id" | "title">;
   view: SectionView;
@@ -266,6 +269,7 @@ function SectionBlocks({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
+  usage: OverviewProps["usage"];
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -282,21 +286,17 @@ function SectionBlocks({
           values={values}
           reveal={reveal}
           onLogs={onLogs}
+          usage={usage}
         />
       ))}
       {view.folds && (
-        <button
-          type="button"
-          aria-expanded={revealed}
-          onClick={() => {
+        <DefaultsLink
+          count={view.defaults}
+          revealed={revealed}
+          onToggle={() => {
             states.toggle(kind, defaultsId(section.id));
           }}
-          className="self-start rounded-sm text-xs text-quiet outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
-        >
-          {revealed
-            ? "Hide defaults"
-            : `${view.defaults} ${view.defaults === 1 ? "default" : "defaults"}`}
-        </button>
+        />
       )}
     </div>
   );
@@ -341,6 +341,7 @@ function BlockView({
   values,
   reveal,
   onLogs,
+  usage,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
   section: Pick<Section, "id" | "title">;
@@ -353,6 +354,7 @@ function BlockView({
   values: OverviewProps["values"];
   reveal: OverviewProps["reveal"];
   onLogs: OverviewProps["onLogs"];
+  usage: OverviewProps["usage"];
 }) {
   switch (block.type) {
     case "fields":
@@ -379,6 +381,7 @@ function BlockView({
           containers={block.containers}
           states={states}
           kind={kind}
+          usage={usage}
           onOpen={onOpen}
           groups={groups}
         />
@@ -423,14 +426,8 @@ function Fields({
         key: field.label,
         label: field.label,
         numeric: isNumeric(field.value),
-        value: field.default ? (
-          <span className="inline-flex flex-wrap items-baseline gap-x-1.5 text-support">
-            <ValueView value={field.value} onOpen={onOpen} />
-            <Chip className="text-2xs">default</Chip>
-          </span>
-        ) : (
-          <ValueView value={field.value} onOpen={onOpen} />
-        ),
+        ...rowOf(field.value),
+        value: <FieldValue field={field} onOpen={onOpen} />,
       }))}
     />
   );
@@ -448,14 +445,11 @@ const CONDITION: Readonly<
 /**
  * Conditions as chips that read at a glance (ARCHITECTURE 4.3): a mark in
  * the condition's tone, its type and its age, with its status, reason and
- * message in the chip's tooltip; what is wrong says why below them.
+ * message in the chip's tooltip; what is wrong and not yet said by the
+ * Diagnostics says why below them, once for conditions that say the same.
  */
 function Conditions({ conditions }: { conditions: readonly Condition[] }) {
-  const wrong = conditions.filter(
-    (condition) =>
-      (condition.tone === "danger" || condition.tone === "warning") &&
-      (condition.message ?? condition.reason) !== null,
-  );
+  const said = unexplained(conditions);
   return (
     <div className="flex flex-col gap-2">
       <ul className="flex flex-wrap gap-1.5">
@@ -485,18 +479,16 @@ function Conditions({ conditions }: { conditions: readonly Condition[] }) {
           );
         })}
       </ul>
-      {wrong.map((condition) => (
-        <p key={condition.type} className="break-words">
-          <span className="font-semibold">{condition.type}</span>
-          {condition.reason && (
-            <span className="text-support"> · {condition.reason}</span>
+      {said.map(({ types, reason, message }) => (
+        <div key={types.join(",")} className="flex flex-col">
+          <p className="break-words">
+            <span className="font-semibold">{types.join(", ")}</span>
+            {reason && <span className="text-support"> · {reason}</span>}
+          </p>
+          {message && (
+            <Prose text={message} className="text-prose text-content" />
           )}
-          {condition.message && (
-            <span className="block text-prose text-content">
-              {condition.message}
-            </span>
-          )}
-        </p>
+        </div>
       ))}
     </div>
   );
@@ -712,9 +704,7 @@ export function Events({ list }: { list: EventList }) {
                   <Age at={event.last} />
                 </span>
               </div>
-              <p className="text-prose break-words text-content">
-                {event.message}
-              </p>
+              <Prose text={event.message} className="text-prose text-content" />
               <p className="text-xs text-support">
                 {event.source}
                 {event.fieldPath && ` · ${event.fieldPath}`}

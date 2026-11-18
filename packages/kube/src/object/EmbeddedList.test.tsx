@@ -14,7 +14,7 @@ import { settle, withScreenSize } from "../../test/workbench";
 import { EmbeddedList } from "./EmbeddedList";
 import { OverviewStates } from "./overviewStates";
 
-withScreenSize();
+const layout = withScreenSize(1000);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -207,11 +207,11 @@ function measuredLate(width: number, after: number) {
 }
 
 test.each([
-  ["wide", 1000, [true]],
-  ["narrow", 400, [true, false]],
+  ["wide", 1000],
+  ["narrow", 400],
 ])(
-  "a node's pods sorted by CPU say they read from their first window, before their width is known, and a %s one goes on by it",
-  async (_, width, said) => {
+  "a node's pods sorted by CPU say they read from their first window, before their width is known, and a %s one goes on reading",
+  async (_, width) => {
     measuredLate(width, 500);
     const backend = createMockBackend("ready");
     const invoke = vi.spyOn(backend, "invoke");
@@ -220,9 +220,21 @@ test.each([
     await shown(NODE_PODS, vi.fn(), states, backend);
     expect(windows(invoke)).toEqual([true]);
     await act(() => vi.advanceTimersByTimeAsync(600));
-    expect(windows(invoke)).toEqual(said);
+    expect(windows(invoke)).toEqual([true]);
   },
 );
+
+test("a node's pods sorted by a column that has no metric stop reading once their width leaves no CPU or Memory", async () => {
+  measuredLate(400, 500);
+  const backend = createMockBackend("ready");
+  const invoke = vi.spyOn(backend, "invoke");
+  const states = new OverviewStates();
+  states.setSort("/nodes", "core.pods", { column: "Name", descending: false });
+  await shown(NODE_PODS, vi.fn(), states, backend);
+  expect(windows(invoke)).toEqual([true]);
+  await act(() => vi.advanceTimersByTimeAsync(600));
+  expect(windows(invoke)).toEqual([true, false]);
+});
 
 test("a node's pods read nothing while their editor is not shown", async () => {
   const backend = createMockBackend("ready");
@@ -300,4 +312,78 @@ test("a node's pod that is not ready and restarted within the hour warns in Read
       ) instanceof Element;
   expect([warns("a", "Ready"), warns("a", "Restarts")]).toEqual([true, false]);
   expect([warns("b", "Ready"), warns("b", "Restarts")]).toEqual([false, true]);
+});
+
+function listWrapper(): HTMLElement {
+  const wrapper = screen.getByRole("grid").parentElement?.parentElement;
+  if (!wrapper) throw new Error("the list's wrapper");
+  return wrapper;
+}
+
+function drawnAt(width: number): string[] {
+  layout.resize(listWrapper(), width);
+  return screen
+    .getAllByRole("columnheader")
+    .map(
+      (header) => header.firstElementChild?.textContent ?? header.textContent,
+    )
+    .filter((title) => title !== "");
+}
+
+const WIDTHS = [1100, 900, 800, 700, 600, 500, 400, 300];
+
+test("a node's pods give up columns in the list's order as the width falls, Ready into Status, and the name last, and take them back as it grows", async () => {
+  await shown(NODE_PODS, vi.fn());
+  const falling = WIDTHS.map(drawnAt);
+  expect(falling).toEqual([
+    [
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "Restarts",
+      "CPU",
+      "Memory",
+      "Age",
+    ],
+    [
+      "Name",
+      "Namespace",
+      "Ready",
+      "Status",
+      "Restarts",
+      "CPU",
+      "Memory",
+      "Age",
+    ],
+    ["Name", "Namespace", "Ready", "Status", "Restarts", "Age"],
+    ["Name", "Namespace", "Ready", "Status", "Restarts"],
+    ["Name", "Ready", "Status", "Restarts"],
+    ["Name", "Ready", "Status"],
+    ["Name", "Status"],
+    ["Name"],
+  ]);
+  const rising = [...WIDTHS].reverse().map(drawnAt).reverse();
+  expect(rising).toEqual(falling);
+});
+
+test("a node's pods read their CPU and Memory only while a column of them is drawn", async () => {
+  const backend = createMockBackend("ready");
+  const invoke = vi.spyOn(backend, "invoke");
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
+  expect(reads(invoke)).toBe(true);
+  drawnAt(700);
+  expect(reads(invoke)).toBe(false);
+  drawnAt(1000);
+  expect(reads(invoke)).toBe(true);
+});
+
+test("a list sorted by a column that has left says so in the name's header", async () => {
+  const states = new OverviewStates();
+  states.setSort("/nodes", "core.pods", { column: "CPU", descending: true });
+  await shown(NODE_PODS, vi.fn(), states);
+  drawnAt(700);
+  expect(
+    screen.getByRole("columnheader", { name: "Name" }).textContent,
+  ).toMatch(/Sorted by CPU, descending: the column has no room at this width/);
 });

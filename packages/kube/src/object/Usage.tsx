@@ -1,158 +1,183 @@
+import type { ReactNode } from "react";
 import type { Measure, ShownUsage } from "@twigo/protocol";
 import { EmptyMeter, Meter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
 import { Quantity } from "../Quantity";
-import { figure, type Figure, type Resource } from "./figures";
-
-const LABEL: Readonly<Record<Resource, string>> = {
-  cpu: "CPU",
-  memory: "Memory",
-};
+import { figure, LABEL, type Figure, type Resource } from "./figures";
 
 const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,11rem)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
 
-interface Subject {
-  /** What its meters are labelled with, and its heading when it has one. */
-  readonly name: string | null;
-  readonly cpu: Measure | null;
-  readonly memory: Measure | null;
-}
-
 /**
- * What a pod or a node uses (ARCHITECTURE 4.3): a pod's total and each of
- * its containers, a node against what it can allocate. A row without a
- * sample says no data yet, never zero, and a Metrics API that gives none
- * says so in place. A usage that waits for its first answer draws the rows
- * it names with empty meters, so the answer moves nothing below it.
+ * What a node uses (ARCHITECTURE 4.3), against what it can allocate. A row
+ * without a sample says no data yet, never zero, and a Metrics API that
+ * gives none says so in place. A usage that waits for its first answer draws
+ * its rows with empty meters, so the answer moves nothing below it.
  */
-export function UsageView({
-  usage,
-  node,
-}: {
-  usage: ShownUsage;
-  node: boolean;
-}) {
-  if (usage.state !== "ready") return <Said state={usage.state} />;
-  const subjectOf = (name: string | null, cpu: Measure, memory: Measure) =>
-    usage.waiting ? { name, cpu: null, memory: null } : { name, cpu, memory };
-  const subjects: readonly Subject[] = node
-    ? [subjectOf(null, usage.cpu, usage.memory)]
-    : [
-        subjectOf("Pod", usage.cpu, usage.memory),
-        ...usage.containers.map(({ name, cpu, memory }) =>
-          subjectOf(name, cpu, memory),
-        ),
-      ];
+export function UsageView({ usage }: { usage: ShownUsage }) {
+  if (usage.state !== "ready") return <UsageNote state={usage.state} />;
+  const measures = usage.waiting
+    ? { cpu: null, memory: null }
+    : { cpu: usage.cpu, memory: usage.memory };
   return (
     <div className={GRID}>
-      {subjects.map((subject) => (
-        <Rows key={subject.name ?? ""} subject={subject} />
+      {(["cpu", "memory"] as const).map((resource) => (
+        <NodeRow
+          key={resource}
+          resource={resource}
+          measure={measures[resource]}
+        />
       ))}
     </div>
   );
 }
 
-function Said({ state }: { state: Exclude<ShownUsage["state"], "ready"> }) {
+export function UsageNote({
+  state,
+}: {
+  state: Exclude<ShownUsage["state"], "ready">;
+}) {
   return <p className="text-support">{METRICS_NOTES[state]}</p>;
 }
 
-function Rows({ subject }: { subject: Subject }) {
-  return (
-    <>
-      {subject.name !== null && (
-        <span className="col-span-4 mt-2 text-xs font-semibold text-support first:mt-0">
-          {subject.name}
-        </span>
-      )}
-      <Row resource="cpu" measure={subject.cpu} name={subject.name} />
-      <Row resource="memory" measure={subject.memory} name={subject.name} />
-    </>
-  );
+interface Parts {
+  readonly shown: Figure;
+  readonly used: string;
+  readonly meter: ReactNode;
 }
 
-function Row({
+function partsOf(
+  resource: Resource,
+  shown: Figure,
+  name: string | null,
+  className?: string,
+): Parts | "no data" {
+  if (shown.used === null) return "no data";
+  return {
+    shown,
+    used: shown.used,
+    meter: shown.bar ? (
+      <Meter
+        label={subject(resource, name)}
+        valueText={spoken(shown)}
+        {...shown.bar}
+        {...(shown.tone && { tone: shown.tone })}
+        {...(className !== undefined && { className })}
+      />
+    ) : null,
+  };
+}
+
+const subject = (resource: Resource, name: string | null) =>
+  name === null ? LABEL[resource] : `${LABEL[resource]} of ${name}`;
+
+function NodeRow({
   resource,
   measure,
-  name,
 }: {
   resource: Resource;
   measure: Measure | null;
-  name: string | null;
 }) {
-  const label = LABEL[resource];
+  const label = (
+    <span className="text-label text-support">{LABEL[resource]}</span>
+  );
   if (measure === null) {
     return (
       <>
-        <span className="text-label text-support">{label}</span>
-        <EmptyMeter label={name === null ? label : `${label} of ${name}`} />
+        {label}
+        <EmptyMeter label={subject(resource, null)} />
         <span aria-hidden className="col-span-2">
-          {"\u00a0"}
+          {" "}
         </span>
       </>
     );
   }
-  const shown = figure(resource, measure);
-  return (
-    <>
-      <span className="text-label text-support">{label}</span>
-      {shown.used === null ? (
-        <span className="col-span-3 text-support">No data yet</span>
-      ) : (
-        <>
-          {shown.bar ? (
-            <Meter
-              label={name === null ? label : `${label} of ${name}`}
-              valueText={spoken(shown)}
-              {...shown.bar}
-              {...(shown.tone && { tone: shown.tone })}
-            />
-          ) : (
-            <span />
-          )}
-          <span className="tabular-nums">
-            <Quantity text={shown.used} />
-            <span className="text-support">
-              <Details shown={shown} />
-            </span>
-          </span>
-          <Percent shown={shown} />
-        </>
-      )}
-    </>
-  );
-}
-
-function Details({
-  shown: { base, limit, request, allocatable },
-}: {
-  shown: Figure;
-}) {
-  if (base === "allocatable") {
+  const parts = partsOf(resource, figure(resource, measure), null);
+  if (parts === "no data") {
     return (
       <>
-        {" of "}
-        <Quantity text={allocatable ?? ""} />
+        {label}
+        <span className="col-span-3 text-support">No data yet</span>
       </>
     );
   }
   return (
     <>
-      {" · "}
-      {limit === null ? (
-        "no limit"
-      ) : (
-        <>
-          {"limit "}
-          <Quantity text={limit} />
-        </>
-      )}
-      {request !== null && (
-        <>
-          {" · request "}
-          <Quantity text={request} />
-        </>
-      )}
+      {label}
+      {parts.meter ?? <span />}
+      <span className="tabular-nums">
+        <Quantity text={parts.used} />
+        <span className="text-support">
+          <Allocatable shown={parts.shown} />
+        </span>
+      </span>
+      <Percent shown={parts.shown} />
+    </>
+  );
+}
+
+const METER = "w-20";
+
+/**
+ * A container's CPU or Memory in one form whatever it has to say, so that no
+ * answer moves what is below it: two lines, each holding the height of a line
+ * of text while it is empty. With something to hold the figure against, the
+ * first line is the meter and how much of its base the container uses, and the
+ * second the figure itself; a container that has neither request nor limit has
+ * the figure alone, on the first line. While the usage waits, the meter is
+ * empty where a base exists and the line is bare where none does.
+ */
+export function ContainerMeter({
+  resource,
+  measure,
+  waiting,
+  name,
+}: {
+  resource: Resource;
+  measure: Measure;
+  waiting: boolean;
+  name: string;
+}) {
+  const shown = figure(resource, measure);
+  const parts = waiting ? null : partsOf(resource, shown, name, METER);
+  const based = shown.base !== null;
+  return (
+    <span className="flex flex-col">
+      <span className="flex min-h-lh items-center gap-2">
+        {parts === null ? (
+          based ? (
+            <EmptyMeter label={subject(resource, name)} className={METER} />
+          ) : (
+            <span aria-hidden>{"\u200b"}</span>
+          )
+        ) : parts === "no data" ? (
+          <span className="text-support">No data yet</span>
+        ) : based ? (
+          <>
+            {parts.meter}
+            <Percent shown={shown} said />
+          </>
+        ) : (
+          <span className="tabular-nums">
+            <Quantity text={parts.used} />
+          </span>
+        )}
+      </span>
+      <span className="min-h-lh whitespace-nowrap tabular-nums">
+        {parts !== null && parts !== "no data" && based && (
+          <Quantity text={parts.used} />
+        )}
+      </span>
+    </span>
+  );
+}
+
+function Allocatable({ shown: { base, allocatable } }: { shown: Figure }) {
+  if (base !== "allocatable") return null;
+  return (
+    <>
+      {" of "}
+      <Quantity text={allocatable ?? ""} />
     </>
   );
 }
@@ -173,16 +198,23 @@ function spoken(shown: Figure): string {
     .join(", ");
 }
 
-function Percent({ shown }: { shown: Figure }) {
+/** The share of its base, with the base in words where nothing else says it. */
+function Percent({ shown, said = false }: { shown: Figure; said?: boolean }) {
   if (shown.percent === null || shown.base === null) return <span />;
   const { tone } = shown;
   return (
     <span
-      title={`of ${OF[shown.base]}`}
-      className="inline-flex items-center justify-end gap-1 tabular-nums"
+      title={said ? undefined : `of ${OF[shown.base]}`}
+      className="inline-flex items-center justify-end gap-1 whitespace-nowrap tabular-nums"
     >
       {tone && <StatusDot tone={tone} label={TONE_WORDS[tone]} />}
       <TonedText tone={tone ?? "idle"}>{shown.percent}%</TonedText>
+      {said && (
+        <>
+          {" "}
+          <span className="text-support">of {OF[shown.base]}</span>
+        </>
+      )}
     </span>
   );
 }

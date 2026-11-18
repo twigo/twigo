@@ -71,12 +71,13 @@ export function ObjectViews({
   const text = pages.text(uri);
   const { filter, invalid } = useMemo(() => compile(text), [text]);
   const { overview, usage } = snapshot;
+  const usageSection = usage !== undefined && kind === "Node";
   const found = useMemo(
     () =>
       filter && overview
-        ? matchesIn(overview, filter, usage !== undefined)
+        ? matchesIn(overview, filter, usageSection)
         : undefined,
-    [filter, overview, usage],
+    [filter, overview, usageSection],
   );
   const field = useRef<HTMLInputElement>(null);
   const wanted = pages.wantsFocus(uri);

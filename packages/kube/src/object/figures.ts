@@ -3,6 +3,11 @@ import { formatCpu, formatMemory } from "@twigo/utils";
 
 export type Resource = "cpu" | "memory";
 
+export const LABEL: Readonly<Record<Resource, string>> = {
+  cpu: "CPU",
+  memory: "Memory",
+};
+
 /** The printed percent of its limit, or of what a node can allocate, from which a measure is a warning. */
 const WARN_FROM = 90;
 /** The printed percent at which it is an error: at the limit or past it. */

@@ -4,9 +4,10 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Overview as Document } from "@twigo/protocol";
+import type { Condition, Overview as Document, Value } from "@twigo/protocol";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
 import { PageStates } from "./pageStates";
@@ -467,9 +468,77 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
       (reason) => reason.textContent,
     ),
   ).toEqual([
-    "Ready · ContainersNotReadycontainers with unready status: [api]",
+    "Ready · ContainersNotReady",
+    "containers with unready status: [api]",
     "DisruptionTarget · EvictionByEvictionAPI",
   ]);
+});
+
+function condition(type: string, rest: Partial<Condition> = {}): Condition {
+  return {
+    type,
+    status: "False",
+    tone: "danger",
+    reason: "ContainersNotReady",
+    message: "containers with unready status: [api]",
+    lastTransition: AT,
+    lastHeartbeat: null,
+    explained: false,
+    ...rest,
+  };
+}
+
+function conditionLines(conditions: Condition[]) {
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={{
+        header: {
+          owner: null,
+          node: null,
+          created: null,
+          printed: [],
+          sentence: [],
+          vitals: [],
+        },
+        sections: [
+          {
+            id: "core.conditions",
+            title: "Conditions",
+            summary: [],
+            tone: null,
+            fold: "open",
+            blocks: [{ type: "conditions", conditions }],
+          },
+        ],
+      }}
+      onOpen={() => undefined}
+    />,
+  );
+  return [...document.querySelectorAll("p:not([aria-live])")].map(
+    (line) => line.textContent,
+  );
+}
+
+test("two wrong conditions that say the same share one line, and one the Diagnostics explain has none", () => {
+  expect(
+    conditionLines([
+      condition("Ready"),
+      condition("ContainersReady"),
+      condition("PodScheduled", {
+        reason: "Unschedulable",
+        message: "0/3 nodes are available",
+        explained: true,
+      }),
+    ]),
+  ).toEqual([
+    "Ready, ContainersReady · ContainersNotReady",
+    "containers with unready status: [api]",
+  ]);
+  expect(screen.getAllByRole("listitem")).toHaveLength(3);
 });
 
 test("a Secret's value reaches the DOM only through a Reveal, and leaves it on Hide", async () => {
@@ -581,4 +650,133 @@ test("an answer that comes after the row moved to another Secret is dropped", as
   expect(document.body.textContent).not.toContain("hunter2");
   rerender(shown(slow));
   expect(document.body.textContent).not.toContain("hunter2");
+});
+
+function fields(...rows: [string, Value][]): Document {
+  return {
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
+    sections: [
+      {
+        id: "core.pod",
+        title: "Pod",
+        summary: [],
+        tone: null,
+        fold: "open",
+        blocks: [
+          {
+            type: "fields",
+            fields: rows.map(([label, value]) => ({
+              label,
+              value,
+              default: false,
+            })),
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test("a long value stacks under its label and a short one stays beside it, each row with a copy icon that gives what the rule says", () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const image = "docker.io/kindest/local-path-helper:v20260131-7181c60a";
+  const at = "2026-11-03T12:13:01Z";
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={fields(
+        ["Image", { type: "code", text: image }],
+        ["Phase", { type: "text", text: "Running" }],
+        ["Started", { type: "time", at }],
+        ["Pod IP", { type: "text", text: "" }],
+      )}
+      onOpen={() => undefined}
+    />,
+  );
+  const labelOf = (name: string) => {
+    const label = screen.getByText(name).closest("dt");
+    if (!label) throw new Error(`no label ${name}`);
+    return label;
+  };
+  expect(
+    within(labelOf("Image")).getByRole("button", {
+      name: "Copy value of Image",
+    }),
+  ).toBeTruthy();
+  expect(within(labelOf("Phase")).queryByRole("button")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Copy value of Phase" }).closest("dd"),
+  ).not.toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Copy value of Pod IP" }),
+  ).toBeNull();
+  for (const name of ["Image", "Started"]) {
+    fireEvent.click(
+      screen.getByRole("button", { name: `Copy value of ${name}` }),
+    );
+  }
+  expect(writeText.mock.calls).toEqual([[image], [at]]);
+});
+
+test("a default that stacks keeps its support role and its tag, and its copy icon gives the value alone", () => {
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const text = "a default long enough to stack under its label, past the forty";
+  const page: Document = fields();
+  const [section] = page.sections;
+  if (!section) throw new Error("no section");
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={{
+        ...page,
+        sections: [
+          {
+            ...section,
+            blocks: [
+              {
+                type: "fields",
+                fields: [
+                  {
+                    label: "Policy",
+                    value: { type: "text", text },
+                    default: true,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }}
+      onOpen={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "1 default" }));
+  const label = screen.getByText("Policy").closest("dt");
+  const value = screen.getByText(text);
+  expect(label?.querySelector("button")).not.toBeNull();
+  expect(value.parentElement?.className).toContain("text-support");
+  expect(value.parentElement?.textContent).toBe(`${text}default`);
+  fireEvent.click(screen.getByRole("button", { name: "Copy value of Policy" }));
+  expect(writeText).toHaveBeenCalledWith(text);
 });

@@ -6,6 +6,7 @@ import type {
   Row,
 } from "@twigo/protocol";
 import {
+  ACTIONS_WIDTH,
   Count,
   DataGrid,
   EmptyState,
@@ -27,11 +28,12 @@ import {
   rowFinished,
   rowTone,
   statusColumn,
-  type CellKind,
+  type ColumnRule,
 } from "../columns";
 import { kindIcon } from "../kinds";
 import { decideRows } from "../list/alarm";
-import { CellView, type ShownColumn } from "../list/cells";
+import { CellView } from "../list/cells";
+import { fitColumns, lostSort } from "../list/fit";
 import { SHOWS_ROWS } from "../list/listStatus";
 import { metricsNote, readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
@@ -52,15 +54,15 @@ const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
 const HEADER = 28;
-/** Narrower than this, as in the details beside a list, it keeps fewer columns. */
-const WIDE = 640;
-const NARROW: ReadonlySet<CellKind> = new Set(["name", "ratio", "status"]);
+/** The frame's border on each side of the grid. */
+const FRAME_BORDER = 2;
 
 /**
  * A live list inside an Overview (ARCHITECTURE 4.3), such as a workload's
  * pods: a query view of the object's space like any list, with the
  * columns the server prints first, its rows counted by their status, and
- * a row opening its object.
+ * a row opening its object. As its width falls its columns leave in the
+ * order a list's do (4.4).
  */
 export function EmbeddedList({
   list,
@@ -110,25 +112,39 @@ export function EmbeddedList({
   const [element, setElement] = useState<HTMLElement | null>(null);
   // 0 until the first measure, which comes after the first window.
   const width = useWidth(element);
-  const narrow = width > 0 && width < WIDE;
   const every = snapshot.columns.map((column, index) => ({
     name: column.name,
     index,
     rule: columnRule(gvr, column),
     priority: column.priority,
   }));
-  const columns: readonly ShownColumn[] = every.filter(
-    (column) =>
-      column.name === "Name" ||
-      (column.priority === 0 && (!narrow || NARROW.has(column.rule.cell))),
+  const widthOf = (column: { name: string; rule: ColumnRule }) =>
+    widths[column.name] ?? column.rule.width;
+  const { columns, gone } = fitColumns(
+    every.filter((column) => column.name === "Name" || column.priority === 0),
+    widthOf,
+    width > 0 ? width - FRAME_BORDER - ACTIONS_WIDTH : Infinity,
   );
   const byName = new Map(columns.map((column) => [column.name, column]));
+  const mergedRoom = (name: string) =>
+    byName.get(name)?.merged?.rule.into?.room ?? 0;
+  const widened = Object.fromEntries(
+    columns
+      .filter((column) => column.merged && widths[column.name] !== undefined)
+      .map((column) => [
+        column.name,
+        widthOf(column) + mergedRoom(column.name),
+      ]),
+  );
+  const sortLost = lostSort(sort, gone);
   const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note = metricsNote(snapshot.metrics, column);
+    const note =
+      metricsNote(snapshot.metrics, column) ??
+      (column.name === "Name" ? sortLost : undefined);
     return {
       id: column.name,
       title: column.name,
-      width: column.rule.width,
+      width: widthOf(column) + mergedRoom(column.name),
       grow: column.rule.grow,
       align: column.rule.align,
       numeric: column.rule.figures,
@@ -143,7 +159,7 @@ export function EmbeddedList({
         : undefined,
     drawn: (name) => byName.has(name),
     sort,
-    visible: visible && !narrow,
+    visible,
   });
   useEffect(() => {
     setMetrics(reads);
@@ -225,7 +241,7 @@ export function EmbeddedList({
         <DataGrid<Row, never>
           label={gvr.resource}
           columns={gridColumns}
-          widths={widths}
+          widths={{ ...widths, ...widened }}
           onResize={(column, width) => {
             states.resize(kind, id, column, width);
           }}

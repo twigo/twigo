@@ -11,11 +11,13 @@ export const OBJECT_FILTERED = "object.filtered";
  * What a page's filter makes of the groups in a part of its sections, which
  * the part draws open or folded: `open` says whether the group named `id` is
  * open where, without the filter, it would be `normally`, and `set` is the
- * person opening or folding it under the filter's text.
+ * person opening or folding it under the filter's text. A group it
+ * `narrowed` draws the rows it kept, the cluster's defaults among them.
  */
 export interface GroupFolds {
   open(id: string, normally: boolean): boolean;
   set(id: string, open: boolean): void;
+  narrowed(id: string): boolean;
 }
 
 /** Where a page was scrolled to: the section at the top of its viewport and how far into it. */

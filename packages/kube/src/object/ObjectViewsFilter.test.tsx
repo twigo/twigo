@@ -6,7 +6,11 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import { INITIAL_OBJECT, type ObjectSnapshot } from "@twigo/protocol";
+import {
+  INITIAL_OBJECT,
+  type ObjectSnapshot,
+  type ShownUsage,
+} from "@twigo/protocol";
 import { withScreenSize } from "../../test/workbench";
 import { ObjectViews } from "./ObjectViews";
 import { PageStates } from "./pageStates";
@@ -57,7 +61,8 @@ function shown(
   {
     focused = false,
     of = snapshot,
-  }: { focused?: boolean; of?: ObjectSnapshot } = {},
+    kind = "Pod",
+  }: { focused?: boolean; of?: ObjectSnapshot; kind?: string } = {},
 ) {
   const pages = new PageStates();
   pages.openFilter(URI);
@@ -70,7 +75,7 @@ function shown(
       onChange={() => undefined}
       pages={pages}
       uri={URI}
-      kind="Pod"
+      kind={kind}
     />
   );
   const { rerender } = render(views(of));
@@ -326,4 +331,22 @@ test("a page that finds more than the count's room, and warnings with more digit
   expect(stage()).toBe(chosen);
   rerender(crowded());
   expect(stage()).toBe(chosen);
+});
+
+const usage: ShownUsage = {
+  state: "ready",
+  waiting: false,
+  sampled: null,
+  cpu: { used: null, request: null, limit: null, allocatable: null },
+  memory: { used: null, request: null, limit: null, allocatable: null },
+  containers: [],
+};
+
+test("a node's usage is a section the count finds by its title, and a pod's, which its containers draw, is none", () => {
+  const withUsage = { ...snapshot, usage };
+  shown("usage", { of: withUsage, kind: "Node" });
+  expect(status().textContent).toBe("1 match in 1 section");
+  cleanup();
+  shown("usage", { of: withUsage });
+  expect(status().textContent).toBe("No matches");
 });

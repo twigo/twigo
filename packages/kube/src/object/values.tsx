@@ -1,10 +1,25 @@
 import { useState, type ReactNode } from "react";
-import type { ObjectRef, Span, Value } from "@twigo/protocol";
-import { Chip, cn, LinkButton, TonedText } from "@twigo/ui";
+import type { Label, ObjectRef, Span, Value } from "@twigo/protocol";
+import { cn, CutInTheMiddle, LinkButton, TonedText } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole } from "../age";
 import { useNow } from "../useNow";
+import { splitImage } from "./image";
+import { LABELS_SHOWN, splitKey, valueFold } from "./labels";
+import { lineCount } from "./lines";
+import { isEmpty } from "./stacking";
 import { TONE } from "./tone";
+
+const NAME_FLOOR = 24;
+
+const PROSE_LINES = 3;
+
+/** A wrapped line starts under the first line's text, so that a long item does not read as two. */
+const HANGING = "pl-3 -indent-3";
+
+function Empty() {
+  return <span className="text-quiet">–</span>;
+}
 
 /** A value of the Overview document, a link opening its object. */
 export function ValueView({
@@ -17,6 +32,7 @@ export function ValueView({
   /** In a table cell: a time as its age alone, its date in its tooltip. */
   compact?: boolean;
 }): ReactNode {
+  if (isEmpty(value)) return <Empty />;
   switch (value.type) {
     case "text":
       return compact ? (
@@ -49,24 +65,21 @@ export function ValueView({
           onClick={() => {
             onOpen(value.target);
           }}
-          className="ident break-all"
+          className="ident block max-w-full"
         >
-          {value.text}
+          <CutInTheMiddle text={value.text} floor={NAME_FLOOR} separator="-" />
         </LinkButton>
       );
     case "labels":
-      return (
-        <ul className="flex flex-wrap gap-1">
-          {value.labels.map((label) => (
-            <LabelChip key={label.key} name={label.key} value={label.value} />
-          ))}
-        </ul>
-      );
+      return <Labels labels={value.labels} />;
     case "list":
       return (
-        <ul className="flex flex-col">
+        <ul className="flex flex-col gap-1">
           {value.items.map((item, index) => (
-            <li key={index}>
+            <li
+              key={index}
+              className={item.type === "link" ? undefined : HANGING}
+            >
               <ValueView value={item} onOpen={onOpen} compact={compact} />
             </li>
           ))}
@@ -75,24 +88,52 @@ export function ValueView({
   }
 }
 
-/** Long and multiline values fold to one line and open whole on a click. */
-function LabelChip({ name, value }: { name: string; value: string }) {
-  const long = value.length > 60 || value.includes("\n");
+function Labels({ labels }: { labels: readonly Label[] }) {
+  const [all, setAll] = useState(false);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <ul className="flex w-full flex-col gap-1">
+        {(all ? labels : labels.slice(0, LABELS_SHOWN)).map((label) => (
+          <LabelLine key={label.key} label={label} />
+        ))}
+      </ul>
+      {labels.length > LABELS_SHOWN && (
+        <button
+          type="button"
+          aria-expanded={all}
+          onClick={() => {
+            setAll(!all);
+          }}
+          className="rounded-sm text-xs text-support outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
+        >
+          {all ? "Show fewer" : `Show all ${String(labels.length)}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function LabelLine({ label: { key, value } }: { label: Label }) {
+  const fold = valueFold(key, value);
   const [open, setOpen] = useState(false);
-  const chip = (
+  const { prefix, name } = splitKey(key);
+  const text = (
     <>
-      <span className="text-support">{name}</span>
-      {value !== "" && <span>={value}</span>}
+      <span className="text-quiet">{prefix}</span>
+      <span>{name}</span>
+      {value !== "" && <span className="text-quiet">=</span>}
+      {fold === "hidden" && !open ? (
+        <span className="text-quiet">…</span>
+      ) : (
+        value
+      )}
     </>
   );
-  if (!long)
-    return (
-      <li className="max-w-full">
-        <Chip>{chip}</Chip>
-      </li>
-    );
+  const line = "ident block text-xs break-all";
+  if (fold === "whole")
+    return <li className={cn(line, HANGING, "whitespace-pre-wrap")}>{text}</li>;
   return (
-    <li className="max-w-full">
+    <li>
       <button
         type="button"
         aria-expanded={open}
@@ -100,11 +141,19 @@ function LabelChip({ name, value }: { name: string; value: string }) {
           setOpen(!open);
         }}
         className={cn(
-          "max-w-full rounded-sm bg-muted px-1.5 py-px text-left text-xs",
-          open ? "break-all whitespace-pre-wrap" : "block truncate",
+          line,
+          "w-full cursor-pointer rounded-sm text-left outline-none focus-visible:shadow-[var(--focus-ring)]",
         )}
       >
-        {chip}
+        <span
+          className={cn(
+            "block",
+            HANGING,
+            open ? "whitespace-pre-wrap" : "line-clamp-2",
+          )}
+        >
+          {text}
+        </span>
       </button>
     </li>
   );
@@ -114,13 +163,58 @@ function Time({ at }: { at: string }) {
   const now = useNow();
   const when = Date.parse(at);
   if (Number.isNaN(when)) return <span>{at}</span>;
-  const date = new Date(when).toLocaleString();
   const age = Math.max(0, now - when);
   return (
-    <span title={date}>
-      <span className={ageRole(age)}>{humanDuration(age)} ago</span>
-      <span className="ml-2 text-quiet">{date}</span>
+    <span title={new Date(when).toLocaleString()} className={ageRole(age)}>
+      {humanDuration(age)} ago
     </span>
+  );
+}
+
+export function ImageName({ image }: { image: string }) {
+  const { path, name, digest } = splitImage(image);
+  return (
+    <code title={image} className="font-mono text-xs break-all">
+      {path !== "" && <span className="text-quiet">{path}</span>}
+      <span className="text-content">{name}</span>
+      {digest !== "" && <span className="text-quiet">{digest}</span>}
+    </code>
+  );
+}
+
+export function Prose({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const folds = lineCount(text) > PROSE_LINES;
+  return (
+    <div className="flex max-w-160 flex-col items-start">
+      <p
+        className={cn(
+          "w-full break-words",
+          folds && !open && "line-clamp-3",
+          className,
+        )}
+      >
+        {text}
+      </p>
+      {folds && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+          }}
+          className="rounded-sm text-xs text-support outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
+        >
+          {open ? "less" : "more"}
+        </button>
+      )}
+    </div>
   );
 }
 

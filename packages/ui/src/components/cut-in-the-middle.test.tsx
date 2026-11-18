@@ -11,10 +11,18 @@ const parts = (container: HTMLElement) =>
 
 test("a text past its floor is three parts, the head and the tail whole and the middle between them, which CSS cuts", () => {
   const { container } = render(
-    <CutInTheMiddle text="payments-api-production" floor={16} separator="-" />,
+    <CutInTheMiddle
+      text="payments-api-production-checkout"
+      floor={16}
+      separator="-"
+    />,
   );
-  expect(parts(container)).toEqual(["paymen", "ts-api-", "production"]);
-  expect(container.textContent).toBe("payments-api-production");
+  expect(parts(container)).toEqual([
+    "payments",
+    "-api-production-",
+    "checkout",
+  ]);
+  expect(container.textContent).toBe("payments-api-production-checkout");
 });
 
 test("a text within its floor is one piece", () => {
@@ -23,4 +31,48 @@ test("a text within its floor is one piece", () => {
   );
   expect(parts(container)).toEqual([]);
   expect(container.textContent).toBe("payments");
+});
+
+test("a text whose middle measures 2em or less is one piece, so the track leaves no gap, and one a character more is cut", () => {
+  const whole = render(
+    <CutInTheMiddle
+      text="kubernetes12ilitcontrolplane"
+      floor={24}
+      separator="-"
+    />,
+  );
+  expect(parts(whole.container)).toEqual([]);
+  expect(whole.container.textContent).toBe("kubernetes12ilitcontrolplane");
+  const cut = render(
+    <CutInTheMiddle
+      text="kubernetes12ilitscontrolplane"
+      floor={24}
+      separator="-"
+    />,
+  );
+  expect(parts(cut.container)).toEqual([
+    "kubernetes12",
+    "ilits",
+    "controlplane",
+  ]);
+});
+
+test("the middle is measured in the font of the element, so the same text takes fewer em at a larger size", () => {
+  const text = "kubernetes12ilitscontrolplane";
+  const small = render(
+    <div style={{ fontSize: "16px" }}>
+      <CutInTheMiddle text={text} floor={24} separator="-" />
+    </div>,
+  );
+  const large = render(
+    <div style={{ fontSize: "40px" }}>
+      <CutInTheMiddle text={text} floor={24} separator="-" />
+    </div>,
+  );
+  const middleOf = (container: HTMLElement) =>
+    [...(container.firstElementChild?.firstElementChild?.children ?? [])].map(
+      (part) => part.textContent,
+    );
+  expect(middleOf(small.container)).toHaveLength(3);
+  expect(middleOf(large.container)).toEqual([]);
 });

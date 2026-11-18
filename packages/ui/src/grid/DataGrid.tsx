@@ -29,7 +29,7 @@ import type { GridColumn, GridItem, GridSort } from "./types";
 export const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 28;
 const MARK_WIDTH = 28;
-const ACTIONS_WIDTH = 32;
+export const ACTIONS_WIDTH = 32;
 /** What a grid with marks takes beside its columns. */
 export const GUTTERS_WIDTH = MARK_WIDTH + ACTIONS_WIDTH;
 /**

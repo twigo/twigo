@@ -50,8 +50,8 @@ import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { decideRows } from "./alarm";
-import { CellView, type ShownColumn } from "./cells";
-import { leaving } from "./fit";
+import { CellView } from "./cells";
+import { fitColumns, lostSort } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
 import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
 import { namespacesOf, whereWords } from "./scope";
@@ -215,29 +215,11 @@ function Grid({
   );
   const widthOf = (column: { name: string; rule: ColumnRule }) =>
     preset.widths[column.name] ?? column.rule.width;
-  const gone = leaving(
-    chosen
-      .filter((column) => column.name === "Name")
-      .reduce((sum, column) => sum + widthOf(column), 0),
-    chosen
-      .filter((column) => column.name !== "Name")
-      .map((column) => ({
-        name: column.name,
-        width: widthOf(column),
-        drop: column.rule.drop,
-        ...(column.rule.into && { into: column.rule.into }),
-      })),
+  const { columns, gone } = fitColumns(
+    chosen,
+    widthOf,
     width > 0 ? width - GUTTERS_WIDTH : Infinity,
   );
-  const columns: readonly ShownColumn[] = chosen
-    .filter((column) => !gone.has(column.name))
-    .map((column) => {
-      const merged = chosen.find(
-        (other) =>
-          gone.has(other.name) && other.rule.into?.column === column.name,
-      );
-      return merged ? { ...column, merged } : column;
-    });
   const byName = new Map(columns.map((column) => [column.name, column]));
   const mergedRoom = (name: string) =>
     byName.get(name)?.merged?.rule.into?.room ?? 0;
@@ -252,10 +234,7 @@ function Grid({
       ]),
   );
   const sorted = shown?.sort;
-  const sortLost =
-    sorted && gone.has(sorted.column)
-      ? `Sorted by ${sorted.column}, ${sorted.descending ? "descending" : "ascending"}: the column has no room at this width.`
-      : undefined;
+  const sortLost = lostSort(sorted, gone);
   const gridColumns: readonly GridColumn[] = columns.map((column) => {
     const note =
       metricsNote(snapshot.metrics, column) ??

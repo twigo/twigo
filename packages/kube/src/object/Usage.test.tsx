@@ -132,15 +132,28 @@ const CONTAINER = (name: string): Container => ({
   mounts: [],
 });
 
-const LISTED: Document = {
-  header: {
-    owner: null,
-    node: null,
-    created: null,
-    printed: [],
-    sentence: [],
-    vitals: [],
+const RUNNING = (name: string): Container => ({
+  ...CONTAINER(name),
+  state: {
+    text: "Running",
+    tone: "success",
+    ready: true,
+    running: true,
+    restarts: 0,
   },
+});
+
+const HEADER: Document["header"] = {
+  owner: null,
+  node: null,
+  created: null,
+  printed: [],
+  sentence: [],
+  vitals: [],
+};
+
+const POD_OF = (...containers: Container[]): Document => ({
+  header: HEADER,
   sections: [
     SECTION("core.pod"),
     {
@@ -149,20 +162,17 @@ const LISTED: Document = {
       summary: [],
       tone: null,
       fold: "open",
-      blocks: [
-        {
-          type: "containers",
-          containers: [
-            { ...CONTAINER("init-config"), role: "init" },
-            CONTAINER("api"),
-            CONTAINER("proxy"),
-          ],
-        },
-      ],
+      blocks: [{ type: "containers", containers }],
     },
     SECTION("core.metadata"),
   ],
-};
+});
+
+const LISTED = POD_OF(
+  { ...RUNNING("init-config"), role: "init" },
+  RUNNING("api"),
+  RUNNING("proxy"),
+);
 
 function shown(
   usage: ShownUsage | undefined,
@@ -174,14 +184,7 @@ function shown(
     <Overview
       {...PAGE}
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: HEADER,
         sections: [SECTION(first), SECTION("core.metadata")],
       }}
       space="prod-eu"
@@ -218,29 +221,48 @@ function listed(
 }
 
 const usageSection = () => screen.getByRole("region", { name: "Usage" });
-test("a pod's usage is a section of its own with its total and each container against request and limit", () => {
-  shown(POD);
-  const section = usageSection();
-  expect(within(section).getByText("Pod")).toBeTruthy();
-  expect(within(section).getByText("api")).toBeTruthy();
-  expect(within(section).getByText("proxy")).toBeTruthy();
-  const total = within(section).getAllByRole("meter");
-  expect(total.map((meter) => meter.getAttribute("aria-label"))).toEqual([
-    "CPU of Pod",
-    "Memory of Pod",
+const containersSection = () =>
+  screen.getByRole("region", { name: "Containers" });
+const labels = () =>
+  within(containersSection()).getAllByText(/^(CPU|Memory)$/).length;
+const lines = (scope: HTMLElement) =>
+  [...scope.querySelectorAll("dd")]
+    .filter((value) =>
+      /^(CPU|Memory)$/.test(value.previousElementSibling?.textContent ?? ""),
+    )
+    .map((value) =>
+      [...(value.firstElementChild?.children ?? [])].map((line) =>
+        line.textContent.replace(/\u200b/g, ""),
+      ),
+    );
+const meterNames = (scope: HTMLElement) =>
+  within(scope)
+    .getAllByRole("meter")
+    .map((meter) => meter.getAttribute("aria-label"));
+
+test("each container draws its own CPU and Memory against request and limit, and a pod has no usage section", () => {
+  listed(POD);
+  expect(screen.queryByRole("region", { name: "Usage" })).toBeNull();
+  const section = containersSection();
+  expect(meterNames(section)).toEqual([
     "CPU of api",
     "Memory of api",
     "CPU of proxy",
     "Memory of proxy",
   ]);
-  expect(section.textContent).toContain("120m · no limit · request 100m");
-  expect(section.textContent).toContain("90Mi · limit 128Mi · request 64Mi");
-  expect(section.textContent).toContain("100m · limit 400m · request 100m");
-  expect(section.textContent).toContain("20m · no limit · request 16m");
+  expect(within(section).queryByText("Pod")).toBeNull();
+  expect(lines(section)).toEqual([
+    ["No data yet", ""],
+    ["No data yet", ""],
+    ["25% of limit", "100m"],
+    ["46% of limit", "60Mi"],
+    ["125% of request", "20m"],
+    ["93% of limit", "30Mi"],
+  ]);
   expect(
-    screen
-      .queryByRole("meter", { name: "CPU of proxy" })
-      ?.getAttribute("aria-valuemax"),
+    within(section)
+      .getByRole("meter", { name: "CPU of proxy" })
+      .getAttribute("aria-valuemax"),
   ).toBe("25000000");
 });
 
@@ -254,54 +276,58 @@ test("a node's usage is held against what it can allocate, with kubectl's percen
   expect(section.textContent).toContain("93%");
 });
 
+const NEAR = {
+  name: "near",
+  cpu: measure({ used: 10_000_000, limit: 100_000_000 }),
+  memory: measure({ used: 92 * MI, limit: 100 * MI }),
+};
+
+const NEAR_AND_OVER: ShownUsage = {
+  ...POD,
+  containers: [
+    NEAR,
+    {
+      name: "over",
+      cpu: measure({ used: 130_000_000, limit: 100_000_000 }),
+      memory: measure({ used: 10 * MI, limit: 100 * MI }),
+    },
+  ],
+};
+
 test("what nears its limit or passes it is a warning or an error in its meter and its words", () => {
-  shown({
-    ...POD,
-    containers: [
-      {
-        name: "near",
-        cpu: measure({ used: 10_000_000, limit: 100_000_000 }),
-        memory: measure({ used: 92 * MI, limit: 100 * MI }),
-      },
-      {
-        name: "over",
-        cpu: measure({ used: 130_000_000, limit: 100_000_000 }),
-        memory: measure({ used: 10 * MI, limit: 100 * MI }),
-      },
-    ],
-  });
+  listed(NEAR_AND_OVER, "/pods", POD_OF(RUNNING("near"), RUNNING("over")));
   const fill = (name: string) =>
     screen.getByRole("meter", { name }).querySelector("span > span")?.className;
   expect(fill("Memory of near")).toContain("bg-warn");
   expect(fill("CPU of over")).toContain("bg-error");
   expect(fill("CPU of near")).not.toMatch(/bg-(warn|error)/);
-  expect(usageSection().textContent).toContain("92%");
-  expect(usageSection().textContent).toContain("130%");
+  expect(containersSection().textContent).toContain("92%");
+  expect(containersSection().textContent).toContain("130%");
 });
 
 test("a meter says its figures in the printed units against what it is held to, and the tone in words", () => {
-  shown({
-    ...POD,
-    containers: [
-      {
-        name: "near",
-        cpu: measure({ used: 10_000_000, limit: 100_000_000 }),
-        memory: measure({ used: 92 * MI, limit: 100 * MI }),
-      },
-      {
-        name: "over",
-        cpu: measure({ used: 130_000_000, limit: 100_000_000 }),
-        memory: measure({ used: 10 * MI, request: 64 * MI }),
-      },
-    ],
-  });
+  listed(
+    {
+      ...NEAR_AND_OVER,
+      containers: [
+        NEAR,
+        {
+          name: "over",
+          cpu: measure({ used: 130_000_000, limit: 100_000_000 }),
+          memory: measure({ used: 10 * MI, request: 64 * MI }),
+        },
+      ],
+    },
+    "/pods",
+    POD_OF(RUNNING("near"), RUNNING("over")),
+  );
   const spoken = (name: string) =>
     screen.getByRole("meter", { name }).getAttribute("aria-valuetext");
   expect(spoken("CPU of near")).toBe("10m of 100m limit, 10%");
   expect(spoken("Memory of near")).toBe("92Mi of 100Mi limit, 92%, warning");
   expect(spoken("CPU of over")).toBe("130m of 100m limit, 130%, error");
   expect(spoken("Memory of over")).toBe("10Mi of 64Mi request, 15%");
-  const section = usageSection();
+  const section = containersSection();
   expect(within(section).getAllByRole("img", { name: "Warning" })).toHaveLength(
     1,
   );
@@ -319,53 +345,93 @@ test("a node's meter says what it can allocate", () => {
   ).toBe("15000Mi of 16000Mi allocatable, 93%, warning");
 });
 
-test("a pod without a sample says no data yet, never zero", () => {
-  shown({
-    ...POD,
-    sampled: null,
-    cpu: NOTHING,
-    memory: NOTHING,
-    containers: [],
-  });
-  const section = usageSection();
+test("a container without a sample says no data yet, never zero", () => {
+  listed(
+    {
+      ...POD,
+      containers: [{ name: "api", cpu: NOTHING, memory: NOTHING }],
+    },
+    "/pods",
+    POD_OF(RUNNING("api")),
+  );
+  const section = containersSection();
   expect(within(section).getAllByText("No data yet")).toHaveLength(2);
   expect(within(section).queryAllByRole("meter")).toHaveLength(0);
   expect(section.textContent).not.toMatch(/\b0(m|Mi)\b/);
+});
+
+test("a running container that a ready answer does not name says no data yet, as does one that a partial answer leaves out, and a container that does not run draws nothing", () => {
+  const answer = listed(
+    { ...POD, sampled: null, cpu: NOTHING, memory: NOTHING, containers: [] },
+    "/pods",
+    POD_OF(RUNNING("api"), CONTAINER("done"), RUNNING("proxy")),
+  );
+  expect(within(containersSection()).getAllByText("No data yet")).toHaveLength(
+    4,
+  );
+  expect(within(containersSection()).queryAllByRole("meter")).toHaveLength(0);
+  expect(labels()).toBe(4);
+
+  answer({ ...POD, containers: POD.containers.slice(0, 1) });
+  expect(meterNames(containersSection())).toEqual([
+    "CPU of api",
+    "Memory of api",
+  ]);
+  expect(within(containersSection()).getAllByText("No data yet")).toHaveLength(
+    2,
+  );
+  expect(labels()).toBe(4);
 });
 
 test.each([
   ["unavailable", /metrics-server does not answer/],
   ["forbidden", /may not read metrics/],
 ] as const)(
-  "a Metrics API that is %s says so in place and draws no figure",
+  "a Metrics API that is %s says so once in the containers' section and draws no figure",
   (state, words) => {
-    shown({
-      ...POD,
-      state,
-      sampled: null,
-      cpu: NOTHING,
-      memory: NOTHING,
-      containers: [],
-    });
-    const section = usageSection();
-    expect(section.textContent).toMatch(words);
+    listed(
+      {
+        ...POD,
+        state,
+        sampled: null,
+        cpu: NOTHING,
+        memory: NOTHING,
+        containers: [],
+      },
+      "/pods",
+      POD_OF(RUNNING("api"), RUNNING("proxy")),
+    );
+    const section = containersSection();
+    expect(section.textContent.match(words)).toHaveLength(1);
     expect(within(section).queryAllByRole("meter")).toHaveLength(0);
     expect(within(section).queryByText("No data yet")).toBeNull();
   },
 );
 
-test("a usage that waits draws the rows it names, whatever the Overview lists, with empty meters that say loading and no figure, and the answer fills them", () => {
+test("a pod whose containers run none says nothing of a Metrics API that does not answer", () => {
+  listed(
+    { ...POD, state: "unavailable", containers: [] },
+    "/pods",
+    POD_OF(CONTAINER("api")),
+  );
+  expect(containersSection().textContent).not.toMatch(/metrics-server/);
+});
+
+test("a node's Metrics API that is unavailable says so in its section", () => {
+  shown(
+    { ...NODE, state: "unavailable", containers: [] },
+    "/nodes",
+    "core.node",
+  );
+  expect(usageSection().textContent).toMatch(/metrics-server does not answer/);
+  expect(within(usageSection()).queryAllByRole("meter")).toHaveLength(0);
+});
+
+test("a usage that waits draws the rows of every running container, with an empty meter where it carries a request or a limit and none where it carries neither, and the answer fills the same rows", () => {
   const answer = listed(WAITING_POD, "/pods");
-  const section = usageSection();
-  const headings = () =>
-    within(usageSection())
-      .getAllByText(/^(Pod|api|proxy|init-config)$/)
-      .map((heading) => heading.textContent);
-  expect(headings()).toEqual(["Pod", "api"]);
+  const section = containersSection();
   const empty = within(section).getAllByRole("progressbar");
   expect(empty.map((meter) => meter.getAttribute("aria-label"))).toEqual([
-    "CPU of Pod",
-    "Memory of Pod",
     "CPU of api",
     "Memory of api",
   ]);
@@ -373,28 +439,85 @@ test("a usage that waits draws the rows it names, whatever the Overview lists, w
     expect(meter.getAttribute("aria-valuetext")).toBe("Loading");
   }
   expect(within(section).queryAllByRole("meter")).toHaveLength(0);
-  expect(section.textContent).not.toMatch(/\d|No data yet|%/);
-  const labels = () =>
-    within(usageSection()).getAllByText(/^(CPU|Memory)$/).length;
-  expect(labels()).toBe(4);
+  expect(lines(section)).toEqual(Array.from({ length: 6 }, () => ["", ""]));
+  expect(labels()).toBe(6);
 
   answer({ ...POD, containers: POD.containers.slice(0, 1) });
-  expect(headings()).toEqual(["Pod", "api"]);
-  expect(labels()).toBe(4);
-  expect(within(usageSection()).getAllByRole("meter")).toHaveLength(4);
-  expect(within(usageSection()).queryAllByRole("progressbar")).toHaveLength(0);
+  expect(labels()).toBe(6);
+  expect(within(containersSection()).getAllByRole("meter")).toHaveLength(2);
+  expect(
+    within(containersSection()).queryAllByRole("progressbar"),
+  ).toHaveLength(0);
+  expect(within(containersSection()).getAllByText("No data yet")).toHaveLength(
+    4,
+  );
 });
+
+const REQUESTED = measure({ used: 20_000_000, request: 16_000_000 });
+const BARE = measure({ used: 20_000_000 });
+
+test.each<[string, ShownUsage, string[], string]>([
+  ["waits with a limit", WAITING_POD, ["", ""], "progressbar"],
+  [
+    "waits with neither request nor limit",
+    {
+      ...WAITING_POD,
+      containers: [{ name: "api", cpu: NOTHING, memory: NOTHING }],
+    },
+    ["", ""],
+    "none",
+  ],
+  ["has a limit and a request", POD, ["25% of limit", "100m"], "meter"],
+  [
+    "has a request only",
+    {
+      ...POD,
+      containers: [{ name: "api", cpu: REQUESTED, memory: REQUESTED }],
+    },
+    ["125% of request", "20m"],
+    "meter",
+  ],
+  [
+    "has neither",
+    { ...POD, containers: [{ name: "api", cpu: BARE, memory: BARE }] },
+    ["20m", ""],
+    "none",
+  ],
+  [
+    "has no sample",
+    {
+      ...POD,
+      containers: [{ name: "api", cpu: NOTHING, memory: NOTHING }],
+    },
+    ["No data yet", ""],
+    "none",
+  ],
+])(
+  "a container's row is two lines whatever it says, the figure on the first only where it has no base to hold it against: it %s",
+  (_, usage, cpu, meter) => {
+    listed(usage, "/pods", POD_OF(RUNNING("api")));
+    const section = containersSection();
+    const rows = [...section.querySelectorAll("dd")].filter((value) =>
+      /^(CPU|Memory)$/.test(value.previousElementSibling?.textContent ?? ""),
+    );
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.children).toHaveLength(1);
+      expect(row.firstElementChild?.children).toHaveLength(2);
+    }
+    expect(lines(section)[0]).toEqual(cpu);
+    expect(
+      within(section).queryAllByRole(meter === "none" ? "meter" : meter),
+    ).toHaveLength(meter === "none" ? 0 : 2);
+    if (meter === "none") {
+      expect(within(section).queryAllByRole("progressbar")).toHaveLength(0);
+    }
+  },
+);
 
 test("a node's usage that waits is its pair of empty meters", () => {
   listed(WAITING_NODE, "/nodes", {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: HEADER,
     sections: [SECTION("core.node"), SECTION("core.metadata")],
   });
   const section = usageSection();
@@ -406,24 +529,27 @@ test("a node's usage that waits is its pair of empty meters", () => {
   expect(within(section).queryByText("Pod")).toBeNull();
 });
 
-test("the section follows the Diagnostics, else comes first, and without a usage there is none", () => {
+test("a node's section follows the Diagnostics, else comes first, a pod has none, and without a usage there is none", () => {
   const order = () =>
     screen
       .getAllByRole("region")
       .map((region) => region.getAttribute("aria-label"));
-  shown(POD, "/pods", "core.diagnostics");
+  shown(NODE, "/nodes", "core.diagnostics");
   expect(order()).toEqual(["Diagnostics", "Usage", "Metadata"]);
   cleanup();
-  shown(POD);
-  expect(order()).toEqual(["Usage", "Pod", "Metadata"]);
+  shown(NODE, "/nodes", "core.node");
+  expect(order()).toEqual(["Usage", "Node", "Metadata"]);
   cleanup();
-  shown(undefined);
-  expect(order()).toEqual(["Pod", "Metadata"]);
+  shown(POD, "/pods", "core.diagnostics");
+  expect(order()).toEqual(["Diagnostics", "Metadata"]);
+  cleanup();
+  shown(undefined, "/nodes", "core.node");
+  expect(order()).toEqual(["Node", "Metadata"]);
 });
 
-test("the section folds, and the kind remembers it", () => {
-  const states = shown(POD);
-  const open = () => states.section("/pods", "", "core.usage", "open");
+test("a node's section folds, and the kind remembers it", () => {
+  const states = shown(NODE, "/nodes", "core.node");
+  const open = () => states.section("/nodes", "", "core.usage", "open");
   expect(open()).toBe(true);
   fireEvent.click(
     within(usageSection()).getByRole("button", { name: /Usage/ }),
@@ -492,19 +618,25 @@ describe("an open object", () => {
   const region = (name: string) =>
     document.querySelector(`section[aria-label="${name}"]`);
 
+  const usageArea = () => region("Usage") ?? region("Containers");
+
   const drawn = () => {
-    const usage = region("Usage");
+    const usage = usageArea();
     if (!usage) return "none";
     if (usage.querySelector('[role="progressbar"]')) return "empty";
     if (usage.querySelector('[role="meter"]')) return "figures";
-    return "sentence";
+    return /metrics-server does not answer|may not read metrics/.test(
+      usage.textContent,
+    )
+      ? "sentence"
+      : "none";
   };
 
   const frame = () => ({
     overview: region("Metadata") !== null,
     state: drawn(),
     rows: [
-      ...(region("Usage")?.querySelectorAll(
+      ...(usageArea()?.querySelectorAll(
         '[role="progressbar"], [role="meter"]',
       ) ?? []),
     ].map((meter) => meter.getAttribute("aria-label")),
@@ -544,7 +676,7 @@ describe("an open object", () => {
     });
     await settle();
     expect(usage()).toBe(true);
-    expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
+    expect(meterNames(containersSection())).toHaveLength(4);
 
     const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
     act(() => {
@@ -592,7 +724,12 @@ describe("an open object", () => {
     fireEvent.click(screen.getAllByRole("row")[1] ?? document.body);
     await settle();
     const aside = screen.getByRole("complementary", { name: "Pod details" });
-    expect(within(aside).getByRole("region", { name: "Usage" })).toBeTruthy();
+    expect(within(aside).queryByRole("region", { name: "Usage" })).toBeNull();
+    expect(
+      aside.querySelector(
+        'section[aria-label="Containers"] [role="meter"], section[aria-label="Containers"] [role="progressbar"]',
+      ),
+    ).not.toBeNull();
   });
 
   test("an object that has no usage never asks for one", async () => {
@@ -606,21 +743,21 @@ describe("an open object", () => {
     expect(usage()).toBe(false);
   });
 
-  test("a pod's Usage section goes, as if none had come, once the context stops serving the Metrics API", async () => {
+  test("a pod's containers lose their meters, as if none had come, once the context stops serving the Metrics API", async () => {
     const backend = createMockBackend("metricsRemoved");
     const workbench = await mountKube(backend);
     act(() => {
       workbench.editors.open(running());
     });
     await settle();
-    expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
+    expect(meterNames(containersSection())).toHaveLength(4);
     await act(() => vi.advanceTimersByTimeAsync(20_000));
     await settle();
-    expect(screen.queryByRole("region", { name: "Usage" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Containers" })).toBeTruthy();
+    expect(within(containersSection()).queryAllByRole("meter")).toHaveLength(0);
+    expect(containersSection().textContent).not.toMatch(/metrics-server/);
   });
 
-  test("a context without the Metrics API shows no section", async () => {
+  test("a context without the Metrics API draws no meters", async () => {
     const backend = createMockBackend("metricsNone");
     const workbench = await mountKube(backend);
     act(() => {
@@ -628,10 +765,10 @@ describe("an open object", () => {
     });
     await settle(30);
     expect(screen.queryByRole("region", { name: "Usage" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Containers" })).toBeTruthy();
+    expect(within(containersSection()).queryAllByRole("meter")).toHaveLength(0);
   });
 
-  test("a pod's Usage section is in the Overview's first paint, with empty meters, and the figures fill it", async () => {
+  test("a pod's containers have their empty meters in the Overview's first paint, and the figures fill them", async () => {
     const workbench = await mountKube(createMockBackend("ready"));
     act(() => {
       workbench.editors.open(running());
@@ -641,7 +778,7 @@ describe("an open object", () => {
     expect(
       seen.filter(({ overview }) => overview).map(({ state }) => state),
     ).toEqual(["empty", "figures"]);
-    expect(within(usageSection()).getAllByRole("meter")).toHaveLength(6);
+    expect(meterNames(containersSection())).toHaveLength(4);
   });
 
   test.each([
@@ -652,18 +789,22 @@ describe("an open object", () => {
         candidate.containers === 2 &&
         finishedInit(candidate),
       2,
+      2,
+      2,
     ],
     [
-      "a crash-looping pod at Ready 1/2",
+      "a crash-looping pod at Ready 1/2, whose second container the mock's card runs and its usage does not name",
       (candidate: Pod) =>
         candidate.status === "CrashLoopBackOff" &&
         candidate.containers === 2 &&
         candidate.ready === 1,
+      2,
+      1,
       1,
     ],
   ])(
-    "%s: the empty meters stand for the containers the answer lists, and the answer moves no row",
-    async (_, pick, listed) => {
+    "%s: a container's rows stand for it from the first paint, with an empty meter where the usage names it, and the answer moves no row",
+    async (_, pick, alive, waiting, answered) => {
       const workbench = await mountKube(createMockBackend("ready"));
       const uri = pod(pick);
       const [namespace, name] = uri.split("/").slice(-2);
@@ -677,12 +818,19 @@ describe("an open object", () => {
       });
       const seen = (await frames()).filter(({ overview }) => overview);
       expect(seen.map(({ state }) => state)).toEqual(["empty", "figures"]);
-      const names = ["Pod", ...containerNames(found, listed)];
-      const rows = names.flatMap((name) => [
-        `CPU of ${name}`,
-        `Memory of ${name}`,
+      const meters = (count: number) =>
+        containerNames(found, count).flatMap((name) => [
+          `CPU of ${name}`,
+          `Memory of ${name}`,
+        ]);
+      expect(seen.map((one) => one.rows)).toEqual([
+        meters(waiting),
+        meters(answered),
       ]);
-      expect(seen.map((one) => one.rows)).toEqual([rows, rows]);
+      expect(labels()).toBe(alive * 2);
+      expect(
+        within(containersSection()).queryAllByText("No data yet"),
+      ).toHaveLength((alive - answered) * 2);
     },
   );
 

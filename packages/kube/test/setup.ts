@@ -18,13 +18,13 @@ Element.prototype.scrollIntoView = () => undefined;
 
 // xterm asks for both, and jsdom has neither.
 HTMLCanvasElement.prototype.getContext = () => null;
-// xterm's DOM renderer measures glyphs, and the terminal's theme reads its colours, on an OffscreenCanvas, which jsdom lacks: a glyph is 8 wide, the cell's width under `withTerminalLayout`, and a colour paints the codes of its first three characters.
+// xterm's DOM renderer measures glyphs, and the terminal's theme reads its colours, on an OffscreenCanvas, which jsdom lacks: a character is 8 wide, the cell's width under `withTerminalLayout` and half an em at jsdom's 16 px, and a colour paints the codes of its first three characters.
 globalThis.OffscreenCanvas = class {
   getContext() {
     return {
       font: "",
       fillStyle: "",
-      measureText: () => ({ width: 8 }),
+      measureText: (text: string) => ({ width: 8 * text.length }),
       clearRect: () => undefined,
       fillRect: () => undefined,
       getImageData(this: { fillStyle: string }) {

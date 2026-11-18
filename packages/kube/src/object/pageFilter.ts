@@ -43,6 +43,9 @@ export const CONTAINER_GROUPS = {
 export const containerGroup = (container: string, title: string) =>
   `containers/${container}/${title}`;
 
+/** What names the remembered reveal of the defaults a part holds, a section or a container's group. */
+export const defaultsId = (part: string) => `${part}/defaults`;
+
 /** What an Overview draws of a section: its blocks as the filter and the defaults leave them. */
 export interface SectionView {
   readonly blocks: readonly Block[];
