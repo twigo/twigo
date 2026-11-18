@@ -6,6 +6,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{Block, DataEntry, Field, Section, Value as Shown};
 
+use crate::show::{Summary, section};
 use crate::{Described, Input, text};
 
 pub(crate) fn config_map(input: &Input<'_>) -> Described {
@@ -33,20 +34,14 @@ pub(crate) fn config_map(input: &Input<'_>) -> Described {
     );
     entries.sort_by(|a, b| a.key.cmp(&b.key));
     let mut blocks = immutable(object);
+    let keys = entries.len();
     blocks.push(Block::Data {
         entries,
         readable: true,
     });
     Described {
-        findings: Vec::new(),
-        sections: vec![Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.data".to_owned(),
-            title: "Data".to_owned(),
-            blocks,
-        }],
+        sections: vec![keys_section(keys, blocks)],
+        ..Described::default()
     }
 }
 
@@ -76,20 +71,21 @@ pub(crate) fn secret(input: &Input<'_>) -> Described {
         })
         .collect();
     entries.sort_by(|a, b| a.key.cmp(&b.key));
+    let keys = entries.len();
     blocks.push(Block::Data {
         entries,
         readable: false,
     });
     Described {
-        findings: Vec::new(),
-        sections: vec![Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.data".to_owned(),
-            title: "Data".to_owned(),
-            blocks,
-        }],
+        sections: vec![keys_section(keys, blocks)],
+        ..Described::default()
+    }
+}
+
+fn keys_section(keys: usize, blocks: Vec<Block>) -> Section {
+    Section {
+        summary: Summary::default().count(keys, "key").done(),
+        ..section("core.data", "Data", blocks)
     }
 }
 

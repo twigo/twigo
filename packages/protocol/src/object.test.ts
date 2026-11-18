@@ -27,7 +27,14 @@ const OVERVIEW: ObjectParts = {
 };
 
 const DOCUMENT: Overview = {
-  header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+  header: {
+    owner: null,
+    node: null,
+    created: null,
+    printed: [],
+    sentence: [],
+    vitals: [],
+  },
   sections: [
     {
       id: "core.metadata",
@@ -220,7 +227,7 @@ test("the mock answers with the recorded pod under the name asked for", async ()
     default: false,
   });
   const sections = overview?.sections ?? [];
-  expect(sections[sections.length - 1]?.id).toBe("core.events");
+  expect(sections[sections.length - 1]?.id).toBe("core.metadata");
   view.setParts({ ...OVERVIEW, manifest: true, related: true });
   await vi.runAllTimersAsync();
   const manifest = JSON.parse(view.getSnapshot().manifest ?? "{}") as {

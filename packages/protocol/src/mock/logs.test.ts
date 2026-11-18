@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogEntry, LogSource, LogView } from "../generated";
-import { Cluster, deploymentOf, type Pod } from "./cluster";
+import { Cluster, containerOf, deploymentOf, type Pod } from "./cluster";
 import { TAB_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
 import type { Limits } from "./logview/buffer";
@@ -61,7 +61,14 @@ function session(
     limits,
   );
   logs.setWindow({ type: "tail", count: 200 });
-  return { logs, batches, cluster, pods: busiest?.[1] ?? 0 };
+  const [first] = cluster.podsOf(namespace, name);
+  return {
+    logs,
+    batches,
+    cluster,
+    pods: busiest?.[1] ?? 0,
+    container: first ? containerOf(first) : "",
+  };
 }
 
 test("a workload's tab follows ten of its pods and tells the rest are over the limit", async () => {
@@ -117,7 +124,7 @@ test("the warn level keeps warnings and errors", async () => {
 });
 
 test("a rollout replaces a followed pod: its followed containers end, it leaves, and its successor joins from its ReplicaSet", async () => {
-  const { logs, batches } = session();
+  const { logs, batches, container } = session();
   await vi.advanceTimersByTimeAsync(26_000);
   const at = batches.findIndex((batch) =>
     batch.window?.entries.some((entry) => entry.type === "left"),
@@ -144,7 +151,7 @@ test("a rollout replaces a followed pod: its followed containers end, it leaves,
     .slice(left + 1)
     .filter((entry) => entry.type === "line" && entry.pod === pod);
   const joined = entries.find((entry) => entry.type === "joined");
-  expect(following).toEqual(["api"]);
+  expect(following).toEqual([container]);
   expect(ended).toEqual(following);
   expect(after).toEqual([]);
   expect(joined?.type === "joined" && joined.owner?.kind).toBe("ReplicaSet");
@@ -227,26 +234,20 @@ test("a pod whose last line is the oldest the bound keeps still shows its left w
     { entries: 10, bytes: 1 << 20 },
   );
   await vi.advanceTimersByTimeAsync(2_000);
-  const listed = batches.find((batch) => batch.pods !== null)?.pods ?? [];
-  const quiet = listed
-    .filter((pod) =>
-      pod.containers.some(
-        (container) => container.stream.state === "following",
-      ),
-    )
-    .pop()?.name;
   cut = true;
   const oldest = () => {
     const entries = carried(batches, "window")?.entries ?? [];
-    return (
-      entries[0]?.type === "dropped" &&
-      podOf(entries[1]) === quiet &&
-      !entries.slice(2).some((entry) => podOf(entry) === quiet)
-    );
+    const first = podOf(entries[1]);
+    return entries[0]?.type === "dropped" &&
+      first !== undefined &&
+      !entries.slice(2).some((entry) => podOf(entry) === first)
+      ? first
+      : undefined;
   };
-  for (let tick = 0; tick < 150 && !oldest(); tick++)
+  for (let tick = 0; tick < 150 && oldest() === undefined; tick++)
     await vi.advanceTimersByTimeAsync(100);
-  expect(oldest()).toBe(true);
+  const quiet = oldest();
+  expect(quiet).toBeDefined();
   const pod = cluster.pods.find((each) => each.name === quiet);
   if (!pod) throw new Error("no quiet pod");
   cluster.rollOut(pod, Date.now());

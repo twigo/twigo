@@ -1205,7 +1205,21 @@ async fn a_part_asked_for_later_has_the_figures_in_the_next_batch_where_a_list_r
     let usage = batch.usage.as_ref().expect("the usage in the next batch");
     assert!(!usage.waiting, "the list's answer is held already");
     assert_eq!(usage.cpu.used, Some(10_000_000));
-    assert_eq!(usage.containers.len(), 1);
+    let used: Vec<(&str, Option<i64>)> = usage
+        .containers
+        .iter()
+        .map(|c| (c.name.as_str(), c.cpu.used))
+        .collect();
+    assert_eq!(
+        used,
+        [
+            ("proxy", None),
+            ("api", None),
+            ("web", Some(10_000_000)),
+            ("debugger", None)
+        ],
+        "every container that runs is listed, those the answer lacks without a figure"
+    );
 }
 
 #[tokio::test(start_paused = true)]

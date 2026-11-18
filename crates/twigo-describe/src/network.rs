@@ -5,7 +5,11 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown};
 
-use crate::show::{Fields, NODE, POD, SECRET, SERVICE, code, labels, link, plain, toned};
+use crate::layout::{worse, wrong};
+use crate::show::{
+    Fields, NODE, POD, SECRET, SERVICE, Summary, code, labels, link, listing, named, plain,
+    section, toned,
+};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
 
@@ -142,12 +146,15 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
     fields.flag("Publish not-ready", &spec["publishNotReadyAddresses"]);
     let slices = slices_of(fact(input.facts, &slices_need(object)), &name);
     let mut sections = vec![Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.service".to_owned(),
-        title: "Service".to_owned(),
-        blocks: vec![Block::Fields { fields: fields.0 }],
+        summary: Summary::default()
+            .part(text(&spec["type"]).unwrap_or_default())
+            .part(text(&spec["clusterIP"]).unwrap_or_default())
+            .done(),
+        ..section(
+            "core.service",
+            "Service",
+            vec![Block::Fields { fields: fields.0 }],
+        )
     }];
     let listed = slices.as_ref().and_then(|slices| slices.as_ref().ok());
     let rows: Vec<Vec<Shown>> = spec["ports"]
@@ -183,13 +190,12 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
         })
         .collect();
     if !rows.is_empty() {
-        sections.push(Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.ports".to_owned(),
-            title: "Ports".to_owned(),
-            blocks: vec![Block::Table {
+        sections.push(listing(
+            "core.ports",
+            "Ports",
+            rows.len(),
+            "port",
+            vec![Block::Table {
                 columns: [
                     "Name",
                     "Port",
@@ -202,7 +208,7 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
                 .to_vec(),
                 rows,
             }],
-        });
+        ));
     }
     if let Some(slices) = listed {
         sections.extend(endpoint_table(slices, namespace.as_deref()));
@@ -228,7 +234,26 @@ pub(crate) fn service(input: &Input<'_>) -> Described {
             message: None,
         });
     }
-    Described { findings, sections }
+    about(&mut sections, "core.endpoints", &findings);
+    Described {
+        findings,
+        sections,
+        ..Described::default()
+    }
+}
+
+/// The findings are about the section that lists what they find wrong,
+/// which names the first.
+fn about(sections: &mut [Section], id: &str, findings: &[Finding]) {
+    if let (Some(section), Some(first)) = (
+        sections.iter_mut().find(|section| section.id == id),
+        findings.first(),
+    ) {
+        section.tone = findings
+            .iter()
+            .fold(None, |tone, finding| worse(tone, wrong(finding.tone)));
+        section.summary = named(first);
+    }
 }
 
 /// Every endpoint of the slices: its address, whether it is ready, its
@@ -261,18 +286,19 @@ fn endpoint_table(slices: &[&Value], namespace: Option<&str>) -> Option<Section>
         }
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0));
-    (!rows.is_empty()).then(|| Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.endpoints".to_owned(),
-        title: "Endpoints".to_owned(),
-        blocks: vec![Block::Table {
-            columns: ["Address", "State", "Node", "Pod"]
-                .map(str::to_owned)
-                .to_vec(),
-            rows: rows.into_iter().map(|(_, row)| row).collect(),
-        }],
+    (!rows.is_empty()).then(|| {
+        listing(
+            "core.endpoints",
+            "Endpoints",
+            rows.len(),
+            "endpoint",
+            vec![Block::Table {
+                columns: ["Address", "State", "Node", "Pod"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows: rows.into_iter().map(|(_, row)| row).collect(),
+            }],
+        )
     })
 }
 
@@ -323,44 +349,41 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         load_balancer(&object["status"]["loadBalancer"]["ingress"])
             .map_or_else(|| plain("none yet"), code),
     );
-    let mut missing: Vec<String> = Vec::new();
-    let mut unserved: Vec<String> = Vec::new();
-    let mut backend = |backend: &Value| -> (Shown, Shown) {
-        describe_backend(
-            backend,
-            namespace,
-            services,
-            slices,
-            &mut missing,
-            &mut unserved,
-        )
-    };
+    let mut default = Gaps::default();
+    let mut ruled = Gaps::default();
     fields.add(
         "Default backend",
         if spec["defaultBackend"].is_object() {
-            {
-                let (target, endpoints) = backend(&spec["defaultBackend"]);
-                Shown::List {
-                    items: vec![target, endpoints],
-                }
+            let (target, endpoints) = describe_backend(
+                &spec["defaultBackend"],
+                namespace,
+                services,
+                slices,
+                &mut default,
+            );
+            Shown::List {
+                items: vec![target, endpoints],
             }
         } else {
             plain("the controller's")
         },
     );
     let mut sections = vec![Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.ingress".to_owned(),
-        title: "Ingress".to_owned(),
-        blocks: vec![Block::Fields { fields: fields.0 }],
+        summary: Summary::default()
+            .part(text(&spec["ingressClassName"]).unwrap_or_default())
+            .done(),
+        ..section(
+            "core.ingress",
+            "Ingress",
+            vec![Block::Fields { fields: fields.0 }],
+        )
     }];
     let mut rows = Vec::new();
     for rule in spec["rules"].as_array().into_iter().flatten() {
         let host = text(&rule["host"]).unwrap_or_else(|| "*".to_owned());
         for path in rule["http"]["paths"].as_array().into_iter().flatten() {
-            let (target, endpoints) = backend(&path["backend"]);
+            let (target, endpoints) =
+                describe_backend(&path["backend"], namespace, services, slices, &mut ruled);
             rows.push(vec![
                 plain(host.clone()),
                 code(path["path"].as_str().unwrap_or_default()),
@@ -371,19 +394,18 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         }
     }
     if !rows.is_empty() {
-        sections.push(Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.rules".to_owned(),
-            title: "Rules".to_owned(),
-            blocks: vec![Block::Table {
+        sections.push(listing(
+            "core.rules",
+            "Rules",
+            rows.len(),
+            "rule",
+            vec![Block::Table {
                 columns: ["Host", "Path", "Type", "Backend", "Endpoints"]
                     .map(str::to_owned)
                     .to_vec(),
                 rows,
             }],
-        });
+        ));
     }
     let tls: Vec<Vec<Shown>> = spec["tls"]
         .as_array()
@@ -400,41 +422,66 @@ pub(crate) fn ingress(input: &Input<'_>) -> Described {
         })
         .collect();
     if !tls.is_empty() {
-        sections.push(Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.tls".to_owned(),
-            title: "TLS".to_owned(),
-            blocks: vec![Block::Table {
+        sections.push(listing(
+            "core.tls",
+            "TLS",
+            tls.len(),
+            "certificate",
+            vec![Block::Table {
                 columns: ["Hosts", "Secret"].map(str::to_owned).to_vec(),
                 rows: tls,
             }],
-        });
+        ));
     }
-    missing.sort();
-    missing.dedup();
-    unserved.sort();
-    unserved.dedup();
-    let finding = |title: String| Finding {
-        logs: None,
-        tone: Tone::Warning,
-        title,
-        detail: vec![Span::Text {
-            text: "The ingress sends traffic to it.".to_owned(),
-        }],
-        message: None,
-    };
-    let findings = missing
-        .into_iter()
-        .map(|service| finding(format!("Service {service} does not exist")))
-        .chain(
-            unserved
-                .into_iter()
-                .map(|service| finding(format!("No ready pod serves Service {service}"))),
-        )
-        .collect();
-    Described { findings, sections }
+    about(&mut sections, "core.ingress", &default.findings());
+    about(&mut sections, "core.rules", &ruled.findings());
+    let findings = Gaps {
+        missing: [default.missing, ruled.missing].concat(),
+        unserved: [default.unserved, ruled.unserved].concat(),
+    }
+    .findings();
+    Described {
+        findings,
+        sections,
+        ..Described::default()
+    }
+}
+
+/// The Services that backends of one part of an Ingress name and find
+/// wrong.
+#[derive(Default)]
+struct Gaps {
+    missing: Vec<String>,
+    unserved: Vec<String>,
+}
+
+impl Gaps {
+    fn findings(&self) -> Vec<Finding> {
+        let sorted = |services: &[String]| {
+            let mut services = services.to_vec();
+            services.sort();
+            services.dedup();
+            services
+        };
+        let finding = |title: String| Finding {
+            logs: None,
+            tone: Tone::Warning,
+            title,
+            detail: vec![Span::Text {
+                text: "The ingress sends traffic to it.".to_owned(),
+            }],
+            message: None,
+        };
+        sorted(&self.missing)
+            .into_iter()
+            .map(|service| finding(format!("Service {service} does not exist")))
+            .chain(
+                sorted(&self.unserved)
+                    .into_iter()
+                    .map(|service| finding(format!("No ready pod serves Service {service}"))),
+            )
+            .collect()
+    }
 }
 
 /// Whether pods serve a Service through EndpointSlices that its controller
@@ -455,8 +502,7 @@ fn describe_backend(
     namespace: Option<&str>,
     services: Option<&Found>,
     slices: Option<&Found>,
-    missing: &mut Vec<String>,
-    unserved: &mut Vec<String>,
+    gaps: &mut Gaps,
 ) -> (Shown, Shown) {
     let service = &backend["service"];
     if !service.is_object() {
@@ -487,7 +533,7 @@ fn describe_backend(
                 .find(|object| object["metadata"]["name"] == name)
             {
                 None => {
-                    missing.push(name.to_owned());
+                    gaps.missing.push(name.to_owned());
                     toned("no such service", Tone::Warning)
                 }
                 Some(found) => {
@@ -507,7 +553,7 @@ fn describe_backend(
                         Some(Ok(slices)) => {
                             let shown = endpoints(&slices, port_name);
                             if shown == NONE && served_by_pods(found) {
-                                unserved.push(name.to_owned());
+                                gaps.unserved.push(name.to_owned());
                             }
                             code(shown)
                         }

@@ -12,7 +12,7 @@ import type {
   Row,
   Usage,
 } from "../generated";
-import { Cluster, type Pod } from "./cluster";
+import { Cluster, containerOf, type Pod } from "./cluster";
 import { createMockBackend, type MockScenario } from "./index";
 import { finishedInit } from "./objects";
 import {
@@ -365,7 +365,9 @@ test("a pod has a sample only while it runs and when two scrapes of it passed", 
     ready: 1,
     status: "CrashLoopBackOff",
   } as Pod;
-  expect(metrics.containers(crashing)?.map((c) => c.name)).toEqual(["api"]);
+  expect(metrics.containers(crashing)?.map((c) => c.name)).toEqual([
+    containerOf(crashing),
+  ]);
   expect(metrics.containers({ ...crashing, ready: 0 })).toBeNull();
 });
 
@@ -912,6 +914,39 @@ test("a pod's waiting usage names the containers that run with their requests an
       });
     }
   }
+});
+
+test("an answer without the pod still lists the containers that run, with their requests and limits and no figure", () => {
+  const metrics = new MockMetrics(undefined);
+  const cluster = new Cluster("staging", 800, Date.now());
+  const running = cluster.pods.find((pod) => pod.status === "Running");
+  if (!running) throw new Error("no running pod in the mock");
+  const young = { ...running, created: Date.now() - 20_000 };
+  expect(metrics.containers(young)).toBeNull();
+  const usage = metrics.podUsage(young, "ready");
+  expect(usage.state).toBe("ready");
+  expect(usage.waiting).toBe(false);
+  expect(usage.cpu.used).toBeNull();
+  const rows = metrics.running(young);
+  expect(rows.length).toBeGreaterThan(0);
+  expect(usage.containers).toEqual(
+    rows.map(({ name, request, limit }) => ({
+      name,
+      cpu: {
+        used: null,
+        request: request.cpu,
+        limit: limit.cpu,
+        allocatable: null,
+      },
+      memory: {
+        used: null,
+        request: request.memory,
+        limit: limit.memory,
+        allocatable: null,
+      },
+    })),
+  );
+  expect(metrics.podUsage(young, "unavailable").containers).toEqual([]);
 });
 
 test("a pod with a finished init container lists it on its card and not in its usage", async () => {

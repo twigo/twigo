@@ -21,7 +21,14 @@ const KEYS = 2000;
 
 function configMap(): Document {
   return {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [
       {
         id: "core.data",
@@ -92,6 +99,7 @@ test("a link opens the object it points at", () => {
         header: {
           owner: null,
           node: null,
+          created: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -152,7 +160,14 @@ test("a section folds by its title, and stays folded for the kind's next object"
 
 function data(readable: boolean, bytes = 3): Document {
   return {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [
       {
         id: "core.data",
@@ -260,6 +275,7 @@ test("events that cannot be listed say why instead of none", () => {
         header: {
           owner: null,
           node: null,
+          created: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -275,6 +291,7 @@ test("events that cannot be listed say why instead of none", () => {
               {
                 type: "events",
                 events: [],
+                listed: false,
                 unavailable: "You may not list events.events.k8s.io.",
               },
             ],
@@ -299,6 +316,7 @@ test("a multiline value keeps its lines", () => {
         header: {
           owner: null,
           node: null,
+          created: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -349,6 +367,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
         header: {
           owner: null,
           node: null,
+          created: null,
           printed: [],
           sentence: [],
           vitals: [],

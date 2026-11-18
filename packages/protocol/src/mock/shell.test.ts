@@ -8,7 +8,7 @@ import type {
   ShellTarget,
 } from "../generated";
 import { SHELL_FRAME_BYTES, SHELL_HIGH_WATER, SHELL_LOW_WATER } from "../shell";
-import { Cluster } from "./cluster";
+import { Cluster, containerOf } from "./cluster";
 import { POD_COUNT } from "./fixtures";
 import { createMockBackend, type MockScenario } from "./index";
 
@@ -47,9 +47,14 @@ function runningPod(context: string) {
   return found;
 }
 
-function targetOf(space: string, container = "api"): ShellTarget {
-  const { namespace, name } = runningPod(space);
-  return { space, namespace, pod: name, container };
+function targetOf(space: string, container?: string): ShellTarget {
+  const pod = runningPod(space);
+  return {
+    space,
+    namespace: pod.namespace,
+    pod: pod.name,
+    container: container ?? containerOf(pod),
+  };
 }
 
 interface Opened {
@@ -191,9 +196,9 @@ test("a shell asks as exec does: at once in read-write, to confirm in guarded, r
   expect((await answered(plan("qa"))).friction).toEqual({ kind: "atOnce" });
   const guarded = await answered(plan("staging"));
   expect(guarded.friction).toEqual({ kind: "confirm" });
-  const { namespace, pod } = targetOf("staging");
+  const { namespace, pod, container } = targetOf("staging");
   expect(guarded.kubectl).toBe(
-    `kubectl --context staging exec -it ${pod} -n ${namespace} -c api -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
+    `kubectl --context staging exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
   );
   const readOnly = await refused(plan("prod-eu"));
   expect(readOnly.kind).toBe("permissions");
@@ -215,9 +220,9 @@ test("an attach is planned apart from a shell, and a container that does not run
     }),
   );
   expect(attach.confirm).toBe("Attach");
-  const { namespace, pod } = targetOf("qa");
+  const { namespace, pod, container } = targetOf("qa");
   expect(attach.kubectl).toBe(
-    `kubectl --context qa attach ${pod} -n ${namespace} -c api`,
+    `kubectl --context qa attach ${pod} -n ${namespace} -c ${container}`,
   );
   expect(attach.consequences).toEqual([
     "It keeps no stdin, so this attach only shows its output.",
@@ -232,7 +237,7 @@ test("an attach is planned apart from a shell, and a container that does not run
     }),
   );
   expect(joined.kubectl).toBe(
-    `kubectl --context qa attach -it ${pod} -n ${namespace} -c api`,
+    `kubectl --context qa attach -it ${pod} -n ${namespace} -c ${container}`,
   );
   const error = await refused(
     backend.invoke("command_plan", {
@@ -272,9 +277,9 @@ test("it connects, runs and shows a prompt with the pod and the container", asyn
     "connecting",
     "running",
   ]);
-  const { pod } = targetOf("qa");
+  const { pod, container } = targetOf("qa");
   expect(shell.text()).toContain(`root@${pod}`);
-  expect(shell.text()).toContain("[api]");
+  expect(shell.text()).toContain(`[${container}]`);
 });
 
 test("typed lines are echoed and run: echo, ls and the last size stty reads", async () => {

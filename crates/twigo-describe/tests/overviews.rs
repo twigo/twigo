@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use twigo_describe::{Fact, Found, Input, Printed, describe};
 use twigo_ipc::{
-    Block, Container, EmbeddedList, EventList, Field, Finding, ObjectEvent, Overview, Section,
-    Span, Tone, Value as Shown,
+    Block, Condition, Container, EmbeddedList, EventList, Field, Finding, Fold, ObjectEvent,
+    Overview, Section, Span, Tone, Value as Shown, Vital,
 };
 
 #[derive(Deserialize)]
@@ -48,6 +48,7 @@ fn described() -> BTreeMap<String, Overview> {
                 printed: &recorded.printed,
                 events: &EventList {
                     events: recorded.events.clone(),
+                    listed: true,
                     unavailable: None,
                 },
                 facts: &recorded.facts,
@@ -144,13 +145,13 @@ fn a_kind_without_a_describer_shows_its_printed_cells_spec_and_status() {
             "core.summary",
             "core.spec",
             "core.status",
-            "core.metadata",
-            "core.events"
+            "core.events",
+            "core.metadata"
         ]
     );
     assert_eq!(
         ids(&described["stage"]),
-        ["core.spec", "core.metadata", "core.events"],
+        ["core.spec", "core.events", "core.metadata"],
         "a CRD without printer columns or status"
     );
 }
@@ -159,7 +160,7 @@ fn a_kind_without_a_describer_shows_its_printed_cells_spec_and_status() {
 fn a_secret_shows_its_keys_and_sizes_and_no_value() {
     let described = described();
     let secret = &described["secret"];
-    assert_eq!(ids(secret), ["core.data", "core.metadata", "core.events"]);
+    assert_eq!(ids(secret), ["core.data", "core.events", "core.metadata"]);
     let Block::Data {
         entries,
         readable: false,
@@ -218,10 +219,9 @@ fn a_pod_names_its_controller_and_its_events() {
         (target.group.as_str(), target.kind.as_str()),
         ("apps", "ReplicaSet")
     );
-    let Some(Block::Events(EventList { events, .. })) =
-        pod.sections.last().and_then(|s| s.blocks.first())
+    let Some(Block::Events(EventList { events, .. })) = section(pod, "core.events").blocks.first()
     else {
-        panic!("the events last");
+        panic!("the events");
     };
     assert!(events.iter().any(|event| event.reason == "Scheduled"));
 }
@@ -316,19 +316,6 @@ fn recorded_object(name: &str) -> Value {
 fn a_crashing_container_says_how_it_ended_and_when_it_starts_again() {
     let described = described();
     let overview = &described["pod-crashing"];
-    assert_eq!(
-        ids(overview)[..4],
-        [
-            "core.diagnostics",
-            "core.pod",
-            "core.conditions",
-            "core.containers"
-        ]
-    );
-    assert_eq!(
-        ids(overview)[ids(overview).len() - 2..],
-        ["core.metadata", "core.events"]
-    );
     let [finding] = findings(overview) else {
         panic!("one finding: {:?}", findings(overview));
     };
@@ -471,7 +458,7 @@ fn a_pods_environment_names_its_sources_and_reads_no_secret() {
     );
     assert_eq!(shown(&app.mounts[0].value), "settings (ro)");
     assert_eq!(
-        shown(field(fields(overview, "core.pod"), "Pod IP")),
+        shown(field(fields(overview, "core.placement"), "Pod IP")),
         ip.to_owned()
     );
 }
@@ -522,7 +509,7 @@ fn a_deployment_shows_its_rollout_and_lists_the_pods_of_its_replica_sets() {
 }
 
 #[test]
-fn a_deployment_whose_replica_sets_are_still_coming_shows_no_rollout_yet() {
+fn a_deployment_whose_replica_sets_are_still_coming_names_none_yet() {
     let recorded = recorded().remove("deployment").unwrap();
     let overview = describe(Input {
         object: &recorded.object,
@@ -531,9 +518,15 @@ fn a_deployment_whose_replica_sets_are_still_coming_shows_no_rollout_yet() {
         facts: &[],
     });
     let shown = ids(&overview);
-    assert!(
-        !shown.contains(&"core.rollout") && !shown.contains(&"core.pods"),
-        "{shown:?}"
+    assert!(!shown.contains(&"core.pods"), "{shown:?}");
+    let labels: Vec<&str> = fields(&overview, "core.rollout")
+        .iter()
+        .map(|field| field.label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        ["Replicas", "Revision"],
+        "no ReplicaSet to name yet"
     );
 }
 
@@ -570,7 +563,7 @@ fn workloads_list_the_pods_and_jobs_they_control() {
     );
     assert_eq!(
         shown(field(
-            fields(&described["daemonset"], "core.daemonset"),
+            fields(&described["daemonset"], "core.rollout"),
             "Nodes"
         )),
         "1 desired | 1 current | 1 ready | 1 up-to-date | 1 available"
@@ -664,8 +657,8 @@ fn a_node_adds_up_what_its_running_pods_request() {
         ["Resource", "Capacity", "Allocatable", "Requests", "Limits"]
     );
     let row = |name: &str| rows.iter().find(|row| row[0] == name).unwrap().clone();
-    assert_eq!(row("cpu")[3..], ["970m (6%)", "0 (0%)"]);
-    assert_eq!(row("memory")[3..], ["322Mi (2%)", "468Mi (2%)"]);
+    assert_eq!(row("cpu")[3..], ["1070m (6%)", "0 (0%)"]);
+    assert_eq!(row("memory")[3..], ["522Mi (3%)", "468Mi (2%)"]);
     assert_eq!(row("pods")[3..], [running.to_string(), String::new()]);
     let name = recorded.object["metadata"]["name"].as_str().unwrap();
     let pods = list(overview, "core.pods");
@@ -677,9 +670,14 @@ fn a_node_adds_up_what_its_running_pods_request() {
         ),
         (None, Some(format!("spec.nodeName={name}")), None)
     );
-    let node = fields(overview, "core.node");
-    assert_eq!(shown(field(node, "Roles")), "control-plane");
-    assert_eq!(shown(field(node, "Lease holder")), name);
+    assert_eq!(
+        shown(field(fields(overview, "core.taints"), "Roles")),
+        "control-plane"
+    );
+    assert_eq!(
+        shown(field(fields(overview, "core.system"), "Lease holder")),
+        name
+    );
     assert!(findings(overview).is_empty());
 }
 
@@ -710,6 +708,7 @@ fn edited(name: &str, edit: impl FnOnce(&mut Recorded)) -> Overview {
         printed: &recorded.printed,
         events: &EventList {
             events: recorded.events.clone(),
+            listed: true,
             unavailable: None,
         },
         facts: &recorded.facts,
@@ -789,6 +788,76 @@ fn an_ingress_backend_no_ready_pod_serves_is_a_finding() {
     );
     let default = field(fields(&ingress, "core.ingress"), "Default backend");
     assert_eq!(shown(default), "web:80 | none");
+    let own = section(&ingress, "core.ingress");
+    assert_eq!(
+        (own.tone, text(&own.summary)),
+        (
+            Some(Tone::Warning),
+            "No ready pod serves Service web".to_owned()
+        ),
+        "the default backend is the Ingress's own"
+    );
+    let rules = section(&ingress, "core.rules");
+    assert_eq!(
+        (rules.tone, text(&rules.summary)),
+        (
+            Some(Tone::Warning),
+            "Service reports does not exist".to_owned()
+        ),
+        "a rule's backend is Rules'"
+    );
+
+    let only_default = edited("ingress", |recorded| {
+        recorded.object["spec"]["defaultBackend"] =
+            serde_json::json!({ "service": { "name": "ghost", "port": { "number": 80 } } });
+        recorded.object["spec"]["rules"][0]["http"]["paths"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+    });
+    assert_eq!(
+        toned_ids(&only_default),
+        ["core.diagnostics", "core.ingress"]
+    );
+    assert_eq!(
+        summary(&only_default, "core.ingress"),
+        "Service ghost does not exist"
+    );
+}
+
+#[test]
+fn an_ingress_whose_default_backend_alone_is_unserved_tones_its_own_section() {
+    let unserved = edited("ingress", |recorded| {
+        recorded.object["spec"]["rules"][0]["http"]["paths"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        recorded.object["spec"]["defaultBackend"] =
+            serde_json::json!({ "service": { "name": "api", "port": { "number": 80 } } });
+        for fact in &mut recorded.facts {
+            if let Found::Listed { objects } = &mut fact.found
+                && objects.iter().any(|object| object["kind"] == "Service")
+            {
+                let mut api = objects[0].clone();
+                api["metadata"]["name"] = "api".into();
+                api["spec"]["ports"] = serde_json::json!([{ "port": 80 }]);
+                objects.push(api);
+            }
+        }
+    });
+    assert_eq!(
+        titles(&unserved),
+        [(Tone::Warning, "No ready pod serves Service api")]
+    );
+    assert_eq!(
+        toned_ids(&unserved),
+        ["core.diagnostics", "core.ingress"],
+        "Rules, whose backend is served, stays plain"
+    );
+    assert_eq!(
+        summary(&unserved, "core.ingress"),
+        "No ready pod serves Service api"
+    );
 }
 
 #[test]
@@ -900,8 +969,10 @@ fn a_pod_that_stops_or_cannot_mount_or_inspect_says_why() {
         at: "2026-11-03T12:00:00Z".to_owned()
     }));
     assert_eq!(
-        shown(field(fields(&stopping, "core.pod"), "Phase")),
-        "Terminating"
+        stopping.header.sentence,
+        [Span::Text {
+            text: "The pod is terminating".to_owned()
+        }]
     );
     let mount_failed = || {
         warning(
@@ -1097,25 +1168,25 @@ fn a_node_counts_its_resource_slices_and_says_what_its_lease_holds() {
                 .found = found;
         })
     };
-    let node = fields(&described()["node"], "core.node").to_vec();
+    let node = fields(&described()["node"], "core.system").to_vec();
     assert_eq!(shown(field(&node, "Lease acquired")), "unset");
     assert!(shown(field(&node, "Lease renewed")).starts_with("2026-"));
     let none = lease(Found::Listed {
         objects: Vec::new(),
     });
-    assert_eq!(shown(field(fields(&none, "core.node"), "Lease")), "none");
+    assert_eq!(shown(field(fields(&none, "core.system"), "Lease")), "none");
     let refused = lease(Found::Unavailable {
         message: "You may not list them.".to_owned(),
     });
     assert_eq!(
-        shown(field(fields(&refused, "core.node"), "Lease")),
+        shown(field(fields(&refused, "core.system"), "Lease")),
         "You may not list them."
     );
     let unset = lease(Found::Listed {
         objects: vec![serde_json::json!({ "spec": {} })],
     });
     assert_eq!(
-        shown(field(fields(&unset, "core.node"), "Lease holder")),
+        shown(field(fields(&unset, "core.system"), "Lease holder")),
         "unset"
     );
 }
@@ -1128,7 +1199,7 @@ fn a_pod_names_its_scheduling_group() {
     });
     assert_eq!(
         shown(field(
-            fields(&grouped, "core.scheduling"),
+            fields(&grouped, "core.placement"),
             "Scheduling group"
         )),
         "training"
@@ -1145,4 +1216,1949 @@ fn no_sandbox(pod: &mut Value) {
             condition["status"] = "False".into();
         }
     }
+}
+
+fn text(spans: &[Span]) -> String {
+    spans
+        .iter()
+        .map(|span| match span {
+            Span::Text { text } => text.as_str(),
+            Span::Ago { .. } => "<ago>",
+            Span::Until { .. } => "<until>",
+        })
+        .collect()
+}
+
+fn summary(overview: &Overview, id: &str) -> String {
+    text(&section(overview, id).summary)
+}
+
+fn vital<'a>(overview: &'a Overview, label: &str) -> &'a Vital {
+    overview
+        .header
+        .vitals
+        .iter()
+        .find(|vital| vital.label == label)
+        .unwrap_or_else(|| panic!("no {label} in {:?}", overview.header.vitals))
+}
+
+fn vitals(overview: &Overview) -> Vec<(&str, String, Option<Tone>)> {
+    overview
+        .header
+        .vitals
+        .iter()
+        .map(|vital| {
+            let tone = match &vital.value {
+                Shown::Toned { tone, .. } => Some(*tone),
+                _ => None,
+            };
+            (vital.label.as_str(), shown(&vital.value), tone)
+        })
+        .collect()
+}
+
+fn foldings(overview: &Overview) -> Vec<(&str, Option<Tone>, Fold)> {
+    overview
+        .sections
+        .iter()
+        .map(|section| (section.id.as_str(), section.tone, section.fold))
+        .collect()
+}
+
+#[test]
+fn sections_come_in_the_order_a_triage_asks_its_questions() {
+    let described = described();
+    assert_eq!(
+        ids(&described["pod"]),
+        [
+            "core.containers",
+            "core.events",
+            "core.conditions",
+            "core.placement",
+            "core.volumes",
+            "core.configuration",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["pod-crashing"]),
+        [
+            "core.diagnostics",
+            "core.containers",
+            "core.events",
+            "core.conditions",
+            "core.placement",
+            "core.volumes",
+            "core.configuration",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["deployment"]),
+        [
+            "core.rollout",
+            "core.pods",
+            "core.events",
+            "core.conditions",
+            "core.template",
+            "core.strategy",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["statefulset"]),
+        [
+            "core.rollout",
+            "core.pods",
+            "core.events",
+            "core.template",
+            "core.claims",
+            "core.strategy",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["daemonset"]),
+        [
+            "core.rollout",
+            "core.pods",
+            "core.events",
+            "core.template",
+            "core.strategy",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["node"]),
+        [
+            "core.resources",
+            "core.conditions",
+            "core.pods",
+            "core.podresources",
+            "core.events",
+            "core.taints",
+            "core.system",
+            "core.metadata"
+        ]
+    );
+    assert_eq!(
+        ids(&described["service"]),
+        [
+            "core.service",
+            "core.ports",
+            "core.endpoints",
+            "core.events",
+            "core.metadata"
+        ],
+        "another kind keeps its sections, then events and metadata last"
+    );
+    assert_eq!(
+        ids(&described["job"]),
+        [
+            "core.job",
+            "core.conditions",
+            "core.pods",
+            "core.template",
+            "core.events",
+            "core.metadata"
+        ]
+    );
+}
+
+#[test]
+fn a_pods_rows_sit_in_the_section_whose_name_says_what_is_inside() {
+    let described = described();
+    let pod = &described["pod"];
+    let labels = |id: &str| -> Vec<&str> {
+        fields(pod, id)
+            .iter()
+            .map(|field| field.label.as_str())
+            .collect()
+    };
+    assert_eq!(
+        labels("core.placement"),
+        [
+            "Node",
+            "Host IP",
+            "Pod IP",
+            "QoS class",
+            "Priority",
+            "Node selector",
+            "Tolerations"
+        ]
+    );
+    assert_eq!(
+        labels("core.configuration"),
+        [
+            "Service account",
+            "Restart policy",
+            "DNS policy",
+            "Termination grace",
+            "Scheduler"
+        ]
+    );
+    assert_eq!(
+        labels("core.metadata")[..4],
+        ["Name", "Namespace", "Created", "Started"]
+    );
+    let namespace = recorded_object("pod")["metadata"]["namespace"].clone();
+    let Shown::Link { target, .. } = field(fields(pod, "core.configuration"), "Service account")
+    else {
+        panic!("a link to the service account");
+    };
+    assert_eq!(
+        (target.kind.as_str(), target.namespace.as_deref()),
+        ("ServiceAccount", namespace.as_str()),
+        "a service account belongs to the namespace of the pod that names it"
+    );
+    for section in &pod.sections {
+        for block in &section.blocks {
+            if let Block::Fields { fields } = block {
+                assert!(
+                    fields
+                        .iter()
+                        .all(|field| field.label != "Phase" && field.label != "Ready"),
+                    "{} says what the vitals and the status word say",
+                    section.id
+                );
+            }
+        }
+    }
+    let node_labels = fields(&described["node"], "core.metadata")
+        .iter()
+        .any(|field| field.label == "Labels");
+    assert!(
+        !node_labels
+            && fields(&described["node"], "core.taints")
+                .iter()
+                .any(|f| f.label == "Labels"),
+        "a node's labels are in Taints and labels, once"
+    );
+}
+
+#[test]
+fn what_is_the_clusters_default_is_marked_and_counted() {
+    let defaults = |overview: &Overview, id: &str| -> Vec<String> {
+        fields(overview, id)
+            .iter()
+            .filter(|field| field.default)
+            .map(|field| field.label.clone())
+            .collect()
+    };
+    let described = described();
+    let pod = &described["pod"];
+    assert_eq!(
+        defaults(pod, "core.configuration"),
+        [
+            "Service account",
+            "Restart policy",
+            "DNS policy",
+            "Termination grace",
+            "Scheduler"
+        ]
+    );
+    assert_eq!(defaults(pod, "core.placement"), ["Priority"]);
+    assert_eq!(summary(pod, "core.configuration"), "5 defaults");
+    let set = edited("pod", |recorded| {
+        let spec = &mut recorded.object["spec"];
+        spec["serviceAccountName"] = "build-bot".into();
+        spec["restartPolicy"] = "OnFailure".into();
+        spec["terminationGracePeriodSeconds"] = 5.into();
+        spec["schedulerName"] = "gang".into();
+        spec["priority"] = 1000.into();
+    });
+    assert_eq!(defaults(&set, "core.configuration"), ["DNS policy"]);
+    assert!(defaults(&set, "core.placement").is_empty());
+    assert_eq!(
+        summary(&set, "core.configuration"),
+        "service account build-bot · 1 default"
+    );
+}
+
+#[test]
+fn an_image_pull_policy_is_the_default_the_api_server_gives_that_image() {
+    let policy = |image: &str, policy: &str| {
+        let overview = edited("pod", |recorded| {
+            let container = &mut recorded.object["spec"]["containers"][0];
+            container["image"] = image.into();
+            container["imagePullPolicy"] = policy.into();
+        });
+        containers(&overview, "core.containers")[0]
+            .details
+            .iter()
+            .find(|field| field.label == "Image pull policy")
+            .map(|field| field.default)
+    };
+    assert_eq!(policy("busybox:1.37", "IfNotPresent"), Some(true));
+    assert_eq!(policy("busybox:1.37", "Always"), Some(false));
+    assert_eq!(policy("busybox:latest", "Always"), Some(true));
+    assert_eq!(policy("busybox", "Always"), Some(true));
+    assert_eq!(policy("busybox", "IfNotPresent"), Some(false));
+    assert_eq!(
+        policy("registry.test:5000/busybox@sha256:abc", "IfNotPresent"),
+        Some(true),
+        "a digest without a tag"
+    );
+    assert_eq!(policy("registry.test:5000/busybox", "Always"), Some(true));
+}
+
+#[test]
+fn each_section_answers_the_commonest_question_while_it_is_folded() {
+    let described = described();
+    let recorded = recorded().remove("pod").unwrap();
+    let pod = &described["pod"];
+    let ip = recorded.object["status"]["podIP"].as_str().unwrap();
+    let node = recorded.object["spec"]["nodeName"].as_str().unwrap();
+    assert_eq!(summary(pod, "core.containers"), "1");
+    assert_eq!(summary(pod, "core.conditions"), "5 of 5 ok");
+    assert_eq!(summary(pod, "core.placement"), format!("{node} · {ip}"));
+    let volumes = recorded.object["spec"]["volumes"].as_array().unwrap().len();
+    assert_eq!(summary(pod, "core.volumes"), format!("{volumes} volumes"));
+    assert_eq!(
+        summary(pod, "core.events"),
+        format!("{} events · <ago>", recorded.events.len())
+    );
+    let labels = recorded.object["metadata"]["labels"]
+        .as_object()
+        .unwrap()
+        .len();
+    assert_eq!(
+        summary(pod, "core.metadata"),
+        format!("{labels} labels · 1 annotation")
+    );
+
+    let crashing = &described["pod-crashing"];
+    assert_eq!(summary(crashing, "core.containers"), "1 · 1 failing");
+    assert_eq!(summary(crashing, "core.conditions"), "3 of 5 ok");
+    let backoff = recorded_events("pod-crashing")
+        .into_iter()
+        .find(|event| event.kind == "Warning")
+        .unwrap();
+    assert_eq!(
+        summary(crashing, "core.events"),
+        format!("1 warning · {} ×{}", backoff.reason, backoff.count)
+    );
+    assert_eq!(
+        summary(&described["pod-unready"], "core.containers"),
+        "1 · 1 not ready"
+    );
+
+    let claimed = edited("pod", |recorded| {
+        recorded.object["spec"]["volumes"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "name": "data",
+                "persistentVolumeClaim": { "claimName": "data-db-0" },
+            }));
+        recorded.events.clear();
+    });
+    assert_eq!(
+        summary(&claimed, "core.volumes"),
+        format!("{} volumes · 1 claim", volumes + 1)
+    );
+    assert_eq!(summary(&claimed, "core.events"), "none");
+
+    let annotated = edited("pod", |recorded| {
+        recorded.object["metadata"]["annotations"] = serde_json::json!({ "a": "1", "kubectl.kubernetes.io/last-applied-configuration": "{}" });
+    });
+    assert_eq!(
+        summary(&annotated, "core.metadata"),
+        format!("{labels} labels · 1 annotation"),
+        "the annotation that no view shows is not counted"
+    );
+    let bare = edited("pod", |recorded| {
+        recorded.object["metadata"]["labels"] = Value::Null;
+        recorded.object["metadata"]["annotations"] = Value::Null;
+    });
+    assert_eq!(summary(&bare, "core.metadata"), "created <ago>");
+
+    let deployment = &described["deployment"];
+    assert_eq!(summary(deployment, "core.rollout"), "revision 2, <ago>");
+    assert_eq!(summary(deployment, "core.pods"), "2/2 ready");
+    assert_eq!(summary(deployment, "core.template"), "pause:3.10");
+    assert_eq!(
+        summary(deployment, "core.strategy"),
+        "RollingUpdate · 2 replicas"
+    );
+    assert_eq!(summary(deployment, "core.conditions"), "2 of 2 ok");
+    assert_eq!(summary(&described["statefulset"], "core.claims"), "1 claim");
+    assert_eq!(
+        summary(&described["statefulset"], "core.rollout"),
+        "1/1 updated"
+    );
+
+    let node = &described["node"];
+    let resources = table(node, "core.resources").1;
+    let share = |name: &str| {
+        let cell = &resources.iter().find(|row| row[0] == name).unwrap()[3];
+        let open = cell.find('(').unwrap();
+        cell[open + 1..cell.len() - 2].to_owned()
+    };
+    assert_eq!(
+        summary(node, "core.resources"),
+        format!(
+            "cpu {}% · memory {}% requested",
+            share("cpu"),
+            share("memory")
+        )
+    );
+    assert_eq!(summary(node, "core.conditions"), "4 of 4 ok");
+    assert_eq!(
+        summary(&described["pvc"], "core.conditions"),
+        "",
+        "a state that a claim is in tells nothing of its health"
+    );
+}
+
+fn recorded_events(name: &str) -> Vec<ObjectEvent> {
+    recorded().remove(name).unwrap().events
+}
+
+#[test]
+fn a_section_holding_a_finding_names_it_and_a_fold_opens_over_what_diagnostics_do_not_explain() {
+    let described = described();
+    let crashing = &described["pod-crashing"];
+    assert_eq!(
+        foldings(crashing),
+        [
+            ("core.diagnostics", Some(Tone::Danger), Fold::Open),
+            ("core.containers", Some(Tone::Danger), Fold::Open),
+            ("core.events", Some(Tone::Warning), Fold::Open),
+            ("core.conditions", Some(Tone::Warning), Fold::Folded),
+            ("core.placement", None, Fold::Folded),
+            ("core.volumes", None, Fold::Folded),
+            ("core.configuration", None, Fold::Folded),
+            ("core.metadata", None, Fold::Folded),
+        ],
+        "Ready and ContainersReady are what the crash says"
+    );
+    let healthy = foldings(&described["pod"]);
+    assert_eq!(
+        healthy
+            .iter()
+            .map(|(id, tone, fold)| (*id, *tone, *fold))
+            .collect::<Vec<_>>(),
+        [
+            ("core.containers", None, Fold::Open),
+            ("core.events", None, Fold::Folded),
+            ("core.conditions", None, Fold::Folded),
+            ("core.placement", None, Fold::Folded),
+            ("core.volumes", None, Fold::Folded),
+            ("core.configuration", None, Fold::Folded),
+            ("core.metadata", None, Fold::Folded),
+        ]
+    );
+
+    let pending = &described["pod-pending"];
+    let placement = section(pending, "core.placement");
+    assert_eq!(
+        (placement.tone, placement.fold, text(&placement.summary)),
+        (
+            Some(Tone::Danger),
+            Fold::Folded,
+            "The pod cannot be scheduled".to_owned()
+        )
+    );
+
+    let gated = edited("pod-crashing", |recorded| {
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "type": "example.com/warm", "status": "False", "reason": "Cold",
+            }));
+    });
+    let conditions = section(&gated, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (
+            Some(Tone::Warning),
+            Fold::Finding,
+            "example.com/warm is False · 3 of 6 ok".to_owned()
+        ),
+        "a condition that no finding explains names itself"
+    );
+
+    let mounting = edited("pod", |recorded| {
+        for condition in recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+        {
+            if condition["type"] == "PodReadyToStartContainers" {
+                condition["status"] = "False".into();
+            }
+        }
+        recorded.events = vec![warning(
+            "FailedMount",
+            "MountVolume.SetUp failed for volume \"settings\"",
+        )];
+    });
+    let storage = section(&mounting, "core.volumes");
+    assert_eq!(
+        (storage.tone, text(&storage.summary)),
+        (
+            Some(Tone::Danger),
+            "A volume of the pod cannot be mounted".to_owned()
+        )
+    );
+
+    let stuck = edited("deployment", |recorded| {
+        recorded.object["status"]["conditions"] = serde_json::json!([
+            { "type": "Progressing", "status": "False", "reason": "ProgressDeadlineExceeded" },
+        ]);
+    });
+    let rollout = section(&stuck, "core.rollout");
+    assert_eq!(
+        (rollout.tone, text(&rollout.summary)),
+        (Some(Tone::Danger), "The rollout is stuck".to_owned())
+    );
+    assert_eq!(section(&stuck, "core.conditions").fold, Fold::Folded);
+
+    let cordoned = edited("node", |recorded| {
+        recorded.object["spec"]["unschedulable"] = true.into();
+    });
+    let taints = section(&cordoned, "core.taints");
+    assert_eq!(
+        (taints.tone, taints.fold, text(&taints.summary)),
+        (
+            Some(Tone::Warning),
+            Fold::Folded,
+            "The node is cordoned".to_owned()
+        )
+    );
+    assert_eq!(section(&cordoned, "core.resources").fold, Fold::Open);
+
+    let ingress = &described["ingress"];
+    let rules = section(ingress, "core.rules");
+    assert_eq!(
+        (rules.tone, rules.fold),
+        (Some(Tone::Warning), Fold::Folded),
+        "the rule whose backend is missing is what the finding says"
+    );
+    let unserved = edited("service", |recorded| {
+        for fact in &mut recorded.facts {
+            if let Found::Listed { objects } = &mut fact.found {
+                for slice in objects.iter_mut() {
+                    for endpoint in slice["endpoints"].as_array_mut().into_iter().flatten() {
+                        endpoint["conditions"]["ready"] = Value::Bool(false);
+                    }
+                }
+            }
+        }
+    });
+    let endpoints = section(&unserved, "core.endpoints");
+    assert_eq!(
+        (endpoints.tone, endpoints.fold),
+        (Some(Tone::Warning), Fold::Folded)
+    );
+
+    let job = edited("job", |recorded| {
+        recorded.object["status"]["conditions"] = serde_json::json!([{
+            "type": "Failed", "status": "True", "reason": "BackoffLimitExceeded",
+        }]);
+    });
+    assert_eq!(
+        foldings(&job)[..3],
+        [
+            ("core.diagnostics", Some(Tone::Danger), Fold::Open),
+            ("core.job", Some(Tone::Danger), Fold::Open),
+            ("core.conditions", Some(Tone::Danger), Fold::Folded),
+        ],
+        "another kind opens its first section, and its failed condition is what its finding says"
+    );
+}
+
+#[test]
+fn a_condition_says_whether_a_finding_already_states_why_it_is_wrong() {
+    let described = described();
+    let conditions = |overview: &Overview| -> Vec<(String, bool)> {
+        let [Block::Conditions { conditions }] = &section(overview, "core.conditions").blocks[..]
+        else {
+            panic!("conditions");
+        };
+        conditions
+            .iter()
+            .map(|condition| (condition.kind.clone(), condition.explained))
+            .collect()
+    };
+    let crashing = conditions(&described["pod-crashing"]);
+    let explained: Vec<&str> = crashing
+        .iter()
+        .filter(|(_, explained)| *explained)
+        .map(|(kind, _)| kind.as_str())
+        .collect();
+    assert_eq!(explained, ["Ready", "ContainersReady"]);
+    assert!(
+        conditions(&described["pod"])
+            .iter()
+            .all(|(_, explained)| !explained),
+        "nothing is wrong, so nothing needs explaining"
+    );
+}
+
+#[test]
+fn a_pod_names_the_controller_at_the_top_of_its_owners() {
+    let described = described();
+    let recorded = recorded().remove("pod").unwrap();
+    let deployment = recorded_object("deployment");
+    let name = deployment["metadata"]["name"].as_str().unwrap();
+    let owner = described["pod"].header.owner.as_ref().unwrap();
+    assert_eq!(
+        (
+            owner.group.as_str(),
+            owner.version.as_str(),
+            owner.kind.as_str(),
+            owner.namespace.as_deref(),
+            owner.name.as_str()
+        ),
+        ("apps", "v1", "Deployment", Some("overview"), name)
+    );
+
+    let replica_set = recorded.object["metadata"]["ownerReferences"][0]["name"]
+        .as_str()
+        .unwrap();
+    let [need] = &twigo_describe::needs(&recorded.object)[..] else {
+        panic!("one need");
+    };
+    assert_eq!(
+        (need.resource.as_str(), need.field_selector.as_deref()),
+        (
+            "replicasets",
+            Some(format!("metadata.name={replica_set}")).as_deref()
+        )
+    );
+
+    let direct = |facts: Vec<Fact>| {
+        let overview = describe(Input {
+            object: &recorded.object,
+            printed: &recorded.printed,
+            events: &EventList::default(),
+            facts: &facts,
+        });
+        let owner = overview.header.owner.unwrap();
+        (owner.kind, owner.name)
+    };
+    assert_eq!(
+        direct(Vec::new()),
+        ("ReplicaSet".to_owned(), replica_set.to_owned()),
+        "its ReplicaSet is not listed yet"
+    );
+    assert_eq!(
+        direct(vec![Fact {
+            need: need.clone(),
+            found: Found::Unavailable {
+                message: "You may not list them.".to_owned()
+            }
+        }]),
+        ("ReplicaSet".to_owned(), replica_set.to_owned()),
+        "or may not be"
+    );
+    assert_eq!(
+        direct(vec![Fact {
+            need: need.clone(),
+            found: Found::Listed {
+                objects: vec![serde_json::json!({ "metadata": { "name": replica_set } })]
+            }
+        }]),
+        ("ReplicaSet".to_owned(), replica_set.to_owned()),
+        "a ReplicaSet that nothing controls is the top"
+    );
+
+    assert!(
+        described["pod-pending"].header.owner.is_none(),
+        "a pod that nothing controls"
+    );
+    assert!(twigo_describe::needs(&recorded_object("pod-pending")).is_empty());
+    let replica = described["replicaset"].header.owner.as_ref().unwrap();
+    assert_eq!(
+        (replica.kind.as_str(), replica.name.as_str()),
+        ("Deployment", name)
+    );
+    assert!(described["deployment"].header.owner.is_none());
+}
+
+#[test]
+fn a_pod_of_a_job_names_the_cron_job_above_it() {
+    let mut recorded = recorded().remove("pod").unwrap();
+    recorded.object["metadata"]["ownerReferences"] = serde_json::json!([{
+        "apiVersion": "batch/v1", "kind": "Job", "name": "report-29",
+        "uid": "job-uid", "controller": true,
+    }]);
+    let [need] = &twigo_describe::needs(&recorded.object)[..] else {
+        panic!("one need");
+    };
+    assert_eq!(
+        (
+            need.group.as_str(),
+            need.resource.as_str(),
+            need.field_selector.as_deref()
+        ),
+        ("batch", "jobs", Some("metadata.name=report-29"))
+    );
+    let facts = vec![Fact {
+        need: need.clone(),
+        found: Found::Listed {
+            objects: vec![serde_json::json!({
+                "metadata": {
+                    "name": "report-29",
+                    "ownerReferences": [{
+                        "apiVersion": "batch/v1", "kind": "CronJob", "name": "report",
+                        "uid": "cron-uid", "controller": true,
+                    }],
+                },
+            })],
+        },
+    }];
+    let overview = describe(Input {
+        object: &recorded.object,
+        printed: &recorded.printed,
+        events: &EventList::default(),
+        facts: &facts,
+    });
+    let owner = overview.header.owner.unwrap();
+    assert_eq!(
+        (
+            owner.group.as_str(),
+            owner.kind.as_str(),
+            owner.name.as_str()
+        ),
+        ("batch", "CronJob", "report")
+    );
+}
+
+#[test]
+fn only_a_bound_pod_has_a_node() {
+    let described = described();
+    let recorded = recorded().remove("pod").unwrap();
+    assert_eq!(
+        described["pod"].header.node.as_deref(),
+        recorded.object["spec"]["nodeName"].as_str()
+    );
+    assert_eq!(described["pod-pending"].header.node, None);
+    assert_eq!(described["deployment"].header.node, None);
+    assert_eq!(described["node"].header.node, None);
+}
+
+fn sentence(overview: &Overview) -> String {
+    text(&overview.header.sentence)
+}
+
+#[test]
+fn the_sentence_is_the_first_finding_else_the_vitals_in_words() {
+    let described = described();
+    assert_eq!(sentence(&described["pod"]), "1/1 ready · no restarts");
+    assert_eq!(
+        sentence(&described["pod-crashing"]),
+        "Container api keeps crashing"
+    );
+    assert_eq!(
+        sentence(&described["pod-pending"]),
+        "The pod cannot be scheduled"
+    );
+    let restarted = edited("pod", |recorded| {
+        recorded.object["status"]["containerStatuses"][0]["restartCount"] = 3.into();
+        recorded.object["status"]["containerStatuses"][0]["lastState"] = serde_json::json!({
+            "terminated": { "exitCode": 1, "finishedAt": "2026-11-03T10:05:00Z" },
+        });
+    });
+    assert_eq!(
+        restarted.header.sentence,
+        [
+            Span::Text {
+                text: "1/1 ready · 3 restarts, last ".to_owned()
+            },
+            Span::Ago {
+                at: "2026-11-03T10:05:00Z".to_owned()
+            }
+        ],
+        "a time is a span, never printed text"
+    );
+    let finished = edited("pod", |recorded| {
+        recorded.object["status"]["phase"] = "Succeeded".into();
+        recorded.object["status"]["containerStatuses"][0]["state"] = serde_json::json!({
+            "terminated": { "exitCode": 0, "finishedAt": "2026-11-03T10:06:00Z" },
+        });
+    });
+    assert_eq!(
+        finished.header.sentence,
+        [
+            Span::Text {
+                text: "Finished ".to_owned()
+            },
+            Span::Ago {
+                at: "2026-11-03T10:06:00Z".to_owned()
+            }
+        ]
+    );
+
+    let deployment = &described["deployment"];
+    assert_eq!(sentence(deployment), "2/2 ready · revision 2, <ago>");
+    let created = recorded()["deployment"].facts[0].found.clone();
+    let Found::Listed { objects } = created else {
+        panic!("listed");
+    };
+    let new = recorded_object("pod")["metadata"]["ownerReferences"][0]["name"].clone();
+    let at = objects
+        .iter()
+        .find(|rs| rs["metadata"]["name"] == new)
+        .unwrap()["metadata"]["creationTimestamp"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        deployment.header.sentence.last(),
+        Some(&Span::Ago { at }),
+        "the revision's age is its ReplicaSet's"
+    );
+    let rolling = edited("deployment", |recorded| {
+        recorded.object["status"]["updatedReplicas"] = 1.into();
+        recorded.object["status"]["readyReplicas"] = 1.into();
+    });
+    assert_eq!(
+        sentence(&rolling),
+        "Rolling out revision 2: 1/2 updated, 1/2 ready"
+    );
+    let unlisted = edited("deployment", |recorded| recorded.facts.clear());
+    assert_eq!(sentence(&unlisted), "2/2 ready · revision 2");
+
+    let node = &described["node"];
+    let pods = recorded()["node"].facts[0].found.clone();
+    let Found::Listed { objects } = pods else {
+        panic!("listed");
+    };
+    let running = objects
+        .iter()
+        .filter(|pod| {
+            !matches!(
+                pod["status"]["phase"].as_str(),
+                Some("Succeeded" | "Failed")
+            )
+        })
+        .count();
+    assert_eq!(sentence(node), format!("Schedulable · {running}/110 pods"));
+    let cordoned = edited("node", |recorded| {
+        recorded.object["spec"]["unschedulable"] = true.into();
+    });
+    assert_eq!(sentence(&cordoned), "The node is cordoned");
+    let unlisted = edited("node", |recorded| recorded.facts.clear());
+    assert_eq!(sentence(&unlisted), "Schedulable");
+
+    for name in [
+        "statefulset",
+        "daemonset",
+        "service",
+        "job",
+        "secret",
+        "replicaset",
+    ] {
+        assert!(
+            described[name].header.sentence.is_empty(),
+            "{name}: the table names no sentence for it"
+        );
+    }
+}
+
+#[test]
+fn each_kinds_vitals_are_toned_only_where_abnormal() {
+    let described = described();
+    assert_eq!(
+        vitals(&described["pod"]),
+        [
+            ("Ready", "1/1".to_owned(), None),
+            ("Restarts", "0".to_owned(), None)
+        ]
+    );
+    assert!(vital(&described["pod"], "Restarts").note.is_empty());
+    let crashing = &described["pod-crashing"];
+    let pod = recorded_object("pod-crashing");
+    let status = &pod["status"]["containerStatuses"][0];
+    assert_eq!(
+        vitals(crashing),
+        [
+            ("Ready", "0/1".to_owned(), Some(Tone::Warning)),
+            (
+                "Restarts",
+                status["restartCount"].to_string(),
+                Some(Tone::Warning)
+            )
+        ]
+    );
+    assert_eq!(
+        vital(crashing, "Restarts").note,
+        [Span::Ago {
+            at: status["lastState"]["terminated"]["finishedAt"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        }]
+    );
+    let calm = edited("pod", |recorded| {
+        recorded.object["status"]["containerStatuses"][0]["restartCount"] = 2.into();
+    });
+    assert_eq!(
+        vitals(&calm)[1],
+        ("Restarts", "2".to_owned(), None),
+        "restarts that left nothing wrong"
+    );
+    assert!(
+        vital(&calm, "Restarts").note.is_empty(),
+        "no time without one to say"
+    );
+    let done = edited("pod", |recorded| {
+        recorded.printed = vec![Printed {
+            column: "Ready".to_owned(),
+            value: "0/1".to_owned(),
+        }];
+        recorded.object["status"]["phase"] = "Succeeded".into();
+    });
+    assert_eq!(
+        vitals(&done)[0],
+        ("Ready", "0/1".to_owned(), None),
+        "a pod that finished is not short of containers"
+    );
+
+    assert_eq!(
+        vitals(&described["deployment"]),
+        [
+            ("Ready", "2/2".to_owned(), None),
+            ("Updated", "2/2".to_owned(), None),
+            ("Revision", "2".to_owned(), None)
+        ]
+    );
+    assert_eq!(
+        vital(&described["deployment"], "Revision").note,
+        [Span::Text {
+            text: "3.10".to_owned()
+        }],
+        "the one container's image tag"
+    );
+    let short = edited("deployment", |recorded| {
+        recorded.object["status"]["readyReplicas"] = 1.into();
+    });
+    assert_eq!(
+        vitals(&short)[0],
+        ("Ready", "1/2".to_owned(), Some(Tone::Warning))
+    );
+    assert_eq!(
+        vitals(&described["statefulset"]),
+        [
+            ("Ready", "1/1".to_owned(), None),
+            ("Updated", "1/1".to_owned(), None)
+        ]
+    );
+    assert_eq!(
+        vitals(&described["daemonset"]),
+        [
+            ("Ready", "1/1".to_owned(), None),
+            ("Updated", "1/1".to_owned(), None)
+        ]
+    );
+    for name in [
+        "service",
+        "job",
+        "cronjob",
+        "secret",
+        "pvc",
+        "replicaset",
+        "stage",
+    ] {
+        assert!(described[name].header.vitals.is_empty(), "{name}");
+    }
+
+    let node = &described["node"];
+    let node_object = recorded_object("node");
+    let kubelet = node_object["status"]["nodeInfo"]["kubeletVersion"]
+        .as_str()
+        .unwrap();
+    let table = table(node, "core.resources").1;
+    let share = |name: &str| {
+        let cell = &table.iter().find(|row| row[0] == name).unwrap()[3];
+        let open = cell.find('(').unwrap();
+        cell[open + 1..cell.len() - 1].to_owned()
+    };
+    let labels: Vec<&str> = vitals(node).iter().map(|(label, _, _)| *label).collect();
+    assert_eq!(
+        labels,
+        ["Pods", "CPU requested", "Memory requested", "Kubelet"]
+    );
+    let values: Vec<String> = vitals(node)
+        .into_iter()
+        .map(|(_, value, _)| value)
+        .collect();
+    assert!(values[0].ends_with("/110"), "{values:?}");
+    assert_eq!(
+        values[1..],
+        [share("cpu"), share("memory"), kubelet.to_owned()]
+    );
+    let full = edited("node", |recorded| {
+        recorded.object["status"]["allocatable"]["cpu"] = "500m".into();
+    });
+    assert_eq!(
+        vitals(&full)[1].2,
+        Some(Tone::Warning),
+        "requests over what it allocates"
+    );
+    let unlisted = edited("node", |recorded| recorded.facts.clear());
+    assert_eq!(
+        vitals(&unlisted)
+            .iter()
+            .map(|(_, value, _)| value.as_str())
+            .collect::<Vec<_>>(),
+        ["–", "–", "–", kubelet],
+        "a dash until its pods are listed"
+    );
+}
+
+fn conditions_of(overview: &Overview) -> &[Condition] {
+    match &section(overview, "core.conditions").blocks[..] {
+        [Block::Conditions { conditions }] => conditions,
+        blocks => panic!("conditions: {blocks:?}"),
+    }
+}
+
+fn condition<'a>(overview: &'a Overview, kind: &str) -> &'a Condition {
+    conditions_of(overview)
+        .iter()
+        .find(|condition| condition.kind == kind)
+        .unwrap_or_else(|| panic!("no {kind}"))
+}
+
+fn set_condition(recorded: &mut Recorded, kind: &str, status: &str, reason: &str) {
+    for condition in recorded.object["status"]["conditions"]
+        .as_array_mut()
+        .unwrap()
+    {
+        if condition["type"] == kind {
+            condition["status"] = status.into();
+            condition["reason"] = reason.into();
+        }
+    }
+}
+
+const FOLLOW: [&str; 3] = ["Ready", "ContainersReady", "PodReadyToStartContainers"];
+
+fn toned_ids(overview: &Overview) -> Vec<&str> {
+    overview
+        .sections
+        .iter()
+        .filter(|section| section.tone.is_some())
+        .map(|section| section.id.as_str())
+        .collect()
+}
+
+#[test]
+fn a_finished_pods_readiness_is_a_state_and_a_running_pods_follows_its_containers() {
+    for phase in ["Succeeded", "Failed"] {
+        let done = edited("pod", |recorded| {
+            recorded.object["status"]["phase"] = phase.into();
+            for kind in FOLLOW {
+                set_condition(recorded, kind, "False", "PodCompleted");
+            }
+        });
+        for kind in FOLLOW.into_iter().chain(["Initialized"]) {
+            let condition = condition(&done, kind);
+            assert_eq!(
+                (condition.tone, condition.explained),
+                (Tone::Neutral, false),
+                "{phase}: {kind}"
+            );
+        }
+        assert_eq!(condition(&done, "Initialized").status, "True");
+        let conditions = section(&done, "core.conditions");
+        assert_eq!(
+            (conditions.tone, conditions.fold, text(&conditions.summary)),
+            (None, Fold::Folded, "1 of 1 ok".to_owned()),
+            "{phase}: a state is neither toned nor counted, whatever its status"
+        );
+    }
+
+    let starting = edited("pod", |recorded| {
+        for kind in ["Ready", "ContainersReady"] {
+            set_condition(recorded, kind, "False", "ContainersNotReady");
+        }
+    });
+    assert!(findings(&starting).is_empty());
+    let conditions = section(&starting, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (Some(Tone::Warning), Fold::Folded, "3 of 5 ok".to_owned()),
+        "what the containers do tones the header and never opens it"
+    );
+
+    let gated = edited("pod", |recorded| {
+        for kind in ["Ready", "ContainersReady"] {
+            set_condition(recorded, kind, "False", "ContainersNotReady");
+        }
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "type": "example.com/warm", "status": "False" }));
+    });
+    let conditions = section(&gated, "core.conditions");
+    assert_eq!(
+        (conditions.fold, text(&conditions.summary)),
+        (
+            Fold::Finding,
+            "example.com/warm is False · 3 of 6 ok".to_owned()
+        ),
+        "only another bad condition opens it"
+    );
+}
+
+#[test]
+fn an_evicted_pods_disruption_is_what_its_finding_says_and_its_reason_is_no_row() {
+    let evicted = edited("pod", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["phase"] = "Failed".into();
+        status["reason"] = "Evicted".into();
+        status["message"] = "The node was low on resource: memory.".into();
+        status["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "type": "DisruptionTarget", "status": "True", "reason": "TerminationByKubelet",
+            }));
+        for kind in FOLLOW {
+            set_condition(recorded, kind, "False", "PodFailed");
+        }
+    });
+    assert_eq!(titles(&evicted), [(Tone::Danger, "The pod was evicted")]);
+    assert_eq!(
+        findings(&evicted)[0].message.as_deref(),
+        Some("The node was low on resource: memory."),
+        "the finding carries the reason and the message"
+    );
+    assert!(condition(&evicted, "DisruptionTarget").explained);
+    let conditions = section(&evicted, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (Some(Tone::Danger), Fold::Folded, "1 of 2 ok".to_owned()),
+        "the finding states the disruption, and the summary says ok as it does for any pod"
+    );
+    let metadata = fields(&evicted, "core.metadata");
+    assert!(
+        metadata
+            .iter()
+            .all(|field| field.label != "Reason" && field.label != "Message"),
+        "{metadata:?}"
+    );
+}
+
+#[test]
+fn a_failed_pod_with_no_message_takes_its_disruptions_reason_and_message() {
+    let orphaned = edited("pod", |recorded| {
+        recorded.object["status"]["phase"] = "Failed".into();
+        for kind in FOLLOW {
+            set_condition(recorded, kind, "False", "PodFailed");
+        }
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "type": "DisruptionTarget", "status": "True",
+                "reason": "DeletionByPodGC", "message": "PodGC: node no longer exists",
+            }));
+    });
+    assert_eq!(titles(&orphaned), [(Tone::Danger, "The pod failed")]);
+    let finding = &findings(&orphaned)[0];
+    assert_eq!(text(&finding.detail), "DisruptionTarget: DeletionByPodGC.");
+    assert_eq!(
+        finding.message.as_deref(),
+        Some("PodGC: node no longer exists")
+    );
+    assert!(condition(&orphaned, "DisruptionTarget").explained);
+    let conditions = section(&orphaned, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold),
+        (Some(Tone::Danger), Fold::Folded),
+        "the finding states the disruption, so it opens nothing"
+    );
+
+    let own = edited("pod", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["phase"] = "Failed".into();
+        status["message"] = "The node was low on resource: memory.".into();
+        status["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "type": "DisruptionTarget", "status": "True",
+                "reason": "TerminationByKubelet", "message": "The disruption's own.",
+            }));
+    });
+    let finding = &findings(&own)[0];
+    assert_eq!(
+        (text(&finding.detail), finding.message.as_deref()),
+        (String::new(), Some("The node was low on resource: memory.")),
+        "the pod's own message is the finding's"
+    );
+}
+
+#[test]
+fn a_condition_whose_status_is_unknown_is_not_ok() {
+    let silent = edited("node", |recorded| {
+        for condition in recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+        {
+            condition["status"] = "Unknown".into();
+        }
+    });
+    let conditions = section(&silent, "core.conditions");
+    assert_eq!(
+        (conditions.tone, text(&conditions.summary)),
+        (Some(Tone::Warning), "0 of 4 ok".to_owned())
+    );
+    assert_eq!(
+        titles(&silent),
+        [(Tone::Danger, "The node stopped reporting")]
+    );
+}
+
+#[test]
+fn a_paused_deployment_says_it_is_paused() {
+    let paused = edited("deployment", |recorded| {
+        recorded.object["spec"]["paused"] = true.into();
+        recorded.object["status"]["updatedReplicas"] = 1.into();
+        set_condition(recorded, "Progressing", "Unknown", "DeploymentPaused");
+    });
+    assert_eq!(sentence(&paused), "Paused at revision 2: 1/2 updated");
+    assert_eq!(summary(&paused, "core.rollout"), "paused · 1/2 updated");
+    assert_eq!(
+        summary(&paused, "core.strategy"),
+        "RollingUpdate · 2 replicas · paused"
+    );
+    let conditions = section(&paused, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, "1 of 1 ok".to_owned()),
+        "its Progressing is Unknown on purpose"
+    );
+}
+
+#[test]
+fn a_deployment_that_was_resumed_is_in_a_state_as_one_paused_is() {
+    let resumed = edited("deployment", |recorded| {
+        set_condition(recorded, "Progressing", "Unknown", "DeploymentResumed");
+    });
+    let conditions = section(&resumed, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, "1 of 1 ok".to_owned())
+    );
+}
+
+#[test]
+fn a_status_of_unknown_is_a_warning_only_where_the_kubelet_stopped_reporting() {
+    let reconciling = edited("stage", |recorded| {
+        recorded.object["status"] = serde_json::json!({
+            "conditions": [{ "type": "Ready", "status": "Unknown", "reason": "Progressing" }],
+        });
+    });
+    assert_eq!(condition(&reconciling, "Ready").tone, Tone::Neutral);
+    let conditions = section(&reconciling, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, String::new()),
+        "a controller that has not decided yet opens nothing and counts for nothing"
+    );
+
+    let silent = edited("pod", |recorded| {
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "type": "example.com/warm", "status": "Unknown" }));
+    });
+    assert_eq!(condition(&silent, "example.com/warm").tone, Tone::Warning);
+    let conditions = section(&silent, "core.conditions");
+    assert_eq!(
+        (conditions.fold, text(&conditions.summary)),
+        (
+            Fold::Finding,
+            "example.com/warm is Unknown · 5 of 6 ok".to_owned()
+        )
+    );
+}
+
+fn with_init(recorded: &mut Recorded, state: Value) {
+    for kind in ["Ready", "ContainersReady"] {
+        set_condition(recorded, kind, "False", "ContainersNotReady");
+    }
+    set_condition(recorded, "Initialized", "False", "ContainersNotInitialized");
+    recorded.object["spec"]["initContainers"] =
+        serde_json::json!([{ "name": "setup", "image": "busybox" }]);
+    recorded.object["status"]["initContainerStatuses"] = serde_json::json!([{
+        "name": "setup", "ready": false, "restartCount": 0, "state": state,
+    }]);
+    recorded.object["status"]["containerStatuses"][0]["ready"] = false.into();
+    recorded.object["status"]["containerStatuses"][0]["state"] =
+        serde_json::json!({ "waiting": { "reason": "PodInitializing" } });
+}
+
+#[test]
+fn a_pod_whose_init_containers_run_has_its_conditions_folded_and_one_that_crashes_keeps_its_finding()
+ {
+    let starting = edited("pod", |recorded| {
+        with_init(
+            recorded,
+            serde_json::json!({ "running": { "startedAt": "2026-11-03T10:01:00Z" } }),
+        );
+    });
+    assert!(findings(&starting).is_empty());
+    let conditions = section(&starting, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (Some(Tone::Warning), Fold::Folded, "2 of 5 ok".to_owned()),
+        "what the init containers do tones the header and never opens it"
+    );
+
+    let crashing = edited("pod", |recorded| {
+        with_init(
+            recorded,
+            serde_json::json!({ "waiting": { "reason": "CrashLoopBackOff" } }),
+        );
+        recorded.object["status"]["initContainerStatuses"][0]["restartCount"] = 3.into();
+        recorded.object["status"]["initContainerStatuses"][0]["lastState"] = serde_json::json!({ "terminated": { "exitCode": 1, "finishedAt": "2026-11-03T10:00:00Z" } });
+    });
+    assert_eq!(
+        titles(&crashing),
+        [(Tone::Danger, "Init container setup keeps crashing")]
+    );
+    assert!(condition(&crashing, "Initialized").explained);
+    let conditions = section(&crashing, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold),
+        (Some(Tone::Warning), Fold::Folded)
+    );
+    assert_eq!(
+        vitals(&crashing)[1],
+        ("Restarts", "3".to_owned(), Some(Tone::Warning)),
+        "an init container's crash loop is what its restarts led to"
+    );
+    assert_eq!(vitals(&starting)[1], ("Restarts", "0".to_owned(), None));
+}
+
+#[test]
+fn a_node_condition_a_detector_adds_is_good_news_while_it_is_false() {
+    let healthy = edited("node", |recorded| {
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .extend([
+                serde_json::json!({ "type": "KernelDeadlock", "status": "False" }),
+                serde_json::json!({ "type": "ReadonlyFilesystem", "status": "False" }),
+            ]);
+    });
+    for kind in ["KernelDeadlock", "ReadonlyFilesystem", "Ready"] {
+        assert_eq!(condition(&healthy, kind).tone, Tone::Success, "{kind}");
+    }
+    let conditions = section(&healthy, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, "6 of 6 ok".to_owned())
+    );
+
+    let monitored = |status: &str| {
+        edited("node", |recorded| {
+            recorded.object["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .extend(
+                    [
+                        "KernelReady",
+                        "NetworkingReady",
+                        "StorageReady",
+                        "ContainerRuntimeReady",
+                    ]
+                    .map(|kind| serde_json::json!({ "type": kind, "status": status })),
+                );
+            recorded.object["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({ "type": "KernelDeadlock", "status": "False" }));
+        })
+    };
+    let agent = monitored("True");
+    for kind in ["KernelReady", "NetworkingReady", "StorageReady"] {
+        assert_eq!(condition(&agent, kind).tone, Tone::Success, "{kind}");
+    }
+    let conditions = section(&agent, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (None, Fold::Folded, "9 of 9 ok".to_owned()),
+        "a type that ends in Ready is good news while it is True"
+    );
+    let stalled = monitored("False");
+    assert_eq!(condition(&stalled, "KernelReady").tone, Tone::Warning);
+    assert_eq!(condition(&stalled, "KernelDeadlock").tone, Tone::Success);
+    let conditions = section(&stalled, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (
+            Some(Tone::Warning),
+            Fold::Finding,
+            "KernelReady is False and 3 more · 5 of 9 ok".to_owned()
+        )
+    );
+
+    let deadlocked = edited("node", |recorded| {
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({ "type": "KernelDeadlock", "status": "True" }));
+    });
+    assert_eq!(condition(&deadlocked, "KernelDeadlock").tone, Tone::Danger);
+    let conditions = section(&deadlocked, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (
+            Some(Tone::Danger),
+            Fold::Finding,
+            "KernelDeadlock is True · 4 of 5 ok".to_owned()
+        )
+    );
+}
+
+#[test]
+fn a_draining_pod_says_why_it_is_disrupted_and_only_that_explains_the_condition() {
+    let draining = |reason: Option<&str>, message: Option<&str>| {
+        edited("pod", |recorded| {
+            recorded.object["metadata"]["deletionTimestamp"] = "2026-11-03T12:00:30Z".into();
+            recorded.object["metadata"]["deletionGracePeriodSeconds"] = 30.into();
+            let mut target = serde_json::json!({ "type": "DisruptionTarget", "status": "True" });
+            target["reason"] = reason.into();
+            target["message"] = message.into();
+            recorded.object["status"]["conditions"]
+                .as_array_mut()
+                .unwrap()
+                .push(target);
+        })
+    };
+    for (reason, message) in [
+        ("EvictionByEvictionAPI", "Eviction API: evicting"),
+        (
+            "DeletionByTaintManager",
+            "Taint manager: deleting due to NoExecute taint",
+        ),
+        (
+            "PreemptionByScheduler",
+            "Preempted by a higher priority pod",
+        ),
+    ] {
+        let overview = draining(Some(reason), Some(message));
+        assert_eq!(
+            titles(&overview),
+            [(Tone::Warning, "The pod is terminating")]
+        );
+        let finding = &findings(&overview)[0];
+        assert_eq!(
+            text(&finding.detail),
+            format!(
+                "Asked to stop <ago>, with a grace period of 30 s. DisruptionTarget: {reason}."
+            )
+        );
+        assert_eq!(finding.message.as_deref(), Some(message));
+        assert!(
+            condition(&overview, "DisruptionTarget").explained,
+            "{reason}"
+        );
+        assert_eq!(section(&overview, "core.conditions").fold, Fold::Folded);
+    }
+
+    let held = edited("pod", |recorded| {
+        recorded.object["metadata"]["finalizers"] = serde_json::json!(["example.com/hold"]);
+        recorded.object["metadata"]["deletionTimestamp"] = "2026-11-03T12:00:30Z".into();
+        recorded.object["metadata"]["deletionGracePeriodSeconds"] = 30.into();
+        recorded.object["status"]["conditions"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "type": "DisruptionTarget", "status": "True", "message": "Eviction API: evicting",
+            }));
+    });
+    assert_eq!(
+        findings(&held)[0].message.as_deref(),
+        Some("Eviction API: evicting\nFinalizers: example.com/hold")
+    );
+
+    let unsaid = draining(None, None);
+    assert_eq!(findings(&unsaid)[0].message, None);
+    assert!(
+        !condition(&unsaid, "DisruptionTarget").explained,
+        "a finding that does not say why states nothing"
+    );
+    let conditions = section(&unsaid, "core.conditions");
+    assert_eq!(
+        (conditions.tone, conditions.fold, text(&conditions.summary)),
+        (
+            Some(Tone::Danger),
+            Fold::Finding,
+            "DisruptionTarget is True · 5 of 6 ok".to_owned()
+        )
+    );
+}
+
+fn restarts_of(overview: &Overview) -> (String, Vec<Span>) {
+    let vital = vital(overview, "Restarts");
+    (shown(&vital.value), vital.note.clone())
+}
+
+#[test]
+fn restarts_are_the_lists_count_and_its_last_time() {
+    let described = described();
+    let recorded = recorded();
+    for name in [
+        "pod",
+        "pod-crashing",
+        "pod-pulling",
+        "pod-pending",
+        "pod-unready",
+    ] {
+        let cell = &recorded[name]
+            .printed
+            .iter()
+            .find(|cell| cell.column == "Restarts")
+            .unwrap()
+            .value;
+        assert_eq!(
+            restarts_of(&described[name]).0,
+            cell.split(' ').next().unwrap(),
+            "{name}"
+        );
+    }
+
+    let ended = |at: &str| serde_json::json!({ "terminated": { "exitCode": 1, "finishedAt": at } });
+    let print = |recorded: &mut Recorded, value: &str| {
+        for cell in &mut recorded.printed {
+            if cell.column == "Restarts" {
+                cell.value = value.to_owned();
+            }
+        }
+    };
+
+    let completed = edited("pod", |recorded| {
+        print(recorded, "0");
+        recorded.object["spec"]["initContainers"] =
+            serde_json::json!([{ "name": "setup", "image": "busybox" }]);
+        recorded.object["status"]["initContainerStatuses"] = serde_json::json!([{
+            "name": "setup",
+            "restartCount": 2,
+            "lastState": ended("2026-11-03T09:59:00Z"),
+            "state": { "terminated": { "exitCode": 0, "reason": "Completed", "finishedAt": "2026-11-03T10:00:00Z" } },
+        }]);
+    });
+    assert_eq!(
+        restarts_of(&completed),
+        ("0".to_owned(), Vec::new()),
+        "an init container that failed twice and completed is left behind"
+    );
+    assert_eq!(sentence(&completed), "1/1 ready · no restarts");
+
+    let starting = edited("pod", |recorded| {
+        print(recorded, "3 (5m ago)");
+        set_condition(recorded, "Initialized", "False", "ContainersNotInitialized");
+        recorded.object["spec"]["initContainers"] =
+            serde_json::json!([{ "name": "setup", "image": "busybox" }]);
+        recorded.object["status"]["initContainerStatuses"] = serde_json::json!([{
+            "name": "setup",
+            "restartCount": 3,
+            "lastState": ended("2026-11-03T10:00:00Z"),
+            "state": { "running": { "startedAt": "2026-11-03T10:01:00Z" } },
+        }]);
+        recorded.object["status"]["containerStatuses"][0]["restartCount"] = 7.into();
+    });
+    assert_eq!(
+        restarts_of(&starting),
+        (
+            "3".to_owned(),
+            vec![Span::Ago {
+                at: "2026-11-03T10:00:00Z".to_owned()
+            }]
+        ),
+        "while it initializes, its init containers' restarts, and its containers' wait"
+    );
+
+    let sidecar = edited("pod", |recorded| {
+        print(recorded, "3 (2m ago)");
+        recorded.object["spec"]["initContainers"] = serde_json::json!([
+            { "name": "setup", "image": "busybox" },
+            { "name": "proxy", "image": "busybox", "restartPolicy": "Always" },
+        ]);
+        recorded.object["status"]["initContainerStatuses"] = serde_json::json!([
+            {
+                "name": "setup", "restartCount": 5,
+                "lastState": ended("2026-11-03T10:09:00Z"),
+                "state": { "terminated": { "exitCode": 0, "finishedAt": "2026-11-03T10:10:00Z" } },
+            },
+            {
+                "name": "proxy", "restartCount": 1, "started": true,
+                "lastState": ended("2026-11-03T10:07:00Z"),
+                "state": { "running": { "startedAt": "2026-11-03T10:08:00Z" } },
+            },
+        ]);
+        let app = &mut recorded.object["status"]["containerStatuses"][0];
+        app["restartCount"] = 2.into();
+        app["lastState"] = ended("2026-11-03T10:05:00Z");
+    });
+    assert_eq!(
+        restarts_of(&sidecar),
+        (
+            "3".to_owned(),
+            vec![Span::Ago {
+                at: "2026-11-03T10:07:00Z".to_owned()
+            }]
+        ),
+        "after it initialized, the sidecars' restarts and the containers', the newest end among them"
+    );
+}
+
+#[test]
+fn restarts_are_toned_only_where_a_container_crashes_or_failed() {
+    let terminating = edited("pod", |recorded| {
+        recorded.object["metadata"]["deletionTimestamp"] = "2026-11-03T10:00:30Z".into();
+        recorded.object["metadata"]["deletionGracePeriodSeconds"] = 30.into();
+        let app = &mut recorded.object["status"]["containerStatuses"][0];
+        app["restartCount"] = 1.into();
+        app["lastState"] = serde_json::json!({
+            "terminated": { "exitCode": 1, "finishedAt": "2026-10-03T10:00:00Z" },
+        });
+    });
+    assert_eq!(
+        titles(&terminating),
+        [(Tone::Warning, "The pod is terminating")]
+    );
+    assert_eq!(
+        vitals(&terminating)[1],
+        ("Restarts", "1".to_owned(), None),
+        "a restart a month ago, under a pod that is going away"
+    );
+    assert_eq!(
+        vitals(&described()["pod-crashing"])[1].2,
+        Some(Tone::Warning),
+        "the crash loop is what the restarts led to"
+    );
+
+    let month_ago = serde_json::json!({
+        "terminated": { "exitCode": 1, "finishedAt": "2026-10-03T10:00:00Z" },
+    });
+    let unready = edited("pod", |recorded| {
+        let app = &mut recorded.object["status"]["containerStatuses"][0];
+        app["ready"] = false.into();
+        app["restartCount"] = 1.into();
+        app["lastState"] = month_ago.clone();
+    });
+    assert_eq!(
+        titles(&unready),
+        [(Tone::Warning, "Container app is not ready")]
+    );
+    assert_eq!(
+        vitals(&unready)[1],
+        ("Restarts", "1".to_owned(), None),
+        "one restart a month ago under a container that is not ready"
+    );
+
+    let failed = edited("pod", |recorded| {
+        let app = &mut recorded.object["status"]["containerStatuses"][0];
+        app["restartCount"] = 2.into();
+        app["state"] = month_ago.clone();
+    });
+    assert_eq!(titles(&failed), [(Tone::Danger, "Container app failed")]);
+    assert_eq!(
+        vitals(&failed)[1].2,
+        Some(Tone::Warning),
+        "a container that failed after restarts"
+    );
+}
+
+#[test]
+fn a_finding_tones_the_section_that_holds_what_it_says_and_no_other() {
+    let described = described();
+    assert_eq!(
+        toned_ids(&described["ingress"]),
+        ["core.diagnostics", "core.rules"],
+        "its own section holds the rule, so the first one is not toned too"
+    );
+    assert_eq!(
+        summary(&described["ingress"], "core.rules"),
+        "Service reports does not exist"
+    );
+
+    let unserved = edited("service", |recorded| {
+        for fact in &mut recorded.facts {
+            if let Found::Listed { objects } = &mut fact.found {
+                for slice in objects.iter_mut() {
+                    for endpoint in slice["endpoints"].as_array_mut().into_iter().flatten() {
+                        endpoint["conditions"]["ready"] = Value::Bool(false);
+                    }
+                }
+            }
+        }
+    });
+    assert_eq!(
+        toned_ids(&unserved),
+        ["core.diagnostics", "core.endpoints"],
+        "the endpoints are what no ready pod serves"
+    );
+    assert_eq!(
+        summary(&unserved, "core.endpoints"),
+        "No ready pod serves it"
+    );
+    let bare = edited("service", |recorded| {
+        for fact in &mut recorded.facts {
+            fact.found = Found::Listed {
+                objects: Vec::new(),
+            };
+        }
+    });
+    assert_eq!(
+        toned_ids(&bare),
+        ["core.diagnostics", "core.service"],
+        "with no endpoints to hold it, the first section does"
+    );
+    assert_eq!(summary(&bare, "core.service"), "No ready pod serves it");
+
+    let short = edited("deployment", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["readyReplicas"] = 1.into();
+        status["availableReplicas"] = 1.into();
+        status["unavailableReplicas"] = 1.into();
+        set_condition(recorded, "Available", "False", "MinimumReplicasUnavailable");
+    });
+    assert_eq!(
+        titles(&short),
+        [(Tone::Warning, "Fewer pods are available than it needs")]
+    );
+    assert_eq!(
+        foldings(&short)[..3],
+        [
+            ("core.diagnostics", Some(Tone::Warning), Fold::Open),
+            ("core.rollout", None, Fold::Open),
+            ("core.pods", Some(Tone::Warning), Fold::Open),
+        ]
+    );
+    assert_eq!(
+        summary(&short, "core.pods"),
+        "Fewer pods are available than it needs"
+    );
+    let stuck = edited("deployment", |recorded| {
+        set_condition(recorded, "Progressing", "False", "ProgressDeadlineExceeded");
+    });
+    assert_eq!(
+        foldings(&stuck)[..3],
+        [
+            ("core.diagnostics", Some(Tone::Danger), Fold::Open),
+            ("core.rollout", Some(Tone::Danger), Fold::Open),
+            ("core.pods", None, Fold::Open),
+        ],
+        "a stuck rollout is the rollout's"
+    );
+
+    let set = edited("statefulset", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["readyReplicas"] = 0.into();
+        status["availableReplicas"] = 0.into();
+    });
+    let daemons = edited("daemonset", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["numberReady"] = 0.into();
+        status["numberAvailable"] = 0.into();
+        status["numberUnavailable"] = 1.into();
+    });
+    for (kind, overview) in [("StatefulSet", &set), ("DaemonSet", &daemons)] {
+        let pods = section(overview, "core.pods");
+        assert_eq!(
+            (pods.tone, text(&pods.summary)),
+            (Some(Tone::Warning), "Not every pod is ready".to_owned()),
+            "{kind}"
+        );
+        assert_eq!(
+            summary(overview, "core.rollout"),
+            "1/1 updated",
+            "{kind}: its rollout is not what the finding is about"
+        );
+    }
+    for (kind, overview) in [
+        ("Deployment", &short),
+        ("StatefulSet", &set),
+        ("DaemonSet", &daemons),
+    ] {
+        assert_eq!(
+            foldings(overview)[..3],
+            [
+                ("core.diagnostics", Some(Tone::Warning), Fold::Open),
+                ("core.rollout", None, Fold::Open),
+                ("core.pods", Some(Tone::Warning), Fold::Open),
+            ],
+            "{kind}: its counting rows hold no tone, the Pods section and the finding do"
+        );
+    }
+
+    let rolling = edited("deployment", |recorded| {
+        let status = &mut recorded.object["status"];
+        status["replicas"] = 3.into();
+        status["updatedReplicas"] = 1.into();
+        status["readyReplicas"] = 2.into();
+        status["availableReplicas"] = 2.into();
+        status["unavailableReplicas"] = 1.into();
+    });
+    assert!(findings(&rolling).is_empty());
+    assert_eq!(
+        foldings(&rolling)[..2],
+        [
+            ("core.rollout", None, Fold::Open),
+            ("core.pods", None, Fold::Open)
+        ],
+        "a normal rolling update is no finding"
+    );
+
+    let misplaced = edited("daemonset", |recorded| {
+        recorded.object["status"]["numberMisscheduled"] = 1.into();
+    });
+    assert_eq!(
+        foldings(&misplaced)[..3],
+        [
+            ("core.diagnostics", Some(Tone::Warning), Fold::Open),
+            ("core.rollout", Some(Tone::Warning), Fold::Open),
+            ("core.pods", None, Fold::Open),
+        ],
+        "a pod that runs where it should not is the rollout's"
+    );
+}
+
+#[test]
+fn the_other_kinds_summarise_their_own_section() {
+    let described = described();
+    let job = &described["job"];
+    assert_eq!(summary(job, "core.job"), "complete <ago>");
+    assert_eq!(summary(job, "core.pods"), "1 succeeded");
+    let running = edited("job", |recorded| {
+        let status = recorded.object["status"].as_object_mut().unwrap();
+        status.remove("completionTime");
+        status.remove("succeeded");
+        status.insert("active".to_owned(), 1.into());
+        status.insert("failed".to_owned(), 2.into());
+        status.insert("conditions".to_owned(), serde_json::json!([]));
+    });
+    assert_eq!(summary(&running, "core.job"), "0/1 completions");
+    assert_eq!(summary(&running, "core.pods"), "1 active · 2 failed");
+    let failed = edited("job", |recorded| {
+        recorded.object["status"]["conditions"] = serde_json::json!([{
+            "type": "Failed", "status": "True", "reason": "BackoffLimitExceeded",
+        }]);
+    });
+    assert_eq!(
+        summary(&failed, "core.job"),
+        "The job failed too many times",
+        "a finding is what the section says"
+    );
+
+    let cron = &described["cronjob"];
+    assert_eq!(
+        summary(cron, "core.cronjob"),
+        "*/1 * * * * · last run <ago>"
+    );
+    assert_eq!(summary(cron, "core.jobs"), "");
+    let idle = edited("cronjob", |recorded| {
+        recorded.object["status"] = serde_json::json!({
+            "active": [{ "name": "report-1" }, { "name": "report-2" }],
+        });
+    });
+    assert_eq!(summary(&idle, "core.cronjob"), "*/1 * * * *");
+    assert_eq!(summary(&idle, "core.jobs"), "2 active");
+
+    let service = recorded_object("service");
+    assert_eq!(
+        summary(&described["service"], "core.service"),
+        format!(
+            "ClusterIP · {}",
+            service["spec"]["clusterIP"].as_str().unwrap()
+        )
+    );
+    assert_eq!(summary(&described["ingress"], "core.ingress"), "nginx");
+    assert_eq!(summary(&described["pvc"], "core.claim"), "Bound · 1Gi");
+    let unbound = edited("pvc", |recorded| {
+        recorded.object["status"] = serde_json::json!({ "phase": "Bound" });
+    });
+    assert_eq!(summary(&unbound, "core.claim"), "Bound");
+}
+
+#[test]
+fn events_say_none_only_once_they_are_listed() {
+    let say = |events: EventList| {
+        let recorded = recorded().remove("pod").unwrap();
+        let overview = describe(Input {
+            object: &recorded.object,
+            printed: &recorded.printed,
+            events: &events,
+            facts: &recorded.facts,
+        });
+        summary(&overview, "core.events")
+    };
+    assert_eq!(
+        say(EventList {
+            listed: false,
+            ..EventList::default()
+        }),
+        "",
+        "still coming"
+    );
+    assert_eq!(
+        say(EventList {
+            listed: true,
+            ..EventList::default()
+        }),
+        "none"
+    );
+    assert_eq!(
+        say(EventList {
+            listed: true,
+            unavailable: Some("You may not list events.".to_owned()),
+            ..EventList::default()
+        }),
+        "unavailable"
+    );
+}
+
+#[test]
+fn the_header_holds_the_creation_time_of_the_object() {
+    for (name, overview) in described() {
+        let object = recorded_object(&name);
+        assert!(
+            object["metadata"]["creationTimestamp"].is_string(),
+            "{name}"
+        );
+        assert_eq!(
+            overview.header.created.as_deref(),
+            object["metadata"]["creationTimestamp"].as_str(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_command_and_its_arguments_are_lists_of_their_elements() {
+    let code = |text: &str| Shown::Code {
+        text: text.to_owned(),
+    };
+    let overview = edited("pod", |recorded| {
+        let container = &mut recorded.object["spec"]["containers"][0];
+        container["command"] = serde_json::json!(["sh", "-c", "echo a\necho b"]);
+        container["args"] = serde_json::json!(["--flag"]);
+    });
+    let details = &containers(&overview, "core.containers")[0].details;
+    assert_eq!(
+        field(details, "Command"),
+        &Shown::List {
+            items: vec![code("sh"), code("-c"), code("echo a\necho b")]
+        },
+        "an element keeps its line end"
+    );
+    assert_eq!(
+        field(details, "Args"),
+        &Shown::List {
+            items: vec![code("--flag")]
+        },
+        "one element is a list too"
+    );
 }

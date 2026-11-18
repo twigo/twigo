@@ -1,9 +1,101 @@
 //! Values as the document shows them, and fields built from an object.
 
 use serde_json::Value;
-use twigo_ipc::{Field, ObjectRef, Tone, Value as Shown};
+use twigo_ipc::{Block, Field, Finding, Fold, ObjectRef, Section, Span, Tone, Value as Shown};
 
 use crate::text;
+
+/// A section as its describer builds it: folded, with no line at its end
+/// and no tone, which the page's layout and the describer's findings settle.
+pub(crate) fn section(id: &str, title: &str, blocks: Vec<Block>) -> Section {
+    Section {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        summary: Vec::new(),
+        tone: None,
+        fold: Fold::Folded,
+        blocks,
+    }
+}
+
+/// A section that holds a finding names it where its line would count.
+pub(crate) fn named(finding: &Finding) -> Vec<Span> {
+    Summary::default().part(&finding.title).done()
+}
+
+/// A section whose line counts what it lists: `2 ports`.
+pub(crate) fn listing(
+    id: &str,
+    title: &str,
+    count: usize,
+    noun: &str,
+    blocks: Vec<Block>,
+) -> Section {
+    Section {
+        summary: Summary::default().count(count, noun).done(),
+        ..section(id, title, blocks)
+    }
+}
+
+/// `2 volumes`, `1 claim`: a count with its noun, which takes an `s`.
+pub(crate) fn counted(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
+/// The line a section's header ends with: parts joined by a dot, where a
+/// part may end in a time that the webview keeps counting.
+#[derive(Default)]
+pub(crate) struct Summary(Vec<Span>);
+
+impl Summary {
+    pub fn part(mut self, text: impl AsRef<str>) -> Self {
+        if !text.as_ref().is_empty() {
+            self.separate();
+            self.push(text.as_ref());
+        }
+        self
+    }
+
+    /// A count with its noun, none when there are none.
+    pub fn count(self, count: usize, noun: &str) -> Self {
+        if count == 0 {
+            self
+        } else {
+            self.part(counted(count, noun))
+        }
+    }
+
+    /// A part that ends in a time: `created 3 d ago`.
+    pub fn ago(mut self, text: &str, at: String) -> Self {
+        self.separate();
+        self.push(text);
+        self.0.push(Span::Ago { at });
+        self
+    }
+
+    pub fn done(self) -> Vec<Span> {
+        self.0
+    }
+
+    fn separate(&mut self) {
+        if !self.0.is_empty() {
+            self.push(" · ");
+        }
+    }
+
+    fn push(&mut self, text: &str) {
+        match self.0.last_mut() {
+            Some(Span::Text { text: last }) => last.push_str(text),
+            _ => self.0.push(Span::Text {
+                text: text.to_owned(),
+            }),
+        }
+    }
+}
 
 pub(crate) fn plain(text: impl Into<String>) -> Shown {
     Shown::Text { text: text.into() }
@@ -57,8 +149,27 @@ pub(crate) struct Fields(pub Vec<Field>);
 
 impl Fields {
     pub fn add(&mut self, label: &str, value: Shown) -> &mut Self {
+        self.add_default(label, value, false)
+    }
+
+    /// A row, when there is a value, that holds the cluster's default when
+    /// `default` says so.
+    pub fn add_default_maybe(
+        &mut self,
+        label: &str,
+        value: Option<Shown>,
+        default: bool,
+    ) -> &mut Self {
+        if let Some(value) = value {
+            self.add_default(label, value, default);
+        }
+        self
+    }
+
+    /// A row that holds the cluster's default when `default` says so.
+    pub fn add_default(&mut self, label: &str, value: Shown, default: bool) -> &mut Self {
         self.0.push(Field {
-            default: false,
+            default,
             label: label.to_owned(),
             value,
         });

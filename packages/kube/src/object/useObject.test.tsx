@@ -35,7 +35,14 @@ const PARTS = {
 
 function document(name: string): Overview {
   return {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [
       {
         id: name,

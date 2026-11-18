@@ -51,6 +51,21 @@ export function deploymentOf(pod: Pod): string {
   return pod.generateName.slice(0, -(pod.templateHash.length + 2));
 }
 
+/** Its Deployment's one container, named after the workload. */
+export function containerOf(pod: Pod): string {
+  const deployment = deploymentOf(pod);
+  return deployment.slice(deployment.indexOf("-") + 1);
+}
+
+/** The first `count` containers of a pod: its Deployment's, then the sidecars the mock adds. */
+export function containerNames(pod: Pod, count = pod.containers): string[] {
+  return [containerOf(pod), "istio-proxy", "log-shipper"].slice(0, count);
+}
+
+export function imageOf(pod: Pod, container = containerOf(pod)): string {
+  return `registry.example.com/${pod.namespace}/${container}:1.42.0`;
+}
+
 const ABNORMAL: [string, number][] = [
   ["Pending", 0.02],
   ["ContainerCreating", 0.01],
@@ -113,7 +128,7 @@ const CRON_JOBS: readonly (readonly [string, string, string])[] = [
   ["monitoring", "prune-metrics", "0 4 * * 0"],
 ];
 
-const DAY = 86_400_000;
+export const DAY = 86_400_000;
 
 /** The nodes of a cluster with pods, which the pods spread over. */
 const NODES = 40;
@@ -512,17 +527,31 @@ export class Cluster {
       }
       roll -= share;
     }
-    const restarts =
+    const drawn =
       status === "CrashLoopBackOff"
         ? 5 + Math.floor(random() * 40)
         : random() < 0.8
           ? 0
           : 1 + Math.floor(random() * 4);
+    const age = drawn === 0 ? null : restartAge(status, random());
+    const born = created ?? now - Math.floor(random() * random() * 90 * DAY);
+    const id = `${this.context}/${namespace}/${name}`;
+    const finished = finishedBy(id, born, now);
+    const restarts =
+      status === "Pending" ||
+      status === "ContainerCreating" ||
+      (status === "Completed" && finished - born < MINUTE)
+        ? 0
+        : drawn;
     const lastRestart =
-      restarts === 0 ? null : now - restartAge(status, random());
+      restarts === 0 || age === null
+        ? null
+        : status === "Completed"
+          ? born + Math.floor((finished - born) / 2)
+          : now - age;
     this.#serial++;
     return {
-      id: `${this.context}/${namespace}/${name}`,
+      id,
       namespace,
       name,
       generateName,
@@ -531,7 +560,7 @@ export class Cluster {
       ready:
         status === "Running"
           ? containers
-          : status === "CrashLoopBackOff"
+          : status === "CrashLoopBackOff" || status === "Error"
             ? containers - 1
             : 0,
       status,
@@ -541,7 +570,7 @@ export class Cluster {
           : `${restarts} (${humanDuration(now - lastRestart)} ago)`,
       lastRestart,
       received: now,
-      created: created ?? now - Math.floor(random() * random() * 90 * DAY),
+      created: born,
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
       node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
@@ -562,6 +591,15 @@ function restartAge(status: string, roll: number): number {
   if (roll < 0.7)
     return (60 + Math.floor(((roll - 0.4) / 0.3) * 1380)) * MINUTE;
   return (1440 + Math.floor(((roll - 0.7) / 0.3) * 28 * 1440)) * MINUTE;
+}
+
+/** When a pod that completed ended: minutes after it started, and not after its row was received. */
+export function finishedAt(pod: Pod): number {
+  return finishedBy(pod.id, pod.created, pod.received);
+}
+
+function finishedBy(id: RowId, created: number, received: number): number {
+  return Math.min(created + (1 + (hash(id) % 20)) * MINUTE, received);
 }
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */

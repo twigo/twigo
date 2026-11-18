@@ -82,8 +82,9 @@ pub struct ObjectBatch {
     /// scope that serves the object has answered once it is `waiting`, or
     /// says the failure its last request ended in, or `unavailable` where the
     /// API is stale; after that a `ready` usage whose `used` is null says
-    /// that an answer came without the object. An object that had an answer
-    /// keeps its figures while the request that serves it is asked anew.
+    /// that an answer came without the object, with the containers that run
+    /// listed all the same. An object that had an answer keeps its figures
+    /// while the request that serves it is asked anew.
     pub usage: Option<Usage>,
 }
 
@@ -95,8 +96,9 @@ pub struct Usage {
     /// answered once: the state is `ready`, the figures are null, and
     /// `containers` names the pod's running containers by its own status,
     /// in the order the answer lists them and with their requests and
-    /// limits, so the webview draws the section at its height at once.
-    /// False for a stale API, which says `unavailable` at once since
+    /// limits, so the webview draws the section at its height at once; an
+    /// answer that comes without the pod lists them as well, with `waiting`
+    /// false. False for a stale API, which says `unavailable` at once since
     /// discovery knows it without a request, and for a scope whose last
     /// request failed, which says that failure at once and is asked all the
     /// same.
@@ -107,8 +109,12 @@ pub struct Usage {
     /// A pod's sum over its containers, or the node's own figures.
     pub cpu: Measure,
     pub memory: Measure,
-    /// A pod's containers that have a sample, or while `waiting` those that
-    /// run, in the pod's order; empty for a node.
+    /// A ready usage lists every container that runs by the pod's own status
+    /// and every one that has a sample, in the pod's order, each with its
+    /// request and limit; `used` is null for one the answer lacks, as for a
+    /// container that has just started or restarted, whose pod metrics-server
+    /// leaves out while any of its containers has no earlier point. Empty for
+    /// a node and for a usage that is not ready.
     pub containers: Vec<ContainerUsage>,
 }
 
@@ -153,6 +159,9 @@ pub struct Header {
     /// The node a pod is bound to; None before it is scheduled, and for
     /// other kinds.
     pub node: Option<String>,
+    /// RFC 3339, `metadata.creationTimestamp`: the object's age, which an
+    /// object opened on its own has no list row to take it from.
+    pub created: Option<String>,
     /// The cells the server prints for it in a list, Name, Namespace and Age
     /// left out, from which the page takes the word of its list's health
     /// column, so the two always say the same.
@@ -356,6 +365,10 @@ pub struct EmbeddedList {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct EventList {
     pub events: Vec<ObjectEvent>,
+    /// They have been listed, so that an empty list means there are none:
+    /// false while they are still coming, and once true it stays true,
+    /// whatever `unavailable` says of a later relist.
+    pub listed: bool,
     /// Why they cannot be listed, as when the person may not list events;
     /// None while they are listed or still coming.
     pub unavailable: Option<String>,

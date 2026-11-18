@@ -15,12 +15,15 @@ import type {
 } from "../generated";
 import {
   hash,
+  imageOf,
   replicaSetUid,
   type Cluster,
   type Node,
   type Pod,
 } from "./cluster";
 import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
+import { headed } from "./header";
+import { cardOf, named } from "./pods";
 import { CRASH_LINE as LAST_LINE } from "./logs";
 import {
   ABSENT,
@@ -33,6 +36,7 @@ import {
 } from "./metrics";
 import OBJECTS from "./objects.json";
 import REVEALED from "./revealed.json";
+import { containersSummary } from "./sections";
 
 /**
  * Objects described in Rust from kind by `twigo-describe`'s tests, keyed by
@@ -182,7 +186,14 @@ export class MockObject {
     this.#overview = withLastLines(
       listing(
         renamed(
-          pod ? withContainers(recorded.overview, pod) : recorded.overview,
+          headed(
+            pod
+              ? withContainers(named(recorded.overview, pod), pod)
+              : recorded.overview,
+            query,
+            cluster,
+            this.#subject,
+          ),
           query,
         ),
         query,
@@ -437,7 +448,8 @@ export function finishedInit(pod: Pod): boolean {
 /**
  * The recorded pod's first container as the cards of the mock pod's own
  * containers, each asking for what its spec says, so that its usage has a
- * card to be shown on.
+ * card to be shown on, and each in the state and the moments its status and
+ * its row say.
  */
 function withContainers(overview: Overview, pod: Pod): Overview {
   const specs = containerSpecs(pod);
@@ -448,7 +460,7 @@ function withContainers(overview: Overview, pod: Pod): Overview {
             ...first,
             name: "init-config",
             role: "init",
-            image: `registry.example.com/${pod.namespace}/init-config:1.42.0`,
+            image: imageOf(pod, "init-config"),
             state: {
               text: "Terminated · Completed",
               tone: "neutral",
@@ -464,49 +476,39 @@ function withContainers(overview: Overview, pod: Pod): Overview {
           },
         ]
       : [];
-  const card = (first: Container, spec: ContainerSpec, index: number) => {
+  const card = (
+    first: Container,
+    spec: ContainerSpec,
+    index: number,
+  ): Container => {
     const asks: [string, ContainerSpec["request"]][] = [
       ["Requests", spec.request],
       ["Limits", spec.limit],
     ];
-    const asked: Container["fields"] = [
-      ...first.fields.filter(
-        ({ label }) => label !== "Requests" && label !== "Limits",
-      ),
-      ...asks.flatMap(([label, resources]) => {
+    const requested: Container["fields"] = asks.flatMap(
+      ([label, resources]) => {
         const text = resourcesText(resources);
         return text === ""
           ? []
           : [{ label, value: { type: "text" as const, text }, default: false }];
-      }),
-    ];
+      },
+    );
+    const { state, fields } = cardOf(pod, index);
+    const own: Container = {
+      ...first,
+      name: spec.name,
+      image: imageOf(pod, spec.name),
+      state,
+      fields: [...fields, ...requested],
+    };
     return index === 0
-      ? { ...first, name: spec.name, fields: asked }
-      : {
-          ...first,
-          name: spec.name,
-          image: `registry.example.com/${pod.namespace}/${spec.name}:1.42.0`,
-          state: {
-            text: "Running",
-            tone: "success" as const,
-            ready: true,
-            running: true,
-            restarts: 0,
-          },
-          ports: [],
-          fields: asked.filter(
-            ({ label }) => label !== "Last state" && label !== "Last finished",
-          ),
-          details: [],
-          env: [],
-          mounts: [],
-        };
+      ? own
+      : { ...own, ports: [], details: [], env: [], mounts: [] };
   };
   return {
     ...overview,
-    sections: overview.sections.map((section) => ({
-      ...section,
-      blocks: section.blocks.map((block) => {
+    sections: overview.sections.map((section) => {
+      const blocks = section.blocks.map((block) => {
         const [first] = block.type === "containers" ? block.containers : [];
         return block.type === "containers" && first
           ? {
@@ -517,8 +519,16 @@ function withContainers(overview: Overview, pod: Pod): Overview {
               ],
             }
           : block;
-      }),
-    })),
+      });
+      const cards = blocks.flatMap((block) =>
+        block.type === "containers" ? block.containers : [],
+      );
+      return {
+        ...section,
+        blocks,
+        summary: cards.length > 0 ? containersSummary(cards) : section.summary,
+      };
+    }),
   };
 }
 
@@ -617,10 +627,14 @@ function events(overview: Overview): EventList {
   for (const section of overview.sections) {
     for (const block of section.blocks) {
       if (block.type === "events")
-        return { events: block.events, unavailable: block.unavailable };
+        return {
+          events: block.events,
+          listed: block.listed,
+          unavailable: block.unavailable,
+        };
     }
   }
-  return { events: [], unavailable: null };
+  return { events: [], listed: true, unavailable: null };
 }
 
 /** The owners the metadata section links to. */

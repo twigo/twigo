@@ -554,7 +554,14 @@ function withWarnings(count: number): Backend {
   const mock = createMockBackend("ready");
   const added = Array.from({ length: count }, (_, index) => warning(index));
   const overview = (document: Overview): Overview => ({
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: document.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>

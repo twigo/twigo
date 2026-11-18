@@ -3,9 +3,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Created pod: agent-v2kwv",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
+      "message": "Created pod: agent-c8xqr",
       "reason": "SuccessfulCreate",
       "source": "daemonset-controller",
       "type": "Normal"
@@ -19,7 +19,7 @@
       "annotations": {
         "deprecated.daemonset.template.generation": "1"
       },
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "managedFields": [
         {
@@ -49,7 +49,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "apps/v1",
@@ -67,13 +67,13 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:32Z"
         }
       ],
       "name": "agent",
       "namespace": "overview",
-      "resourceVersion": "2423",
-      "uid": "50ad4f58-a985-4f1e-83d8-4506a695a60d"
+      "resourceVersion": "1097",
+      "uid": "49579b1c-b166-415d-bf1d-9859bdcab2f0"
     },
     "spec": {
       "revisionHistoryLimit": 10,

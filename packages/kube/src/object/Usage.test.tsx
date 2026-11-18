@@ -17,7 +17,11 @@ import type {
   ShownUsage,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { Cluster, type Pod } from "../../../protocol/src/mock/cluster";
+import {
+  Cluster,
+  containerNames,
+  type Pod,
+} from "../../../protocol/src/mock/cluster";
 import { finishedInit } from "../../../protocol/src/mock/objects";
 import {
   mountKube,
@@ -129,7 +133,14 @@ const CONTAINER = (name: string): Container => ({
 });
 
 const LISTED: Document = {
-  header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+  header: {
+    owner: null,
+    node: null,
+    created: null,
+    printed: [],
+    sentence: [],
+    vitals: [],
+  },
   sections: [
     SECTION("core.pod"),
     {
@@ -166,6 +177,7 @@ function shown(
         header: {
           owner: null,
           node: null,
+          created: null,
           printed: [],
           sentence: [],
           vitals: [],
@@ -375,7 +387,14 @@ test("a usage that waits draws the rows it names, whatever the Overview lists, w
 
 test("a node's usage that waits is its pair of empty meters", () => {
   listed(WAITING_NODE, "/nodes", {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [SECTION("core.node"), SECTION("core.metadata")],
   });
   const section = usageSection();
@@ -632,7 +651,7 @@ describe("an open object", () => {
         candidate.status === "Running" &&
         candidate.containers === 2 &&
         finishedInit(candidate),
-      ["Pod", "api", "istio-proxy"],
+      2,
     ],
     [
       "a crash-looping pod at Ready 1/2",
@@ -640,17 +659,25 @@ describe("an open object", () => {
         candidate.status === "CrashLoopBackOff" &&
         candidate.containers === 2 &&
         candidate.ready === 1,
-      ["Pod", "api"],
+      1,
     ],
   ])(
     "%s: the empty meters stand for the containers the answer lists, and the answer moves no row",
-    async (_, pick, names) => {
+    async (_, pick, listed) => {
       const workbench = await mountKube(createMockBackend("ready"));
+      const uri = pod(pick);
+      const [namespace, name] = uri.split("/").slice(-2);
+      const found = new Cluster("prod-eu", 5000, Date.now()).pods.find(
+        (candidate) =>
+          candidate.namespace === namespace && candidate.name === name,
+      );
+      if (!found) throw new Error("no such pod in the mock");
       act(() => {
-        workbench.editors.open(pod(pick));
+        workbench.editors.open(uri);
       });
       const seen = (await frames()).filter(({ overview }) => overview);
       expect(seen.map(({ state }) => state)).toEqual(["empty", "figures"]);
+      const names = ["Pod", ...containerNames(found, listed)];
       const rows = names.flatMap((name) => [
         `CPU of ${name}`,
         `Memory of ${name}`,

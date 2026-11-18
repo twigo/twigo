@@ -5,7 +5,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Finding, ObjectEvent, Section, Span, Tone, Value as Shown};
 
-use crate::show::{Fields, POD, PV, link, list, plain, toned};
+use crate::show::{Fields, POD, PV, Summary, link, list, plain, section, toned};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
 
@@ -133,13 +133,17 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     Described {
         findings,
         sections: vec![Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.claim".to_owned(),
-            title: "Claim".to_owned(),
-            blocks: vec![Block::Fields { fields: fields.0 }],
+            summary: Summary::default()
+                .part(phase)
+                .part(text(&status["capacity"]["storage"]).unwrap_or_default())
+                .done(),
+            ..section(
+                "core.claim",
+                "Claim",
+                vec![Block::Fields { fields: fields.0 }],
+            )
         }],
+        ..Described::default()
     }
 }
 

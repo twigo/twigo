@@ -4,91 +4,128 @@
 use jiff::{SignedDuration, Timestamp};
 use serde_json::Value;
 use twigo_ipc::{
-    Block, Finding, FindingLogs, Section, Span, Tone, TreeNode, TreeValue, Value as Shown,
+    Block, Finding, FindingLogs, Section, Span, Tone, TreeNode, TreeValue, Value as Shown, Vital,
 };
 
+use crate::layout::wrong;
 use crate::show::{
-    Fields, NODE, SERVICE_ACCOUNT, code, labels, link, list, plain, quantities, toned,
+    Fields, NODE, SERVICE_ACCOUNT, Summary, code, counted, labels, link, list, named, plain,
+    quantities, section, toned,
 };
-use crate::{Described, Input, containers, message, printed, text, tree, volumes};
+use crate::{Described, Input, Need, containers, header, message, printed, text, tree, volumes};
+
+const CONTAINERS: &str = "core.containers";
+const PLACEMENT: &str = "core.placement";
+const STORAGE: &str = "core.volumes";
+
+pub(crate) fn needs(pod: &Value) -> Vec<Need> {
+    header::above(pod).into_iter().collect()
+}
 
 pub(crate) fn describe(input: &Input<'_>) -> Described {
     let pod = input.object;
     let spec = &pod["spec"];
     let namespace = text(&pod["metadata"]["namespace"]);
-    let mut sections = vec![Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.pod".to_owned(),
-        title: "Pod".to_owned(),
-        blocks: vec![Block::Fields {
-            fields: fields(input).0,
-        }],
-    }];
+    let (found, explained) = findings(input);
+    let (findings, subjects): (Vec<Finding>, Vec<Option<&str>>) = found.into_iter().unzip();
+    let about = |id: &str| {
+        findings
+            .iter()
+            .zip(&subjects)
+            .find_map(|(finding, subject)| (*subject == Some(id)).then_some(finding))
+    };
+    let restarts = Restarts::of(pod);
+    let mut sections = Vec::new();
     sections.extend(containers::block(spec, Some(pod)).map(|block| Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.containers".to_owned(),
-        title: "Containers".to_owned(),
-        blocks: vec![block],
+        summary: containers_summary(&block),
+        tone: about(CONTAINERS).and_then(|finding| wrong(finding.tone)),
+        ..section(CONTAINERS, "Containers", vec![block])
     }));
+    sections.push(placement(input, about(PLACEMENT)));
     sections.extend(
         volumes::block(spec, namespace.as_deref()).map(|block| Section {
-            summary: Vec::new(),
-            tone: None,
-            fold: twigo_ipc::Fold::Open,
-            id: "core.volumes".to_owned(),
-            title: "Volumes".to_owned(),
-            blocks: vec![block],
+            summary: match about(STORAGE) {
+                Some(finding) => named(finding),
+                None => storage_summary(spec),
+            },
+            tone: about(STORAGE).and_then(|finding| wrong(finding.tone)),
+            ..section(STORAGE, "Storage", vec![block])
         }),
     );
-    sections.extend(scheduling(spec));
+    sections.push(configuration(spec, &pod["status"], namespace.as_deref()));
+    let mut metadata = Fields::default();
+    metadata.time("Started", &pod["status"]["startTime"]);
     Described {
-        findings: findings(input),
+        sentence: sentence(input, &restarts),
+        vitals: vitals(input, &restarts, crashed(&pod["status"])),
+        explained,
+        node: text(&spec["nodeName"]),
+        metadata: metadata.0,
+        findings,
         sections,
+        ..Described::default()
     }
 }
 
-fn fields(input: &Input<'_>) -> Fields {
+fn containers_summary(block: &Block) -> Vec<Span> {
+    let Block::Containers { containers } = block else {
+        return Vec::new();
+    };
+    let states = || {
+        containers
+            .iter()
+            .filter_map(|container| container.state.as_ref())
+    };
+    let failing = states().filter(|state| state.tone == Tone::Danger).count();
+    let unready = states()
+        .filter(|state| state.tone == Tone::Warning && state.running && !state.ready)
+        .count();
+    let mut summary = Summary::default().part(containers.len().to_string());
+    if failing > 0 {
+        summary = summary.part(format!("{failing} failing"));
+    }
+    if unready > 0 {
+        summary = summary.part(format!("{unready} not ready"));
+    }
+    summary.done()
+}
+
+/// `2 volumes · 1 claim`: a claim is a volume that a claim backs.
+fn storage_summary(spec: &Value) -> Vec<Span> {
+    let volumes = spec["volumes"].as_array().map_or(&[][..], Vec::as_slice);
+    let claims = volumes
+        .iter()
+        .filter(|volume| {
+            volume["persistentVolumeClaim"].is_object() || volume["ephemeral"].is_object()
+        })
+        .count();
+    Summary::default()
+        .count(volumes.len(), "volume")
+        .count(claims, "claim")
+        .done()
+}
+
+fn placement(input: &Input<'_>, finding: Option<&Finding>) -> Section {
     let pod = input.object;
     let spec = &pod["spec"];
     let status = &pod["status"];
-    let namespace = text(&pod["metadata"]["namespace"]);
     let mut fields = Fields::default();
-    let finished = finished(pod);
-    if pod["metadata"]["deletionTimestamp"].is_string() && !finished {
-        fields.add("Phase", toned("Terminating", Tone::Warning));
-    } else {
-        fields.text("Phase", &status["phase"]);
-    }
-    fields.text("Reason", &status["reason"]);
-    fields.text("Message", &status["message"]);
-    if let Some(ready) = printed(input.printed, "Ready") {
-        let all = ready
-            .split_once('/')
-            .is_some_and(|(have, want)| have == want);
-        fields.add(
-            "Ready",
-            if all || finished {
-                plain(ready)
-            } else {
-                toned(ready, Tone::Warning)
-            },
-        );
-    }
-    if let Some(node) = text(&spec["nodeName"]) {
-        fields.add("Node", link(NODE, None, &node, node.clone()));
+    let node = text(&spec["nodeName"]);
+    if let Some(node) = &node {
+        fields.add("Node", link(NODE, None, node, node.clone()));
     }
     fields.maybe(
         "Host IP",
         ips(&status["hostIPs"], &status["hostIP"]).map(code),
     );
-    fields.maybe("Pod IP", ips(&status["podIPs"], &status["podIP"]).map(code));
-    fields.time("Started", &status["startTime"]);
+    let address = ips(&status["podIPs"], &status["podIP"]);
+    fields.maybe("Pod IP", address.clone().map(code));
     fields.text("QoS class", &status["qosClass"]);
-    fields.scalar("Priority", &spec["priority"]);
+    fields.add_default_maybe(
+        "Priority",
+        crate::show::scalar(&spec["priority"]).map(plain),
+        spec["priority"] == 0,
+    );
     fields.maybe(
         "Priority class",
         text(&spec["priorityClassName"]).map(|name| {
@@ -99,6 +136,67 @@ fn fields(input: &Input<'_>) -> Fields {
                 name.clone(),
             )
         }),
+    );
+    fields.text("Nominated node", &status["nominatedNodeName"]);
+    fields.0.extend(scheduling(spec).0);
+    let mut blocks = Vec::new();
+    if !fields.is_empty() {
+        blocks.push(Block::Fields { fields: fields.0 });
+    }
+    blocks.extend(affinity(spec));
+    Section {
+        summary: match finding {
+            Some(finding) => named(finding),
+            None => Summary::default()
+                .part(node.unwrap_or_default())
+                .part(address.unwrap_or_default())
+                .done(),
+        },
+        tone: finding.and_then(|finding| wrong(finding.tone)),
+        ..section(PLACEMENT, "Placement", blocks)
+    }
+}
+
+/// How the pod is set up, apart from where it runs: the rows that are the
+/// cluster's defaults fold behind their count.
+fn configuration(spec: &Value, status: &Value, namespace: Option<&str>) -> Section {
+    let mut fields = Fields::default();
+    let account = text(&spec["serviceAccountName"]);
+    fields.add_default_maybe(
+        "Service account",
+        account
+            .as_ref()
+            .map(|name| link(SERVICE_ACCOUNT, namespace, name, name.clone())),
+        account.as_deref() == Some("default"),
+    );
+    fields.add_default_maybe(
+        "Restart policy",
+        text(&spec["restartPolicy"]).map(plain),
+        spec["restartPolicy"] == "Always",
+    );
+    fields.add_default_maybe(
+        "DNS policy",
+        text(&spec["dnsPolicy"]).map(plain),
+        spec["dnsPolicy"] == "ClusterFirst",
+    );
+    fields.flag("Host network", &spec["hostNetwork"]);
+    fields.flag("Host PID", &spec["hostPID"]);
+    fields.flag("Host IPC", &spec["hostIPC"]);
+    fields.add_default_maybe(
+        "Termination grace",
+        spec["terminationGracePeriodSeconds"]
+            .as_i64()
+            .map(|seconds| plain(format!("{seconds} s"))),
+        spec["terminationGracePeriodSeconds"] == 30,
+    );
+    fields.add_default_maybe(
+        "Scheduler",
+        text(&spec["schedulerName"]).map(plain),
+        spec["schedulerName"] == "default-scheduler",
+    );
+    fields.maybe(
+        "Security",
+        containers::security(&spec["securityContext"]).map(plain),
     );
     fields.maybe(
         "Runtime class",
@@ -112,30 +210,183 @@ fn fields(input: &Input<'_>) -> Fields {
         }),
     );
     fields.maybe(
-        "Service account",
-        text(&spec["serviceAccountName"])
-            .map(|name| link(SERVICE_ACCOUNT, namespace.as_deref(), &name, name.clone())),
-    );
-    fields.text("Nominated node", &status["nominatedNodeName"]);
-    fields.maybe("Readiness gates", readiness_gates(pod));
-    fields.text("Restart policy", &spec["restartPolicy"]);
-    fields.text("DNS policy", &spec["dnsPolicy"]);
-    fields.flag("Host network", &spec["hostNetwork"]);
-    fields.flag("Host PID", &spec["hostPID"]);
-    fields.flag("Host IPC", &spec["hostIPC"]);
-    fields.maybe(
-        "Termination grace",
-        spec["terminationGracePeriodSeconds"]
-            .as_i64()
-            .map(|seconds| plain(format!("{seconds} s"))),
-    );
-    fields.maybe(
-        "Security",
-        containers::security(&spec["securityContext"]).map(plain),
+        "Readiness gates",
+        readiness_gates(&spec["readinessGates"], status),
     );
     fields.maybe("Requests", quantities(&spec["resources"]["requests"]));
     fields.maybe("Limits", quantities(&spec["resources"]["limits"]));
-    fields
+    let defaults = fields.0.iter().filter(|field| field.default).count();
+    let summary = match account.filter(|name| name != "default") {
+        Some(name) => Summary::default().part(format!("service account {name}")),
+        None => Summary::default(),
+    };
+    Section {
+        summary: summary.count(defaults, "default").done(),
+        ..section(
+            "core.configuration",
+            "Configuration",
+            vec![Block::Fields { fields: fields.0 }],
+        )
+    }
+}
+
+struct Restarts {
+    count: u64,
+    last: Option<String>,
+}
+
+/// Restart counts and the newest end of a previous run, over the statuses
+/// added.
+#[derive(Default)]
+struct Tally {
+    count: u64,
+    last: Option<(Timestamp, String)>,
+}
+
+impl Tally {
+    fn add(&mut self, status: &Value) {
+        self.count += status["restartCount"].as_u64().unwrap_or_default();
+        let ended = text(&status["lastState"]["terminated"]["finishedAt"])
+            .and_then(|at| Some((at.parse::<Timestamp>().ok()?, at)));
+        if let Some(ended) = ended
+            && self.last.as_ref().is_none_or(|(last, _)| ended.0 > *last)
+        {
+            self.last = Some(ended);
+        }
+    }
+}
+
+impl Restarts {
+    /// What the list's Restarts column prints, as kubectl's `printPod` counts
+    /// it (kubernetes v1.37.0,
+    /// [`printers.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/printers/internalversion/printers.go#L999-L1112)):
+    /// while an init container is yet to complete and the pod is not
+    /// Initialized, the restarts of the init containers up to it, and
+    /// after that the sidecars' and the containers', the restarts of an init
+    /// container that is no sidecar being left behind with its completion.
+    fn of(pod: &Value) -> Self {
+        let statuses = |key: &str| pod["status"][key].as_array().into_iter().flatten();
+        let sidecar = |name: &Value| {
+            pod["spec"]["initContainers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|spec| spec["name"] == *name && spec["restartPolicy"] == "Always")
+        };
+        let mut inits = Tally::default();
+        let mut sidecars = Tally::default();
+        let mut initializing = false;
+        for status in statuses("initContainerStatuses") {
+            inits.add(status);
+            let restartable = sidecar(&status["name"]);
+            if restartable {
+                sidecars.add(status);
+            }
+            let terminated = &status["state"]["terminated"];
+            let completed =
+                terminated.is_object() && terminated["exitCode"].as_i64().unwrap_or(0) == 0;
+            if completed || (restartable && status["started"] == true) {
+                continue;
+            }
+            initializing = true;
+            break;
+        }
+        let initialized =
+            condition(pod, "Initialized").is_some_and(|ready| ready["status"] == "True");
+        let tally = if initializing && !initialized {
+            inits
+        } else {
+            statuses("containerStatuses").for_each(|status| sidecars.add(status));
+            sidecars
+        };
+        Restarts {
+            count: tally.count,
+            last: tally.last.map(|(_, at)| at),
+        }
+    }
+}
+
+/// Whether a container keeps crashing or ended in failure, which is what
+/// its restarts led to.
+fn crashed(status: &Value) -> bool {
+    ["initContainerStatuses", "containerStatuses"]
+        .into_iter()
+        .flat_map(|key| status[key].as_array().into_iter().flatten())
+        .any(|container| {
+            let state = &container["state"];
+            state["waiting"]["reason"] == "CrashLoopBackOff"
+                || state["terminated"]["exitCode"]
+                    .as_i64()
+                    .is_some_and(|code| code != 0)
+        })
+}
+
+/// Ready as the list prints it, and how often it restarted, the Ready
+/// toned where a pod that has not finished is short of containers, and the
+/// restarts where a container crashes or failed.
+fn vitals(input: &Input<'_>, restarts: &Restarts, crashed: bool) -> Vec<Vital> {
+    let mut vitals = Vec::new();
+    if let Some(ready) = printed(input.printed, "Ready") {
+        let all = ready
+            .split_once('/')
+            .is_some_and(|(have, want)| have == want);
+        vitals.push(Vital {
+            label: "Ready".to_owned(),
+            value: if all || finished(input.object) {
+                plain(ready)
+            } else {
+                toned(ready, Tone::Warning)
+            },
+            note: Vec::new(),
+        });
+    }
+    let count = restarts.count.to_string();
+    vitals.push(Vital {
+        label: "Restarts".to_owned(),
+        value: if restarts.count > 0 && crashed {
+            toned(count, Tone::Warning)
+        } else {
+            plain(count)
+        },
+        note: restarts
+            .last
+            .iter()
+            .filter(|_| restarts.count > 0)
+            .map(|at| Span::Ago { at: at.clone() })
+            .collect(),
+    });
+    vitals
+}
+
+/// `2/2 ready · no restarts`, `2/2 ready · 3 restarts, last 28 m ago`, and
+/// for a pod that finished, when.
+fn sentence(input: &Input<'_>, restarts: &Restarts) -> Vec<Span> {
+    let pod = input.object;
+    if finished(pod) {
+        let ended = ["initContainerStatuses", "containerStatuses"]
+            .into_iter()
+            .flat_map(|key| pod["status"][key].as_array().into_iter().flatten())
+            .filter_map(|status| text(&status["state"]["terminated"]["finishedAt"]))
+            .filter_map(|at| Some((at.parse::<Timestamp>().ok()?, at)))
+            .max();
+        return match ended {
+            Some((_, at)) => Summary::default().ago("Finished ", at).done(),
+            None => Summary::default().part("Finished").done(),
+        };
+    }
+    let Some(ready) = printed(input.printed, "Ready") else {
+        return Vec::new();
+    };
+    let summary = Summary::default().part(format!("{ready} ready"));
+    let summary = match (restarts.count, &restarts.last) {
+        (0, _) => summary.part("no restarts"),
+        (count, Some(at)) => summary.ago(
+            &format!("{}, last ", counted(count as usize, "restart")),
+            at.clone(),
+        ),
+        (count, None) => summary.part(counted(count as usize, "restart")),
+    };
+    summary.done()
 }
 
 /// The IPs a pod or its node has, the list or the one field.
@@ -154,15 +405,15 @@ fn ips(list: &Value, one: &Value) -> Option<String> {
 }
 
 /// Each gate with the status of its condition, `<none>` until one is set.
-fn readiness_gates(pod: &Value) -> Option<Shown> {
+fn readiness_gates(gates: &Value, status: &Value) -> Option<Shown> {
     list(
-        pod["spec"]["readinessGates"]
+        gates
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|gate| {
                 let kind = gate["conditionType"].as_str()?;
-                let status = pod["status"]["conditions"]
+                let status = status["conditions"]
                     .as_array()
                     .into_iter()
                     .flatten()
@@ -176,9 +427,8 @@ fn readiness_gates(pod: &Value) -> Option<Shown> {
 }
 
 /// Where the pod may run: node selector, tolerations and topology spread
-/// as kubectl prints them, the scheduler when it is not the default, and
-/// affinity, which kubectl leaves out, as a tree.
-pub(crate) fn scheduling(spec: &Value) -> Option<Section> {
+/// as kubectl prints them, and the group it is scheduled with.
+pub(crate) fn scheduling(spec: &Value) -> Fields {
     let mut fields = Fields::default();
     fields.maybe("Node selector", labels(&spec["nodeSelector"]));
     fields.maybe("Tolerations", tolerations(&spec["tolerations"]));
@@ -192,30 +442,17 @@ pub(crate) fn scheduling(spec: &Value) -> Option<Section> {
         ),
     );
     fields.text("Scheduling group", &spec["schedulingGroup"]["podGroupName"]);
-    if let Some(scheduler) = text(&spec["schedulerName"]).filter(|name| name != "default-scheduler")
-    {
-        fields.add("Scheduler", plain(scheduler));
-    }
-    let mut blocks = Vec::new();
-    if !fields.is_empty() {
-        blocks.push(Block::Fields { fields: fields.0 });
-    }
-    if let Some(nodes) = tree::nodes(&spec["affinity"]) {
-        blocks.push(Block::Tree {
-            nodes: vec![TreeNode {
-                key: "affinity".to_owned(),
-                label: "Affinity".to_owned(),
-                value: TreeValue::Map { entries: nodes },
-            }],
-        });
-    }
-    (!blocks.is_empty()).then(|| Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.scheduling".to_owned(),
-        title: "Scheduling".to_owned(),
-        blocks,
+    fields
+}
+
+/// Affinity, which kubectl leaves out, as a tree.
+pub(crate) fn affinity(spec: &Value) -> Option<Block> {
+    tree::nodes(&spec["affinity"]).map(|nodes| Block::Tree {
+        nodes: vec![TreeNode {
+            key: "affinity".to_owned(),
+            label: "Affinity".to_owned(),
+            value: TreeValue::Map { entries: nodes },
+        }],
     })
 }
 
@@ -275,36 +512,59 @@ fn sorted_spread(constraints: &Value) -> Vec<String> {
         .collect()
 }
 
-/// What keeps the pod from running, the worst first.
-fn findings(input: &Input<'_>) -> Vec<Finding> {
+/// What keeps the pod from running, the worst first, each with the section
+/// it is about, if one; and the conditions only a finding that says their
+/// cause explains.
+fn findings(input: &Input<'_>) -> (Vec<(Finding, Option<&'static str>)>, Vec<&'static str>) {
     let pod = input.object;
     let status = &pod["status"];
     let mut findings = Vec::new();
+    let mut explained = Vec::new();
     if status["phase"] == "Failed" {
         let reason = text(&status["reason"]);
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Danger,
-            title: match reason.as_deref() {
-                Some("Evicted") => "The pod was evicted".to_owned(),
-                Some(reason) => format!("The pod failed: {reason}"),
-                None => "The pod failed".to_owned(),
+        let own = message(&status["message"]);
+        let (cause, why) = if own.is_some() {
+            (None, None)
+        } else {
+            disruption(pod)
+        };
+        if own.is_some() || cause.is_some() || why.is_some() {
+            explained.push(DISRUPTION);
+        }
+        let detail = cause
+            .map(|cause| span(&format!("{DISRUPTION}: {cause}.")))
+            .into_iter()
+            .collect();
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Danger,
+                title: match reason.as_deref() {
+                    Some("Evicted") => "The pod was evicted".to_owned(),
+                    Some(reason) => format!("The pod failed: {reason}"),
+                    None => "The pod failed".to_owned(),
+                },
+                detail,
+                message: own.or(why),
             },
-            detail: Vec::new(),
-            message: message(&status["message"]),
-        });
+            None,
+        ));
     }
     if status["phase"] == "Unknown" {
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Warning,
-            title: "Its node does not report the pod's state".to_owned(),
-            detail: Vec::new(),
-            message: message(&status["message"]),
-        });
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Warning,
+                title: "Its node does not report the pod's state".to_owned(),
+                detail: Vec::new(),
+                message: message(&status["message"]),
+            },
+            None,
+        ));
     }
-    if let Some(terminating) = terminating(pod) {
-        findings.push(terminating);
+    if let Some((terminating, disruption)) = terminating(pod) {
+        explained.extend(disruption.then_some(DISRUPTION));
+        findings.push((terminating, None));
     }
     if let Some(creating) = creating(input) {
         findings.push(creating);
@@ -318,13 +578,16 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
             detail.push(Span::Ago { at });
             detail.push(span("."));
         }
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Danger,
-            title: "The pod cannot be scheduled".to_owned(),
-            detail,
-            message: message(&scheduled["message"]),
-        });
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Danger,
+                title: "The pod cannot be scheduled".to_owned(),
+                detail,
+                message: message(&scheduled["message"]),
+            },
+            Some(PLACEMENT),
+        ));
     }
     let groups = [
         ("initContainers", "initContainerStatuses", "Init container"),
@@ -339,21 +602,37 @@ fn findings(input: &Input<'_>) -> Vec<Finding> {
                 .flatten()
                 .any(|spec| spec["name"] == name && spec["restartPolicy"] == "Always");
             let noun = if sidecar { "Sidecar" } else { noun };
-            findings.extend(container(
-                input,
-                status,
-                noun,
-                specs == "containers" || sidecar,
-            ));
+            findings.extend(
+                container(input, status, noun, specs == "containers" || sidecar)
+                    .map(|finding| (finding, Some(CONTAINERS))),
+            );
         }
     }
-    findings.sort_by_key(|finding| finding.tone != Tone::Danger);
-    findings
+    findings.sort_by_key(|(finding, _)| finding.tone != Tone::Danger);
+    (findings, explained)
+}
+
+const DISRUPTION: &str = "DisruptionTarget";
+
+/// Why the pod is disrupted, where its DisruptionTarget is True: the reason
+/// and the message of an eviction, a preemption, the taint manager's
+/// deletion or Pod GC's of an orphaned pod
+/// ([`gc_controller.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/controller/podgc/gc_controller.go#L253-L259)).
+fn disruption(pod: &Value) -> (Option<String>, Option<String>) {
+    let target = condition(pod, DISRUPTION).filter(|target| target["status"] == "True");
+    (
+        target.and_then(|target| text(&target["reason"])),
+        target.and_then(|target| message(&target["message"])),
+    )
 }
 
 /// A pod asked to stop that has not finished: since when, and how long it
-/// may take, as kubectl prints `Terminating (lasts …)` and its grace period.
-fn terminating(pod: &Value) -> Option<Finding> {
+/// may take, as kubectl prints `Terminating (lasts …)` and its grace period;
+/// and why, where its DisruptionTarget is True: the reason and the message
+/// of an eviction, a preemption or the taint manager's deletion, which
+/// `kubectl drain` leaves on a pod that still runs. Whether the finding
+/// says that cause comes with it.
+fn terminating(pod: &Value) -> Option<(Finding, bool)> {
     let metadata = &pod["metadata"];
     let deadline: Timestamp = metadata["deletionTimestamp"].as_str()?.parse().ok()?;
     if finished(pod) {
@@ -370,19 +649,31 @@ fn terminating(pod: &Value) -> Option<Finding> {
         },
     ];
     detail.push(span(&format!(", with a grace period of {grace} s.")));
+    let (reason, why) = disruption(pod);
+    if let Some(reason) = &reason {
+        detail.push(span(&format!(" {DISRUPTION}: {reason}.")));
+    }
+    let stated = reason.is_some() || why.is_some();
     let finalizers: Vec<&str> = metadata["finalizers"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
         .collect();
-    Some(Finding {
-        logs: None,
-        tone: Tone::Warning,
-        title: "The pod is terminating".to_owned(),
-        detail,
-        message: (!finalizers.is_empty()).then(|| format!("Finalizers: {}", finalizers.join(", "))),
-    })
+    let lines: Vec<String> = why
+        .into_iter()
+        .chain((!finalizers.is_empty()).then(|| format!("Finalizers: {}", finalizers.join(", "))))
+        .collect();
+    Some((
+        Finding {
+            logs: None,
+            tone: Tone::Warning,
+            title: "The pod is terminating".to_owned(),
+            detail,
+            message: (!lines.is_empty()).then(|| lines.join("\n")),
+        },
+        stated,
+    ))
 }
 
 /// Event reasons that keep a pod's containers from being created, by what
@@ -409,7 +700,7 @@ const CREATING: &[(&str, &str)] = &[
 /// kubelet tries on every sync, finds nothing; nor does a warning that
 /// passed, followed by an image's pull, nor one under a pod that finished,
 /// whose sandbox the kubelet stops.
-fn creating(input: &Input<'_>) -> Option<Finding> {
+fn creating(input: &Input<'_>) -> Option<(Finding, Option<&'static str>)> {
     if finished(input.object) {
         return None;
     }
@@ -418,7 +709,7 @@ fn creating(input: &Input<'_>) -> Option<Finding> {
         return None;
     }
     let event = input.events.events.first()?;
-    let (_, title) = CREATING
+    let (reason, title) = CREATING
         .iter()
         .find(|(reason, _)| event.kind == "Warning" && event.reason == *reason)?;
     let mut detail = vec![span(&event.reason)];
@@ -430,13 +721,16 @@ fn creating(input: &Input<'_>) -> Option<Finding> {
         detail.push(Span::Ago { at: at.clone() });
     }
     detail.push(span("."));
-    Some(Finding {
-        logs: None,
-        tone: Tone::Danger,
-        title: (*title).to_owned(),
-        detail,
-        message: Some(event.message.trim().to_owned()),
-    })
+    Some((
+        Finding {
+            logs: None,
+            tone: Tone::Danger,
+            title: (*title).to_owned(),
+            detail,
+            message: Some(event.message.trim().to_owned()),
+        },
+        (*reason != "FailedCreatePodSandBox").then_some(STORAGE),
+    ))
 }
 
 fn finished(pod: &Value) -> bool {

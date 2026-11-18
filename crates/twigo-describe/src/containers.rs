@@ -87,9 +87,15 @@ fn describe(
     }
     fields.maybe("Requests", quantities(&container["resources"]["requests"]));
     fields.maybe("Limits", quantities(&container["resources"]["limits"]));
-    details.maybe("Command", lines(&container["command"]));
-    details.maybe("Args", lines(&container["args"]));
+    details.maybe("Command", argv(&container["command"]));
+    details.maybe("Args", argv(&container["args"]));
     details.text("Working directory", &container["workingDir"]);
+    let image = container["image"].as_str().unwrap_or_default();
+    details.add_default_maybe(
+        "Image pull policy",
+        text(&container["imagePullPolicy"]).map(plain),
+        container["imagePullPolicy"] == pull_policy(image),
+    );
     for (label, key) in [
         ("Liveness", "livenessProbe"),
         ("Readiness", "readinessProbe"),
@@ -117,6 +123,27 @@ fn describe(
         details: details.0,
         env: env(container, pod, namespace),
         mounts: mounts(container),
+    }
+}
+
+/// The pull policy the API server gives a container that sets none: `Always`
+/// for the tag `latest` and for an image with neither a tag nor a digest,
+/// else `IfNotPresent` (kubernetes v1.37.0,
+/// [`SetDefaults_Container`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/apis/core/v1/defaults.go#L82-L93) over
+/// [`ParseImageName`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/util/parsers/parsers.go#L32-L55)).
+fn pull_policy(image: &str) -> &'static str {
+    let (name, digest) = image
+        .split_once('@')
+        .map_or((image, false), |(name, _)| (name, true));
+    let tag = name
+        .rsplit('/')
+        .next()
+        .and_then(|last| last.split_once(':'))
+        .map(|(_, tag)| tag);
+    match tag {
+        Some("latest") => "Always",
+        None if !digest => "Always",
+        _ => "IfNotPresent",
     }
 }
 
@@ -208,10 +235,17 @@ fn exit(terminated: &Value) -> Option<String> {
     )
 }
 
-/// Each element on a line of its own, as kubectl prints a command.
-fn lines(list: &Value) -> Option<Shown> {
-    let items: Vec<&str> = list.as_array()?.iter().filter_map(Value::as_str).collect();
-    (!items.is_empty()).then(|| code(items.join("\n")))
+/// One `code` item per element, even for one, since an element may hold a
+/// line end, which a copy of the command line must quote and not mistake
+/// for the end of an element.
+fn argv(list: &Value) -> Option<Shown> {
+    let items: Vec<Shown> = list
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(code)
+        .collect();
+    (!items.is_empty()).then_some(Shown::List { items })
 }
 
 /// `8080/TCP (http)`, with its host port when it has one.

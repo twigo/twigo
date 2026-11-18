@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { humanDuration, parseDuration } from "@twigo/utils";
-import { Cluster, generatedAt, type Pod } from "./cluster";
+import { Cluster, finishedAt, generatedAt, type Pod } from "./cluster";
 import { KINDS } from "./kinds";
 
 test("a Deployment's pod is generated from its template hash", () => {
@@ -90,7 +90,9 @@ const ago = (restarts: string) =>
 
 test("a running pod's last restart is minutes, hours or days old, any other pod's minutes", () => {
   const cluster = new Cluster("prod-eu", 4000, Date.UTC(2026, 10, 3));
-  const restarted = cluster.pods.filter((pod) => pod.restarts !== "0");
+  const restarted = cluster.pods.filter(
+    (pod) => pod.restarts !== "0" && pod.status !== "Completed",
+  );
   const [running, other] = [
     restarted.filter((pod) => pod.status === "Running"),
     restarted.filter((pod) => pod.status !== "Running"),
@@ -100,6 +102,25 @@ test("a running pod's last restart is minutes, hours or days old, any other pod'
   expect(running?.some((age) => age >= DAY)).toBe(true);
   expect(other?.length).toBeGreaterThan(0);
   expect(other?.every((age) => age <= HOUR - 60_000)).toBe(true);
+});
+
+test("a pod that finished restarted before it did, and one that never started has not restarted", () => {
+  const cluster = new Cluster("prod-eu", 4000, Date.UTC(2026, 10, 3));
+  const finished = cluster.pods.filter(
+    (pod) => pod.status === "Completed" && pod.restarts !== "0",
+  );
+  expect(finished.length).toBeGreaterThan(0);
+  for (const pod of finished) {
+    expect(pod.lastRestart, pod.name).toBeGreaterThanOrEqual(pod.created);
+    expect(pod.lastRestart, pod.name).toBeLessThan(finishedAt(pod));
+  }
+  const waiting = cluster.pods.filter(
+    (pod) => pod.status === "Pending" || pod.status === "ContainerCreating",
+  );
+  expect(waiting.length).toBeGreaterThan(0);
+  expect(waiting.map((pod) => [pod.restarts, pod.lastRestart])).toEqual(
+    waiting.map(() => ["0", null]),
+  );
 });
 
 test("a pod's Restarts counts from the moment of its last restart, so its age grows across prints", () => {

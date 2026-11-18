@@ -429,7 +429,11 @@ async fn run(
             }
             if let Some(subscription) = &held.events {
                 let unavailable = unavailable(&subscription.state());
-                if drained(subscription) || unavailable != events.unavailable {
+                let whole = subscription.listed();
+                if drained(subscription)
+                    || unavailable != events.unavailable
+                    || whole != events.listed
+                {
                     let mut listed: Vec<ObjectEvent> = subscription
                         .items()
                         .iter()
@@ -439,6 +443,7 @@ async fn run(
                     twigo_describe::newest_first(&mut listed);
                     events = EventList {
                         events: listed,
+                        listed: whole,
                         unavailable,
                     };
                     dirty.overview = true;

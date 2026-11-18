@@ -162,7 +162,14 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const node = RECORDED.node?.overview;
   if (!node) throw new Error("the node");
   const beating: Document = {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: node.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>
@@ -196,12 +203,12 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   );
 });
 
-test("a node adds up its pods' requests in its resources table", async () => {
+test("a node adds up its pods' requests in its capacity table", async () => {
   await shown("node");
-  const resources = within(section("Resources")).getByRole("table", {
-    name: "Resources",
+  const resources = within(section("Capacity")).getByRole("table", {
+    name: "Capacity",
   });
-  const cpu = within(resources).getByText("970m (6%)");
+  const cpu = within(resources).getByText("1070m (6%)");
   expect(cpu.closest("tr")?.textContent).toContain("cpu");
 });
 

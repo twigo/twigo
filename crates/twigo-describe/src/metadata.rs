@@ -3,13 +3,16 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Field, Label, ObjectRef, Section, Value as Shown};
 
+use crate::show::{Summary, section as shown_section};
 use crate::{group_version, text};
 
 /// Holds the whole object again, a Secret's values in clear among them, so
 /// no view shows it (ARCHITECTURE 3.6).
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
-pub(crate) fn section(object: &Value) -> Section {
+/// `extra` joins the rows after the object's age, and with `labels_apart`
+/// its labels are left to a section that shows them.
+pub(crate) fn section(object: &Value, extra: Vec<Field>, labels_apart: bool) -> Section {
     let metadata = &object["metadata"];
     let namespace = text(&metadata["namespace"]);
     let mut fields = Vec::new();
@@ -55,6 +58,9 @@ pub(crate) fn section(object: &Value) -> Section {
             );
         }
     }
+    for Field { label, value, .. } in extra {
+        add(&label, value);
+    }
     let (controllers, others) = owners(metadata, namespace.as_deref());
     if !controllers.is_empty() {
         add("Controlled by", list(controllers));
@@ -62,11 +68,16 @@ pub(crate) fn section(object: &Value) -> Section {
     if !others.is_empty() {
         add("Owners", list(others));
     }
-    let labels = labels(&metadata["labels"], &[]);
+    let labels = if labels_apart {
+        Vec::new()
+    } else {
+        labels(&metadata["labels"], &[])
+    };
+    let annotations = labels_of(&metadata["annotations"]);
+    let counts = (labels.len(), annotations.len());
     if !labels.is_empty() {
         add("Labels", Shown::Labels { labels });
     }
-    let annotations = labels_of(&metadata["annotations"]);
     if !annotations.is_empty() {
         add(
             "Annotations",
@@ -96,13 +107,16 @@ pub(crate) fn section(object: &Value) -> Section {
     if let Some(uid) = text(&metadata["uid"]) {
         add("UID", Shown::Text { text: uid });
     }
+    let summary = Summary::default()
+        .count(counts.0, "label")
+        .count(counts.1, "annotation");
+    let summary = match (counts, text(&metadata["creationTimestamp"])) {
+        ((0, 0), Some(at)) => summary.ago("created ", at),
+        _ => summary,
+    };
     Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.metadata".to_owned(),
-        title: "Metadata".to_owned(),
-        blocks: vec![Block::Fields { fields }],
+        summary: summary.done(),
+        ..shown_section("core.metadata", "Metadata", vec![Block::Fields { fields }])
     }
 }
 

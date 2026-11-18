@@ -1,12 +1,17 @@
 import { humanDuration } from "@twigo/utils";
 import type { Cell, Column, Row } from "../generated";
 import {
+  containerOf,
+  DAY,
   generatedAt,
   hash,
+  imageOf,
   podCells,
   deploymentOf,
   replicaSetUid,
   type Cluster,
+  type CronJob,
+  type Job,
   type Node,
   type Pod,
 } from "./cluster";
@@ -149,18 +154,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         received: cluster.built,
         labels: {},
         controller: null,
-        cells: [
-          node.name,
-          node.status,
-          "<none>",
-          null,
-          VERSIONS[cluster.context] ?? "",
-          node.ip,
-          "<none>",
-          "Debian GNU/Linux 13 (trixie)",
-          "6.12.54-cloud-amd64",
-          "containerd://2.3.4",
-        ],
+        cells: nodeCells(node, cluster.context),
         generated: null,
         fields: {
           "metadata.name": node.name,
@@ -182,20 +176,7 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
         received: cluster.built,
         labels: { app: deployment.name },
         controller: null,
-        cells: namespaced(
-          [
-            deployment.name,
-            `${deployment.ready}/${deployment.replicas}`,
-            deployment.replicas,
-            deployment.ready,
-            null,
-            deployment.container,
-            deployment.image,
-            `app=${deployment.name}`,
-          ],
-          deployment.namespace,
-          withNamespace,
-        ),
+        cells: deploymentCells(deployment, withNamespace),
         generated: null,
         fields: {
           "metadata.name": deployment.name,
@@ -207,92 +188,40 @@ export const KINDS: Readonly<Record<string, MockKind>> = {
     columns: JOB_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
-      cluster.jobs.map((job) => {
-        const status =
-          job.completed !== null
-            ? "Complete"
-            : job.suspend
-              ? "Suspended"
-              : "Running";
-        return {
-          id: job.id,
-          namespace: job.namespace,
-          created: job.created,
-          received: cluster.built,
-          labels: {},
-          controller:
-            job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
-          cells: namespaced(
-            [
-              job.name,
-              status,
-              job.completed === null ? "0/1" : "1/1",
-              // Printed when the Job changes, as the API server does
-              // (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1312-L1319):
-              // one that runs reads as at its start, one without a start none.
-              job.started === null
-                ? ""
-                : humanDuration((job.completed ?? job.started) - job.started),
-              null,
-              "app",
-              "registry.example.com/jobs/app:1.42.0",
-              `batch.kubernetes.io/controller-uid=${job.id}`,
-            ],
-            job.namespace,
-            withNamespace,
-          ),
-          generated: null,
-          fields: {
-            "metadata.name": job.name,
-            "metadata.namespace": job.namespace,
-          },
-        };
-      }),
+      cluster.jobs.map((job) => ({
+        id: job.id,
+        namespace: job.namespace,
+        created: job.created,
+        received: cluster.built,
+        labels: {},
+        controller:
+          job.owner && `${cluster.context}/${job.namespace}/${job.owner}`,
+        cells: jobCells(job, withNamespace),
+        generated: null,
+        fields: {
+          "metadata.name": job.name,
+          "metadata.namespace": job.namespace,
+        },
+      })),
   },
   "batch/v1/cronjobs": {
     columns: CRONJOB_COLUMNS,
     fields: ["metadata.name", "metadata.namespace"],
     rows: (cluster, withNamespace) =>
-      cluster.cronJobs.map((cronJob) => {
-        const {
-          texts: [lastSchedule = ""],
-          at,
-        } = cluster.printed(cronJob.id, [cronJob.lastSchedule]);
-        return {
-          id: cronJob.id,
-          namespace: cronJob.namespace,
-          created: cronJob.created,
-          received: at,
-          labels: {},
-          controller: null,
-          cells: namespaced(
-            [
-              cronJob.name,
-              cronJob.schedule,
-              "<none>",
-              cronJob.suspend ? "True" : "False",
-              cluster.jobs.filter(
-                (job) =>
-                  job.namespace === cronJob.namespace &&
-                  job.owner === cronJob.name &&
-                  job.completed === null,
-              ).length,
-              lastSchedule,
-              null,
-              "app",
-              "registry.example.com/jobs/app:1.42.0",
-              "<none>",
-            ],
-            cronJob.namespace,
-            withNamespace,
-          ),
-          generated: null,
-          fields: {
-            "metadata.name": cronJob.name,
-            "metadata.namespace": cronJob.namespace,
-          },
-        };
-      }),
+      cluster.cronJobs.map((cronJob) => ({
+        id: cronJob.id,
+        namespace: cronJob.namespace,
+        created: cronJob.created,
+        received: cluster.printed(cronJob.id, [cronJob.lastSchedule]).at,
+        labels: {},
+        controller: null,
+        cells: cronJobCells(cluster, cronJob, withNamespace),
+        generated: null,
+        fields: {
+          "metadata.name": cronJob.name,
+          "metadata.namespace": cronJob.namespace,
+        },
+      })),
   },
   "/v1/events": EVENTS,
   "events.k8s.io/v1/events": EVENTS,
@@ -330,6 +259,100 @@ function podFields(pod: Pod): Readonly<Record<string, string>> {
   };
 }
 
+/** The cells of a node, matching `NODE_COLUMNS`. */
+export function nodeCells(node: Node, context: string): Cell[] {
+  return [
+    node.name,
+    node.status,
+    "<none>",
+    null,
+    VERSIONS[context] ?? "",
+    node.ip,
+    "<none>",
+    "Debian GNU/Linux 13 (trixie)",
+    "6.12.54-cloud-amd64",
+    "containerd://2.3.4",
+  ];
+}
+
+/** The cells of a Job, matching `queryColumns(JOB_COLUMNS, query)`. */
+export function jobCells(job: Job, withNamespace: boolean): Cell[] {
+  const status =
+    job.completed !== null ? "Complete" : job.suspend ? "Suspended" : "Running";
+  return namespaced(
+    [
+      job.name,
+      status,
+      job.completed === null ? "0/1" : "1/1",
+      // Printed when the Job changes, as the API server does
+      // (https://github.com/kubernetes/kubernetes/blob/v1.37.2/pkg/printers/internalversion/printers.go#L1312-L1319):
+      // one that runs reads as at its start, one without a start none.
+      job.started === null
+        ? ""
+        : humanDuration((job.completed ?? job.started) - job.started),
+      null,
+      "app",
+      "registry.example.com/jobs/app:1.42.0",
+      `batch.kubernetes.io/controller-uid=${job.id}`,
+    ],
+    job.namespace,
+    withNamespace,
+  );
+}
+
+/** The cells of a CronJob, matching `queryColumns(CRONJOB_COLUMNS, query)`. */
+export function cronJobCells(
+  cluster: Cluster,
+  cronJob: CronJob,
+  withNamespace: boolean,
+): Cell[] {
+  const [lastSchedule = ""] = cluster.printed(cronJob.id, [
+    cronJob.lastSchedule,
+  ]).texts;
+  return namespaced(
+    [
+      cronJob.name,
+      cronJob.schedule,
+      "<none>",
+      cronJob.suspend ? "True" : "False",
+      cluster.jobs.filter(
+        (job) =>
+          job.namespace === cronJob.namespace &&
+          job.owner === cronJob.name &&
+          job.completed === null,
+      ).length,
+      lastSchedule,
+      null,
+      "app",
+      "registry.example.com/jobs/app:1.42.0",
+      "<none>",
+    ],
+    cronJob.namespace,
+    withNamespace,
+  );
+}
+
+/** The cells of a Deployment, matching `queryColumns(DEPLOYMENT_COLUMNS, query)`. */
+export function deploymentCells(
+  deployment: Deployment,
+  withNamespace: boolean,
+): Cell[] {
+  return namespaced(
+    [
+      deployment.name,
+      `${deployment.ready}/${deployment.replicas}`,
+      deployment.replicas,
+      deployment.ready,
+      null,
+      deployment.container,
+      deployment.image,
+      `app=${deployment.name}`,
+    ],
+    deployment.namespace,
+    withNamespace,
+  );
+}
+
 export function wireRow(row: MockRow): Row {
   return {
     id: row.id,
@@ -357,31 +380,32 @@ function namespaced(
     : [first ?? null, ...rest];
 }
 
-/** Its Deployment's one container, named after the workload. */
-function containerOf(pod: Pod): string {
-  return deploymentOf(pod).slice(deploymentOf(pod).indexOf("-") + 1);
-}
-
-function imageOf(pod: Pod): string {
-  return `registry.example.com/${pod.namespace}/${containerOf(pod)}:1.42.0`;
-}
-
 /** Ready as a Deployment counts its replicas: running with every container ready. */
 function ready(pod: Pod): boolean {
   return pod.status === "Running" && pod.ready === pod.containers;
 }
 
-interface Deployment {
+export interface Deployment {
   readonly namespace: string;
   readonly name: string;
   readonly replicas: number;
   readonly ready: number;
+  /** Before its pods: its first ReplicaSet began with it. */
   readonly created: number;
+  /** When its oldest pod began, which its current ReplicaSet began with. */
+  readonly firstPod: number;
   readonly container: string;
   readonly image: string;
+  /** Its ReplicaSet's `pod-template-hash`, as the pod that gives it its template has it. */
+  readonly templateHash: string;
 }
 
-function deployments(cluster: Cluster): Deployment[] {
+/** A Deployment is days older than the pods it has now. */
+function madeBefore(namespace: string, name: string, firstPod: number): number {
+  return firstPod - (1 + (hash(`${namespace}/${name}`) % 14)) * DAY;
+}
+
+export function deployments(cluster: Cluster): Deployment[] {
   const owned = new Map<string, Pod[]>();
   for (const pod of cluster.pods) {
     const key = `${pod.namespace}/${deploymentOf(pod)}`;
@@ -392,15 +416,18 @@ function deployments(cluster: Cluster): Deployment[] {
   const scaled = [...owned.values()].flatMap(([first, ...more]) => {
     if (!first) return [];
     const pods = [first, ...more];
+    const firstPod = Math.min(...pods.map((pod) => pod.created));
     return [
       {
         namespace: first.namespace,
         name: deploymentOf(first),
         replicas: pods.length,
         ready: pods.filter(ready).length,
-        created: Math.min(...pods.map((pod) => pod.created)),
+        created: madeBefore(first.namespace, deploymentOf(first), firstPod),
+        firstPod,
         container: containerOf(first),
         image: imageOf(first),
+        templateHash: first.templateHash,
       },
     ];
   });
@@ -409,9 +436,15 @@ function deployments(cluster: Cluster): Deployment[] {
     name: deploymentOf(template),
     replicas: 0,
     ready: 0,
-    created: template.created,
+    created: madeBefore(
+      template.namespace,
+      deploymentOf(template),
+      template.created,
+    ),
+    firstPod: template.created,
     container: containerOf(template),
     image: imageOf(template),
+    templateHash: template.templateHash,
   }));
   return [...scaled, ...emptied];
 }
@@ -564,7 +597,7 @@ function eventSuffix(id: string, reason: string): string {
 }
 
 /** A uid in the shape the API server gives, stable for an id. */
-function uid(id: string): string {
+export function uid(id: string): string {
   const hex = [0, 1, 2, 3]
     .map((part) => hash(`${part}/${id}`).toString(16).padStart(8, "0"))
     .join("");

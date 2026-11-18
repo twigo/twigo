@@ -4,14 +4,18 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use twigo_ipc::{Block, EmbeddedList, Finding, Gvr, Section, Span, Tone, Value as Shown};
+use twigo_ipc::{Block, EmbeddedList, Finding, Gvr, Section, Span, Tone, Value as Shown, Vital};
 
-use crate::show::{Fields, POD, code, link, list, plain, toned};
+use crate::layout::wrong;
+use crate::show::{
+    Fields, POD, Summary, code, labels, link, list, listing, named, plain, section, toned,
+};
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
 use twigo_quantity::Quantity;
 
 const ROLE: &str = "node-role.kubernetes.io/";
+const CORDONED: &str = "The node is cordoned";
 
 fn pods_need(node: &Value) -> Need {
     Need {
@@ -68,39 +72,41 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     let spec = &node["spec"];
     let status = &node["status"];
     let info = &status["nodeInfo"];
-    let mut fields = Fields::default();
-    fields.maybe("Roles", roles(node).map(plain));
+    let findings = findings(node);
+    let pods = fact(input.facts, &pods_need(node));
+    let running: Option<Vec<&Value>> = match pods {
+        Some(Found::Listed { objects }) => Some(
+            objects
+                .iter()
+                .filter(|pod| {
+                    !matches!(
+                        pod["status"]["phase"].as_str(),
+                        Some("Succeeded" | "Failed")
+                    )
+                })
+                .collect(),
+        ),
+        _ => None,
+    };
+    let (requests, limits) = running.as_deref().map_or_else(Default::default, totals);
+
+    let mut marks = Fields::default();
+    marks.maybe("Roles", roles(node).map(plain));
     if spec["unschedulable"].as_bool() == Some(true) {
-        fields.add("Unschedulable", toned("true", Tone::Warning));
+        marks.add("Unschedulable", toned("true", Tone::Warning));
     }
-    fields.maybe("Taints", taints(&spec["taints"]));
-    match fact(input.facts, &lease_need(node)) {
-        Some(Found::Listed { objects }) if objects.is_empty() => {
-            fields.add("Lease", plain("none"));
-        }
-        Some(Found::Listed { objects }) => {
-            let lease = objects.first().map_or(&Value::Null, |lease| &lease["spec"]);
-            let unset = || plain("unset");
-            fields.add(
-                "Lease holder",
-                text(&lease["holderIdentity"]).map_or_else(unset, plain),
-            );
-            for (label, key) in [
-                ("Lease acquired", "acquireTime"),
-                ("Lease renewed", "renewTime"),
-            ] {
-                fields.add(
-                    label,
-                    text(&lease[key]).map_or_else(unset, |at| Shown::Time { at }),
-                );
-            }
-        }
-        Some(Found::Unavailable { message }) => {
-            fields.add("Lease", plain(message.clone()));
-        }
-        None => {}
+    marks.maybe("Taints", taints(&spec["taints"]));
+    marks.maybe("Labels", labels(&node["metadata"]["labels"]));
+
+    let mut system = Fields::default();
+    system.text("Kubelet", &info["kubeletVersion"]);
+    system.text("Container runtime", &info["containerRuntimeVersion"]);
+    system.text("OS image", &info["osImage"]);
+    system.text("Kernel", &info["kernelVersion"]);
+    if let (Some(os), Some(arch)) = (text(&info["operatingSystem"]), text(&info["architecture"])) {
+        system.add("Platform", plain(format!("{os}/{arch}")));
     }
-    fields.maybe(
+    system.maybe(
         "Addresses",
         list(
             status["addresses"]
@@ -117,7 +123,7 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
                 .collect(),
         ),
     );
-    fields.maybe(
+    system.maybe(
         "Pod CIDRs",
         list(
             spec["podCIDRs"]
@@ -129,80 +135,193 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
                 .collect(),
         ),
     );
-    fields.maybe("Provider ID", text(&spec["providerID"]).map(code));
-    let mut system = Fields::default();
-    system.text("Kubelet", &info["kubeletVersion"]);
-    system.text("Container runtime", &info["containerRuntimeVersion"]);
-    system.text("OS image", &info["osImage"]);
-    system.text("Kernel", &info["kernelVersion"]);
-    if let (Some(os), Some(arch)) = (text(&info["operatingSystem"]), text(&info["architecture"])) {
-        system.add("Platform", plain(format!("{os}/{arch}")));
+    system.maybe("Provider ID", text(&spec["providerID"]).map(code));
+    match fact(input.facts, &lease_need(node)) {
+        Some(Found::Listed { objects }) if objects.is_empty() => {
+            system.add("Lease", plain("none"));
+        }
+        Some(Found::Listed { objects }) => {
+            let lease = objects.first().map_or(&Value::Null, |lease| &lease["spec"]);
+            let unset = || plain("unset");
+            system.add(
+                "Lease holder",
+                text(&lease["holderIdentity"]).map_or_else(unset, plain),
+            );
+            for (label, key) in [
+                ("Lease acquired", "acquireTime"),
+                ("Lease renewed", "renewTime"),
+            ] {
+                system.add(
+                    label,
+                    text(&lease[key]).map_or_else(unset, |at| Shown::Time { at }),
+                );
+            }
+        }
+        Some(Found::Unavailable { message }) => {
+            system.add("Lease", plain(message.clone()));
+        }
+        None => {}
     }
     system.maybe("Machine ID", text(&info["machineID"]).map(code));
     system.maybe("System UUID", text(&info["systemUUID"]).map(code));
     system.maybe("Boot ID", text(&info["bootID"]).map(code));
 
-    let pods = fact(input.facts, &pods_need(node));
-    let running: Option<Vec<&Value>> = match pods {
-        Some(Found::Listed { objects }) => Some(
-            objects
-                .iter()
-                .filter(|pod| {
-                    !matches!(
-                        pod["status"]["phase"].as_str(),
-                        Some("Succeeded" | "Failed")
-                    )
-                })
-                .collect(),
-        ),
-        _ => None,
-    };
-    let mut sections = vec![Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.node".to_owned(),
-        title: "Node".to_owned(),
-        blocks: vec![Block::Fields { fields: fields.0 }],
-    }];
-    sections.push(resources(node, running.as_deref(), pods));
-    sections.push(Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.pods".to_owned(),
-        title: "Pods".to_owned(),
-        blocks: vec![Block::List(EmbeddedList {
-            gvr: Gvr {
-                group: String::new(),
-                version: "v1".to_owned(),
-                resource: "pods".to_owned(),
+    let share = |name: &str| percent_of(&status["allocatable"], &requests, name);
+    let capacity = (share("cpu"), share("memory"));
+    let cordoned = findings.iter().find(|finding| finding.title == CORDONED);
+    let allocatable = status["allocatable"]["pods"]
+        .as_str()
+        .and_then(|pods| pods.parse::<usize>().ok());
+    let mut sections = vec![
+        Section {
+            summary: match capacity {
+                (Some(cpu), Some(memory)) if running.is_some() => Summary::default()
+                    .part(format!("cpu {cpu}%"))
+                    .part(format!("memory {memory}% requested"))
+                    .done(),
+                _ => Vec::new(),
             },
-            kind: "Pod".to_owned(),
-            namespaced: true,
-            namespace: None,
-            field_selector: Some(on(node)),
-            owners: None,
-        })],
-    });
+            ..resources(node, running.as_deref(), pods, &requests, &limits)
+        },
+        Section {
+            summary: match (running.as_ref(), allocatable) {
+                (Some(running), Some(allocatable)) => Summary::default()
+                    .part(format!("{}/{allocatable} pods", running.len()))
+                    .done(),
+                (Some(running), None) => Summary::default().count(running.len(), "pod").done(),
+                _ => Vec::new(),
+            },
+            ..section(
+                "core.pods",
+                "Pods",
+                vec![Block::List(EmbeddedList {
+                    gvr: Gvr {
+                        group: String::new(),
+                        version: "v1".to_owned(),
+                        resource: "pods".to_owned(),
+                    },
+                    kind: "Pod".to_owned(),
+                    namespaced: true,
+                    namespace: None,
+                    field_selector: Some(on(node)),
+                    owners: None,
+                })],
+            )
+        },
+        Section {
+            summary: match cordoned {
+                Some(finding) => named(finding),
+                None => Summary::default()
+                    .count(spec["taints"].as_array().map_or(0, Vec::len), "taint")
+                    .count(
+                        node["metadata"]["labels"]
+                            .as_object()
+                            .map_or(0, serde_json::Map::len),
+                        "label",
+                    )
+                    .done(),
+            },
+            tone: cordoned.and_then(|finding| wrong(finding.tone)),
+            ..section(
+                "core.taints",
+                "Taints and labels",
+                vec![Block::Fields { fields: marks.0 }],
+            )
+        },
+        Section {
+            summary: Summary::default()
+                .part(
+                    text(&info["kubeletVersion"])
+                        .map_or_else(String::new, |version| format!("kubelet {version}")),
+                )
+                .done(),
+            ..section(
+                "core.system",
+                "System",
+                vec![Block::Fields { fields: system.0 }],
+            )
+        },
+    ];
     if let Some(running) = &running {
         sections.extend(pod_resources(node, running));
     }
     if let Some(Found::Listed { objects }) = fact(input.facts, &slices_need(node)) {
         sections.extend(resource_slices(objects));
     }
-    sections.push(Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.system".to_owned(),
-        title: "System".to_owned(),
-        blocks: vec![Block::Fields { fields: system.0 }],
-    });
+    let schedulable = spec["unschedulable"].as_bool() != Some(true);
     Described {
-        findings: findings(node),
+        sentence: sentence(schedulable, running.as_deref(), allocatable),
+        vitals: vitals(info, running.as_deref(), allocatable, capacity),
+        findings,
         sections,
+        labels_apart: true,
+        ..Described::default()
     }
+}
+
+/// `Schedulable · 43/110 pods`; the pods once they are listed.
+fn sentence(
+    schedulable: bool,
+    running: Option<&[&Value]>,
+    allocatable: Option<usize>,
+) -> Vec<Span> {
+    let summary = Summary::default().part(if schedulable { "Schedulable" } else { "" });
+    match (running, allocatable) {
+        (Some(running), Some(allocatable)) => {
+            summary.part(format!("{}/{allocatable} pods", running.len()))
+        }
+        (Some(running), None) => summary.count(running.len(), "pod"),
+        _ => summary,
+    }
+    .done()
+}
+
+/// The pods it runs, what they request as a share of what it allocates,
+/// and its kubelet; a dash until its pods are listed.
+fn vitals(
+    info: &Value,
+    running: Option<&[&Value]>,
+    allocatable: Option<usize>,
+    (cpu, memory): (Option<i128>, Option<i128>),
+) -> Vec<Vital> {
+    let known = running.is_some();
+    let cell = |label: &str, value: Option<Shown>| Vital {
+        label: label.to_owned(),
+        value: value.unwrap_or_else(|| plain("–")),
+        note: Vec::new(),
+    };
+    let share = |label: &str, percent: Option<i128>| {
+        cell(
+            label,
+            percent.filter(|_| known).map(|percent| {
+                let shown = format!("{percent}%");
+                if percent > 100 {
+                    toned(shown, Tone::Warning)
+                } else {
+                    plain(shown)
+                }
+            }),
+        )
+    };
+    vec![
+        cell(
+            "Pods",
+            running.map(|running| {
+                let shown = allocatable.map_or_else(
+                    || running.len().to_string(),
+                    |allocatable| format!("{}/{allocatable}", running.len()),
+                );
+                if allocatable.is_some_and(|allocatable| running.len() >= allocatable) {
+                    toned(shown, Tone::Warning)
+                } else {
+                    plain(shown)
+                }
+            }),
+        ),
+        share("CPU requested", cpu),
+        share("Memory requested", memory),
+        cell("Kubelet", text(&info["kubeletVersion"]).map(plain)),
+    ]
 }
 
 /// The node's ResourceSlices by driver and pool, ten pools at most, as
@@ -220,7 +339,8 @@ fn resource_slices(slices: &[Value]) -> Option<Section> {
         entry.0 += 1;
         entry.1 += spec["devices"].as_array().map_or(0, Vec::len);
     }
-    let more = pools.len().saturating_sub(POOLS);
+    let total_pools = pools.len();
+    let more = total_pools.saturating_sub(POOLS);
     let mut rows: Vec<Vec<Shown>> = pools
         .into_iter()
         .take(POOLS)
@@ -241,18 +361,19 @@ fn resource_slices(slices: &[Value]) -> Option<Section> {
             plain(""),
         ]);
     }
-    (!rows.is_empty()).then(|| Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.resourceslices".to_owned(),
-        title: "Resource slices".to_owned(),
-        blocks: vec![Block::Table {
-            columns: ["Driver", "Pool", "Slices", "Devices"]
-                .map(str::to_owned)
-                .to_vec(),
-            rows,
-        }],
+    (!rows.is_empty()).then(|| {
+        listing(
+            "core.resourceslices",
+            "Resource slices",
+            total_pools,
+            "pool",
+            vec![Block::Table {
+                columns: ["Driver", "Pool", "Slices", "Devices"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows,
+            }],
+        )
     })
 }
 
@@ -298,18 +419,15 @@ fn taints(taints: &Value) -> Option<Shown> {
 /// Each resource the node has: its capacity, what it allocates to pods,
 /// and what the pods on it request and may use at most, by their specs, as
 /// kubectl's `getPodsTotalRequestsAndLimits` adds them up.
-fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> Section {
+fn resources(
+    node: &Value,
+    running: Option<&[&Value]>,
+    pods: Option<&Found>,
+    requests: &BTreeMap<String, Quantity>,
+    limits: &BTreeMap<String, Quantity>,
+) -> Section {
     let capacity = node["status"]["capacity"].as_object();
     let allocatable = &node["status"]["allocatable"];
-    let (requests, limits) = running.map_or_else(Default::default, |pods| {
-        let mut requests: BTreeMap<String, Quantity> = BTreeMap::new();
-        let mut limits: BTreeMap<String, Quantity> = BTreeMap::new();
-        for pod in pods {
-            add(&mut requests, pod_requests(pod, false));
-            add(&mut limits, pod_limits(pod, false));
-        }
-        (requests, limits)
-    });
     let mut names: Vec<&String> = capacity
         .into_iter()
         .flatten()
@@ -321,12 +439,7 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
             return plain("");
         }
         let total = totals.get(name).copied().unwrap_or(Quantity::ZERO);
-        let percent = allocatable[name]
-            .as_str()
-            .and_then(Quantity::parse)
-            .filter(|of| of.milli() > 0)
-            .map(|of| total.milli() * 100 / of.milli());
-        match percent {
+        match percent_of(allocatable, totals, name) {
             Some(percent) if percent > 100 => {
                 toned(format!("{} ({percent}%)", show(name, total)), Tone::Warning)
             }
@@ -339,7 +452,7 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
         .map(|name| {
             let (requested, limited) = match (name.as_str(), running) {
                 ("pods", Some(running)) => (plain(running.len().to_string()), plain("")),
-                _ => (used(&requests, name), used(&limits, name)),
+                _ => (used(requests, name), used(limits, name)),
             };
             vec![
                 plain(name.as_str()),
@@ -370,14 +483,30 @@ fn resources(node: &Value, running: Option<&[&Value]>, pods: Option<&Found>) -> 
             .to_vec(),
         rows,
     });
-    Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.resources".to_owned(),
-        title: "Resources".to_owned(),
-        blocks,
+    section("core.resources", "Capacity", blocks)
+}
+
+fn totals(pods: &[&Value]) -> (BTreeMap<String, Quantity>, BTreeMap<String, Quantity>) {
+    let mut requests: BTreeMap<String, Quantity> = BTreeMap::new();
+    let mut limits: BTreeMap<String, Quantity> = BTreeMap::new();
+    for pod in pods {
+        add(&mut requests, pod_requests(pod, false));
+        add(&mut limits, pod_limits(pod, false));
     }
+    (requests, limits)
+}
+
+fn percent_of(
+    allocatable: &Value,
+    totals: &BTreeMap<String, Quantity>,
+    name: &str,
+) -> Option<i128> {
+    let total = totals.get(name).copied().unwrap_or(Quantity::ZERO);
+    allocatable[name]
+        .as_str()
+        .and_then(Quantity::parse)
+        .filter(|of| of.milli() > 0)
+        .map(|of| total.milli() * 100 / of.milli())
 }
 
 /// CPU, memory, storage and pods first, as kubectl lists them.
@@ -453,6 +582,7 @@ fn pod_resources(node: &Value, pods: &[&Value]) -> Option<Section> {
                 .to_owned(),
         )
     });
+    let pod_count = pods.len();
     let rows: Vec<Vec<Shown>> = pods
         .into_iter()
         .map(|pod| {
@@ -470,25 +600,26 @@ fn pod_resources(node: &Value, pods: &[&Value]) -> Option<Section> {
             ]
         })
         .collect();
-    (!rows.is_empty()).then(|| Section {
-        summary: Vec::new(),
-        tone: None,
-        fold: twigo_ipc::Fold::Open,
-        id: "core.podresources".to_owned(),
-        title: "Pod resources".to_owned(),
-        blocks: vec![Block::Table {
-            columns: [
-                "Namespace",
-                "Pod",
-                "CPU requests",
-                "CPU limits",
-                "Memory requests",
-                "Memory limits",
-            ]
-            .map(str::to_owned)
-            .to_vec(),
-            rows,
-        }],
+    (!rows.is_empty()).then(|| {
+        listing(
+            "core.podresources",
+            "Pod resources",
+            pod_count,
+            "pod",
+            vec![Block::Table {
+                columns: [
+                    "Namespace",
+                    "Pod",
+                    "CPU requests",
+                    "CPU limits",
+                    "Memory requests",
+                    "Memory limits",
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+                rows,
+            }],
+        )
     })
 }
 
@@ -699,7 +830,7 @@ fn findings(node: &Value) -> Vec<Finding> {
         findings.push(Finding {
             logs: None,
             tone: Tone::Warning,
-            title: "The node is cordoned".to_owned(),
+            title: CORDONED.to_owned(),
             detail: vec![Span::Text {
                 text: "New pods are not scheduled on it.".to_owned(),
             }],

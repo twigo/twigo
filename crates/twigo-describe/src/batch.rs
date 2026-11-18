@@ -5,7 +5,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown};
 
-use crate::show::{Fields, JOB, code, link, list, plain, toned};
+use crate::show::{Fields, JOB, Summary, code, link, list, plain, section, toned};
 use crate::template::{self, JOBS, PODS};
 use crate::{Described, Input, text};
 
@@ -74,21 +74,53 @@ pub(crate) fn job(input: &Input<'_>) -> Described {
         "Selector",
         crate::show::selector(&spec["selector"]).map(code),
     );
+    let mut pods = Summary::default();
+    for (count, word) in [
+        (number("active"), "active"),
+        (number("succeeded"), "succeeded"),
+        (failed, "failed"),
+    ] {
+        if count > 0 {
+            pods = pods.part(format!("{count} {word}"));
+        }
+    }
     Described {
         findings: job_findings(object),
         sections: vec![
             Section {
-                summary: Vec::new(),
-                tone: None,
-                fold: twigo_ipc::Fold::Open,
-                id: "core.job".to_owned(),
-                title: "Job".to_owned(),
-                blocks: vec![Block::Fields { fields: fields.0 }],
+                summary: job_summary(object),
+                ..section("core.job", "Job", vec![Block::Fields { fields: fields.0 }])
             },
-            template::owned_list("core.pods", "Pods", PODS, namespace.as_deref(), vec![uid]),
+            Section {
+                summary: pods.done(),
+                ..template::owned_list("core.pods", "Pods", PODS, namespace.as_deref(), vec![uid])
+            },
             template::section(&spec["template"], namespace.as_deref()),
         ],
+        ..Described::default()
     }
+}
+
+/// `1/3 completions`, or `complete` with the moment it was.
+fn job_summary(job: &Value) -> Vec<Span> {
+    let status = &job["status"];
+    let complete = status["conditions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|condition| condition["type"] == "Complete" && condition["status"] == "True");
+    let succeeded = status["succeeded"].as_u64().unwrap_or_default();
+    match (complete, text(&status["completionTime"])) {
+        (true, Some(at)) => Summary::default().ago("complete ", at),
+        (true, None) => Summary::default().part("complete"),
+        (false, _) => match job["spec"]["completions"].as_u64() {
+            Some(completions) => {
+                Summary::default().part(format!("{succeeded}/{completions} completions"))
+            }
+            None => Summary::default().part(format!("{succeeded} succeeded")),
+        },
+    }
+    .done()
 }
 
 /// What a Job's spec and a CronJob's job template share.
@@ -221,20 +253,36 @@ pub(crate) fn cron_job(input: &Input<'_>) -> Described {
     );
     template.id = "core.jobtemplate".to_owned();
     template.title = "Job template".to_owned();
+    let schedule = Summary::default().part(text(&spec["schedule"]).unwrap_or_default());
+    let running = status["active"].as_array().map_or(0, Vec::len);
     Described {
         findings: cron_findings(status),
         sections: vec![
             Section {
-                summary: Vec::new(),
-                tone: None,
-                fold: twigo_ipc::Fold::Open,
-                id: "core.cronjob".to_owned(),
-                title: "CronJob".to_owned(),
-                blocks: vec![Block::Fields { fields: fields.0 }],
+                summary: match text(&status["lastScheduleTime"]) {
+                    Some(at) => schedule.ago("last run ", at),
+                    None => schedule,
+                }
+                .done(),
+                ..section(
+                    "core.cronjob",
+                    "CronJob",
+                    vec![Block::Fields { fields: fields.0 }],
+                )
             },
-            template::owned_list("core.jobs", "Jobs", JOBS, namespace.as_deref(), vec![uid]),
+            Section {
+                summary: Summary::default()
+                    .part(if running > 0 {
+                        format!("{running} active")
+                    } else {
+                        String::new()
+                    })
+                    .done(),
+                ..template::owned_list("core.jobs", "Jobs", JOBS, namespace.as_deref(), vec![uid])
+            },
             template,
         ],
+        ..Described::default()
     }
 }
 
