@@ -114,7 +114,7 @@ test.each<[string, Value, boolean]>([
   ["a time", { type: "time", at: AT }, true],
   ["a toned word", { type: "toned", text: "0/1", tone: "warning" }, true],
   [
-    "a name, which is cut and has its whole text in the tooltip",
+    "a name, which is cut and whose link has its whole text as its tooltip",
     { type: "link", target: OWNER, text: "api-c8894f678" },
     false,
   ],

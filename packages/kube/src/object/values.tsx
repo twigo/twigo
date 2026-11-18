@@ -65,6 +65,7 @@ export function ValueView({
           onClick={() => {
             onOpen(value.target);
           }}
+          title={value.text}
           className="ident block max-w-full"
         >
           <CutInTheMiddle text={value.text} floor={NAME_FLOOR} separator="-" />

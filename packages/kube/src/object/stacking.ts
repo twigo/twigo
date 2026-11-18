@@ -55,7 +55,7 @@ export function copyText(value: Value): string | undefined {
   }
 }
 
-/** Whether a value wraps over lines, which every one does but a name, cut in the middle with its whole text in its tooltip. */
+/** Whether a value wraps over lines, which every one does but a name, cut in the middle, whose link carries its whole text as its tooltip. */
 const wraps = (value: Value) => value.type !== "link";
 
 export function rowOf(value: Value): {

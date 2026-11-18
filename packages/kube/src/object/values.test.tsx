@@ -33,6 +33,22 @@ test("a time reads as its age alone, and its date is in its tooltip", () => {
   );
 });
 
+test("a name that is a link has its whole text in its tooltip, where its copy icon hides the end of a cut one", () => {
+  const text = "payments-api-production-checkout-7d9f8c6b5-x2x4q";
+  const { container } = view({
+    type: "link",
+    target: {
+      group: "apps",
+      version: "v1",
+      kind: "Deployment",
+      namespace: "payments",
+      name: text,
+    },
+    text,
+  });
+  expect(container.querySelector("button")?.getAttribute("title")).toBe(text);
+});
+
 const labels = (count: number): Label[] =>
   Array.from({ length: count }, (_, at) => ({
     key: `app.kubernetes.io/part-${String(at)}`,

@@ -14,7 +14,8 @@ const NAME = { copied: "Copied", failed: "Could not copy" } as const;
  * glyph is drawn by `.copy-glyph` in the stylesheet, so it is one element.
  * By default it lies over the end of its nearest positioned ancestor, on the
  * editor's own fill, and takes no width of its own while hidden, which suits
- * a text that is cut, whose end is in the tooltip. A `floated` one comes first
+ * a text that is cut, whose element has the whole text as its tooltip, since
+ * the icon hides its end while it shows. A `floated` one comes first
  * in its text's block and floats at the end of the first line, a line tall: a
  * first line that reaches it wraps 16 px sooner, and nothing it lies beside is
  * covered, which suits a text that wraps.
