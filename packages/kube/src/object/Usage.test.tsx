@@ -504,6 +504,9 @@ test.each<[string, ShownUsage, string[], string]>([
     for (const row of rows) {
       expect(row.children).toHaveLength(1);
       expect(row.firstElementChild?.children).toHaveLength(2);
+      const first = row.firstElementChild?.firstElementChild?.firstElementChild;
+      expect(first?.textContent).toBe("\u200b");
+      expect(first?.getAttribute("aria-hidden")).toBe("true");
     }
     expect(lines(section)[0]).toEqual(cpu);
     expect(

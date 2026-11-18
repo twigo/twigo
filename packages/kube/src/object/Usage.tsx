@@ -125,7 +125,10 @@ const METER = "w-20";
  * first line is the meter and how much of its base the container uses, and the
  * second the figure itself; a container that has neither request nor limit has
  * the figure alone, on the first line. While the usage waits, the meter is
- * empty where a base exists and the line is bare where none does.
+ * empty where a base exists and the line is bare where none does. The first
+ * line begins with a zero-width space, its gap cancelled, in every state: the
+ * row takes its baseline from text, as the rows around it do, and not from a
+ * meter's edge, so its label keeps its place as the answer comes.
  */
 export function ContainerMeter({
   resource,
@@ -144,11 +147,12 @@ export function ContainerMeter({
   return (
     <span className="flex flex-col">
       <span className="flex min-h-lh items-center gap-2">
+        <span aria-hidden className="-mr-2">
+          {"\u200b"}
+        </span>
         {parts === null ? (
-          based ? (
+          based && (
             <EmptyMeter label={subject(resource, name)} className={METER} />
-          ) : (
-            <span aria-hidden>{"\u200b"}</span>
           )
         ) : parts === "no data" ? (
           <span className="text-support">No data yet</span>
