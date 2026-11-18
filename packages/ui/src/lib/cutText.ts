@@ -16,6 +16,10 @@ export interface Cut {
  * or less by `emWidth`: the whole text is then no wider than its head, the 2em
  * that the middle's track keeps and its tail, so it takes no more than the
  * cut's floor, and the track would leave a gap where the middle falls short.
+ * The canvas does not apply `ss06`, the glyph set an `ident` name has on
+ * macOS, so there a middle of 2em or a little less can draw wider than 2em,
+ * by about 0.4 px for each `l` at 13 px, and its whole text takes that much
+ * more than the floor.
  * The tail is the part after the last `separator` when it fits the floor and
  * leaves the head `MIN_HEAD` characters, else the last characters, so that a
  * cluster's ARN keeps its name and a list of namespaces its last one.
