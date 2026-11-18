@@ -21,6 +21,7 @@ import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { ObjectViews } from "./object/ObjectViews";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
+import { OBJECT_FILTERED, OBJECT_URI, useFiltered } from "./object/pageStates";
 import { refResource, refUri, useObject } from "./object/useObject";
 import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
@@ -134,14 +135,19 @@ export function Details({
       ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
       : undefined;
   const idle = tab === "overview" && noContainerRuns(snapshot.overview);
+  const page = tab === "overview";
+  const filtered = useFiltered(services.pages, uri) && page;
   useEffect(() => {
     if (!element) return;
     const scope = keys.scope(element);
     scope.set("resource.noContainerRuns", idle);
+    scope.set("pageFocus", page);
+    scope.set(OBJECT_URI, page ? uri : undefined);
+    scope.set(OBJECT_FILTERED, filtered);
     return () => {
       scope.dispose();
     };
-  }, [keys, element, idle]);
+  }, [keys, element, idle, page, filtered, uri]);
   const now = useNow();
   const lookup = keys.lookup(element);
   const measured = useSyncExternalStore(selection.watch, () =>
@@ -302,6 +308,9 @@ export function Details({
         onChange={(next) => {
           states.setDetailsTab(uri, next);
         }}
+        pages={services.pages}
+        uri={uri}
+        kind={kind}
       />
       <div className="min-h-0 flex-1 overflow-auto">
         {snapshot.overview || tab !== "overview" ? (
@@ -310,6 +319,9 @@ export function Details({
             space={space}
             states={services.overviews}
             kind={`${group}/${resource}`}
+            pages={services.pages}
+            uri={uri}
+            object={`${namespace ?? ""}/${name}`}
             snapshot={snapshot}
             values={values}
             reveal={reveal}

@@ -3,18 +3,27 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TreeNode } from "@twigo/protocol";
 import { Chip, PropertyList } from "@twigo/ui";
 import { isFigures } from "../tabular";
+import { treeGroup } from "./pageFilter";
+import type { GroupFolds } from "./pageStates";
 
 /**
  * A part of an object as a property grid: its plain fields as rows, then
  * each nested map as a group and each list of maps as a group of cards,
- * one per item. Groups below the second level start folded.
+ * one per item. Groups below the second level start folded; while the page's
+ * filter holds text, a group it narrowed draws open, and the person's choice
+ * for a group is kept with that text.
  */
 export function Properties({
   nodes,
   depth,
+  path = [],
+  groups,
 }: {
   nodes: readonly TreeNode[];
   depth: number;
+  /** The keys from the top of the tree down to `nodes`, which name its groups. */
+  path?: readonly string[];
+  groups: GroupFolds | undefined;
 }) {
   const plain = nodes.filter(
     (node) =>
@@ -41,7 +50,13 @@ export function Properties({
         />
       )}
       {nested.map((node) => (
-        <Group key={node.key} node={node} depth={depth} />
+        <Group
+          key={node.key}
+          node={node}
+          depth={depth}
+          path={[...path, node.key]}
+          groups={groups}
+        />
       ))}
     </div>
   );
@@ -63,8 +78,20 @@ function Plain({ node }: { node: TreeNode }) {
   );
 }
 
-function Group({ node, depth }: { node: TreeNode; depth: number }) {
-  const [open, setOpen] = useState(depth < 2);
+function Group({
+  node,
+  depth,
+  path,
+  groups,
+}: {
+  node: TreeNode;
+  depth: number;
+  path: readonly string[];
+  groups: GroupFolds | undefined;
+}) {
+  const [shown, setShown] = useState(depth < 2);
+  const id = treeGroup(path);
+  const open = groups ? groups.open(id, shown) : shown;
   const count =
     node.value.type === "map"
       ? node.value.entries.length
@@ -77,7 +104,8 @@ function Group({ node, depth }: { node: TreeNode; depth: number }) {
         type="button"
         aria-expanded={open}
         onClick={() => {
-          setOpen(!open);
+          if (groups) groups.set(id, !open);
+          else setShown(!open);
         }}
         className="group/title flex h-6 items-center gap-1 self-start text-left text-xs font-semibold text-support"
       >
@@ -94,12 +122,24 @@ function Group({ node, depth }: { node: TreeNode; depth: number }) {
       {open && (
         <div className="mt-1 ml-1.5 border-l border-border-subtle pl-3">
           {node.value.type === "map" && (
-            <Properties nodes={node.value.entries} depth={depth + 1} />
+            <Properties
+              nodes={node.value.entries}
+              depth={depth + 1}
+              path={path}
+              groups={groups}
+            />
           )}
           {node.value.type === "list" && (
             <div className="flex flex-col gap-2">
               {node.value.items.map((item, index) => (
-                <Card key={index} item={item} index={index} depth={depth} />
+                <Card
+                  key={index}
+                  item={item}
+                  index={index}
+                  depth={depth}
+                  path={[...path, item.key]}
+                  groups={groups}
+                />
               ))}
             </div>
           )}
@@ -114,10 +154,14 @@ function Card({
   item,
   index,
   depth,
+  path,
+  groups,
 }: {
   item: TreeNode;
   index: number;
   depth: number;
+  path: readonly string[];
+  groups: GroupFolds | undefined;
 }) {
   const named = item.key !== String(index);
   return (
@@ -130,7 +174,12 @@ function Card({
         )}
       </div>
       {item.value.type === "map" ? (
-        <Properties nodes={item.value.entries} depth={depth + 1} />
+        <Properties
+          nodes={item.value.entries}
+          depth={depth + 1}
+          path={path}
+          groups={groups}
+        />
       ) : (
         <Plain node={item} />
       )}

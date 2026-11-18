@@ -2,6 +2,9 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { INITIAL_OBJECT, type ObjectSnapshot } from "@twigo/protocol";
 import { ObjectContent, RelatedView } from "./ObjectContent";
+import { PageStates } from "./pageStates";
+
+const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
 
 afterEach(() => {
   cleanup();
@@ -32,6 +35,7 @@ const deleted: ObjectSnapshot = {
 function yamlOf(snapshot: ObjectSnapshot, kept?: boolean) {
   render(
     <ObjectContent
+      {...PAGE}
       tab="yaml"
       space="dev"
       states={{} as never}

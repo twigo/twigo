@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -20,9 +20,17 @@ import type {
   Overview as Document,
   Section,
   ShownUsage,
+  Tone,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { Button, cn, PropertyList, Section as Folding, Table } from "@twigo/ui";
+import {
+  Button,
+  Chip,
+  cn,
+  PropertyList,
+  Section as Folding,
+  Table,
+} from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
@@ -30,10 +38,12 @@ import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
 import type { OverviewStates } from "./overviewStates";
+import { compile, USAGE_TITLE, viewOf, type SectionView } from "./pageFilter";
+import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
 import { isNumeric, numericColumns } from "./numeric";
 import { UsageView } from "./Usage";
-import { Age, ValueView } from "./values";
+import { Age, Sentence, ValueView } from "./values";
 
 const USAGE = "core.usage";
 
@@ -45,6 +55,11 @@ export interface OverviewProps {
   readonly states: OverviewStates;
   /** The object's resource, `apps/deployments`, which keys `states`. */
   readonly kind: string;
+  /** The object shown, as `namespace/name`: a finding the person folded stays folded in it, in its space, only. */
+  readonly object: string;
+  /** What the editor at `uri` shows of the page beyond its object: its filter. */
+  readonly pages: PageStates;
+  readonly uri: string;
   /** Opens the object a link points at. */
   readonly onOpen: (target: ObjectRef) => void;
   /** The values of a ConfigMap's keys, null for a binary one. */
@@ -59,15 +74,21 @@ export interface OverviewProps {
 
 /**
  * An object described in Rust (ARCHITECTURE 4.3): its sections in order,
- * each folding by its id as the kind's other objects do, each block drawn
- * by its type. While the object is shown, a finding that comes or goes is
- * announced by its title, which, unlike its times, does not tick.
+ * each opening as its fold says until the person folds or opens it for the
+ * kind, and each block drawn by its type. A section's fields that hold the
+ * cluster's default hide behind a link at its end. While the page's filter
+ * holds text, the sections with a match open and the others hide. While the
+ * object is shown, a finding that comes or goes is announced by its title,
+ * which, unlike its times, does not tick.
  */
 export function Overview({
   overview,
   space,
   states,
   kind,
+  object,
+  pages,
+  uri,
   onOpen,
   values,
   reveal,
@@ -75,6 +96,19 @@ export function Overview({
   usage,
 }: OverviewProps) {
   useChanges(states.changes);
+  useChanges(pages.changes);
+  const text = pages.text(uri);
+  const { filter } = useMemo(() => compile(text), [text]);
+  const shut = pages.shut(uri);
+  const root = useRef<HTMLDivElement>(null);
+  const goToMatch = pages.wantsMatch(uri);
+  useEffect(() => {
+    if (!goToMatch) return;
+    root.current
+      ?.querySelector<HTMLElement>("[data-section] button[aria-expanded]")
+      ?.focus();
+    pages.matched(uri);
+  }, [goToMatch, pages, uri]);
   const titles = overview.sections.flatMap((section) =>
     section.blocks.flatMap((block) =>
       block.type === "diagnostics"
@@ -82,21 +116,87 @@ export function Overview({
         : [],
     ),
   );
-  const rendered = overview.sections.map((section) => (
-    <Folding
-      key={section.id}
-      title={section.title}
-      open={states.open(kind, section.id, true)}
-      onToggle={() => {
-        states.toggle(kind, section.id);
-      }}
-    >
-      <div className="flex flex-col gap-3">
-        {section.blocks.map((block, index) => (
-          <BlockView
-            key={index}
-            section={section}
-            block={block}
+  const parts: Part[] = overview.sections.map((section) => {
+    const revealed = states.open(kind, defaultsId(section.id), false);
+    return {
+      id: section.id,
+      title: section.title,
+      fold: section.fold,
+      summary: section.summary,
+      tone: section.tone === null ? undefined : EDGE[section.tone],
+      revealed,
+      view: viewOf(section, filter, revealed),
+    };
+  });
+  if (usage) {
+    parts.splice(overview.sections[0]?.id === "core.diagnostics" ? 1 : 0, 0, {
+      id: USAGE,
+      title: USAGE_TITLE,
+      fold: "open",
+      summary: [],
+      tone: undefined,
+      revealed: false,
+      view: undefined,
+    });
+  }
+  const shown = filter
+    ? parts.filter((part) =>
+        part.view === undefined
+          ? filter.keeps([part.title])
+          : part.view.matches > 0,
+      )
+    : parts;
+  const identity = `${space}/${object}`;
+  const isOpen = ({ id, fold }: Part) =>
+    filter ? !shut.has(id) : states.section(kind, identity, id, fold);
+  const toggle = (part: Part, all: boolean) => {
+    const targets = all ? shown : [part];
+    if (filter)
+      pages.setShut(
+        uri,
+        targets.map(({ id }) => id),
+        isOpen(part),
+      );
+    else if (all) states.setSections(kind, identity, shown, !isOpen(part));
+    else states.setSection(kind, identity, part, !isOpen(part));
+  };
+  const groupsOf = (part: Part, { narrowed }: SectionView): GroupFolds => ({
+    open: (id, normally) =>
+      pages.group(uri, `${part.id}/${id}`) ?? (narrowed.has(id) || normally),
+    set: (id, open) => {
+      pages.setGroup(uri, `${part.id}/${id}`, open);
+    },
+  });
+  const opens = shown.map(isOpen);
+  const rendered = shown.map((part, index) => {
+    const open = opens[index] === true;
+    const spacing =
+      index === 0
+        ? undefined
+        : !open && opens[index - 1] === false
+          ? "mt-1"
+          : "mt-6";
+    return (
+      <Folding
+        key={part.id}
+        id={part.id}
+        title={part.title}
+        summary={part.summary.length > 0 && <Sentence spans={part.summary} />}
+        tone={part.tone}
+        open={open}
+        onToggle={(all) => {
+          toggle(part, all);
+        }}
+        className={spacing}
+      >
+        {part.view === undefined ? (
+          usage && <UsageView usage={usage} node={kind === "/nodes"} />
+        ) : (
+          <SectionBlocks
+            section={part}
+            view={part.view}
+            revealed={part.revealed}
+            groups={filter === null ? undefined : groupsOf(part, part.view)}
             space={space}
             states={states}
             kind={kind}
@@ -105,30 +205,99 @@ export function Overview({
             reveal={reveal}
             onLogs={onLogs}
           />
-        ))}
-      </div>
-    </Folding>
-  ));
-  if (usage) {
-    rendered.splice(
-      overview.sections[0]?.id === "core.diagnostics" ? 1 : 0,
-      0,
-      <Folding
-        key={USAGE}
-        title="Usage"
-        open={states.open(kind, USAGE, true)}
-        onToggle={() => {
-          states.toggle(kind, USAGE);
-        }}
-      >
-        <UsageView usage={usage} node={kind === "/nodes"} />
-      </Folding>,
+        )}
+      </Folding>
     );
-  }
+  });
   return (
-    <div className="flex flex-col gap-6 px-3.5 pt-4 pb-4 text-body">
+    <div ref={root} className="flex flex-col py-4 text-body">
       <Announcer titles={titles} />
       {rendered}
+      {filter && shown.length === 0 && (
+        <p className="px-3.5 text-support">Nothing here matches “{text}”</p>
+      )}
+    </div>
+  );
+}
+
+/** A section as the Overview draws it: what its header says, and, but for the usage section, what its blocks leave of it. */
+interface Part {
+  readonly id: string;
+  readonly title: string;
+  readonly fold: Section["fold"];
+  readonly summary: Section["summary"];
+  readonly tone: "error" | "warn" | undefined;
+  readonly revealed: boolean;
+  readonly view: SectionView | undefined;
+}
+
+/** The tone of the edge on the header of a section that holds what is wrong; the others have none. */
+const EDGE: Readonly<Record<Tone, "error" | "warn" | undefined>> = {
+  danger: "error",
+  warning: "warn",
+  success: undefined,
+  neutral: undefined,
+};
+
+const defaultsId = (section: string) => `${section}/defaults`;
+
+function SectionBlocks({
+  section,
+  view,
+  revealed,
+  groups,
+  space,
+  states,
+  kind,
+  onOpen,
+  values,
+  reveal,
+  onLogs,
+}: {
+  section: Pick<Section, "id" | "title">;
+  view: SectionView;
+  revealed: boolean;
+  /** What the page's filter makes of the groups in the section, while its text is not empty. */
+  groups: GroupFolds | undefined;
+  space: string;
+  states: OverviewStates;
+  kind: string;
+  onOpen: OverviewProps["onOpen"];
+  values: OverviewProps["values"];
+  reveal: OverviewProps["reveal"];
+  onLogs: OverviewProps["onLogs"];
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {view.blocks.map((block, index) => (
+        <BlockView
+          key={index}
+          section={section}
+          block={block}
+          groups={groups}
+          space={space}
+          states={states}
+          kind={kind}
+          onOpen={onOpen}
+          values={values}
+          reveal={reveal}
+          onLogs={onLogs}
+        />
+      ))}
+      {view.folds && (
+        <button
+          type="button"
+          aria-expanded={revealed}
+          onClick={() => {
+            states.toggle(kind, defaultsId(section.id));
+          }}
+          className="self-start rounded-sm text-xs text-quiet outline-none hover:text-content focus-visible:shadow-[var(--focus-ring)]"
+        >
+          {revealed
+            ? "Hide defaults"
+            : `${view.defaults} ${view.defaults === 1 ? "default" : "defaults"}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -164,6 +333,7 @@ function Announcer({ titles }: { titles: readonly string[] }) {
 function BlockView({
   section,
   block,
+  groups,
   space,
   states,
   kind,
@@ -173,8 +343,9 @@ function BlockView({
   onLogs,
 }: {
   /** Whose title names a table and whose id keys a list's state. */
-  section: Section;
+  section: Pick<Section, "id" | "title">;
   block: Block;
+  groups: GroupFolds | undefined;
   space: string;
   states: OverviewStates;
   kind: string;
@@ -197,7 +368,7 @@ function BlockView({
         />
       );
     case "tree":
-      return <Properties nodes={block.nodes} depth={0} />;
+      return <Properties nodes={block.nodes} depth={0} groups={groups} />;
     case "events":
       return <Events list={block} />;
     case "diagnostics":
@@ -209,6 +380,7 @@ function BlockView({
           states={states}
           kind={kind}
           onOpen={onOpen}
+          groups={groups}
         />
       );
     case "table":
@@ -251,7 +423,14 @@ function Fields({
         key: field.label,
         label: field.label,
         numeric: isNumeric(field.value),
-        value: <ValueView value={field.value} onOpen={onOpen} />,
+        value: field.default ? (
+          <span className="inline-flex flex-wrap items-baseline gap-x-1.5 text-support">
+            <ValueView value={field.value} onOpen={onOpen} />
+            <Chip className="text-2xs">default</Chip>
+          </span>
+        ) : (
+          <ValueView value={field.value} onOpen={onOpen} />
+        ),
       }))}
     />
   );

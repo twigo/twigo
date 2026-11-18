@@ -11,7 +11,7 @@ import type {
   LogWindow,
   TextRange,
 } from "../../generated";
-import { lowerAscii, parseText, type TextFilter } from "../query";
+import { lowerAscii, parseText, type TextFilter } from "../../textFilter";
 import type { Dropped, Entry, Judged, Kind, LogBuffer } from "./buffer";
 import { time } from "./line";
 

@@ -9,6 +9,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { Overview as Document } from "@twigo/protocol";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
+import { PageStates } from "./pageStates";
+
+const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
 
 afterEach(() => {
   cleanup();
@@ -48,6 +51,7 @@ test("a ConfigMap of 2,000 keys puts in the DOM the values of the keys opened on
   );
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -80,6 +84,7 @@ test("a link opens the object it points at", () => {
   };
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -125,6 +130,7 @@ test("a section folds by its title, and stays folded for the kind's next object"
   const shown = (kind: string) =>
     render(
       <Overview
+        {...PAGE}
         states={states}
         kind={kind}
         space="kind-test"
@@ -171,6 +177,7 @@ test("an open value is read again when the object changes", async () => {
   const values = vi.fn(() => Promise.resolve([current]));
   const { rerender } = render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -188,6 +195,7 @@ test("an open value is read again when the object changes", async () => {
   await act(async () => {
     rerender(
       <Overview
+        {...PAGE}
         states={new OverviewStates()}
         kind="/pods"
         space="kind-test"
@@ -208,6 +216,7 @@ test("a value that cannot be read says why", async () => {
   );
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -227,6 +236,7 @@ test("a Secret's keys do not open", () => {
   const values = vi.fn(() => Promise.resolve([null]));
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -242,6 +252,7 @@ test("a Secret's keys do not open", () => {
 test("events that cannot be listed say why instead of none", () => {
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -280,6 +291,7 @@ test("events that cannot be listed say why instead of none", () => {
 test("a multiline value keeps its lines", () => {
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -329,6 +341,7 @@ const AT = "2026-11-02T21:04:52Z";
 test("conditions read as chips with a mark in their tone, and the wrong ones say why below them", () => {
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/pods"
       space="kind-test"
@@ -448,6 +461,7 @@ test("a Secret's value reaches the DOM only through a Reveal, and leaves it on H
   );
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/secrets"
       space="kind-test"
@@ -471,6 +485,7 @@ test("a Reveal the person does not confirm shows nothing", async () => {
   const reveal = vi.fn(() => Promise.resolve(undefined));
   render(
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/secrets"
       space="kind-test"
@@ -494,6 +509,7 @@ test("a value revealed for one Secret is not shown for the next one's key of tha
   const next = vi.fn(() => Promise.resolve(undefined));
   const shown = (reveal: typeof first | typeof next) => (
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/secrets"
       space="kind-test"
@@ -527,6 +543,7 @@ test("an answer that comes after the row moved to another Secret is dropped", as
   const next = vi.fn(() => Promise.resolve(undefined));
   const shown = (reveal: typeof slow | typeof next) => (
     <Overview
+      {...PAGE}
       states={new OverviewStates()}
       kind="/secrets"
       space="kind-test"

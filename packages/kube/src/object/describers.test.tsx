@@ -5,6 +5,9 @@ import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import OBJECTS from "../../../protocol/src/mock/objects.json";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
+import { PageStates } from "./pageStates";
+
+const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
 
 afterEach(() => {
   cleanup();
@@ -20,6 +23,7 @@ async function shown(name: string) {
   const workbench = await testWorkbench("ready");
   render(
     <Overview
+      {...PAGE}
       overview={overview}
       space="prod-eu"
       states={new OverviewStates()}
@@ -97,6 +101,7 @@ test("a finding that comes or goes is announced once, and its tone has a name", 
   const workbench = await testWorkbench("ready");
   const view = (overview: Document) => (
     <Overview
+      {...PAGE}
       overview={overview}
       space="prod-eu"
       states={new OverviewStates()}
@@ -126,6 +131,7 @@ test("a container's folds stay open for the kind's next object", async () => {
   const mounted = (kind: string) =>
     render(
       <Overview
+        {...PAGE}
         overview={overview}
         space="prod-eu"
         states={states}
@@ -175,6 +181,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const workbench = await testWorkbench("ready");
   render(
     <Overview
+      {...PAGE}
       overview={beating}
       space="prod-eu"
       states={new OverviewStates()}

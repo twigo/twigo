@@ -53,7 +53,7 @@ export interface Source {
   readonly rules: readonly (KeybindingRule | KeybindingRemoval)[];
 }
 
-const LIST_ONLY = parseWhen("listFocus && !inputFocus");
+const BARE_OK = parseWhen("(listFocus || pageFocus) && !inputFocus");
 const QUICK_OPEN = parseWhen("inQuickOpen");
 /** Bare keys that edit no line of text, so they drive quick access's list from its input. */
 const QUICK_OPEN_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
@@ -200,10 +200,10 @@ function key(when: When): string {
   );
 }
 
-/** Bare keys fire in a focused list, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */
+/** Bare keys fire in a focused list or page, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */
 function bareFires(press: Press, lookup: Lookup): boolean {
   return (
-    evaluate(LIST_ONLY, lookup) ||
+    evaluate(BARE_OK, lookup) ||
     (QUICK_OPEN_KEYS.has(pressId(press)) && evaluate(QUICK_OPEN, lookup))
   );
 }

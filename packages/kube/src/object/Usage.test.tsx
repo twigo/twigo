@@ -27,6 +27,9 @@ import {
 } from "../../test/workbench";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
+import { PageStates } from "./pageStates";
+
+const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
 
 afterEach(() => {
   cleanup();
@@ -158,6 +161,7 @@ function shown(
   const states = new OverviewStates();
   render(
     <Overview
+      {...PAGE}
       overview={{
         header: {
           owner: null,
@@ -186,6 +190,7 @@ function listed(
   const states = new OverviewStates();
   const view = (usage: ShownUsage | undefined) => (
     <Overview
+      {...PAGE}
       overview={overview}
       space="prod-eu"
       states={states}
@@ -399,11 +404,12 @@ test("the section follows the Diagnostics, else comes first, and without a usage
 
 test("the section folds, and the kind remembers it", () => {
   const states = shown(POD);
-  expect(states.open("/pods", "core.usage", true)).toBe(true);
+  const open = () => states.section("/pods", "", "core.usage", "open");
+  expect(open()).toBe(true);
   fireEvent.click(
     within(usageSection()).getByRole("button", { name: /Usage/ }),
   );
-  expect(states.open("/pods", "core.usage", true)).toBe(false);
+  expect(open()).toBe(false);
   expect(within(usageSection()).queryAllByRole("meter")).toHaveLength(0);
 });
 

@@ -1,5 +1,5 @@
 import type { Level } from "../../generated";
-import { lowerAscii } from "../query";
+import { lowerAscii } from "../../textFilter";
 
 /**
  * A line's level, read from what it says rather than guessed from its

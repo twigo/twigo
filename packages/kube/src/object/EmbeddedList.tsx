@@ -43,8 +43,9 @@ import type { OverviewStates } from "./overviewStates";
 
 /**
  * Inside a row's details, the list editor's selection and marks are not
- * this list's, so its resource keys find no row here; and Space and `/`
- * stay with it rather than hide the details or filter the editor.
+ * this list's, so its resource keys find no row here; and Space stays with
+ * it rather than hide the details, and `/` opens the filter of the page it
+ * is in rather than the editor's.
  */
 const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
 

@@ -8,6 +8,8 @@ import { Card, Pill, PropertyList, Section } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import type { OverviewStates } from "./overviewStates";
 import { isNumeric } from "./numeric";
+import { CONTAINER_GROUPS, containerGroup } from "./pageFilter";
+import type { GroupFolds } from "./pageStates";
 import { TONE } from "./tone";
 import { ValueView } from "./values";
 
@@ -22,19 +24,22 @@ const ROLE: Readonly<Record<ContainerRole, string | null>> = {
  * A pod's containers, or a pod template's, as cards (ARCHITECTURE 4.3):
  * the name, its state and ports, the image with its tag, its state's
  * times and resources; the rest of what kubectl describe prints of it,
- * its environment and its mounts fold.
+ * its environment and its mounts fold, and while the page's filter holds
+ * text, a group it narrowed draws open.
  */
 export function Containers({
   containers,
   states,
   kind,
   onOpen,
+  groups,
 }: {
   containers: readonly Container[];
   /** Where the folds are kept, for every object of `kind`. */
   states: OverviewStates;
   kind: string;
   onOpen: (target: ObjectRef) => void;
+  groups: GroupFolds | undefined;
 }) {
   useChanges(states.changes);
   return (
@@ -43,16 +48,18 @@ export function Containers({
         <ContainerCard
           key={`${container.role}/${container.name}`}
           container={container}
-          fold={(title) => ({
-            open: states.open(
-              kind,
-              `containers/${container.name}/${title}`,
-              false,
-            ),
-            onToggle: () => {
-              states.toggle(kind, `containers/${container.name}/${title}`);
-            },
-          })}
+          fold={(title) => {
+            const id = containerGroup(container.name, title);
+            const normally = states.open(kind, id, false);
+            const open = groups ? groups.open(id, normally) : normally;
+            return {
+              open,
+              onToggle: () => {
+                if (groups) groups.set(id, !open);
+                else states.toggle(kind, id);
+              },
+            };
+          }}
           onOpen={onOpen}
         />
       ))}
@@ -106,15 +113,26 @@ function ContainerCard({
         <span className="text-content">{version}</span>
       </code>
       {fields.length > 0 && <Fields fields={fields} onOpen={onOpen} />}
-      <Folded title="Details" fields={details} fold={fold} onOpen={onOpen} />
       <Folded
-        title="Environment"
+        title={CONTAINER_GROUPS.details}
+        fields={details}
+        fold={fold}
+        onOpen={onOpen}
+      />
+      <Folded
+        title={CONTAINER_GROUPS.env}
         fields={env}
         fold={fold}
         onOpen={onOpen}
         cut
       />
-      <Folded title="Mounts" fields={mounts} fold={fold} onOpen={onOpen} cut />
+      <Folded
+        title={CONTAINER_GROUPS.mounts}
+        fields={mounts}
+        fold={fold}
+        onOpen={onOpen}
+        cut
+      />
     </Card>
   );
 }

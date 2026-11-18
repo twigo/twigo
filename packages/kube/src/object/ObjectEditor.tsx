@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ObjectRef } from "@twigo/protocol";
 import { EmptyState, InlineActions } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import {
   hasStatusSubresource,
+  servedAs,
   useResources,
   type Discovery,
 } from "../discovery";
@@ -17,6 +18,12 @@ import { useVisible } from "../useVisible";
 import { ObjectContent } from "./ObjectContent";
 import { ObjectViews } from "./ObjectViews";
 import type { OverviewStates } from "./overviewStates";
+import {
+  OBJECT_FILTERED,
+  OBJECT_URI,
+  useFiltered,
+  type PageStates,
+} from "./pageStates";
 import type { ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
 import { hasUsage } from "./figures";
@@ -31,11 +38,13 @@ export function ObjectEditor({
   uri,
   discovery,
   overviews,
+  pages,
   tabs,
   edits,
 }: EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
+  pages: PageStates;
   tabs: ObjectTabs;
   edits: EditServices;
 }) {
@@ -62,6 +71,19 @@ export function ObjectEditor({
     usage: asked,
   });
   const reveal = useReveal(id);
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const page = tab === "overview";
+  const filtered = useFiltered(pages, uri) && page;
+  useEffect(() => {
+    if (!element) return;
+    const scope = keys.scope(element);
+    scope.set("pageFocus", page);
+    scope.set(OBJECT_URI, page ? uri : undefined);
+    scope.set(OBJECT_FILTERED, filtered);
+    return () => {
+      scope.dispose();
+    };
+  }, [keys, element, page, filtered, uri]);
   const statusLocked = hasStatusSubresource(resources, input?.gvr);
   const manifest = snapshot.manifest;
   useEffect(() => {
@@ -77,13 +99,20 @@ export function ObjectEditor({
     editors.open(next, { preview: true });
   };
   return (
-    <div className="flex h-full min-h-0 flex-col bg-editor">
+    <div ref={setElement} className="flex h-full min-h-0 flex-col bg-editor">
       <ObjectViews
         tab={tab}
         snapshot={snapshot}
         onChange={(next) => {
           tabs.set(uri, next);
         }}
+        pages={pages}
+        uri={uri}
+        kind={
+          (resources.state === "ready"
+            ? servedAs(resources.value, input.gvr)?.kind
+            : undefined) ?? "object"
+        }
       />
       <div className="min-h-0 flex-1">
         <ObjectContent
@@ -91,6 +120,9 @@ export function ObjectEditor({
           space={input.space}
           states={overviews}
           kind={`${input.gvr.group}/${input.gvr.resource}`}
+          pages={pages}
+          uri={uri}
+          object={`${input.namespace ?? ""}/${input.name}`}
           snapshot={snapshot}
           values={values}
           reveal={reveal}

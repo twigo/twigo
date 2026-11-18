@@ -230,6 +230,13 @@ describe("bare keys", () => {
     );
   });
 
+  test("fire in a page that takes them, and never in an input there", () => {
+    expect(resolve(target, [press("KeyL")], { pageFocus: true })).toBe("logs");
+    expect(
+      resolve(target, [press("KeyL")], { pageFocus: true, inputFocus: true }),
+    ).toBe("none");
+  });
+
   test("Escape and the function keys are not bare", () => {
     expect(resolve(target, [press("Escape")])).toBe("clear");
     expect(resolve(target, [press("F5")])).toBe("refresh");
