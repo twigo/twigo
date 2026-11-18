@@ -959,7 +959,7 @@ test("a failing row carries its tone, a name reads in its parts, and restarts re
   const restarts = parts(failing, "Restarts").map((part) => part.textContent);
   expect(restarts).toHaveLength(2);
   expect(restarts[0]).toMatch(/^\d+$/);
-  expect(restarts[1]).toMatch(/^\d+m ago$/);
+  expect(restarts[1]).toMatch(/^(\d+[smhd])+ ago$/);
 
   const pending = await filter("Pending");
   expect(textOf(pending, "Status")).toBe("Pending");

@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 import { humanDuration, parseDuration } from "@twigo/utils";
-import { Cluster, finishedAt, generatedAt, type Pod } from "./cluster";
+import {
+  backOff,
+  Cluster,
+  CONTAINER_START,
+  finishedAt,
+  generatedAt,
+  restartCount,
+  type Pod,
+} from "./cluster";
 import { KINDS } from "./kinds";
 
 test("a Deployment's pod is generated from its template hash", () => {
@@ -121,6 +129,122 @@ test("a pod that finished restarted before it did, and one that never started ha
   expect(waiting.map((pod) => [pod.restarts, pod.lastRestart])).toEqual(
     waiting.map(() => ["0", null]),
   );
+});
+
+function leastTaken(restarts: number): number {
+  let taken = CONTAINER_START;
+  for (let exit = 1; exit < restarts; exit++) taken += backOff(exit);
+  return taken;
+}
+
+function holdsWhatTheGeneratorHolds(cluster: Cluster) {
+  const now = cluster.now;
+  const states = new Set<string>();
+  for (const pod of cluster.pods) {
+    const restarts = restartCount(pod);
+    const as = `${pod.status} ${pod.name}`;
+    states.add(`${pod.status}${pod.containers > 1 ? " with sidecars" : ""}`);
+    if (pod.lastRestart !== null) {
+      expect(pod.lastRestart, as).toBeGreaterThanOrEqual(
+        pod.created + leastTaken(restarts),
+      );
+      expect(pod.lastRestart, as).toBeLessThanOrEqual(now);
+    }
+    switch (pod.status) {
+      case "CrashLoopBackOff":
+        expect(restarts, as).toBeGreaterThan(0);
+        expect(now - (pod.lastRestart ?? NaN), as).toBeLessThan(
+          backOff(restarts),
+        );
+        expect(pod.ready, as).toBe(pod.containers - 1);
+        break;
+      case "Pending":
+      case "ContainerCreating":
+        expect([pod.restarts, pod.lastRestart, pod.ready], as).toEqual([
+          "0",
+          null,
+          0,
+        ]);
+        break;
+      case "Completed":
+        expect(pod.lastRestart ?? 0, as).toBeLessThan(finishedAt(pod));
+        expect(pod.ready, as).toBe(0);
+        break;
+      case "Error":
+      case "ImagePullBackOff":
+        expect(pod.ready, as).toBe(pod.containers - 1);
+        break;
+      default:
+        expect(pod.ready, as).toBeGreaterThanOrEqual(pod.containers - 1);
+        expect(pod.ready, as).toBeLessThanOrEqual(pod.containers);
+    }
+  }
+  return states;
+}
+
+test("the mock's pods are made as the kubelet leaves them: a crash loop waits within its back-off, and no restart comes before the pod could have had it", () => {
+  const states = holdsWhatTheGeneratorHolds(
+    new Cluster("prod-eu", 5000, Date.UTC(2026, 10, 3)),
+  );
+  expect([...states]).toEqual(
+    expect.arrayContaining([
+      "CrashLoopBackOff",
+      "CrashLoopBackOff with sidecars",
+      "Pending",
+      "ContainerCreating",
+      "Completed",
+      "Error",
+      "ImagePullBackOff with sidecars",
+    ]),
+  );
+});
+
+test("the churn keeps what the generator holds, through ten simulated minutes", () => {
+  const start = Date.UTC(2026, 10, 3);
+  for (const [change, rows] of [
+    [(cluster: Cluster, at: number) => cluster.churn(10, [], at), 5000],
+    [(cluster: Cluster, at: number) => cluster.change(100, at), 5000],
+  ] as const) {
+    const cluster = new Cluster("prod-eu", rows, start);
+    for (let second = 1; second <= 600; second++) {
+      change(cluster, start + second * 1000);
+    }
+    const states = holdsWhatTheGeneratorHolds(cluster);
+    expect([...states]).toEqual(
+      expect.arrayContaining([
+        "CrashLoopBackOff",
+        "CrashLoopBackOff with sidecars",
+        "Pending",
+        "ContainerCreating",
+        "Completed",
+        "Error with sidecars",
+      ]),
+    );
+  }
+});
+
+test("the churn does not restart or crash a pod before its first container could have exited", () => {
+  const start = Date.UTC(2026, 10, 3);
+  const cluster = new Cluster("prod-eu", 400, start);
+  for (const pod of cluster.pods) {
+    Object.assign(pod, {
+      status: "Running",
+      ready: pod.containers,
+      restarts: "0",
+      lastRestart: null,
+      created: start - CONTAINER_START / 2,
+    });
+  }
+  cluster.change(cluster.pods.length, start);
+  expect(
+    cluster.pods.map(({ status, restarts, lastRestart }) => [
+      status,
+      restarts,
+      lastRestart,
+    ]),
+  ).toEqual(cluster.pods.map(() => ["Running", "0", null]));
+  cluster.change(cluster.pods.length, start + CONTAINER_START);
+  expect(cluster.pods.some(({ restarts }) => restarts !== "0")).toBe(true);
 });
 
 test("a pod's Restarts counts from the moment of its last restart, so its age grows across prints", () => {

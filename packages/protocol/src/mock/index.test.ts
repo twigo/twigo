@@ -17,6 +17,7 @@ import {
   finishedAt,
   imageOf,
   podCells,
+  type Pod,
 } from "./cluster";
 import { POD_COUNT } from "./fixtures";
 import { createMockBackend, type MockScenario } from "./index";
@@ -1341,6 +1342,19 @@ test("a mock Deployment's page says its own counts, ReplicaSets and image, and o
     const { header } = page;
     const counts = `${String(ready)}/${String(replicas)}`;
     expect(header.vitals[0]?.value).toMatchObject({ text: counts });
+    const transitions = new Map(
+      conditionsOf(page).map(({ type, lastTransition }) => [
+        type,
+        lastTransition,
+      ]),
+    );
+    const made = new Date(deployment.created).toISOString();
+    expect(transitions.get("Progressing"), name).toBe(made);
+    if (deployment === short) {
+      expect(transitions.get("Available"), name).not.toBe(made);
+    } else {
+      expect(transitions.get("Available"), name).toBe(made);
+    }
     expect(near(header.created, deployment.created)).toBe(true);
     expect(
       header.printed.find(({ column }) => column === "Images")?.value,
@@ -1598,6 +1612,21 @@ test("a completed mock pod shows its containers terminated and its readiness as 
       conditions.fold,
       said(conditions.summary),
     ]).toEqual([null, "folded", "1 of 1 ok"]);
+    const stamped = new Map(
+      list.conditions.map(({ type, lastTransition }) => [type, lastTransition]),
+    );
+    const finished = new Date(finishedAt(pod)).toISOString();
+    expect([
+      stamped.get("Initialized"),
+      ...["PodReadyToStartContainers", "Ready", "ContainersReady"].map((type) =>
+        stamped.get(type),
+      ),
+    ]).toEqual([
+      new Date(pod.created + 2000).toISOString(),
+      finished,
+      finished,
+      finished,
+    ]);
     expect(page.header.vitals[0]?.value).toMatchObject({
       type: "text",
       text: `0/${String(pod.containers)}`,
@@ -1886,10 +1915,11 @@ test("a ContainerCreating mock pod waits in every container, and an Error one ha
     first?.fields.find(({ label }) => label === "Exit code")?.value,
   ).toEqual({ type: "text", text: "exit code 1" });
   for (const other of others) expect(other.state?.ready, other.name).toBe(true);
+  const regular = cardsOf(failed).filter(({ role }) => role !== "init");
   expect(
     failed.header.vitals.find(({ label }) => label === "Ready")?.value,
   ).toMatchObject({
-    text: `${String(errored.ready)}/${String(errored.containers)}`,
+    text: `${String(regular.filter(({ state }) => state?.ready).length)}/${String(regular.length)}`,
   });
   const [finding] = findingsOf(failed);
   expect(finding?.title).toBe(`Container ${container} failed`);
@@ -1902,6 +1932,95 @@ test("a ContainerCreating mock pod waits in every container, and an Error one ha
   expect([containers.tone, said(containers.summary)]).toEqual([
     "danger",
     `${String(errored.containers)} · 1 failing`,
+  ]);
+});
+
+test("a ContainerCreating mock pod's events say it was scheduled and pulls its image, and an Error pod that never restarted has no BackOff", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const creating = cluster.pods.find(
+    (candidate) => candidate.status === "ContainerCreating",
+  );
+  const errored = cluster.pods.filter(
+    (candidate) => candidate.status === "Error",
+  );
+  const never = errored.find((candidate) => candidate.lastRestart === null);
+  const again = errored.find((candidate) => candidate.lastRestart !== null);
+  if (!creating || !never || !again) throw new Error("prod-eu has all three");
+  const reasons = (pod: Pod) =>
+    eventsOf(opened(cluster, "", "pods", pod.namespace, pod.name)).map(
+      ({ reason }) => reason,
+    );
+
+  const page = opened(cluster, "", "pods", creating.namespace, creating.name);
+  expect(reasons(creating)).toEqual(["Pulling", "Scheduled"]);
+  expect(eventsOf(page)[0]).toMatchObject({
+    message: `Pulling image "${imageOf(creating)}"`,
+    fieldPath: `spec.containers{${containerOf(creating)}}`,
+  });
+  const events = section(page, "core.events");
+  expect([events.tone, events.fold, said(events.summary)]).toEqual([
+    null,
+    "folded",
+    "2 events · <ago>",
+  ]);
+
+  expect(reasons(never)).toEqual(["Created", "Started", "Pulled", "Scheduled"]);
+  const quiet = section(
+    opened(cluster, "", "pods", never.namespace, never.name),
+    "core.events",
+  );
+  expect([quiet.tone, quiet.fold, said(quiet.summary)]).toEqual([
+    null,
+    "folded",
+    "4 events · <ago>",
+  ]);
+  expect(reasons(again)).toContain("BackOff");
+});
+
+test("a mock pod's Ready is what its row prints and what its ready cards count, in every state", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const rows = new Map(
+    KINDS["/v1/pods"]?.rows(cluster, false).map((row) => [row.id, row]),
+  );
+  for (const status of [
+    "Running",
+    "CrashLoopBackOff",
+    "Error",
+    "ImagePullBackOff",
+    "ContainerCreating",
+    "Pending",
+    "Completed",
+  ]) {
+    const pod = cluster.pods.find(
+      (candidate) => candidate.status === status && candidate.containers >= 2,
+    );
+    if (!pod) throw new Error(`prod-eu has a ${status} pod with sidecars`);
+    const page = opened(cluster, "", "pods", pod.namespace, pod.name);
+    const cards = cardsOf(page).filter(({ role }) => role !== "init");
+    const counted = `${String(cards.filter(({ state }) => state?.ready).length)}/${String(cards.length)}`;
+    const shown = page.header.vitals.find(({ label }) => label === "Ready");
+    expect(shown?.value, status).toMatchObject({ text: counted });
+    expect(rows.get(pod.id)?.cells[1], status).toBe(counted);
+  }
+});
+
+test("a crash loop's next start comes a back-off after its last exit: 10 s doubled at each restart, to 5 minutes", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const pod = cluster.pods.find(
+    (candidate) => candidate.status === "CrashLoopBackOff",
+  );
+  const last = pod?.lastRestart;
+  if (!pod || last === null || last === undefined)
+    throw new Error("prod-eu has a crash loop that restarted");
+  const next = (restarts: number) => {
+    pod.restarts = `${String(restarts)} (30s ago)`;
+    const page = opened(cluster, "", "pods", pod.namespace, pod.name);
+    const [finding] = findingsOf(page);
+    const until = finding?.detail.find((span) => span.type === "until");
+    return until?.type === "until" ? (Date.parse(until.at) - last) / 1000 : NaN;
+  };
+  expect([1, 2, 3, 4, 5, 6, 7, 44].map((restarts) => next(restarts))).toEqual([
+    10, 20, 40, 80, 160, 300, 300, 300,
   ]);
 });
 
@@ -2042,11 +2161,20 @@ test("a mock Job says its own state and moments, selector and template, and its 
       {
         complete: ["Completed", "SuccessfulCreate"],
         running: ["SuccessfulCreate"],
-        suspended: ["Suspended"],
+        suspended: ["Suspended", "SuccessfulDelete", "SuccessfulCreate"],
       }[state],
     );
   }
 
+  const next = {
+    ...done,
+    id: `${done.id}-next`,
+    name: `${done.name}-next`,
+    completed: null,
+    created: done.created + 60_000,
+    started: done.created + 60_000,
+  };
+  cluster.jobs.push(next);
   const first = opened(cluster, "batch", "cronjobs", cron.namespace, cron.name);
   const own = fieldsOf(first, "core.cronjob");
   const value = (label: string) => own.find((field) => field.label === label);
@@ -2063,8 +2191,13 @@ test("a mock Job says its own state and moments, selector and template, and its 
   );
   expect(value("Active jobs")?.value).toMatchObject({
     type: "list",
-    items: [{ type: "link", target: { kind: "Job", name: running.name } }],
+    items: [{ type: "link", target: { kind: "Job", name: next.name } }],
   });
+  expect(
+    KINDS["batch/v1/cronjobs"]
+      ?.rows(cluster, false)
+      .find(({ id }) => id === cron.id)?.cells[4],
+  ).toBe(1);
   expect(said(section(first, "core.cronjob").summary)).toBe(
     `${cron.schedule} · last run <ago>`,
   );
@@ -2074,7 +2207,8 @@ test("a mock Job says its own state and moments, selector and template, and its 
   expect(names).toContain(
     `Saw completed job: ${done.name}, condition: Complete`,
   );
-  expect(names).toContain(`Created job ${running.name}`);
+  expect(names).toContain(`Created job ${next.name}`);
+  expect(names).not.toContain(`Created job ${running.name}`);
   expect(names.join("\n")).not.toContain("report-");
 
   cluster.suspend(other, true, Date.now());
@@ -2087,6 +2221,96 @@ test("a mock Job says its own state and moments, selector and template, and its 
     text: "true",
     tone: "warning",
   });
+});
+
+test("a mock CronJob counts and lists the Jobs its schedule made, and says it saw one it did not make", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const [done] = cluster.jobs;
+  const cron = cluster.cronJobs.find(({ name }) => name === done?.owner);
+  if (!done || !cron) throw new Error("prod-eu has a Job of a CronJob");
+  const manual = `${cron.name}-manual`;
+  cluster.trigger(cron.namespace, cron.name, manual, Date.now());
+  const page = opened(cluster, "batch", "cronjobs", cron.namespace, cron.name);
+
+  const active = fieldsOf(page, "core.cronjob").find(
+    ({ label }) => label === "Active jobs",
+  );
+  expect(active?.value).toEqual({ type: "text", text: "none" });
+  expect(said(section(page, "core.jobs").summary)).toBe("");
+  expect(
+    KINDS["batch/v1/cronjobs"]
+      ?.rows(cluster, false)
+      .find(({ id }) => id === cron.id)?.cells[4],
+  ).toBe(0);
+
+  const events = eventsOf(page);
+  expect(
+    events.filter(({ message }) => message.includes(manual)),
+  ).toMatchObject([
+    {
+      type: "Warning",
+      reason: "UnexpectedJob",
+      message: `Saw a job that the controller did not create or forgot: ${manual}`,
+      source: "cronjob-controller",
+    },
+  ]);
+  const shown = section(page, "core.events");
+  expect([shown.tone, shown.fold, said(shown.summary)]).toEqual([
+    "warning",
+    "open",
+    "1 warning · UnexpectedJob",
+  ]);
+});
+
+test("a mock Job suspended after it ran says when, and a resumed one keeps its Suspended condition False", () => {
+  const cluster = new Cluster("prod-eu", 5000, Date.now());
+  const [cron] = cluster.cronJobs;
+  if (!cron) throw new Error("prod-eu has a CronJob");
+  const made = Date.now();
+  cluster.trigger(cron.namespace, cron.name, "run", made);
+  const job = cluster.jobs.find(({ name }) => name === "run");
+  if (!job) throw new Error("a triggered Job");
+  const stopped = made + 60_000;
+  const resumed = made + 120_000;
+  const at = (moment: number) => new Date(moment).toISOString();
+  const history = (page: Overview) =>
+    eventsOf(page).map(({ reason, message, last }) => [reason, message, last]);
+
+  cluster.suspend(job, true, stopped);
+  const suspended = opened(cluster, "batch", "jobs", job.namespace, job.name);
+  expect(
+    conditionsOf(suspended).map(({ status, reason, lastTransition }) => [
+      status,
+      reason,
+      lastTransition,
+    ]),
+  ).toEqual([["True", "JobSuspended", at(stopped)]]);
+  const [first] = history(suspended).slice(-1);
+  const pod = String(first?.[1]).replace("Created pod: ", "");
+  expect(history(suspended)).toEqual([
+    ["Suspended", "Job suspended", at(stopped)],
+    ["SuccessfulDelete", `Deleted pod: ${pod}`, at(stopped)],
+    ["SuccessfulCreate", `Created pod: ${pod}`, at(made)],
+  ]);
+
+  cluster.suspend(job, false, resumed);
+  const running = opened(cluster, "batch", "jobs", job.namespace, job.name);
+  expect(
+    conditionsOf(running).map(({ status, reason, lastTransition }) => [
+      status,
+      reason,
+      lastTransition,
+    ]),
+  ).toEqual([["False", "JobResumed", at(resumed)]]);
+  expect(history(running).map(([reason]) => reason)).toEqual([
+    "Resumed",
+    "SuccessfulCreate",
+    "Suspended",
+    "SuccessfulDelete",
+    "SuccessfulCreate",
+  ]);
+  expect(history(running)[0]).toEqual(["Resumed", "Job resumed", at(resumed)]);
+  expect(history(running)[1]?.[1]).not.toBe(`Created pod: ${pod}`);
 });
 
 test("a mock node's body says what its header does, and a NotReady or cordoned one carries its finding", async () => {

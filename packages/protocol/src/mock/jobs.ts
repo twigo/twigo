@@ -1,22 +1,17 @@
-import type {
-  Condition,
-  ObjectEvent,
-  Overview,
-  Section,
-  Value,
-} from "../generated";
+import type { Condition, Overview, Section, Value } from "../generated";
 import { hash, type Cluster, type CronJob, type Job } from "./cluster";
 import { CRONJOB_COLUMNS, JOB_COLUMNS } from "./fixtures";
 import { cronJobCells, jobCells } from "./kinds";
 import {
   ago,
   amended,
-  counted,
   created,
+  event,
   fieldText,
   printed,
   swapped,
   text,
+  withEvents,
   withFields,
   words,
 } from "./sections";
@@ -34,44 +29,6 @@ function duration(milliseconds: number): string {
   return minutes > 0
     ? `${String(minutes)}m ${String(seconds % 60)}s`
     : `${String(seconds)}s`;
-}
-
-function event(
-  source: string,
-  reason: string,
-  message: string,
-  moment: number,
-): ObjectEvent {
-  return {
-    type: "Normal",
-    reason,
-    message,
-    source,
-    count: 1,
-    first: iso(moment),
-    last: iso(moment),
-    fieldPath: null,
-  };
-}
-
-/** The page's events as `events`, newest first, with the summary Rust gives them. */
-function withEvents(page: Overview, events: readonly ObjectEvent[]): Overview {
-  const newest = [...events].sort(
-    (a, b) => Date.parse(b.last ?? "") - Date.parse(a.last ?? ""),
-  );
-  const [first] = newest;
-  return amended(page, "core.events", (section) => ({
-    ...section,
-    summary: first
-      ? [
-          ...words(`${counted(newest.length, "event")} · `),
-          ago(Date.parse(first.last ?? "")),
-        ]
-      : words("none"),
-    blocks: section.blocks.map((block) =>
-      block.type === "events" ? { ...block, events: newest } : block,
-    ),
-  }));
 }
 
 function templated(
@@ -108,6 +65,25 @@ function recordedImage(recorded: Overview, id: string): string | undefined {
 
 function cell(page: Overview, column: string): string {
   return page.header.printed.find((one) => one.column === column)?.value ?? "";
+}
+
+/** What the Job controller writes of a Job's `spec.suspend`, a state whichever its status. */
+function suspension(
+  status: string,
+  reason: string,
+  message: string,
+  moment: number,
+): Condition {
+  return {
+    type: "Suspended",
+    status,
+    tone: "neutral",
+    reason,
+    message,
+    lastTransition: iso(moment),
+    lastHeartbeat: null,
+    explained: false,
+  };
 }
 
 /** The Job the mock has: its moments, state, selector and template as its row says them. */
@@ -225,28 +201,22 @@ export function jobPage(recorded: Overview, job: Job): Overview {
           },
         ];
       }
-      return job.suspend
+      const stated = job.suspend
+        ? suspension(
+            "True",
+            "JobSuspended",
+            "Job suspended",
+            job.suspendedAt ?? job.created,
+          )
+        : job.resumedAt !== null
+          ? suspension("False", "JobResumed", "Job resumed", job.resumedAt)
+          : null;
+      return stated
         ? [
             {
               ...section,
               summary: [],
-              blocks: [
-                {
-                  type: "conditions",
-                  conditions: [
-                    {
-                      type: "Suspended",
-                      status: "True",
-                      tone: "neutral",
-                      reason: "JobSuspended",
-                      message: "Job suspended",
-                      lastTransition: iso(job.created),
-                      lastHeartbeat: null,
-                      explained: false,
-                    },
-                  ],
-                },
-              ],
+              blocks: [{ type: "conditions", conditions: [stated] }],
             },
           ]
         : [];
@@ -258,24 +228,46 @@ export function jobPage(recorded: Overview, job: Job): Overview {
     cell(page, "Containers"),
     cell(page, "Images"),
   );
-  const suffix = hash(job.id).toString(36).slice(0, 5);
+  const pod = (of: string) =>
+    `${job.name}-${hash(of).toString(36).slice(0, 5)}`;
+  const [first, second] = [pod(job.id), pod(`${job.id}/resumed`)];
   return withEvents(page, [
-    ...(done === null
+    ...(job.resumedAt === null
       ? []
-      : [event("job-controller", "Completed", "Job completed", done)]),
-    ...(job.started === null
+      : [
+          event("job-controller", "Resumed", "Job resumed", job.resumedAt),
+          event(
+            "job-controller",
+            "SuccessfulCreate",
+            `Created pod: ${second}`,
+            job.resumedAt,
+          ),
+        ]),
+    ...(job.suspendedAt === null
       ? []
       : [
           event(
             "job-controller",
-            "SuccessfulCreate",
-            `Created pod: ${job.name}-${suffix}`,
-            job.started,
+            "Suspended",
+            "Job suspended",
+            job.suspendedAt,
+          ),
+          event(
+            "job-controller",
+            "SuccessfulDelete",
+            `Deleted pod: ${job.resumedAt !== null && job.resumedAt < job.suspendedAt ? second : first}`,
+            job.suspendedAt,
           ),
         ]),
-    ...(job.suspend
-      ? [event("job-controller", "Suspended", "Job suspended", job.created)]
-      : []),
+    ...(done === null
+      ? []
+      : [event("job-controller", "Completed", "Job completed", done)]),
+    event(
+      "job-controller",
+      "SuccessfulCreate",
+      `Created pod: ${first}`,
+      job.created,
+    ),
   ]);
 }
 
@@ -295,7 +287,8 @@ export function cronJobPage(
         job.namespace === cronJob.namespace && job.owner === cronJob.name,
     )
     .sort((a, b) => b.created - a.created);
-  const active = jobs.filter((job) => job.completed === null);
+  const made = jobs.filter((job) => !job.triggered);
+  const active = made.filter((job) => job.completed === null);
   const succeeded = Math.max(
     0,
     ...jobs.flatMap((job) => (job.completed === null ? [] : [job.completed])),
@@ -381,9 +374,8 @@ export function cronJobPage(
     cell(page, "Containers"),
     cell(page, "Images"),
   );
-  return withEvents(
-    page,
-    jobs.flatMap((job) => [
+  return withEvents(page, [
+    ...made.flatMap((job) => [
       event(
         "cronjob-controller",
         "SuccessfulCreate",
@@ -401,5 +393,16 @@ export function cronJobPage(
             ),
           ]),
     ]),
-  );
+    ...jobs
+      .filter((job) => job.triggered)
+      .map((job) =>
+        event(
+          "cronjob-controller",
+          "UnexpectedJob",
+          `Saw a job that the controller did not create or forgot: ${job.name}`,
+          job.created,
+          { type: "Warning" },
+        ),
+      ),
+  ]);
 }

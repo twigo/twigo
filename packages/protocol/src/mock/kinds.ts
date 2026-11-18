@@ -319,6 +319,7 @@ export function cronJobCells(
         (job) =>
           job.namespace === cronJob.namespace &&
           job.owner === cronJob.name &&
+          !job.triggered &&
           job.completed === null,
       ).length,
       lastSchedule,

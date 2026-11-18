@@ -8,10 +8,13 @@ import type {
   Span,
 } from "../generated";
 import {
+  backOff,
+  CONTAINER_START,
   containerNames,
   containerOf,
   finishedAt,
   imageOf,
+  restartCount,
   type Pod,
 } from "./cluster";
 import { uid } from "./kinds";
@@ -19,21 +22,19 @@ import {
   ago,
   amended,
   conditionsSummary,
+  event,
   fieldText,
   swapped,
   text,
+  withEvents,
   words,
 } from "./sections";
 
 const SECOND = 1000;
 
-export function restartCount(pod: Pod): number {
-  return Number.parseInt(pod.restarts, 10);
-}
-
 /** When its first container began the run it is in: at its last restart, else with the pod. */
 function ranFrom(pod: Pod): number {
-  return pod.lastRestart ?? pod.created + 2 * SECOND;
+  return pod.lastRestart ?? pod.created + CONTAINER_START;
 }
 
 /** When its first container's run ended in an error, a moment after it began. */
@@ -81,7 +82,7 @@ export function cardOf(
 ): { state: ContainerState | null; fields: Field[] } {
   const first = index === 0;
   const restarts = first ? restartCount(pod) : 0;
-  const started = first ? ranFrom(pod) : pod.created + 2 * SECOND;
+  const started = first ? ranFrom(pod) : pod.created + CONTAINER_START;
   const last = first ? lastRun(pod) : [];
   const ended = (
     label: string,
@@ -206,11 +207,6 @@ function refound(
   }));
 }
 
-/** How long the kubelet waits before it starts a container again: 10 s, doubled at each restart, to 5 minutes. */
-function backOff(restarts: number): number {
-  return Math.min(300, 10 * 2 ** (restarts - 1)) * SECOND;
-}
-
 /** The pod's own state in the finding the recorded page makes of its first container. */
 export function stated(page: Overview, pod: Pod): Overview {
   const restarts = restartCount(pod);
@@ -263,6 +259,45 @@ export function stated(page: Overview, pod: Pod): Overview {
   }
 }
 
+/**
+ * The events the pod's state leaves of the recorded pod's: one still
+ * creating its containers has been scheduled and pulls its image, and one
+ * that failed without a restart has no back-off.
+ */
+export function reported(page: Overview, pod: Pod): Overview {
+  const recorded = page.sections
+    .filter((section) => section.id === "core.events")
+    .flatMap((section) => section.blocks)
+    .flatMap((block) => (block.type === "events" ? block.events : []));
+  switch (pod.status) {
+    case "ContainerCreating": {
+      const scheduled = recorded.filter(({ reason }) => reason === "Scheduled");
+      const at = Math.max(
+        ...scheduled.map(({ last }) => Date.parse(last ?? "")),
+      );
+      return withEvents(page, [
+        ...scheduled,
+        event(
+          "kubelet",
+          "Pulling",
+          `Pulling image "${imageOf(pod)}"`,
+          at + SECOND,
+          { fieldPath: `spec.containers{${containerOf(pod)}}` },
+        ),
+      ]);
+    }
+    case "Error":
+      return restartCount(pod) === 0
+        ? withEvents(
+            page,
+            recorded.filter(({ reason }) => reason !== "BackOff"),
+          )
+        : page;
+    default:
+      return page;
+  }
+}
+
 export function titleOf(page: Overview): Span[] | undefined {
   const [finding] = page.sections
     .filter((section) => section.id === "core.diagnostics")
@@ -273,7 +308,7 @@ export function titleOf(page: Overview): Span[] | undefined {
 
 /** A pod whose containers are being created: its readiness is what its containers lack, which tones the header of Conditions and opens nothing. */
 export function starting(page: Overview, pod: Pod): Overview {
-  const since = new Date(pod.created + 2 * SECOND).toISOString();
+  const since = new Date(pod.created + CONTAINER_START).toISOString();
   const unready = containerNames(pod).join(" ");
   return amended(page, "core.conditions", (section): Section => {
     const conditions = section.blocks.flatMap((block) =>

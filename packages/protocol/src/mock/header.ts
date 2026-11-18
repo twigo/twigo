@@ -9,11 +9,13 @@ import type {
   Vital,
 } from "../generated";
 import {
+  CONTAINER_START,
   cordoned,
   deploymentOf,
   finishedAt,
   hash,
   podCells,
+  restartCount,
   type Cluster,
   type Node,
   type Pod,
@@ -26,7 +28,7 @@ import {
   type Deployment,
 } from "./kinds";
 import { cronJobPage, jobPage } from "./jobs";
-import { restartCount, stated, starting, titleOf } from "./pods";
+import { reported, stated, starting, titleOf } from "./pods";
 import {
   ago,
   amended,
@@ -111,6 +113,7 @@ const READINESS = ["PodReadyToStartContainers", "ContainersReady", "Ready"];
 /** A pod that completed: its readiness and its initialization are states, as the core sends them once it has finished. */
 function completed(page: Overview, pod: Pod): Overview {
   const ended = new Date(finishedAt(pod)).toISOString();
+  const initialized = new Date(pod.created + CONTAINER_START).toISOString();
   return amended(page, "core.conditions", (section) => {
     const conditions = section.blocks.flatMap((block) =>
       block.type === "conditions" ? block.conditions : [],
@@ -123,7 +126,8 @@ function completed(page: Overview, pod: Pod): Overview {
             tone: "neutral",
             reason: "PodCompleted",
             message: null,
-            lastTransition: ended,
+            lastTransition:
+              condition.type === "Initialized" ? initialized : ended,
             explained: false,
           }
         : condition,
@@ -179,20 +183,21 @@ function podPage(
               ...field,
               value: {
                 type: "time",
-                at: new Date(pod.created + 2000).toISOString(),
+                at: new Date(pod.created + CONTAINER_START).toISOString(),
               },
             }
           : field,
       ),
     ),
   );
+  const events = reported(started, pod);
   switch (pod.status) {
     case "Completed":
-      return completed(started, pod);
+      return completed(events, pod);
     case "ContainerCreating":
-      return starting(started, pod);
+      return starting(events, pod);
     default:
-      return started;
+      return events;
   }
 }
 
@@ -429,7 +434,7 @@ function deploymentPage(
         );
       }
       return condition.type === "Available" || condition.type === "Progressing"
-        ? { ...condition, lastTransition: rolled }
+        ? { ...condition, lastTransition: made }
         : condition;
     });
     return {

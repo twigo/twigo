@@ -5,6 +5,7 @@ import type {
   Container,
   Field,
   Finding,
+  ObjectEvent,
   Overview,
   Printed,
   Section,
@@ -45,6 +46,63 @@ export function containersSummary(containers: readonly Container[]): Span[] {
       ...(unready > 0 ? [`${String(unready)} not ready`] : []),
     ].join(" · "),
   );
+}
+
+/** An event of a controller, seen once at `moment`; a Normal one unless `more` says otherwise. */
+export function event(
+  source: string,
+  reason: string,
+  message: string,
+  moment: number,
+  more: Partial<Pick<ObjectEvent, "type" | "fieldPath">> = {},
+): ObjectEvent {
+  const at = new Date(moment).toISOString();
+  return {
+    type: "Normal",
+    reason,
+    message,
+    source,
+    count: 1,
+    first: at,
+    last: at,
+    fieldPath: null,
+    ...more,
+  };
+}
+
+/**
+ * The page's events as `events`, newest first, with the summary, tone and
+ * fold Rust gives them: a warning is counted and its newest named, and
+ * opens the section.
+ */
+export function withEvents(
+  page: Overview,
+  events: readonly ObjectEvent[],
+): Overview {
+  const newest = [...events].sort(
+    (a, b) => Date.parse(b.last ?? "") - Date.parse(a.last ?? ""),
+  );
+  const warnings = newest.filter(({ type }) => type === "Warning");
+  const [first] = newest;
+  const [warned] = warnings;
+  return amended(page, "core.events", (section) => ({
+    ...section,
+    summary: warned
+      ? words(
+          `${counted(warnings.length, "warning")} · ${warned.count > 1 ? `${warned.reason} ×${String(warned.count)}` : warned.reason}`,
+        )
+      : first
+        ? [
+            ...words(`${counted(newest.length, "event")} · `),
+            ago(Date.parse(first.last ?? "")),
+          ]
+        : words("none"),
+    tone: warned ? "warning" : null,
+    fold: warned ? "open" : "folded",
+    blocks: section.blocks.map((block) =>
+      block.type === "events" ? { ...block, events: newest } : block,
+    ),
+  }));
 }
 
 export function amended(
