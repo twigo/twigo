@@ -54,7 +54,14 @@ afterEach(() => {
 
 function overview(ids: string[]): Overview {
   return {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: ids.map((id) => ({
       id,
       title: id.toUpperCase(),

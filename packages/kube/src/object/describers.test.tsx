@@ -42,12 +42,36 @@ function section(title: string): HTMLElement {
   return screen.getByRole("region", { name: title });
 }
 
+const toggleOf = (title: string): HTMLButtonElement => {
+  const toggle = section(title).querySelector<HTMLButtonElement>(
+    "button[aria-expanded]",
+  );
+  if (!toggle) throw new Error(`no toggle in ${title}`);
+  return toggle;
+};
+
+function unfold(title: string) {
+  act(() => {
+    toggleOf(title).click();
+  });
+}
+
 test.each(Object.keys(RECORDED))(
-  "the recorded %s renders every section its document holds",
+  "the recorded %s draws each section as its fold says: a folded one by its header and summary, an open one whole",
   async (name) => {
     const overview = await shown(name);
-    for (const { title, blocks } of overview.sections) {
+    for (const { title, fold, summary, blocks } of overview.sections) {
       const region = section(title);
+      const toggle = toggleOf(title);
+      for (const span of summary)
+        if (span.type === "text")
+          expect(toggle.textContent).toContain(span.text);
+      if (fold === "folded") {
+        expect(toggle.getAttribute("aria-expanded")).toBe("false");
+        expect(region.textContent).toBe(toggle.textContent);
+        unfold(title);
+      }
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
       for (const block of blocks) {
         if (block.type === "table")
           expect(
@@ -197,6 +221,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
     />,
     { wrapper: inWorkbench(workbench) },
   );
+  unfold("Conditions");
   const ready = within(section("Conditions")).getByText("Ready").closest("li");
   expect(ready?.getAttribute("title")).toContain(
     `Last heartbeat ${new Date("2026-11-03T10:00:00Z").toLocaleString()}`,
@@ -219,6 +244,7 @@ test("a claim links the pod that uses it, and a Service its endpoints", async ()
   ).toBeDefined();
   cleanup();
   await shown("service");
+  unfold("Ports");
   const ports = within(section("Ports")).getByRole("table", { name: "Ports" });
   expect(ports.textContent).toMatch(
     /10\.244\.\d+\.\d+:8080, 10\.244\.\d+\.\d+:8080/,

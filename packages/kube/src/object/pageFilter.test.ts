@@ -165,7 +165,14 @@ const METADATA: Section = {
 };
 
 const PAGE: Overview = {
-  header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+  header: {
+    owner: null,
+    node: null,
+    created: null,
+    printed: [],
+    sentence: [],
+    vitals: [],
+  },
   sections: [POD, SIDECARS, METADATA],
 };
 
@@ -277,6 +284,7 @@ test("conditions, events, findings, keys, tables and trees keep their matching r
       },
       {
         type: "events",
+        listed: true,
         unavailable: null,
         events: [
           {
@@ -409,7 +417,14 @@ test("an embedded list is found by its section's title only", () => {
 
 test("a page counts its matching rows and the sections that hold them, the usage section by its title", () => {
   const overview: Overview = {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [POD, CONTAINERS],
   };
   expect(matchesIn(overview, filterOf("o"), false)).toEqual({

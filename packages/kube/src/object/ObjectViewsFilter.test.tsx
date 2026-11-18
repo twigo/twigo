@@ -22,7 +22,14 @@ const snapshot: ObjectSnapshot = {
   status: { state: "ready" },
   exists: true,
   overview: {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: ["Pod", "Containers", "Metadata"].map((title) => ({
       id: title,
       title,
@@ -147,6 +154,7 @@ test("beside the field the views never fold, even when their copy outgrows the r
 const warned = (count: number): ObjectSnapshot => ({
   ...snapshot,
   events: {
+    listed: true,
     unavailable: null,
     events: Array.from({ length: count }, (_, index) => ({
       type: "Warning",

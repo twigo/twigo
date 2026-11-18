@@ -597,10 +597,12 @@ test("the details show the document of the row the selection rests on", async ()
   if (!first || !second) throw new Error("no rows");
   fireEvent.click(first);
   await settle();
-  const metadata = () =>
+  const region = () =>
     within(details() ?? document.body).getByRole("region", {
       name: "Metadata",
-    }).textContent;
+    });
+  const metadata = () => region().textContent;
+  fireEvent.click(within(region()).getByRole("button", { expanded: false }));
   expect(metadata()).toContain(nameOf(first));
   focusGrid();
   key("KeyJ");

@@ -51,7 +51,14 @@ function doc(
   overrides: Partial<Record<string, Section["fold"]>> = {},
 ): Document {
   return {
-    header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+    header: {
+      owner: null,
+      node: null,
+      created: null,
+      printed: [],
+      sentence: [],
+      vitals: [],
+    },
     sections: [
       section(
         "core.pod",
@@ -297,7 +304,14 @@ const group = (key: string, entries: TreeNode[]): TreeNode => ({
 });
 
 const nested: Document = {
-  header: { owner: null, node: null, printed: [], sentence: [], vitals: [] },
+  header: {
+    owner: null,
+    node: null,
+    created: null,
+    printed: [],
+    sentence: [],
+    vitals: [],
+  },
   sections: [
     {
       id: "core.containers",
