@@ -23,10 +23,10 @@ use twigo_ipc::{
     ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
     ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent,
     ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell,
-    OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery, SetContextEnvironment,
-    SetContextMode, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
-    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
-    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
+    ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
+    SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 
@@ -169,24 +169,6 @@ async fn contexts_watch(
     });
     app.contexts.replace(&webview, follower);
     Ok(current)
-}
-
-#[tauri::command]
-async fn context_mode_set(app: State<'_, App>, request: SetContextMode) -> Result<(), IpcError> {
-    app.core.set_context_mode(request).await
-}
-
-#[tauri::command]
-async fn context_environment_set(
-    app: State<'_, App>,
-    request: SetContextEnvironment,
-) -> Result<(), IpcError> {
-    app.core.set_context_environment(request).await
-}
-
-#[tauri::command]
-async fn context_unlock(app: State<'_, App>, request: String) -> Result<(), IpcError> {
-    app.core.unlock_context(&request).await
 }
 
 #[tauri::command]
@@ -829,9 +811,6 @@ fn main() {
             shell_environment_watch,
             shell_environment_retry,
             contexts_watch,
-            context_mode_set,
-            context_environment_set,
-            context_unlock,
             context_relock,
             command_plan,
             command_execute,
