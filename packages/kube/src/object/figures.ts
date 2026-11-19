@@ -18,7 +18,7 @@ export function hasUsage({ group, resource }: Gvr): boolean {
   return group === "" && (resource === "pods" || resource === "nodes");
 }
 
-export type Base = "limit" | "request" | "allocatable";
+type Base = "limit" | "request" | "allocatable";
 
 export interface Figure {
   /** Null while there is no sample, which is no data yet and never zero. */
@@ -96,12 +96,6 @@ function percent(resource: Resource, used: number, whole: number): number {
   return Math.trunc((a / b) * 100);
 }
 
-export const OF: Readonly<Record<Base, string>> = {
-  limit: "limit",
-  request: "request",
-  allocatable: "allocatable",
-};
-
 export const TONE_WORDS = { warn: "Warning", error: "Error" } as const;
 
 const MI = 1024 * 1024;
@@ -132,7 +126,7 @@ export const WIDEST: Measure = {
 /** A figure as a screen reader says it: what is used against what it is held to, its share and its tone. */
 export function spoken(shown: Figure): string {
   const { used, base, percent, tone } = shown;
-  const against = base === null ? "" : ` of ${shown[base] ?? ""} ${OF[base]}`;
+  const against = base === null ? "" : ` of ${shown[base] ?? ""} ${base}`;
   return [
     `${used ?? ""}${against}`,
     percent === null ? "" : `${String(percent)}%`,

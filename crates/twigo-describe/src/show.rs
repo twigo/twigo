@@ -3,6 +3,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Field, Finding, Fold, ObjectRef, Section, Span, Tone, Value as Shown};
 
+use crate::layout::wrong;
 use crate::text;
 
 /// A section as its describer builds it: folded, with no line at its end
@@ -21,6 +22,18 @@ pub(crate) fn section(id: &str, title: &str, blocks: Vec<Block>) -> Section {
 /// A section that holds a finding names it where its line would count.
 pub(crate) fn named(finding: &Finding) -> Vec<Span> {
     Summary::default().part(&finding.title).done()
+}
+
+/// A section's line and tone: the finding's title and its tone where one is
+/// about it, else `own`.
+pub(crate) fn said(
+    finding: Option<&Finding>,
+    own: impl FnOnce() -> Vec<Span>,
+) -> (Vec<Span>, Option<Tone>) {
+    match finding {
+        Some(finding) => (named(finding), wrong(finding.tone)),
+        None => (own(), None),
+    }
 }
 
 /// A section whose line counts what it lists: `2 ports`.

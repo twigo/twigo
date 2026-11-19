@@ -1,13 +1,13 @@
 import { useState, type ReactNode, type Ref } from "react";
 import type { Span, Vital } from "@twigo/protocol";
-import { cn, Meter, TonedText, type Tone } from "@twigo/ui";
+import { cn, TonedText, type Tone } from "@twigo/ui";
 import { restartedRecently } from "../age";
 import { Quantity } from "../Quantity";
 import { useNowAs } from "../useNow";
+import { meterOf } from "./figureMeter";
 import {
   isCapped,
   LABEL,
-  OF,
   shareText,
   spoken,
   type Figure,
@@ -194,7 +194,7 @@ function Measure({
     <Frame
       label={label}
       frame={frame}
-      meter={meterOf(resource, shown)}
+      meter={meterOf(LABEL[resource], shown, "h-0.5 min-w-0")}
       title={
         held && (say !== "share" || isCapped(shown.percent))
           ? spoken(shown)
@@ -232,24 +232,11 @@ function Said({ figure: shown, say }: { figure: Figure; say: Say }) {
       {say !== "figure" && base !== null && (
         <span className="min-w-0 truncate text-2xs font-normal text-quiet tabular-nums">
           {say === "share" && percent !== null
-            ? `${shareText(percent)} of ${OF[base]}`
+            ? `${shareText(percent)} of ${base}`
             : `of ${amount ?? ""}`}
         </span>
       )}
     </>
-  );
-}
-
-function meterOf(resource: Resource, shown: Figure): ReactNode {
-  if (shown.bar === null) return null;
-  return (
-    <Meter
-      label={LABEL[resource]}
-      valueText={spoken(shown)}
-      {...shown.bar}
-      {...(shown.tone && { tone: shown.tone })}
-      className="h-0.5 min-w-0"
-    />
   );
 }
 

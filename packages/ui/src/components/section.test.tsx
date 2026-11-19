@@ -32,6 +32,18 @@ test("the title, the chevron and the summary are one toggle", () => {
   expect(onToggle).toHaveBeenCalledTimes(2);
 });
 
+test.each(["sm", "md"] as const)(
+  "the chevron leads the title of a %s section",
+  (size) => {
+    shown({ size });
+    const toggle = screen.getByRole("button", { name: /Containers/ });
+    expect(toggle.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    expect(toggle.firstElementChild?.nextElementSibling?.textContent).toBe(
+      "Containers",
+    );
+  },
+);
+
 test("Alt tells the toggle to take every section of the page", () => {
   const onToggle = shown();
   const toggle = screen.getByRole("button", { name: /Containers/ });

@@ -1,4 +1,5 @@
 import type { Gvr, Header, ShownUsage } from "@twigo/protocol";
+import type { Tone } from "@twigo/ui";
 import { verdictOf, type Verdict } from "./verdict";
 import {
   labelsOf,
@@ -7,6 +8,11 @@ import {
   vitalCells,
   type VitalCell,
 } from "./vitalCells";
+
+export const printedOf =
+  (header: Header | undefined) =>
+  (column: string): string | undefined =>
+    header?.printed.find((cell) => cell.column === column)?.value;
 
 /**
  * What the header and the vitals of an object say, which an object's page
@@ -19,12 +25,15 @@ import {
 export function useHeader({
   gvr,
   header,
+  found,
   usage,
   row,
 }: {
   /** None for an address that names no object. */
   gvr: Gvr | undefined;
   header: Header | undefined;
+  /** The tone of the findings the object's Overview carries. */
+  found?: Tone | undefined;
   usage: ShownUsage | undefined;
   /** The list row's cell of a column, where the object has a row. */
   row?: (column: string) => string | undefined;
@@ -47,11 +56,7 @@ export function useHeader({
   const verdict =
     gvr &&
     (header
-      ? verdictOf(
-          gvr,
-          (column) =>
-            header.printed.find((cell) => cell.column === column)?.value,
-        )
+      ? verdictOf(gvr, printedOf(header), found)
       : row && verdictOf(gvr, row));
   return {
     verdict,

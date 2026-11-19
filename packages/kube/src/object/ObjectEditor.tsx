@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy } from "lucide-react";
-import type { Cell, ObjectRef } from "@twigo/protocol";
+import type { ObjectRef } from "@twigo/protocol";
 import { ActionRow, EmptyState, FullActionRow, IconButton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import {
@@ -28,7 +28,7 @@ import { ObjectContent } from "./ObjectContent";
 import { ObjectHeader } from "./ObjectHeader";
 import { noContainerRuns } from "./noContainerRuns";
 import { ObjectViews } from "./ObjectViews";
-import { FULL_PAGE, TWO_COLUMNS, useClientWidth, useHeld } from "./pageStage";
+import { FULL_PAGE, useClientWidth, useHeld } from "./pageStage";
 import { PropertyColumns } from "./propertyColumns";
 import type { OverviewStates } from "./overviewStates";
 import {
@@ -42,14 +42,17 @@ import type { ObjectTabs } from "./tabs";
 import { useReveal } from "./reveal";
 import { hasUsage } from "./figures";
 import { objectQuery, refResource, refUri, useObject } from "./useObject";
-import { useHeader } from "./useHeader";
+import { printedOf, useHeader } from "./useHeader";
+import { foundTone } from "./verdict";
 import { Vitals } from "./Vitals";
 
 /**
  * A `k8s://` editor (ARCHITECTURE 4.3): one object, live, as its Overview,
  * its YAML, its events and its related objects, under the same header as the
- * inspector's, whose commands act on this object; Rust follows only the tab
- * shown.
+ * inspector's, whose commands act on this object; Rust always follows its
+ * Overview, its events and related objects only while their view is shown, its
+ * manifest while the YAML view is shown or an edit is held, and its usage, for
+ * a kind that has one, while the Overview is shown in a visible window.
  */
 export function ObjectEditor({
   uri,
@@ -93,9 +96,7 @@ export function ObjectEditor({
   const editing =
     edits.copies.get(uri) !== undefined || edits.copies.held(uri) !== undefined;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const [main, setMain] = useState<HTMLElement | null>(null);
   const wide = useHeld(useClientWidth(element), FULL_PAGE);
-  const two = useHeld(useClientWidth(main), TWO_COLUMNS);
   const asked =
     tab === "overview" && visible && input !== undefined && hasUsage(input.gvr);
   const { snapshot, values, id } = useObject(backend, query, {
@@ -113,8 +114,7 @@ export function ObjectEditor({
       ? servedAs(resources.value, input.gvr)
       : undefined;
   const header = snapshot.overview?.header;
-  const printed = (column: string): Cell | undefined =>
-    header?.printed.find((cell) => cell.column === column)?.value;
+  const printed = printedOf(header);
   const referenced = CAPABILITY_PREFIXES.flatMap((prefix) =>
     commands.referenced(prefix),
   );
@@ -186,6 +186,7 @@ export function ObjectEditor({
   const { verdict, strip, line } = useHeader({
     gvr: input?.gvr,
     header,
+    found: foundTone(snapshot.overview),
     usage: snapshot.usage,
   });
   if (!input) return <EmptyState title="Not an object">{uri}</EmptyState>;
@@ -258,7 +259,7 @@ export function ObjectEditor({
           ))
         }
       />
-      <div ref={setMain} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ObjectViews
           tab={tab}
           snapshot={snapshot}
@@ -271,7 +272,7 @@ export function ObjectEditor({
         />
         {page && <Vitals cells={strip} verdict={verdict} />}
         <div className="min-h-0 flex-1">
-          <PropertyColumns.Provider value={wide && two ? 2 : 1}>
+          <PropertyColumns.Provider value={wide ? 2 : 1}>
             <ObjectContent
               tab={tab}
               space={input.space}

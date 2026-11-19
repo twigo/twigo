@@ -5,9 +5,8 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown, Vital};
 
-use crate::layout::wrong;
 use crate::show::{
-    Fields, REPLICA_SET, SERVICE, Summary, code, counted, link, list, named, plain, section, toned,
+    Fields, REPLICA_SET, SERVICE, Summary, code, counted, link, list, plain, said, section, toned,
 };
 use crate::template::{self, PODS};
 use crate::{Described, Fact, Found, Input, Need, text};
@@ -89,19 +88,23 @@ pub(crate) fn deployment(input: &Input<'_>) -> Described {
     };
     let paused = spec["paused"] == true;
     let rolling = updated < desired || total > updated;
-    let mut sections = vec![Section {
-        summary: match about(ROLLOUT) {
-            Some(finding) => named(finding),
-            None if paused => Summary::default()
+    let (summary, tone) = said(about(ROLLOUT), || {
+        if paused {
+            Summary::default()
                 .part("paused")
                 .part(format!("{updated}/{desired} updated"))
-                .done(),
-            None if rolling => Summary::default()
+                .done()
+        } else if rolling {
+            Summary::default()
                 .part(format!("{updated}/{desired} updated"))
-                .done(),
-            None => revision_line(Summary::default(), revision.as_deref(), new).done(),
-        },
-        tone: about(ROLLOUT).and_then(|finding| wrong(finding.tone)),
+                .done()
+        } else {
+            revision_line(Summary::default(), revision.as_deref(), new).done()
+        }
+    });
+    let mut sections = vec![Section {
+        summary,
+        tone,
         ..rollout(
             fields,
             found,
@@ -274,14 +277,14 @@ fn pods(
     desired: u64,
     finding: Option<&Finding>,
 ) -> Section {
+    let (summary, tone) = said(finding, || {
+        Summary::default()
+            .part(format!("{ready}/{desired} ready"))
+            .done()
+    });
     Section {
-        summary: match finding {
-            Some(finding) => named(finding),
-            None => Summary::default()
-                .part(format!("{ready}/{desired} ready"))
-                .done(),
-        },
-        tone: finding.and_then(|finding| wrong(finding.tone)),
+        summary,
+        tone,
         ..template::owned_list(PODS_SECTION, "Pods", PODS, namespace, owners)
     }
 }
@@ -702,17 +705,15 @@ pub(crate) fn daemon_set(input: &Input<'_>) -> Described {
             message: None,
         });
     }
+    let (summary, tone) = said(findings.get(unready), || {
+        Summary::default()
+            .part(format!("{updated}/{desired} updated"))
+            .done()
+    });
     let sections = vec![
         Section {
-            summary: match findings.get(unready) {
-                Some(finding) => named(finding),
-                None => Summary::default()
-                    .part(format!("{updated}/{desired} updated"))
-                    .done(),
-            },
-            tone: findings
-                .get(unready)
-                .and_then(|finding| wrong(finding.tone)),
+            summary,
+            tone,
             ..section(
                 ROLLOUT,
                 "Rollout",

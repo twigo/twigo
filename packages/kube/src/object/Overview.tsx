@@ -15,7 +15,6 @@ import type {
   Condition,
   DataEntry,
   EventList,
-  Field,
   ObjectEvent,
   ObjectRef,
   Overview as Document,
@@ -23,18 +22,11 @@ import type {
   ShownUsage,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import {
-  Button,
-  cn,
-  LinkButton,
-  PropertyList,
-  Section as Folding,
-  Table,
-} from "@twigo/ui";
+import { Button, cn, LinkButton, Section as Folding, Table } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
-import { DefaultsLink, FieldValue } from "./defaults";
+import { DefaultsLink, Fields } from "./defaults";
 import { Diagnostics, type FindingLogsChoice } from "./Diagnostics";
 import { EmbeddedList } from "./EmbeddedList";
 import { Properties } from "./Properties";
@@ -50,10 +42,9 @@ import {
 import { outlineOf, type Outline } from "./outline";
 import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
-import { isNumeric, numericColumns } from "./numeric";
+import { numericColumns } from "./numeric";
 import { unexplained } from "./conditions";
 import { UsageView } from "./Usage";
-import { rowOf } from "./stacking";
 import { Age, Prose, Sentence, ValueView } from "./values";
 
 export interface OverviewProps {
@@ -172,6 +163,9 @@ export function Overview({
   const opens = shown.map(isOpen);
   const rendered = shown.map((part, index) => {
     const open = opens[index] === true;
+    const { view } = part;
+    const groups =
+      view === undefined || filter === null ? undefined : groupsOf(part, view);
     const spacing =
       index === 0
         ? undefined
@@ -191,24 +185,38 @@ export function Overview({
         }}
         className={spacing}
       >
-        {part.view === undefined ? (
+        {view === undefined ? (
           usage && <UsageView usage={usage} />
         ) : (
-          <SectionBlocks
-            section={part}
-            view={part.view}
-            revealed={part.revealed}
-            groups={filter === null ? undefined : groupsOf(part, part.view)}
-            space={space}
-            states={states}
-            kind={kind}
-            onOpen={onOpen}
-            values={values}
-            reveal={reveal}
-            onLogs={onLogs}
-            onEvents={onEvents}
-            usage={usage}
-          />
+          <div className="flex flex-col gap-3">
+            {view.blocks.map((block, at) => (
+              <BlockView
+                key={at}
+                section={part}
+                block={block}
+                groups={groups}
+                whole={view.whole}
+                space={space}
+                states={states}
+                kind={kind}
+                onOpen={onOpen}
+                values={values}
+                reveal={reveal}
+                onLogs={onLogs}
+                onEvents={onEvents}
+                usage={usage}
+              />
+            ))}
+            {view.folds && (
+              <DefaultsLink
+                count={view.defaults}
+                revealed={part.revealed}
+                onToggle={() => {
+                  states.toggle(kind, defaultsId(part.id));
+                }}
+              />
+            )}
+          </div>
         )}
       </Folding>
     );
@@ -228,69 +236,6 @@ export function Overview({
 interface Part extends Outline {
   readonly revealed: boolean;
   readonly view: SectionView | undefined;
-}
-
-function SectionBlocks({
-  section,
-  view,
-  revealed,
-  groups,
-  space,
-  states,
-  kind,
-  onOpen,
-  values,
-  reveal,
-  onLogs,
-  onEvents,
-  usage,
-}: {
-  section: Pick<Section, "id" | "title">;
-  view: SectionView;
-  revealed: boolean;
-  /** What the page's filter makes of the groups in the section, while its text is not empty. */
-  groups: GroupFolds | undefined;
-  space: string;
-  states: OverviewStates;
-  kind: string;
-  onOpen: OverviewProps["onOpen"];
-  values: OverviewProps["values"];
-  reveal: OverviewProps["reveal"];
-  onLogs: OverviewProps["onLogs"];
-  onEvents: OverviewProps["onEvents"];
-  usage: OverviewProps["usage"];
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      {view.blocks.map((block, index) => (
-        <BlockView
-          key={index}
-          section={section}
-          block={block}
-          groups={groups}
-          whole={view.whole}
-          space={space}
-          states={states}
-          kind={kind}
-          onOpen={onOpen}
-          values={values}
-          reveal={reveal}
-          onLogs={onLogs}
-          onEvents={onEvents}
-          usage={usage}
-        />
-      ))}
-      {view.folds && (
-        <DefaultsLink
-          count={view.defaults}
-          revealed={revealed}
-          onToggle={() => {
-            states.toggle(kind, defaultsId(section.id));
-          }}
-        />
-      )}
-    </div>
-  );
 }
 
 /**
@@ -351,9 +296,10 @@ function BlockView({
   onEvents: OverviewProps["onEvents"];
   usage: OverviewProps["usage"];
 }) {
+  const columns = usePropertyColumns();
   switch (block.type) {
     case "fields":
-      return <Fields fields={block.fields} onOpen={onOpen} />;
+      return <Fields fields={block.fields} onOpen={onOpen} columns={columns} />;
     case "conditions":
       return <Conditions conditions={block.conditions} />;
     case "data":
@@ -406,28 +352,6 @@ function BlockView({
         />
       );
   }
-}
-
-function Fields({
-  fields,
-  onOpen,
-}: {
-  fields: readonly Field[];
-  onOpen: (target: ObjectRef) => void;
-}) {
-  const columns = usePropertyColumns();
-  return (
-    <PropertyList
-      columns={columns}
-      items={fields.map((field) => ({
-        key: field.label,
-        label: field.label,
-        numeric: isNumeric(field.value),
-        ...rowOf(field.value),
-        value: <FieldValue field={field} onOpen={onOpen} />,
-      }))}
-    />
-  );
 }
 
 const CONDITION: Readonly<

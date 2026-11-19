@@ -10,6 +10,7 @@ import type {
   Printed,
   Section,
   Span,
+  Tone,
   Value,
 } from "../generated";
 
@@ -179,6 +180,28 @@ export function failing(
   };
 }
 
+/**
+ * The page's conditions as `change` states them, each one. `tone` is the
+ * section's with the summary that follows from them; left out, the section
+ * keeps its own.
+ */
+export function restated(
+  overview: Overview,
+  change: (condition: Condition) => Condition,
+  tone?: Tone | null,
+): Overview {
+  return amended(overview, "core.conditions", (section) => {
+    const stated = section.blocks
+      .flatMap((block) => (block.type === "conditions" ? block.conditions : []))
+      .map(change);
+    return {
+      ...section,
+      ...(tone !== undefined && { summary: conditionsSummary(stated), tone }),
+      blocks: [{ type: "conditions", conditions: stated }],
+    };
+  });
+}
+
 /** `3 of 5 ok`, over the conditions that are no state, as Rust counts them. */
 export function conditionsSummary(conditions: readonly Condition[]): Span[] {
   const health = conditions.filter(({ tone }) => tone !== "neutral");
@@ -262,6 +285,13 @@ export function fieldText(
   return value?.type === "text" || value?.type === "code"
     ? value.text
     : undefined;
+}
+
+export function printedCell(
+  overview: Overview,
+  column: string,
+): string | undefined {
+  return overview.header.printed.find((cell) => cell.column === column)?.value;
 }
 
 /**

@@ -1,7 +1,7 @@
 //! How a kind's page is arranged: the order of its sections, which of them
 //! open until a person folds them, and which conditions its findings state.
 
-use twigo_ipc::{Block, Condition, Fold, Section, Tone, Value as Shown};
+use twigo_ipc::{Block, Condition, Finding, Fold, Section, Tone, Value as Shown};
 
 pub(crate) struct Layout {
     /// The ids of its sections in the order the page shows them. Empty for
@@ -189,7 +189,7 @@ impl Layout {
 
 /// The worse of two tones, danger over warning; the others say nothing is
 /// wrong.
-pub(crate) fn worse(a: Option<Tone>, b: Option<Tone>) -> Option<Tone> {
+fn worse(a: Option<Tone>, b: Option<Tone>) -> Option<Tone> {
     match (a, b) {
         (Some(Tone::Danger), _) | (_, Some(Tone::Danger)) => Some(Tone::Danger),
         (Some(Tone::Warning), _) | (_, Some(Tone::Warning)) => Some(Tone::Warning),
@@ -199,6 +199,12 @@ pub(crate) fn worse(a: Option<Tone>, b: Option<Tone>) -> Option<Tone> {
 
 pub(crate) fn wrong(tone: Tone) -> Option<Tone> {
     matches!(tone, Tone::Danger | Tone::Warning).then_some(tone)
+}
+
+pub(crate) fn worst(findings: &[Finding]) -> Option<Tone> {
+    findings
+        .iter()
+        .fold(None, |tone, finding| worse(tone, wrong(finding.tone)))
 }
 
 fn shown(shown: &Shown) -> Option<Tone> {
@@ -238,9 +244,7 @@ fn held(blocks: &[Block], layout: Option<&Layout>) -> Option<Tone> {
                     container.state.as_ref().and_then(|state| wrong(state.tone)),
                 )
             }),
-            Block::Diagnostics { findings } => findings
-                .iter()
-                .fold(None, |tone, finding| worse(tone, wrong(finding.tone))),
+            Block::Diagnostics { findings } => worst(findings),
             Block::Data { .. } | Block::Tree { .. } | Block::List(_) => None,
         };
         worse(tone, found)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   EmbeddedList as Spec,
   ListQuery,
+  ListSnapshot,
   ObjectRef,
   Row,
 } from "@twigo/protocol";
@@ -13,8 +14,8 @@ import {
   Frame,
   ROW_HEIGHT,
   TonedText,
-  type GridColumn,
   type GridItem,
+  type Tone,
   useWidth,
 } from "@twigo/ui";
 import {
@@ -28,14 +29,13 @@ import {
   rowFinished,
   rowTone,
   statusColumn,
-  type ColumnRule,
 } from "../columns";
 import { kindIcon } from "../kinds";
 import { decideRows } from "../list/alarm";
 import { CellView } from "../list/cells";
-import { fitColumns, lostSort } from "../list/fit";
+import { fitGrid } from "../list/fit";
 import { SHOWS_ROWS } from "../list/listStatus";
-import { metricsNote, readsMetrics } from "../list/metrics";
+import { readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
@@ -53,9 +53,29 @@ const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
 
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
+/**
+ * Up to this many rows an embedded list holds whole, so that it can put the rows that fail first; a longer one is drawn as the core sends it.
+ * @todo: drop this and `problemsFirst` once the core's query view sorts by the health the list's rule names, sent over the IPC as data.
+ */
+const WHOLE = 100;
 const HEADER = 28;
 /** The frame's border on each side of the grid. */
 const FRAME_BORDER = 2;
+
+function problemsFirst(
+  { ids, rows }: Pick<ListSnapshot, "ids" | "rows">,
+  decide: (row: Row) => { readonly tone: Tone | undefined },
+): readonly string[] {
+  const failing: string[] = [];
+  const pending: string[] = [];
+  const rest: string[] = [];
+  for (const id of ids) {
+    const row = rows.get(id);
+    const tone = row && decide(row).tone;
+    (tone === "error" ? failing : tone === "warn" ? pending : rest).push(id);
+  }
+  return [...failing, ...pending, ...rest];
+}
 
 /**
  * A live list inside an Overview (ARCHITECTURE 4.3), such as a workload's
@@ -118,39 +138,14 @@ export function EmbeddedList({
     rule: columnRule(gvr, column),
     priority: column.priority,
   }));
-  const widthOf = (column: { name: string; rule: ColumnRule }) =>
-    widths[column.name] ?? column.rule.width;
-  const { columns, gone } = fitColumns(
-    every.filter((column) => column.name === "Name" || column.priority === 0),
-    widthOf,
-    width > 0 ? width - FRAME_BORDER - ACTIONS_WIDTH : Infinity,
-  );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const mergedRoom = (name: string) =>
-    byName.get(name)?.merged?.rule.into?.room ?? 0;
-  const widened = Object.fromEntries(
-    columns
-      .filter((column) => column.merged && widths[column.name] !== undefined)
-      .map((column) => [
-        column.name,
-        widthOf(column) + mergedRoom(column.name),
-      ]),
-  );
-  const sortLost = lostSort(sort, gone);
-  const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note =
-      metricsNote(snapshot.metrics, column) ??
-      (column.name === "Name" ? sortLost : undefined);
-    return {
-      id: column.name,
-      title: column.name,
-      width: widthOf(column) + mergedRoom(column.name),
-      grow: column.rule.grow,
-      align: column.rule.align,
-      numeric: column.rule.figures,
-      descendFirst: column.rule.descendFirst,
-      ...(note !== undefined && { note }),
-    };
+  const { columns, byName, widened, gridColumns } = fitGrid({
+    chosen: every.filter(
+      (column) => column.name === "Name" || column.priority === 0,
+    ),
+    widths,
+    room: width > 0 ? width - FRAME_BORDER - ACTIONS_WIDTH : Infinity,
+    metrics: snapshot.metrics,
+    sort,
   });
   const reads = readsMetrics({
     measures:
@@ -169,8 +164,11 @@ export function EmbeddedList({
     (row) => rowFinished(gvr, countBy, snapshot.columns, row),
     columns,
   );
+  const held = snapshot.start === 0 && snapshot.ids.length === snapshot.total;
+  const ids =
+    held && sort === null ? problemsFirst(snapshot, decide) : snapshot.ids;
   const item = (index: number): GridItem<Row, never> | undefined => {
-    const id = snapshot.ids[index - snapshot.start];
+    const id = ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
     const { tone } = decide(row);
@@ -181,12 +179,17 @@ export function EmbeddedList({
       ...((tone === "error" || tone === "warn") && { tone }),
     };
   };
+  const whole = snapshot.total <= WHOLE;
   const onRange = useCallback(
     (start: number, end: number) => {
+      if (whole) {
+        setWindow(0, WHOLE);
+        return;
+      }
       const screen = Math.max(end - start, VISIBLE);
       setWindow(Math.max(0, start - screen), end + screen);
     },
-    [setWindow],
+    [setWindow, whole],
   );
   const open = (row: Row) => {
     const { namespace, name } = objectOf({
@@ -253,7 +256,7 @@ export function EmbeddedList({
           query={JSON.stringify(query)}
           item={item}
           indexOf={(id) => {
-            const at = snapshot.ids.indexOf(id);
+            const at = ids.indexOf(id);
             return at < 0 ? -1 : snapshot.start + at;
           }}
           onRange={onRange}

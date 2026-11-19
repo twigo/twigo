@@ -1,11 +1,5 @@
 import { expect, test } from "vitest";
-import type {
-  Container,
-  Field,
-  Overview,
-  Section,
-  TreeNode,
-} from "@twigo/protocol";
+import type { Container, Overview, Section, TreeNode } from "@twigo/protocol";
 import {
   compile,
   containerGroup,
@@ -14,13 +8,9 @@ import {
   treeGroup,
   viewOf,
 } from "./pageFilter";
+import { field, NO_HEADER } from "../../test/object";
 
 const text = (value: string) => ({ type: "text" as const, text: value });
-const field = (label: string, value: string, byDefault = false): Field => ({
-  label,
-  value: text(value),
-  default: byDefault,
-});
 
 const POD: Section = {
   id: "core.pod",
@@ -198,15 +188,7 @@ const METADATA: Section = {
 };
 
 const PAGE: Overview = {
-  header: {
-    owner: null,
-    node: null,
-    created: null,
-    generated: null,
-    printed: [],
-    sentence: [],
-    vitals: [],
-  },
+  header: NO_HEADER,
   sections: [POD, SIDECARS, METADATA],
 };
 
@@ -451,15 +433,7 @@ test("an embedded list is found by its section's title only", () => {
 
 test("a page counts its matching rows and the sections that hold them, the usage section by its title", () => {
   const overview: Overview = {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [POD, CONTAINERS],
   };
   expect(matchesIn(overview, filterOf("o"), false)).toEqual({

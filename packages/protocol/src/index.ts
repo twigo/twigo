@@ -8,7 +8,7 @@ export type {
   SubscriptionCommand,
 } from "./backend";
 export { IpcError, toIpcError } from "./error";
-export { parseText, type TextFilter } from "./textFilter";
+export { lowerAscii, parseText, type TextFilter } from "./textFilter";
 export type {
   Access,
   AccessQuery,

@@ -236,12 +236,11 @@ pub fn describe(input: Input<'_>) -> Overview {
         metadata,
         labels_apart,
     } = described;
+    let worst = layout::worst(&findings);
     let mut sections = Vec::new();
     if !findings.is_empty() {
         sections.push(Section {
-            tone: findings.iter().fold(None, |tone, finding| {
-                layout::worse(tone, layout::wrong(finding.tone))
-            }),
+            tone: worst,
             ..section(
                 "core.diagnostics",
                 "Diagnostics",
@@ -256,9 +255,7 @@ pub fn describe(input: Input<'_>) -> Overview {
         && own.iter().all(|section| section.tone.is_none())
         && let (Some(section), Some(finding)) = (own.first_mut(), findings.first())
     {
-        section.tone = findings.iter().fold(None, |tone, finding| {
-            layout::worse(tone, layout::wrong(finding.tone))
-        });
+        section.tone = worst;
         section.summary = named(finding);
     }
     let mut own = own.into_iter();

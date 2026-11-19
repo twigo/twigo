@@ -1,10 +1,8 @@
 import type {
-  Condition,
   ContainerState,
   Field,
   Finding,
   Overview,
-  Section,
   Span,
 } from "../generated";
 import {
@@ -21,9 +19,10 @@ import { uid } from "./kinds";
 import {
   ago,
   amended,
-  conditionsSummary,
+  counted,
   event,
   fieldText,
+  restated,
   swapped,
   withEvents,
   words,
@@ -223,9 +222,7 @@ export function stated(page: Overview, pod: Pod): Overview {
       return refound(own, (finding) => ({
         ...finding,
         detail: [
-          ...words(
-            `Exited with code 1, ${restarts === 1 ? "1 restart" : `${String(restarts)} restarts`}`,
-          ),
+          ...words(`Exited with code 1, ${counted(restarts, "restart")}`),
           ...(last === null ? [] : [...words(", last "), ago(last)]),
           ...words("."),
           ...(last === null
@@ -312,11 +309,9 @@ export function titleOf(page: Overview): Span[] | undefined {
 export function starting(page: Overview, pod: Pod): Overview {
   const since = new Date(pod.created + CONTAINER_START).toISOString();
   const unready = containerNames(pod).join(" ");
-  return amended(page, "core.conditions", (section): Section => {
-    const conditions = section.blocks.flatMap((block) =>
-      block.type === "conditions" ? block.conditions : [],
-    );
-    const stated: Condition[] = conditions.map((condition) =>
+  return restated(
+    page,
+    (condition) =>
       condition.type === "Ready" || condition.type === "ContainersReady"
         ? {
             ...condition,
@@ -328,12 +323,6 @@ export function starting(page: Overview, pod: Pod): Overview {
             explained: false,
           }
         : condition,
-    );
-    return {
-      ...section,
-      summary: conditionsSummary(stated),
-      tone: "warning",
-      blocks: [{ type: "conditions", conditions: stated }],
-    };
-  });
+    "warning",
+  );
 }

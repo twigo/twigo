@@ -683,12 +683,10 @@ export function ActionRow({
 export function FullActionRow({
   actions,
   label,
-  className,
 }: {
   actions: ActionGroups;
   /** The toolbar's accessible name. */
   label: string;
-  className?: string;
 }) {
   const { roving, onKeyDown } = useRoving(actions.flat().length);
   let at = 0;
@@ -697,10 +695,7 @@ export function FullActionRow({
       role="toolbar"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className={cn(
-        "flex min-w-0 items-center gap-1 text-xs whitespace-nowrap",
-        className,
-      )}
+      className="flex min-w-0 items-center gap-1 text-xs whitespace-nowrap"
     >
       {actions.map((group, index) => {
         const apart = group.every((action) => action.danger === true);

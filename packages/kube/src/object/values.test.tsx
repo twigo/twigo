@@ -1,9 +1,19 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
-import type { Label, Value } from "@twigo/protocol";
-import { ImageName, Prose, ValueView } from "./values";
+import { Profiler } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import type { Label, Span, Value } from "@twigo/protocol";
+import { ImageName, Prose, SaidLine, Sentence, ValueView } from "./values";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const view = (value: Value, compact = false) =>
   render(
@@ -43,6 +53,48 @@ test("a sentence of text and times reads as one line, its age ticking from its m
     ],
   });
   expect(container.textContent).toBe("code 1 (Error) · 11d ago");
+});
+
+test("a sentence draws again only for its times, and each time as its own text changes", () => {
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  vi.useFakeTimers({
+    now,
+    toFake: ["Date", "setInterval", "clearInterval"],
+  });
+  const text: Span = { type: "text", text: "Exited with code 1" };
+  const redrawn = (spans: Span[], said = false) => {
+    let commits = 0;
+    const { container } = render(
+      <Profiler
+        id="sentence"
+        onRender={() => {
+          commits++;
+        }}
+      >
+        {said ? <SaidLine spans={spans} /> : <Sentence spans={spans} />}
+      </Profiler>,
+    );
+    const first = commits;
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    const result = { commits: commits - first, container };
+    return result;
+  };
+  expect(redrawn([text]).commits).toBe(0);
+  cleanup();
+  expect(redrawn([text], true).commits).toBe(0);
+  cleanup();
+  const ago: Span = {
+    type: "ago",
+    at: new Date(Date.now() - 10_000).toISOString(),
+  };
+  const timed = redrawn([text, ago], true);
+  expect(timed.commits).toBeGreaterThan(0);
+  expect(timed.container.textContent).toBe("Exited with code 115s ago");
+  expect(timed.container.firstElementChild?.getAttribute("title")).toBe(
+    "Exited with code 115s ago",
+  );
 });
 
 test("a name that is a link has its whole text in its tooltip, where its copy icon hides the end of a cut one", () => {

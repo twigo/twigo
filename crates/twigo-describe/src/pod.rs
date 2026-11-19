@@ -9,8 +9,8 @@ use twigo_ipc::{
 
 use crate::layout::wrong;
 use crate::show::{
-    Fields, NODE, SERVICE_ACCOUNT, Summary, code, counted, labels, link, list, named, plain,
-    quantities, section, toned,
+    Fields, NODE, SERVICE_ACCOUNT, Summary, code, counted, labels, link, list, plain, quantities,
+    said, section, toned,
 };
 use crate::{Described, Input, Need, containers, header, message, printed, text, tree, volumes};
 
@@ -42,16 +42,14 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
         ..section(CONTAINERS, "Containers", vec![block])
     }));
     sections.push(placement(input, about(PLACEMENT)));
-    sections.extend(
-        volumes::block(spec, namespace.as_deref()).map(|block| Section {
-            summary: match about(STORAGE) {
-                Some(finding) => named(finding),
-                None => storage_summary(spec),
-            },
-            tone: about(STORAGE).and_then(|finding| wrong(finding.tone)),
+    sections.extend(volumes::block(spec, namespace.as_deref()).map(|block| {
+        let (summary, tone) = said(about(STORAGE), || storage_summary(spec));
+        Section {
+            summary,
+            tone,
             ..section(STORAGE, "Storage", vec![block])
-        }),
-    );
+        }
+    }));
     sections.push(configuration(spec, &pod["status"], namespace.as_deref()));
     let mut metadata = Fields::default();
     metadata.time("Started", &pod["status"]["startTime"]);
@@ -149,15 +147,15 @@ fn placement(input: &Input<'_>, finding: Option<&Finding>) -> Section {
         blocks.push(Block::Fields { fields: fields.0 });
     }
     blocks.extend(affinity(spec));
+    let (summary, tone) = said(finding, || {
+        Summary::default()
+            .part(node.unwrap_or_default())
+            .part(address.unwrap_or_default())
+            .done()
+    });
     Section {
-        summary: match finding {
-            Some(finding) => named(finding),
-            None => Summary::default()
-                .part(node.unwrap_or_default())
-                .part(address.unwrap_or_default())
-                .done(),
-        },
-        tone: finding.and_then(|finding| wrong(finding.tone)),
+        summary,
+        tone,
         ..section(PLACEMENT, "Placement", blocks)
     }
 }

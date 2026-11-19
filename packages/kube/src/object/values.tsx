@@ -3,7 +3,7 @@ import type { Label, ObjectRef, Span, Value } from "@twigo/protocol";
 import { cn, CutInTheMiddle, LinkButton, TonedText } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole } from "../age";
-import { useNow } from "../useNow";
+import { useNow, useNowAs } from "../useNow";
 import { splitImage } from "./image";
 import { LABELS_SHOWN, splitKey, valueFold } from "./labels";
 import { lineCount } from "./lines";
@@ -29,7 +29,7 @@ export function ValueView({
 }: {
   value: Value;
   onOpen: (target: ObjectRef) => void;
-  /** In a table cell: a time as its age alone, its date in its tooltip. */
+  /** In a table cell, where text and code do not wrap. */
   compact?: boolean;
 }): ReactNode {
   if (isEmpty(value)) return <Empty />;
@@ -54,11 +54,7 @@ export function ValueView({
     case "toned":
       return <TonedText tone={TONE[value.tone]}>{value.text}</TonedText>;
     case "time":
-      return compact ? (
-        <Age at={value.at} suffix=" ago" />
-      ) : (
-        <Time at={value.at} />
-      );
+      return <Age at={value.at} suffix=" ago" />;
     case "link": {
       const { name } = value.target;
       // The last one: the key in `key {key} of {noun} {name}` may hold it too.
@@ -181,18 +177,6 @@ function LabelLine({ label: { key, value } }: { label: Label }) {
   );
 }
 
-function Time({ at }: { at: string }) {
-  const now = useNow();
-  const when = Date.parse(at);
-  if (Number.isNaN(when)) return <span>{at}</span>;
-  const age = Math.max(0, now - when);
-  return (
-    <span title={new Date(when).toLocaleString()} className={ageRole(age)}>
-      {humanDuration(age)} ago
-    </span>
-  );
-}
-
 export function ImageName({ image }: { image: string }) {
   const { path, name, digest } = splitImage(image);
   return (
@@ -277,25 +261,30 @@ function spanText(span: Span, now: number): string {
   }
 }
 
-/** A sentence of text and times, the times read as it shows. */
+/** A sentence of text and times, each time drawn again as its own text changes. */
 export function Sentence({ spans }: { spans: readonly Span[] }) {
-  const now = useNow();
   return (
     <>
       {spans.map((span, index) =>
         span.type === "text" ? (
           <span key={index}>{span.text}</span>
         ) : (
-          <span
-            key={index}
-            title={new Date(Date.parse(span.at)).toLocaleString()}
-            className={span.type === "until" ? "tabular-nums" : undefined}
-          >
-            {spanText(span, now)}
-          </span>
+          <Moment key={index} span={span} />
         ),
       )}
     </>
+  );
+}
+
+function Moment({ span }: { span: Exclude<Span, { type: "text" }> }) {
+  const text = useNowAs((now) => spanText(span, now));
+  return (
+    <span
+      title={new Date(Date.parse(span.at)).toLocaleString()}
+      className={span.type === "until" ? "tabular-nums" : undefined}
+    >
+      {text}
+    </span>
   );
 }
 
@@ -306,12 +295,11 @@ export function SaidLine({
   spans: readonly Span[];
   className?: string;
 }) {
-  const now = useNow();
+  const title = useNowAs((now) =>
+    spans.map((span) => spanText(span, now)).join(""),
+  );
   return (
-    <span
-      title={spans.map((span) => spanText(span, now)).join("")}
-      className={cn("min-w-0 truncate", className)}
-    >
+    <span title={title} className={cn("min-w-0 truncate", className)}>
       <Sentence spans={spans} />
     </span>
   );

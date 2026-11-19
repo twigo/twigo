@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type { Overview, Section } from "@twigo/protocol";
 import { outlineOf } from "./outline";
 import { OverviewStates } from "./overviewStates";
+import { NO_HEADER } from "../../test/object";
 
 const section = (
   id: string,
@@ -29,15 +30,7 @@ const section = (
 });
 
 const PAGE: Overview = {
-  header: {
-    owner: null,
-    node: null,
-    created: null,
-    generated: null,
-    printed: [],
-    sentence: [],
-    vitals: [],
-  },
+  header: NO_HEADER,
   sections: [
     section("core.diagnostics", "Diagnostics", "open", "crash"),
     section("core.placement", "Placement", "finding", "worker-3"),

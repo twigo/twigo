@@ -7,6 +7,7 @@ import type {
   Overview,
 } from "@twigo/protocol";
 import { useObject } from "./useObject";
+import { NO_HEADER } from "../../test/object";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -35,15 +36,7 @@ const PARTS = {
 
 function document(name: string): Overview {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       {
         id: name,

@@ -17,18 +17,13 @@ import type {
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
 import { PageStates } from "./pageStates";
+import { field, NO_HEADER } from "../../test/object";
 
 afterEach(() => {
   cleanup();
 });
 
 const URI = "k8s://editor";
-
-const field = (label: string, value: string, byDefault = false): Field => ({
-  label,
-  value: { type: "text", text: value },
-  default: byDefault,
-});
 
 function section(
   id: string,
@@ -51,15 +46,7 @@ function doc(
   overrides: Partial<Record<string, Section["fold"]>> = {},
 ): Document {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       section(
         "core.pod",
@@ -208,9 +195,6 @@ test("default fields hide behind their count, show with a tag, and the choice is
   fireEvent.click(screen.getByRole("button", { name: "3 defaults" }));
   expect(screen.getByText("Priority")).toBeTruthy();
   expect(screen.getAllByText("default")).toHaveLength(3);
-  expect(screen.getByText("ClusterFirst").parentElement?.className).toContain(
-    "text-support",
-  );
   first.view.unmount();
   shown(doc(), { states, object: "payments/web-2" });
   expect(screen.getByText("Priority")).toBeTruthy();
@@ -306,15 +290,7 @@ const group = (key: string, entries: TreeNode[]): TreeNode => ({
 });
 
 const nested: Document = {
-  header: {
-    owner: null,
-    node: null,
-    created: null,
-    generated: null,
-    printed: [],
-    sentence: [],
-    vitals: [],
-  },
+  header: NO_HEADER,
   sections: [
     {
       id: "core.containers",

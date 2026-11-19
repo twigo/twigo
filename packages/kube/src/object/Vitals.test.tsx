@@ -1,9 +1,10 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { Gvr, Measure, ShownUsage, Vital } from "@twigo/protocol";
+import type { Gvr, ShownUsage, Vital } from "@twigo/protocol";
 import type { Verdict } from "./verdict";
 import { Vitals } from "./Vitals";
 import { labelsOf, measured, vitalCells, type VitalCell } from "./vitalCells";
+import { measure } from "../../test/object";
 
 const POD: Gvr = { group: "", version: "v1", resource: "pods" };
 const DEPLOYMENT: Gvr = {
@@ -22,14 +23,6 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
-});
-
-const measure = (rest: Partial<Measure>): Measure => ({
-  used: null,
-  request: null,
-  limit: null,
-  allocatable: null,
-  ...rest,
 });
 
 const usage = (rest: Partial<ShownUsage>): ShownUsage => ({

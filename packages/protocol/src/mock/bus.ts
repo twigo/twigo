@@ -21,6 +21,7 @@ import type {
   ShellTarget,
 } from "../generated";
 import { side } from "./edits";
+import { counted } from "./sections";
 import {
   cordoned,
   deploymentOf,
@@ -383,11 +384,6 @@ export interface BusHost {
     resource: { readonly group: string; readonly resource: string } | undefined,
     edited: Record<string, unknown>,
   ): void;
-}
-
-/** `1 pod`, `3 pods`: the mock's kinds all count with an s. */
-function counted(count: number, words: string): string {
-  return `${String(count)} ${words}${count === 1 ? "" : "s"}`;
 }
 
 function capital(text: string): string {

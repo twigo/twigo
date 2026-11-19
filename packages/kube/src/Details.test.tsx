@@ -1,7 +1,9 @@
+import { Profiler } from "react";
 import {
   act,
   cleanup,
   fireEvent,
+  render,
   screen,
   within,
 } from "@testing-library/react";
@@ -16,6 +18,10 @@ import type {
   RequestOf,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
+import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
+import { Details } from "./Details";
+import type { Selected } from "./selection";
+import { createServices } from "./services";
 import {
   hoverIcons,
   narrowHeaderCopies,
@@ -23,6 +29,7 @@ import {
   settle,
   withScreenSize,
 } from "../test/workbench";
+import { NO_HEADER, ROLLOUT_STUCK } from "../test/object";
 
 vi.mock("./edit/YamlEditor", () => ({ default: () => <div /> }));
 
@@ -553,6 +560,54 @@ describe("in a wide editor", () => {
     expect(verdict()).toMatch(/^Terminating/);
   });
 
+  test("the pill of a Deployment that is 4/4 and past its progress deadline takes the tone of the core's finding, and the list's row keeps the list's", async () => {
+    const mock = createMockBackend("ready");
+    const backend: Backend = {
+      invoke: (command, request) => mock.invoke(command, request),
+      subscribe(command, request, onMessage) {
+        if (command !== "object_open")
+          return mock.subscribe(command, request, onMessage);
+        const send = onMessage as (batch: ObjectBatch) => void;
+        return mock.subscribe(command, request, (message) => {
+          const batch = message as ObjectBatch;
+          send({
+            ...batch,
+            overview: batch.overview && {
+              header: {
+                ...batch.overview.header,
+                printed: batch.overview.header.printed.map((cell) =>
+                  cell.column === "Ready" ? { ...cell, value: "4/4" } : cell,
+                ),
+                sentence: [{ type: "text", text: "The rollout is stuck" }],
+              },
+              sections: [ROLLOUT_STUCK, ...batch.overview.sections],
+            },
+          });
+        });
+      },
+    };
+    await openList(backend, "k8s-list://prod-eu/apps/v1/deployments");
+    const healthy = rows().find((row) =>
+      /^(\d+)\/\1$/.test(
+        row.querySelector('[data-column="Ready"]')?.textContent ?? "",
+      ),
+    );
+    expect(healthy).toBeDefined();
+    expect(healthy?.hasAttribute("data-tone")).toBe(false);
+    fireEvent.click(rows()[0] ?? document.body);
+    const pill = () =>
+      within(
+        within(
+          screen.getByRole("complementary", { name: "Deployment details" }),
+        ).getByRole("group", { name: "Verdict" }),
+      ).getByText(/^\d+\/\d+$/);
+    await settle(1);
+    expect(pill().className).not.toContain("text-error");
+    await settle(8);
+    expect(pill().textContent).toBe("4/4");
+    expect(pill().className).toContain("text-error");
+  });
+
   test("the Events tab counts the object's warnings", async () => {
     await openList(withWarnings(2));
     fireEvent.click(rows()[0] ?? document.body);
@@ -698,6 +753,120 @@ describe("in a narrow editor", () => {
   });
 });
 
+test("once the object has come, the measures a poll brings to the selected row draw the inspector no more", async () => {
+  const pending = testWorkbench("ready");
+  await vi.advanceTimersByTimeAsync(10);
+  const workbench = await pending;
+  const services = createServices(workbench);
+  const uri = "k8s-list://prod-eu/v1/pods";
+  const name = "payments-api-7f9c8d6b5-h8lbx";
+  const selected: Selected = {
+    gvr: { group: "", version: "v1", resource: "pods" },
+    kind: "Pod",
+    namespaced: true,
+    columns: [{ name: "Name", kind: "string", priority: 0 }],
+    row: {
+      id: `prod-eu/payments/${name}`,
+      created: null,
+      received: "2026-11-16T12:00:00.000Z",
+      generated: null,
+      cells: [name],
+    },
+  };
+  services.selection.set(uri, selected);
+  let commits = 0;
+  render(
+    <Profiler
+      id="details"
+      onRender={() => {
+        commits++;
+      }}
+    >
+      <Details
+        uri={uri}
+        selected={selected}
+        space="prod-eu"
+        services={services}
+        docked
+        onOpen={() => undefined}
+        onClose={() => undefined}
+      />
+    </Profiler>,
+    { wrapper: inWorkbench(workbench) },
+  );
+  await settle(12);
+  expect(
+    screen.getByRole("tablist", { name: "Views of the object" }),
+  ).toBeTruthy();
+  commits = 0;
+  act(() => {
+    services.selection.measure(uri, {
+      ...selected.row,
+      cells: [name],
+    });
+  });
+  expect(commits).toBe(0);
+});
+
+test("while the object has not come, the stand-in draws what a poll brings to the selected row", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "object_open") return new Promise<never>(() => undefined);
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const pending = testWorkbench("ready", backend);
+  await vi.advanceTimersByTimeAsync(10);
+  const workbench = await pending;
+  const services = createServices(workbench);
+  const uri = "k8s-list://prod-eu/v1/pods";
+  const name = "payments-api-7f9c8d6b5-h8lbx";
+  const selected: Selected = {
+    gvr: { group: "", version: "v1", resource: "pods" },
+    kind: "Pod",
+    namespaced: true,
+    columns: [
+      { name: "Name", kind: "string", priority: 0 },
+      { name: "Status", kind: "string", priority: 0 },
+    ],
+    row: {
+      id: `prod-eu/payments/${name}`,
+      created: null,
+      received: "2026-11-16T12:00:00.000Z",
+      generated: null,
+      cells: [name, "Running"],
+    },
+  };
+  services.selection.set(uri, selected);
+  render(
+    <Details
+      uri={uri}
+      selected={selected}
+      space="prod-eu"
+      services={services}
+      docked
+      onOpen={() => undefined}
+      onClose={() => undefined}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  await settle(12);
+  const status = () =>
+    within(shown()).getByText("Status", { selector: "dt" }).nextElementSibling
+      ?.textContent;
+  expect(status()).toBe("Running");
+  act(() => {
+    services.selection.measure(uri, {
+      ...selected.row,
+      cells: [name, "Terminating"],
+    });
+  });
+  await settle(2);
+  expect(status()).toBe("Terminating");
+});
+
 function scriptedPods(unread = false) {
   const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;
@@ -795,15 +964,7 @@ function withWarnings(count: number): Backend {
   const mock = createMockBackend("ready");
   const added = Array.from({ length: count }, (_, index) => warning(index));
   const overview = (document: Overview): Overview => ({
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: document.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>

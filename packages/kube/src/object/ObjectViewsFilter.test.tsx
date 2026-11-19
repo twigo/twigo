@@ -14,6 +14,7 @@ import {
 import { withScreenSize } from "../../test/workbench";
 import { ObjectViews } from "./ObjectViews";
 import { PageStates } from "./pageStates";
+import { NO_HEADER } from "../../test/object";
 
 const size = withScreenSize(1280);
 
@@ -26,15 +27,7 @@ const snapshot: ObjectSnapshot = {
   status: { state: "ready" },
   exists: true,
   overview: {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: ["Pod", "Containers", "Metadata"].map((title) => ({
       id: title,
       title,

@@ -16,9 +16,8 @@ import {
   type Property,
 } from "@twigo/ui";
 import { useChanges } from "@twigo/workbench";
-import { DefaultsLink, FieldValue } from "./defaults";
+import { DefaultsLink, Fields } from "./defaults";
 import type { OverviewStates } from "./overviewStates";
-import { isNumeric } from "./numeric";
 import { CONTAINER_GROUPS, containerGroup, defaultsId } from "./pageFilter";
 import type { GroupFolds } from "./pageStates";
 import { TONE } from "./tone";
@@ -26,7 +25,6 @@ import { LABEL, WIDEST } from "./figures";
 import { useClientWidth, useFits } from "./pageStage";
 import { usePropertyColumns } from "./propertyColumns";
 import { ContainerMeter, UsageNote } from "./Usage";
-import { rowOf } from "./stacking";
 import { ImageName } from "./values";
 
 const ROLE: Readonly<Record<ContainerRole, string | null>> = {
@@ -327,41 +325,5 @@ function OpenGroup({
         />
       )}
     </div>
-  );
-}
-
-function Fields({
-  fields,
-  extra = [],
-  onOpen,
-  mono = false,
-  cut = false,
-}: {
-  fields: readonly Field[];
-  extra?: readonly Property[];
-  onOpen: (target: ObjectRef) => void;
-  mono?: boolean;
-  cut?: boolean;
-}) {
-  return (
-    <PropertyList
-      cut={cut}
-      items={[
-        ...fields.map((field, index) => ({
-          key: `${String(index)}/${field.label}`,
-          label: mono ? (
-            <span className="font-mono text-xs">{field.label}</span>
-          ) : (
-            field.label
-          ),
-          copyLabel: field.label,
-          ...(cut && { title: field.label }),
-          numeric: isNumeric(field.value),
-          ...rowOf(field.value),
-          value: <FieldValue field={field} onOpen={onOpen} />,
-        })),
-        ...extra,
-      ]}
-    />
   );
 }

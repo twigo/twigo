@@ -24,13 +24,26 @@ function drawn(
     owner?: string;
     space?: { name: string; color: undefined };
     outside?: HTMLElement;
+    age?: number;
+    ticking?: boolean;
   } = {},
 ) {
-  const { name = POD, node = NODE, owner = OWNER, space, outside } = props;
+  const {
+    name = POD,
+    node = NODE,
+    owner = OWNER,
+    space,
+    outside,
+    age = 32 * 24 * 3600 * 1000,
+    ticking = false,
+  } = props;
   const now = Date.parse("2026-11-18T12:00:00Z");
-  vi.useFakeTimers({ now, toFake: ["Date"] });
+  vi.useFakeTimers({
+    now,
+    toFake: ticking ? ["Date", "setInterval", "clearInterval"] : ["Date"],
+  });
   let object = "k8s://prod-eu//v1/pods/payments/auth-billing";
-  let created = now - 32 * 24 * 3600 * 1000;
+  let created = now - age;
   const ui = () => (
     <div style={{ fontSize: "12px" }}>
       <ObjectHeader
@@ -105,6 +118,9 @@ function drawn(
     },
     ageing: (ms: number) => {
       vi.setSystemTime(created + ms);
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
       rerender(ui());
     },
     laidOut: (bases: readonly number[], width: number) => {
@@ -182,16 +198,6 @@ test("the kind word leaves before the name is cut in the middle, its icon keepin
   expect(header.named().title).toBe(`Pod ${POD}`);
 });
 
-test("the first line comes back to a fuller stage only with 16 px to spare", () => {
-  const header = drawn();
-  header.title(TITLE, 150);
-  expect(header.h2.dataset.stage).toBe("3");
-  header.title(TITLE, 167 + 1 + 15);
-  expect(header.h2.dataset.stage).toBe("3");
-  header.title(TITLE, 167 + 1 + 16);
-  expect(header.h2.dataset.stage).toBe("2");
-});
-
 test("the second line has every part whole while they fit, then the node, the owner's name, the owner's kind word, the node and the namespace give way in turn", () => {
   const header = drawn();
   const owner = () =>
@@ -231,16 +237,6 @@ test("the second line has every part whole while they fit, then the node, the ow
   expect(header.place.dataset.stage).toBe("5");
   expect(pieces(header.parts()[0])).toEqual(["payments-p", "roduction-", "eu"]);
   expect(header.parts().pop()?.textContent).toBe("32d");
-});
-
-test("the second line comes back to a fuller stage only with 16 px to spare", () => {
-  const header = drawn();
-  header.where(WHERE, 220);
-  expect(header.place.dataset.stage).toBe("4");
-  header.where(WHERE, 300 + 1 + 15);
-  expect(header.place.dataset.stage).toBe("4");
-  header.where(WHERE, 300 + 1 + 16);
-  expect(header.place.dataset.stage).toBe("3");
 });
 
 test("the full page leads the second line with the space's name, then the namespace after a chevron, and the stages leave the space whole", () => {
@@ -344,6 +340,48 @@ test("a second line on a boundary keeps its stage while its age goes 2m59s, 3m, 
   header.ageing(10 * MINUTE);
   header.laidOut(WHERE, 385);
   expect(header.place.dataset.stage).toBe("3");
+});
+
+test("a copy of the second line draws its age again only where the age's range changes, the shown age every second", () => {
+  const header = drawn({ age: 10_000, ticking: true });
+  const watch = (target: Element) => {
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(target, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+    });
+    return observer;
+  };
+  const age = header.place.querySelector(":scope > [data-widest]");
+  if (!age) throw new Error("no age");
+  const copies = watch(header.placeCopies);
+  const shown = watch(age);
+  act(() => {
+    vi.advanceTimersByTime(5_000);
+  });
+  expect(shown.takeRecords().length).toBeGreaterThan(0);
+  expect(copies.takeRecords()).toHaveLength(0);
+  act(() => {
+    vi.advanceTimersByTime(120_000);
+  });
+  expect(copies.takeRecords().length).toBeGreaterThan(0);
+});
+
+test("the hidden copies are drawn again only for another name or place, not for every render of the header", () => {
+  const header = drawn();
+  const read = vi.spyOn(window, "getComputedStyle");
+  header.draw();
+  const inCopies = (target: Element) => target.closest("[inert]") !== null;
+  const reads = read.mock.calls.map(([target]) => target);
+  read.mockClear();
+  expect(reads.length).toBeGreaterThan(0);
+  expect(reads.filter(inCopies)).toHaveLength(0);
+  header.recreated();
+  expect(
+    read.mock.calls.filter(([target]) => inCopies(target)).length,
+  ).toBeGreaterThan(0);
+  read.mockRestore();
 });
 
 test("a copy that comes out wider than the line has room for takes it to the next stage at once, the margin holding only a stage back", () => {

@@ -1,5 +1,8 @@
-import type { Sort } from "@twigo/protocol";
+import type { ServedMetrics, Sort } from "@twigo/protocol";
+import type { GridColumn } from "@twigo/ui";
 import type { ColumnRule } from "../columns";
+import type { ShownColumn } from "./cells";
+import { metricsNote } from "./metrics";
 
 /** A column that may leave a list too narrow for it. */
 export interface Leaver {
@@ -54,7 +57,7 @@ interface Candidate {
  * that left into it, and the names of those that left. The name column never
  * leaves; the rest go by `leaving`.
  */
-export function fitColumns<C extends Candidate>(
+function fitColumns<C extends Candidate>(
   chosen: readonly C[],
   widthOf: (column: C) => number,
   room: number,
@@ -89,11 +92,63 @@ export function fitColumns<C extends Candidate>(
 }
 
 /** What a list says when it is sorted by a column that has no room at its width. */
-export function lostSort(
+function lostSort(
   sort: Sort | null | undefined,
   gone: ReadonlySet<string>,
 ): string | undefined {
   return sort && gone.has(sort.column)
     ? `Sorted by ${sort.column}, ${sort.descending ? "descending" : "ascending"}: the column has no room at this width.`
     : undefined;
+}
+
+/**
+ * What a grid of `chosen` columns draws in `room` px: the columns it shows,
+ * by name, the room the ones that left leave in the ones they went into, the
+ * widths those made wider than the person's, and its `GridColumn`s, parallel
+ * to the shown ones.
+ */
+export function fitGrid<C extends ShownColumn>({
+  chosen,
+  widths,
+  room,
+  metrics,
+  sort,
+}: {
+  chosen: readonly C[];
+  widths: Readonly<Record<string, number>>;
+  room: number;
+  metrics: ServedMetrics | null;
+  sort: Sort | null | undefined;
+}) {
+  const widthOf = (column: Candidate) =>
+    widths[column.name] ?? column.rule.width;
+  const { columns, gone } = fitColumns(chosen, widthOf, room);
+  const byName = new Map(columns.map((column) => [column.name, column]));
+  const mergedRoom = (name: string) =>
+    byName.get(name)?.merged?.rule.into?.room ?? 0;
+  const widened = Object.fromEntries(
+    columns
+      .filter((column) => column.merged && widths[column.name] !== undefined)
+      .map((column) => [
+        column.name,
+        widthOf(column) + mergedRoom(column.name),
+      ]),
+  );
+  const sortLost = lostSort(sort, gone);
+  const gridColumns: readonly GridColumn[] = columns.map((column) => {
+    const note =
+      metricsNote(metrics, column) ??
+      (column.name === "Name" ? sortLost : undefined);
+    return {
+      id: column.name,
+      title: column.name,
+      width: widthOf(column) + mergedRoom(column.name),
+      grow: column.rule.grow,
+      align: column.rule.align,
+      numeric: column.rule.figures,
+      descendFirst: column.rule.descendFirst,
+      ...(note !== undefined && { note }),
+    };
+  });
+  return { columns, byName, mergedRoom, widened, gridColumns };
 }

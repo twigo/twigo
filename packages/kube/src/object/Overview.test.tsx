@@ -17,13 +17,7 @@ import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
 import { compile, matchesIn } from "./pageFilter";
 import { PageStates } from "./pageStates";
-
-const PAGE = {
-  pages: new PageStates(),
-  uri: "k8s://test",
-  object: "a",
-  onEvents: () => undefined,
-};
+import { NO_HEADER, PAGE } from "../../test/object";
 
 afterEach(() => {
   cleanup();
@@ -33,15 +27,7 @@ const KEYS = 2000;
 
 function configMap(): Document {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       {
         id: "core.data",
@@ -109,15 +95,7 @@ test("a link opens the object it points at", () => {
       kind="/pods"
       space="kind-test"
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          generated: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: NO_HEADER,
         sections: [
           {
             id: "core.metadata",
@@ -174,15 +152,7 @@ test("a section folds by its title, and stays folded for the kind's next object"
 
 function data(readable: boolean, bytes = 3): Document {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       {
         id: "core.data",
@@ -287,15 +257,7 @@ test("events that cannot be listed say why instead of none", () => {
       kind="/pods"
       space="kind-test"
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          generated: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: NO_HEADER,
         sections: [
           {
             id: "core.events",
@@ -323,15 +285,7 @@ test("events that cannot be listed say why instead of none", () => {
 
 function eventsPage(events: ObjectEvent[]): Document {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       {
         id: "core.events",
@@ -479,15 +433,7 @@ test("a multiline value keeps its lines", () => {
       kind="/pods"
       space="kind-test"
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          generated: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: NO_HEADER,
         sections: [
           {
             id: "core.spec",
@@ -531,15 +477,7 @@ test("conditions read as chips with a mark in their tone, and the wrong ones say
       kind="/pods"
       space="kind-test"
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          generated: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: NO_HEADER,
         sections: [
           {
             id: "core.conditions",
@@ -663,15 +601,7 @@ function conditionLines(conditions: Condition[]) {
       kind="/pods"
       space="kind-test"
       overview={{
-        header: {
-          owner: null,
-          node: null,
-          created: null,
-          generated: null,
-          printed: [],
-          sentence: [],
-          vitals: [],
-        },
+        header: NO_HEADER,
         sections: [
           {
             id: "core.conditions",
@@ -822,15 +752,7 @@ test("an answer that comes after the row moved to another Secret is dropped", as
 
 function fields(...rows: [string, Value][]): Document {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: [
       {
         id: "core.pod",
@@ -899,6 +821,48 @@ test("a long value stacks under its label and a short one stays beside it, each 
     );
   }
   expect(writeText.mock.calls).toEqual([[image], [at]]);
+});
+
+test("Tab through the property rows stops at a section's toggle and at what a row holds, and at no copy icon", () => {
+  render(
+    <Overview
+      {...PAGE}
+      states={new OverviewStates()}
+      kind="/pods"
+      space="kind-test"
+      overview={fields(
+        ["Image", { type: "code", text: "docker.io/kindest/helper:v1" }],
+        [
+          "Owner",
+          {
+            type: "link",
+            target: {
+              group: "apps",
+              version: "v1",
+              kind: "ReplicaSet",
+              namespace: "payments",
+              name: "web-1",
+            },
+            text: "web-1",
+          },
+        ],
+      )}
+      onOpen={() => undefined}
+    />,
+  );
+  expect(
+    screen.getAllByRole("button", { name: /^Copy value of / }),
+  ).toHaveLength(2);
+  const stops = [
+    ...document.querySelectorAll<HTMLElement>(
+      "a[href], button, input, select, textarea, [tabindex]",
+    ),
+  ]
+    .filter((element) => element.tabIndex >= 0)
+    .map(
+      (element) => element.getAttribute("aria-label") ?? element.textContent,
+    );
+  expect(stops).toEqual(["Pod", "web-1"]);
 });
 
 test("a default that stacks keeps its support role and its tag, and its copy icon gives the value alone", () => {

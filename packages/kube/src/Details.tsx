@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef, Row } from "@twigo/protocol";
+import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
 import { ActionRow, cn, IconButton, PropertyList } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
 import { columnRule, rowFinished, rowTone, statusColumn } from "./columns";
@@ -13,11 +13,12 @@ import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { ObjectViews } from "./object/ObjectViews";
 import { Vitals } from "./object/Vitals";
 import { useHeader } from "./object/useHeader";
+import { foundTone } from "./object/verdict";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
 import { OBJECT_FILTERED, OBJECT_URI, useFiltered } from "./object/pageStates";
 import { refResource, refUri, useObject } from "./object/useObject";
-import { objectOf, type Selected } from "./selection";
+import { cellsOf, objectOf, type Selected, type Selection } from "./selection";
 import type { ListServices } from "./services";
 import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
@@ -125,13 +126,13 @@ export function Details({
       ? refResource(resources.value, owner)?.gvr
       : undefined;
   const cellOf = (column: string) => {
-    const cell =
-      row.cells[selected.columns.findIndex((c) => c.name === column)];
+    const cell = cellsOf(selected)(column);
     return typeof cell === "string" ? cell : undefined;
   };
   const { verdict, strip, line } = useHeader({
     gvr,
     header,
+    found: foundTone(snapshot.overview),
     usage: snapshot.usage,
     row: cellOf,
   });
@@ -150,10 +151,6 @@ export function Details({
     };
   }, [keys, element, idle, page, filtered, uri]);
   const lookup = keys.lookup(element);
-  const measured = useSyncExternalStore(selection.watch, () =>
-    selection.get(uri),
-  );
-  const cells = measured?.row.id === row.id ? measured.row : row;
 
   return (
     <aside
@@ -292,7 +289,7 @@ export function Details({
         ) : (
           <>
             <ViewStatus status={snapshot.status} what="the object" inline />
-            <Cells selected={selected} row={cells} />
+            <Cells selected={selected} uri={uri} selection={selection} />
           </>
         )}
       </div>
@@ -300,8 +297,21 @@ export function Details({
   );
 }
 
-/** The row's cells, wide columns included, until the object comes, each as its list draws it; `row` is the selection's with the measures a poll brought. */
-function Cells({ selected, row }: { selected: Selected; row: Row }) {
+/** The row's cells, wide columns included, until the object comes, each as its list draws it, with the measures a poll brought to the selection. */
+function Cells({
+  selected,
+  uri,
+  selection,
+}: {
+  selected: Selected;
+  uri: string;
+  selection: Selection;
+}) {
+  const measured = useSyncExternalStore(selection.watch, () =>
+    selection.get(uri),
+  );
+  const row =
+    measured?.row.id === selected.row.id ? measured.row : selected.row;
   const { gvr, columns } = selected;
   const shown: ShownColumn[] = columns.map((column, index) => ({
     name: column.name,

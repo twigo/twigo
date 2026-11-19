@@ -5,9 +5,7 @@ import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import OBJECTS from "../../../protocol/src/mock/objects.json";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
-import { PageStates } from "./pageStates";
-
-const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
+import { NO_HEADER, PAGE } from "../../test/object";
 
 afterEach(() => {
   cleanup();
@@ -29,7 +27,6 @@ async function shown(name: string) {
       states={new OverviewStates()}
       kind="/pods"
       onOpen={() => undefined}
-      onEvents={() => undefined}
     />,
     { wrapper: inWorkbench(workbench) },
   );
@@ -136,7 +133,6 @@ test("a finding that comes or goes is announced once, and its tone has a name", 
       states={new OverviewStates()}
       kind="/pods"
       onOpen={() => undefined}
-      onEvents={() => undefined}
     />
   );
   const { rerender } = render(view(crashing), {
@@ -167,7 +163,6 @@ test("a container's folds stay open for the kind's next object", async () => {
         states={states}
         kind={kind}
         onOpen={() => undefined}
-        onEvents={() => undefined}
       />,
       { wrapper: inWorkbench(workbench) },
     );
@@ -193,15 +188,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const node = RECORDED.node?.overview;
   if (!node) throw new Error("the node");
   const beating: Document = {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: node.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>
@@ -226,7 +213,6 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
       states={new OverviewStates()}
       kind="/nodes"
       onOpen={() => undefined}
-      onEvents={() => undefined}
     />,
     { wrapper: inWorkbench(workbench) },
   );

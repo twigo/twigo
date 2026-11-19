@@ -1,19 +1,18 @@
 import type { ReactNode } from "react";
 import type { Measure, ShownUsage } from "@twigo/protocol";
-import { cn, EmptyMeter, Meter, StatusDot, TonedText } from "@twigo/ui";
+import { cn, EmptyMeter, StatusDot, TonedText } from "@twigo/ui";
 import { METRICS_NOTES } from "../list/metrics";
 import { Quantity } from "../Quantity";
 import {
   figure,
   isCapped,
   LABEL,
-  OF,
   shareText,
-  spoken,
   TONE_WORDS,
   type Figure,
   type Resource,
 } from "./figures";
+import { meterOf } from "./figureMeter";
 
 const GRID =
   "grid grid-cols-[3.5rem_minmax(4rem,11rem)_max-content_2.5rem] items-center gap-x-2 gap-y-1";
@@ -66,15 +65,7 @@ function partsOf(
   return {
     shown,
     used: shown.used,
-    meter: shown.bar ? (
-      <Meter
-        label={subject(resource, name)}
-        valueText={spoken(shown)}
-        {...shown.bar}
-        {...(shown.tone && { tone: shown.tone })}
-        {...(className !== undefined && { className })}
-      />
-    ) : null,
+    meter: meterOf(subject(resource, name), shown, className),
   };
 }
 
@@ -199,10 +190,10 @@ function Percent({ shown, said = false }: { shown: Figure; said?: boolean }) {
   if (shown.percent === null || shown.base === null) return <span />;
   const { tone, percent, base } = shown;
   const title = isCapped(percent)
-    ? `${String(percent)}% of ${OF[base]}`
+    ? `${String(percent)}% of ${base}`
     : said
       ? undefined
-      : `of ${OF[base]}`;
+      : `of ${base}`;
   return (
     <span
       title={title}
@@ -210,7 +201,7 @@ function Percent({ shown, said = false }: { shown: Figure; said?: boolean }) {
     >
       {tone && <StatusDot tone={tone} label={TONE_WORDS[tone]} />}
       <TonedText tone={tone ?? "idle"}>{shareText(percent)}</TonedText>
-      {said && <span className="text-support">of {OF[base]}</span>}
+      {said && <span className="text-support">of {base}</span>}
     </span>
   );
 }

@@ -4,6 +4,7 @@ import { INITIAL_OBJECT, type Overview } from "@twigo/protocol";
 import { ObjectContent } from "./ObjectContent";
 import { OverviewStates } from "./overviewStates";
 import { PageStates } from "./pageStates";
+import { NO_HEADER } from "../../test/object";
 
 const URI = "k8s-list://dev/v1/pods";
 const STARTS: Record<string, number> = { a: 16, b: 140, c: 464 };
@@ -54,15 +55,7 @@ afterEach(() => {
 
 function overview(ids: string[]): Overview {
   return {
-    header: {
-      owner: null,
-      node: null,
-      created: null,
-      generated: null,
-      printed: [],
-      sentence: [],
-      vitals: [],
-    },
+    header: NO_HEADER,
     sections: ids.map((id) => ({
       id,
       title: id.toUpperCase(),

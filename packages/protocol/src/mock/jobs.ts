@@ -9,6 +9,7 @@ import {
   event,
   fieldText,
   printed,
+  printedCell,
   swapped,
   text,
   withEvents,
@@ -63,10 +64,6 @@ function recordedImage(recorded: Overview, id: string): string | undefined {
     .map((card) => card.image)[0];
 }
 
-function cell(page: Overview, column: string): string {
-  return page.header.printed.find((one) => one.column === column)?.value ?? "";
-}
-
 /** What the Job controller writes of a Job's `spec.suspend`, a state whichever its status. */
 function suspension(
   status: string,
@@ -101,7 +98,7 @@ export function jobPage(recorded: Overview, job: Job): Overview {
   if (name !== undefined) whole.set(name, job.name);
   const image = recordedImage(recorded, "core.template");
   if (image !== undefined)
-    pairs.set(image, cell({ ...recorded, header }, "Images"));
+    pairs.set(image, printedCell({ ...recorded, header }, "Images") ?? "");
   let page = created(
     { ...swapped(recorded, pairs, whole), header },
     job.created,
@@ -156,7 +153,7 @@ export function jobPage(recorded: Overview, job: Job): Overview {
       },
       {
         label: "Selector",
-        value: { type: "code", text: cell(page, "Selector") },
+        value: { type: "code", text: printedCell(page, "Selector") ?? "" },
         default: false,
       },
     ]);
@@ -225,8 +222,8 @@ export function jobPage(recorded: Overview, job: Job): Overview {
   page = templated(
     page,
     "core.template",
-    cell(page, "Containers"),
-    cell(page, "Images"),
+    printedCell(page, "Containers") ?? "",
+    printedCell(page, "Images") ?? "",
   );
   const pod = (of: string) =>
     `${job.name}-${hash(of).toString(36).slice(0, 5)}`;
@@ -296,7 +293,7 @@ export function cronJobPage(
   const pairs = new Map<string, string>();
   const image = recordedImage(recorded, "core.jobtemplate");
   if (image !== undefined)
-    pairs.set(image, cell({ ...recorded, header }, "Images"));
+    pairs.set(image, printedCell({ ...recorded, header }, "Images") ?? "");
   const name = fieldText(recorded, "Name");
   const whole = new Map<string, string>();
   if (name !== undefined) whole.set(name, cronJob.name);
@@ -371,8 +368,8 @@ export function cronJobPage(
   page = templated(
     page,
     "core.jobtemplate",
-    cell(page, "Containers"),
-    cell(page, "Images"),
+    printedCell(page, "Containers") ?? "",
+    printedCell(page, "Images") ?? "",
   );
   return withEvents(page, [
     ...made.flatMap((job) => [

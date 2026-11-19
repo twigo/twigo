@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, memo, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { ContextColor, Gvr, ObjectRef } from "@twigo/protocol";
 import { cn, CutInTheMiddle, LinkButton } from "@twigo/ui";
@@ -152,7 +152,12 @@ export function TitleLine({
 }) {
   const [room, setRoom] = useState<HTMLElement | null>(null);
   const [copies, setCopies] = useState<HTMLElement | null>(null);
-  const { at, stage } = useLineStage(TITLE_STAGES, room, copies, object);
+  const { at, stage, settled } = useLineStage(
+    TITLE_STAGES,
+    room,
+    copies,
+    object,
+  );
   const said = `${kind} ${name}`;
   return (
     <div className="relative flex h-7 items-center gap-1.5">
@@ -179,7 +184,38 @@ export function TitleLine({
         />
       </h2>
       {controls}
-      <div aria-hidden inert ref={setCopies} className={COPIES}>
+      <TitleCopies
+        copies={setCopies}
+        settled={settled}
+        kind={kind}
+        name={name}
+        generated={generated}
+      />
+    </div>
+  );
+}
+
+/**
+ * The stages of the first line at their narrowest, which each cut reads its
+ * font to draw: drawn again only for another name once every copy is
+ * measured, and with each render of the line before, as a cut whose font
+ * could not be read waits for one.
+ */
+const TitleCopies = memo(
+  function TitleCopies({
+    copies,
+    kind,
+    name,
+    generated,
+  }: {
+    copies: (box: HTMLElement | null) => void;
+    settled: boolean;
+    kind: string;
+    name: string;
+    generated: number | null;
+  }) {
+    return (
+      <div aria-hidden inert ref={copies} className={COPIES}>
         {TITLE_STAGES.map((each, index) => (
           <div
             key={index}
@@ -196,11 +232,18 @@ export function TitleLine({
           </div>
         ))}
       </div>
-    </div>
-  );
-}
+    );
+  },
+  (before, after) =>
+    before.settled &&
+    after.settled &&
+    before.copies === after.copies &&
+    before.kind === after.kind &&
+    before.name === after.name &&
+    before.generated === after.generated,
+);
 
-export interface Place {
+interface Place {
   /** The space's name and its context's colour, which only the full page leads its line with. */
   readonly space:
     | { readonly name: string; readonly color: ContextColor | undefined }
@@ -222,7 +265,8 @@ function Parts({
   place: Place;
   stage: PlaceStage;
   least: boolean;
-  onOpen: (target: ObjectRef) => void;
+  /** A copy has none: it draws its links as text. */
+  onOpen?: (target: ObjectRef) => void;
 }) {
   const formOf = (form: Form): Form =>
     least && form === "cut" ? "floor" : form;
@@ -254,7 +298,7 @@ function Parts({
         form={formOf(stage.owner)}
         said={`${owner.target.kind} ${owner.target.name}`}
         onOpen={() => {
-          onOpen(owner.target);
+          onOpen?.(owner.target);
         }}
       >
         {owner.gvr && <KindIcon gvr={owner.gvr} className="size-3 shrink-0" />}
@@ -273,7 +317,7 @@ function Parts({
         form={formOf(stage.node)}
         said={`Node ${node}`}
         onOpen={() => {
-          onOpen({
+          onOpen?.({
             group: "",
             version: "v1",
             kind: "Node",
@@ -286,7 +330,12 @@ function Parts({
         <Text text={node} form={formOf(stage.node)} />
       </Linked>
     ),
-    created !== undefined && <Age key="age" at={created} />,
+    created !== undefined &&
+      (least ? (
+        <AgeRoom key="age" at={created} />
+      ) : (
+        <Age key="age" at={created} />
+      )),
   ].filter(Boolean);
   return (
     <>
@@ -350,7 +399,12 @@ export function PlaceLine({
 }) {
   const [room, setRoom] = useState<HTMLElement | null>(null);
   const [copies, setCopies] = useState<HTMLElement | null>(null);
-  const { at, stage } = useLineStage(PLACE_STAGES, room, copies, object);
+  const { at, stage, settled } = useLineStage(
+    PLACE_STAGES,
+    room,
+    copies,
+    object,
+  );
   const { namespace, owner, node } = place;
   const lost = stage.node === "left" || stage.namespace !== "whole";
   return (
@@ -371,20 +425,51 @@ export function PlaceLine({
       className="relative flex h-5 min-w-0 items-center gap-1 text-xs text-support"
     >
       <Parts place={place} stage={stage} least={false} onOpen={onOpen} />
-      <div aria-hidden inert ref={setCopies} className={COPIES}>
+      <PlaceCopies copies={setCopies} settled={settled} place={place} />
+    </div>
+  );
+}
+
+const samePlace = (a: Place, b: Place) =>
+  a.space?.name === b.space?.name &&
+  a.space?.color === b.space?.color &&
+  a.namespace === b.namespace &&
+  a.owner?.target.kind === b.owner?.target.kind &&
+  a.owner?.target.name === b.owner?.target.name &&
+  (a.owner?.gvr === undefined) === (b.owner?.gvr === undefined) &&
+  a.node === b.node &&
+  a.created === b.created;
+
+/** The stages of the second line at their narrowest, drawn again as `TitleCopies` is, for another place. */
+const PlaceCopies = memo(
+  function PlaceCopies({
+    copies,
+    place,
+  }: {
+    copies: (box: HTMLElement | null) => void;
+    settled: boolean;
+    place: Place;
+  }) {
+    return (
+      <div aria-hidden inert ref={copies} className={COPIES}>
         {PLACE_STAGES.map((each, index) => (
           <div
             key={index}
             data-stage={index}
             className="flex w-max items-center gap-1"
           >
-            <Parts place={place} stage={each} least onOpen={onOpen} />
+            <Parts place={place} stage={each} least />
           </div>
         ))}
       </div>
-    </div>
-  );
-}
+    );
+  },
+  (before, after) =>
+    before.settled &&
+    after.settled &&
+    before.copies === after.copies &&
+    samePlace(before.place, after.place),
+);
 
 function Dot() {
   return (
@@ -426,4 +511,10 @@ function Age({ at }: { at: string }) {
       {text}
     </span>
   );
+}
+
+/** What a copy of the line takes of an age: the room of the widest age of its range, drawn again only when the range changes. */
+function AgeRoom({ at }: { at: string }) {
+  const widest = useNowAs((now) => widestDuration(now - Date.parse(at)));
+  return <span className="inline-block shrink-0 tabular-nums">{widest}</span>;
 }

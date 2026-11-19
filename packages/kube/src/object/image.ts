@@ -1,5 +1,5 @@
 /** A container image reference in the parts that read apart. */
-export interface ImageParts {
+interface ImageParts {
   /** The registry and the path before the name, with their last `/`: `docker.io/kindest/`. */
   readonly path: string;
   /** The name with its tag: `local-path-helper:v20260131-7181c60a`. */

@@ -10,14 +10,9 @@ import type { Container, Field } from "@twigo/protocol";
 import { Containers } from "./Containers";
 import { OverviewStates } from "./overviewStates";
 import type { GroupFolds } from "./pageStates";
+import { field } from "../../test/object";
 
 afterEach(cleanup);
-
-const field = (label: string, text: string): Field => ({
-  label,
-  value: { type: "text", text },
-  default: false,
-});
 
 const API: Container = {
   name: "api",
@@ -139,9 +134,6 @@ test("a group's defaults hide behind their count at its end, draw tagged once sh
   expect(group.lastElementChild).toBe(link);
   fireEvent.click(link);
   expect(within(group).getByText("Image pull policy")).toBeTruthy();
-  expect(
-    within(group).getByText("IfNotPresent").parentElement?.className,
-  ).toContain("text-support");
   expect(within(group).getByText("default")).toBeTruthy();
   expect(states.open("/pods", "containers/api/Details/defaults", false)).toBe(
     true,

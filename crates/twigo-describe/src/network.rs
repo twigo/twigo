@@ -5,7 +5,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown};
 
-use crate::layout::{worse, wrong};
+use crate::layout::worst;
 use crate::show::{
     Fields, NODE, POD, SECRET, SERVICE, Summary, code, labels, link, listing, named, plain,
     section, toned,
@@ -249,9 +249,7 @@ fn about(sections: &mut [Section], id: &str, findings: &[Finding]) {
         sections.iter_mut().find(|section| section.id == id),
         findings.first(),
     ) {
-        section.tone = findings
-            .iter()
-            .fold(None, |tone, finding| worse(tone, wrong(finding.tone)));
+        section.tone = worst(findings);
         section.summary = named(first);
     }
 }

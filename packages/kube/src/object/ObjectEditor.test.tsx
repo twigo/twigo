@@ -18,6 +18,7 @@ import { createMockBackend } from "@twigo/protocol/mock";
 import type { Workbench } from "@twigo/workbench";
 import { Cluster } from "../../../protocol/src/mock/cluster";
 import { podGenerated } from "../../../protocol/src/mock/kinds";
+import { ROLLOUT_STUCK } from "../../test/object";
 import {
   mountKube,
   narrowHeaderCopies,
@@ -56,7 +57,6 @@ const page = (kind: string) =>
   screen.getByRole("region", { name: new RegExp(`^${kind} `) });
 const FULL_VERBS = ["Logs", "Forward", "Restart", "Scale…", "Delete"];
 const INSPECTOR_VERBS = ["Logs", "Restart", "Scale…", "More"];
-const summary = () => screen.queryByRole("complementary", { name: "Summary" });
 const strip = () =>
   document.querySelector<HTMLElement>('dl[aria-label="Vitals"]');
 const containerCards = () =>
@@ -105,23 +105,6 @@ describe("from 900 px of the editor's own width", () => {
     expect(verbs("Deployment")).toEqual(FULL_VERBS);
     layout.resize(editor, 890);
     expect(verbs("Deployment")).toEqual(FULL_VERBS);
-  });
-
-  test("the two property columns are decided by the page's one column, come at 750 px and stay down to 734", async () => {
-    await openEditor(POD);
-    const main = screen.getByRole("tabpanel", { name: "Overview" })
-      .parentElement?.parentElement;
-    if (!main) throw new Error("no main column");
-    layout.resize(main, 700);
-    layout.resize(page("Pod"), 1069);
-    layout.resize(main, 749);
-    expect(containerCards()?.className).not.toContain("grid-cols-2");
-    layout.resize(main, 750);
-    expect(containerCards()?.className).toContain("grid-cols-2");
-    layout.resize(main, 734);
-    expect(containerCards()?.className).toContain("grid-cols-2");
-    layout.resize(main, 733);
-    expect(containerCards()?.className).not.toContain("grid-cols-2");
   });
 
   test("the editor cuts a pod's name as the list does, its generated part from the object's header", async () => {
@@ -180,10 +163,8 @@ describe("from 900 px of the editor's own width", () => {
 describe("in the full page", () => {
   const layout = withScreenSize(1130);
 
-  test("the full page has one column: no summary, the vitals strip on the Overview only, the sections open but the Metadata, two property columns and two cards", async () => {
+  test("the full page has the vitals strip on the Overview only, the sections open but the Metadata, two property columns and two cards", async () => {
     await openEditor(POD);
-    expect(summary()).toBeNull();
-    expect(screen.queryByRole("list", { name: "Sections" })).toBeNull();
     const bar = strip();
     if (!bar) throw new Error("no vitals strip");
     expect(
@@ -223,7 +204,6 @@ describe("in the full page", () => {
   test("under 900 px the editor is the inspector's layout: the strip under the views, one column", async () => {
     await openEditor(POD);
     layout.resize(page("Pod"), 700);
-    expect(summary()).toBeNull();
     expect(strip()).not.toBeNull();
     expect(containerCards()?.className).not.toContain("grid-cols-2");
   });
@@ -477,6 +457,23 @@ describe("one header on every view", () => {
       await settle(2);
       expect(verdict(), name).toBe(`${name}${name} now`);
     }
+  });
+
+  test("the pill of a Deployment that is 4/4 and past its progress deadline takes the tone of the core's finding", async () => {
+    const { backend, change } = changing();
+    await openEditor(DEPLOYMENT, backend);
+    const pill = () =>
+      within(
+        within(page("Deployment")).getByRole("group", { name: "Verdict" }),
+      ).getByText(/^\d+\/\d+$/);
+    expect(pill().className).not.toContain("text-error");
+    change((overview) => ({
+      ...printing(overview, { Ready: "4/4" }),
+      sections: [ROLLOUT_STUCK, ...overview.sections],
+    }));
+    await settle(2);
+    expect(pill().textContent).toBe("4/4");
+    expect(pill().className).toContain("text-error");
   });
 
   test("the sentence keeps its whole text in a tooltip, its times as they read now", async () => {

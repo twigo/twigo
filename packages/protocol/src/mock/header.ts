@@ -1,6 +1,5 @@
 import type {
   Block,
-  Condition,
   Finding,
   Header,
   ObjectQuery,
@@ -33,13 +32,14 @@ import { reported, stated, starting, titleOf } from "./pods";
 import {
   ago,
   amended,
-  conditionsSummary,
   counted,
   created,
   diagnosed,
   failing,
   fieldText,
   printed,
+  printedCell,
+  restated,
   swapped,
   text,
   toned,
@@ -116,11 +116,9 @@ const READINESS = ["PodReadyToStartContainers", "ContainersReady", "Ready"];
 function completed(page: Overview, pod: Pod): Overview {
   const ended = new Date(finishedAt(pod)).toISOString();
   const initialized = new Date(pod.created + CONTAINER_START).toISOString();
-  return amended(page, "core.conditions", (section) => {
-    const conditions = section.blocks.flatMap((block) =>
-      block.type === "conditions" ? block.conditions : [],
-    );
-    const states: Condition[] = conditions.map((condition) =>
+  return restated(
+    page,
+    (condition) =>
       READINESS.includes(condition.type) || condition.type === "Initialized"
         ? {
             ...condition,
@@ -133,14 +131,8 @@ function completed(page: Overview, pod: Pod): Overview {
             explained: false,
           }
         : condition,
-    );
-    return {
-      ...section,
-      summary: conditionsSummary(states),
-      tone: null,
-      blocks: [{ type: "conditions", conditions: states }],
-    };
-  });
+    null,
+  );
 }
 
 /** The mock pod's own node and addresses where the recorded pod's stand, and no host address where its node is gone. */
@@ -257,11 +249,6 @@ function recordedSets(recorded: Overview): string[] {
     .flatMap(([, set]) => (set?.type === "link" ? [set.target.name] : []));
 }
 
-/** What the recorded Deployment's list row printed in a column. */
-function recordedCell(recorded: Overview, column: string): string | undefined {
-  return recorded.header.printed.find((cell) => cell.column === column)?.value;
-}
-
 /** The Deployment the mock's pods make: what its row counts, its own ReplicaSets and image, and the Available finding if its pods fall short. */
 function deploymentPage(
   recorded: Overview,
@@ -334,8 +321,8 @@ function deploymentPage(
     { type: "time" as const, at },
   ];
   const [recordedNew, recordedOld] = recordedSets(recorded);
-  const recordedImage = recordedCell(recorded, "Images");
-  const recordedSelector = recordedCell(recorded, "Selector");
+  const recordedImage = printedCell(recorded, "Images");
+  const recordedSelector = printedCell(recorded, "Selector");
   const pairs = new Map<string, string>();
   if (recordedNew !== undefined) pairs.set(recordedNew, set);
   if (recordedOld !== undefined) pairs.set(recordedOld, older);
@@ -423,11 +410,9 @@ function deploymentPage(
       summary: words(`${update ?? ""} · ${counted(replicas, "replica")}`),
     };
   });
-  page = amended(page, "core.conditions", (section) => {
-    const conditions = section.blocks.flatMap((block) =>
-      block.type === "conditions" ? block.conditions : [],
-    );
-    const stated: Condition[] = conditions.map((condition) => {
+  page = restated(
+    page,
+    (condition) => {
       if (condition.type === "Available" && finding && since !== null) {
         return failing(
           condition,
@@ -439,15 +424,9 @@ function deploymentPage(
       return condition.type === "Available" || condition.type === "Progressing"
         ? { ...condition, lastTransition: made }
         : condition;
-    });
-    return {
-      ...section,
-      ...(finding
-        ? { summary: conditionsSummary(stated), tone: "warning" as const }
-        : {}),
-      blocks: [{ type: "conditions", conditions: stated }],
-    };
-  });
+    },
+    finding ? "warning" : undefined,
+  );
   return diagnosed(page, finding ? [finding] : []);
 }
 
@@ -528,11 +507,9 @@ function nodePage(recorded: Overview, node: Node, cluster: Cluster): Overview {
     ),
   }));
   if (notReady) {
-    page = amended(page, "core.conditions", (section) => {
-      const conditions = section.blocks.flatMap((block) =>
-        block.type === "conditions" ? block.conditions : [],
-      );
-      const stated: Condition[] = conditions.map((condition) =>
+    page = restated(
+      page,
+      (condition) =>
         condition.type === "Ready"
           ? failing(
               condition,
@@ -541,14 +518,8 @@ function nodePage(recorded: Overview, node: Node, cluster: Cluster): Overview {
               since,
             )
           : condition,
-      );
-      return {
-        ...section,
-        summary: conditionsSummary(stated),
-        tone: "warning",
-        blocks: [{ type: "conditions", conditions: stated }],
-      };
-    });
+      "warning",
+    );
   }
   page = amended(page, "core.pods", (section) => ({
     ...section,

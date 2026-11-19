@@ -1,12 +1,9 @@
 import { expect, test } from "vitest";
 import type { Measure } from "@twigo/protocol";
 import { figure, hasUsage, shareText, WIDEST } from "./figures";
+import { measure } from "../../test/object";
 
 const MI = 1024 * 1024;
-
-function measure(rest: Partial<Measure>): Measure {
-  return { used: null, request: null, limit: null, allocatable: null, ...rest };
-}
 
 test("a pod and a node have a usage, and nothing else does", () => {
   const gvr = (group: string, resource: string) => ({

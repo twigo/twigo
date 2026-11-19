@@ -1,4 +1,5 @@
 import type { Value } from "@twigo/protocol";
+import { isNumeric } from "./numeric";
 
 /** The longest text that stays beside a label: what the value column holds on one line at the inspector's width. */
 const BESIDE = 40;
@@ -66,11 +67,13 @@ export function copyText(value: Value): string | undefined {
 const wraps = (value: Value) => value.type !== "link";
 
 export function rowOf(value: Value): {
+  numeric: boolean;
   stacked: boolean;
   wraps: boolean;
   copy: string | undefined;
 } {
   return {
+    numeric: isNumeric(value),
     stacked: stacks(value),
     wraps: wraps(value),
     copy: copyText(value),

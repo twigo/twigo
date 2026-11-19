@@ -585,6 +585,7 @@ test.each([
   "a link in the details",
   "the context menu",
   "a double click",
+  "⌘Enter",
 ])(
   "opening an object by %s from a preview list pins the list and puts the object in a tab of its own",
   async (way) => {
@@ -606,9 +607,16 @@ test.each([
     expect(tabs()).toEqual([["Pods", "true"]]);
     if (way === "the context menu") {
       fireEvent.contextMenu(row);
-      fireEvent.click(screen.getByRole("menuitem", { name: "Open in Editor" }));
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: /^Open in Editor/ }),
+      );
     } else if (way === "a double click") {
       doubleClick(row);
+    } else if (way === "⌘Enter") {
+      fireEvent.click(row);
+      await settle();
+      focusGrid();
+      key("Enter", { metaKey: true });
     } else {
       fireEvent.click(row);
       await settle();
@@ -625,6 +633,39 @@ test.each([
     ]);
   },
 );
+
+test("the context menu shows the key that opens a row's object", async () => {
+  await openList();
+  const [row] = rows();
+  if (!row) throw new Error("no rows");
+  fireEvent.contextMenu(row);
+  expect(
+    screen.getByRole("menuitem", { name: /^Open in Editor/ }).textContent,
+  ).toContain("⌘↩");
+});
+
+test("⌘Enter in quick access opens the pick to the side and not the row of a list that is open", async () => {
+  const workbench = await openList();
+  const [row] = rows();
+  if (!row) throw new Error("no rows");
+  fireEvent.click(row);
+  await settle();
+  const open = vi.spyOn(workbench.editors, "open");
+  act(() => {
+    workbench.quickAccess.show(":deployments");
+  });
+  await settle(2);
+  fireEvent.keyDown(screen.getByRole("combobox"), {
+    code: "Enter",
+    key: "Enter",
+    metaKey: true,
+  });
+  await settle(2);
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(open).toHaveBeenCalledWith("k8s-list://prod-eu/apps/v1/deployments", {
+    side: true,
+  });
+});
 
 test("opening a pod and then a Deployment from the details leaves both in tabs of their own", async () => {
   const workbench = await openList();

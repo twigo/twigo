@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   Backend,
   Container,
-  Measure,
   ObjectBatch,
   Overview as Document,
   RequestOf,
@@ -31,9 +30,7 @@ import {
 } from "../../test/workbench";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
-import { PageStates } from "./pageStates";
-
-const PAGE = { pages: new PageStates(), uri: "k8s://test", object: "a" };
+import { measure, NO_HEADER, PAGE } from "../../test/object";
 
 afterEach(() => {
   cleanup();
@@ -41,10 +38,6 @@ afterEach(() => {
 });
 
 const MI = 1024 * 1024;
-
-function measure(rest: Partial<Measure>): Measure {
-  return { used: null, request: null, limit: null, allocatable: null, ...rest };
-}
 
 const NOTHING = measure({});
 
@@ -143,18 +136,8 @@ const RUNNING = (name: string): Container => ({
   },
 });
 
-const HEADER: Document["header"] = {
-  owner: null,
-  node: null,
-  created: null,
-  generated: null,
-  printed: [],
-  sentence: [],
-  vitals: [],
-};
-
 const POD_OF = (...containers: Container[]): Document => ({
-  header: HEADER,
+  header: NO_HEADER,
   sections: [
     SECTION("core.pod"),
     {
@@ -185,14 +168,13 @@ function shown(
     <Overview
       {...PAGE}
       overview={{
-        header: HEADER,
+        header: NO_HEADER,
         sections: [SECTION(first), SECTION("core.metadata")],
       }}
       space="prod-eu"
       states={states}
       kind={kind}
       onOpen={() => undefined}
-      onEvents={() => undefined}
       usage={usage}
     />,
   );
@@ -213,7 +195,6 @@ function listed(
       states={states}
       kind={kind}
       onOpen={() => undefined}
-      onEvents={() => undefined}
       usage={usage}
     />
   );
@@ -597,7 +578,7 @@ test("a share says its base in words where the part has room for its widest row 
 
 test("a node's usage that waits is its pair of empty meters", () => {
   listed(WAITING_NODE, "/nodes", {
-    header: HEADER,
+    header: NO_HEADER,
     sections: [SECTION("core.node"), SECTION("core.metadata")],
   });
   const section = usageSection();

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Field, ObjectRef } from "@twigo/protocol";
-import { Chip } from "@twigo/ui";
+import { Chip, PropertyList, type Property } from "@twigo/ui";
+import { rowOf } from "./stacking";
 import { ValueView } from "./values";
 
 /** A field's value; one that holds the cluster's default is drawn in the support role, tagged. */
@@ -19,6 +20,44 @@ export function FieldValue({
     </span>
   ) : (
     value
+  );
+}
+
+export function Fields({
+  fields,
+  extra = [],
+  onOpen,
+  columns = 1,
+  mono = false,
+  cut = false,
+}: {
+  fields: readonly Field[];
+  extra?: readonly Property[];
+  onOpen: (target: ObjectRef) => void;
+  columns?: 1 | 2;
+  mono?: boolean;
+  cut?: boolean;
+}) {
+  return (
+    <PropertyList
+      cut={cut}
+      columns={columns}
+      items={[
+        ...fields.map((field, index) => ({
+          key: `${String(index)}/${field.label}`,
+          label: mono ? (
+            <span className="font-mono text-xs">{field.label}</span>
+          ) : (
+            field.label
+          ),
+          copyLabel: field.label,
+          ...(cut && { title: field.label }),
+          ...rowOf(field.value),
+          value: <FieldValue field={field} onOpen={onOpen} />,
+        })),
+        ...extra,
+      ]}
+    />
   );
 }
 

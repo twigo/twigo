@@ -186,6 +186,16 @@ export function registerResourceActions(
     namespace: subject.namespace ?? null,
     name: subject.name,
   });
+  /** Where a command that opens a session finds the subject: none for a cluster-scoped one. */
+  const placeOf = (subject: Subject | undefined) =>
+    subject?.namespace === undefined
+      ? undefined
+      : {
+          space: subject.space,
+          gvr: subject.gvr,
+          namespace: subject.namespace,
+          name: subject.name,
+        };
   /** Plans and runs a request of the bus on the subject's space. */
   const act = async (
     subject: Subject | undefined,
@@ -196,24 +206,22 @@ export function registerResourceActions(
   };
   /** Forwards a port of the subject Pod, Service or workload, which the person picks. */
   const forward = async (subject: Subject | undefined) => {
-    if (subject?.namespace === undefined) return;
-    await commands.execute("k8s.forward.open", workbench.keys.lookup(null), {
-      space: subject.space,
-      gvr: subject.gvr,
-      namespace: subject.namespace,
-      name: subject.name,
-    });
+    const place = placeOf(subject);
+    if (place)
+      await commands.execute(
+        "k8s.forward.open",
+        workbench.keys.lookup(null),
+        place,
+      );
   };
   /** Opens a shell, or an attach, in a container of the subject pod. */
   const shell = async (subject: Subject | undefined, kind: ShellKind) => {
-    if (subject?.namespace === undefined) return;
-    await commands.execute("k8s.shell.open", workbench.keys.lookup(null), {
-      space: subject.space,
-      gvr: subject.gvr,
-      namespace: subject.namespace,
-      name: subject.name,
-      kind,
-    });
+    const place = placeOf(subject);
+    if (place)
+      await commands.execute("k8s.shell.open", workbench.keys.lookup(null), {
+        ...place,
+        kind,
+      });
   };
 
   const actions: readonly {
@@ -255,14 +263,13 @@ export function registerResourceActions(
         ["resource/details", "navigation", `${POD} || ${RESTARTS}`],
       ],
       run: async (lookup, args) => {
-        const subject = subjectOf(lookup, args);
-        if (subject?.namespace === undefined) return;
-        await commands.execute("k8s.logs.open", workbench.keys.lookup(null), {
-          space: subject.space,
-          gvr: subject.gvr,
-          namespace: subject.namespace,
-          name: subject.name,
-        });
+        const place = placeOf(subjectOf(lookup, args));
+        if (place)
+          await commands.execute(
+            "k8s.logs.open",
+            workbench.keys.lookup(null),
+            place,
+          );
       },
     },
     {
@@ -322,6 +329,7 @@ export function registerResourceActions(
       id: "k8s.resource.openEditor",
       title: "Open in Editor",
       icon: SquareArrowOutUpRight,
+      key: "mod+enter",
       when: LIST_URI,
       menus: [["resource/context", "navigation"]],
       run: (lookup) => {

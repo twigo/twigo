@@ -10,8 +10,10 @@ const NAME = { copied: "Copied", failed: "Could not copy" } as const;
 /**
  * A 12 px copy icon that puts `text` on the clipboard and says so for a
  * moment. It shows while the pointer is over the nearest ancestor that is a
- * `group/copy`, or the focus is within it, and stays in the tab order. Its
- * glyph is drawn by `.copy-glyph` in the stylesheet, so it is one element.
+ * `group/copy`, or the focus is within it, and is out of the tab order, so
+ * that tabbing through a page's rows stops at what a row holds and not at its
+ * copy icon. Its glyph is drawn by `.copy-glyph` in the stylesheet, so it is
+ * one element.
  * By default it lies over the end of its nearest positioned ancestor, on the
  * editor's own fill, and takes no width of its own while hidden, which suits
  * a text that is cut, whose element has the whole text as its tooltip, since
@@ -47,6 +49,7 @@ export function CopyButton({
   return (
     <button
       type="button"
+      tabIndex={-1}
       aria-label={name}
       title={name}
       data-result={result}

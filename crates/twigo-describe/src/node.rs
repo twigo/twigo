@@ -6,9 +6,8 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use twigo_ipc::{Block, EmbeddedList, Finding, Gvr, Section, Span, Tone, Value as Shown, Vital};
 
-use crate::layout::wrong;
 use crate::show::{
-    Fields, POD, Summary, code, labels, link, list, listing, named, plain, section, toned,
+    Fields, POD, Summary, code, labels, link, list, listing, plain, said, section, toned,
 };
 use crate::workloads::fact;
 use crate::{Described, Found, Input, Need, text};
@@ -172,6 +171,17 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
     let allocatable = status["allocatable"]["pods"]
         .as_str()
         .and_then(|pods| pods.parse::<usize>().ok());
+    let (marks_summary, marks_tone) = said(cordoned, || {
+        Summary::default()
+            .count(spec["taints"].as_array().map_or(0, Vec::len), "taint")
+            .count(
+                node["metadata"]["labels"]
+                    .as_object()
+                    .map_or(0, serde_json::Map::len),
+                "label",
+            )
+            .done()
+    });
     let mut sections = vec![
         Section {
             summary: match capacity {
@@ -209,19 +219,8 @@ pub(crate) fn describe(input: &Input<'_>) -> Described {
             )
         },
         Section {
-            summary: match cordoned {
-                Some(finding) => named(finding),
-                None => Summary::default()
-                    .count(spec["taints"].as_array().map_or(0, Vec::len), "taint")
-                    .count(
-                        node["metadata"]["labels"]
-                            .as_object()
-                            .map_or(0, serde_json::Map::len),
-                        "label",
-                    )
-                    .done(),
-            },
-            tone: cordoned.and_then(|finding| wrong(finding.tone)),
+            summary: marks_summary,
+            tone: marks_tone,
             ..section(
                 "core.taints",
                 "Taints and labels",

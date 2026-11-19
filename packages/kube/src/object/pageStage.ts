@@ -9,31 +9,11 @@ import {
 import { flushSync } from "react-dom";
 import { CUT_PENDING } from "@twigo/ui";
 
-/** The width of an object's own page from which it draws the full page: a wide action row, the sections open, and the property rows in two columns where the page is wide enough. */
+/** The width of an object's own page from which it draws the full page: a wide action row, the sections open, and the property rows in two columns. */
 export const FULL_PAGE = 900;
 
-/** The label column of the page's property rows, which `LABEL_COLUMN` sets. */
-export const LABEL_WIDTH = 112;
-
-/**
- * The width of the full page's column from which its property rows run
- * in two columns: each takes its label column, a 12 px gap and 225 px for its
- * value, with the 24 px that the list keeps between the columns and the page's
- * 14 px of padding on each side.
- */
-export const TWO_COLUMNS = 2 * (LABEL_WIDTH + 12 + 225) + 24 + 2 * 14;
-
+/** Spare width a fuller stage needs before it comes back, so that a width on a boundary does not flicker. */
 export const MARGIN = 16;
-
-/**
- * Whether a stage that starts at `from` px is drawn at `width`: it comes at
- * `from` and stays down to the margin below it, so that a width on the
- * boundary does not flicker. A width of 0 is none measured, and no stage
- * stands on it, as a form that measures 0 fits nowhere.
- */
-export function stands(width: number, drawn: boolean, from: number): boolean {
-  return width > 0 && width >= (drawn ? from - MARGIN : from);
-}
 
 /**
  * Draws `redraw` at the start of the next frame, before that frame's layout
@@ -42,8 +22,8 @@ export function stands(width: number, drawn: boolean, from: number): boolean {
  * would render inside the delivery that reported the resize and take along the
  * updates that `useWidth` has pending, which resize what lies above the
  * observer: Chrome then reports "ResizeObserver loop completed with undelivered
- * notifications". A plain update waits for React's scheduler, which left 3
- * frames at the old stage when the side bar was shown.
+ * notifications". A plain update waits for React's scheduler, which leaves
+ * frames at the old stage.
  */
 function nextFrame(redraw: () => void) {
   const waiting = new Set<number>();
@@ -189,10 +169,15 @@ export function useFits(room: number, natural: number): boolean {
   return useHeld(natural > 0 ? room : 0, natural + MARGIN);
 }
 
-/** Whether a stage that starts at `from` px is drawn at `width`, remembering whether it was. */
+/**
+ * Whether a stage that starts at `from` px is drawn at `width`, remembering
+ * whether it was: it comes at `from` and stays down to the margin below it, so
+ * that a width on the boundary does not flicker. A width of 0 is none measured,
+ * and no stage stands on it, as a form that measures 0 fits nowhere.
+ */
 export function useHeld(width: number, from: number): boolean {
   const [drawn, setDrawn] = useState(false);
-  const next = stands(width, drawn, from);
+  const next = width > 0 && width >= (drawn ? from - MARGIN : from);
   if (next !== drawn) setDrawn(next);
   return next;
 }

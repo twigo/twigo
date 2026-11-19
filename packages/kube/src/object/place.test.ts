@@ -48,6 +48,29 @@ function section(
   element.getBoundingClientRect = () => new DOMRect(0, top(), 400, height);
 }
 
+function whileObserving(body: (observers: Set<() => void>) => void) {
+  const observers = new Set<() => void>();
+  const original = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class {
+    constructor(report: () => void) {
+      observers.add(report);
+      this.#report = report;
+    }
+    readonly #report: () => void;
+    observe() {
+      return undefined;
+    }
+    disconnect() {
+      observers.delete(this.#report);
+    }
+  } as unknown as typeof ResizeObserver;
+  try {
+    body(observers);
+  } finally {
+    globalThis.ResizeObserver = original;
+  }
+}
+
 test("the place is the section at the top of the viewport and how far into it, none at the top of the page", () => {
   const { scroller } = page({ a: 100, b: 300, c: 200 });
   expect(placeOf(scroller)).toBeUndefined();
@@ -80,22 +103,7 @@ test("a page without that section stays at its top", () => {
 });
 
 test("what grows above the place is followed until the person scrolls", () => {
-  const observers = new Set<() => void>();
-  const original = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class {
-    constructor(report: () => void) {
-      observers.add(report);
-      this.#report = report;
-    }
-    readonly #report: () => void;
-    observe() {
-      return undefined;
-    }
-    disconnect() {
-      observers.delete(this.#report);
-    }
-  } as unknown as typeof ResizeObserver;
-  try {
+  whileObserving((observers) => {
     const { scroller, above } = page({ a: 100, b: 300, c: 200 });
     const stop = keepPlace(
       scroller,
@@ -112,9 +120,7 @@ test("what grows above the place is followed until the person scrolls", () => {
     for (const report of observers) report();
     expect(scroller.scrollTop).toBe(20);
     stop();
-  } finally {
-    globalThis.ResizeObserver = original;
-  }
+  });
 });
 
 test("an offset deeper than the section is long opens at the end of the section", () => {
@@ -168,22 +174,7 @@ test("a page without a place records the first scroll the person makes", () => {
 });
 
 test("a slow scroll, a pixel a frame, releases the hold and is recorded", () => {
-  const observers = new Set<() => void>();
-  const original = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class {
-    constructor(report: () => void) {
-      observers.add(report);
-      this.#report = report;
-    }
-    readonly #report: () => void;
-    observe() {
-      return undefined;
-    }
-    disconnect() {
-      observers.delete(this.#report);
-    }
-  } as unknown as typeof ResizeObserver;
-  try {
+  whileObserving((observers) => {
     const { scroller, above } = page({ a: 100, b: 300, c: 200 });
     const recorded: (Place | undefined)[] = [];
     const stop = keepPlace(scroller, { section: "b", offset: 60 }, (place) => {
@@ -202,7 +193,5 @@ test("a slow scroll, a pixel a frame, releases the hold and is recorded", () => 
     for (const report of observers) report();
     expect(scroller.scrollTop).toBe(held + 150);
     stop();
-  } finally {
-    globalThis.ResizeObserver = original;
-  }
+  });
 });

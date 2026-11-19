@@ -1,5 +1,7 @@
+import { MARGIN } from "./pageStage";
+
 /** Where the page filter's field sits in the views row, and how its count is worded. */
-export interface FilterStage {
+interface FilterStage {
   /** Beside the views, which keep their full width, rather than on a line of its own. */
   readonly beside: boolean;
   /** `3 in 2` rather than `3 matches in 2 sections`. */
@@ -18,11 +20,9 @@ export const FILTER_STAGES: readonly FilterStage[] = [
 const FIELD = 112;
 /** The space between the field and its count, and the row's `pr-1.5` after it. */
 const GAP = 6;
-/** Spare width a fuller stage needs before it comes back, so that a width on a boundary does not flicker. */
-const MARGIN = 16;
 
 /** What the row and its parts take at their natural size, each 0 until measured. */
-export interface FilterWidths {
+interface FilterWidths {
   readonly row: number;
   /** The views with every tab shown, at the widest count their tabs keep room for. */
   readonly views: number;

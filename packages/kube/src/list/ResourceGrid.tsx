@@ -22,7 +22,6 @@ import {
   GUTTERS_WIDTH,
   StatusDot,
   useWidth,
-  type GridColumn,
   type GridItem,
 } from "@twigo/ui";
 import {
@@ -35,7 +34,6 @@ import { CAPABILITY_PREFIXES } from "../capabilities";
 import {
   byHealth,
   columnRule,
-  type ColumnRule,
   HEALTH,
   healthValues,
   rowFinished,
@@ -51,9 +49,9 @@ import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
-import { fitColumns, lostSort } from "./fit";
+import { fitGrid } from "./fit";
 import { SHOWS_ROWS } from "./listStatus";
-import { metricsNote, readsMetrics, sameBesidesMetrics } from "./metrics";
+import { readsMetrics, sameBesidesMetrics } from "./metrics";
 import { namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
@@ -213,44 +211,19 @@ function Grid({
       (column.name !== grouping?.column &&
         (preset.columns[column.name] ?? column.priority === 0)),
   );
-  const widthOf = (column: { name: string; rule: ColumnRule }) =>
-    preset.widths[column.name] ?? column.rule.width;
-  const { columns, gone } = fitColumns(
-    chosen,
-    widthOf,
-    width > 0 ? width - GUTTERS_WIDTH : Infinity,
-  );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const mergedRoom = (name: string) =>
-    byName.get(name)?.merged?.rule.into?.room ?? 0;
-  const widened = Object.fromEntries(
-    columns
-      .filter(
-        (column) => column.merged && preset.widths[column.name] !== undefined,
-      )
-      .map((column) => [
-        column.name,
-        widthOf(column) + mergedRoom(column.name),
-      ]),
-  );
   const sorted = shown?.sort;
-  const sortLost = lostSort(sorted, gone);
-  const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note =
-      metricsNote(snapshot.metrics, column) ??
-      (column.name === "Name" ? sortLost : undefined);
-    return {
-      id: column.name,
-      title: column.name,
-      width: widthOf(column) + mergedRoom(column.name),
-      grow: column.rule.grow,
-      align: column.rule.align,
-      numeric: column.rule.figures,
-      descendFirst: column.rule.descendFirst,
-      coverable: column.rule.coverable,
-      ...(note !== undefined && { note }),
-    };
+  const fitted = fitGrid({
+    chosen,
+    widths: preset.widths,
+    room: width > 0 ? width - GUTTERS_WIDTH : Infinity,
+    metrics: snapshot.metrics,
+    sort: sorted,
   });
+  const { columns, byName, mergedRoom, widened } = fitted;
+  const gridColumns = fitted.gridColumns.map((column) => ({
+    ...column,
+    coverable: byName.get(column.id)?.rule.coverable,
+  }));
   // While a new subscription has no columns yet, what was drawn stays drawn.
   const [drawnBefore, setDrawnBefore] = useState<readonly string[]>();
   const drawnNow = every.length > 0 ? [...byName.keys()] : undefined;

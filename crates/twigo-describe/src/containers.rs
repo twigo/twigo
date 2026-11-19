@@ -83,21 +83,15 @@ fn describe(
         } else {
             &status["lastState"]["terminated"]
         };
-        if state["terminated"].is_object() {
-            fields.maybe("Exited", exit(&state["terminated"], false));
-        }
-        if status["lastState"]["terminated"].is_object() {
-            fields.maybe("Last exit", exit(&status["lastState"]["terminated"], true));
-        }
+        fields.maybe("Exited", exit(&state["terminated"], false));
+        fields.maybe("Last exit", exit(&status["lastState"]["terminated"], true));
         let ran = if state["running"].is_object() {
             &state["running"]
         } else {
             &state["terminated"]
         };
         details.time("Started", &ran["startedAt"]);
-        if last.is_object() {
-            details.maybe("Last message", message(&last["message"]).map(plain));
-        }
+        details.maybe("Last message", message(&last["message"]).map(plain));
     }
     details.maybe("Requests", quantities(&container["resources"]["requests"]));
     details.maybe("Limits", quantities(&container["resources"]["limits"]));

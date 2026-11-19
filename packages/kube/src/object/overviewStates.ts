@@ -26,7 +26,9 @@ export class OverviewStates {
   }
 
   toggle(kind: string, part: string): void {
-    this.#flip(kind, part);
+    const toggled = new Set(this.#toggled.get(kind));
+    if (!toggled.delete(part)) toggled.add(part);
+    this.#toggled.set(kind, toggled);
     this.changes.emit();
   }
 
@@ -98,12 +100,6 @@ export class OverviewStates {
     chosen.set(id, open);
     this.#chosen.set(kind, chosen);
     return changed;
-  }
-
-  #flip(kind: string, part: string): void {
-    const toggled = new Set(this.#toggled.get(kind));
-    if (!toggled.delete(part)) toggled.add(part);
-    this.#toggled.set(kind, toggled);
   }
 
   sort(kind: string, list: string): Sort | null {
