@@ -195,6 +195,56 @@ test("a plan names, of the sets of locks whose absence shows what a change gives
   ]);
 });
 
+test("a plan that asks for the name though it lowers nothing as it is names a set of locks under which it lowers, as Rust's words test says", () => {
+  const cleared = (mode: Mode) => {
+    const access = new MockAccess(false, {
+      readOnly: new Set(["qa"]),
+      types: { qa: "staging" },
+    });
+    access.setMode("qa", mode);
+    const { from, to, beneath } = weigh(access, "qa", CLEAR_MODE);
+    return words("qa", CLEAR_MODE, from, to, beneath).consequences;
+  };
+  const asks =
+    "When its kubeconfig's lock goes and its kubeconfig's type goes, its first write or exec asks what qa is.";
+  expect(cleared("guarded")).toEqual([
+    "Every write, exec and shell is refused; reads, dry runs and port-forwards go on.",
+    asks,
+  ]);
+  expect(
+    cleared("read-only"),
+    "of the sets that leave it guarded, the one that leaves it unmarked",
+  ).toEqual(["It stays read-only as its kubeconfig says.", asks]);
+
+  const production = new MockAccess(false, {
+    readOnly: new Set(),
+    types: { qa: "production" },
+  });
+  const { from, to, beneath } = weigh(production, "qa", mark("development"));
+  expect(
+    words("qa", mark("development"), from, to, beneath).consequences.some(
+      (said) => said.startsWith("When"),
+    ),
+    "a change that lowers the context as it is says nothing its type's going would repeat",
+  ).toBe(false);
+
+  const file = "/etc/twigo/policy.json";
+  const filed: ContextAccess = {
+    ...chosen("read-write"),
+    source: { kind: "policyFile", file, pattern: "kind-a" },
+  };
+  const development = typedAs("read-write", "development");
+  expect(
+    words("kind-a", mark("development"), filed, filed, [
+      { gone: [{ kind: "policyFile", file }], from: UNMARKED, to: development },
+    ]).consequences,
+    "an admin's read-write entry over a context nobody marked, which the mock's policy file never sets",
+  ).toEqual([
+    `It stays read-write by kind-a in ${file}.`,
+    `When ${file} no longer sets its mode, it will be read-write.`,
+  ]);
+});
+
 test("an unlock's plan says nothing of the locks going, as it ends by itself before any does", () => {
   const access = new MockAccess(false);
   access.setMode("analytics", null);

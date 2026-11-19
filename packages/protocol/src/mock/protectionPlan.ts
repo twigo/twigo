@@ -189,7 +189,7 @@ function consequences(
   } else {
     said.push(...asks(context, after.mode, was));
   }
-  if (!unlock) said.push(...beneath(context, after, views));
+  if (!unlock) said.push(...beneath(context, before, after, views));
   if (after.source.kind === "user" && after.source.overrides !== null) {
     const { mode, source }: Lock = after.source.overrides;
     said.push(`It sets aside the ${mode} ${lockedBy(source)}.`);
@@ -203,22 +203,30 @@ function consequences(
 }
 
 /**
- * What the change gives once locks that hold the context go, where that is
- * not what it gives now: the person's mode and type outlive them. Of the
- * sets of locks whose absence shows it, the one that leaves the context
- * least strict, and of those the smallest.
+ * What the change gives once locks that hold the context go: the person's
+ * mode and type outlive them. Where it asks for the name though it lowers
+ * nothing as it is, of the sets of locks under which it lowers the context,
+ * else of those under which it gives other than now, the one that leaves
+ * the context least strict, and of those the smallest, as
+ * `actions::protection::beneath` in Rust says.
  */
 function beneath(
   context: string,
+  before: ContextAccess,
   after: ContextAccess,
   views: readonly Beneath[],
 ): string[] {
   const unmarked = ({ source }: ContextAccess) => source.kind === "unmarked";
   const strictness = ({ to }: Beneath) =>
     STRICTNESS[to.mode] * 2 + (unmarked(to) ? 0 : 1);
+  const now = { from: before, to: after };
+  const hidden =
+    lowering(context, before, [now, ...views]).kind === "typed" && keeps(now);
   const view = views
-    .filter(
-      ({ to }) => to.mode !== after.mode || unmarked(to) !== unmarked(after),
+    .filter((view) =>
+      hidden
+        ? !keeps(view)
+        : view.to.mode !== after.mode || unmarked(view.to) !== unmarked(after),
     )
     .reduce<Beneath | undefined>(
       (least, next) =>
