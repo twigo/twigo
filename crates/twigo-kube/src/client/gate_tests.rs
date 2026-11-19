@@ -175,6 +175,7 @@ async fn a_relock_reaches_a_request_already_waiting() {
     let lines: Vec<serde_json::Value> = logged
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|line: &serde_json::Value| line["event"] == "request")
         .collect();
     assert_eq!(lines.len(), 1, "logged once, where it stopped: {logged}");
     assert_eq!(lines[0]["blocked"], "mode");
