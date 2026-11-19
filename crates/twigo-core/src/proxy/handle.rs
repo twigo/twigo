@@ -77,7 +77,11 @@ async fn serve(
     };
 
     let (clients, actor) = core.proxy.clients(core, &holder).await?;
-    let attributes = actor.attributes(&request).await;
+    let attributes = tokio::select! {
+        biased;
+        () = holder.ended.cancelled() => return Err(Refusal::revoked()),
+        attributes = actor.attributes(&request) => attributes,
+    };
     let (parts, ()) = request.into_parts();
     // Before anything is sent, so a relock meanwhile reaches what it opens.
     let changes = Changes::new(&core.policy, &core.catalog.subscribe());

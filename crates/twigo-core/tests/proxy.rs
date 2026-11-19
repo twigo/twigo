@@ -2832,6 +2832,13 @@ async fn a_write_whose_body_ends_after_its_process_did_is_neither_sent_nor_asked
             "application/merge-patch+json",
             json!({ "spec": { "replicas": 2 } }),
         ),
+        (
+            Mode::Guarded,
+            "PATCH",
+            "/apis/stable.example.com/v1/namespaces/a/crontabs/c?dryRun=All",
+            "application/merge-patch+json",
+            json!({ "spec": { "schedule": "* * * * *" } }),
+        ),
     ] {
         core.policy.set_mode("kind-a", Some(mode)).unwrap();
         let process = Process::start(&core, Some("main")).await;
