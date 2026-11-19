@@ -16,7 +16,7 @@ import {
   type Plan,
   type PlanRequest,
 } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { ConfirmHost } from "../operations/ConfirmHost";
 import { inWorkbench, testWorkbench } from "../testing";
@@ -97,8 +97,8 @@ const DELETE = ask(9, {
   lastingMinutes: null,
 });
 
-async function broker() {
-  const mock = createMockBackend("ready");
+async function broker(scenario: MockScenario = "ready") {
+  const mock = createMockBackend(scenario);
   const answers: unknown[] = [];
   const control: {
     emit: (event: ApprovalEvent) => void;
@@ -107,7 +107,7 @@ async function broker() {
   } = { emit: () => undefined, refuse: undefined, hold: undefined };
   const backend: Backend = {
     async invoke(command, request) {
-      if (command === "command_plan") return PLAN;
+      if (command === "command_plan" && scenario === "ready") return PLAN;
       if (command === "command_cancel") return null;
       if (command !== "approval_answer") return mock.invoke(command, request);
       answers.push(request);
@@ -123,7 +123,7 @@ async function broker() {
       return Promise.resolve(null);
     },
   };
-  const workbench = await testWorkbench("ready", backend);
+  const workbench = await testWorkbench(scenario, backend);
   workbench.approvals.registerDetails({
     component: ({ detail }) => <p>Detail of a {detail.kind}</p>,
     wide: ({ kind }) => kind === "diff",
@@ -580,6 +580,36 @@ test("an ask on screen that a plan's confirmation then covers is withdrawn witho
     key: "Escape",
   });
   await expect(outcome).resolves.toEqual({ state: "cancelled" });
+});
+
+test("an ask that arrives while the question of what a context is is open waits behind it, and one withdrawn there leaves without a word", async () => {
+  const { workbench, raise, withdraw } = await broker("protection");
+  const info = vi.spyOn(notify, "info");
+  const outcome = workbench.operations.run(
+    { action: "cordon", space: "qa", node: "qa-node-1", unschedulable: true },
+    { icon: Trash2 },
+  );
+  await waitFor(() => {
+    expect(titles()).toEqual(["What is qa?"]);
+  });
+
+  raise(ask(1), ask(2));
+  expect(titles()).toEqual(["What is qa?"]);
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(dialog("What is qa?"), { key: "Escape" });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
+    expect(titles()).toEqual([
+      "Allow Terminal 2 to patch deployments/web in default on staging?",
+    ]);
+  });
+  withdraw(2);
+  expect(info).toHaveBeenCalledExactlyOnceWith(
+    "Terminal 2 no longer asks to patch deployments/web in default on staging",
+    expect.anything(),
+  );
 });
 
 async function clickOutside() {

@@ -21,7 +21,8 @@ const MONO = "font-mono text-2xs wrap-anywhere select-text";
  * in the order they came and saying how many wait, in its context's colour
  * as a plan's dialog has it. Deny is what Escape does, and focus starts on
  * it, or on the typed name, so a stray Enter allows nothing. An ask waits
- * while a plan's confirmation is open, so it takes neither that dialog's
+ * while a plan's confirmation or the question of what a context is, which a
+ * command of the person's asks, is open, so it takes neither that dialog's
  * focus nor its Escape, and it shows once that dialog is gone. An ask of a
  * context nobody marked asks what it is, with the process and what it asked
  * to do, and answers its type, or Deny. It comes
@@ -33,7 +34,7 @@ export function ApprovalHost() {
   const { approvals, operations } = useWorkbench();
   useChanges(approvals.changes);
   useChanges(operations.changes);
-  const ask = operations.asking === undefined ? approvals.current : undefined;
+  const ask = operations.confirming ? undefined : approvals.current;
   const returnFocus = useReturnFocus(ask !== undefined);
   if (!ask) return null;
   return (

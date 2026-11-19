@@ -156,6 +156,11 @@ export class Operations {
     return this.#marking;
   }
 
+  /** Whether a plan's confirmation or the question of what a context is is open, which the asks of processes wait behind. */
+  get confirming(): boolean {
+    return this.#asking !== undefined || this.#marking !== undefined;
+  }
+
   /** The same array until the next change, for `useSyncExternalStore`. */
   get running(): readonly Running[] {
     return this.#all;
