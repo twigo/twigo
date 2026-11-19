@@ -3,8 +3,8 @@
 //! cluster, so a plan has no writes and no kubectl command, and it runs only
 //! while the context stands as it was planned.
 
-use twigo_ipc::{Environment, IpcError, LockSource, Mode, ModeSource};
-use twigo_policy::{Change, PlannedChange, UNLOCK};
+use twigo_ipc::{ContextAccess, Environment, IpcError, LockSource, Mode, ModeSource};
+use twigo_policy::{Change, Outlived, PlannedChange, UNLOCK};
 
 use crate::bus::{self, Planned};
 use crate::{Core, errors};
@@ -105,8 +105,8 @@ fn words(context: &str, planned: &PlannedChange) -> Words {
 }
 
 /// What the change does to what is asked: what stops being asked or
-/// refused, or starts to be, a lock the person's mode sets aside, and the
-/// end of an unlock.
+/// refused, or starts to be, what it gives once the locks go, a lock the
+/// person's mode sets aside, and the end of an unlock.
 fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
     let PlannedChange { before, after, .. } = planned;
     let unlock = planned.change == Change::Unlock;
@@ -131,6 +131,9 @@ fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
     } else {
         said.extend(asks(context, after.mode, was));
     }
+    if !unlock {
+        said.extend(beneath(context, planned));
+    }
     if let ModeSource::User {
         overrides: Some(lock),
     } = &after.source
@@ -150,6 +153,32 @@ fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
         said.push("Its unlock ends.".to_owned());
     }
     said
+}
+
+/// What the change gives once the locks that hold the context go, where
+/// that is not what it gives now: a type outlives them.
+fn beneath(context: &str, planned: &PlannedChange) -> Option<String> {
+    let (now, bare) = (&planned.after, &planned.beneath.after);
+    let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
+    if bare.mode == now.mode && unmarked(bare) == unmarked(now) {
+        return None;
+    }
+    let gone: Vec<String> = planned
+        .beneath
+        .locks
+        .iter()
+        .map(|lock| match lock {
+            Outlived::PolicyFile { file } => format!("{file} no longer sets its mode"),
+            Outlived::Kubeconfig => "its kubeconfig's lock goes".to_owned(),
+            Outlived::Provider => "its provider's lock goes".to_owned(),
+        })
+        .collect();
+    let then = if unmarked(bare) {
+        format!("its first write or exec asks what {context} is")
+    } else {
+        format!("it will be {}", bare.mode.name())
+    };
+    Some(format!("When {}, {then}.", gone.join(" and ")))
 }
 
 /// What `mode` asks of the person and of processes, said as what changes
@@ -250,7 +279,8 @@ fn name(environment: Environment) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use twigo_ipc::{ContextAccess, Lock};
+    use twigo_ipc::Lock;
+    use twigo_policy::Beneath;
 
     use super::*;
 
@@ -267,6 +297,11 @@ mod tests {
         let policy = twigo_policy::Policy::open();
         policy.set_mode("kind-a", Some(Mode::ReadOnly)).unwrap();
         let mut planned = policy.plan("kind-a", change).unwrap();
+        planned.beneath = Beneath {
+            locks: Vec::new(),
+            before: before.clone(),
+            after: after.clone(),
+        };
         planned.before = before;
         planned.after = after;
         planned
@@ -399,5 +434,67 @@ mod tests {
                 planned.after
             );
         }
+    }
+
+    #[test]
+    fn a_change_a_lock_hides_says_what_it_gives_once_the_lock_goes() {
+        let beneath = |change, now: ContextAccess, bare, locks| {
+            let mut planned = planned(change, now.clone(), now.clone());
+            planned.beneath = Beneath {
+                locks,
+                before: now,
+                after: bare,
+            };
+            planned
+        };
+        let provided = beneath(
+            Change::Type {
+                environment: Some(Environment::Development),
+            },
+            access(Mode::Guarded, ModeSource::Provider),
+            access(
+                Mode::ReadWrite,
+                ModeSource::Environment {
+                    environment: Environment::Development,
+                },
+            ),
+            vec![Outlived::Provider],
+        );
+        assert_eq!(
+            consequences("kind-a", &provided),
+            [
+                "It stays guarded as its provider says.",
+                "When its provider's lock goes, it will be read-write.",
+            ]
+        );
+        let cleared = beneath(
+            Change::Type { environment: None },
+            access(Mode::ReadOnly, ModeSource::Kubeconfig),
+            access(Mode::Guarded, ModeSource::Unmarked),
+            vec![Outlived::Kubeconfig],
+        );
+        assert_eq!(
+            consequences("kind-a", &cleared),
+            [
+                "It stays read-only as its kubeconfig says.",
+                "When its kubeconfig's lock goes, its first write or exec asks what kind-a is.",
+            ]
+        );
+        let mut unlock = beneath(
+            Change::Unlock,
+            access(Mode::ReadOnly, ModeSource::Kubeconfig),
+            access(Mode::Guarded, ModeSource::Unmarked),
+            vec![Outlived::Kubeconfig],
+        );
+        unlock.after = ContextAccess {
+            unlocked_until: Some(1),
+            ..access(Mode::Guarded, ModeSource::Kubeconfig)
+        };
+        assert!(
+            !consequences("kind-a", &unlock)
+                .iter()
+                .any(|said| said.starts_with("When")),
+            "an unlock ends by itself before any lock goes"
+        );
     }
 }

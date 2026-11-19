@@ -989,24 +989,49 @@ async fn under_a_policy_file_a_type_asks_as_it_would_with_no_lock_but_itself() {
     let typed = |context: &str| Friction::Typed {
         text: context.to_owned(),
     };
+    let file = dir.path().join("policy.json").display().to_string();
+    let gives = |then: &str| Some(format!("When {file} no longer sets its mode{then}."));
+    let read_write = gives(", it will be read-write");
     let cases = [
-        ("kind-local", Environment::Staging, Friction::AtOnce),
-        ("kind-local", Environment::Development, typed("kind-local")),
-        ("kind-prod", Environment::Development, typed("kind-prod")),
+        (
+            "kind-local",
+            Environment::Staging,
+            Friction::AtOnce,
+            gives(", it will be guarded"),
+        ),
+        (
+            "kind-local",
+            Environment::Development,
+            typed("kind-local"),
+            read_write.clone(),
+        ),
+        (
+            "kind-prod",
+            Environment::Development,
+            typed("kind-prod"),
+            read_write,
+        ),
         (
             "kind-locked",
             Environment::Development,
             typed("kind-locked"),
+            gives(" and its kubeconfig's lock goes, it will be read-write"),
         ),
-        ("kind-unmarked", Environment::Production, Friction::AtOnce),
+        (
+            "kind-unmarked",
+            Environment::Production,
+            Friction::AtOnce,
+            None,
+        ),
     ];
-    for (context, environment, friction) in cases {
+    for (context, environment, friction, then) in cases {
         let request = PlanRequest::SetEnvironment {
             context: context.to_owned(),
             environment: Some(environment),
         };
         let plan = core.command_plan("main", request).await.unwrap();
         assert_eq!(plan.friction, friction, "{context} as {environment:?}");
+        assert_eq!(plan.consequences.get(1), then.as_ref(), "{context}");
         let typed = match plan.friction {
             Friction::Typed { text } => Some(text),
             _ => None,
@@ -1038,6 +1063,13 @@ async fn a_type_under_a_kubeconfig_s_lock_asks_as_what_it_gives_once_the_lock_go
         text: "kind-locked".to_owned(),
     };
     assert_eq!(plan.friction, typed);
+    assert_eq!(
+        plan.consequences,
+        [
+            "It stays read-only as its kubeconfig says.",
+            "When its kubeconfig's lock goes, it will be read-write.",
+        ]
+    );
     let execute = Execute {
         plan: plan.id,
         typed: Some("kind-locked".to_owned()),

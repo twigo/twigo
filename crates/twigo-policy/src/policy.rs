@@ -149,8 +149,22 @@ pub struct PlannedChange {
 /// outlives them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Beneath {
+    /// The locks that hold the context now.
+    pub locks: Vec<Outlived>,
     pub before: ContextAccess,
     pub after: ContextAccess,
+}
+
+/// A lock that a person's type outlives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outlived {
+    /// The admin's policy file sets the context's mode.
+    PolicyFile {
+        file: String,
+    },
+    /// Its kubeconfig's `twigo.readOnly`.
+    Kubeconfig,
+    Provider,
 }
 
 impl PlannedChange {
@@ -577,6 +591,7 @@ impl Policy {
             change,
             after: self.resolved(&changed, context, Some(metadata), now),
             beneath: Beneath {
+                locks: self.locks(context, &metadata),
                 before: bare(&held),
                 after: bare(&changed),
             },
@@ -588,6 +603,17 @@ impl Policy {
         self.relocked(context, ended);
         refuse_unlock(context, change, &planned.before)?;
         Ok(planned)
+    }
+
+    /// The locks that a person's type outlives that hold `context`.
+    fn locks(&self, context: &str, metadata: &Metadata) -> Vec<Outlived> {
+        let file = match self.file.mode(context) {
+            Some((_, ModeSource::PolicyFile { file, .. })) => Some(Outlived::PolicyFile { file }),
+            _ => None,
+        };
+        let kubeconfig = metadata.read_only.then_some(Outlived::Kubeconfig);
+        let provider = metadata.provider.map(|_| Outlived::Provider);
+        [file, kubeconfig, provider].into_iter().flatten().collect()
     }
 
     /// Makes a change a person confirmed through `friction`, while the
