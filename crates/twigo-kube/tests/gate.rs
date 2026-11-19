@@ -18,6 +18,8 @@ use twigo_policy::Policy;
 struct Server {
     port: u16,
     seen: Arc<Mutex<Vec<String>>>,
+    /// Each request's `User-Agent` lines.
+    agents: Arc<Mutex<Vec<Vec<String>>>>,
     /// Requests whose path ends in `/hold` wait for it.
     release: Arc<Notify>,
 }
@@ -28,6 +30,7 @@ impl Server {
         let server = Self {
             port: listener.local_addr().unwrap().port(),
             seen: Arc::default(),
+            agents: Arc::default(),
             release: Arc::new(Notify::new()),
         };
         let serving = server.clone();
@@ -54,6 +57,13 @@ impl Server {
                 let line = head.lines().next().unwrap_or_default();
                 let line = line.trim_end_matches(" HTTP/1.1").to_owned();
                 let hold = line.ends_with("/hold");
+                let agents = head
+                    .lines()
+                    .filter_map(|header| header.split_once(": "))
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+                    .map(|(_, value)| value.to_owned())
+                    .collect();
+                self.agents.lock().unwrap().push(agents);
                 self.seen.lock().unwrap().push(line);
                 if hold {
                     self.release.notified().await;
@@ -187,4 +197,35 @@ async fn another_actor_s_clients_share_the_counter_and_keep_their_own_rules() {
     send(&clients.api, "POST", CONFIGMAPS).await.unwrap();
     assert_eq!(server.seen().len(), 2);
     assert_eq!(clients.usage().borrow().requests.held, 0);
+}
+
+#[tokio::test]
+async fn every_request_says_it_is_twigo_s_and_whose_after_what_it_came_with() {
+    let server = Server::start().await;
+    let policy = in_mode(Mode::ReadWrite);
+    let clients = server.clients("", &policy, Budgets::default());
+    let terminal = clients.actor(Actor::Terminal).unwrap();
+    for client in [
+        &clients.api,
+        &clients.sessions,
+        &terminal.api,
+        &terminal.sessions,
+    ] {
+        send(client, "GET", "/api/v1/pods").await.unwrap();
+    }
+    let came = "kubectl/v1.34.1 (darwin/arm64) kubernetes/0000000";
+    let request = Request::get("/api/v1/pods")
+        .header("user-agent", came)
+        .body(Vec::new())
+        .unwrap();
+    terminal.api.request_text(request).await.unwrap();
+
+    let version = env!("CARGO_PKG_VERSION");
+    let ui = vec![format!("twigo/{version} (ui)")];
+    let theirs = vec![format!("twigo/{version} (terminal)")];
+    let appended = vec![format!("{came} twigo/{version} (terminal)")];
+    assert_eq!(
+        *server.agents.lock().unwrap(),
+        [ui.clone(), ui, theirs.clone(), theirs, appended]
+    );
 }

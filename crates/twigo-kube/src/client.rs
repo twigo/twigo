@@ -9,6 +9,7 @@ mod identity;
 pub(crate) mod idp;
 mod proxy;
 mod retry;
+mod user_agent;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,6 +39,7 @@ use counter::{Counter, CounterLayer};
 use dial::Dialer;
 use identity::Identity;
 use retry::RetryLayer;
+use user_agent::UserAgentLayer;
 
 use crate::credentials::{Provider, token_or_basic};
 
@@ -133,6 +135,7 @@ where
             .option_layer(config.auth_layer()?)
             .option_layer(auth())
             .layer(config.extra_headers_layer()?)
+            .layer(UserAgentLayer::of(gate.actor()))
             .layer(CounterLayer(self.counter.clone(), party(gate.actor())))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
             .layer(RetryLayer)
@@ -145,6 +148,7 @@ where
             .option_layer(config.auth_layer()?)
             .option_layer(auth())
             .layer(config.extra_headers_layer()?)
+            .layer(UserAgentLayer::of(gate.actor()))
             .layer(gate.recheck())
             .service(self.sessions.clone());
         Ok(ActorClients {

@@ -814,9 +814,14 @@ async fn the_server_sees_the_request_as_kubectl_sent_it_without_the_proxy_s_own_
     );
     assert_eq!(seen.headers.get("kubectl-command").unwrap(), "kubectl get");
     assert_eq!(seen.headers.get("kubectl-session").unwrap(), "5f0c");
+    let version = env!("CARGO_PKG_VERSION");
+    let agents: Vec<_> = seen.headers.get_all("user-agent").iter().collect();
     assert_eq!(
-        seen.headers.get("user-agent").unwrap(),
-        "kubectl/v1.34.1 (darwin/arm64) kubernetes/0000000"
+        agents,
+        [
+            format!("kubectl/v1.34.1 (darwin/arm64) kubernetes/0000000 twigo/{version} (terminal)")
+                .as_str()
+        ]
     );
     assert_eq!(
         seen.headers.get("accept").unwrap(),
@@ -827,6 +832,17 @@ async fn the_server_sees_the_request_as_kubectl_sent_it_without_the_proxy_s_own_
             .keys()
             .all(|name| !name.as_str().starts_with("x-forwarded"))
     );
+
+    let mut bare = process
+        .request("GET", "kind-a", "/api/v1/namespaces/a/configmaps")
+        .body(empty())
+        .unwrap();
+    bare.headers_mut().remove("user-agent");
+    let (response, _connection) = send(process.at(), bare).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let seen = fake.seen();
+    let agents: Vec<_> = seen[1].headers.get_all("user-agent").iter().collect();
+    assert_eq!(agents, [format!("twigo/{version} (terminal)").as_str()]);
 }
 
 #[tokio::test]

@@ -5,8 +5,8 @@
 //! and `Host` never reach the server: kube's credential layers replace
 //! `Authorization` only when the context has a token or a password, and
 //! hyper-util sets `Host` only where none is set. Everything else passes as
-//! it came, `User-Agent`, `Kubectl-Command` and the WebSocket and SPDY
-//! headers included, and nothing is added.
+//! it came, `Kubectl-Command` and the WebSocket and SPDY headers included,
+//! and the actor's clients append Twigo's product to `User-Agent`.
 
 use http::header::{
     AUTHORIZATION, CONNECTION, CONTENT_LENGTH, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE,
