@@ -23,7 +23,6 @@ export * from "./components/card";
 export * from "./components/chip";
 export * from "./components/copy-button";
 export * from "./components/count";
-export * from "./components/entry";
 export * from "./components/cut-in-the-middle";
 export * from "./components/icon-button";
 export * from "./components/key-hints";

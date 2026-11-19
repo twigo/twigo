@@ -39,6 +39,30 @@ export function humanDuration(ms: number): string {
   return `${years}y`;
 }
 
+/**
+ * The widest text `humanDuration` gives anywhere in the range of ages that
+ * `ms` falls in, as its forms change with the range: seconds, minutes and
+ * seconds, minutes, hours and minutes, hours, days and hours, days, years and
+ * days, years, and `<invalid>` for a time ahead of now by 2 s or more, which a
+ * clock behind the server's gives. Digits are as wide as each other in tabular
+ * figures, so the room it takes is the room any age of the range takes.
+ */
+export function widestDuration(ms: number): string {
+  const seconds = Math.trunc(ms / 1000);
+  if (seconds < -1) return "<invalid>";
+  if (seconds < 2 * MINUTE) return "119s";
+  const minutes = Math.trunc(seconds / MINUTE);
+  if (minutes < 10) return "9m59s";
+  if (minutes < 3 * 60) return "179m";
+  const hours = Math.trunc(seconds / HOUR);
+  if (hours < 8) return "7h59m";
+  if (hours < 48) return "47h";
+  if (hours < 8 * 24) return "7d23h";
+  if (seconds < 2 * YEAR) return "729d";
+  if (seconds < 8 * YEAR) return "7y364d";
+  return "99y";
+}
+
 const UNITS = /^(?:(\d+)y)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/;
 
 /**

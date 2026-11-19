@@ -24,21 +24,17 @@ const RESTARTS = "Restarts";
 /**
  * The cells of an object's vitals (ARCHITECTURE 4.3): a caption over a value,
  * the same height whatever each says, a tone only where a value is abnormal.
- * As a strip under the views it is one row of up to four equal cells; as the
- * full page's summary it is two by two. The cells are equal, so the first one's
- * width is the room each takes its measure's words in.
+ * Under the views it is one row of up to four equal cells, on the full page
+ * too. The cells are equal, so the first one's width is the room each takes its
+ * measure's words in.
  */
 export function Vitals({
   cells,
   verdict,
-  layout,
-  className,
 }: {
   cells: readonly VitalCell[];
   /** A row has one alarm, so a restart that is news stays plain beside the verdict's tone, or once the object finished, or beside a vital that is toned already. */
   verdict: Verdict | undefined;
-  layout: "strip" | "grid";
-  className?: string;
 }) {
   const [first, setFirst] = useState<HTMLElement | null>(null);
   const room = useClientWidth(first);
@@ -55,12 +51,7 @@ export function Vitals({
   return (
     <dl
       aria-label="Vitals"
-      className={cn(
-        layout === "strip"
-          ? "grid grid-cols-4 gap-x-2 px-3.5 shadow-[inset_0_-1px_0_var(--border-subtle)]"
-          : "grid grid-cols-2 gap-x-3 gap-y-1 px-3.5",
-        className,
-      )}
+      className="grid grid-cols-4 gap-x-2 px-3.5 shadow-[inset_0_-1px_0_var(--border-subtle)]"
     >
       {cells.map((cell, index) => (
         <Cell

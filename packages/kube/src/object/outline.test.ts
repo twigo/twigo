@@ -1,10 +1,5 @@
 import { expect, test } from "vitest";
-import {
-  parseText,
-  type Overview,
-  type Section,
-  type TextFilter,
-} from "@twigo/protocol";
+import type { Overview, Section } from "@twigo/protocol";
 import { outlineOf } from "./outline";
 import { OverviewStates } from "./overviewStates";
 
@@ -84,18 +79,4 @@ test("a fold the person remembered for the kind never hides a finding on the ful
   expect(open(first, "a/b")).toBe(false);
   expect(open(second, "a/b")).toBe(true);
   expect(open(second, "x/y")).toBe(true);
-});
-
-const filtered = (text: string, usage = false): string[] => {
-  const filter: TextFilter | null = parseText(text);
-  return outlineOf(PAGE, usage, true, filter).map(({ id }) => id);
-};
-
-test("under a filter the index lists the sections the filter keeps, a node's usage by its title", () => {
-  expect(filtered("worker")).toEqual(["core.placement"]);
-  expect(filtered("conditions")).toEqual(["core.conditions"]);
-  expect(filtered("nothing like it")).toEqual([]);
-  expect(filtered("usage", true)).toEqual(["core.usage"]);
-  expect(filtered("a")).toContain("core.metadata");
-  expect(outlineOf(PAGE, false, true, null)).toHaveLength(4);
 });

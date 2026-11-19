@@ -114,9 +114,32 @@ export function withScreenSize(width = 800) {
     resize(target: Element, to: number) {
       widths.set(target, to);
       act(() => {
-        for (const report of watchers.get(target) ?? [])
-          report([entry(target)], {} as ResizeObserver);
+        // The frame that a width hook asks for comes as the report ends.
+        const frames: FrameRequestCallback[] = [];
+        const request = globalThis.requestAnimationFrame;
+        globalThis.requestAnimationFrame = (frame) => frames.push(frame);
+        try {
+          for (const report of watchers.get(target) ?? [])
+            report([entry(target)], {} as ResizeObserver);
+        } finally {
+          globalThis.requestAnimationFrame = request;
+        }
+        for (const frame of frames) frame(0);
       });
     },
   };
+}
+
+/**
+ * Sizes the hidden copies of a header's stages to `width`, so that each
+ * stage has its room: `withScreenSize` makes every element as wide as the
+ * screen, and no stage of a line is narrower than the line itself then.
+ */
+export function narrowHeaderCopies(
+  size: ReturnType<typeof withScreenSize>,
+  header: ParentNode,
+  width = 100,
+) {
+  for (const copy of header.querySelectorAll("[inert] > [data-stage]"))
+    size.resize(copy, width);
 }

@@ -130,14 +130,18 @@ const labels = (workbench: Workbench) =>
     ({ label, description }) => [label, description] as const,
   );
 
-test("f on a pod with one port starts it at once and opens its tab", async () => {
+test("f on a pod with one port asks which, and its pick starts the forward and opens its tab", async () => {
   const { workbench, calls } = await listed();
   const name = await selectFirst();
   letter("f");
   await settle(10);
   const [asked] = calls("forward_ports");
   expect(asked).toMatchObject({ space: "prod-eu", gvr: PODS, name });
-  expect(workbench.quickAccess.session).toBeUndefined();
+  expect(labels(workbench)).toEqual([
+    ["http 8080 → localhost:8080", "default · app"],
+  ]);
+  expect(calls("forward_start")).toEqual([]);
+  await pick(workbench, "8080");
   expect(calls("forward_start")).toEqual([
     { target: asked, port: 8080, local: null },
   ]);
@@ -196,11 +200,12 @@ test("a port that is forwarded already goes to its forward, never to a second", 
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
 });
 
-test("f on a pod whose port is forwarded goes to that forward without a pick or a start", async () => {
+test("f on a pod whose port is forwarded asks, shows it forwarded, and its pick goes to that forward, never a second", async () => {
   const { workbench, calls } = await listed();
   await selectFirst();
   letter("f");
   await settle(10);
+  await pick(workbench, "8080");
   act(() => {
     workbench.editors.close(pfUri({ space: "prod-eu", id: 1 }));
   });
@@ -210,21 +215,24 @@ test("f on a pod whose port is forwarded goes to that forward without a pick or 
   });
   letter("f");
   await settle(10);
+  expect(workbench.quickAccess.session?.pick?.items[0]?.state).toBeDefined();
+  await pick(workbench, "8080");
   expect(calls("forward_start")).toHaveLength(1);
-  expect(workbench.quickAccess.session).toBeUndefined();
   expect(workbench.editors.active).toBe(pfUri({ space: "prod-eu", id: 1 }));
 });
 
-test("⇧F asks which port even where the pod has one", async () => {
+test("⇧F is no key and Forward Port… no command, so a pod's key asks once and no other does", async () => {
   const { workbench, calls } = await listed();
   await selectFirst();
   letter("f", { shiftKey: true });
   await settle(10);
-  expect(labels(workbench)).toEqual([
-    ["http 8080 → localhost:8080", "default · app"],
-  ]);
-  await pick(workbench, "8080");
-  expect(calls("forward_start")).toHaveLength(1);
+  expect(workbench.quickAccess.session).toBeUndefined();
+  expect(calls("forward_ports")).toEqual([]);
+  expect(
+    workbench.commands
+      .all()
+      .filter(({ id }) => id.startsWith("k8s.resource.forward")),
+  ).toHaveLength(1);
 });
 
 test.each([
@@ -255,7 +263,7 @@ test.each([
     letter("f");
     await settle(6);
     expect(items.includes("Forward")).toBe(forwardable);
-    expect(items.includes("Forward Port…")).toBe(forwardable);
+    expect(items.includes("Forward Port…")).toBe(false);
     expect(invoke.mock.calls.some(([name]) => name === "forward_ports")).toBe(
       forwardable,
     );
@@ -305,7 +313,8 @@ test.each([
       target,
     );
     await settle(8);
-    if (workbench.quickAccess.session?.pick) await pick(workbench, "80");
+    const asking = workbench.quickAccess.session?.pick;
+    if (asking) await pick(workbench, asking.items[0]?.id);
     await run;
     await settle(6);
     expect(calls("forward_ports")).toEqual([target]);
@@ -363,7 +372,7 @@ test("the object editors of a Service and a workload offer Forward in their head
   expect(await titleHas("k8s://prod-eu//v1/nodes/prod-eu-node-1")).toBe(false);
 });
 
-test("Forward in an object editor's header starts the object's port", async () => {
+test("Forward in an object editor's header asks which port, and its pick starts that one", async () => {
   const { workbench, calls } = await listed();
   act(() => {
     workbench.editors.open(
@@ -373,6 +382,7 @@ test("Forward in an object editor's header starts the object's port", async () =
   await settle(8);
   fireEvent.click(screen.getByRole("button", { name: "Forward" }));
   await settle(10);
+  await pick(workbench, "8080");
   expect(calls("forward_start")).toEqual([
     {
       target: {
@@ -569,13 +579,14 @@ test("a start that fails for another reason than a busy port or the mode is show
   expect(icon?.getAttribute("class")).toContain("text-error");
 });
 
-test("two invocations at once make one forward and one tab, and the second says nothing of a busy port", async () => {
+test("two invocations at once ask once, and the pick makes one forward and one tab", async () => {
   const { workbench, calls, backend } = await listed();
   await selectFirst();
   letter("f");
   letter("f");
   await settle(10);
-  expect(calls("forward_start")).toHaveLength(2);
+  await pick(workbench, "8080");
+  expect(calls("forward_start")).toHaveLength(1);
   const forwards = await backend.subscribe(
     "forwards_watch",
     null,

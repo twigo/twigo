@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
 import type { ObjectQuery, ObjectRef, Row } from "@twigo/protocol";
 import { ActionRow, cn, IconButton, PropertyList } from "@twigo/ui";
-import { humanDuration } from "@twigo/utils";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import { columnRule } from "./columns";
+import { columnRule, rowFinished, rowTone, statusColumn } from "./columns";
 import { useResources } from "./discovery";
-import { measureText } from "./list/metrics";
+import { decideRows } from "./list/alarm";
+import { CellView, type ShownColumn } from "./list/cells";
 import { noContainerRuns } from "./object/noContainerRuns";
 import { ObjectHeader } from "./object/ObjectHeader";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
@@ -21,7 +21,6 @@ import { objectOf, type Selected } from "./selection";
 import type { ListServices } from "./services";
 import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
-import { useNow } from "./useNow";
 import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
@@ -74,6 +73,12 @@ export function Details({
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
   const { group, version, resource } = gvr;
+  const object = objectUri({
+    space,
+    gvr,
+    ...(namespace !== undefined && { namespace }),
+    name,
+  });
   const query: ObjectQuery = useMemo(
     () => ({
       space,
@@ -144,7 +149,6 @@ export function Details({
       scope.dispose();
     };
   }, [keys, element, idle, page, filtered, uri]);
-  const now = useNow();
   const lookup = keys.lookup(element);
   const measured = useSyncExternalStore(selection.watch, () =>
     selection.get(uri),
@@ -198,6 +202,7 @@ export function Details({
         className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
       />
       <ObjectHeader
+        object={object}
         gvr={gvr}
         kind={kind}
         name={name}
@@ -218,14 +223,7 @@ export function Details({
               icon={SquareArrowOutUpRight}
               label="Open in an editor"
               onClick={() => {
-                onOpen(
-                  objectUri({
-                    space,
-                    gvr,
-                    ...(namespace !== undefined && { namespace }),
-                    name,
-                  }),
-                );
+                onOpen(object);
               }}
             />
             <IconButton
@@ -261,7 +259,7 @@ export function Details({
         uri={uri}
         kind={kind}
       />
-      {page && <Vitals cells={strip} verdict={verdict} layout="strip" />}
+      {page && <Vitals cells={strip} verdict={verdict} />}
       <div className="min-h-0 flex-1 overflow-auto">
         {snapshot.overview || tab !== "overview" ? (
           <ObjectContent
@@ -294,7 +292,7 @@ export function Details({
         ) : (
           <>
             <ViewStatus status={snapshot.status} what="the object" inline />
-            <Cells selected={selected} row={cells} now={now} />
+            <Cells selected={selected} row={cells} />
           </>
         )}
       </div>
@@ -302,37 +300,39 @@ export function Details({
   );
 }
 
-/** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */
-function Cells({
-  selected,
-  row,
-  now,
-}: {
-  selected: Selected;
-  row: Row;
-  now: number;
-}) {
+/** The row's cells, wide columns included, until the object comes, each as its list draws it; `row` is the selection's with the measures a poll brought. */
+function Cells({ selected, row }: { selected: Selected; row: Row }) {
   const { gvr, columns } = selected;
+  const shown: ShownColumn[] = columns.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(gvr, column),
+  }));
+  const health = statusColumn(gvr);
+  const { tone, alarmed, finished } = decideRows(
+    (each) => rowTone(gvr, health, columns, each),
+    (each) => rowFinished(gvr, health, columns, each),
+    shown,
+  )(row);
   return (
     <PropertyList
       className={cn("p-3 text-body", LABEL_COLUMN)}
-      items={columns.map((column, index) => {
-        const { cell, figures } = columnRule(gvr, column);
-        const value =
-          cell === "age"
-            ? row.created
-              ? humanDuration(now - Date.parse(row.created))
-              : ""
-            : cell === "cpu" || cell === "memory"
-              ? (measureText(cell, row.cells[index] ?? null) ?? "–")
-              : String(row.cells[index] ?? "");
-        return {
-          key: column.name,
-          label: column.name,
-          numeric: figures || isTabular(value),
-          value,
-        };
-      })}
+      items={shown.map((column) => ({
+        key: column.name,
+        label: column.name,
+        numeric:
+          column.rule.figures ||
+          isTabular(String(row.cells[column.index] ?? "")),
+        value: (
+          <CellView
+            row={row}
+            column={column}
+            tone={tone}
+            alarmed={alarmed}
+            finished={finished}
+          />
+        ),
+      }))}
     />
   );
 }

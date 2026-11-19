@@ -61,6 +61,62 @@ test("a name that is a link has its whole text in its tooltip, where its copy ic
   expect(container.querySelector("button")?.getAttribute("title")).toBe(text);
 });
 
+test.each([
+  ["words after it", "", " (40/40 replicas created)"],
+  ["words around it", "key tls.crt of Secret ", ", optional"],
+  [
+    "a key that holds it among the words before",
+    "key payments-api-production-checkout-7d9f8c6b5.crt of Secret ",
+    ", optional",
+  ],
+])(
+  "a link whose text has %s cuts its name alone, and they stay whole beside it",
+  (_, before, after) => {
+    const name = "payments-api-production-checkout-7d9f8c6b5";
+    const { container } = view({
+      type: "link",
+      target: {
+        group: "apps",
+        version: "v1",
+        kind: "ReplicaSet",
+        namespace: "payments",
+        name,
+      },
+      text: `${before}${name}${after}`,
+    });
+    const button = container.querySelector("button");
+    expect(
+      [...(button?.childNodes ?? [])].map((node) => node.textContent),
+    ).toEqual([before, name, after].filter((part) => part !== ""));
+    const cells = [
+      ...(container.querySelector("button > span")?.children ?? []),
+    ].map((cell) => cell.textContent);
+    expect(cells).toHaveLength(3);
+    expect(cells.join("")).toBe(name);
+  },
+);
+
+test("a link whose text does not hold its target's name is cut as a whole", () => {
+  const text =
+    "payments-api-production-checkout-7d9f8c6b5 (40/40 replicas created)";
+  const { container } = view({
+    type: "link",
+    target: {
+      group: "",
+      version: "v1",
+      kind: "Pod",
+      namespace: "payments",
+      name: "api-0",
+    },
+    text,
+  });
+  const cells = [
+    ...(container.querySelector("button > span")?.children ?? []),
+  ].map((cell) => cell.textContent);
+  expect(cells).toHaveLength(3);
+  expect(cells.join("")).toBe(text);
+});
+
 const labels = (count: number): Label[] =>
   Array.from({ length: count }, (_, at) => ({
     key: `app.kubernetes.io/part-${String(at)}`,

@@ -894,6 +894,95 @@ test("a header is a column header with a button that sorts, and a double click o
   expect(handlers.onResize).toHaveBeenCalledWith("Name", expect.any(Number));
 });
 
+function doubleClick(target: Element, first: Element = target) {
+  fireEvent.mouseDown(first, { detail: 1 });
+  fireEvent.mouseUp(first, { detail: 1 });
+  fireEvent.mouseDown(target, { detail: 2 });
+  fireEvent.mouseUp(target, { detail: 2 });
+  fireEvent.doubleClick(target, { detail: 2 });
+}
+
+test("a double click opens a row, never a group header, a column's edge or a control in the row, and keeps the second press from selecting text", () => {
+  const onOpen = vi.fn();
+  const menu = [[{ id: "delete", label: "Delete", run: vi.fn() }]];
+  const { handlers } = grid({ onOpen, menu, selected: "a1" });
+  doubleClick(screen.getByText("edge"));
+  doubleClick(screen.getByRole("separator", { name: "Resize Name" }));
+  doubleClick(screen.getByRole("button", { name: "Row actions" }));
+  doubleClick(nth(screen.getAllByRole("checkbox"), 1));
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(handlers.onResize).toHaveBeenCalledOnce();
+
+  doubleClick(screen.getByText("api-2"));
+  expect(onOpen).toHaveBeenCalledExactlyOnceWith("a2", { name: "api-2" });
+
+  const row = rowNamed("api-1");
+  expect(fireEvent.mouseDown(row, { detail: 1 })).toBe(true);
+  expect(fireEvent.mouseDown(row, { detail: 2 })).toBe(false);
+  expect(fireEvent.mouseDown(screen.getByText("edge"), { detail: 2 })).toBe(
+    true,
+  );
+});
+
+test("a double click opens a row only when both presses were on it, the next one starting afresh", () => {
+  const onOpen = vi.fn();
+  grid({ onOpen });
+  doubleClick(rowNamed("api-2"), rowNamed("api-1"));
+  expect(onOpen).not.toHaveBeenCalled();
+  doubleClick(rowNamed("api-1"), rowNamed("api-2"));
+  expect(onOpen).not.toHaveBeenCalled();
+  doubleClick(rowNamed("api-2"));
+  expect(onOpen).toHaveBeenCalledExactlyOnceWith("a2", { name: "api-2" });
+});
+
+test("a double click whose first press was off every row opens nothing, though an earlier click was on the row of its second", () => {
+  const onOpen = vi.fn();
+  grid({ onOpen });
+  fireEvent.mouseDown(rowNamed("api-2"), { detail: 1 });
+  fireEvent.mouseUp(rowNamed("api-2"), { detail: 1 });
+  fireEvent.click(rowNamed("api-2"), { detail: 1 });
+  doubleClick(rowNamed("api-2"), screen.getByRole("grid"));
+  expect(onOpen).not.toHaveBeenCalled();
+  doubleClick(
+    rowNamed("api-2"),
+    screen.getByRole("columnheader", { name: "Name" }),
+  );
+  expect(onOpen).not.toHaveBeenCalled();
+  doubleClick(rowNamed("api-2"));
+  expect(onOpen).toHaveBeenCalledExactlyOnceWith("a2", { name: "api-2" });
+});
+
+test("a double click in the mark cell beside its box opens nothing, as on the box", () => {
+  const onOpen = vi.fn();
+  grid({ onOpen });
+  const box = nth(screen.getAllByRole("checkbox"), 1);
+  const cell = box.closest<HTMLElement>('[role="gridcell"]');
+  if (!cell || cell === box) throw new Error("the box has no cell");
+  doubleClick(cell);
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("a double click in a menu that the row opened reaches the row through its portal and opens nothing", () => {
+  const onOpen = vi.fn();
+  grid({ onOpen, menu: [[{ id: "delete", label: "Delete", run: vi.fn() }]] });
+  fireEvent.pointerEnter(rowNamed("api-1"));
+  fireEvent.pointerDown(
+    within(rowNamed("api-1")).getByRole("button", { name: "Row actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  const menu = screen.getByRole("menu");
+  expect(rowNamed("api-1").contains(menu)).toBe(false);
+  fireEvent.mouseDown(rowNamed("api-1"), { detail: 1 });
+  fireEvent.doubleClick(menu, { detail: 2 });
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("without a way to open, a double click on a row does nothing and its second press selects text as usual", () => {
+  grid();
+  const row = rowNamed("api-1");
+  expect(fireEvent.mouseDown(row, { detail: 2 })).toBe(true);
+});
+
 test("loading shows skeleton rows, and an empty grid what its owner gives", () => {
   grid({ loading: true });
   expect(document.querySelector("[aria-busy]")).not.toBeNull();

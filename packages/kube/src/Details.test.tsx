@@ -18,6 +18,7 @@ import type {
 import { createMockBackend } from "@twigo/protocol/mock";
 import {
   hoverIcons,
+  narrowHeaderCopies,
   openList,
   settle,
   withScreenSize,
@@ -174,6 +175,7 @@ describe("in a wide editor", () => {
     );
     fireEvent.click(rows()[0] ?? document.body);
     await settle();
+    narrowHeaderCopies(layout, shown());
     const header = within(shown().querySelector("header") ?? document.body);
     const verdict = within(header.getByRole("group", { name: "Verdict" }));
     expect(verdict.getByText("CrashLoopBackOff").className).toContain(
@@ -628,6 +630,44 @@ describe("in a narrow editor", () => {
     expect(verdict.getByText("CrashLoopBackOff").className).toContain(
       "text-error",
     );
+  });
+
+  test("before the object comes a printed duration reads as the row's cell does, counted from the moment the row was received", async () => {
+    const script = scriptedPods(true);
+    await openList(script.backend);
+    const batch = podsBatch(1, { "web-1": "Running" }, true);
+    act(() => {
+      script.send({
+        ...batch,
+        columns: [
+          ...(batch.columns ?? []),
+          {
+            name: "Restarts",
+            kind: "string",
+            priority: 0,
+            printsDuration: true,
+          },
+        ],
+        upserts: batch.upserts.map((row) => ({
+          ...row,
+          received: new Date(Date.now() - 8000).toISOString(),
+          cells: [...row.cells, "19 (2m46s ago)"],
+        })),
+      });
+    });
+    await settle(1);
+    const [row] = rows();
+    if (!row) throw new Error("no rows");
+    fireEvent.click(row);
+    await settle(1);
+    const standIn = within(shown()).getByText("Restarts", {
+      selector: "dt",
+    }).nextElementSibling;
+    const cell = row.querySelector<HTMLElement>('[data-column="Restarts"]');
+    if (!standIn || !cell) throw new Error("no Restarts");
+    expect(within(standIn as HTMLElement).getByText("2m54s ago")).toBeTruthy();
+    expect(within(cell).getByText("2m54s ago")).toBeTruthy();
+    expect(standIn.textContent).not.toContain("2m46s");
   });
 
   test("before the object comes the row's CPU and Memory read as the grid prints them, and follow a poll", async () => {

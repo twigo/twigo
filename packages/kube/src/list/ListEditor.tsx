@@ -273,7 +273,7 @@ function Loaded({
           docked={docked}
           onOpen={(object) => {
             editors.pin(uri);
-            editors.open(object, { preview: true });
+            editors.open(object);
           }}
           onClose={() => {
             setOpen(false);

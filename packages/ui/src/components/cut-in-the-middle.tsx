@@ -1,6 +1,13 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import { cn } from "../lib/cn";
 import { cutText } from "../lib/cutText";
 import { emWidth, fontOf, type Font } from "../lib/textWidth";
+
+/**
+ * What a text carries until its font is read, when it could be cut: a width
+ * taken of it before then is of a text that is whole and may not stay so.
+ */
+export const CUT_PENDING = "data-cut-pending";
 
 /**
  * A text CSS can cut only at its end, cut in the middle instead, with the head
@@ -16,10 +23,16 @@ export function CutInTheMiddle({
   text,
   floor,
   separator,
+  inline = false,
+  "aria-hidden": hidden,
 }: {
   text: string;
   floor: number;
   separator: string | RegExp;
+  /** Sits among words in a line that wraps, as one piece that wraps whole and is cut only where it alone is wider than the line. */
+  inline?: boolean;
+  /** For a text that a neighbour says whole: the cut's cells would read as separate words. */
+  "aria-hidden"?: boolean;
 }) {
   const box = useRef<HTMLSpanElement>(null);
   const [font, setFont] = useState<Font>();
@@ -34,9 +47,14 @@ export function CutInTheMiddle({
   return (
     <span
       ref={box}
+      aria-hidden={hidden}
+      {...(font === undefined && text.length > floor && { [CUT_PENDING]: "" })}
       className={
         cut
-          ? "grid grid-cols-[auto_minmax(2em,1fr)_auto] whitespace-pre"
+          ? cn(
+              "grid-cols-[auto_minmax(2em,1fr)_auto] whitespace-pre",
+              inline ? "inline-grid max-w-full align-bottom" : "grid",
+            )
           : "whitespace-pre"
       }
     >

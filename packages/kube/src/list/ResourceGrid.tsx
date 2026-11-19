@@ -507,6 +507,10 @@ function Grid({
         select(row);
       }}
       onActivate={onActivate}
+      onOpen={(_, row) => {
+        select(row);
+        void commands.execute("k8s.resource.openEditor", lookup);
+      }}
       marked={selection.marks(uri)}
       onMark={(ids, marked) => {
         selection.mark(uri, ids, marked);

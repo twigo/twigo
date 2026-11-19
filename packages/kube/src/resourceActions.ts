@@ -194,15 +194,14 @@ export function registerResourceActions(
   ) => {
     if (subject) await workbench.operations.run(request(subject), look);
   };
-  /** Forwards a port of the subject Pod, Service or workload; `pick` asks which whatever their number. */
-  const forward = async (subject: Subject | undefined, pick: boolean) => {
+  /** Forwards a port of the subject Pod, Service or workload, which the person picks. */
+  const forward = async (subject: Subject | undefined) => {
     if (subject?.namespace === undefined) return;
     await commands.execute("k8s.forward.open", workbench.keys.lookup(null), {
       space: subject.space,
       gvr: subject.gvr,
       namespace: subject.namespace,
       name: subject.name,
-      ...(pick && { pick }),
     });
   };
   /** Opens a shell, or an attach, in a container of the subject pod. */
@@ -303,19 +302,7 @@ export function registerResourceActions(
         ["resource/context", "navigation"],
         ["resource/details", "navigation", `!(${RESTARTS})`],
       ],
-      run: (lookup, args) => forward(subjectOf(lookup, args), false),
-    },
-    {
-      id: "k8s.resource.forwardPick",
-      title: "Forward Port…",
-      icon: ArrowLeftRight,
-      key: "shift+f",
-      when: "resource.forward",
-      menus: [
-        ["resource/context", "navigation"],
-        ["resource/details", "navigation"],
-      ],
-      run: (lookup, args) => forward(subjectOf(lookup, args), true),
+      run: (lookup, args) => forward(subjectOf(lookup, args)),
     },
     {
       id: "k8s.resource.yaml",

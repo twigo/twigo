@@ -34,8 +34,6 @@ interface State {
   readonly open: boolean;
   readonly focus: boolean;
   readonly match: boolean;
-  /** The section the person asked the page to scroll to, which it does once it has drawn it open. */
-  readonly reach: string | undefined;
   /** Folded by the person while the filter holds text, which only that text keeps. */
   readonly shut: ReadonlySet<string>;
   /** Groups opened or folded by the person while the filter holds text, which only that text keeps. */
@@ -48,7 +46,6 @@ const INITIAL: State = {
   open: false,
   focus: false,
   match: false,
-  reach: undefined,
   shut: new Set(),
   groups: new Map(),
   place: undefined,
@@ -116,23 +113,6 @@ export class PageStates {
 
   matched(uri: string): void {
     if (this.#get(uri).match) this.#update(uri, { match: false });
-  }
-
-  reachSection(uri: string, section: string): void {
-    this.#update(uri, { reach: section });
-  }
-
-  reaching(uri: string): string | undefined {
-    return this.#get(uri).reach;
-  }
-
-  reached(uri: string): void {
-    if (this.#get(uri).reach !== undefined)
-      this.#update(uri, { reach: undefined });
-  }
-
-  scroller(uri: string): HTMLElement | undefined {
-    return this.#elements.get(uri);
   }
 
   shut(uri: string): ReadonlySet<string> {

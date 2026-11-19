@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy } from "lucide-react";
 import type { Cell, ObjectRef } from "@twigo/protocol";
-import {
-  ActionRow,
-  cn,
-  EmptyState,
-  FullActionRow,
-  IconButton,
-} from "@twigo/ui";
+import { ActionRow, EmptyState, FullActionRow, IconButton } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import {
   CAPABILITY_PREFIXES,
@@ -36,8 +30,6 @@ import { noContainerRuns } from "./noContainerRuns";
 import { ObjectViews } from "./ObjectViews";
 import { FULL_PAGE, TWO_COLUMNS, useClientWidth, useHeld } from "./pageStage";
 import { PropertyColumns } from "./propertyColumns";
-import { SummaryColumn } from "./SummaryColumn";
-import type { Outline } from "./outline";
 import type { OverviewStates } from "./overviewStates";
 import {
   OBJECT_FILTERED,
@@ -101,17 +93,11 @@ export function ObjectEditor({
   const editing =
     edits.copies.get(uri) !== undefined || edits.copies.held(uri) !== undefined;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const [column, setColumn] = useState<HTMLElement | null>(null);
   const [main, setMain] = useState<HTMLElement | null>(null);
   const wide = useHeld(useClientWidth(element), FULL_PAGE);
-  const columnDrawn = useClientWidth(column) > 0;
-  const mainWidth = useClientWidth(main);
-  const two = useHeld(columnDrawn ? mainWidth : 0, TWO_COLUMNS);
+  const two = useHeld(useClientWidth(main), TWO_COLUMNS);
   const asked =
-    (tab === "overview" || wide) &&
-    visible &&
-    input !== undefined &&
-    hasUsage(input.gvr);
+    tab === "overview" && visible && input !== undefined && hasUsage(input.gvr);
   const { snapshot, values, id } = useObject(backend, query, {
     overview: true,
     manifest: tab === "yaml" || editing,
@@ -209,7 +195,7 @@ export function ObjectEditor({
     const next = refUri(input.space, resources.value, target);
     if (!next) return;
     editors.pin(uri);
-    editors.open(next, { preview: true });
+    editors.open(next);
   };
   const lookup = keys.lookup(element);
   const owner = header?.owner ?? undefined;
@@ -217,16 +203,6 @@ export function ObjectEditor({
   const color = space && colors.ofSpace(space);
   const resource = `${input.gvr.group}/${input.gvr.resource}`;
   const states = wide ? fullPages : overviews;
-  const identity = `${input.space}/${input.namespace ?? ""}/${input.name}`;
-  const reach = (section: Outline) => {
-    if (pages.text(uri) !== "") {
-      if (pages.shut(uri).has(section.id))
-        pages.setShut(uri, [section.id], false);
-    } else if (!states.section(resource, identity, section.id, section.fold))
-      states.setSection(resource, identity, section, true);
-    if (tab !== "overview") tabs.set(uri, "overview");
-    pages.reachSection(uri, section.id);
-  };
   const actions =
     subject && workbench.actions("resource/details", lookup, subject);
   return (
@@ -237,6 +213,7 @@ export function ObjectEditor({
       className="flex h-full min-h-0 flex-col bg-editor"
     >
       <ObjectHeader
+        object={uri}
         gvr={input.gvr}
         kind={known?.kind ?? input.gvr.resource}
         name={input.name}
@@ -281,86 +258,70 @@ export function ObjectEditor({
           ))
         }
       />
-      <div className={cn("flex min-h-0 flex-1", !wide && "flex-col")}>
-        {wide && (
-          <SummaryColumn
-            frame={setColumn}
-            cells={strip}
-            verdict={verdict}
-            overview={snapshot.overview}
-            usage={snapshot.usage !== undefined && resource === "/nodes"}
-            pages={pages}
-            uri={uri}
-            onReach={reach}
-          />
-        )}
-        <div ref={setMain} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ObjectViews
-            tab={tab}
-            snapshot={snapshot}
-            onChange={(next) => {
-              tabs.set(uri, next);
-            }}
-            pages={pages}
-            uri={uri}
-            kind={known?.kind ?? "object"}
-          />
-          {page && !wide && (
-            <Vitals cells={strip} verdict={verdict} layout="strip" />
-          )}
-          <div className="min-h-0 flex-1">
-            <PropertyColumns.Provider value={wide && two ? 2 : 1}>
-              <ObjectContent
-                tab={tab}
-                space={input.space}
-                states={states}
-                kind={resource}
-                pages={pages}
-                uri={uri}
-                object={`${input.namespace ?? ""}/${input.name}`}
-                snapshot={snapshot}
-                values={values}
-                reveal={reveal}
-                onOpen={open}
-                onEvents={() => {
-                  tabs.set(uri, "events");
-                }}
-                fullPage={wide}
-                yaml={(json) => (
+      <div ref={setMain} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ObjectViews
+          tab={tab}
+          snapshot={snapshot}
+          onChange={(next) => {
+            tabs.set(uri, next);
+          }}
+          pages={pages}
+          uri={uri}
+          kind={known?.kind ?? "object"}
+        />
+        {page && <Vitals cells={strip} verdict={verdict} />}
+        <div className="min-h-0 flex-1">
+          <PropertyColumns.Provider value={wide && two ? 2 : 1}>
+            <ObjectContent
+              tab={tab}
+              space={input.space}
+              states={states}
+              kind={resource}
+              pages={pages}
+              uri={uri}
+              object={`${input.namespace ?? ""}/${input.name}`}
+              snapshot={snapshot}
+              values={values}
+              reveal={reveal}
+              onOpen={open}
+              onEvents={() => {
+                tabs.set(uri, "events");
+              }}
+              fullPage={wide}
+              yaml={(json) => (
+                <YamlTab
+                  edits={edits}
+                  uri={uri}
+                  space={input.space}
+                  json={json}
+                  statusLocked={statusLocked}
+                />
+              )}
+              {...(opened !== undefined && {
+                kept: (problem: { title: string; body: string }) => (
                   <YamlTab
                     edits={edits}
                     uri={uri}
                     space={input.space}
-                    json={json}
+                    json={opened}
                     statusLocked={statusLocked}
+                    gone={problem}
                   />
-                )}
-                {...(opened !== undefined && {
-                  kept: (problem: { title: string; body: string }) => (
-                    <YamlTab
-                      edits={edits}
-                      uri={uri}
-                      space={input.space}
-                      json={opened}
-                      statusLocked={statusLocked}
-                      gone={problem}
-                    />
-                  ),
-                })}
-                {...(input.namespace !== undefined && {
-                  onLogs: (choice) => {
-                    void commands.execute("k8s.logs.open", keys.lookup(null), {
-                      space: input.space,
-                      gvr: input.gvr,
-                      namespace: input.namespace,
-                      name: input.name,
-                      ...choice,
-                    });
-                  },
-                })}
-              />
-            </PropertyColumns.Provider>
-          </div>
+                ),
+              })}
+              {...(input.namespace !== undefined && {
+                onLogs: (choice) => {
+                  void commands.execute("k8s.logs.open", keys.lookup(null), {
+                    space: input.space,
+                    gvr: input.gvr,
+                    namespace: input.namespace,
+                    name: input.name,
+                    ...choice,
+                  });
+                },
+              })}
+            />
+          </PropertyColumns.Provider>
         </div>
       </div>
     </div>

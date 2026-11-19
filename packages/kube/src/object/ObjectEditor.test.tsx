@@ -18,7 +18,12 @@ import { createMockBackend } from "@twigo/protocol/mock";
 import type { Workbench } from "@twigo/workbench";
 import { Cluster } from "../../../protocol/src/mock/cluster";
 import { podGenerated } from "../../../protocol/src/mock/kinds";
-import { mountKube, settle, withScreenSize } from "../../test/workbench";
+import {
+  mountKube,
+  narrowHeaderCopies,
+  settle,
+  withScreenSize,
+} from "../../test/workbench";
 
 vi.mock("../edit/YamlEditor", () => ({ default: () => <div /> }));
 
@@ -49,15 +54,19 @@ async function openEditor(
 
 const page = (kind: string) =>
   screen.getByRole("region", { name: new RegExp(`^${kind} `) });
+const FULL_VERBS = ["Logs", "Forward", "Restart", "Scale…", "Delete"];
+const INSPECTOR_VERBS = ["Logs", "Restart", "Scale…", "More"];
 const summary = () => screen.queryByRole("complementary", { name: "Summary" });
+const strip = () =>
+  document.querySelector<HTMLElement>('dl[aria-label="Vitals"]');
+const containerCards = () =>
+  document.querySelector('[data-section="core.containers"] .relative.grid');
 const row = (kind: string) =>
   screen.getByRole("toolbar", { name: `${kind} actions` });
 const verbs = (kind: string) =>
   within(row(kind))
     .getAllByRole("button")
     .map((button) => button.getAttribute("aria-label"));
-const column = () =>
-  within(screen.getByRole("complementary", { name: "Summary" }));
 const sectionButton = (id: string): HTMLElement => {
   const found = document.querySelector<HTMLElement>(
     `[data-section="${id}"] button[aria-expanded]`,
@@ -72,74 +81,47 @@ describe("from 900 px of the editor's own width", () => {
   test("the editor draws the inspector's layout under 900 px, the full page from 900, and goes back only under 884", async () => {
     await openEditor(DEPLOYMENT);
     const editor = page("Deployment");
-    expect(summary()).toBeNull();
-    expect(verbs("Deployment")).toEqual(["Logs", "Restart", "Scale…", "More"]);
+    expect(verbs("Deployment")).toEqual(INSPECTOR_VERBS);
 
     layout.resize(editor, 900);
-    expect(summary()).not.toBeNull();
-    expect(verbs("Deployment")).toEqual([
-      "Logs",
-      "Forward",
-      "Forward Port…",
-      "Restart",
-      "Scale…",
-      "Delete",
-    ]);
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
 
     layout.resize(editor, 884);
-    expect(summary()).not.toBeNull();
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
     layout.resize(editor, 883);
-    expect(summary()).toBeNull();
+    expect(verbs("Deployment")).toEqual(INSPECTOR_VERBS);
     layout.resize(editor, 899);
-    expect(summary()).toBeNull();
+    expect(verbs("Deployment")).toEqual(INSPECTOR_VERBS);
     layout.resize(editor, 900);
-    expect(summary()).not.toBeNull();
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
   });
 
   test("a tab that is hidden keeps the stage it held, and shows it again where it was", async () => {
     await openEditor(DEPLOYMENT);
     const editor = page("Deployment");
     layout.resize(editor, 900);
-    expect(summary()).not.toBeNull();
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
     layout.resize(editor, 0);
-    expect(summary()).not.toBeNull();
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
     layout.resize(editor, 890);
-    expect(summary()).not.toBeNull();
+    expect(verbs("Deployment")).toEqual(FULL_VERBS);
   });
 
-  test("the two property columns are decided by the main column's width once the summary column has taken its own, and come at 750 px", async () => {
+  test("the two property columns are decided by the page's one column, come at 750 px and stay down to 734", async () => {
     await openEditor(POD);
     const main = screen.getByRole("tabpanel", { name: "Overview" })
       .parentElement?.parentElement;
     if (!main) throw new Error("no main column");
-    const cards = () =>
-      document.querySelector('[data-section="core.containers"] .relative.grid');
+    layout.resize(main, 700);
+    layout.resize(page("Pod"), 1069);
     layout.resize(main, 749);
-    layout.resize(page("Pod"), 1069);
-    expect(cards()?.className).not.toContain("grid-cols-2");
+    expect(containerCards()?.className).not.toContain("grid-cols-2");
     layout.resize(main, 750);
-    expect(cards()?.className).toContain("grid-cols-2");
+    expect(containerCards()?.className).toContain("grid-cols-2");
     layout.resize(main, 734);
-    expect(cards()?.className).toContain("grid-cols-2");
+    expect(containerCards()?.className).toContain("grid-cols-2");
     layout.resize(main, 733);
-    expect(cards()?.className).not.toContain("grid-cols-2");
-  });
-
-  test("the main column is read once the summary column is drawn, never as it was before, when it spanned the editor", async () => {
-    await openEditor(POD);
-    const main = screen.getByRole("tabpanel", { name: "Overview" })
-      .parentElement?.parentElement;
-    if (!main) throw new Error("no main column");
-    Object.defineProperty(main, "clientWidth", {
-      configurable: true,
-      get: () => (summary() ? 749 : 1068),
-    });
-    layout.resize(page("Pod"), 1069);
-    expect(summary()).not.toBeNull();
-    expect(
-      document.querySelector('[data-section="core.containers"] .relative.grid')
-        ?.className,
-    ).not.toContain("grid-cols-2");
+    expect(containerCards()?.className).not.toContain("grid-cols-2");
   });
 
   test("the editor cuts a pod's name as the list does, its generated part from the object's header", async () => {
@@ -149,6 +131,7 @@ describe("from 900 px of the editor's own width", () => {
     if (!generated) throw new Error("prod-eu has a pod with a generated name");
     const { pod, at } = generated;
     await openEditor(`k8s://prod-eu//v1/pods/${pod.namespace}/${pod.name}`);
+    narrowHeaderCopies(layout, page("Pod"));
     const name = within(page("Pod")).getByRole("heading");
     expect(name.textContent).toContain(pod.name);
     expect(name.querySelector(".text-quiet")?.textContent).toBe(
@@ -159,7 +142,8 @@ describe("from 900 px of the editor's own width", () => {
   test("the full page leads the where line with the space's name, and the inspector's layout does not", async () => {
     await openEditor(POD);
     const editor = page("Pod");
-    const where = () => within(editor).queryByText("prod-eu");
+    const where = () =>
+      within(editor).queryByText("prod-eu", { ignore: "[inert] *" });
     expect(where()).toBeNull();
     layout.resize(editor, 1130);
     expect(where()).not.toBeNull();
@@ -196,109 +180,52 @@ describe("from 900 px of the editor's own width", () => {
 describe("in the full page", () => {
   const layout = withScreenSize(1130);
 
-  test("the summary column holds the vitals and the sections as an index of what each says, and a click opens the section and scrolls to it", async () => {
+  test("the full page has one column: no summary, the vitals strip on the Overview only, the sections open but the Metadata, two property columns and two cards", async () => {
     await openEditor(POD);
-    const index = column();
-    expect(index.getAllByRole("term").map((term) => term.textContent)).toEqual([
-      "Ready",
-      "Restarts",
-      "CPU",
-      "Memory",
-    ]);
-    expect(index.getAllByRole("listitem").length).toBeGreaterThanOrEqual(5);
-    const metadata = index.getByRole("button", { name: /^Metadata/ });
-    expect(metadata.textContent).toMatch(/^Metadata.+/);
-
+    expect(summary()).toBeNull();
+    expect(screen.queryByRole("list", { name: "Sections" })).toBeNull();
+    const bar = strip();
+    if (!bar) throw new Error("no vitals strip");
+    expect(
+      within(bar)
+        .getAllByRole("term")
+        .map((term) => term.textContent),
+    ).toEqual(["Ready", "Restarts", "CPU", "Memory"]);
+    expect(bar.className).toContain("grid-cols-4");
+    const views = screen.getByRole("tablist", { name: "Views of the object" });
     const panel = screen.getByRole("tabpanel", { name: "Overview" });
-    let top = 0;
-    Object.defineProperty(panel, "scrollTop", {
-      configurable: true,
-      get: () => top,
-      set: (to: number) => {
-        top = to;
-      },
-    });
-    panel.getBoundingClientRect = () => new DOMRect(0, 100, 600, 500);
-    const target = panel.querySelector('[data-section="core.metadata"]');
-    if (!target) throw new Error("no metadata section");
-    target.getBoundingClientRect = () => new DOMRect(0, 700, 600, 30);
-    expect(
-      within(target as HTMLElement).getByRole("button", { expanded: false }),
-    ).toBeTruthy();
+    expect(views.compareDocumentPosition(bar)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(bar.compareDocumentPosition(panel)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
 
-    fireEvent.click(metadata);
-    await settle(2);
+    const sections = [...panel.querySelectorAll("[data-section]")];
+    expect(sections.length).toBeGreaterThanOrEqual(5);
     expect(
-      within(screen.getByRole("region", { name: "Metadata" })).getByRole(
-        "button",
-        {
-          expanded: true,
-        },
-      ),
-    ).toBeTruthy();
-    expect(top).toBe(600);
+      sections
+        .filter(
+          (section) =>
+            section
+              .querySelector("button[aria-expanded]")
+              ?.getAttribute("aria-expanded") === "false",
+        )
+        .map((section) => section.getAttribute("data-section")),
+    ).toEqual(["core.metadata"]);
+    expect(containerCards()?.className).toContain("grid-cols-2");
+
+    fireEvent.click(within(views).getByRole("tab", { name: /^YAML/ }));
+    await settle(2);
+    expect(strip()).toBeNull();
   });
 
-  test("under the page's filter the index lists the sections the filter keeps, and a click on one writes no fold of the kind", async () => {
+  test("under 900 px the editor is the inspector's layout: the strip under the views, one column", async () => {
     await openEditor(POD);
-    const panel = screen.getByRole("tabpanel", { name: "Overview" });
-    act(() => {
-      panel.focus();
-    });
-    fireEvent.keyDown(panel, { code: "Slash", key: "/" });
-    await settle(2);
-    const field = screen.getByRole("textbox", { name: "Filter this page" });
-    const entries = () =>
-      within(column().getByRole("list", { name: "Sections" }))
-        .getAllByRole("button")
-        .map((entry) => entry.textContent);
-    const all = entries();
-    expect(all.length).toBeGreaterThanOrEqual(5);
-    fireEvent.change(field, { target: { value: "metadata" } });
-    await settle(2);
-    expect(entries().length).toBeLessThan(all.length);
-    expect(entries().some((entry) => entry.startsWith("Metadata"))).toBe(true);
-    expect(entries().some((entry) => entry.startsWith("Conditions"))).toBe(
-      false,
-    );
-    fireEvent.click(column().getByRole("button", { name: /^Metadata/ }));
-    await settle(2);
-    expect(sectionButton("core.metadata").getAttribute("aria-expanded")).toBe(
-      "true",
-    );
-    fireEvent.change(field, { target: { value: "" } });
-    await settle(2);
-    expect(entries()).toEqual(all);
-    expect(sectionButton("core.metadata").getAttribute("aria-expanded")).toBe(
-      "false",
-    );
-  });
-
-  test("the containers sit two side by side where the property rows run in two columns, and one under the other where they do not", async () => {
-    await openEditor(POD);
-    const cards = () =>
-      document.querySelector('[data-section="core.containers"] .relative.grid');
-    const column = summary();
-    if (!column) throw new Error("no summary column");
-    layout.resize(column, 320);
-    expect(cards()?.className).toContain("grid-cols-2");
     layout.resize(page("Pod"), 700);
     expect(summary()).toBeNull();
-    expect(cards()?.className).not.toContain("grid-cols-2");
-  });
-
-  test("a click on the index while another view shows brings the Overview", async () => {
-    await openEditor(POD);
-    fireEvent.click(
-      within(
-        screen.getByRole("tablist", { name: "Views of the object" }),
-      ).getByRole("tab", { name: /^YAML/ }),
-    );
-    await settle(2);
-    expect(screen.queryByRole("tabpanel", { name: "Overview" })).toBeNull();
-    fireEvent.click(column().getByRole("button", { name: /^Containers/ }));
-    await settle(2);
-    expect(screen.getByRole("tabpanel", { name: "Overview" })).toBeTruthy();
+    expect(strip()).not.toBeNull();
+    expect(containerCards()?.className).not.toContain("grid-cols-2");
   });
 
   test("the header's owner opens its Deployment", async () => {
@@ -310,6 +237,54 @@ describe("in the full page", () => {
     expect(workbench.editors.active).toMatch(
       /^k8s:\/\/prod-eu\/apps\/v1\/deployments\//,
     );
+  });
+
+  test("links followed from one object open tabs of their own, none replacing another", async () => {
+    const workbench = await openEditor(POD);
+    fireEvent.click(
+      within(page("Pod")).getByRole("button", { name: /^Deployment / }),
+    );
+    await settle(2);
+    act(() => {
+      workbench.editors.open(POD);
+    });
+    await settle(2);
+    fireEvent.click(
+      within(page("Pod")).getByRole("button", {
+        name: "ConfigMap kube-root-ca.crt",
+      }),
+    );
+    await settle(2);
+    expect(
+      [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+        (title) => [title.textContent.trim(), title.dataset.preview],
+      ),
+    ).toEqual([
+      [POD.split("/").pop(), "false"],
+      ["web", "false"],
+      ["kube-root-ca.crt", "false"],
+    ]);
+  });
+
+  test("a link followed from a preview tab pins it and opens the object in a tab of its own", async () => {
+    const workbench = await mountKube();
+    act(() => {
+      workbench.editors.open(POD, { preview: true });
+    });
+    await settle(12);
+    const tabs = () =>
+      [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+        (title) => [title.textContent.trim(), title.dataset.preview],
+      );
+    expect(tabs()).toEqual([[POD.split("/").pop(), "true"]]);
+    fireEvent.click(
+      within(page("Pod")).getByRole("button", { name: /^Deployment / }),
+    );
+    await settle(2);
+    expect(tabs()).toEqual([
+      [POD.split("/").pop(), "false"],
+      ["web", "false"],
+    ]);
   });
 
   test("a pod's Logs button opens the logs of this pod", async () => {
@@ -455,9 +430,9 @@ function followed(backend: Backend): () => ObjectParts {
 }
 
 describe("one header on every view", () => {
-  const layout = withScreenSize(1130);
+  withScreenSize(1130);
 
-  test("the editor follows the Overview on every view, and the usage while its summary column shows", async () => {
+  test("the editor follows the Overview on every view, and the usage on the Overview alone", async () => {
     const backend = createMockBackend("ready");
     const parts = followed(backend);
     await openEditor(POD, backend);
@@ -471,13 +446,13 @@ describe("one header on every view", () => {
       await settle(3);
       expect(parts(), name).toMatchObject({
         overview: true,
-        usage: true,
+        usage: false,
         ...own,
       });
     }
-    layout.resize(page("Pod"), 700);
+    fireEvent.click(view("Overview"));
     await settle(3);
-    expect(parts()).toMatchObject({ overview: true, usage: false });
+    expect(parts()).toMatchObject({ overview: true, usage: true });
   });
 
   test("the header says what the object says now, whichever view shows, and the verdict is its printed cell's", async () => {

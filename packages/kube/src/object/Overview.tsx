@@ -48,7 +48,6 @@ import {
   type SectionView,
 } from "./pageFilter";
 import { outlineOf, type Outline } from "./outline";
-import { scrollToSection } from "./place";
 import type { GroupFolds, PageStates } from "./pageStates";
 import type { Reveal } from "./reveal";
 import { isNumeric, numericColumns } from "./numeric";
@@ -125,13 +124,6 @@ export function Overview({
       ?.focus();
     pages.matched(uri);
   }, [goToMatch, pages, uri]);
-  const reach = pages.reaching(uri);
-  useEffect(() => {
-    if (reach === undefined) return;
-    const scroller = pages.scroller(uri);
-    if (scroller) scrollToSection(scroller, reach);
-    pages.reached(uri);
-  }, [reach, pages, uri]);
   const titles = overview.sections.flatMap((section) =>
     section.blocks.flatMap((block) =>
       block.type === "diagnostics"

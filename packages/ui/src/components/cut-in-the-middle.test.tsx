@@ -90,3 +90,43 @@ test("an element outside the document is not measured, so a text there is whole 
   expect(parts(out)).toEqual([]);
   expect(out.textContent).toBe("payments-api-production-checkout");
 });
+
+test("a text that could be cut says so until its font is read, and a text within its floor never does", () => {
+  const out = document.createElement("div");
+  const pending = (container: HTMLElement) =>
+    container.querySelector("[data-cut-pending]") !== null;
+  render(
+    <CutInTheMiddle
+      text="payments-api-production-checkout"
+      floor={16}
+      separator="-"
+    />,
+    { container: out },
+  );
+  expect(pending(out)).toBe(true);
+  const read = render(
+    <CutInTheMiddle
+      text="payments-api-production-checkout"
+      floor={16}
+      separator="-"
+    />,
+  );
+  expect(pending(read.container)).toBe(false);
+  const short = render(
+    <CutInTheMiddle text="payments" floor={16} separator="-" />,
+    { container: document.createElement("div") },
+  );
+  expect(pending(short.container)).toBe(false);
+});
+
+test("a text that a neighbour says whole can be hidden from assistive technology", () => {
+  const { container } = render(
+    <CutInTheMiddle
+      text="payments-api-production-checkout"
+      floor={16}
+      separator="-"
+      aria-hidden
+    />,
+  );
+  expect(container.firstElementChild?.getAttribute("aria-hidden")).toBe("true");
+});

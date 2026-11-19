@@ -42,6 +42,11 @@ const nameOf = (row: HTMLElement | undefined) => cellOf(row, "Name");
 const statusOf = (row: HTMLElement) => cellOf(row, "Status");
 const details = () =>
   screen.queryByRole("complementary", { name: "Pod details" });
+const shown = () => {
+  const aside = details();
+  if (!aside) throw new Error("no details");
+  return aside;
+};
 const grid = () => screen.getByRole("grid");
 const focusGrid = () => {
   act(() => {
@@ -57,6 +62,13 @@ const health = (name: string) =>
     { name: new RegExp(`^${name}`) },
   );
 const filterField = () => screen.getByRole("textbox", { name: "Filter rows" });
+const doubleClick = (row: HTMLElement) => {
+  fireEvent.mouseDown(row, { detail: 1 });
+  fireEvent.click(row, { detail: 1 });
+  fireEvent.mouseDown(row, { detail: 2 });
+  fireEvent.click(row, { detail: 2 });
+  fireEvent.doubleClick(row, { detail: 2 });
+};
 const openMenu = (trigger: HTMLElement) => {
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
 };
@@ -566,6 +578,118 @@ test("opening the object from the details keeps the list in a tab of its own", a
   expect(tabs[0]).toBe("Pods");
   expect(tabs).toHaveLength(2);
   expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);
+});
+
+test.each([
+  "the details' button",
+  "a link in the details",
+  "the context menu",
+  "a double click",
+])(
+  "opening an object by %s from a preview list pins the list and puts the object in a tab of its own",
+  async (way) => {
+    const workbench = await openList();
+    act(() => {
+      workbench.editors.close("k8s-list://prod-eu/v1/pods");
+    });
+    act(() => {
+      workbench.editors.open("k8s-list://prod-eu/v1/pods", { preview: true });
+    });
+    await settle();
+    const [row] = rows();
+    if (!row) throw new Error("no rows");
+    const name = nameOf(row);
+    const tabs = () =>
+      [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+        (title) => [title.textContent.trim(), title.dataset.preview] as const,
+      );
+    expect(tabs()).toEqual([["Pods", "true"]]);
+    if (way === "the context menu") {
+      fireEvent.contextMenu(row);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Open in Editor" }));
+    } else if (way === "a double click") {
+      doubleClick(row);
+    } else {
+      fireEvent.click(row);
+      await settle();
+      fireEvent.click(
+        way === "the details' button"
+          ? screen.getByRole("button", { name: "Open in an editor" })
+          : within(shown()).getByRole("button", { name: /^Deployment / }),
+      );
+    }
+    await settle();
+    expect(tabs()).toEqual([
+      ["Pods", "false"],
+      [way === "a link in the details" ? expect.any(String) : name, "false"],
+    ]);
+  },
+);
+
+test("opening a pod and then a Deployment from the details leaves both in tabs of their own", async () => {
+  const workbench = await openList();
+  const tabs = () =>
+    [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+      (title) => [title.textContent.trim(), title.dataset.preview] as const,
+    );
+  const [pod] = rows();
+  if (!pod) throw new Error("no rows");
+  fireEvent.click(pod);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
+  await settle();
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/apps/v1/deployments");
+  });
+  await settle();
+  const [deployment] = rows();
+  if (!deployment) throw new Error("no rows");
+  fireEvent.click(deployment);
+  await settle();
+  fireEvent.click(screen.getByRole("button", { name: "Open in an editor" }));
+  await settle();
+  const shown = tabs();
+  expect(shown.map(([title]) => title)).toEqual(
+    expect.arrayContaining([nameOf(pod), nameOf(deployment)]),
+  );
+  expect(
+    shown.filter(([title]) =>
+      [nameOf(pod), nameOf(deployment)].includes(title),
+    ),
+  ).toEqual([
+    [nameOf(pod), "false"],
+    [nameOf(deployment), "false"],
+  ]);
+});
+
+test("a double click on a row opens its object in a tab of its own, keeps the list and its details, and the next one adds a tab", async () => {
+  const workbench = await openList();
+  const tabs = () =>
+    [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+      (title) => [title.textContent.trim(), title.dataset.preview] as const,
+    );
+  const [first, second] = rows();
+  if (!first || !second) throw new Error("no rows");
+  const [podOne, podTwo] = [nameOf(first), nameOf(second)];
+  doubleClick(first);
+  await settle();
+  expect(workbench.editors.active).toMatch(
+    new RegExp(`^k8s://prod-eu//v1/pods/.*/${podOne}$`),
+  );
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle();
+  const [again, other] = rows();
+  if (!again || !other) throw new Error("no rows");
+  expect(details()).not.toBeNull();
+  doubleClick(other);
+  await settle();
+  expect(tabs()).toEqual([
+    ["Pods", "false"],
+    [podOne, "false"],
+    [podTwo, "false"],
+  ]);
 });
 
 test("the details say why the object cannot open, over the row's cells", async () => {

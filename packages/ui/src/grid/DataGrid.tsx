@@ -100,6 +100,8 @@ export interface DataGridProps<R, G> {
   readonly onSelect: (id: string, row: R) => void;
   /** A click or Enter on a row. */
   readonly onActivate: (id: string, row: R) => void;
+  /** A double click on a row, after the click that selected and activated it, and not on a control in it. */
+  readonly onOpen?: (id: string, row: R) => void;
   /** Marked rows; without it the grid has no marks column. */
   readonly marked?: ReadonlySet<string>;
   readonly onMark?: (ids: readonly string[], marked: boolean) => void;
@@ -175,6 +177,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     selected,
     onSelect,
     onActivate,
+    onOpen,
     marked,
     onMark,
     menu = [],
@@ -272,6 +275,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
   // Where the cursor was last seen, to move on from once it leaves the
   // window.
   const seen = useRef<{ id: string; index: number }>(undefined);
+  const firstPress = useRef<string>(undefined);
   useEffect(() => {
     latest.current = {
       cursor,
@@ -597,6 +601,26 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
           onActivate(target.id, target.data);
         }}
         onContextMenu={select}
+        onMouseDown={
+          onOpen &&
+          ((event) => {
+            if (event.detail > 1) event.preventDefault();
+            else firstPress.current = target.id;
+          })
+        }
+        onDoubleClick={
+          onOpen &&
+          ((event) => {
+            const { target: hit } = event;
+            if (
+              firstPress.current === target.id &&
+              hit instanceof Element &&
+              event.currentTarget.contains(hit) &&
+              !hit.closest("button, a, input, [data-mark]")
+            )
+              onOpen(target.id, target.data);
+          })
+        }
         data-tone={tone}
         className={cn(
           "group/row absolute inset-x-0 top-0 grid items-center",
@@ -608,6 +632,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         {marking && (
           <div
             role="gridcell"
+            data-mark=""
             className={held ? cn(markCell, held, edge, "left-0") : markCell}
           >
             <MarkBox
@@ -663,6 +688,9 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       aria-label={label}
       onPointerDown={() => {
         setWanted(undefined);
+      }}
+      onMouseDownCapture={(event) => {
+        if (event.detail <= 1) firstPress.current = undefined;
       }}
       aria-rowcount={length + (header ? 1 : 0)}
       aria-multiselectable={marking || undefined}

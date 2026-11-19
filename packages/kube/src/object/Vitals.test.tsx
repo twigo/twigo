@@ -75,7 +75,6 @@ function strip(
     <Vitals
       cells={vitalCells(POD, vitals, shown, undefined)}
       verdict={alarm}
-      layout="strip"
     />,
   );
 }
@@ -156,7 +155,6 @@ describe("a pod's strip", () => {
       <Vitals
         cells={vitalCells(POD, [], shown, undefined)}
         verdict={undefined}
-        layout="strip"
       />
     );
     const shown = usage({
@@ -182,7 +180,6 @@ describe("a pod's strip", () => {
       <Vitals
         cells={vitalCells(POD, [], shown, undefined)}
         verdict={undefined}
-        layout="strip"
       />
     );
     sized(104, 120, 98);
@@ -326,9 +323,7 @@ describe("the cells of an object", () => {
     );
     expect(labelsOf(cells)).toEqual(["Ready", "Updated", "Revision"]);
     expect(vitalCells(DEPLOYMENT, [], undefined, undefined)).toEqual([]);
-    const { container } = render(
-      <Vitals cells={[]} verdict={undefined} layout="strip" />,
-    );
+    const { container } = render(<Vitals cells={[]} verdict={undefined} />);
     expect(container.firstChild).toBeNull();
   });
 
@@ -349,7 +344,7 @@ describe("the cells of an object", () => {
       "CPU",
       "Memory",
     ]);
-    render(<Vitals cells={cells} verdict={undefined} layout="strip" />);
+    render(<Vitals cells={cells} verdict={undefined} />);
     expect(screen.getAllByRole("term")).toHaveLength(4);
     for (const label of ["Ready", "Restarts", "CPU", "Memory"]) {
       expect(cell(label).textContent).toBe("–");

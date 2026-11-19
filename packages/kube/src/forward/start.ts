@@ -41,13 +41,13 @@ function pickItems(ports: ForwardPorts, forwards: Forwards): QuickPickItem[] {
 
 /**
  * What `f` does on a pod, a Service or a workload (ARCHITECTURE 4.4): asks
- * the core for the target's ports, and starts one of them, or goes to the
- * forward that port has already, never a second.
+ * the core for the target's ports, asks which of them whatever their number,
+ * and starts that one, or goes to the forward it has already, never a second.
  */
 export function startForward(
   workbench: Workbench,
   forwards: Forwards,
-): (target: ForwardTarget, options: { pick: boolean }) => Promise<void> {
+): (target: ForwardTarget) => Promise<void> {
   const { backend, editors, quickAccess } = workbench;
   const told = tellFailure(workbench, forwards);
 
@@ -55,21 +55,13 @@ export function startForward(
     editors.open(pfUri({ space: target.space, id }));
   };
 
-  return async (
-    target: ForwardTarget,
-    { pick }: { pick: boolean },
-  ): Promise<void> => {
+  return async (target: ForwardTarget): Promise<void> => {
     const ports = await backend.invoke("forward_ports", target);
-    let chosen: ForwardPort | undefined;
-    if (pick || ports.ports.length > 1) {
-      const picked = await quickAccess.pick(
-        `Port of ${ports.kind} ${target.name} to forward`,
-        pickItems(ports, forwards),
-      );
-      chosen = ports.ports.find(({ port }) => String(port) === picked?.id);
-    } else {
-      chosen = ports.ports.find(({ port }) => port === ports.default);
-    }
+    const picked = await quickAccess.pick(
+      `Port of ${ports.kind} ${target.name} to forward`,
+      pickItems(ports, forwards),
+    );
+    const chosen = ports.ports.find(({ port }) => String(port) === picked?.id);
     if (!chosen) return;
     if (chosen.forward !== null) {
       reveal(target, chosen.forward);

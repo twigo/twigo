@@ -28,7 +28,7 @@ import { WorkbenchView, type Workbench } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
 import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
-import { objectUri, pfUri } from "../uri";
+import { OBJECT_SCHEME, objectUri, parseObjectUri, pfUri } from "../uri";
 import { registerForwards } from "./register";
 import { Forwards } from "./service";
 
@@ -183,29 +183,53 @@ test("a forward's tab tooltip is its target's path from the context down, then t
   ).toBeUndefined();
 });
 
-test("the target and the pod are links to their objects, which open beside the tab", async () => {
-  const { workbench, start, open } = await mounted();
+test("the target and the pod are links to their objects, which open in tabs of their own beside the forward's, which they pin", async () => {
+  const { workbench, start } = await mounted();
+  workbench.editors.register({
+    id: "test.object",
+    scheme: OBJECT_SCHEME,
+    title: (uri) => parseObjectUri(uri.href)?.name ?? uri.href,
+    component: () => null,
+  });
   const forward = await start(API, 80);
-  const uri = await open(forward);
-  const opened = vi
-    .spyOn(workbench.editors, "open")
-    .mockImplementation(() => undefined);
-  const pinned = vi.spyOn(workbench.editors, "pin");
+  const uri = pfUri({ space: forward.target.space, id: forward.id });
+  act(() => {
+    workbench.editors.open(uri, { preview: true });
+  });
+  await settle(6);
+  const tabs = () =>
+    [...document.querySelectorAll<HTMLElement>(".twigo-tab-title")].map(
+      (title) => [title.textContent.trim(), title.dataset.preview] as const,
+    );
+  expect(tabs()).toEqual([["auth-api:http → 8080", "true"]]);
   fireEvent.click(button("auth/auth-api"));
-  expect(opened).toHaveBeenLastCalledWith(
+  await settle(2);
+  expect(workbench.editors.active).toBe(
     objectUri({
       space: "qa",
       gvr: SERVICES,
       namespace: NAMESPACE,
       name: "auth-api",
     }),
-    { preview: true },
   );
-  expect(pinned).toHaveBeenLastCalledWith(uri);
+  expect(tabs()).toEqual([
+    ["auth-api:http → 8080", "false"],
+    ["auth-api", "false"],
+  ]);
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle(2);
   fireEvent.click(button(/^auth-api-[a-z0-9]+-[a-z0-9]+$/));
-  const [pod, options] = opened.mock.calls[1] ?? [];
-  expect(pod).toMatch(/^k8s:\/\/qa\/\/v1\/pods\/auth\/auth-api-/);
-  expect(options).toEqual({ preview: true });
+  await settle(2);
+  expect(workbench.editors.active).toMatch(
+    /^k8s:\/\/qa\/\/v1\/pods\/auth\/auth-api-/,
+  );
+  expect(tabs()).toEqual([
+    ["auth-api:http → 8080", "false"],
+    ["auth-api", "false"],
+    [expect.stringMatching(/^auth-api-/), "false"],
+  ]);
 });
 
 test("a forward to a pod has one row for it, which carries the port it reaches, and the pod opens from it", async () => {
@@ -224,7 +248,6 @@ test("a forward to a pod has one row for it, which carries the port it reaches, 
   fireEvent.click(button(`auth/${name}`));
   expect(opened).toHaveBeenLastCalledWith(
     objectUri({ space: "qa", gvr: PODS, namespace: NAMESPACE, name }),
-    { preview: true },
   );
 });
 

@@ -59,18 +59,33 @@ export function ValueView({
       ) : (
         <Time at={value.at} />
       );
-    case "link":
+    case "link": {
+      const { name } = value.target;
+      // The last one: the key in `key {key} of {noun} {name}` may hold it too.
+      const at = value.text.lastIndexOf(name);
+      const [before, named, after] =
+        at < 0
+          ? ["", value.text, ""]
+          : [value.text.slice(0, at), name, value.text.slice(at + name.length)];
       return (
         <LinkButton
           onClick={() => {
             onOpen(value.target);
           }}
           title={value.text}
-          className="ident block max-w-full"
+          className="ident block max-w-full whitespace-normal"
         >
-          <CutInTheMiddle text={value.text} floor={NAME_FLOOR} separator="-" />
+          {before}
+          <CutInTheMiddle
+            inline
+            text={named}
+            floor={NAME_FLOOR}
+            separator="-"
+          />
+          {after}
         </LinkButton>
       );
+    }
     case "labels":
       return <Labels labels={value.labels} />;
     case "spans":

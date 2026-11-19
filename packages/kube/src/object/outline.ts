@@ -1,10 +1,5 @@
-import type {
-  Overview as Document,
-  Section,
-  TextFilter,
-  Tone,
-} from "@twigo/protocol";
-import { keeps, USAGE_TITLE, viewOf } from "./pageFilter";
+import type { Overview as Document, Section, Tone } from "@twigo/protocol";
+import { USAGE_TITLE } from "./pageFilter";
 
 const USAGE = "core.usage";
 
@@ -18,7 +13,7 @@ const EDGE: Readonly<Record<Tone, "error" | "warn" | undefined>> = {
   neutral: undefined,
 };
 
-/** A section as its header and the full page's index say it. */
+/** A section as its header says it. */
 export interface Outline {
   readonly id: string;
   readonly title: string;
@@ -30,14 +25,12 @@ export interface Outline {
 /**
  * The sections of a page in order, a node's usage after its Diagnostics. The
  * full page opens every one but the Metadata, which the person opens, and a
- * section that holds a finding stays one, which opens over what was kept. Under
- * a filter only the sections it keeps are listed, as the page draws them.
+ * section that holds a finding stays one, which opens over what was kept.
  */
 export function outlineOf(
   overview: Document,
   withUsage: boolean,
   fullPage: boolean,
-  filter: TextFilter | null = null,
 ): Outline[] {
   const outline = overview.sections.map((section): Outline => ({
     id: section.id,
@@ -59,13 +52,5 @@ export function outlineOf(
       summary: [],
       tone: undefined,
     });
-  if (filter === null) return outline;
-  return outline.filter((entry) => {
-    const section = overview.sections.find(({ id }) => id === entry.id);
-    return keeps(
-      filter,
-      section && viewOf(section, filter, false),
-      entry.title,
-    );
-  });
+  return outline;
 }

@@ -639,7 +639,7 @@ test("a node's section folds, and the kind remembers it", () => {
 });
 
 describe("an open object", () => {
-  const layout = withScreenSize(1000);
+  withScreenSize(1000);
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -760,7 +760,7 @@ describe("an open object", () => {
     return states;
   }
 
-  test("an open pod's Overview shows its usage while the document is visible, and the part follows the summary column, which the Overview alone shows under 900 px", async () => {
+  test("an open pod's Overview shows its usage while the document is visible, and no other view asks for it", async () => {
     const backend = createMockBackend("ready");
     const usage = spied(backend);
     const workbench = await mountKube(backend);
@@ -785,10 +785,6 @@ describe("an open object", () => {
     expect(usage()).toBe(true);
 
     fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
-    await settle();
-    expect(usage()).toBe(true);
-
-    layout.resize(screen.getByRole("region", { name: /^Pod / }), 700);
     await settle();
     expect(usage()).toBe(false);
     fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
