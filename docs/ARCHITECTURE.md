@@ -1027,7 +1027,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     A usage that says `absent`, once the context stops serving the resource, withdraws the figures as if none had come, until a later batch brings one.
   - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
   - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
-    They draw as a list does (4.4): their columns of priority 0 give way by their measured width, and the rows of a pods list that fail come first, then the pending ones, while it holds at most 100 rows and the person has not sorted it; a click or Enter on a row opens its object in a tab of its own.
+    They draw as a list does (4.4): their columns of priority 0 give way by their measured width, and their rows come in the order the core gives; a click or Enter on a row opens its object in a tab of its own.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
@@ -1698,7 +1698,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - an object always opens in a tab of its own, and the tab it was opened from stays; a double-click or ⌘Enter on a list's row opens its object, and the docked details are the quick look;
   - the full page in one column of sections, with no summary column or index beside it;
   - the chevron leads a section's title, as it does in a side bar;
-  - the failing pods first in a list of pods inside an Overview;
+  - a list inside an Overview keeps the order the core gives, as every other list does;
   - copy buttons out of the Tab order;
   - a pill keeps the list's word and takes the core's finding tone where the list's rule calls that word healthy, as for a rollout past its deadline;
   - labels as lines, a pending pod's sentence as it is, shares from 10,000 % as `>9999%`, and no step of its own for the mock's fidelity.
