@@ -23,7 +23,7 @@ function edit(
   edited: unknown = { ...SETTINGS, data: { a: "1" } },
 ): ApplyRequest {
   return {
-    space: "qa",
+    space: "kind-local",
     opened: {
       target: {
         gvr: { group: "", version: "v1", resource: "configmaps" },
@@ -47,7 +47,7 @@ async function settled<T>(promise: Promise<T>): Promise<T> {
 
 async function backendOf(scenario: MockScenario) {
   const backend = createMockBackend(scenario);
-  await settled(backend.invoke("space_open", "qa"));
+  await settled(backend.invoke("space_open", "kind-local"));
   return backend;
 }
 
@@ -137,7 +137,7 @@ interface Manifest {
 }
 
 const OPENED = {
-  space: "qa",
+  space: "kind-local",
   gvr: { group: "", version: "v1", resource: "configmaps" },
   namespaced: true,
   namespace: "default",
@@ -181,7 +181,7 @@ async function applyEdit(
 ): Promise<OperationEvent[]> {
   const answer = await settled(
     backend.invoke("apply_preview", {
-      space: "qa",
+      space: "kind-local",
       opened: {
         target: {
           gvr: OPENED.gvr,
@@ -202,7 +202,7 @@ async function applyEdit(
   const plan = await settled(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: answer.id,
     }),
   );
@@ -431,7 +431,7 @@ test("an edit of what an apply leaves out is unchanged and says what was left ou
   };
   const request = (edited: unknown, base: unknown = deployment) =>
     ({
-      space: "qa",
+      space: "kind-local",
       opened: {
         target: {
           gvr: { group: "apps", version: "v1", resource: "deployments" },
@@ -505,7 +505,7 @@ test("a manifest of an object an apply left shows it as live, and one of an obje
   const backend = await backendOf("live");
   const manifest = (data: Record<string, string>) =>
     ({
-      space: "qa",
+      space: "kind-local",
       opened: null,
       edited: {
         apiVersion: "v1",
@@ -525,7 +525,7 @@ test("a manifest of an object an apply left shows it as live, and one of an obje
   const plan = await settled(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: first.id,
     }),
   );
@@ -569,7 +569,7 @@ test("a refused edit ends the plans of older previews of its object, and a names
     backend
       .invoke("command_plan", {
         action: "apply",
-        space: "qa",
+        space: "kind-local",
         preview: ready.id,
       })
       .catch((error: unknown) => error),
@@ -582,7 +582,7 @@ test("a refused edit ends the plans of older previews of its object, and a names
   const unnamespaced = await settled(
     backend
       .invoke("apply_preview", {
-        space: "qa",
+        space: "kind-local",
         opened: null,
         edited: {
           apiVersion: "v1",

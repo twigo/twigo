@@ -3,10 +3,12 @@ import type {
   Context,
   ContextAccess,
   Environment,
+  Lock,
+  LockSource,
   Mode,
   ModeSource,
 } from "../generated";
-import { CONTEXTS } from "./fixtures";
+import { CHOSEN, CONTEXTS, KUBECONFIG_READ_ONLY } from "./fixtures";
 
 const UNLOCK_MS = 15 * 60 * 1000;
 const POLICY_FILE = "/Library/Application Support/Twigo/policy.json";
@@ -19,10 +21,21 @@ const DEFAULT_MODE: Readonly<Record<Environment, Mode>> = {
   local: "read-write",
 };
 
+/** How much a mode holds back, as `twigo_policy::Mode`'s order does. */
+export const STRICTNESS: Readonly<Record<Mode, number>> = {
+  "read-write": 0,
+  guarded: 1,
+  "read-only": 2,
+};
+
+/** A change of what the person marked, to see what a context would be. */
+export type Change =
+  { readonly mode: Mode | null } | { readonly environment: Environment | null };
+
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(contexts: Context[]) => void>();
-  readonly #modes = new Map<string, Mode>();
+  readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
   readonly #environments = new Map<string, Environment | null>();
   readonly #unlocks = new Map<string, number>();
   /** Contexts a policy file turned read-only after the app started. */
@@ -36,8 +49,7 @@ export class MockAccess {
   }
 
   setMode(name: string, mode: Mode | null): void {
-    fixture(name);
-    this.#refusePolicyFile(name);
+    this.refuse(name);
     this.#unlocks.delete(name);
     if (mode === null) this.#modes.delete(name);
     else this.#modes.set(name, mode);
@@ -52,9 +64,8 @@ export class MockAccess {
   }
 
   unlock(name: string): void {
-    const context = fixture(name);
-    this.#refusePolicyFile(name);
-    const { mode, unlockedUntil } = this.#access(context);
+    this.refuse(name);
+    const { mode, unlockedUntil } = this.of(name);
     if (mode !== "read-only" && unlockedUntil === null) {
       throw new IpcError(
         "invalidInput",
@@ -91,6 +102,22 @@ export class MockAccess {
     return this.#access(fixture(name));
   }
 
+  /** What a context would let through once `change` is made, an unlock ended. */
+  would(name: string, change: Change): ContextAccess {
+    return this.#access(fixture(name), change);
+  }
+
+  /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
+  refuse(name: string): void {
+    fixture(name);
+    if (this.#policyFileSets(name)) {
+      throw new IpcError(
+        "permissions",
+        `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
+      );
+    }
+  }
+
   #list(): Context[] {
     return CONTEXTS.map((context) => ({
       ...context,
@@ -103,12 +130,20 @@ export class MockAccess {
     for (const watcher of this.#watchers) watcher(contexts);
   }
 
-  #access(context: Context): ContextAccess {
-    const marked = this.#environments.get(context.name);
+  #access(context: Context, change?: Change): ContextAccess {
+    const { name } = context;
+    const marked =
+      change && "environment" in change
+        ? change.environment
+        : this.#environments.get(name);
     const environment =
       marked === undefined ? context.access.environment : marked;
-    const { mode, source } = this.#resolve(context.name, environment);
-    const until = this.#unlocks.get(context.name);
+    const chosen =
+      change && "mode" in change
+        ? (change.mode ?? undefined)
+        : this.#modes.get(name);
+    const { mode, source } = this.#resolve(name, environment, chosen);
+    const until = change ? undefined : this.#unlocks.get(name);
     const unlocked =
       until !== undefined &&
       until > Date.now() &&
@@ -122,9 +157,11 @@ export class MockAccess {
     };
   }
 
+  /** As ARCHITECTURE 6.4 orders them: the policy file, the person's choice over the strictest lock, the strictest lock, else unmarked. */
   #resolve(
     name: string,
     environment: Environment | null,
+    chosen: Mode | undefined,
   ): { mode: Mode; source: ModeSource } {
     if (this.#policyFileSets(name)) {
       return {
@@ -136,15 +173,14 @@ export class MockAccess {
         },
       };
     }
-    const chosen = this.#modes.get(name);
-    if (chosen) return { mode: chosen, source: { kind: "user" } };
-    if (environment) {
-      return {
-        mode: DEFAULT_MODE[environment],
-        source: { kind: "environment", environment },
-      };
+    const lock = strictest(name, environment);
+    if (chosen) {
+      const overrides =
+        lock && STRICTNESS[lock.mode] > STRICTNESS[chosen] ? lock : null;
+      return { mode: chosen, source: { kind: "user", overrides } };
     }
-    return { mode: "read-write", source: { kind: "default" } };
+    if (lock) return { mode: lock.mode, source: lock.source };
+    return { mode: "guarded", source: { kind: "unmarked" } };
   }
 
   #policyFileSets(name: string): boolean {
@@ -153,18 +189,41 @@ export class MockAccess {
     );
   }
 
-  #refusePolicyFile(name: string): void {
-    if (this.#policyFileSets(name)) {
-      throw new IpcError(
-        "permissions",
-        `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
-      );
-    }
-  }
-
   #pattern(name: string): string {
     return this.#filed.has(name) ? name : POLICY_PATTERN;
   }
+}
+
+/** The strictest of a context's locks, the kubeconfig's before the type's where they tie. */
+function strictest(
+  name: string,
+  environment: Environment | null,
+): Lock | undefined {
+  const locks: Lock[] = [
+    ...(KUBECONFIG_READ_ONLY.has(name)
+      ? [
+          {
+            mode: "read-only" as const,
+            source: { kind: "kubeconfig" } as const,
+          },
+        ]
+      : []),
+    ...(environment
+      ? [
+          {
+            mode: DEFAULT_MODE[environment],
+            source: { kind: "environment", environment } as LockSource,
+          },
+        ]
+      : []),
+  ];
+  return locks.reduce<Lock | undefined>(
+    (best, lock) =>
+      best === undefined || STRICTNESS[lock.mode] > STRICTNESS[best.mode]
+        ? lock
+        : best,
+    undefined,
+  );
 }
 
 function fixture(name: string): Context {

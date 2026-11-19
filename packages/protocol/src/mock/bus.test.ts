@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { IpcError } from "../error";
-import type { OperationEvent, PlanRequest } from "../generated";
+import type {
+  Environment,
+  Mode,
+  OperationEvent,
+  PlanRequest,
+} from "../generated";
 import { Cluster, deploymentOf } from "./cluster";
-import { createMockBackend } from "./index";
+import { createMockBackend, protect } from "./index";
 import { POD_COUNT } from "./fixtures";
 
 beforeEach(() => {
@@ -41,6 +46,18 @@ async function answered<T>(promise: Promise<T>): Promise<T> {
   return promise;
 }
 
+type Protection = Parameters<typeof protect>[1];
+
+const tick = () => vi.advanceTimersByTimeAsync(1);
+
+/** A change of protection the way a person confirms it, the name typed where it asks. */
+function change(
+  backend: ReturnType<typeof createMockBackend>,
+  request: Protection,
+): Promise<void> {
+  return protect(backend, request, tick);
+}
+
 /** The error a request is refused with, caught before the timers let it reject. */
 async function refused(promise: Promise<unknown>): Promise<IpcError> {
   const caught = promise.then(
@@ -72,9 +89,11 @@ async function run(
 
 test("a pod its replica set replaces counts down, and runs only once the countdown ends", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const { name } = pod("qa");
-  const plan = await answered(backend.invoke("command_plan", deletePod("qa")));
+  await answered(backend.invoke("space_open", "kind-local"));
+  const { name } = pod("kind-local");
+  const plan = await answered(
+    backend.invoke("command_plan", deletePod("kind-local")),
+  );
   expect(plan.friction).toEqual({ kind: "countdown", seconds: 5 });
   expect(plan.consequences[0]).toMatch(/^Its replica set .+ replaces it\.$/);
   const early = await refused(
@@ -86,7 +105,9 @@ test("a pod its replica set replaces counts down, and runs only once the countdo
   );
   expect(early.message).toBe("the countdown has not ended");
 
-  const again = await answered(backend.invoke("command_plan", deletePod("qa")));
+  const again = await answered(
+    backend.invoke("command_plan", deletePod("kind-local")),
+  );
   await vi.advanceTimersByTimeAsync(5000);
   expect(await run(backend, again.id)).toEqual([
     { state: "running", text: `Waiting for pod ${name} to go` },
@@ -96,8 +117,10 @@ test("a pod its replica set replaces counts down, and runs only once the countdo
 
 test("a cancelled plan never runs", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const plan = await answered(backend.invoke("command_plan", deletePod("qa")));
+  await answered(backend.invoke("space_open", "kind-local"));
+  const plan = await answered(
+    backend.invoke("command_plan", deletePod("kind-local")),
+  );
   await answered(backend.invoke("command_cancel", plan.id));
   await vi.advanceTimersByTimeAsync(5000);
   const error = await refused(
@@ -136,29 +159,31 @@ test("guarded asks for the context's name and read-only refuses before anything 
 
 test("a node asks for its name typed and a deployment in a dialog", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const node = await answered(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: [
         {
           gvr: { group: "", version: "v1", resource: "nodes" },
           namespaced: false,
           namespace: null,
-          name: "qa-node-3",
+          name: "kind-local-node-3",
         },
       ],
     }),
   );
-  expect(node.friction).toEqual({ kind: "typed", text: "qa-node-3" });
-  expect(node.kubectl).toBe("kubectl --context qa delete nodes qa-node-3");
+  expect(node.friction).toEqual({ kind: "typed", text: "kind-local-node-3" });
+  expect(node.kubectl).toBe(
+    "kubectl --context kind-local delete nodes kind-local-node-3",
+  );
 
-  const first = pod("qa");
+  const first = pod("kind-local");
   const deployment = await answered(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: [
         {
           gvr: { group: "apps", version: "v1", resource: "deployments" },
@@ -172,7 +197,7 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
   expect(deployment.friction).toEqual({ kind: "confirm" });
   expect(deployment.confirm).toBe("Delete deployment");
   expect(deployment.kubectl).toBe(
-    `kubectl --context qa delete deployments.apps ${deploymentOf(first)} -n ${first.namespace}`,
+    `kubectl --context kind-local delete deployments.apps ${deploymentOf(first)} -n ${first.namespace}`,
   );
 });
 
@@ -197,13 +222,13 @@ test("read-only refuses before the object is looked up, as Rust does", async () 
 
 test("a Reveal whose Secret closed before it ran fails, and says so", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const object = await answered(
     backend.subscribe(
       "object_open",
       {
         object: {
-          space: "qa",
+          space: "kind-local",
           gvr: { group: "", version: "v1", resource: "secrets" },
           namespaced: true,
           namespace: "overview",
@@ -242,9 +267,13 @@ test("a Reveal whose Secret closed before it ran fails, and says so", async () =
 });
 
 function deployment() {
-  const first = pod("qa");
+  const first = pod("kind-local");
   const name = deploymentOf(first);
-  const count = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.filter(
+  const count = new Cluster(
+    "kind-local",
+    POD_COUNT["kind-local"] ?? 0,
+    0,
+  ).pods.filter(
     (other) =>
       other.namespace === first.namespace && deploymentOf(other) === name,
   ).length;
@@ -263,18 +292,18 @@ function deployment() {
 
 test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const { target, name, namespace, count } = deployment();
   const scale = (replicas: number): PlanRequest => ({
     action: "scale",
-    space: "qa",
+    space: "kind-local",
     target,
     replicas,
   });
   const up = await answered(backend.invoke("command_plan", scale(count + 2)));
   expect(up.friction).toEqual({ kind: "atOnce" });
   expect(up.kubectl).toBe(
-    `kubectl --context qa scale deployments.apps ${name} --current-replicas ${String(count)} --replicas ${String(count + 2)} -n ${namespace}`,
+    `kubectl --context kind-local scale deployments.apps ${name} --current-replicas ${String(count)} --replicas ${String(count + 2)} -n ${namespace}`,
   );
   const started = Date.now();
   const [done] = await run(backend, up.id);
@@ -287,10 +316,10 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   expect(until).toBeLessThan(started + 31_000);
 
   const back = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(back.kubectl).toBe(
-    `kubectl --context qa scale deployments.apps ${name} --current-replicas ${String(count + 2)} --replicas ${String(count)} -n ${namespace}`,
+    `kubectl --context kind-local scale deployments.apps ${name} --current-replicas ${String(count + 2)} --replicas ${String(count)} -n ${namespace}`,
   );
   expect(await run(backend, back.id)).toEqual([
     {
@@ -300,7 +329,7 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
     },
   ]);
   const nothing = await refused(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(nothing.kind).toBe("notFound");
 
@@ -312,7 +341,7 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   );
   await vi.advanceTimersByTimeAsync(30_000);
   const late = await refused(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(late.kind).toBe("notFound");
 
@@ -324,10 +353,10 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
 
 test("an undo puts back the space's last action only", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const suspend = (on: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "cronjobs" },
       namespaced: true,
@@ -348,7 +377,7 @@ test("an undo puts back the space's last action only", async () => {
     (await answered(backend.invoke("command_plan", suspend(true)))).id,
   );
   const undo = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(await run(backend, undo.id)).toEqual([
     {
@@ -361,12 +390,12 @@ test("an undo puts back the space's last action only", async () => {
 
 test("the last action is the one that started last, whichever ends first", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const [drained, cordoned] = ["qa-node-3", "qa-node-4"];
+  await answered(backend.invoke("space_open", "kind-local"));
+  const [drained, cordoned] = ["kind-local-node-3", "kind-local-node-4"];
   const drain = await answered(
     backend.invoke("command_plan", {
       action: "drain",
-      space: "qa",
+      space: "kind-local",
       node: drained,
     }),
   );
@@ -380,21 +409,21 @@ test("the last action is the one that started last, whichever ends first", async
   const cordon = await answered(
     backend.invoke("command_plan", {
       action: "cordon",
-      space: "qa",
+      space: "kind-local",
       node: cordoned,
       unschedulable: true,
     }),
   );
   await run(backend, cordon.id);
   const undo = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
-  expect(undo.question).toBe(`Uncordon node ${cordoned} on qa?`);
+  expect(undo.question).toBe(`Uncordon node ${cordoned} on kind-local?`);
 
   const first = await answered(
     backend.invoke("command_plan", {
       action: "cordon",
-      space: "qa",
+      space: "kind-local",
       node: drained,
       unschedulable: false,
     }),
@@ -402,7 +431,7 @@ test("the last action is the one that started last, whichever ends first", async
   const later = await answered(
     backend.invoke("command_plan", {
       action: "drain",
-      space: "qa",
+      space: "kind-local",
       node: cordoned,
     }),
   );
@@ -416,18 +445,18 @@ test("the last action is the one that started last, whichever ends first", async
   await answered(Promise.all(both));
   await vi.advanceTimersByTimeAsync(2000);
   const nothing = await refused(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(nothing.kind).toBe("notFound");
 });
 
 test("an undo that scales back to zero asks and lists the pods that go", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const { target } = deployment();
   const scale = (replicas: number): PlanRequest => ({
     action: "scale",
-    space: "qa",
+    space: "kind-local",
     target,
     replicas,
   });
@@ -440,7 +469,7 @@ test("an undo that scales back to zero asks and lists the pods that go", async (
     (await answered(backend.invoke("command_plan", scale(2)))).id,
   );
   const undo = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(undo.friction).toEqual({ kind: "confirm" });
   expect(undo.affected[0]?.title).toBe("Its pods go");
@@ -449,17 +478,21 @@ test("an undo that scales back to zero asks and lists the pods that go", async (
 
 test("a drain cordons the node and lists the pods it evicts", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const node = pod("qa").node;
+  await answered(backend.invoke("space_open", "kind-local"));
+  const node = pod("kind-local").node;
   const plan = await answered(
-    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+    backend.invoke("command_plan", {
+      action: "drain",
+      space: "kind-local",
+      node,
+    }),
   );
   expect(plan.friction).toEqual({ kind: "confirm" });
   expect(plan.kubectl).toBe(
-    `kubectl --context qa drain ${node} --ignore-daemonsets`,
+    `kubectl --context kind-local drain ${node} --ignore-daemonsets`,
   );
   expect(plan.affected[0]?.objects.map((object) => object.name)).toContain(
-    pod("qa").name,
+    pod("kind-local").name,
   );
   const events = await run(backend, plan.id);
   expect(events[events.length - 1]).toEqual({
@@ -470,7 +503,7 @@ test("a drain cordons the node and lists the pods it evicts", async () => {
   const again = await refused(
     backend.invoke("command_plan", {
       action: "cordon",
-      space: "qa",
+      space: "kind-local",
       node,
       unschedulable: true,
     }),
@@ -480,10 +513,14 @@ test("a drain cordons the node and lists the pods it evicts", async () => {
 
 test("a stopped drain evicts nothing more and leaves the node cordoned", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const { node, name } = pod("qa");
+  await answered(backend.invoke("space_open", "kind-local"));
+  const { node, name } = pod("kind-local");
   const plan = await answered(
-    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+    backend.invoke("command_plan", {
+      action: "drain",
+      space: "kind-local",
+      node,
+    }),
   );
   const events: OperationEvent[] = [];
   await answered(
@@ -503,7 +540,11 @@ test("a stopped drain evicts nothing more and leaves the node cordoned", async (
     text: `Stopped draining node ${node}, which stays cordoned; it evicted 0 of ${String(pods)} pod${pods === 1 ? "" : "s"}`,
   });
   const again = await answered(
-    backend.invoke("command_plan", { action: "drain", space: "qa", node }),
+    backend.invoke("command_plan", {
+      action: "drain",
+      space: "kind-local",
+      node,
+    }),
   );
   expect(again.affected[0]?.objects.map((object) => object.name)).toContain(
     name,
@@ -511,21 +552,21 @@ test("a stopped drain evicts nothing more and leaves the node cordoned", async (
   const uncordon = await answered(
     backend.invoke("command_plan", {
       action: "cordon",
-      space: "qa",
+      space: "kind-local",
       node,
       unschedulable: false,
     }),
   );
-  expect(uncordon.question).toBe(`Uncordon node ${node} on qa?`);
+  expect(uncordon.question).toBe(`Uncordon node ${node} on kind-local?`);
 });
 
 test("suspending a job that runs asks, and so does undoing its resume", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const trigger = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -541,7 +582,7 @@ test("suspending a job that runs asks, and so does undoing its resume", async ()
   const job = /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1];
   const suspend = (on: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "jobs" },
       namespaced: true,
@@ -576,18 +617,18 @@ test("suspending a job that runs asks, and so does undoing its resume", async ()
   );
   await vi.advanceTimersByTimeAsync(10);
   const back = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(back.friction).toEqual({ kind: "confirm" });
 });
 
 test("a trigger asks in a dialog and names the job it makes", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "report",
     }),
@@ -596,7 +637,7 @@ test("a trigger asks in a dialog and names the job it makes", async () => {
   const job = /^Job (\S+) runs once/.exec(plan.consequences[0] ?? "")?.[1];
   expect(job).toMatch(/^report-manual-[bcdfghjklmnpqrstvwxz2456789]{5}$/);
   expect(plan.kubectl).toBe(
-    `kubectl --context qa create job ${job ?? ""} --from cronjob/report -n batch`,
+    `kubectl --context kind-local create job ${job ?? ""} --from cronjob/report -n batch`,
   );
   expect(await run(backend, plan.id)).toEqual([
     { state: "done", text: `Created job ${job ?? ""}`, undoUntil: null },
@@ -605,12 +646,16 @@ test("a trigger asks in a dialog and names the job it makes", async () => {
 
 test("a delete of several asks for the context's name typed and lists them", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const pods = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.slice(0, 3);
+  await answered(backend.invoke("space_open", "kind-local"));
+  const pods = new Cluster(
+    "kind-local",
+    POD_COUNT["kind-local"] ?? 0,
+    0,
+  ).pods.slice(0, 3);
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: pods.map((each) => ({
         gvr: { group: "", version: "v1", resource: "pods" },
         namespaced: true,
@@ -619,7 +664,7 @@ test("a delete of several asks for the context's name typed and lists them", asy
       })),
     }),
   );
-  expect(plan.friction).toEqual({ kind: "typed", text: "qa" });
+  expect(plan.friction).toEqual({ kind: "typed", text: "kind-local" });
   expect(plan.confirm).toBe("Delete 3 pods");
   expect(plan.affected[0]).toEqual({
     title: "Deletes",
@@ -644,20 +689,28 @@ test("a viewer may read and nothing else", async () => {
   const viewer = createMockBackend("viewer");
   expect(
     await answered(
-      viewer.invoke("access_review", { space: "qa", namespace: null, checks }),
+      viewer.invoke("access_review", {
+        space: "kind-local",
+        namespace: null,
+        checks,
+      }),
     ),
   ).toEqual([true, false, false]);
   const admin = createMockBackend("live");
   expect(
     await answered(
-      admin.invoke("access_review", { space: "qa", namespace: null, checks }),
+      admin.invoke("access_review", {
+        space: "kind-local",
+        namespace: null,
+        checks,
+      }),
     ),
   ).toEqual([true, true, true]);
 });
 
 test("only a Job's latest start completes it, and one that completed is neither suspended nor resumed", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const execute = async (plan: number) => {
     await answered(
       backend.subscribe(
@@ -671,7 +724,7 @@ test("only a Job's latest start completes it, and one that completed is neither 
   const trigger = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -680,7 +733,7 @@ test("only a Job's latest start completes it, and one that completed is neither 
   const job = /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1];
   const suspend = (on: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "jobs" },
       namespaced: true,
@@ -710,11 +763,11 @@ test("only a Job's latest start completes it, and one that completed is neither 
 
 test("a scale whose replicas moved since its plan scales nothing, and one that finds them there offers no undo", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const { target, name, count } = deployment();
   const scale = (replicas: number): PlanRequest => ({
     action: "scale",
-    space: "qa",
+    space: "kind-local",
     target,
     replicas,
   });
@@ -746,11 +799,11 @@ test("a scale whose replicas moved since its plan scales nothing, and one that f
 
 test("a cordon that finds the node cordoned already offers no undo", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const cordon: PlanRequest = {
     action: "cordon",
-    space: "qa",
-    node: "qa-node-1",
+    space: "kind-local",
+    node: "kind-local-node-1",
     unschedulable: true,
   };
   const first = await answered(backend.invoke("command_plan", cordon));
@@ -759,7 +812,7 @@ test("a cordon that finds the node cordoned already offers no undo", async () =>
   expect(await run(backend, second.id)).toEqual([
     {
       state: "done",
-      text: "Node qa-node-1 is cordoned already",
+      text: "Node kind-local-node-1 is cordoned already",
       undoUntil: null,
     },
   ]);
@@ -767,7 +820,7 @@ test("a cordon that finds the node cordoned already offers no undo", async () =>
 
 test("a Job that completes before its suspend runs is not suspended, nor its resume undone", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const execute = async (plan: number) => {
     const events: OperationEvent[] = [];
     await answered(
@@ -781,7 +834,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
   const trigger = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -791,7 +844,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
     /^Job (\S+) runs once/.exec(trigger.consequences[0] ?? "")?.[1] ?? "";
   const suspend = (on: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "jobs" },
       namespaced: true,
@@ -815,7 +868,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
   const again = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -825,7 +878,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
     /^Job (\S+) runs once/.exec(again.consequences[0] ?? "")?.[1] ?? "";
   const of = (on: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "jobs" },
       namespaced: true,
@@ -838,7 +891,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
   await execute((await answered(backend.invoke("command_plan", of(false)))).id);
   await vi.advanceTimersByTimeAsync(5000);
   const error = await refused(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(error.kind).toBe("conflict");
   expect(error.message).toBe(
@@ -848,8 +901,8 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
 
 test("a delete of marked rows leaves out one gone since, and a cron job's resume says what it starts and asks", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const { namespace, name } = pod("qa");
+  await answered(backend.invoke("space_open", "kind-local"));
+  const { namespace, name } = pod("kind-local");
   const ref = (named: string) => ({
     gvr: { group: "", version: "v1", resource: "pods" },
     namespaced: true,
@@ -859,11 +912,13 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: [ref(name), ref("ghost")],
     }),
   );
-  expect(plan.question).toBe(`Delete pod ${name} in ${namespace} from qa?`);
+  expect(plan.question).toBe(
+    `Delete pod ${name} in ${namespace} from kind-local?`,
+  );
   expect(plan.friction).toEqual({ kind: "countdown", seconds: 5 });
   expect(plan.consequences).toContain(
     "Gone already, so not in this delete: ghost.",
@@ -872,7 +927,7 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
   const error = await refused(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: [ref("ghost")],
     }),
   );
@@ -880,7 +935,7 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
 
   const cron = (suspend: boolean): PlanRequest => ({
     action: "suspend",
-    space: "qa",
+    space: "kind-local",
     target: {
       gvr: { group: "batch", version: "v1", resource: "cronjobs" },
       namespaced: true,
@@ -892,7 +947,7 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
   const suspended = await answered(backend.invoke("command_plan", cron(true)));
   await run(backend, suspended.id);
   const back = await answered(
-    backend.invoke("command_plan", { action: "undo", space: "qa" }),
+    backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
   expect(back.consequences).toEqual([
     "Its schedule starts jobs again, and the latest run it missed while suspended starts at once, unless its starting deadline has passed.",
@@ -907,12 +962,12 @@ test("a delete of marked rows leaves out one gone since, and a cron job's resume
 
 test("a run whose object went since its plan fails, as Rust's read of it does", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const node = "qa-node-2";
+  await answered(backend.invoke("space_open", "kind-local"));
+  const node = "kind-local-node-2";
   const cordon = await answered(
     backend.invoke("command_plan", {
       action: "cordon",
-      space: "qa",
+      space: "kind-local",
       node,
       unschedulable: true,
     }),
@@ -920,7 +975,7 @@ test("a run whose object went since its plan fails, as Rust's read of it does", 
   const remove = await answered(
     backend.invoke("command_plan", {
       action: "delete",
-      space: "qa",
+      space: "kind-local",
       targets: [
         {
           gvr: { group: "", version: "v1", resource: "nodes" },
@@ -942,11 +997,11 @@ test("a run whose object went since its plan fails, as Rust's read of it does", 
 
 test("a delete whose object went before it ran says so and takes nothing else", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const trigger = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -957,7 +1012,7 @@ test("a delete whose object went before it ran says so and takes nothing else", 
   const later = await answered(
     backend.invoke("command_plan", {
       action: "trigger",
-      space: "qa",
+      space: "kind-local",
       namespace: "batch",
       name: "cleanup",
     }),
@@ -967,7 +1022,7 @@ test("a delete whose object went before it ran says so and takes nothing else", 
     /^Job (\S+) runs once/.exec(later.consequences[0] ?? "")?.[1] ?? "";
   const remove: PlanRequest = {
     action: "delete",
-    space: "qa",
+    space: "kind-local",
     targets: [
       {
         gvr: { group: "batch", version: "v1", resource: "jobs" },
@@ -981,7 +1036,7 @@ test("a delete whose object went before it ran says so and takes nothing else", 
   const second = await answered(backend.invoke("command_plan", remove));
   const lastStays: PlanRequest = {
     action: "delete",
-    space: "qa",
+    space: "kind-local",
     targets: [
       {
         gvr: { group: "batch", version: "v1", resource: "jobs" },
@@ -1030,7 +1085,7 @@ function applyEdit(annotation: string | null) {
           annotations: { "mock.twigo.io/answer": annotation },
         };
   return {
-    space: "qa",
+    space: "kind-local",
     opened: {
       target: {
         gvr: { group: "", version: "v1", resource: "configmaps" },
@@ -1049,7 +1104,7 @@ function applyEdit(annotation: string | null) {
 
 test("apply_preview answers each case of the enum, and a ready one's plan runs once", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const unchanged = await answered(
     backend.invoke("apply_preview", {
       ...applyEdit(null),
@@ -1079,7 +1134,7 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: ready.id,
     }),
   );
@@ -1092,7 +1147,7 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
   const again = await refused(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: ready.id,
     }),
   );
@@ -1101,7 +1156,7 @@ test("apply_preview answers each case of the enum, and a ready one's plan runs o
 
 test("a recreate's plan asks and names what it deletes", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const answer = await answered(
     backend.invoke("apply_preview", applyEdit("recreate")),
   );
@@ -1111,7 +1166,7 @@ test("a recreate's plan asks and names what it deletes", async () => {
   const plan = await answered(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: answer.recreate,
     }),
   );
@@ -1121,12 +1176,12 @@ test("a recreate's plan asks and names what it deletes", async () => {
 
 test("an apply is at once in read-write, asks in guarded and is blocked in read-only", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   for (const [mode, expected] of [
     ["guarded", { kind: "confirm" }],
     ["read-write", { kind: "atOnce" }],
   ] as const) {
-    await answered(backend.invoke("context_mode_set", { context: "qa", mode }));
+    await change(backend, { action: "setMode", context: "kind-local", mode });
     const answer = await answered(
       backend.invoke("apply_preview", applyEdit(null)),
     );
@@ -1134,18 +1189,17 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
     const plan = await answered(
       backend.invoke("command_plan", {
         action: "apply",
-        space: "qa",
+        space: "kind-local",
         preview: answer.id,
       }),
     );
     expect(plan.friction).toEqual(expected);
   }
-  await answered(
-    backend.invoke("context_mode_set", {
-      context: "qa",
-      mode: "read-only",
-    }),
-  );
+  await change(backend, {
+    action: "setMode",
+    context: "kind-local",
+    mode: "read-only",
+  });
   const answer = await answered(
     backend.invoke("apply_preview", applyEdit(null)),
   );
@@ -1153,7 +1207,7 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
   const blocked = await refused(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: answer.id,
     }),
   );
@@ -1162,20 +1216,22 @@ test("an apply is at once in read-write, asks in guarded and is blocked in read-
 
 test("a recreate is blocked by its first write, a delete, in read-only", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const answer = await answered(
     backend.invoke("apply_preview", applyEdit("recreate")),
   );
   if (answer.state !== "immutable" || answer.recreate === null) {
     throw new Error("expected a recreate");
   }
-  await answered(
-    backend.invoke("context_mode_set", { context: "qa", mode: "read-only" }),
-  );
+  await change(backend, {
+    action: "setMode",
+    context: "kind-local",
+    mode: "read-only",
+  });
   const blocked = await refused(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: answer.recreate,
     }),
   );
@@ -1185,7 +1241,7 @@ test("a recreate is blocked by its first write, a delete, in read-only", async (
 
 test("a newer preview of an object drops the plan of an older one that waits", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const older = await answered(
     backend.invoke("apply_preview", applyEdit(null)),
   );
@@ -1204,7 +1260,7 @@ test("a newer preview of an object drops the plan of an older one that waits", a
 
 test("a newer preview of an object replaces an older one, whatever it answers", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const older = await answered(
     backend.invoke("apply_preview", applyEdit(null)),
   );
@@ -1213,7 +1269,7 @@ test("a newer preview of an object replaces an older one, whatever it answers", 
   const gone = await refused(
     backend.invoke("command_plan", {
       action: "apply",
-      space: "qa",
+      space: "kind-local",
       preview: older.id,
     }),
   );
@@ -1225,13 +1281,17 @@ function planOf(
   preview: number,
 ) {
   return answered(
-    backend.invoke("command_plan", { action: "apply", space: "qa", preview }),
+    backend.invoke("command_plan", {
+      action: "apply",
+      space: "kind-local",
+      preview,
+    }),
   );
 }
 
 test("a plan's kubectl line and consequences say how its edit is sent", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
 
   const byPatch = await answered(
     backend.invoke("apply_preview", applyEdit("merge-patch")),
@@ -1275,7 +1335,7 @@ test("a plan's kubectl line and consequences say how its edit is sent", async ()
 
 test("a Job's recreate says it runs again, in its own words", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const edit = applyEdit("recreate");
   const answer = await answered(
     backend.invoke("apply_preview", {
@@ -1301,7 +1361,7 @@ test("a Job's recreate says it runs again, in its own words", async () => {
 
 test("the two sides of a preview lose resourceVersion and generation, as Rust's do", async () => {
   const backend = createMockBackend();
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const edit = applyEdit(null);
   const server = { resourceVersion: "9", generation: 2 };
   const answer = await answered(
@@ -1323,4 +1383,167 @@ test("the two sides of a preview lose resourceVersion and generation, as Rust's 
   if (answer.state !== "ready") throw new Error("expected ready");
   expect(answer.live).toEqual({ ...EDITED, data: { a: "0" } });
   expect(answer.result).toEqual(EDITED);
+});
+
+const SET_MODE = (context: string, mode: Mode | null): Protection => ({
+  action: "setMode",
+  context,
+  mode,
+});
+
+const SET_ENVIRONMENT = (
+  context: string,
+  environment: Environment | null,
+): Protection => ({ action: "setEnvironment", context, environment });
+
+test("a lasting change that lowers protection asks for the name typed, and one that tightens or keeps it runs at once", async () => {
+  const backend = createMockBackend();
+  const friction = async (request: PlanRequest) =>
+    (await answered(backend.invoke("command_plan", request))).friction;
+
+  expect(await friction(SET_MODE("prod-eu", "read-write"))).toEqual({
+    kind: "typed",
+    text: "prod-eu",
+  });
+  expect(await friction(SET_MODE("prod-eu", "guarded"))).toEqual({
+    kind: "typed",
+    text: "prod-eu",
+  });
+  expect(await friction(SET_MODE("staging", "read-only"))).toEqual({
+    kind: "atOnce",
+  });
+  expect(await friction(SET_MODE("staging", "guarded"))).toEqual({
+    kind: "atOnce",
+  });
+  expect(await friction(SET_ENVIRONMENT("staging", "development"))).toEqual({
+    kind: "typed",
+    text: "staging",
+  });
+  expect(await friction(SET_ENVIRONMENT("dev", "production"))).toEqual({
+    kind: "atOnce",
+  });
+  expect(await friction(SET_ENVIRONMENT("prod-eu", null))).toEqual({
+    kind: "typed",
+    text: "prod-eu",
+  });
+});
+
+test("an unlock asks in a dialog, and its plan has no kubectl command", async () => {
+  const backend = createMockBackend();
+  const plan = await answered(
+    backend.invoke("command_plan", { action: "unlock", context: "prod-eu" }),
+  );
+  expect(plan.friction).toEqual({ kind: "confirm" });
+  expect(plan.kubectl).toBeNull();
+  const nothing = await refused(
+    backend.invoke("command_plan", { action: "unlock", context: "staging" }),
+  );
+  expect(nothing.kind).toBe("invalidInput");
+});
+
+test("any change of a context nobody marked runs at once, and marking it sets the mode its type gives", async () => {
+  const backend = createMockBackend();
+  const mode = await answered(
+    backend.invoke("command_plan", SET_MODE("qa", "read-write")),
+  );
+  const type = await answered(
+    backend.invoke("command_plan", SET_ENVIRONMENT("qa", "production")),
+  );
+  expect([mode.friction, type.friction]).toEqual([
+    { kind: "atOnce" },
+    { kind: "atOnce" },
+  ]);
+  await change(backend, SET_ENVIRONMENT("qa", "production"));
+  const watched = await answered(
+    backend.subscribe("contexts_watch", null, () => undefined),
+  );
+  expect(
+    watched.find((context) => context.name === "qa")?.access,
+  ).toMatchObject({
+    mode: "read-only",
+    source: { kind: "environment", environment: "production" },
+  });
+});
+
+test("a plan that tightened asks for more once the mode it ran against moved", async () => {
+  const backend = createMockBackend();
+  const tighten = await answered(
+    backend.invoke("command_plan", SET_MODE("dev", "guarded")),
+  );
+  expect(tighten.friction).toEqual({ kind: "atOnce" });
+  await change(backend, SET_MODE("dev", "read-only"));
+  const error = await refused(
+    backend.subscribe(
+      "command_execute",
+      { plan: tighten.id, typed: null },
+      () => undefined,
+    ),
+  );
+  expect(error.kind).toBe("conflict");
+  expect(error.message).toContain("asks for more than you confirmed");
+});
+
+test("a change that asks for the name typed refuses the wrong one and changes nothing", async () => {
+  const backend = createMockBackend();
+  const plan = await answered(
+    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
+  );
+  const wrong = await refused(
+    backend.subscribe(
+      "command_execute",
+      { plan: plan.id, typed: "stagin" },
+      () => undefined,
+    ),
+  );
+  expect(wrong.message).toBe("type staging to confirm");
+  const next = await answered(
+    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
+  );
+  expect(next.friction).toEqual({ kind: "typed", text: "staging" });
+});
+
+test("a write or an exec on a context nobody marked is refused as unmarked, before anything is asked", async () => {
+  const backend = createMockBackend();
+  await answered(backend.invoke("space_open", "qa"));
+  const write = await refused(backend.invoke("command_plan", deletePod("qa")));
+  expect(write.kind).toBe("permissions");
+  expect(write.message).toMatch(
+    /^nobody has said what qa is yet, so Twigo did not send delete pods\//,
+  );
+  expect(write.blocked).toMatchObject({
+    context: "qa",
+    mode: "guarded",
+    source: { kind: "unmarked" },
+    reason: "unmarked",
+    class: "write",
+  });
+  const { namespace, name } = pod("qa");
+  const exec = await refused(
+    backend.invoke("command_plan", {
+      action: "shell",
+      target: { space: "qa", namespace, pod: name, container: "app" },
+      kind: "shell",
+    }),
+  );
+  expect(exec.blocked).toMatchObject({ reason: "unmarked", class: "exec" });
+
+  await change(backend, SET_ENVIRONMENT("qa", "staging"));
+  const plan = await answered(backend.invoke("command_plan", deletePod("qa")));
+  expect(plan.friction).toEqual({ kind: "typed", text: "qa" });
+});
+
+test("an admin's policy file refuses a change of the mode it holds", async () => {
+  const backend = createMockBackend("policyFile");
+  for (const request of [
+    SET_MODE("prod-eu", "read-write"),
+    { action: "unlock", context: "prod-eu" } satisfies Protection,
+  ]) {
+    const error = await refused(backend.invoke("command_plan", request));
+    expect(error.kind).toBe("permissions");
+    expect(error.message).toContain("prod-*");
+  }
+  const dev = await answered(
+    backend.invoke("command_plan", SET_MODE("dev", "guarded")),
+  );
+  expect(dev.friction).toEqual({ kind: "atOnce" });
 });

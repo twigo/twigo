@@ -10,6 +10,7 @@ import {
   createMockBackend,
   MOCK_SCENARIOS,
   OFFER_AFTER_MS,
+  protect,
   type MockScenario,
 } from "./index";
 
@@ -140,7 +141,9 @@ test("the policy file sends the contexts it lists in terminal.usePolicyProxy thr
 
 test("an unlocked context goes through the proxy for its mode", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("context_unlock", "prod-eu"));
+  await protect(backend, { action: "unlock", context: "prod-eu" }, () =>
+    vi.advanceTimersByTimeAsync(1),
+  );
   const unlocked = await answered(
     backend.invoke("terminal_create", { context: "prod-eu", label: "T" }),
   );

@@ -87,6 +87,7 @@ import {
   FORBIDDEN,
   NAMESPACES,
   POD_COUNT,
+  PROTECTION_SPACES,
   SPACES,
   VERSIONS,
 } from "./fixtures";
@@ -118,6 +119,7 @@ export {
 export { OFFER_AFTER_MS } from "./terminal";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
+export { openMarked, protect } from "./protect";
 export { SCRAPE_MS } from "./metrics";
 
 /**
@@ -130,7 +132,9 @@ type ListScenario = "live" | ViewState["state"];
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*` that also sends `dev`'s terminal through the proxy,
- * `viewer`: live lists for a person who may only read,
+ * `viewer`: live lists for a person who may only read, `protection`: live
+ * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
+ * read-only and which the person made read-write, open on the rail,
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
@@ -152,6 +156,7 @@ export type MockScenario =
   | "policyFile"
   | "viewer"
   | "rbacNamespaces"
+  | "protection"
   | AuthScenario
   | EditScenario
   | ShellScenario
@@ -166,6 +171,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "policyFile",
   "viewer",
   "rbacNamespaces",
+  "protection",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
@@ -238,6 +244,7 @@ export function createMockBackend(
     scenario === "policyFile" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
+    scenario === "protection" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
@@ -254,6 +261,9 @@ export function createMockBackend(
   const access = new MockAccess(scenario === "policyFile");
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
+    (context, environment) => {
+      access.setEnvironment(context, environment);
+    },
   );
   const offers = new MockOffers(
     isTerminalScenario(scenario) ? scenario : undefined,
@@ -270,7 +280,10 @@ export function createMockBackend(
   };
   const clusters = new Map<string, Cluster>();
   const subscriptions = new Map<number, Subscription>();
-  const spaces = [...SPACES];
+  const spaces = [
+    ...SPACES,
+    ...(scenario === "protection" ? PROTECTION_SPACES : []),
+  ];
   const appState = new Map<string, string>();
   const spaceState = new Map<string, Map<string, string>>();
   let nextId = 1;
@@ -412,6 +425,7 @@ export function createMockBackend(
       }
     },
     access: (context) => access.of(context),
+    protection: access,
     context: (id) => space(id).contexts[0],
     cluster,
     reveal: (id, key) => object(id).reveal(key),
@@ -454,18 +468,6 @@ export function createMockBackend(
     [C in PlainCommand]: (request: RequestOf<C>) => ResponseOf<C>;
   } = {
     spaces_list: () => [...spaces],
-    context_mode_set: ({ context, mode }) => {
-      access.setMode(context, mode);
-      return null;
-    },
-    context_environment_set: ({ context, environment }) => {
-      access.setEnvironment(context, environment);
-      return null;
-    },
-    context_unlock: (context) => {
-      access.unlock(context);
-      return null;
-    },
     context_relock: (context) => {
       access.relock(context);
       return null;

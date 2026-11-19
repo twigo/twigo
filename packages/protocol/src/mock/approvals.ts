@@ -5,6 +5,7 @@ import type {
   ApprovalDetail,
   ApprovalEvent,
   ApprovalId,
+  Environment,
 } from "../generated";
 import { side } from "./edits";
 import { recordedManifest } from "./objects";
@@ -12,17 +13,19 @@ import { recordedManifest } from "./objects";
 /**
  * Pins the asks a process makes of the window (ARCHITECTURE 6.4), which
  * nothing in the app raises before step 7: `approval` raises a sequence, the
- * next one after each answer, `approvalQueue` raises three at once and
- * `approvalWithdrawn` one that is withdrawn a while after it shows. Any
- * other scenario raises none.
+ * next one after each answer, `approvalQueue` raises three at once,
+ * `approvalWithdrawn` one that is withdrawn a while after it shows and
+ * `approvalUnmarked` one on a context nobody marked, which asks what it is.
+ * Any other scenario raises none.
  */
 export type ApprovalScenario =
-  "approval" | "approvalQueue" | "approvalWithdrawn";
+  "approval" | "approvalQueue" | "approvalWithdrawn" | "approvalUnmarked";
 
 export const APPROVAL_SCENARIOS: readonly ApprovalScenario[] = [
   "approval",
   "approvalQueue",
   "approvalWithdrawn",
+  "approvalUnmarked",
 ];
 
 export function isApprovalScenario(
@@ -43,6 +46,7 @@ type Draft = Omit<ApprovalAsk, "id">;
 
 const STAGING = "staging";
 const PRODUCTION = "prod-eu";
+const UNMARKED = "qa";
 const POD = "web-54454cf656-dvb7s";
 const NEW_UID = "0b8f6a3e-52c1-4d7e-9a14-6f3d2c9e7a58";
 
@@ -124,6 +128,7 @@ function drafts(): Record<string, Draft> {
     impersonate: null,
     typed: false,
     lastingMinutes: 15,
+    unmarked: false,
   } as const;
   return {
     patch: {
@@ -247,6 +252,21 @@ function drafts(): Record<string, Draft> {
         [],
       ),
     },
+    unmarked: {
+      ...common,
+      context: UNMARKED,
+      process: "Terminal 1",
+      command: "kubectl scale",
+      verb: "patch",
+      target: "deployments/web/scale in default",
+      detail: {
+        kind: "unknown",
+        reason: { reason: "subresource" },
+        body: JSON.stringify({ spec: { replicas: 5 } }),
+      },
+      lastingMinutes: null,
+      unmarked: true,
+    },
     deleteFlags: {
       ...common,
       context: STAGING,
@@ -287,6 +307,8 @@ function sequence(scenario: ApprovalScenario): Draft[] {
       return pick("patch", "create", "exec");
     case "approvalWithdrawn":
       return pick("patch");
+    case "approvalUnmarked":
+      return pick("unmarked");
   }
 }
 
@@ -298,7 +320,11 @@ const grantOf = ({ process, context }: Draft) => `${process}\0${context}`;
  * one for an ask that is gone, a name typed wrong or a lasting answer that
  * was not offered. A lasting answer allows what its process asks on its
  * context for the minutes the ask offered, deletes excepted: an ask that
- * waits then is withdrawn, and one that comes is not raised.
+ * waits then is withdrawn, and one that comes is not raised. An ask of a
+ * context nobody marked takes `mark` or `deny` alone; `mark` sets the
+ * context's type through `mark`, and the request then meets the mode that
+ * type gives: Staging asks again, as any guarded context does, Production
+ * refuses it and Development and Local let it through.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
@@ -309,7 +335,10 @@ export class MockApprovals {
   /** When each process's lasting answer on a context ends, in milliseconds. */
   readonly #lasting = new Map<string, number>();
 
-  constructor(private readonly scenario: ApprovalScenario | undefined) {}
+  constructor(
+    private readonly scenario: ApprovalScenario | undefined,
+    private readonly mark: (context: string, environment: Environment) => void,
+  ) {}
 
   watch(onMessage: (event: ApprovalEvent) => void): null {
     this.#follower = onMessage;
@@ -329,10 +358,18 @@ export class MockApprovals {
     if (ask === undefined) {
       throw new IpcError("notFound", `the ask ${String(id)} is gone`);
     }
-    if (answer !== "deny" && ask.typed && typed !== ask.context) {
+    if (answer.kind !== "deny" && (answer.kind === "mark") !== ask.unmarked) {
+      throw new IpcError(
+        "invalidInput",
+        ask.unmarked
+          ? "this ask takes the context's type or a denial"
+          : "this ask does not ask what the context is",
+      );
+    }
+    if (answer.kind !== "deny" && ask.typed && typed !== ask.context) {
       throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
     }
-    if (answer === "lasting") {
+    if (answer.kind === "lasting") {
       if (ask.lastingMinutes === null) {
         throw new IpcError("invalidInput", "this ask offers no lasting answer");
       }
@@ -343,6 +380,12 @@ export class MockApprovals {
       if (this.#allowed(other)) {
         this.#waiting.delete(other.id);
         this.#follower?.({ event: "withdrawn", id: other.id });
+      }
+    }
+    if (answer.kind === "mark") {
+      this.mark(ask.context, answer.environment);
+      if (answer.environment === "staging") {
+        this.#raise({ ...ask, unmarked: false, lastingMinutes: 15 });
       }
     }
     if (this.scenario === "approval") this.#later(NEXT_ASK_MS);

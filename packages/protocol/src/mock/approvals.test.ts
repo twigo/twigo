@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { IpcError } from "../error";
 import type { Backend } from "../backend";
-import type { ApprovalAsk, ApprovalEvent } from "../generated";
+import type { ApprovalAnswer, ApprovalAsk, ApprovalEvent } from "../generated";
 import {
   createMockBackend,
   FIRST_ASK_MS,
@@ -48,7 +48,7 @@ function nth(events: ApprovalEvent[], index: number): ApprovalAsk {
 async function answer(
   backend: Backend,
   ask: ApprovalAsk,
-  answer: "deny" | "once" | "lasting" = "once",
+  answer: ApprovalAnswer = { kind: "once" },
   typed: string | null = null,
 ) {
   const sent = backend.invoke("approval_answer", {
@@ -84,7 +84,7 @@ test("the sequence raises its asks one after another as each is answered", async
   expect(asks(events)[1]?.detail).toMatchObject({ kind: "diff", live: null });
 
   for (let step = 1; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   expect(
@@ -112,7 +112,7 @@ async function raised(): Promise<ApprovalAsk[]> {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   for (let step = 0; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   return asks(events);
@@ -187,7 +187,7 @@ test("a diff's sides are recorded objects with a change made in code, as Rust's 
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   for (let step = 0; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   const diffs = asks(events).flatMap(({ detail }) =>
@@ -247,16 +247,18 @@ test("a delete refuses a context name typed wrong, an ask that is gone, and allo
   });
 
   for (const typed of [null, "prod", "Prod-eu"]) {
-    const error = await answer(backend, remove, "once", typed);
+    const error = await answer(backend, remove, { kind: "once" }, typed);
     expect(error).toBeInstanceOf(IpcError);
     expect((error as IpcError).kind).toBe("invalidInput");
   }
-  expect(await answer(backend, remove, "lasting", "prod")).toBeInstanceOf(
-    IpcError,
-  );
-  expect(await answer(backend, remove, "once", "prod-eu")).toBeUndefined();
+  expect(
+    await answer(backend, remove, { kind: "lasting" }, "prod"),
+  ).toBeInstanceOf(IpcError);
+  expect(
+    await answer(backend, remove, { kind: "once" }, "prod-eu"),
+  ).toBeUndefined();
 
-  const gone = await answer(backend, remove, "once", "prod-eu");
+  const gone = await answer(backend, remove, { kind: "once" }, "prod-eu");
   expect((gone as IpcError).kind).toBe("notFound");
 });
 
@@ -271,7 +273,7 @@ async function throughSequence(
     await answer(
       backend,
       ask,
-      step === lastingAt ? "lasting" : "once",
+      step === lastingAt ? { kind: "lasting" } : { kind: "once" },
       ask.context,
     );
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
@@ -330,11 +332,11 @@ test("a lasting answer ends after the minutes the ask offered", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   const patch = nth(events, 0);
-  await answer(backend, patch, "lasting");
+  await answer(backend, patch, { kind: "lasting" });
   await vi.advanceTimersByTimeAsync((patch.lastingMinutes ?? 0) * 60_000);
   await answer(backend, nth(events, 1));
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  await answer(backend, nth(events, 2), "deny");
+  await answer(backend, nth(events, 2), { kind: "deny" });
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   expect(nth(events, 3).command).toBe("kubectl exec");
 });
@@ -353,7 +355,7 @@ test("a lasting answer allows the asks of its process and context that already w
     "Terminal 2",
   ]);
 
-  expect(await answer(backend, patch, "lasting")).toBeUndefined();
+  expect(await answer(backend, patch, { kind: "lasting" })).toBeUndefined();
   expect(events.slice(3)).toEqual([{ event: "withdrawn", id: exec.id }]);
   const gone = await answer(backend, exec);
   expect((gone as IpcError).kind).toBe("notFound");
@@ -370,9 +372,11 @@ test("a lasting answer is refused for an ask that offers none, and the ask stays
   const remove = nth(events, 2);
   expect(remove.lastingMinutes).toBeNull();
 
-  const refused = await answer(backend, remove, "lasting", "prod-eu");
+  const refused = await answer(backend, remove, { kind: "lasting" }, "prod-eu");
   expect((refused as IpcError).kind).toBe("invalidInput");
-  expect(await answer(backend, remove, "once", "prod-eu")).toBeUndefined();
+  expect(
+    await answer(backend, remove, { kind: "once" }, "prod-eu"),
+  ).toBeUndefined();
 });
 
 test("a deny needs no name typed", async () => {
@@ -383,7 +387,9 @@ test("a deny needs no name typed", async () => {
   await answer(backend, nth(events, 1));
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   expect(nth(events, 2).typed).toBe(true);
-  expect(await answer(backend, nth(events, 2), "deny")).toBeUndefined();
+  expect(
+    await answer(backend, nth(events, 2), { kind: "deny" }),
+  ).toBeUndefined();
 });
 
 test("a window that follows again is sent the asks that wait", async () => {

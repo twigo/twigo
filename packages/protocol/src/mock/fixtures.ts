@@ -1,4 +1,4 @@
-import type { Column, Context, ContextAccess, Space } from "../generated";
+import type { Column, Context, ContextAccess, Mode, Space } from "../generated";
 
 export const SPACES: Space[] = [
   { id: "prod-eu", name: "prod-eu", contexts: ["prod-eu"] },
@@ -6,15 +6,29 @@ export const SPACES: Space[] = [
   { id: "dev", name: "dev", contexts: ["dev"] },
 ];
 
-/** A context nobody marked: read-write, with no chip. */
+/** A context nobody marked: guarded until the person says what it is. */
 export const UNMARKED: ContextAccess = {
-  mode: "read-write",
-  source: { kind: "default" },
+  mode: "guarded",
+  source: { kind: "unmarked" },
   environment: null,
   unlockedUntil: null,
 };
 
-/** The catalog: the contexts of the spaces, plus two that have none yet, from two files. */
+/** The contexts whose kubeconfig says `twigo.readOnly: true`. */
+export const KUBECONFIG_READ_ONLY: ReadonlySet<string> = new Set(["analytics"]);
+
+/** The modes the person chose before the app started. */
+export const CHOSEN: Readonly<Record<string, Mode>> = {
+  analytics: "read-write",
+};
+
+/** The spaces of the `protection` scenario: a context nobody marked, and one whose kubeconfig's lock the person set aside. */
+export const PROTECTION_SPACES: Space[] = [
+  { id: "qa", name: "qa", contexts: ["qa"] },
+  { id: "analytics", name: "analytics", contexts: ["analytics"] },
+];
+
+/** The catalog: the contexts of the spaces, plus three that have none yet, from two files. */
 export const CONTEXTS: Context[] = [
   {
     name: "prod-eu",
@@ -60,6 +74,21 @@ export const CONTEXTS: Context[] = [
     access: UNMARKED,
   },
   {
+    name: "analytics",
+    color: null,
+    source: "~/.kube/config",
+    server: "https://analytics.internal:6443",
+    access: {
+      mode: "read-write",
+      source: {
+        kind: "user",
+        overrides: { mode: "read-only", source: { kind: "kubeconfig" } },
+      },
+      environment: null,
+      unlockedUntil: null,
+    },
+  },
+  {
     name: "kind-local",
     color: null,
     source: "~/.kube/kind.yaml",
@@ -79,6 +108,7 @@ export const VERSIONS: Readonly<Record<string, string>> = {
   staging: "v1.35.2",
   dev: "v1.37.0",
   qa: "v1.36.1",
+  analytics: "v1.36.1",
   "kind-local": "v1.37.0",
 };
 
@@ -97,6 +127,7 @@ export const POD_COUNT: Readonly<Record<string, number>> = {
   staging: 800,
   dev: 0,
   qa: 120,
+  analytics: 60,
   "kind-local": 40,
 };
 
