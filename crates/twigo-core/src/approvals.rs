@@ -977,6 +977,51 @@ mod tests {
     }
 
     #[test]
+    fn a_lasting_answer_covers_the_process_s_other_asks_on_the_context_but_an_unmarked_one() {
+        let policy = Policy::new(
+            twigo_policy::PolicyFile::default(),
+            |_| Some(twigo_policy::Metadata::default()),
+            twigo_policy::Choices::default(),
+            twigo_policy::Audit::off(),
+        );
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(policy, catalog);
+        let (events, mut told) = tokio::sync::mpsc::unbounded_channel();
+        approvals.follow_window("main", move |event| events.send(event).is_ok());
+        let waiting = |id, unmarked| {
+            let (resolve, resolved) = oneshot::channel();
+            let pending = Pending {
+                window: "main".into(),
+                process: 0,
+                connection: 0,
+                ended: CancellationToken::new(),
+                delete: false,
+                ask: ApprovalAsk {
+                    unmarked,
+                    ..ask(id)
+                },
+                audited: audited(),
+                resolve,
+            };
+            approvals.state().asks.insert(id, pending);
+            resolved
+        };
+        let (_answered, _covered, _unmarked) =
+            (waiting(1, false), waiting(2, false), waiting(3, true));
+        let lasting = AnswerApproval {
+            id: ApprovalId(1),
+            answer: ApprovalAnswer::Lasting,
+            typed: None,
+        };
+        approvals.answer("main", lasting).unwrap();
+        assert_eq!(
+            told.try_recv().unwrap(),
+            ApprovalEvent::Withdrawn { id: ApprovalId(2) }
+        );
+        assert!(told.try_recv().is_err(), "the unmarked ask stays");
+        assert_eq!(approvals.state().asks.keys().collect::<Vec<_>>(), [&3]);
+    }
+
     #[test]
     fn a_create_is_named_by_its_generate_name_only_where_the_server_generated_its_name() {
         let long = "a".repeat(60);
