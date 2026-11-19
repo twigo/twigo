@@ -3,6 +3,7 @@ import type { Environment, Mode, Space } from "@twigo/protocol";
 import type { QuickPickItem } from "../quickaccess/registry";
 import type { Workbench } from "../services";
 import {
+  currentMode,
   ENVIRONMENTS,
   environmentLabel,
   MODES,
@@ -68,7 +69,8 @@ export function registerContextModes(workbench: Workbench): void {
         ...MODES.map((mode) => ({
           id: mode,
           label: modeLabel(mode),
-          description: mode === access.mode ? "Current" : modeHelp(mode),
+          description:
+            mode === currentMode(access) ? "Current" : modeHelp(mode),
         })),
         {
           id: NONE,
@@ -80,7 +82,8 @@ export function registerContextModes(workbench: Workbench): void {
       // The current one changes nothing: picking the guarded of an unlock
       // would end its relock for good. Current as of the pick, which may
       // have outlived the unlock.
-      if (!picked || picked.id === catalog.find(context)?.access.mode) return;
+      const now = catalog.find(context)?.access;
+      if (!picked || (now && picked.id === currentMode(now))) return;
       await operations.run(
         {
           action: "setMode",

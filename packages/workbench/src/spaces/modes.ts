@@ -67,6 +67,11 @@ export function modeHelp(mode: Mode): string {
   return MODE_HELP[mode];
 }
 
+/** The mode a press or a pick of the same leaves as it is, none for a context nobody marked, whose `guarded` is nobody's choice, so each mode plans. */
+export function currentMode(access: ContextAccess): Mode | undefined {
+  return access.source.kind === "unmarked" ? undefined : access.mode;
+}
+
 /** A space with one context has its access; one with several, none (ARCHITECTURE 4.2). */
 export function accessOfSpace(
   catalog: Catalog,

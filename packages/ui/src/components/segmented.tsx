@@ -26,7 +26,7 @@ export function Segmented<V extends string>({
 }: {
   label: string;
   items: readonly SegmentedItem<V>[];
-  value: V;
+  value: V | undefined;
   onChange: (value: V) => void;
   className?: string;
 }) {

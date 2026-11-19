@@ -374,6 +374,24 @@ test("picking the guarded of an unlock in the palette leaves the unlock alone", 
   });
 });
 
+test("picking the guarded of a context nobody marked plans it, as no mode is current there", async () => {
+  const workbench = await testWorkbench("protection");
+  const { commands, keys, catalog, quickAccess, spaces } = workbench;
+  await act(() => spaces.open("qa"));
+  const run = commands.execute(SET_CONTEXT_MODE, keys.lookup(null));
+  await act(() => Promise.resolve());
+  const pick = quickAccess.session?.pick;
+  expect(pick?.items.map((item) => item.description)).not.toContain("Current");
+  act(() => {
+    pick?.resolve(pick.items.find((item) => item.id === "guarded"));
+  });
+  await act(() => run);
+  expect(catalog.find("qa")?.access.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
+});
+
 test("a person's None holds over a type from the kubeconfig's fixtures", async () => {
   const { commands, keys, catalog, colors } = await testWorkbench();
   await act(() => Promise.resolve());

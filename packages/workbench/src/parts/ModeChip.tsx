@@ -24,6 +24,7 @@ import {
 import {
   accessOfSpace,
   chipLabel,
+  currentMode,
   describeAccess,
   ENVIRONMENTS,
   environmentLabel,
@@ -187,11 +188,11 @@ function ModeDetails({
               value: mode,
               label: modeLabel(mode),
             }))}
-            value={access.mode}
+            value={currentMode(access)}
             onChange={(value) => {
               // The pressed one changes nothing: pressing the guarded of an
               // unlock would end its relock for good.
-              if (value === access.mode) return;
+              if (value === currentMode(access)) return;
               const args: SetArgs<Mode> = { context, value };
               run(SET_CONTEXT_MODE, args);
             }}

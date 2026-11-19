@@ -280,6 +280,25 @@ test("a context nobody marked has a quiet chip that opens the choices of any oth
   await screen.findByRole("button", { name: "Mode of qa: Staging · guarded" });
 });
 
+test("no mode is the choice of a context nobody marked, so pressing the guarded it shows plans it", async () => {
+  const { workbench } = await mounted();
+  await act(() => workbench.spaces.open("qa"));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mode of qa: Not marked" }),
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Guarded" })
+      .getAttribute("aria-pressed"),
+  ).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Guarded" }));
+  await screen.findByRole("button", { name: "Mode of qa: Guarded" });
+  expect(workbench.catalog.find("qa")?.access.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
+});
+
 test("with the variant that shows nothing, a context nobody marked has no chip", async () => {
   window.history.replaceState(null, "", "/?variant=unmarked:none");
   try {
