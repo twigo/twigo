@@ -1,6 +1,9 @@
 //! An apply of an edit on kind: what each answer of the preview is for, and
 //! what is on the server after it, field by field.
 
+use std::path::Path;
+use std::sync::Arc;
+
 use k8s_openapi::api::core::v1::{ConfigMap, Secret};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::api::PostParams;
@@ -16,6 +19,7 @@ use twigo_ipc::{
 use super::{Cluster, core, core_over, eventually, kubectl, line, reference, run, unique};
 
 const FLOW_SCHEMAS: &str = "/apis/flowcontrol.apiserver.k8s.io/v1/flowschemas";
+const STAGES: &str = "/apis/kwok.x-k8s.io/v1alpha1/stages";
 
 fn deployments(namespace: &str) -> String {
     format!("/apis/apps/v1/namespaces/{namespace}/deployments")
@@ -881,7 +885,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
     cluster.delete(&namespace).await;
 }
 
-async fn api_service_reads(admin: &kube::Client, user: &str) -> u64 {
+async fn dispatched(admin: &kube::Client, user: &str) -> u64 {
     let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
     let metrics = admin.request_text(request).await.unwrap();
     let schema = format!("flow_schema=\"{user}\"");
@@ -893,6 +897,41 @@ async fn api_service_reads(admin: &kube::Client, user: &str) -> u64 {
         })
         .map(|line| line.rsplit(' ').next().unwrap().parse::<f64>().unwrap() as u64)
         .sum()
+}
+
+async fn count_requests(cluster: &Cluster, user: &str, rule: Value) {
+    post(
+        &cluster.admin,
+        FLOW_SCHEMAS,
+        &json!({
+            "metadata": { "name": user },
+            "spec": {
+                "matchingPrecedence": 450,
+                "priorityLevelConfiguration": { "name": "global-default" },
+                "rules": [{
+                    "subjects": [{ "kind": "User", "user": { "name": user } }],
+                    "resourceRules": [rule],
+                }],
+            },
+        }),
+    )
+    .await;
+}
+
+async fn acting_as(cluster: &Cluster, dir: &Path, user: &str) -> (Arc<Core>, kube::Client) {
+    let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
+    for named in &mut kubeconfig.auth_infos {
+        if let Some(info) = &mut named.auth_info {
+            info.impersonate = Some(user.to_owned());
+        }
+    }
+    let config = dir.join("config");
+    std::fs::write(&config, serde_json::to_string(&kubeconfig).unwrap()).unwrap();
+    let core = core_over(dir, &config, &cluster.context).await;
+    let as_user = Config::from_custom_kubeconfig(kubeconfig, &Default::default())
+        .await
+        .unwrap();
+    (core, kube::Client::try_from(as_user).unwrap())
 }
 
 #[tokio::test]
@@ -911,41 +950,15 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
         }),
     )
     .await;
-    post(
-        &cluster.admin,
-        FLOW_SCHEMAS,
-        &json!({
-            "metadata": { "name": user },
-            "spec": {
-                "matchingPrecedence": 450,
-                "priorityLevelConfiguration": { "name": "global-default" },
-                "rules": [{
-                    "subjects": [{ "kind": "User", "user": { "name": user } }],
-                    "resourceRules": [{
-                        "verbs": ["get"],
-                        "apiGroups": ["apiregistration.k8s.io"],
-                        "resources": ["apiservices"],
-                        "clusterScope": true,
-                    }],
-                }],
-            },
-        }),
-    )
-    .await;
-    let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
-    for named in &mut kubeconfig.auth_infos {
-        if let Some(info) = &mut named.auth_info {
-            info.impersonate = Some(user.clone());
-        }
-    }
+    let rule = json!({
+        "verbs": ["get"],
+        "apiGroups": ["apiregistration.k8s.io"],
+        "resources": ["apiservices"],
+        "clusterScope": true,
+    });
+    count_requests(&cluster, &user, rule).await;
     let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join("config");
-    std::fs::write(&config, serde_json::to_string(&kubeconfig).unwrap()).unwrap();
-    let core = core_over(dir.path(), &config, &cluster.context).await;
-    let as_user = Config::from_custom_kubeconfig(kubeconfig, &Default::default())
-        .await
-        .unwrap();
-    let as_user = kube::Client::try_from(as_user).unwrap();
+    let (core, as_user) = acting_as(&cluster, dir.path(), &user).await;
     eventually("the API server takes up the FlowSchema", || {
         let (admin, as_user, user) = (cluster.admin.clone(), as_user.clone(), user.clone());
         async move {
@@ -957,7 +970,7 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
                 matches!(&refused, kube::Error::Api(status) if status.code == 403),
                 "{refused}"
             );
-            api_service_reads(&admin, &user).await > 0
+            dispatched(&admin, &user).await > 0
         }
     })
     .await;
@@ -983,10 +996,10 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
         space: cluster.context.clone(),
         preview,
     };
-    let reads = api_service_reads(&cluster.admin, &user).await;
+    let reads = dispatched(&cluster.admin, &user).await;
     let answer = core.apply_preview("main", request()).await;
     assert_eq!(
-        api_service_reads(&cluster.admin, &user).await,
+        dispatched(&cluster.admin, &user).await,
         reads,
         "the preview read no APIService"
     );
@@ -998,10 +1011,10 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
     core.policy
         .set_mode(&cluster.context, Some(Mode::ReadOnly))
         .unwrap();
-    let reads = api_service_reads(&cluster.admin, &user).await;
+    let reads = dispatched(&cluster.admin, &user).await;
     let answer = core.apply_preview("main", request()).await;
     assert_eq!(
-        api_service_reads(&cluster.admin, &user).await,
+        dispatched(&cluster.admin, &user).await,
         reads,
         "the preview read no APIService"
     );
@@ -1073,6 +1086,92 @@ async fn read_only_and_a_context_nobody_marked_preview_no_edit_of_a_group_anothe
         refused.message,
         format!("{why}, so Twigo cannot preview this edit in {context}, which is read-only")
     );
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn read_only_previews_no_edit_of_a_group_whose_api_service_it_cannot_read() {
+    let cluster = Cluster::connect().await;
+    let user = format!("core-bus-apply-unread-{}", unique());
+    let rbac = "/apis/rbac.authorization.k8s.io/v1";
+    let (roles, bindings) = (
+        format!("{rbac}/clusterroles"),
+        format!("{rbac}/clusterrolebindings"),
+    );
+    let role = json!({
+        "metadata": { "name": user },
+        "rules": [{ "apiGroups": ["kwok.x-k8s.io"], "resources": ["stages"], "verbs": ["get"] }],
+    });
+    post(&cluster.admin, &roles, &role).await;
+    let binding = json!({
+        "metadata": { "name": user },
+        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": user },
+        "subjects": [{ "apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user }],
+    });
+    post(&cluster.admin, &bindings, &binding).await;
+    let rule = json!({
+        "verbs": ["create", "update", "patch"],
+        "apiGroups": ["kwok.x-k8s.io"],
+        "resources": ["*"],
+        "clusterScope": true,
+    });
+    count_requests(&cluster, &user, rule).await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, as_user) = acting_as(&cluster, dir.path(), &user).await;
+    let path = format!("{STAGES}/pod-ready");
+    eventually("the API server takes up the FlowSchema", || {
+        let (admin, as_user, user, path) = (
+            cluster.admin.clone(),
+            as_user.clone(),
+            user.clone(),
+            path.clone(),
+        );
+        async move {
+            let probe = http::Request::patch(format!("{path}?dryRun=All"))
+                .header("content-type", "application/merge-patch+json")
+                .body(b"{}".to_vec())
+                .unwrap();
+            let refused = as_user.request_text(probe).await.unwrap_err();
+            assert!(
+                matches!(&refused, kube::Error::Api(status) if status.code == 403),
+                "{refused}"
+            );
+            dispatched(&admin, &user).await > 0
+        }
+    })
+    .await;
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::ReadOnly))
+        .unwrap();
+
+    let live = read(&cluster.admin, &path).await;
+    let mut edited = view(&live);
+    edited["metadata"]["annotations"] = json!({ "mine": "1" });
+    let target = reference("kwok.x-k8s.io", "v1alpha1", "stages", None, "pod-ready");
+    let sent = dispatched(&cluster.admin, &user).await;
+    let refused = core
+        .apply_preview("main", edit(&cluster, target, &live, edited, false, vec![]))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        dispatched(&cluster.admin, &user).await,
+        sent,
+        "no dry run reached the server"
+    );
+    assert_eq!(refused.kind, ErrorKind::Permissions, "{refused:?}");
+    assert_eq!(
+        refused.message,
+        format!(
+            "Twigo could not read whether the cluster's API server serves kwok.x-k8s.io/v1alpha1 itself, so Twigo cannot preview this edit in {}, which is read-only",
+            cluster.context
+        )
+    );
+    for made in [FLOW_SCHEMAS, &bindings, &roles] {
+        let deleted = http::Request::delete(format!("{made}/{user}"))
+            .body(Vec::new())
+            .unwrap();
+        cluster.admin.request_text(deleted).await.unwrap();
+    }
 }
 
 #[tokio::test]
