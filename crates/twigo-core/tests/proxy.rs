@@ -2396,6 +2396,39 @@ async fn each_request_the_proxy_stops_or_lets_on_leaves_one_request_line() {
     );
 }
 
+#[tokio::test]
+async fn a_request_whose_context_moves_while_its_ask_waits_is_refused_with_its_request_line() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let refusing = tokio::spawn(refused(process.at(), create(&process, "c")));
+    let ask = asked(&mut events).await;
+    let said = said_of_kind_a(&core).await;
+    let moved = kubeconfig("http://127.0.0.1:1", KIND_A);
+    rewrite(&core, dir.path(), &moved, said, false).await;
+    withdrawn(&mut events, &ask).await;
+    let (status, message) = refusing.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(message.contains("names another cluster now"), "{message}");
+    assert_eq!(fake.writes(Method::POST), 0);
+
+    let requests: Vec<Value> = audited(dir.path(), "request")
+        .iter()
+        .map(|line| json!([line["class"], line["mode"], line["blocked"]]))
+        .collect();
+    assert_eq!(
+        requests,
+        [
+            json!(["dryRun", "guarded", null]),
+            json!(["write", "read-only", "mode"]),
+        ]
+    );
+}
+
 fn delete(process: &Process, name: &str) -> Request<Full<Bytes>> {
     process
         .request("DELETE", "kind-a", &format!("{CONFIGMAPS}/{name}"))
@@ -3134,6 +3167,32 @@ async fn a_denied_unmarked_ask_leaves_the_context_unmarked_so_the_next_write_ask
         assert_eq!(core.policy.access("kind-a").source, ModeSource::Unmarked);
     }
     assert_eq!(fake.writes(Method::POST), 0);
+}
+
+#[tokio::test]
+async fn an_unmarked_ask_of_a_delete_asks_for_no_name_and_the_ask_after_its_type_does() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let deleting = tokio::spawn(send(process.at(), delete(&process, "c")));
+    let ask = asked(&mut events).await;
+    assert!(ask.unmarked);
+    assert!(!ask.typed, "the type question is its friction");
+    answered(&core, &ask, marked(Environment::Staging)).unwrap();
+    let again = asked(&mut events).await;
+    assert!(!again.unmarked);
+    assert_eq!((again.typed, again.lasting_minutes), (true, None));
+    assert_eq!(
+        answered(&core, &again, ApprovalAnswer::Once),
+        Err(ErrorKind::InvalidInput)
+    );
+    assert_eq!(fake.writes(Method::DELETE), 0);
+    answer_with(&core, &again, ApprovalAnswer::Once, Some("kind-a"));
+    assert_eq!(deleting.await.unwrap().0.status(), StatusCode::OK);
+    assert_eq!(fake.writes(Method::DELETE), 1);
 }
 
 #[tokio::test]
