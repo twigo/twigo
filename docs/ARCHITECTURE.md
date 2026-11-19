@@ -753,6 +753,8 @@ Each crumb is cut in the middle, a fixed head and tail around a middle that shri
 The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, 1 to 12, so `All namespaces` is never cut, and no text as short as its floor is.
 A stage counts half a pixel for each rounded width it adds up, so that a part stays whole only where it fits whichever way the widths were rounded.
 The bar stays 36 px high, which the position of the macOS traffic lights in `tauri.conf.json` is tied to.
+The mode chip after the context's name says its type and its lock, `Production · read-only`, and opens what set it and the choices the person has (6.4).
+A context nobody marked has a quiet chip, `Not marked`, that opens the same choices, and its tile in the rail says so in its tooltip.
 
 The panel hides when a person's close takes its last tab (`Editors.dismiss`, 4.3): its X, a middle click, ⌘W, Delete or Backspace on the focused tab, and the Close Terminal… and Close Shell… picks.
 It leaves maximize and hides in one step, and gives the focus back (4.3).
@@ -2327,11 +2329,17 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context; its kubeconfig metadata (`twigo.environment`, 5.5) counts only where it tightens, Production or Staging, so a context whose kubeconfig alone says Development or Local is unmarked and asks; the person's mark wins, their None included.
-    Nothing guesses a type from a context's name: a context nobody marked is `guarded` until someone says what it is (above), and only an admin's policy file sets modes by glob (4.8).
+    Nothing guesses a type from a context's name: a context nobody marked is `guarded` and shows a quiet chip, `Not marked`, until someone says what it is (above), and only an admin's policy file sets modes by glob (4.8).
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     Where the bar is too narrow the chip folds to its icon, its words in its tooltip, after the search and before the crumbs (4.1).
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.
     The chip opens what set the mode, in words, with the choices the person has.
+    Where the person's choice sets a stricter lock aside, a kubeconfig's `twigo.readOnly`, a provider's or the type's default, the words say which: `You set this, over its kubeconfig's read-only.`
+  - The person lowers protection only through the command bus (5.1): the chip's choices, Set Context Mode…, Set Environment Type… and the toast's Unlock for 15 minutes plan a `setMode`, `setEnvironment` or `unlock`, and the operations service draws the friction the plan names and runs it.
+    A lasting change that leaves the context less strict asks for its name typed, an unlock asks in a dialog, and a change that tightens or keeps the mode, or that starts from a context nobody marked, runs at once, with a toast that says what it did; a plan with no kubectl command shows no such line.
+  - A write or an exec that meets a context nobody marked is refused with `unmarked`, and the operations service asks what the context is: a dialog of Production, Staging, Development and Local, each with what its type gives, and Cancel, which sends nothing.
+    It plans `setEnvironment` with the answer, runs it, and plans the command again, which asks its own friction or is refused in the new mode, with the unlock offered where it may be.
+    A process's ask for such a context asks the same question in the approval host, naming the process and what it asked to do, and answers `mark` with the type, or `deny`; the ordinary ask that may follow, as Staging gives, comes with its own question and the context's new type on its badge, so that it does not read as a repeat.
   - Friction grows with the blast radius (Primer), and the mode raises it; Rust names it in a command's plan and checks it before the plan runs (5.1):
     - scale, cordon and suspend run at once with an undo (⌘Z): for 30 s the space's last action, the one that started last, can be put back, refused once anyone else replaced or changed the object since.
       Status moves an object's resourceVersion every second (a scale's went 873 to 888 within 1 s on kind 1.37, 2026-11-08), so the undo holds to its generation instead, or for a node, which has none, to the `spec.unschedulable` it set, and its write carries the resourceVersion it checked;
