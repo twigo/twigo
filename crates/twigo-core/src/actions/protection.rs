@@ -155,28 +155,32 @@ fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
     said
 }
 
-/// What the change gives once the locks that hold the context go, where
-/// that is not what it gives now: a type outlives them.
+/// What the change gives once locks that hold the context go, where that is
+/// not what it gives now: the person's mode and type outlive them. Of the
+/// sets of locks whose absence shows it, the one that leaves the context
+/// least strict, and of those the smallest.
 fn beneath(context: &str, planned: &PlannedChange) -> Option<String> {
-    let (now, bare) = (&planned.after, &planned.beneath.after);
+    let now = &planned.after;
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
-    if bare.mode == now.mode && unmarked(bare) == unmarked(now) {
-        return None;
-    }
-    let gone: Vec<String> = planned
+    let view = planned
         .beneath
-        .locks
+        .iter()
+        .filter(|view| view.after.mode != now.mode || unmarked(&view.after) != unmarked(now))
+        .min_by_key(|view| (view.after.mode, !unmarked(&view.after)))?;
+    let gone: Vec<String> = view
+        .gone
         .iter()
         .map(|lock| match lock {
             Outlived::PolicyFile { file } => format!("{file} no longer sets its mode"),
             Outlived::Kubeconfig => "its kubeconfig's lock goes".to_owned(),
+            Outlived::Type => "its kubeconfig's type goes".to_owned(),
             Outlived::Provider => "its provider's lock goes".to_owned(),
         })
         .collect();
-    let then = if unmarked(bare) {
+    let then = if unmarked(&view.after) {
         format!("its first write or exec asks what {context} is")
     } else {
-        format!("it will be {}", bare.mode.name())
+        format!("it will be {}", view.after.mode.name())
     };
     Some(format!("When {}, {then}.", gone.join(" and ")))
 }
@@ -280,7 +284,7 @@ fn name(environment: Environment) -> &'static str {
 #[cfg(test)]
 mod tests {
     use twigo_ipc::Lock;
-    use twigo_policy::Beneath;
+    use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile, ProviderLock, TypeLock};
 
     use super::*;
 
@@ -297,11 +301,6 @@ mod tests {
         let policy = twigo_policy::Policy::open();
         policy.set_mode("kind-a", Some(Mode::ReadOnly)).unwrap();
         let mut planned = policy.plan("kind-a", change).unwrap();
-        planned.beneath = Beneath {
-            locks: Vec::new(),
-            before: before.clone(),
-            after: after.clone(),
-        };
         planned.before = before;
         planned.after = after;
         planned
@@ -437,61 +436,67 @@ mod tests {
     }
 
     #[test]
-    fn a_change_a_lock_hides_says_what_it_gives_once_the_lock_goes() {
-        let beneath = |change, now: ContextAccess, bare, locks| {
-            let mut planned = planned(change, now.clone(), now.clone());
-            planned.beneath = Beneath {
-                locks,
-                before: now,
-                after: bare,
-            };
-            planned
+    fn a_change_locks_hide_says_what_it_gives_under_the_least_strict_set_of_locks_gone() {
+        let plan = |metadata: Metadata, change| {
+            let policy = Policy::new(
+                PolicyFile::default(),
+                move |_| Some(metadata),
+                Choices::default(),
+                Audit::off(),
+            );
+            policy.plan("kind-a", change).unwrap()
         };
-        let provided = beneath(
-            Change::Type {
-                environment: Some(Environment::Development),
-            },
-            access(Mode::Guarded, ModeSource::Provider),
-            access(
-                Mode::ReadWrite,
-                ModeSource::Environment {
-                    environment: Environment::Development,
-                },
-            ),
-            vec![Outlived::Provider],
-        );
+        let said = |metadata, change| consequences("kind-a", &plan(metadata, change));
+        let mark = |environment| Change::Type {
+            environment: Some(environment),
+        };
+        let provided = Metadata {
+            provider: Some(ProviderLock::Guarded),
+            ..Metadata::default()
+        };
+        let locked = Metadata {
+            read_only: true,
+            ..Metadata::default()
+        };
         assert_eq!(
-            consequences("kind-a", &provided),
+            said(provided, mark(Environment::Development)),
             [
                 "It stays guarded as its provider says.",
                 "When its provider's lock goes, it will be read-write.",
             ]
         );
-        let cleared = beneath(
-            Change::Type { environment: None },
-            access(Mode::ReadOnly, ModeSource::Kubeconfig),
-            access(Mode::Guarded, ModeSource::Unmarked),
-            vec![Outlived::Kubeconfig],
-        );
         assert_eq!(
-            consequences("kind-a", &cleared),
+            said(locked, Change::Type { environment: None }),
             [
                 "It stays read-only as its kubeconfig says.",
                 "When its kubeconfig's lock goes, its first write or exec asks what kind-a is.",
             ]
         );
-        let mut unlock = beneath(
-            Change::Unlock,
-            access(Mode::ReadOnly, ModeSource::Kubeconfig),
-            access(Mode::Guarded, ModeSource::Unmarked),
-            vec![Outlived::Kubeconfig],
-        );
-        unlock.after = ContextAccess {
-            unlocked_until: Some(1),
-            ..access(Mode::Guarded, ModeSource::Kubeconfig)
+        let both = Metadata {
+            provider: Some(ProviderLock::Guarded),
+            ..locked
         };
+        assert_eq!(
+            said(both, mark(Environment::Development)),
+            [
+                "It stays read-only as its kubeconfig says.",
+                "When its kubeconfig's lock goes and its provider's lock goes, it will be read-write.",
+            ]
+        );
+        let production = Metadata {
+            environment: Some(TypeLock::Production),
+            ..locked
+        };
+        assert_eq!(
+            said(production, mark(Environment::Staging)),
+            [
+                "It stays read-only as its kubeconfig says.",
+                "When its kubeconfig's lock goes, it will be guarded.",
+            ],
+            "its kubeconfig's type, which a type sets aside, is not named"
+        );
         assert!(
-            !consequences("kind-a", &unlock)
+            !consequences("kind-a", &plan(locked, Change::Unlock))
                 .iter()
                 .any(|said| said.starts_with("When")),
             "an unlock ends by itself before any lock goes"

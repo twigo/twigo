@@ -821,9 +821,10 @@ fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_fri
 }
 
 #[test]
-fn a_type_or_a_cleared_mode_asks_as_it_would_with_no_lock_but_the_person_s_choices_and_the_type() {
+fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_shows_it_lowering() {
+    let (_dir, file) = file(r#"{"contexts": {"filed": "guarded"}}"#);
     let policy = Policy::new(
-        PolicyFile::default(),
+        file,
         |context| {
             Some(match context {
                 "provided" => Metadata {
@@ -831,53 +832,69 @@ fn a_type_or_a_cleared_mode_asks_as_it_would_with_no_lock_but_the_person_s_choic
                     ..NOTHING
                 },
                 "production" => Metadata {
+                    environment: Some(TypeLock::Production),
+                    ..NOTHING
+                },
+                "staging" => Metadata {
+                    environment: Some(TypeLock::Staging),
+                    ..NOTHING
+                },
+                "locked-production" => Metadata {
                     read_only: true,
                     environment: Some(TypeLock::Production),
                     ..NOTHING
                 },
-                _ => Metadata {
+                "locked" => Metadata {
                     read_only: true,
                     ..NOTHING
                 },
+                _ => NOTHING,
             })
         },
         Choices::default(),
         Audit::off(),
     );
-    let asks = |context: &str, change| {
-        let planned = policy.plan(context, change).unwrap();
-        friction(&planned.risk(), context, &planned.before)
-    };
-    let typed = |context: &str| Friction::Typed {
-        text: context.to_owned(),
-    };
-    let mark = |environment| Change::Type {
-        environment: Some(environment),
-    };
-    assert_eq!(
-        asks("provided", mark(Environment::Development)),
-        typed("provided")
-    );
-    assert_eq!(
-        asks("provided", mark(Environment::Staging)),
-        Friction::AtOnce
-    );
-    assert_eq!(
-        asks("production", mark(Environment::Staging)),
-        typed("production"),
-        "its kubeconfig's Production stays beneath its readOnly"
-    );
-
+    policy.set_mode("production", Some(Mode::Guarded)).unwrap();
+    policy.set_mode("staging", Some(Mode::Guarded)).unwrap();
     policy.set_mode("locked", Some(Mode::ReadOnly)).unwrap();
-    assert_eq!(
-        asks("locked", mark(Environment::Development)),
-        Friction::AtOnce,
-        "the person's mode stays beneath every lock"
-    );
     policy
         .set_environment("locked", Some(Environment::Development))
         .unwrap();
-    assert_eq!(asks("locked", Change::Mode { mode: None }), typed("locked"));
+    policy
+        .set_environment("filed", Some(Environment::Staging))
+        .unwrap();
+    let mark = |environment| Change::Type {
+        environment: Some(environment),
+    };
+    let clear_mode = Change::Mode { mode: None };
+    let clear_type = Change::Type { environment: None };
+    let asks = [
+        ("provided", mark(Environment::Development), true),
+        ("provided", mark(Environment::Staging), false),
+        ("locked-production", mark(Environment::Staging), true),
+        ("locked-production", mark(Environment::Production), false),
+        ("production", clear_mode, true),
+        ("staging", clear_mode, true),
+        ("locked", clear_mode, true),
+        ("locked", mark(Environment::Local), false),
+        ("filed", clear_type, true),
+        ("filed", mark(Environment::Production), false),
+    ];
+    for (context, change, typed) in asks {
+        let planned = policy.plan(context, change).unwrap();
+        let expected = if typed {
+            Friction::Typed {
+                text: context.to_owned(),
+            }
+        } else {
+            Friction::AtOnce
+        };
+        assert_eq!(
+            friction(&planned.risk(), context, &planned.before),
+            expected,
+            "{context}: {change:?}"
+        );
+    }
 }
 
 #[test]

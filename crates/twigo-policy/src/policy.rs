@@ -14,7 +14,7 @@ use twigo_ipc::{
     RequestClass,
 };
 
-use crate::friction::{Protection, Risk};
+use crate::friction::Risk;
 use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile, Served};
 
 /// How long an unlock lasts.
@@ -136,7 +136,9 @@ pub struct PlannedChange {
     pub change: Change,
     pub before: ContextAccess,
     pub after: ContextAccess,
-    pub beneath: Beneath,
+    /// Under each nonempty set of the locks that hold the context, the
+    /// smallest sets first.
+    pub beneath: Vec<Beneath>,
     /// [`Policy::changes_of`] the context when it was planned.
     changes: u64,
     /// [`Metadata::revision`] of the context when it was planned.
@@ -144,18 +146,16 @@ pub struct PlannedChange {
 }
 
 /// A context's access before and after a change as it would have them with
-/// no lock but the person's choices and its type: the locks can go, an
-/// admin's entry or a kubeconfig's `readOnly` with an edit, while a type
-/// outlives them.
+/// the locks `gone` taken away, the person's choices kept.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Beneath {
-    /// The locks that hold the context now.
-    pub locks: Vec<Outlived>,
+    pub gone: Vec<Outlived>,
     pub before: ContextAccess,
     pub after: ContextAccess,
 }
 
-/// A lock that a person's type outlives.
+/// A lock that can go while the person's mode and type stay: an edit of the
+/// admin's file or of a kubeconfig takes it away, or the provider lifts it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outlived {
     /// The admin's policy file sets the context's mode.
@@ -164,6 +164,8 @@ pub enum Outlived {
     },
     /// Its kubeconfig's `twigo.readOnly`.
     Kubeconfig,
+    /// Its kubeconfig's `twigo.environment`, where that locks.
+    Type,
     Provider,
 }
 
@@ -173,10 +175,14 @@ impl PlannedChange {
     pub fn risk(&self) -> Risk {
         match self.change {
             Change::Unlock => Risk::Unlock,
-            Change::Mode { .. } | Change::Type { .. } => Risk::Protection(Box::new(Protection {
-                now: (self.before.clone(), self.after.clone()),
-                bare: (self.beneath.before.clone(), self.beneath.after.clone()),
-            })),
+            Change::Mode { .. } | Change::Type { .. } => {
+                let now = (self.before.clone(), self.after.clone());
+                let beneath = self
+                    .beneath
+                    .iter()
+                    .map(|view| (view.before.clone(), view.after.clone()));
+                Risk::Protection(std::iter::once(now).chain(beneath).collect())
+            }
         }
     }
 }
@@ -389,6 +395,27 @@ impl Policy {
         self.resolved_as(held, context, metadata, now, file)
     }
 
+    /// [`Policy::resolved`] with the locks `gone` taken away.
+    fn resolved_without(
+        &self,
+        held: &Held,
+        context: &str,
+        mut metadata: Metadata,
+        now: Timestamp,
+        gone: &[Outlived],
+    ) -> ContextAccess {
+        let mut file = self.file.mode(context);
+        for lock in gone {
+            match lock {
+                Outlived::PolicyFile { .. } => file = None,
+                Outlived::Kubeconfig => metadata.read_only = false,
+                Outlived::Type => metadata.environment = None,
+                Outlived::Provider => metadata.provider = None,
+            }
+        }
+        self.resolved_as(held, context, Some(metadata), now, file)
+    }
+
     /// [`Policy::resolved`] where `file` is what the admin's policy file
     /// sets, none for what the context would be without it.
     fn resolved_as(
@@ -581,20 +608,19 @@ impl Policy {
         let before = self.resolved(&held, context, Some(metadata), now);
         let mut changed = held.clone();
         changed.make(context, change, &metadata, unlocked_until(now, UNLOCK));
-        let bare = Metadata {
-            read_only: false,
-            provider: None,
-            ..metadata
-        };
-        let bare = |held: &Held| self.resolved_as(held, context, Some(bare), now, None);
+        let beneath = sets(self.locks(context, &metadata))
+            .into_iter()
+            .filter(|gone| !gone.is_empty())
+            .map(|gone| Beneath {
+                before: self.resolved_without(&held, context, metadata, now, &gone),
+                after: self.resolved_without(&changed, context, metadata, now, &gone),
+                gone,
+            })
+            .collect();
         let planned = PlannedChange {
             change,
             after: self.resolved(&changed, context, Some(metadata), now),
-            beneath: Beneath {
-                locks: self.locks(context, &metadata),
-                before: bare(&held),
-                after: bare(&changed),
-            },
+            beneath,
             changes: held.changes_of(context),
             revision: metadata.revision,
             before,
@@ -605,15 +631,19 @@ impl Policy {
         Ok(planned)
     }
 
-    /// The locks that a person's type outlives that hold `context`.
+    /// The locks that can go that hold `context`.
     fn locks(&self, context: &str, metadata: &Metadata) -> Vec<Outlived> {
         let file = match self.file.mode(context) {
             Some((_, ModeSource::PolicyFile { file, .. })) => Some(Outlived::PolicyFile { file }),
             _ => None,
         };
         let kubeconfig = metadata.read_only.then_some(Outlived::Kubeconfig);
+        let environment = metadata.environment.map(|_| Outlived::Type);
         let provider = metadata.provider.map(|_| Outlived::Provider);
-        [file, kubeconfig, provider].into_iter().flatten().collect()
+        [file, kubeconfig, environment, provider]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Makes a change a person confirmed through `friction`, while the
@@ -882,6 +912,20 @@ fn refuse_unlock(context: &str, change: Change, before: &ContextAccess) -> Resul
         return Err(Refused::NotLocked(context.to_owned(), before.mode.name()));
     }
     Ok(())
+}
+
+/// Every set of `locks`, the smallest first.
+fn sets(locks: Vec<Outlived>) -> Vec<Vec<Outlived>> {
+    let mut sets = vec![Vec::new()];
+    for lock in locks {
+        let with: Vec<Vec<Outlived>> = sets
+            .iter()
+            .map(|set| [set.clone(), vec![lock.clone()]].concat())
+            .collect();
+        sets.extend(with);
+    }
+    sets.sort_by_key(Vec::len);
+    sets
 }
 
 fn unlocked_until(now: Timestamp, length: SignedDuration) -> Timestamp {

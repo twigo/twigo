@@ -1097,6 +1097,60 @@ async fn a_type_under_a_kubeconfig_s_lock_asks_as_what_it_gives_once_the_lock_go
 }
 
 #[tokio::test]
+async fn clearing_a_choice_beneath_a_lock_asks_for_the_name_and_says_what_it_gives_once_the_lock_goes()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("policy.json");
+    std::fs::write(&policy, r#"{"contexts": {"kind-unmarked": "guarded"}}"#).unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let file = policy.display().to_string();
+    let cases = [
+        (
+            PlanRequest::SetMode {
+                context: "kind-prod".to_owned(),
+                mode: Some(Mode::Guarded),
+            },
+            PlanRequest::SetMode {
+                context: "kind-prod".to_owned(),
+                mode: None,
+            },
+            [
+                "Every write, exec and shell is refused; reads, dry runs and port-forwards go on."
+                    .to_owned(),
+                "When its kubeconfig's type goes, its first write or exec asks what kind-prod is."
+                    .to_owned(),
+            ],
+        ),
+        (
+            PlanRequest::SetEnvironment {
+                context: "kind-unmarked".to_owned(),
+                environment: Some(Environment::Staging),
+            },
+            PlanRequest::SetEnvironment {
+                context: "kind-unmarked".to_owned(),
+                environment: None,
+            },
+            [
+                format!("It stays guarded by kind-unmarked in {file}."),
+                format!(
+                    "When {file} no longer sets its mode, its first write or exec asks what kind-unmarked is."
+                ),
+            ],
+        ),
+    ];
+    for (chosen, cleared, said) in cases {
+        protect(&core, chosen).await.unwrap();
+        let plan = core.command_plan("main", cleared).await.unwrap();
+        let typed = Friction::Typed {
+            text: plan.context.clone(),
+        };
+        assert_eq!(plan.friction, typed);
+        assert_eq!(plan.consequences, said);
+    }
+}
+
+#[tokio::test]
 async fn commands_refuse_a_context_no_source_lists() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
