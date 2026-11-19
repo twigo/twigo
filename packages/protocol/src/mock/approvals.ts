@@ -329,23 +329,16 @@ function asked(ask: Draft, unmarked: boolean): Draft {
  * The approval broker as a window sees it: it sends the asks waiting and
  * every new one to the window that follows, takes the answers and refuses
  * one for an ask that is gone, a name typed wrong or a lasting answer that
- * was not offered. A scenario's request meets the gate as it comes, as
- * Rust's `decide` has it: it asks what its context is where nobody marked
- * it, asks to be allowed where the context is guarded, and else goes or is
- * refused with no ask. A lasting answer allows what its process asks on its
- * context for the minutes the ask offered, deletes excepted, while the
- * context's mode, its source and its count of changes stay as they were
- * when it was given, a change that went back included, as Rust's `holds`
- * has it: an ask that waits then is withdrawn, and one that comes is not
- * raised. An ask of a context nobody marked takes `mark` or `deny` alone;
- * `mark` sets the context's type, and the request then meets the mode that
- * type gives: Staging asks again,
- * as any guarded context does, Production refuses it and Development and
- * Local let it through. Whenever a context's access changes, each ask
- * waiting on it that its block no longer fits is withdrawn and its request
- * meets the gate anew in the same way, as Rust's `wait` does: an ask whose
- * reason still holds, an ordinary one on a context still guarded or an
- * unmarked one on a context still unmarked, stays.
+ * was not offered. A lasting answer allows what its process asks on its
+ * context for the minutes the ask offered, deletes excepted, while what
+ * `#holds` names stays as it was: an ask that waits then is withdrawn, and
+ * one that comes is not raised. An ask of a context nobody marked takes
+ * `mark` or `deny` alone; `mark` sets the context's type, and the request
+ * then meets the mode that type gives: Staging asks again, Production
+ * refuses it and Development and Local let it through. Whenever a context's
+ * access changes, each ask waiting on it that its block no longer fits is
+ * withdrawn and its request meets the gate anew. Rust's `decide`, `holds`
+ * and `wait` decide the same.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
