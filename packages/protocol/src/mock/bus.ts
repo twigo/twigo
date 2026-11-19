@@ -372,6 +372,7 @@ export interface BusHost {
     | "would"
     | "bare"
     | "locks"
+    | "changes"
     | "refuse"
     | "setMode"
     | "setEnvironment"
@@ -1708,8 +1709,8 @@ export class MockBus {
    * it only names and colours the context there, and where there is nothing
    * to unlock. A lasting change is weighed twice, as it is and as the context
    * would be with no lock but the person's choices and its type, which
-   * outlives every other, and the plan runs only while the context lets
-   * through what it did when planned.
+   * outlives every other, and the plan runs only while what the context lets
+   * through and the count of its changes are what they were when planned.
    */
   #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
@@ -1731,6 +1732,7 @@ export class MockBus {
       from: protection.bare(context),
       to: protection.bare(context, change),
     };
+    const changes = protection.changes(context);
     const said = words(context, change, before, after, bare);
     return {
       plan: {
@@ -1752,7 +1754,10 @@ export class MockBus {
               bare,
             },
       stands: () => {
-        if (!isEqual(protection.of(context), before)) {
+        if (
+          !isEqual(protection.of(context), before) ||
+          protection.changes(context) !== changes
+        ) {
           throw new IpcError(
             "conflict",
             `what ${context} lets through changed since Twigo asked, so Twigo changed nothing`,

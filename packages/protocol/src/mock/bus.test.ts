@@ -1699,6 +1699,51 @@ test("a protection plan is refused once what the context lets through changed si
   expect((await execute(tighten.id, null)).kind).toBe("conflict");
 });
 
+test("a protection plan is refused once the context changed and changed back, as Rust counts the changes", async () => {
+  const backend = createMockBackend();
+  const execute = (plan: number) =>
+    refused(
+      backend.subscribe(
+        "command_execute",
+        { plan, typed: null },
+        () => undefined,
+      ),
+    );
+  const access = async (context: string) =>
+    (
+      await answered(backend.subscribe("contexts_watch", null, () => undefined))
+    ).find((candidate) => candidate.name === context)?.access;
+
+  const sameType = await answered(
+    backend.invoke("command_plan", SET_ENVIRONMENT("staging", "staging")),
+  );
+  const before = await access("staging");
+  await change(backend, SET_ENVIRONMENT("staging", "development"));
+  await change(backend, SET_ENVIRONMENT("staging", "staging"));
+  expect(await access("staging")).toEqual(before);
+  const stale = await execute(sameType.id);
+  expect(stale.kind).toBe("conflict");
+  expect(stale.message).toBe(
+    "what staging lets through changed since Twigo asked, so Twigo changed nothing",
+  );
+
+  const tightening = await answered(
+    backend.invoke("command_plan", SET_MODE("prod-eu", "read-only")),
+  );
+  await change(backend, { action: "unlock", context: "prod-eu" });
+  await answered(backend.invoke("context_relock", "prod-eu"));
+  expect((await execute(tightening.id)).kind).toBe("conflict");
+
+  const fresh = await answered(
+    backend.invoke("command_plan", SET_MODE("prod-eu", "read-only")),
+  );
+  await run(backend, fresh.id);
+  expect((await access("prod-eu"))?.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
+});
+
 test("a change that asks for the name typed refuses the wrong one and changes nothing", async () => {
   const backend = createMockBackend();
   const plan = await answered(

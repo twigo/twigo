@@ -53,6 +53,8 @@ export class MockAccess {
     Object.entries(MARKED),
   );
   readonly #unlocks = new Map<string, number>();
+  /** How many times a choice or an unlock changed what a context lets through, as `Policy::changes_of` counts. */
+  readonly #changed = new Map<string, number>();
   /** Contexts a policy file turned read-only after the app started. */
   readonly #filed = new Set<string>();
 
@@ -68,6 +70,7 @@ export class MockAccess {
     this.#unlocks.delete(name);
     if (mode === null) this.#modes.delete(name);
     else this.#modes.set(name, mode);
+    this.#changes(name);
     this.#emit();
   }
 
@@ -75,6 +78,7 @@ export class MockAccess {
     fixture(name);
     this.#unlocks.delete(name);
     this.#environments.set(name, environment);
+    this.#changes(name);
     this.#emit();
   }
 
@@ -88,6 +92,7 @@ export class MockAccess {
       );
     }
     this.#unlocks.set(name, Date.now() + UNLOCK_MS);
+    this.#changes(name);
     setTimeout(() => {
       this.#emit();
     }, UNLOCK_MS + 1);
@@ -131,6 +136,11 @@ export class MockAccess {
     return this.#access(fixture(name), change, false);
   }
 
+  /** How many times a choice or an unlock changed what a context lets through: a plan holds only while this stays. */
+  changes(name: string): number {
+    return this.#changed.get(name) ?? 0;
+  }
+
   /** The locks that hold a context, which its type outlives: the policy file, then its kubeconfig's `readOnly`. */
   locks(name: string): Outlived[] {
     fixture(name);
@@ -153,6 +163,10 @@ export class MockAccess {
         `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
       );
     }
+  }
+
+  #changes(name: string): void {
+    this.#changed.set(name, (this.#changed.get(name) ?? 0) + 1);
   }
 
   #list(): Context[] {
