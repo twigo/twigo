@@ -1,7 +1,8 @@
 //! Who serves a group-version, read as an actor where nothing kept knows it
-//! (ARCHITECTURE 6.4): the gate takes a dry run outside the core group for
-//! one only once a read says kube-apiserver serves it itself, so whatever
-//! sends one reads this first. The read is a `GET`, which never waits on it.
+//! (ARCHITECTURE 6.4): the gate takes a dry run outside kube-apiserver's own
+//! groups for one only once a read says kube-apiserver serves it itself, so
+//! whatever sends one reads this first. The read is a `GET`, which never
+//! waits on it.
 
 use http::Request;
 use k8s_openapi::kube_aggregator::pkg::apis::apiregistration::v1::APIService;

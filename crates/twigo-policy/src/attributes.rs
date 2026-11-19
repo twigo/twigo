@@ -9,6 +9,7 @@ use percent_encoding::percent_decode_str;
 use twigo_ipc::RequestClass;
 
 use crate::Server;
+use crate::served::built_in;
 
 /// The POSTs that only ask a question, by group and resource.
 const REVIEWS: [(&str, &str); 3] = [
@@ -44,15 +45,15 @@ pub struct Attributes {
 impl Attributes {
     /// A request about to be sent, by its path from the API server's root,
     /// where nothing says who serves its group-version: a dry run outside
-    /// the core group is a write.
+    /// kube-apiserver's own groups is a write.
     pub fn of<B>(request: &Request<B>) -> Self {
         Self::served(request, |_, _| None)
     }
 
     /// [`Attributes::of`], where `served` says who serves a group-version,
-    /// asked only of a dry run outside the core group: it is one only where
-    /// kube-apiserver serves it itself, as an aggregated server may ignore
-    /// `dryRun` and perform the write.
+    /// asked only of a dry run outside kube-apiserver's own groups: it is one
+    /// only where kube-apiserver serves it itself, as an aggregated server
+    /// may ignore `dryRun` and perform the write.
     pub fn served<B>(
         request: &Request<B>,
         served: impl FnOnce(&str, &str) -> Option<Server>,
@@ -79,7 +80,7 @@ impl Attributes {
     }
 
     /// The group and version whose server decides the class of `request`:
-    /// those of a dry run outside the core group.
+    /// those of a dry run outside kube-apiserver's own groups.
     pub fn dry_run_group<B>(request: &Request<B>) -> Option<(String, String)> {
         let mut asked = None;
         Self::served(request, |group, version| {
@@ -352,11 +353,11 @@ impl<'a> Parts<'a> {
             && query.dry_run()
     }
 
-    /// Whether kube-apiserver serves the group-version itself: the core
-    /// group always, any other as `served` says.
+    /// Whether kube-apiserver serves the group-version itself: one of its own
+    /// groups always, any other as `served` says.
     fn served_itself(&self, served: impl FnOnce(&str, &str) -> Option<Server>) -> bool {
         match (self.group, self.version) {
-            (Some(""), _) => true,
+            (Some(group), _) if built_in(group) => true,
             (Some(group), Some(version)) => served(group, version) == Some(Server::Itself),
             _ => false,
         }

@@ -236,10 +236,7 @@ mod tests {
             dry.uri(),
             "/apis/apps/v1/namespaces/a/deployments/d?fieldManager=kubectl&dryRun=All"
         );
-        assert_eq!(
-            Attributes::dry_run_group(&dry),
-            Some(("apps".to_owned(), "v1".to_owned()))
-        );
+        assert_eq!(Attributes::dry_run_group(&dry), None);
         let create = parts(Method::POST, "/api/v1/namespaces/a/configmaps");
         let dry = dry_run(&create, &Bytes::new());
         assert_eq!(dry.uri(), "/api/v1/namespaces/a/configmaps?dryRun=All");

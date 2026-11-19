@@ -36,8 +36,8 @@ struct Row {
     uri: &'static str,
     accept: Option<&'static str>,
     upgrade: bool,
-    /// Who serves the group-version a dry run outside the core group goes
-    /// to, as read; none where it could not be read.
+    /// Who serves the group-version of a dry run outside kube-apiserver's
+    /// own groups, as read; none where nothing could read it.
     served: Option<Server>,
     class: RequestClass,
     /// The UI's answer in each of [`COLUMNS`].
@@ -57,7 +57,7 @@ fn row(
         uri,
         accept: None,
         upgrade: false,
-        served: Some(Server::Itself),
+        served: None,
         class,
         answers,
     }
@@ -202,6 +202,23 @@ fn table() -> Vec<Row> {
             DryRun,
             OPEN,
         ),
+        row(
+            "a dry run to a built-in group, whose APIService nobody read",
+            post.clone(),
+            "/apis/networking.k8s.io/v1/namespaces/a/ingresses?dryRun=All",
+            DryRun,
+            OPEN,
+        ),
+        serving(
+            Some(Server::Itself),
+            row(
+                "a dry run to a group whose APIService names no service",
+                post.clone(),
+                "/apis/example.com/v1/namespaces/a/widgets?dryRun=All",
+                DryRun,
+                OPEN,
+            ),
+        ),
         serving(
             Some(Server::Aggregated),
             row(
@@ -220,16 +237,6 @@ fn table() -> Vec<Row> {
                 "/apis/example.com/v1/namespaces/a/widgets?dryRun=All",
                 Write,
                 WRITE_OR_EXEC,
-            ),
-        ),
-        serving(
-            Some(Server::Aggregated),
-            row(
-                "a dry run to the core group, whatever is said of it",
-                post.clone(),
-                "/api/v1/namespaces/a/configmaps?dryRun=All",
-                DryRun,
-                OPEN,
             ),
         ),
         row(
@@ -1282,7 +1289,14 @@ fn approvals_table() -> Vec<Approved> {
             [EVERY, APPROVED, NONE, NONE],
         ),
         approved(
-            "a dry run to a group kube-apiserver serves itself",
+            "a dry run to a group whose APIService names no service",
+            Method::POST,
+            "/apis/stable.example.com/v1/namespaces/a/crontabs?dryRun=All",
+            DryRun,
+            [EVERY; 4],
+        ),
+        approved(
+            "a dry run to a built-in group, whose APIService nobody read",
             Method::PATCH,
             "/apis/apps/v1/namespaces/a/deployments/d?dryRun=All",
             DryRun,
@@ -1407,7 +1421,7 @@ async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_cov
                 "v1beta1",
                 Server::Aggregated,
             );
-            served.keep("c", Some(0), "apps", "v1", Server::Itself);
+            served.keep("c", Some(0), "stable.example.com", "v1", Server::Itself);
             let attributes = policy.gate("c", Actor::Terminal).attributes(&sent);
             assert_eq!(attributes.class, row.class, "{} in {column:?}", row.what);
             let approvals = approvals_for(&attributes);
