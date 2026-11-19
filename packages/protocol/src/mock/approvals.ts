@@ -438,9 +438,7 @@ export class MockApprovals {
         : mode === "guarded"
           ? asked(ask, false)
           : null;
-    if (raised === null || (!raised.unmarked && this.#allowed(raised))) {
-      return false;
-    }
+    if (raised === null || this.#allowed(raised)) return false;
     this.#raise(raised);
     return true;
   }
