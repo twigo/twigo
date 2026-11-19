@@ -3,8 +3,9 @@
 
 use k8s_openapi::api::core::v1::{ConfigMap, Secret};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
-use kube::Api;
 use kube::api::PostParams;
+use kube::config::Kubeconfig;
+use kube::{Api, Config};
 use serde_json::{Value, json};
 use twigo_core::Core;
 use twigo_ipc::{
@@ -12,7 +13,9 @@ use twigo_ipc::{
     OpenedEdit, Plan, PlanRequest, PreviewId, ResourceRef,
 };
 
-use super::{Cluster, core, eventually, kubectl, line, reference, run, unique};
+use super::{Cluster, core, core_over, eventually, kubectl, line, reference, run, unique};
+
+const FLOW_SCHEMAS: &str = "/apis/flowcontrol.apiserver.k8s.io/v1/flowschemas";
 
 fn deployments(namespace: &str) -> String {
     format!("/apis/apps/v1/namespaces/{namespace}/deployments")
@@ -878,13 +881,86 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
     cluster.delete(&namespace).await;
 }
 
+async fn api_service_reads(admin: &kube::Client, user: &str) -> u64 {
+    let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
+    let metrics = admin.request_text(request).await.unwrap();
+    let schema = format!("flow_schema=\"{user}\"");
+    metrics
+        .lines()
+        .filter(|line| {
+            line.starts_with("apiserver_flowcontrol_dispatched_requests_total{")
+                && line.contains(&schema)
+        })
+        .map(|line| line.rsplit(' ').next().unwrap().parse::<f64>().unwrap() as u64)
+        .sum()
+}
+
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_the_apply() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("apply-readonly").await;
+    let user = namespace.clone();
+    post(
+        &cluster.admin,
+        &format!("/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings"),
+        &json!({
+            "metadata": { "name": user },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "edit" },
+            "subjects": [{ "apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user }],
+        }),
+    )
+    .await;
+    post(
+        &cluster.admin,
+        FLOW_SCHEMAS,
+        &json!({
+            "metadata": { "name": user },
+            "spec": {
+                "matchingPrecedence": 450,
+                "priorityLevelConfiguration": { "name": "global-default" },
+                "rules": [{
+                    "subjects": [{ "kind": "User", "user": { "name": user } }],
+                    "resourceRules": [{
+                        "verbs": ["get"],
+                        "apiGroups": ["apiregistration.k8s.io"],
+                        "resources": ["apiservices"],
+                        "clusterScope": true,
+                    }],
+                }],
+            },
+        }),
+    )
+    .await;
+    let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
+    for named in &mut kubeconfig.auth_infos {
+        if let Some(info) = &mut named.auth_info {
+            info.impersonate = Some(user.clone());
+        }
+    }
     let dir = tempfile::tempdir().unwrap();
-    let (core, _) = core(dir.path(), &cluster).await;
+    let config = dir.path().join("config");
+    std::fs::write(&config, serde_json::to_string(&kubeconfig).unwrap()).unwrap();
+    let core = core_over(dir.path(), &config, &cluster.context).await;
+    let as_user = Config::from_custom_kubeconfig(kubeconfig, &Default::default())
+        .await
+        .unwrap();
+    let as_user = kube::Client::try_from(as_user).unwrap();
+    eventually("the API server takes up the FlowSchema", || {
+        let (admin, as_user, user) = (cluster.admin.clone(), as_user.clone(), user.clone());
+        async move {
+            let read = http::Request::get("/apis/apiregistration.k8s.io/v1/apiservices/v1.apps")
+                .body(Vec::new())
+                .unwrap();
+            let refused = as_user.request_text(read).await.unwrap_err();
+            assert!(
+                matches!(&refused, kube::Error::Api(status) if status.code == 403),
+                "{refused}"
+            );
+            api_service_reads(&admin, &user).await > 0
+        }
+    })
+    .await;
     let path = format!("{}/web", deployments(&namespace));
     post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
     let live = settled(&cluster.admin, &path).await;
@@ -893,20 +969,45 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
     let mut edited = view(&live);
     edited["metadata"]["annotations"]["mine"] = json!("1");
     let target = deployment_ref(&namespace, "web");
-    let (id, result, _, _) =
-        ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
-    assert_eq!(result["metadata"]["annotations"]["mine"], "1");
-
-    let apply = || PlanRequest::Apply {
-        space: cluster.context.clone(),
-        preview: id,
+    let request = || {
+        edit(
+            &cluster,
+            target.clone(),
+            &live,
+            edited.clone(),
+            true,
+            vec![],
+        )
     };
-    let refused = core.command_plan("main", apply()).await.unwrap_err();
+    let apply = |preview| PlanRequest::Apply {
+        space: cluster.context.clone(),
+        preview,
+    };
+    let reads = api_service_reads(&cluster.admin, &user).await;
+    let answer = core.apply_preview("main", request()).await;
+    assert_eq!(
+        api_service_reads(&cluster.admin, &user).await,
+        reads,
+        "the preview read no APIService"
+    );
+    let (id, result, _, _) = ready(answer.unwrap());
+    assert_eq!(result["metadata"]["annotations"]["mine"], "1");
+    let refused = core.command_plan("main", apply(id)).await.unwrap_err();
     assert_eq!(refused.blocked.unwrap().reason, BlockReason::Unmarked);
+
     core.policy
         .set_mode(&cluster.context, Some(Mode::ReadOnly))
         .unwrap();
-    let refused = core.command_plan("main", apply()).await.unwrap_err();
+    let reads = api_service_reads(&cluster.admin, &user).await;
+    let answer = core.apply_preview("main", request()).await;
+    assert_eq!(
+        api_service_reads(&cluster.admin, &user).await,
+        reads,
+        "the preview read no APIService"
+    );
+    let (id, result, _, _) = ready(answer.unwrap());
+    assert_eq!(result["metadata"]["annotations"]["mine"], "1");
+    let refused = core.command_plan("main", apply(id)).await.unwrap_err();
     assert_eq!(refused.blocked.unwrap().reason, BlockReason::Mode);
     let after = read(&cluster.admin, &path).await;
     assert_eq!(rv(&after), rv(&live), "the server saw no write");
@@ -918,6 +1019,9 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
     applied(&core, &cluster, id).await;
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["metadata"]["annotations"]["mine"], "1");
+    let schema = format!("{FLOW_SCHEMAS}/{user}");
+    let deleted = http::Request::delete(schema).body(Vec::new()).unwrap();
+    cluster.admin.request_text(deleted).await.unwrap();
     cluster.delete(&namespace).await;
 }
 
