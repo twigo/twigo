@@ -116,24 +116,26 @@ fn words(context: &str, planned: &PlannedChange) -> Words {
 fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
     let PlannedChange { before, after, .. } = planned;
     let unlock = planned.change == Change::Unlock;
-    let kept = if before.unlocked_until.is_some() {
-        Mode::ReadOnly
+    let was = if before.source == ModeSource::Unmarked {
+        None
+    } else if before.unlocked_until.is_some() {
+        Some(Mode::ReadOnly)
     } else {
-        before.mode
+        Some(before.mode)
     };
     let mut said = Vec::new();
     if after.source == ModeSource::Unmarked {
         said.push(format!(
             "Its first write or exec asks what {context} is, and nothing is sent until you say."
         ));
-    } else if after.mode == kept && !unlock {
+    } else if was == Some(after.mode) && !unlock {
         said.push(format!(
             "It stays {}{}.",
             after.mode.name(),
             why(&after.source)
         ));
     } else {
-        said.extend(asks(context, after.mode, kept));
+        said.extend(asks(context, after.mode, was));
     }
     if let ModeSource::User {
         overrides: Some(lock),
@@ -157,28 +159,53 @@ fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
 }
 
 /// What `mode` asks of the person and of processes, said as what changes
-/// from `was`.
-fn asks(context: &str, mode: Mode, was: Mode) -> Vec<String> {
+/// from `was`, none for a context nobody had marked, whose writes and execs
+/// were refused, a process's asking what it is.
+fn asks(context: &str, mode: Mode, was: Option<Mode>) -> Vec<String> {
+    const OPENED: &str = "Writes and shells are no longer refused";
+    let refused = matches!(was, None | Some(Mode::ReadOnly));
+    let unmarked = was.is_none();
     match mode {
-        Mode::ReadWrite => vec![
-            format!(
-                "Writes stop asking for {context}'s name: a scale, an apply or a shell runs at once, and a delete asks in a dialog."
-            ),
-            "Processes in its terminals write and exec without asking, and new terminals use your own kubeconfig.".to_owned(),
-        ],
-        Mode::Guarded => {
-            let opened = if was == Mode::ReadOnly {
-                "Writes and shells are no longer refused: "
+        Mode::ReadWrite => {
+            let opened = if refused {
+                OPENED.to_owned()
             } else {
-                ""
+                format!("Writes stop asking for {context}'s name")
             };
             vec![
                 format!(
-                    "{opened}each write asks for {context}'s name typed, and a shell or an apply asks in a dialog."
+                    "{opened}: a scale, an apply or a shell runs at once, and a delete asks in a dialog."
                 ),
-                "A process's write or exec in its terminals waits for your answer.".to_owned(),
+                "Processes in its terminals write and exec without asking, and new terminals use your own kubeconfig.".to_owned(),
             ]
         }
+        Mode::Guarded => {
+            let asks = format!(
+                "write asks for {context}'s name typed, and a shell or an apply asks in a dialog."
+            );
+            let processes = if unmarked {
+                format!(
+                    "A process's write or exec in its terminals asks you to allow it, rather than what {context} is."
+                )
+            } else {
+                "A process's write or exec in its terminals waits for your answer.".to_owned()
+            };
+            vec![
+                if refused {
+                    format!("{OPENED}: each {asks}")
+                } else {
+                    format!("Each {asks}")
+                },
+                processes,
+            ]
+        }
+        Mode::ReadOnly if unmarked => vec![
+            "Every write, exec and shell stays refused; reads, dry runs and port-forwards go on."
+                .to_owned(),
+            format!(
+                "A process's write or exec in its terminals is refused, rather than asking what {context} is."
+            ),
+        ],
         Mode::ReadOnly => vec![
             "Every write, exec and shell is refused; reads, dry runs and port-forwards go on."
                 .to_owned(),
@@ -270,7 +297,7 @@ mod tests {
         assert_eq!(
             consequences("prod-eu", &lowered),
             [
-                "Writes stop asking for prod-eu's name: a scale, an apply or a shell runs at once, and a delete asks in a dialog.",
+                "Writes and shells are no longer refused: a scale, an apply or a shell runs at once, and a delete asks in a dialog.",
                 "Processes in its terminals write and exec without asking, and new terminals use your own kubeconfig.",
                 "It sets aside the read-only Production sets by default.",
             ]
@@ -321,5 +348,54 @@ mod tests {
             consequences("kind-a", &cleared),
             ["Its first write or exec asks what kind-a is, and nothing is sent until you say."]
         );
+    }
+
+    #[test]
+    fn marking_an_unmarked_context_says_its_refused_writes_now_run_ask_or_stay_refused() {
+        let marked = |environment, mode| {
+            planned(
+                Change::Type {
+                    environment: Some(environment),
+                },
+                access(Mode::Guarded, ModeSource::Unmarked),
+                access(mode, ModeSource::Environment { environment }),
+            )
+        };
+        let staging = marked(Environment::Staging, Mode::Guarded);
+        assert_eq!(
+            words("kind-a", &staging).question,
+            "Mark kind-a as Staging?"
+        );
+        let cases = [
+            (
+                marked(Environment::Development, Mode::ReadWrite),
+                [
+                    "Writes and shells are no longer refused: a scale, an apply or a shell runs at once, and a delete asks in a dialog.",
+                    "Processes in its terminals write and exec without asking, and new terminals use your own kubeconfig.",
+                ],
+            ),
+            (
+                staging,
+                [
+                    "Writes and shells are no longer refused: each write asks for kind-a's name typed, and a shell or an apply asks in a dialog.",
+                    "A process's write or exec in its terminals asks you to allow it, rather than what kind-a is.",
+                ],
+            ),
+            (
+                marked(Environment::Production, Mode::ReadOnly),
+                [
+                    "Every write, exec and shell stays refused; reads, dry runs and port-forwards go on.",
+                    "A process's write or exec in its terminals is refused, rather than asking what kind-a is.",
+                ],
+            ),
+        ];
+        for (planned, said) in cases {
+            assert_eq!(
+                consequences("kind-a", &planned),
+                said,
+                "{:?}",
+                planned.after
+            );
+        }
     }
 }
