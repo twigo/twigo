@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   EmbeddedList as Spec,
   ListQuery,
-  ListSnapshot,
   ObjectRef,
   Row,
 } from "@twigo/protocol";
@@ -15,7 +14,6 @@ import {
   ROW_HEIGHT,
   TonedText,
   type GridItem,
-  type Tone,
   useWidth,
 } from "@twigo/ui";
 import {
@@ -53,29 +51,9 @@ const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
 
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
-/**
- * Up to this many rows an embedded list holds whole, so that it can put the rows that fail first; a longer one is drawn as the core sends it.
- * @todo: drop this and `problemsFirst` once the core's query view sorts by the health the list's rule names, sent over the IPC as data.
- */
-const WHOLE = 100;
 const HEADER = 28;
 /** The frame's border on each side of the grid. */
 const FRAME_BORDER = 2;
-
-function problemsFirst(
-  { ids, rows }: Pick<ListSnapshot, "ids" | "rows">,
-  decide: (row: Row) => { readonly tone: Tone | undefined },
-): readonly string[] {
-  const failing: string[] = [];
-  const pending: string[] = [];
-  const rest: string[] = [];
-  for (const id of ids) {
-    const row = rows.get(id);
-    const tone = row && decide(row).tone;
-    (tone === "error" ? failing : tone === "warn" ? pending : rest).push(id);
-  }
-  return [...failing, ...pending, ...rest];
-}
 
 /**
  * A live list inside an Overview (ARCHITECTURE 4.3), such as a workload's
@@ -164,11 +142,8 @@ export function EmbeddedList({
     (row) => rowFinished(gvr, countBy, snapshot.columns, row),
     columns,
   );
-  const held = snapshot.start === 0 && snapshot.ids.length === snapshot.total;
-  const ids =
-    held && sort === null ? problemsFirst(snapshot, decide) : snapshot.ids;
   const item = (index: number): GridItem<Row, never> | undefined => {
-    const id = ids[index - snapshot.start];
+    const id = snapshot.ids[index - snapshot.start];
     const row = id === undefined ? undefined : snapshot.rows.get(id);
     if (!row) return undefined;
     const { tone } = decide(row);
@@ -179,17 +154,12 @@ export function EmbeddedList({
       ...((tone === "error" || tone === "warn") && { tone }),
     };
   };
-  const whole = snapshot.total <= WHOLE;
   const onRange = useCallback(
     (start: number, end: number) => {
-      if (whole) {
-        setWindow(0, WHOLE);
-        return;
-      }
       const screen = Math.max(end - start, VISIBLE);
       setWindow(Math.max(0, start - screen), end + screen);
     },
-    [setWindow, whole],
+    [setWindow],
   );
   const open = (row: Row) => {
     const { namespace, name } = objectOf({
@@ -256,7 +226,7 @@ export function EmbeddedList({
           query={JSON.stringify(query)}
           item={item}
           indexOf={(id) => {
-            const at = ids.indexOf(id);
+            const at = snapshot.ids.indexOf(id);
             return at < 0 ? -1 : snapshot.start + at;
           }}
           onRange={onRange}
