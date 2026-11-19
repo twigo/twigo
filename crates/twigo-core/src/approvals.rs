@@ -930,6 +930,54 @@ mod tests {
     }
 
     #[test]
+    fn a_mark_that_comes_after_its_request_went_marks_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let audit = dir.path().join("audit.jsonl");
+        let policy = Policy::new(
+            twigo_policy::PolicyFile::default(),
+            |_| Some(twigo_policy::Metadata::default()),
+            twigo_policy::Choices::default(),
+            twigo_policy::Audit::open(&audit),
+        );
+        let (_catalog, catalog) = watch::channel(None);
+        let approvals = Approvals::new(Arc::clone(&policy), catalog);
+        let (events, mut told) = tokio::sync::mpsc::unbounded_channel();
+        approvals.follow_window("main", move |event| events.send(event).is_ok());
+        let (resolve, resolved) = oneshot::channel();
+        drop(resolved);
+        let pending = Pending {
+            window: "main".into(),
+            process: 0,
+            connection: 0,
+            ended: CancellationToken::new(),
+            delete: false,
+            ask: ApprovalAsk {
+                unmarked: true,
+                ..ask(7)
+            },
+            audited: audited(),
+            resolve,
+        };
+        approvals.state().asks.insert(7, pending);
+        let mark = AnswerApproval {
+            id: ApprovalId(7),
+            answer: ApprovalAnswer::Mark {
+                environment: Environment::Development,
+            },
+            typed: None,
+        };
+        let refused = approvals.answer("main", mark);
+        assert_eq!(refused.unwrap_err().kind, ErrorKind::NotFound);
+        assert_eq!(
+            told.try_recv().unwrap(),
+            ApprovalEvent::Withdrawn { id: ApprovalId(7) }
+        );
+        assert_eq!(answers(&audit), ["withdrawn"]);
+        assert_eq!(policy.access("kind-a").source, ModeSource::Unmarked);
+    }
+
+    #[test]
+    #[test]
     fn a_create_is_named_by_its_generate_name_only_where_the_server_generated_its_name() {
         let long = "a".repeat(60);
         let cut = &long[..GENERATED_BASE];
