@@ -261,9 +261,7 @@ export function createMockBackend(
   const access = new MockAccess(scenario === "policyFile");
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
-    (context, environment) => {
-      access.setEnvironment(context, environment);
-    },
+    access,
   );
   const offers = new MockOffers(
     isTerminalScenario(scenario) ? scenario : undefined,

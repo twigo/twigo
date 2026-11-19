@@ -5,8 +5,8 @@ import type {
   ApprovalDetail,
   ApprovalEvent,
   ApprovalId,
-  Environment,
 } from "../generated";
+import type { MockAccess } from "./access";
 import { side } from "./edits";
 import { recordedManifest } from "./objects";
 
@@ -314,6 +314,17 @@ function sequence(scenario: ApprovalScenario): Draft[] {
 
 const grantOf = ({ process, context }: Draft) => `${process}\0${context}`;
 
+/** The ask the same request raises, of a context nobody marked or of one that is marked, as Rust's `decide` makes it. */
+function asked(ask: Draft, unmarked: boolean): Draft {
+  const deletes = ask.detail.kind === "delete";
+  return {
+    ...ask,
+    unmarked,
+    typed: deletes && !unmarked,
+    lastingMinutes: !deletes && !unmarked ? 15 : null,
+  };
+}
+
 /**
  * The approval broker as a window sees it: it sends the asks waiting and
  * every new one to the window that follows, takes the answers and refuses
@@ -322,9 +333,13 @@ const grantOf = ({ process, context }: Draft) => `${process}\0${context}`;
  * context for the minutes the ask offered, deletes excepted: an ask that
  * waits then is withdrawn, and one that comes is not raised. An ask of a
  * context nobody marked takes `mark` or `deny` alone; `mark` sets the
- * context's type through `mark`, and the request then meets the mode that
- * type gives: Staging asks again, as any guarded context does, Production
- * refuses it and Development and Local let it through.
+ * context's type, and the request then meets the mode that type gives:
+ * Staging asks again, as any guarded context does, Production refuses it
+ * and Development and Local let it through. Whenever a context's access
+ * changes, each ask waiting on it that its block no longer fits is withdrawn
+ * and its request meets the gate anew in the same way, as Rust's `wait` does:
+ * an ask whose reason still holds, an ordinary one on a context still
+ * guarded or an unmarked one on a context still unmarked, stays.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
@@ -337,8 +352,15 @@ export class MockApprovals {
 
   constructor(
     private readonly scenario: ApprovalScenario | undefined,
-    private readonly mark: (context: string, environment: Environment) => void,
-  ) {}
+    private readonly access: Pick<
+      MockAccess,
+      "of" | "setEnvironment" | "watch"
+    >,
+  ) {
+    access.watch(() => {
+      this.#changed();
+    });
+  }
 
   watch(onMessage: (event: ApprovalEvent) => void): null {
     this.#follower = onMessage;
@@ -383,13 +405,35 @@ export class MockApprovals {
       }
     }
     if (answer.kind === "mark") {
-      this.mark(ask.context, answer.environment);
-      if (answer.environment === "staging") {
-        this.#raise({ ...ask, unmarked: false, lastingMinutes: 15 });
-      }
+      this.access.setEnvironment(ask.context, answer.environment);
+      this.#decide(ask);
     }
     if (this.scenario === "approval") this.#later(NEXT_ASK_MS);
     return null;
+  }
+
+  /** Whether a request the gate stopped for `ask`'s reason is stopped for it still: a write or an exec of an unmarked context, else of a guarded one. */
+  #blocked(ask: ApprovalAsk): boolean {
+    const { mode, source } = this.access.of(ask.context);
+    return ask.unmarked
+      ? source.kind === "unmarked"
+      : source.kind !== "unmarked" && mode === "guarded";
+  }
+
+  /** The request of an ask meets its context's access anew: it goes, it is refused, or the person is asked what the context is, or to allow it. */
+  #decide(ask: ApprovalAsk): void {
+    const { mode, source } = this.access.of(ask.context);
+    if (source.kind === "unmarked") this.#raise(asked(ask, true));
+    else if (mode === "guarded") this.#raise(asked(ask, false));
+  }
+
+  #changed(): void {
+    for (const ask of [...this.#waiting.values()]) {
+      if (this.#blocked(ask)) continue;
+      this.#waiting.delete(ask.id);
+      this.#follower?.({ event: "withdrawn", id: ask.id });
+      this.#decide(ask);
+    }
   }
 
   #allowed(draft: Draft): boolean {
