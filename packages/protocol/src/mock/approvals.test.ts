@@ -392,6 +392,63 @@ test("a deny needs no name typed", async () => {
   ).toBeUndefined();
 });
 
+const MARK: ApprovalAnswer = { kind: "mark", environment: "staging" };
+
+const typeOf = async (backend: Backend, context: string) => {
+  const watch = backend.subscribe("contexts_watch", null, () => undefined);
+  await vi.advanceTimersByTimeAsync(0);
+  const contexts = await watch;
+  return contexts.find(({ name }) => name === context)?.access.environment;
+};
+
+test("an ask of a context nobody marked takes its type or a denial alone, and its type answers no ordinary ask", async () => {
+  const { backend, events } = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const unmarked = nth(events, 0);
+  expect(unmarked).toMatchObject({ context: "qa", unmarked: true });
+  for (const given of [{ kind: "once" }, { kind: "lasting" }] as const) {
+    const error = await answer(backend, unmarked, given);
+    expect((error as IpcError).kind).toBe("invalidInput");
+  }
+  expect(await typeOf(backend, "qa")).toBeNull();
+  expect(await answer(backend, unmarked, { kind: "deny" })).toBeUndefined();
+  expect(await typeOf(backend, "qa")).toBeNull();
+
+  const ordinary = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const patch = nth(ordinary.events, 0);
+  const refused = await answer(ordinary.backend, patch, MARK);
+  expect((refused as IpcError).kind).toBe("invalidInput");
+  expect(await answer(ordinary.backend, patch)).toBeUndefined();
+});
+
+test("a type that answers an unmarked ask marks its context, and Staging raises the request again as an ordinary ask", async () => {
+  const staging = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const unmarked = nth(staging.events, 0);
+  expect(await answer(staging.backend, unmarked, MARK)).toBeUndefined();
+  expect(await typeOf(staging.backend, "qa")).toBe("staging");
+  const again = nth(staging.events, 1);
+  expect(again).toMatchObject({
+    context: "qa",
+    process: unmarked.process,
+    target: unmarked.target,
+    unmarked: false,
+    lastingMinutes: 15,
+  });
+  expect(again.id).not.toBe(unmarked.id);
+
+  const production = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(production.backend, nth(production.events, 0), {
+    kind: "mark",
+    environment: "production",
+  });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(await typeOf(production.backend, "qa")).toBe("production");
+  expect(asks(production.events)).toHaveLength(1);
+});
+
 test("a window that follows again is sent the asks that wait", async () => {
   const { backend, events } = await followed("approvalQueue");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
