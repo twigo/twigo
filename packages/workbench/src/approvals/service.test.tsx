@@ -661,6 +661,63 @@ test("an ask that arrives while quick access asks what a context is waits behind
   }
 });
 
+test.each(["dialog", "pick"])(
+  "an ask withdrawn between the answer to the question what a context is and the command's own confirmation leaves without a word, and the asks wait behind it, in the %s variant",
+  async (variant) => {
+    window.history.replaceState(null, "", `/?variant=ask:${variant}`);
+    try {
+      const { workbench, raise, withdraw } = await broker("protection");
+      const info = vi.spyOn(notify, "info");
+      raise(ask(1), ask(2));
+      const outcome = workbench.operations.run(
+        {
+          action: "cordon",
+          space: "qa",
+          node: "qa-node-1",
+          unschedulable: true,
+        },
+        { icon: Trash2 },
+      );
+      await waitFor(() => {
+        expect(
+          workbench.operations.marking ?? workbench.quickAccess.session?.pick,
+        ).toBeDefined();
+      });
+      expect(titles()).toEqual(variant === "dialog" ? ["What is qa?"] : []);
+
+      await act(async () => {
+        const pick = workbench.quickAccess.session?.pick;
+        if (pick)
+          pick.resolve(pick.items.find((item) => item.id === "staging"));
+        else workbench.operations.marking?.choose("staging");
+        await Promise.resolve();
+      });
+      expect(workbench.operations.asking).toBeUndefined();
+      withdraw(1);
+      expect(info).not.toHaveBeenCalled();
+      expect(titles()).toEqual([]);
+
+      await waitFor(() => {
+        expect(workbench.operations.asking).toBeDefined();
+      });
+      expect(titles()).toEqual([workbench.operations.asking?.plan.question]);
+
+      act(() => {
+        workbench.operations.asking?.cancel();
+      });
+      await expect(outcome).resolves.toEqual({ state: "cancelled" });
+      await waitFor(() => {
+        expect(titles()).toEqual([
+          "Allow Terminal 2 to patch deployments/web in default on staging?",
+        ]);
+      });
+      expect(info).not.toHaveBeenCalled();
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  },
+);
+
 async function clickOutside() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));

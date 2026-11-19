@@ -110,8 +110,8 @@ export class Operations {
   readonly changes = new Changes();
   #asking: Asking | undefined;
   #marking: Marking | undefined;
-  /** How many quick picks that ask what a context is are open. */
-  #picks = 0;
+  /** How many commands wait on the question what a context nobody marked is: from its asking until the command opens its own confirmation, or ends without one. */
+  #questions = 0;
   readonly #running = new Map<number, Running>();
   /** The countdowns under way, the newest last, by what they plan. */
   readonly #countdowns: {
@@ -158,13 +158,9 @@ export class Operations {
     return this.#marking;
   }
 
-  /** Whether a plan's confirmation or the question of what a context is is open, in a dialog or in quick access, which the asks of processes wait behind. */
+  /** Whether a plan's confirmation is open, or the question of what a context is, in a dialog or in quick access, and the command it asks for has not yet opened its own, which the asks of processes wait behind. */
   get confirming(): boolean {
-    return (
-      this.#asking !== undefined ||
-      this.#marking !== undefined ||
-      this.#picks > 0
-    );
+    return this.#asking !== undefined || this.#questions > 0;
   }
 
   /** The same array until the next change, for `useSyncExternalStore`. */
@@ -189,32 +185,42 @@ export class Operations {
     undo: Undo | undefined,
   ): Promise<Outcome> {
     let plan: Plan;
+    let asked: Promise<{ typed: string | undefined } | undefined>;
+    let release: (() => void) | undefined;
     try {
-      plan = await this.backend.invoke("command_plan", request);
-    } catch (error) {
-      const { blocked } = toIpcError(error);
-      if (blocked?.reason === "unmarked") {
-        const marked = await this.#mark(blocked.context);
-        return marked.state === "done"
-          ? this.#run(request, look, undo)
-          : marked;
+      for (;;) {
+        try {
+          plan = await this.backend.invoke("command_plan", request);
+          break;
+        } catch (error) {
+          const { blocked } = toIpcError(error);
+          if (blocked?.reason !== "unmarked") {
+            this.#fail(error, spaceOf(request), unlockAction(this, error));
+            return {
+              state:
+                toIpcError(error).blocked === undefined ? "failed" : "refused",
+            };
+          }
+          release ??= this.#hold();
+          const marked = await this.#mark(blocked.context);
+          if (marked.state !== "done") return marked;
+        }
       }
-      this.#fail(error, spaceOf(request), unlockAction(this, error));
-      return {
-        state: toIpcError(error).blocked === undefined ? "failed" : "refused",
-      };
-    }
-    if (undo) {
-      if (
-        request.action === "undo" &&
-        this.#undos.get(request.space) !== undo
-      ) {
-        this.backend.invoke("command_cancel", plan.id).catch(this.report);
-        return { state: "cancelled" };
+      if (undo) {
+        if (
+          request.action === "undo" &&
+          this.#undos.get(request.space) !== undo
+        ) {
+          this.backend.invoke("command_cancel", plan.id).catch(this.report);
+          return { state: "cancelled" };
+        }
+        undo.plan = plan.id;
       }
-      undo.plan = plan.id;
+      asked = this.#ask(plan, look, request);
+    } finally {
+      release?.();
     }
-    const agreed = await this.#ask(plan, look, request);
+    const agreed = await asked;
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
@@ -260,23 +266,29 @@ export class Operations {
     );
   }
 
-  async #pickEnvironment(context: string): Promise<Environment | undefined> {
-    this.#picks++;
+  /** Counts a question what a context nobody marked is as open until the returned function ends it, so no ask of a process mounts between it and the command's own confirmation. */
+  #hold(): () => void {
+    this.#questions++;
     this.changes.emit();
-    try {
-      const picked = await this.pick(
-        `What is ${context}?`,
-        ENVIRONMENTS.map((environment) => ({
-          id: environment,
-          label: environmentLabel(environment),
-          description: environmentHelp(environment),
-        })),
-      );
-      return ENVIRONMENTS.find((environment) => environment === picked?.id);
-    } finally {
-      this.#picks--;
+    let open = true;
+    return () => {
+      if (!open) return;
+      open = false;
+      this.#questions--;
       this.changes.emit();
-    }
+    };
+  }
+
+  async #pickEnvironment(context: string): Promise<Environment | undefined> {
+    const picked = await this.pick(
+      `What is ${context}?`,
+      ENVIRONMENTS.map((environment) => ({
+        id: environment,
+        label: environmentLabel(environment),
+        description: environmentHelp(environment),
+      })),
+    );
+    return ENVIRONMENTS.find((environment) => environment === picked?.id);
   }
 
   #askEnvironment(context: string): Promise<Environment | undefined> {
