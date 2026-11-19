@@ -3050,7 +3050,6 @@ async fn a_later_follower_of_the_window_replaces_the_earlier_and_gets_what_still
     assert_eq!(fake.writes(Method::POST), 2);
 }
 
-/// The lines of the core's audit log of `event`.
 fn audited(dir: &Path, event: &str) -> Vec<Value> {
     std::fs::read_to_string(dir.join("audit.jsonl"))
         .unwrap_or_default()

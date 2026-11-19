@@ -745,8 +745,6 @@ async fn create_a_configmap(core: &Core, context: &str) -> IpcError {
     twigo_kube::errors::request(&error)
 }
 
-/// Changes a context's protection as the webview does: plans it, types the
-/// name where the plan asks, and runs it.
 async fn protect(core: &Core, request: PlanRequest) -> Result<(), IpcError> {
     let plan = core.command_plan("main", request).await?;
     let typed = match plan.friction {

@@ -238,8 +238,6 @@ pub async fn run(
     Ok(told)
 }
 
-/// Changes a context's protection as the webview does: plans it, types the
-/// name where the plan asks, and runs it.
 pub async fn protect(core: &Core, request: PlanRequest) -> Result<Vec<OperationEvent>, IpcError> {
     let plan = plan(core, request).await?;
     let typed = match &plan.friction {

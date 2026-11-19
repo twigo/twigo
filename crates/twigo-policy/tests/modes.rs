@@ -732,7 +732,6 @@ fn a_gate_holds_its_clients_to_what_they_were_built_for() {
     });
 }
 
-/// The lines of the audit log at `path`.
 fn audited(path: &std::path::Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(path)
         .unwrap_or_default()

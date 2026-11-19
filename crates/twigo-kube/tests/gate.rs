@@ -18,7 +18,6 @@ use twigo_policy::Policy;
 struct Server {
     port: u16,
     seen: Arc<Mutex<Vec<String>>>,
-    /// Each request's `User-Agent` lines.
     agents: Arc<Mutex<Vec<Vec<String>>>>,
     /// Requests whose path ends in `/hold` wait for it.
     release: Arc<Notify>,

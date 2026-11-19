@@ -25,13 +25,10 @@ contexts:
   context: { cluster: c, user: u }
 ";
 
-/// A core over [`KUBECONFIG`], whose kind-a the person marked Local.
 async fn running(dir: &Path) -> Arc<Core> {
     marked(running_with(dir, KUBECONFIG)).await
 }
 
-/// `core` once its catalog is read, with kind-a marked Local, as a person
-/// would.
 async fn marked(core: Arc<Core>) -> Arc<Core> {
     core.catalog.contexts().await;
     core.policy
