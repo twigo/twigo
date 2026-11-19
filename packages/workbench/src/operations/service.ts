@@ -110,6 +110,8 @@ export class Operations {
   readonly changes = new Changes();
   #asking: Asking | undefined;
   #marking: Marking | undefined;
+  /** How many quick picks that ask what a context is are open. */
+  #picks = 0;
   readonly #running = new Map<number, Running>();
   /** The countdowns under way, the newest last, by what they plan. */
   readonly #countdowns: {
@@ -156,9 +158,13 @@ export class Operations {
     return this.#marking;
   }
 
-  /** Whether a plan's confirmation or the question of what a context is is open, which the asks of processes wait behind. */
+  /** Whether a plan's confirmation or the question of what a context is is open, in a dialog or in quick access, which the asks of processes wait behind. */
   get confirming(): boolean {
-    return this.#asking !== undefined || this.#marking !== undefined;
+    return (
+      this.#asking !== undefined ||
+      this.#marking !== undefined ||
+      this.#picks > 0
+    );
   }
 
   /** The same array until the next change, for `useSyncExternalStore`. */
@@ -255,15 +261,22 @@ export class Operations {
   }
 
   async #pickEnvironment(context: string): Promise<Environment | undefined> {
-    const picked = await this.pick(
-      `What is ${context}?`,
-      ENVIRONMENTS.map((environment) => ({
-        id: environment,
-        label: environmentLabel(environment),
-        description: environmentHelp(environment),
-      })),
-    );
-    return ENVIRONMENTS.find((environment) => environment === picked?.id);
+    this.#picks++;
+    this.changes.emit();
+    try {
+      const picked = await this.pick(
+        `What is ${context}?`,
+        ENVIRONMENTS.map((environment) => ({
+          id: environment,
+          label: environmentLabel(environment),
+          description: environmentHelp(environment),
+        })),
+      );
+      return ENVIRONMENTS.find((environment) => environment === picked?.id);
+    } finally {
+      this.#picks--;
+      this.changes.emit();
+    }
   }
 
   #askEnvironment(context: string): Promise<Environment | undefined> {
