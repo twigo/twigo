@@ -2315,6 +2315,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   A file that cannot be opened is said on stderr and keeps nothing: the log records, it guards nothing.
   Past 8 MiB the log moves to `audit.1.jsonl`, each older one up by one as far as `audit.5.jsonl`, whose last content goes, and a new `audit.jsonl` opens, each 0600: at most 48 MiB.
   A move that fails is said on stderr and the log goes on where it is, to try again after another 8 MiB.
+  A new log that cannot be opened after the move is said on stderr, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
+  The older logs move only with the log, so a log gone from its place, as when a person deleted it, is opened anew and moves none of them.
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context; its kubeconfig metadata (`twigo.environment`, 5.5) counts only where it tightens, Production or Staging, so a context whose kubeconfig alone says Development or Local is unmarked and asks; the person's mark wins, their None included.

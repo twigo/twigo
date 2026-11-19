@@ -35,6 +35,9 @@ pub struct Audit {
 struct Log {
     path: PathBuf,
     file: File,
+    /// Whether `file` is the one at `path`: not once a rotation moved it
+    /// and no new one could be opened there.
+    in_place: bool,
     /// What it holds, as far as this process knows.
     size: u64,
     limit: u64,
@@ -154,13 +157,13 @@ impl Audit {
         let opened = path
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| create(path))
-            .and_then(|file| Ok((file.metadata()?.len(), file)));
+            .and_then(|()| create(path));
         match opened {
-            Ok((size, file)) => Self {
+            Ok((file, size)) => Self {
                 log: Some(Mutex::new(Log {
                     path: path.to_owned(),
                     file,
+                    in_place: true,
                     size,
                     limit,
                     kept,
@@ -189,7 +192,10 @@ impl Audit {
         line.push(b'\n');
         let mut log = log.lock().expect("audit lock");
         let size = line.len() as u64;
-        if log.size > 0 && log.size + size > log.limit {
+        if !log.in_place {
+            log.reopen();
+        }
+        if log.in_place && log.size > 0 && log.size + size > log.limit {
             log.rotate();
         }
         // One write per line on a file opened to append, so lines of
@@ -234,33 +240,46 @@ impl Audit {
 
 impl Log {
     /// Moves the log to `audit.1.jsonl`, each older one up by one, the
-    /// oldest past `kept` overwritten, and opens a new one. One that fails
-    /// is said on stderr and the log goes on where it is, to try again
-    /// after another `limit`.
+    /// oldest past `kept` overwritten, and opens a new one; a log gone from
+    /// its place moves none of them. A move that fails is said on stderr and
+    /// the log goes on where it is, to try again after another `limit`.
     fn rotate(&mut self) {
         self.size = 0;
-        let moved = (1..=self.kept)
-            .rev()
-            .map(|number| (self.numbered(number - 1), self.numbered(number)))
-            .try_for_each(|(from, to)| match std::fs::rename(&from, &to) {
-                Err(error) if error.kind() == io::ErrorKind::NotFound && from != self.path => {
-                    Ok(())
-                }
-                moved => moved,
-            });
-        if let Err(error) = moved {
-            eprintln!(
-                "the audit log {} could not move aside: {error}",
-                self.path.display()
-            );
-            return;
+        if !matches!(std::fs::exists(&self.path), Ok(false)) {
+            let moved = (1..=self.kept)
+                .rev()
+                .map(|number| (self.numbered(number - 1), self.numbered(number)))
+                .try_for_each(|(from, to)| match std::fs::rename(&from, &to) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound && from != self.path => {
+                        Ok(())
+                    }
+                    moved => moved,
+                });
+            if let Err(error) = moved {
+                eprintln!(
+                    "the audit log {} could not move aside: {error}",
+                    self.path.display()
+                );
+                return;
+            }
         }
+        self.in_place = false;
+        self.reopen();
+    }
+
+    /// Opens a new log at `path` for the one that left it. One that cannot
+    /// be opened is said on stderr, and the lines go on to the one that left
+    /// until the next line opens one.
+    fn reopen(&mut self) {
         match create(&self.path) {
-            Ok(file) => self.file = file,
+            Ok((file, size)) => {
+                self.file = file;
+                self.size = size;
+                self.in_place = true;
+            }
             Err(error) => eprintln!(
-                "the audit log {} could not be opened anew, so it goes on in {}: {error}",
-                self.path.display(),
-                self.numbered(1).display()
+                "the audit log {} could not be opened anew, so this line goes to the one that left its place: {error}",
+                self.path.display()
             ),
         }
     }
@@ -274,8 +293,8 @@ impl Log {
     }
 }
 
-/// Opens `path` to append, made 0600 if it is new.
-fn create(path: &Path) -> io::Result<File> {
+/// Opens `path` to append, made 0600 if it is new, with what it holds.
+fn create(path: &Path) -> io::Result<(File, u64)> {
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
@@ -283,7 +302,9 @@ fn create(path: &Path) -> io::Result<File> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    options.open(path)
+    let file = options.open(path)?;
+    let size = file.metadata()?.len();
+    Ok((file, size))
 }
 
 #[cfg(test)]
@@ -364,5 +385,35 @@ mod tests {
             ended(&audit, outcome);
         }
         assert_eq!(outcomes(&path), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_log_that_left_its_place_opens_anew_and_moves_no_older_one() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("audit.jsonl");
+        let names = |number: usize| home.path().join(format!("audit.{number}.jsonl"));
+        let audit = Audit::rotating(&path, 1, 4);
+        ended(&audit, "a");
+        ended(&audit, "b");
+        {
+            let mut log = audit.log.as_ref().unwrap().lock().unwrap();
+            std::fs::rename(names(1), names(2)).unwrap();
+            std::fs::rename(&path, names(1)).unwrap();
+            log.in_place = false;
+            log.size = 0;
+        }
+        ended(&audit, "c");
+        ended(&audit, "d");
+        assert_eq!(outcomes(&path), ["d"]);
+        assert_eq!(outcomes(&names(1)), ["c"]);
+        assert_eq!(outcomes(&names(2)), ["b"]);
+        assert_eq!(outcomes(&names(3)), ["a"]);
+
+        std::fs::remove_file(&path).unwrap();
+        ended(&audit, "e");
+        assert_eq!(outcomes(&path), ["e"]);
+        assert_eq!(outcomes(&names(1)), ["c"]);
+        assert_eq!(outcomes(&names(2)), ["b"]);
+        assert_eq!(outcomes(&names(3)), ["a"]);
     }
 }
