@@ -1479,6 +1479,40 @@ test("a type weighs the mode a context would have with no lock but the type, so 
   ]);
 });
 
+test("a type, or a mode cleared, beneath a kubeconfig's lock asks as what it gives once the lock goes, and says so", async () => {
+  const backend = createMockBackend();
+  const plan = (request: PlanRequest) =>
+    answered(backend.invoke("command_plan", request));
+  await change(backend, SET_MODE("analytics", "read-only"));
+
+  const marked = await plan(SET_ENVIRONMENT("analytics", "development"));
+  expect(marked.friction).toEqual({ kind: "atOnce" });
+  expect(marked.consequences).toEqual(["It stays read-only by your choice."]);
+  await change(backend, SET_ENVIRONMENT("analytics", "development"));
+
+  const cleared = await plan(SET_MODE("analytics", null));
+  expect(cleared.friction).toEqual({ kind: "typed", text: "analytics" });
+  expect(cleared.consequences).toEqual([
+    "It stays read-only as its kubeconfig says.",
+    "When its kubeconfig's lock goes, it will be read-write.",
+  ]);
+
+  await change(backend, SET_ENVIRONMENT("analytics", "staging"));
+  const guarded = await plan(SET_MODE("analytics", null));
+  expect(guarded.friction).toEqual({ kind: "typed", text: "analytics" });
+  expect(guarded.consequences).toEqual([
+    "It stays read-only as its kubeconfig says.",
+    "When its kubeconfig's lock goes, it will be guarded.",
+  ]);
+
+  await change(backend, SET_ENVIRONMENT("analytics", "production"));
+  const kept = await plan(SET_MODE("analytics", null));
+  expect(kept.friction).toEqual({ kind: "atOnce" });
+  expect(kept.consequences).toEqual([
+    "It stays read-only as its kubeconfig says.",
+  ]);
+});
+
 test("clearing a type weighs as a change to read-write, and leaves the context unmarked whatever its kubeconfig says", async () => {
   const backend = createMockBackend();
   const friction = async (request: PlanRequest) =>
@@ -1558,6 +1592,7 @@ test("a protection plan says what changes in Rust's words, out of an unmarked co
     confirm: "Make read-only",
     consequences: [
       "Every write, exec and shell is refused; reads, dry runs and port-forwards go on.",
+      "When its kubeconfig's lock goes, its first write or exec asks what analytics is.",
     ],
   });
   expect(await said(SET_MODE("staging", "read-write"))).toMatchObject({
@@ -1568,13 +1603,23 @@ test("a protection plan says what changes in Rust's words, out of an unmarked co
       "It sets aside the guarded Staging sets by default.",
     ],
   });
-  expect(await said(SET_ENVIRONMENT("prod-eu", "staging"), true)).toMatchObject(
-    {
-      consequences: [
-        "It stays read-only by prod-* in /Library/Application Support/Twigo/policy.json.",
-      ],
-    },
-  );
+  const FILE = "/Library/Application Support/Twigo/policy.json";
+  const STAYS = `It stays read-only by prod-* in ${FILE}.`;
+  const filed = async (environment: Environment | null) =>
+    (await said(SET_ENVIRONMENT("prod-eu", environment), true)).consequences;
+  expect(await filed("production")).toEqual([STAYS]);
+  expect(await filed("staging")).toEqual([
+    STAYS,
+    `When ${FILE} no longer sets its mode, it will be guarded.`,
+  ]);
+  expect(await filed("development")).toEqual([
+    STAYS,
+    `When ${FILE} no longer sets its mode, it will be read-write.`,
+  ]);
+  expect(await filed(null)).toEqual([
+    STAYS,
+    `When ${FILE} no longer sets its mode, its first write or exec asks what prod-eu is.`,
+  ]);
   expect(await said({ action: "unlock", context: "prod-eu" })).toEqual({
     question: "Unlock prod-eu for 15 minutes?",
     confirm: "Unlock for 15 minutes",

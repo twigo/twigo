@@ -22,7 +22,7 @@ import type {
 } from "../generated";
 import type { Change, MockAccess } from "./access";
 import { side } from "./edits";
-import { lowering, words } from "./protectionPlan";
+import { lowering, words, type Step } from "./protectionPlan";
 import { counted } from "./sections";
 import {
   cordoned,
@@ -56,10 +56,10 @@ type Risk =
   | { readonly kind: "reviewed" }
   | { readonly kind: "unlock" }
   | {
-      /** A lasting change of the context's protection, from the access `from` to `to`. */
+      /** A lasting change of the context's protection, `now` and with no lock but the person's choices and its type, `bare`. */
       readonly kind: "protection";
-      readonly from: ContextAccess;
-      readonly to: ContextAccess;
+      readonly now: Step;
+      readonly bare: Step;
     };
 
 /** `twigo_policy::friction::friction`. */
@@ -70,7 +70,7 @@ function frictionOf(
 ): Friction {
   if (risk.kind === "unlock") return { kind: "confirm" };
   if (risk.kind === "protection") {
-    return lowering(context, access, risk.from, risk.to);
+    return lowering(context, access, risk.now, risk.bare);
   }
   if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
@@ -368,7 +368,14 @@ export interface BusHost {
   /** What a context lets through, and what the person's changes of it do. */
   readonly protection: Pick<
     MockAccess,
-    "of" | "would" | "bare" | "refuse" | "setMode" | "setEnvironment" | "unlock"
+    | "of"
+    | "would"
+    | "bare"
+    | "locks"
+    | "refuse"
+    | "setMode"
+    | "setEnvironment"
+    | "unlock"
   >;
   /** The context of a space, or none. */
   context(space: string): string | undefined;
@@ -1699,9 +1706,10 @@ export class MockBus {
    * A change of a context's own protection (`actions::protection` in Rust):
    * refused where the admin's policy file sets the mode, a type excepted, as
    * it only names and colours the context there, and where there is nothing
-   * to unlock. A type weighs the mode the context would have with no lock but
-   * the type, since it outlives every other, and the plan runs only while the
-   * context lets through what it did when planned.
+   * to unlock. A lasting change is weighed twice, as it is and as the context
+   * would be with no lock but the person's choices and its type, which
+   * outlives every other, and the plan runs only while the context lets
+   * through what it did when planned.
    */
   #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
@@ -1718,8 +1726,12 @@ export class MockBus {
       );
     }
     const after = protection.would(context, change);
-    const said = words(context, change, before, after);
-    const marks = "environment" in change;
+    const bare = {
+      locks: protection.locks(context),
+      from: protection.bare(context),
+      to: protection.bare(context, change),
+    };
+    const said = words(context, change, before, after, bare);
     return {
       plan: {
         context,
@@ -1736,8 +1748,8 @@ export class MockBus {
           ? { kind: "unlock" }
           : {
               kind: "protection",
-              from: marks ? protection.bare(context) : before,
-              to: marks ? protection.bare(context, change) : after,
+              now: { from: before, to: after },
+              bare,
             },
       stands: () => {
         if (!isEqual(protection.of(context), before)) {

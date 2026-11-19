@@ -7,7 +7,7 @@ import type {
   Mode,
   ModeSource,
 } from "../generated";
-import { STRICTNESS, type Change } from "./access";
+import { STRICTNESS, type Change, type Outlived } from "./access";
 
 const UNLOCK_MINUTES = 15;
 
@@ -29,32 +29,47 @@ export interface Words {
   readonly consequences: string[];
 }
 
+/** A context's access before and after a change. */
+export interface Step {
+  readonly from: ContextAccess;
+  readonly to: ContextAccess;
+}
+
+/**
+ * The context as it would be with no lock but the person's choices and its
+ * type, `twigo_policy::Beneath`: a type outlives the policy file's entry, a
+ * kubeconfig's `readOnly` and a provider's lock, which can go.
+ */
+export interface Beneath extends Step {
+  readonly locks: readonly Outlived[];
+}
+
 /**
  * What a lasting change of a context's protection asks, as
  * `twigo_policy::friction::friction` does: its name typed when the change
- * leaves the context less strict than the mode it keeps, from `from` to `to`,
- * which a type weighs with no lock but the type; nothing when it tightens or
- * keeps that, or when the context is unmarked now, as the question it answers
- * is its friction.
+ * leaves the context less strict than the mode it keeps, as it is (`now`) or
+ * with no lock but the person's choices and its type (`bare`); nothing when
+ * it tightens or keeps that either way, or when the context is unmarked now,
+ * as the question it answers is its friction.
  */
 export function lowering(
   context: string,
   access: ContextAccess,
-  from: ContextAccess,
-  to: ContextAccess,
+  now: Step,
+  bare: Step,
 ): Friction {
-  return access.source.kind === "unmarked" || keeps(from, to)
+  return access.source.kind === "unmarked" || (keeps(now) && keeps(bare))
     ? { kind: "atOnce" }
     : { kind: "typed", text: context };
 }
 
 /**
- * Whether `to` is at least as strict as the mode `from` keeps, an unlock
- * counting as `read-only`. Leaving a context unmarked weighs as `read-write`,
- * since any change from there runs at once, unless it was unmarked already,
- * and then it counts as `guarded`.
+ * Whether the change leaves the context at least as strict as the mode it
+ * keeps, an unlock counting as `read-only`. Leaving a context unmarked weighs
+ * as `read-write`, since any change from there runs at once, unless it was
+ * unmarked already, and then it counts as `guarded`.
  */
-function keeps(from: ContextAccess, to: ContextAccess): boolean {
+function keeps({ from, to }: Step): boolean {
   const unmarked = ({ source }: ContextAccess) => source.kind === "unmarked";
   const leaves = unmarked(to) && !unmarked(from) ? "read-write" : to.mode;
   const kept = from.unlockedUntil === null ? from.mode : "read-only";
@@ -66,10 +81,11 @@ export function words(
   change: Change,
   before: ContextAccess,
   after: ContextAccess,
+  bare: Beneath,
 ): Words {
   return {
     ...question(context, change, after),
-    consequences: consequences(context, change, before, after),
+    consequences: consequences(context, change, before, after, bare),
   };
 }
 
@@ -120,6 +136,7 @@ function consequences(
   change: Change,
   before: ContextAccess,
   after: ContextAccess,
+  bare: Beneath,
 ): string[] {
   const unlock = "unlock" in change;
   const was =
@@ -138,6 +155,7 @@ function consequences(
   } else {
     said.push(...asks(context, after.mode, was));
   }
+  if (!unlock) said.push(...beneath(context, after, bare));
   if (after.source.kind === "user" && after.source.overrides !== null) {
     const { mode, source }: Lock = after.source.overrides;
     said.push(`It sets aside the ${mode} ${lockedBy(source)}.`);
@@ -148,6 +166,27 @@ function consequences(
     said.push("Its unlock ends.");
   }
   return said;
+}
+
+/** What the change gives once the locks that hold the context go, where that is not what it gives now: a type outlives them. */
+function beneath(
+  context: string,
+  after: ContextAccess,
+  bare: Beneath,
+): string[] {
+  const unmarked = ({ source }: ContextAccess) => source.kind === "unmarked";
+  if (bare.to.mode === after.mode && unmarked(bare.to) === unmarked(after)) {
+    return [];
+  }
+  const gone = bare.locks.map((lock) =>
+    lock.kind === "policyFile"
+      ? `${lock.file} no longer sets its mode`
+      : "its kubeconfig's lock goes",
+  );
+  const then = unmarked(bare.to)
+    ? `its first write or exec asks what ${context} is`
+    : `it will be ${bare.to.mode}`;
+  return [`When ${gone.join(" and ")}, ${then}.`];
 }
 
 /** What `mode` asks of the person and of processes, said as what changes from `was`, none for a context nobody had marked. */

@@ -40,6 +40,11 @@ export type Change =
   | { readonly environment: Environment | null }
   | { readonly unlock: true };
 
+/** A lock that a person's type outlives, as `twigo_policy::Outlived` says. */
+export type Outlived =
+  | { readonly kind: "policyFile"; readonly file: string }
+  | { readonly kind: "kubeconfig" };
+
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(contexts: Context[]) => void>();
@@ -124,6 +129,19 @@ export class MockAccess {
    */
   bare(name: string, change?: Change): ContextAccess {
     return this.#access(fixture(name), change, false);
+  }
+
+  /** The locks that hold a context, which its type outlives: the policy file, then its kubeconfig's `readOnly`. */
+  locks(name: string): Outlived[] {
+    fixture(name);
+    return [
+      ...(this.#policyFileSets(name)
+        ? [{ kind: "policyFile" as const, file: POLICY_FILE }]
+        : []),
+      ...(KUBECONFIG_READ_ONLY.has(name)
+        ? [{ kind: "kubeconfig" as const }]
+        : []),
+    ];
   }
 
   /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
