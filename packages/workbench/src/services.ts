@@ -133,10 +133,13 @@ export class Workbench {
         this.report(error);
       },
       this.spaces,
+      (placeholder, items) => this.quickAccess.pick(placeholder, items),
     );
     this.approvals = new Approvals(
       backend,
-      () => this.operations.asking !== undefined,
+      () =>
+        this.operations.asking !== undefined ||
+        this.operations.marking !== undefined,
       this.spaces,
     );
   }

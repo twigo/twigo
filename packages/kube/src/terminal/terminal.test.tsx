@@ -11,6 +11,7 @@ import {
   createMockBackend,
   OFFER_AFTER_MS,
   type MockScenario,
+  protect,
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import {
@@ -64,6 +65,15 @@ async function mounted(
     tabs,
     tabPaths(workbench, { last: () => undefined }),
   );
+  if (space === "qa") {
+    await act(() =>
+      protect(backend, {
+        action: "setEnvironment",
+        context: space,
+        environment: "development",
+      }),
+    );
+  }
   await act(() => workbench.spaces.open(space));
   act(() => {
     workbench.spaces.select(space);
@@ -111,7 +121,7 @@ function tabOf(tabs: TerminalTabs, n = 1, space = "qa"): TerminalTab {
 }
 
 async function setMode(backend: Backend, context: string, mode: Mode) {
-  await act(() => backend.invoke("context_mode_set", { context, mode }));
+  await act(() => protect(backend, { action: "setMode", context, mode }));
   await settle(4);
 }
 
@@ -249,7 +259,7 @@ test("Restart on an ended terminal starts a new session in the same tab, keeping
   screen.getByText("Exit 4");
 
   await act(() =>
-    backend.invoke("context_mode_set", { context: "qa", mode: "guarded" }),
+    protect(backend, { action: "setMode", context: "qa", mode: "guarded" }),
   );
   const invoke = vi.spyOn(backend, "invoke");
   fireEvent.click(screen.getByRole("button", { name: "Restart Terminal" }));

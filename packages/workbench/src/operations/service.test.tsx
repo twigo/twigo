@@ -255,7 +255,7 @@ function blocked(source: Blocked["source"]): IpcError {
 test("a refused plan runs nothing, and a lock the person may lift offers the unlock", async () => {
   const error = vi.spyOn(notify, "error");
   const refused = blocked({ kind: "environment", environment: "production" });
-  const { workbench, sent, report, outcome } = await started(refused, []);
+  const { sent, report, outcome } = await started(refused, []);
   await expect(outcome).resolves.toEqual({
     state: "refused",
   } satisfies Outcome);
@@ -264,9 +264,12 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   const [message, options] = error.mock.calls[0] ?? [];
   expect(message).toBe(refused.message);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
-  const unlock = vi.spyOn(workbench.backend, "invoke");
   options?.action?.run();
-  expect(unlock).toHaveBeenCalledWith("context_unlock", "dev");
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(sent[sent.length - 1]).toEqual({
+    command: "command_plan",
+    request: { action: "unlock", context: "dev" },
+  });
 });
 
 const said = (text: string) =>
@@ -901,4 +904,159 @@ test("a run that Rust refuses to start fails, led by the tile of the space it wa
   await expect(outcome).resolves.toEqual({ state: "failed" });
   expect(report).not.toHaveBeenCalled();
   expect(said("no plan 7")).toMatch(/^DEno plan 7 waits/);
+});
+
+const CORDON: PlanRequest = {
+  action: "cordon",
+  space: "qa",
+  node: "qa-node-1",
+  unschedulable: true,
+};
+
+async function inProtection() {
+  const backend = createMockBackend("protection");
+  const planned: PlanRequest[] = [];
+  const invoke = backend.invoke.bind(backend);
+  vi.spyOn(backend, "invoke").mockImplementation((command, request) => {
+    if (command === "command_plan") planned.push(request as PlanRequest);
+    return invoke(command, request);
+  });
+  const workbench = await testWorkbench("ready", backend);
+  return { workbench, planned };
+}
+
+test("a command that meets a context nobody marked asks what it is, marks it as the person answers, and plans the command again", async () => {
+  const { workbench, planned } = await inProtection();
+  const outcome = workbench.operations.run(CORDON, LOOK);
+  await vi.waitFor(() => {
+    expect(workbench.operations.marking?.context).toBe("qa");
+  });
+  expect(workbench.operations.asking).toBeUndefined();
+  act(() => {
+    workbench.operations.marking?.choose("staging");
+  });
+  await vi.waitFor(() => {
+    expect(workbench.operations.asking?.plan.friction).toEqual({
+      kind: "typed",
+      text: "qa",
+    });
+  });
+  expect(workbench.catalog.find("qa")?.access).toMatchObject({
+    mode: "guarded",
+    environment: "staging",
+  });
+  act(() => {
+    workbench.operations.asking?.confirm("qa");
+  });
+  await expect(outcome).resolves.toEqual({ state: "done" });
+  expect(planned.map((request) => request.action)).toEqual([
+    "cordon",
+    "setEnvironment",
+    "cordon",
+  ]);
+  expect(planned[1]).toEqual({
+    action: "setEnvironment",
+    context: "qa",
+    environment: "staging",
+  });
+});
+
+test("the way out of the question sends nothing and leaves the context unmarked", async () => {
+  const { workbench, planned } = await inProtection();
+  const outcome = workbench.operations.run(CORDON, LOOK);
+  await vi.waitFor(() => {
+    expect(workbench.operations.marking).toBeDefined();
+  });
+  act(() => {
+    workbench.operations.marking?.cancel();
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  expect(planned.map((request) => request.action)).toEqual(["cordon"]);
+  expect(workbench.operations.marking).toBeUndefined();
+  expect(workbench.catalog.find("qa")?.access.source).toEqual({
+    kind: "unmarked",
+  });
+});
+
+test("the variant that picks asks in quick access, titled with the question", async () => {
+  window.history.replaceState(null, "", "/?variant=ask:pick");
+  try {
+    const { workbench, planned } = await inProtection();
+    const outcome = workbench.operations.run(CORDON, LOOK);
+    await vi.waitFor(() => {
+      expect(workbench.quickAccess.session?.pick).toBeDefined();
+    });
+    const pick = workbench.quickAccess.session?.pick;
+    expect(pick?.placeholder).toBe("What is qa?");
+    expect(pick?.items.map((item) => item.id)).toEqual([
+      "production",
+      "staging",
+      "development",
+      "local",
+    ]);
+    expect(workbench.operations.marking).toBeUndefined();
+    act(() => {
+      pick?.resolve(pick.items.find((item) => item.id === "development"));
+    });
+    await expect(outcome).resolves.toEqual({ state: "done" });
+    expect(planned.map((request) => request.action)).toEqual([
+      "cordon",
+      "setEnvironment",
+      "cordon",
+    ]);
+  } finally {
+    window.history.replaceState(null, "", "/");
+  }
+});
+
+test("a change that lowers protection asks for the context's name, and a wrong name changes nothing", async () => {
+  const error = vi.spyOn(notify, "error");
+  const { workbench } = await inProtection();
+  const outcome = workbench.operations.run(
+    { action: "setMode", context: "prod-eu", mode: "read-write" },
+    LOOK,
+  );
+  await vi.waitFor(() => {
+    expect(workbench.operations.asking).toBeDefined();
+  });
+  expect(workbench.operations.asking?.plan).toMatchObject({
+    friction: { kind: "typed", text: "prod-eu" },
+    kubectl: null,
+  });
+  act(() => {
+    workbench.operations.asking?.confirm("prod-e");
+  });
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(error.mock.calls[0]?.[0]).toBe("type prod-eu to confirm");
+  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
+});
+
+test("the unlock a refusal offers asks in a dialog, and runs once it is confirmed", async () => {
+  const error = vi.spyOn(notify, "error");
+  const { workbench } = await inProtection();
+  await workbench.operations.run(
+    {
+      action: "delete",
+      space: "prod-eu",
+      targets: REQUEST.targets,
+    },
+    LOOK,
+  );
+  const action = error.mock.calls[0]?.[1]?.action;
+  expect(action?.label).toBe("Unlock for 15 minutes");
+  action?.run();
+  await vi.waitFor(() => {
+    expect(workbench.operations.asking?.plan.friction).toEqual({
+      kind: "confirm",
+    });
+  });
+  expect(workbench.catalog.find("prod-eu")?.access.unlockedUntil).toBeNull();
+  act(() => {
+    workbench.operations.asking?.confirm(undefined);
+  });
+  await vi.waitFor(() => {
+    expect(
+      workbench.catalog.find("prod-eu")?.access.unlockedUntil,
+    ).not.toBeNull();
+  });
 });

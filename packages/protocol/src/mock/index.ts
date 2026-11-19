@@ -119,7 +119,7 @@ export {
 export { OFFER_AFTER_MS } from "./terminal";
 export { APPLIED_LAG_MS } from "./edits";
 export { UNMARKED } from "./fixtures";
-export { openMarked, protect } from "./protect";
+export { protect } from "./protect";
 export { SCRAPE_MS } from "./metrics";
 
 /**

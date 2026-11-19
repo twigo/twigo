@@ -4,11 +4,12 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { inWorkbench, testWorkbench } from "../testing";
+import { confirmAsking, inWorkbench, testWorkbench } from "../testing";
 import { TitleBar } from "./TitleBar";
 
 const unsized = globalThis.ResizeObserver;
@@ -163,8 +164,10 @@ test("the chip follows the context's name and opens what set its mode", async ()
   fireEvent.click(
     screen.getByRole("button", { name: /Unlock for 15 minutes/ }),
   );
-  await settled();
-  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("guarded");
+  await confirmAsking(workbench);
+  await waitFor(() => {
+    expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("guarded");
+  });
   expect(
     screen.getByRole("button", {
       name: "Mode of prod-eu: Production · unlocked",
@@ -180,19 +183,17 @@ test("pressing what is already pressed changes nothing, so an unlock keeps its r
   fireEvent.click(screen.getByRole("button", { name: "Read-only" }));
   fireEvent.click(screen.getByRole("button", { name: "Production" }));
   await settled();
-  expect(invoke).not.toHaveBeenCalledWith(
-    "context_mode_set",
-    expect.anything(),
-  );
-  expect(invoke).not.toHaveBeenCalledWith(
-    "context_environment_set",
-    expect.anything(),
-  );
+  expect(invoke).not.toHaveBeenCalledWith("command_plan", expect.anything());
 
   fireEvent.click(
     screen.getByRole("button", { name: /Unlock for 15 minutes/ }),
   );
-  await settled();
+  await confirmAsking(workbench);
+  await waitFor(() => {
+    expect(workbench.catalog.find("prod-eu")?.access.unlockedUntil).not.toBe(
+      null,
+    );
+  });
   const until = workbench.catalog.find("prod-eu")?.access.unlockedUntil;
   fireEvent.click(screen.getByRole("button", { name: "Guarded" }));
   await settled();
@@ -243,13 +244,16 @@ test("a choice of the person can go back to the default", async () => {
   await settled();
   fireEvent.click(screen.getByRole("button", { name: /^Mode of prod-eu/ }));
   fireEvent.click(screen.getByRole("button", { name: "Guarded" }));
-  await settled();
-  expect(workbench.catalog.find("prod-eu")?.access.source).toEqual({
-    kind: "user",
+  await confirmAsking(workbench);
+  await waitFor(() => {
+    expect(workbench.catalog.find("prod-eu")?.access.source).toMatchObject({
+      kind: "user",
+    });
   });
   fireEvent.click(screen.getByRole("button", { name: "Use the default" }));
-  await settled();
-  expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
+  await waitFor(() => {
+    expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
+  });
 });
 
 test("under a policy file the popover names the rule and offers no way around it", async () => {
@@ -265,10 +269,41 @@ test("under a policy file the popover names the rule and offers no way around it
   expect(screen.queryByRole("button", { name: /Unlock/ })).toBeNull();
 });
 
-test("a context nobody marked has no chip", async () => {
+test("a context nobody marked has a quiet chip that opens the choices of any other, where the variant shows it", async () => {
   const { workbench } = await mounted();
   await act(() => workbench.spaces.open("qa"));
-  expect(screen.queryByRole("button", { name: /^Mode of/ })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mode of qa: Not marked" }),
+  );
+  expect(screen.getByText(/Nobody has said what this context is/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Staging" }));
+  await screen.findByRole("button", { name: "Mode of qa: Staging · guarded" });
+});
+
+test("with the variant that shows nothing, a context nobody marked has no chip", async () => {
+  window.history.replaceState(null, "", "/?variant=unmarked:none");
+  try {
+    const { workbench } = await mounted();
+    await act(() => workbench.spaces.open("qa"));
+    expect(screen.queryByRole("button", { name: /^Mode of/ })).toBeNull();
+  } finally {
+    window.history.replaceState(null, "", "/");
+  }
+});
+
+test("a choice that sets a stricter lock aside says which", async () => {
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("protection"),
+  );
+  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
+  await act(() => workbench.spaces.open("analytics"));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Mode of analytics: Read-write" }),
+  );
+  expect(
+    screen.getByText("You set this, over its kubeconfig's read-only."),
+  ).toBeTruthy();
 });
 
 test("a type other than Production has its chip", async () => {

@@ -55,9 +55,9 @@ function useChip() {
 /**
  * The mode after the context's name (ARCHITECTURE 6.4), in the context's
  * colour, as NN/g asks of a mode: say it where you are looking. It opens
- * what set it, and the choices the person has. A context nobody marked
- * that lets everything through has no chip. Folded, it is its icon, and its
- * words are the tooltip.
+ * what set it, and the choices the person has. A context nothing says
+ * anything of has no chip, and one nobody marked has a quiet one where the
+ * variant shows it. Folded, it is its icon, and its words are the tooltip.
  */
 export function ModeChip({ folded }: { folded: boolean }) {
   const chip = useChip();
@@ -90,11 +90,13 @@ function ChipFace({
 }) {
   const Icon = access.unlockedUntil
     ? LockOpen
-    : access.mode === "read-only"
-      ? Lock
-      : access.mode === "guarded"
-        ? ShieldAlert
-        : undefined;
+    : access.source.kind === "unmarked"
+      ? Tag
+      : access.mode === "read-only"
+        ? Lock
+        : access.mode === "guarded"
+          ? ShieldAlert
+          : undefined;
   const Shown = Icon ?? (folded ? Tag : undefined);
   return (
     <>
@@ -125,7 +127,10 @@ function Chip({
               type="button"
               aria-label={`Mode of ${context}: ${label}`}
               className={cn(
-                "twigo-mode-chip outline-none focus-visible:shadow-[var(--focus-ring)]",
+                "outline-none focus-visible:shadow-[var(--focus-ring)]",
+                access.source.kind === "unmarked"
+                  ? "bg-well text-support"
+                  : "twigo-mode-chip",
                 CHIP,
                 folded && "w-5 justify-center px-0",
               )}

@@ -1,6 +1,7 @@
-import { CircleCheck, type LucideIcon } from "lucide-react";
+import { CircleCheck, LockOpen, Tag, type LucideIcon } from "lucide-react";
 import type {
   Backend,
+  Environment,
   OperationEvent,
   Plan,
   PlanId,
@@ -12,7 +13,14 @@ import { notify, type ToastAction } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
 import { spaceMark } from "../parts/spaceMark";
+import type { QuickPickItem } from "../quickaccess/registry";
+import {
+  ENVIRONMENTS,
+  environmentHelp,
+  environmentLabel,
+} from "../spaces/modes";
 import type { Spaces } from "../spaces/store";
+import { variant } from "../variants";
 import { unlockAction } from "./unlock";
 
 /** The context key that holds while a countdown runs, which ⌘Z cancels. */
@@ -40,6 +48,13 @@ export interface Asking {
   readonly cancel: () => void;
 }
 
+/** The question what a context nobody marked is, which a dialog asks. */
+export interface Marking {
+  readonly context: string;
+  readonly choose: (environment: Environment) => void;
+  readonly cancel: () => void;
+}
+
 /** A run under way that said it waits, for the status bar. */
 export interface Running {
   readonly id: number;
@@ -48,7 +63,7 @@ export interface Running {
   readonly stop: () => void;
 }
 
-/** The space a request is for; a Reveal and a shell name none. */
+/** The space a request is for; a Reveal, a shell and a change of protection name none. */
 function spaceOf(request: PlanRequest): string | undefined {
   return "space" in request ? request.space : undefined;
 }
@@ -94,6 +109,7 @@ export type Outcome =
 export class Operations {
   readonly changes = new Changes();
   #asking: Asking | undefined;
+  #marking: Marking | undefined;
   readonly #running = new Map<number, Running>();
   /** The countdowns under way, the newest last, by what they plan. */
   readonly #countdowns: {
@@ -114,6 +130,10 @@ export class Operations {
     private readonly undoKeys: () => string | undefined,
     private readonly report: (error: unknown) => void,
     private readonly spaces: Pick<Spaces, "get" | "ofContext">,
+    private readonly pick: (
+      placeholder: string,
+      items: readonly QuickPickItem[],
+    ) => Promise<QuickPickItem | undefined>,
   ) {}
 
   /**
@@ -132,6 +152,10 @@ export class Operations {
     return this.#asking;
   }
 
+  get marking(): Marking | undefined {
+    return this.#marking;
+  }
+
   /** The same array until the next change, for `useSyncExternalStore`. */
   get running(): readonly Running[] {
     return this.#all;
@@ -140,6 +164,11 @@ export class Operations {
   /** Plans `request`, asks as its friction says, and runs it once the person agrees. */
   run(request: PlanRequest, look: Look): Promise<Outcome> {
     return this.#run(request, look, undefined);
+  }
+
+  /** Lifts a read-only context's lock for 15 minutes, which asks in a dialog. */
+  unlock(context: string): Promise<Outcome> {
+    return this.run({ action: "unlock", context }, { icon: LockOpen });
   }
 
   /** As `run`, for the undo it puts back, if it does. */
@@ -152,11 +181,14 @@ export class Operations {
     try {
       plan = await this.backend.invoke("command_plan", request);
     } catch (error) {
-      this.#fail(
-        error,
-        spaceOf(request),
-        unlockAction(this.backend, error, this.report),
-      );
+      const { blocked } = toIpcError(error);
+      if (blocked?.reason === "unmarked") {
+        const marked = await this.#mark(blocked.context);
+        return marked.state === "done"
+          ? this.#run(request, look, undo)
+          : marked;
+      }
+      this.#fail(error, spaceOf(request), unlockAction(this, error));
       return {
         state: toIpcError(error).blocked === undefined ? "failed" : "refused",
       };
@@ -178,12 +210,7 @@ export class Operations {
     }
     // An undo takes its own and leaves a later one standing, as in Rust; a
     // Reveal and a shell change nothing an undo could put back.
-    const space =
-      request.action === "reveal" ||
-      request.action === "undo" ||
-      request.action === "shell"
-        ? undefined
-        : request.space;
+    const space = request.action === "undo" ? undefined : spaceOf(request);
     // Rust takes the undo as its run starts; a refused one leaves it.
     const taken =
       undo && space === undefined && request.action === "undo"
@@ -201,6 +228,58 @@ export class Operations {
       look,
       taken,
     );
+  }
+
+  /**
+   * Asks what a context nobody marked is, as the first write or exec to it
+   * does, and marks it as the person answers, which a plan of its own does
+   * (ARCHITECTURE 6.4). Anything but `done` leaves the command it came from
+   * unsent.
+   */
+  async #mark(context: string): Promise<Outcome> {
+    const environment =
+      variant("ask") === "pick"
+        ? await this.#pickEnvironment(context)
+        : await this.#askEnvironment(context);
+    if (environment === undefined) return { state: "cancelled" };
+    return this.#run(
+      { action: "setEnvironment", context, environment },
+      { icon: Tag },
+      undefined,
+    );
+  }
+
+  async #pickEnvironment(context: string): Promise<Environment | undefined> {
+    const picked = await this.pick(
+      `What is ${context}?`,
+      ENVIRONMENTS.map((environment) => ({
+        id: environment,
+        label: environmentLabel(environment),
+        description: environmentHelp(environment),
+      })),
+    );
+    return ENVIRONMENTS.find((environment) => environment === picked?.id);
+  }
+
+  #askEnvironment(context: string): Promise<Environment | undefined> {
+    return new Promise((resolve) => {
+      this.#marking?.cancel();
+      const done = (environment: Environment | undefined) => {
+        if (this.#marking !== marking) return;
+        this.#marking = undefined;
+        this.changes.emit();
+        resolve(environment);
+      };
+      const marking: Marking = {
+        context,
+        choose: done,
+        cancel: () => {
+          done(undefined);
+        },
+      };
+      this.#marking = marking;
+      this.changes.emit();
+    });
   }
 
   /** Puts back the space's last action while its undo lasts, as ⌘Z does; a second press while it goes does nothing. */

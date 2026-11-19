@@ -1,11 +1,12 @@
 import { act } from "@testing-library/react";
-import { expect, test, vi } from "vitest";
-import type { ContextAccess } from "@twigo/protocol";
+import { afterEach, expect, test, vi } from "vitest";
+import type { ContextAccess, Lock } from "@twigo/protocol";
 import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
+import { notify } from "@twigo/ui";
 import { registerCore } from "../core";
 import { Workbench } from "../services";
 import { StateStore } from "../state/store";
-import { testWorkbench } from "../testing";
+import { confirmAsking, testWorkbench } from "../testing";
 import {
   RELOCK_CONTEXT,
   SET_CONTEXT_ENVIRONMENT,
@@ -14,11 +15,18 @@ import {
 } from "./modeCommands";
 import { chipLabel, countdown, describeAccess, describeSource } from "./modes";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
+});
+
 function access(fields: Partial<ContextAccess>): ContextAccess {
-  return { ...UNMARKED, ...fields };
+  return { ...UNMARKED, mode: "read-write", ...fields };
 }
 
-test("a context nobody marked that lets everything through has no chip", () => {
+test("a context nobody marked has a quiet chip, or none where the variant says so", () => {
+  expect(chipLabel(UNMARKED)).toBe("Not marked");
+  window.history.replaceState(null, "", "/?variant=unmarked:none");
   expect(chipLabel(UNMARKED)).toBeUndefined();
 });
 
@@ -31,7 +39,7 @@ test("the chip says the type and the mode", () => {
   expect(chipLabel(access({ environment: "staging", mode: "guarded" }))).toBe(
     "Staging · guarded",
   );
-  const chosen = { kind: "user" } as const;
+  const chosen = { kind: "user", overrides: null } as const;
   expect(chipLabel(access({ mode: "read-only", source: chosen }))).toBe(
     "Read-only",
   );
@@ -41,7 +49,9 @@ test("the chip says the type and the mode", () => {
 });
 
 test("a read-write that somebody chose is said, as it may override a lock", () => {
-  expect(chipLabel(access({ source: { kind: "user" } }))).toBe("Read-write");
+  expect(chipLabel(access({ source: { kind: "user", overrides: null } }))).toBe(
+    "Read-write",
+  );
   expect(chipLabel(access({ source: { kind: "kubeconfig" } }))).toBe(
     "Read-write",
   );
@@ -83,7 +93,23 @@ test("each source is named in words", () => {
       pattern: null,
     }),
   ).toContain("cannot be read");
-  expect(describeSource({ kind: "user" })).toBe("You set this.");
+  expect(describeSource({ kind: "user", overrides: null })).toBe(
+    "You set this.",
+  );
+  const over = (lock: Lock) =>
+    describeSource({ kind: "user", overrides: lock });
+  expect(over({ mode: "read-only", source: { kind: "kubeconfig" } })).toBe(
+    "You set this, over its kubeconfig's read-only.",
+  );
+  expect(over({ mode: "read-only", source: { kind: "provider" } })).toBe(
+    "You set this, over its provider's read-only.",
+  );
+  expect(
+    over({
+      mode: "guarded",
+      source: { kind: "environment", environment: "staging" },
+    }),
+  ).toBe("You set this, over the guarded default for Staging.");
   expect(describeSource({ kind: "kubeconfig" })).toContain("twigo.readOnly");
   expect(describeSource({ kind: "provider" })).toContain("provider");
   expect(describeSource({ kind: "environment", environment: "staging" })).toBe(
@@ -91,8 +117,8 @@ test("each source is named in words", () => {
   );
   expect(describeSource({ kind: "unlisted" })).toContain("No source lists");
   expect(describeSource({ kind: "moved" })).toContain("another cluster");
-  expect(describeSource({ kind: "default" })).toBe(
-    "Nothing limits this context.",
+  expect(describeSource({ kind: "unmarked" })).toContain(
+    "Nobody has said what this context is",
   );
 });
 
@@ -115,7 +141,9 @@ test("context keys follow the mode and an unlock", async () => {
   expect(key("context.readOnly")).toBe(true);
   expect(key("context.unlocked")).toBe(false);
 
-  await act(() => commands.execute(UNLOCK_CONTEXT, lookup()));
+  const unlock = commands.execute(UNLOCK_CONTEXT, lookup());
+  await confirmAsking(workbench);
+  await act(() => unlock);
   expect(key("context.mode")).toBe("guarded");
   expect(key("context.readOnly")).toBe(false);
   expect(key("context.unlocked")).toBe(true);
@@ -133,18 +161,22 @@ test("context keys follow the mode and an unlock", async () => {
 });
 
 test("unlocking and relocking follow enablement, whatever the mode", async () => {
-  const { commands, keys } = await testWorkbench();
+  const workbench = await testWorkbench();
+  const { commands, keys } = workbench;
   await act(() => Promise.resolve());
   const enabled = (id: string) => commands.enabled(id, keys.lookup(null));
   expect(enabled(UNLOCK_CONTEXT)).toBe(true);
   expect(enabled(RELOCK_CONTEXT)).toBe(false);
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const unlock = commands.execute(UNLOCK_CONTEXT, keys.lookup(null));
+  await confirmAsking(workbench);
+  await act(() => unlock);
   expect(enabled(UNLOCK_CONTEXT)).toBe(false);
   expect(enabled(RELOCK_CONTEXT)).toBe(true);
 });
 
-test("the mode command sets the mode outright, or asks and sends what was picked", async () => {
-  const { commands, keys, catalog, quickAccess } = await testWorkbench();
+test("the mode command sets the mode outright, or asks and plans what was picked", async () => {
+  const workbench = await testWorkbench();
+  const { commands, keys, catalog, quickAccess } = workbench;
   await act(() => Promise.resolve());
   await act(() =>
     commands.execute(SET_CONTEXT_MODE, keys.lookup(null), {
@@ -153,7 +185,10 @@ test("the mode command sets the mode outright, or asks and sends what was picked
     }),
   );
   expect(catalog.find("qa")?.access.mode).toBe("guarded");
-  expect(catalog.find("qa")?.access.source).toEqual({ kind: "user" });
+  expect(catalog.find("qa")?.access.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
 
   const asked = commands.execute(SET_CONTEXT_MODE, keys.lookup(null));
   await act(() => Promise.resolve());
@@ -167,35 +202,45 @@ test("the mode command sets the mode outright, or asks and sends what was picked
   act(() => {
     pick?.resolve(pick.items.find((item) => item.id === "read-write"));
   });
+  await confirmAsking(workbench);
   await act(() => asked);
   expect(catalog.find("prod-eu")?.access.mode).toBe("read-write");
-  expect(catalog.find("prod-eu")?.access.source).toEqual({ kind: "user" });
+  expect(catalog.find("prod-eu")?.access.source).toEqual({
+    kind: "user",
+    overrides: {
+      mode: "read-only",
+      source: { kind: "environment", environment: "production" },
+    },
+  });
 });
 
 test("the palette's Default and None send no value, and the current None sends nothing", async () => {
-  const { commands, keys, catalog, quickAccess, backend } =
-    await testWorkbench();
+  const workbench = await testWorkbench();
+  const { commands, keys, catalog, quickAccess, backend } = workbench;
   await act(() => Promise.resolve());
   const invoke = vi.spyOn(backend, "invoke");
-  const pickFrom = async (command: string, id: string) => {
+  const pickFrom = async (command: string, id: string, asks = false) => {
     const run = commands.execute(command, keys.lookup(null));
     await act(() => Promise.resolve());
     const pick = quickAccess.session?.pick;
     act(() => {
       pick?.resolve(pick.items.find((item) => item.id === id));
     });
+    if (asks) await confirmAsking(workbench);
     await act(() => run);
   };
 
-  await pickFrom(SET_CONTEXT_MODE, "guarded");
-  expect(catalog.find("prod-eu")?.access.source).toEqual({ kind: "user" });
+  await pickFrom(SET_CONTEXT_MODE, "guarded", true);
+  expect(catalog.find("prod-eu")?.access.source).toMatchObject({
+    kind: "user",
+  });
   await pickFrom(SET_CONTEXT_MODE, "none");
   expect(catalog.find("prod-eu")?.access.source).toEqual({
     kind: "environment",
     environment: "production",
   });
 
-  await pickFrom(SET_CONTEXT_ENVIRONMENT, "none");
+  await pickFrom(SET_CONTEXT_ENVIRONMENT, "none", true);
   expect(catalog.find("prod-eu")?.access.environment).toBeNull();
   invoke.mockClear();
   await pickFrom(SET_CONTEXT_ENVIRONMENT, "none");
@@ -260,14 +305,11 @@ test("marking a context sets its default mode and its colour", async () => {
 });
 
 test("a policy file's entry cannot be changed and says who set it", async () => {
-  const reports: unknown[] = [];
+  const error = vi.spyOn(notify, "error");
   const workbench = await testWorkbench(
     undefined,
     createMockBackend("policyFile"),
   );
-  vi.spyOn(workbench, "report").mockImplementation((error) => {
-    reports.push(error);
-  });
   const { commands, keys, catalog } = workbench;
   await act(() => Promise.resolve());
   const source = catalog.find("prod-eu")?.access.source;
@@ -281,9 +323,9 @@ test("a policy file's entry cannot be changed and says who set it", async () => 
   );
   await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
   expect(catalog.find("prod-eu")?.access.mode).toBe("read-only");
-  expect(reports.length).toBe(2);
-  for (const report of reports) {
-    expect((report as Error).message).toContain("prod-*");
+  expect(error).toHaveBeenCalledTimes(2);
+  for (const [message] of error.mock.calls) {
+    expect(message).toContain("prod-*");
   }
 });
 
@@ -310,9 +352,12 @@ test("the rail's menu sets the mode and the type of the space it names", async (
 });
 
 test("picking the guarded of an unlock in the palette leaves the unlock alone", async () => {
-  const { commands, keys, catalog, quickAccess } = await testWorkbench();
+  const workbench = await testWorkbench();
+  const { commands, keys, catalog, quickAccess } = workbench;
   await act(() => Promise.resolve());
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const unlock = commands.execute(UNLOCK_CONTEXT, keys.lookup(null));
+  await confirmAsking(workbench);
+  await act(() => unlock);
   const until = catalog.find("prod-eu")?.access.unlockedUntil;
   const run = commands.execute(SET_CONTEXT_MODE, keys.lookup(null));
   await act(() => Promise.resolve());
@@ -344,9 +389,12 @@ test("a person's None holds over a type from the kubeconfig's fixtures", async (
 
 test("the relock by itself reaches the context keys", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
-  const { commands, keys } = await testWorkbench();
+  const workbench = await testWorkbench();
+  const { commands, keys } = workbench;
   await act(() => Promise.resolve());
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const unlock = commands.execute(UNLOCK_CONTEXT, keys.lookup(null));
+  await confirmAsking(workbench);
+  await act(() => unlock);
   expect(keys.lookup(null)("context.unlocked")).toBe(true);
   await act(() => vi.advanceTimersByTimeAsync(15 * 60 * 1000 + 10));
   expect(keys.lookup(null)("context.unlocked")).toBe(false);

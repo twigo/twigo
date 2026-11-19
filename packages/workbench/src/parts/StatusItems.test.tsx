@@ -6,6 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
+import { protect } from "@twigo/protocol/mock";
 import { inWorkbench, testWorkbench } from "../testing";
 import { StatusBar, StatusEntries } from "./StatusBar";
 import { useSpaceEntries } from "./StatusItems";
@@ -63,7 +64,9 @@ test("the space entry has a lock while its mode holds writes back, open during a
   const icon = () => screen.getByTitle("Switch space").querySelector("svg");
   expect(icon()?.classList.contains("lucide-lock")).toBe(true);
 
-  await act(() => workbench.backend.invoke("context_unlock", "prod-eu"));
+  await act(() =>
+    protect(workbench.backend, { action: "unlock", context: "prod-eu" }),
+  );
   expect(icon()?.classList.contains("lucide-lock-open")).toBe(true);
 
   act(() => {

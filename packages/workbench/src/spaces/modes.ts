@@ -1,11 +1,13 @@
 import type {
   ContextAccess,
   Environment,
+  Lock,
   Mode,
   ModeSource,
   Space,
 } from "@twigo/protocol";
 import type { Lookup } from "../contextkey/when";
+import { variant } from "../variants";
 import type { Catalog } from "./catalog";
 
 export const MODES: readonly Mode[] = ["read-write", "guarded", "read-only"];
@@ -37,12 +39,27 @@ const ENVIRONMENT_LABEL: Readonly<Record<Environment, string>> = {
   local: "Local",
 };
 
+const ENVIRONMENT_HELP: Readonly<Record<Environment, string>> = {
+  production: "Reads only: Twigo sends no change until you unlock it.",
+  staging: "Every change and exec asks first.",
+  development:
+    "Changes go through, with a confirmation for what cannot be undone.",
+  local: "Changes go through, with a confirmation for what cannot be undone.",
+};
+
+export const NOT_MARKED = "Not marked";
+
 export function modeLabel(mode: Mode): string {
   return MODE_LABEL[mode];
 }
 
 export function environmentLabel(environment: Environment): string {
   return ENVIRONMENT_LABEL[environment];
+}
+
+/** What a type gives a context by default, for the person choosing it. */
+export function environmentHelp(environment: Environment): string {
+  return ENVIRONMENT_HELP[environment];
 }
 
 /** What a mode lets through, for the person choosing it. */
@@ -65,7 +82,8 @@ export function accessOfSpace(
  * The chip's words, `Production · read-only`, or none for a context nothing
  * says anything of. A Production context says read-write too, since that is
  * the one to notice; other types leave it out, and a context with no type says
- * it when somebody chose it, a kubeconfig's lock overridden among them.
+ * it when somebody chose it, a kubeconfig's lock overridden among them, and
+ * that nobody did, where the variant has the chip say so.
  */
 export function chipLabel(access: ContextAccess): string | undefined {
   const { environment, mode, source, unlockedUntil } = access;
@@ -74,7 +92,8 @@ export function chipLabel(access: ContextAccess): string | undefined {
     return type === undefined ? "Unlocked" : `${type} · unlocked`;
   }
   if (type === undefined) {
-    return source.kind === "default" ? undefined : modeLabel(mode);
+    if (source.kind !== "unmarked") return modeLabel(mode);
+    return variant("unmarked") === "chip" ? NOT_MARKED : undefined;
   }
   return mode === "read-write" && environment !== "production"
     ? type
@@ -111,6 +130,18 @@ export function setByPolicyFile(source: ModeSource): boolean {
   return source.kind === "policyFile";
 }
 
+/** A lock a choice sets aside, in words. */
+function describeLock({ mode, source }: Lock): string {
+  switch (source.kind) {
+    case "kubeconfig":
+      return `its kubeconfig's ${mode}`;
+    case "provider":
+      return `its provider's ${mode}`;
+    case "environment":
+      return `the ${mode} default for ${environmentLabel(source.environment)}`;
+  }
+}
+
 /** Which rule gives a context its mode, in words. */
 export function describeSource(source: ModeSource): string {
   switch (source.kind) {
@@ -119,15 +150,17 @@ export function describeSource(source: ModeSource): string {
         ? `${source.file} cannot be read, so every context is read-only until an admin fixes it and Twigo restarts.`
         : `${source.pattern} in ${source.file} sets this. Twigo cannot change or unlock it.`;
     case "user":
-      return "You set this.";
+      return source.overrides === null
+        ? "You set this."
+        : `You set this, over ${describeLock(source.overrides)}.`;
     case "kubeconfig":
       return "twigo.readOnly in its kubeconfig sets this.";
     case "provider":
       return "Its provider sets this.";
     case "environment":
       return `The default for ${environmentLabel(source.environment)}.`;
-    case "default":
-      return "Nothing limits this context.";
+    case "unmarked":
+      return "Nobody has said what this context is, so it is guarded: its first change or exec asks you.";
     case "unlisted":
       return "No source lists this context now, so Twigo sends it no change.";
     case "moved":

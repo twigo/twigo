@@ -40,9 +40,7 @@ export async function unlessRefused<T>(
   } catch (error) {
     const { blocked, message } = toIpcError(error);
     if (blocked === undefined) throw error;
-    const action = unlockAction(workbench.backend, error, (failure) => {
-      workbench.report(failure);
-    });
+    const action = unlockAction(workbench.operations, error);
     notify.warning(`${what} is not forwarded: ${message}`, {
       key: `forward-refused:${what}`,
       tile: spaceMark(workbench.spaces.ofContext(blocked.context)),

@@ -50,7 +50,6 @@ type Protection = Parameters<typeof protect>[1];
 
 const tick = () => vi.advanceTimersByTimeAsync(1);
 
-/** A change of protection the way a person confirms it, the name typed where it asks. */
 function change(
   backend: ReturnType<typeof createMockBackend>,
   request: Protection,

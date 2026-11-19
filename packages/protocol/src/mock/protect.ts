@@ -1,6 +1,6 @@
 import type { Backend } from "../backend";
 import { IpcError } from "../error";
-import type { Environment, PlanRequest } from "../generated";
+import type { PlanRequest } from "../generated";
 
 type Protection = Extract<
   PlanRequest,
@@ -52,24 +52,4 @@ export function protect(
   tick: Tick = TIMER,
 ): Promise<void> {
   return ticked(change(backend, request), tick);
-}
-
-/**
- * Opens the space of a context and marks it, so that a test of what a
- * context does meets no question of what it is.
- */
-export function openMarked(
-  backend: Backend,
-  context: string,
-  environment: Environment = "development",
-  tick: Tick = TIMER,
-): Promise<void> {
-  return ticked(
-    backend
-      .invoke("space_open", context)
-      .then(() =>
-        change(backend, { action: "setEnvironment", context, environment }),
-      ),
-    tick,
-  );
 }
