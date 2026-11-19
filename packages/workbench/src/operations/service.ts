@@ -13,14 +13,7 @@ import { notify, type ToastAction } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
 import { spaceMark } from "../parts/spaceMark";
-import type { QuickPickItem } from "../quickaccess/registry";
-import {
-  ENVIRONMENTS,
-  environmentHelp,
-  environmentLabel,
-} from "../spaces/modes";
 import type { Spaces } from "../spaces/store";
-import { variant } from "../variants";
 import { unlockAction } from "./unlock";
 
 /** The context key that holds while a countdown runs, which ⌘Z cancels. */
@@ -132,10 +125,6 @@ export class Operations {
     private readonly undoKeys: () => string | undefined,
     private readonly report: (error: unknown) => void,
     private readonly spaces: Pick<Spaces, "get" | "ofContext">,
-    private readonly pick: (
-      placeholder: string,
-      items: readonly QuickPickItem[],
-    ) => Promise<QuickPickItem | undefined>,
   ) {}
 
   /**
@@ -158,7 +147,7 @@ export class Operations {
     return this.#marking;
   }
 
-  /** Whether a plan's confirmation is open, or the question of what a context is, in a dialog or in quick access, and the command it asks for has not yet opened its own, which the asks of processes wait behind. */
+  /** Whether a plan's confirmation is open, or the question of what a context is, and the command it asks for has not yet opened its own, which the asks of processes wait behind. */
   get confirming(): boolean {
     return this.#asking !== undefined || this.#questions > 0;
   }
@@ -254,10 +243,7 @@ export class Operations {
    * unsent.
    */
   async #mark(context: string): Promise<Outcome> {
-    const environment =
-      variant("ask") === "pick"
-        ? await this.#pickEnvironment(context)
-        : await this.#askEnvironment(context);
+    const environment = await this.#askEnvironment(context);
     if (environment === undefined) return { state: "cancelled" };
     return this.#run(
       { action: "setEnvironment", context, environment },
@@ -277,18 +263,6 @@ export class Operations {
       this.#questions--;
       this.changes.emit();
     };
-  }
-
-  async #pickEnvironment(context: string): Promise<Environment | undefined> {
-    const picked = await this.pick(
-      `What is ${context}?`,
-      ENVIRONMENTS.map((environment) => ({
-        id: environment,
-        label: environmentLabel(environment),
-        description: environmentHelp(environment),
-      })),
-    );
-    return ENVIRONMENTS.find((environment) => environment === picked?.id);
   }
 
   #askEnvironment(context: string): Promise<Environment | undefined> {

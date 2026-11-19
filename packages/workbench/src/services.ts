@@ -133,7 +133,6 @@ export class Workbench {
         this.report(error);
       },
       this.spaces,
-      (placeholder, items) => this.quickAccess.pick(placeholder, items),
     );
     this.approvals = new Approvals(
       backend,

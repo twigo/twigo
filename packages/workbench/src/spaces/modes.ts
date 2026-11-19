@@ -7,7 +7,6 @@ import type {
   Space,
 } from "@twigo/protocol";
 import type { Lookup } from "../contextkey/when";
-import { variant } from "../variants";
 import type { Catalog } from "./catalog";
 
 export const MODES: readonly Mode[] = ["read-write", "guarded", "read-only"];
@@ -84,13 +83,12 @@ export function accessOfSpace(
 }
 
 /**
- * The chip's words, `Production · read-only`, or none for a context nothing
- * says anything of. A Production context says read-write too, since that is
- * the one to notice; other types leave it out, and a context with no type says
- * it when somebody chose it, a kubeconfig's lock overridden among them, and
- * that nobody did, where the variant has the chip say so.
+ * The chip's words, `Production · read-only`. A Production context says
+ * read-write too, since that is the one to notice; other types leave it out,
+ * and a context with no type says it when somebody chose it, a kubeconfig's
+ * lock overridden among them, and that nobody did.
  */
-export function chipLabel(access: ContextAccess): string | undefined {
+export function chipLabel(access: ContextAccess): string {
   const { environment, mode, source, unlockedUntil } = access;
   const type = environment === null ? undefined : environmentLabel(environment);
   if (unlockedUntil !== null) {
@@ -98,7 +96,7 @@ export function chipLabel(access: ContextAccess): string | undefined {
   }
   if (type === undefined) {
     if (source.kind !== "unmarked") return modeLabel(mode);
-    return variant("unmarked") === "chip" ? NOT_MARKED : undefined;
+    return NOT_MARKED;
   }
   return mode === "read-write" && environment !== "production"
     ? type

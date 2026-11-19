@@ -17,17 +17,14 @@ import { chipLabel, countdown, describeAccess, describeSource } from "./modes";
 
 afterEach(() => {
   vi.restoreAllMocks();
-  window.history.replaceState(null, "", "/");
 });
 
 function access(fields: Partial<ContextAccess>): ContextAccess {
   return { ...UNMARKED, mode: "read-write", ...fields };
 }
 
-test("a context nobody marked has a quiet chip, or none where the variant says so", () => {
+test("a context nobody marked has a quiet chip", () => {
   expect(chipLabel(UNMARKED)).toBe("Not marked");
-  window.history.replaceState(null, "", "/?variant=unmarked:none");
-  expect(chipLabel(UNMARKED)).toBeUndefined();
 });
 
 test("the chip says the type and the mode", () => {

@@ -300,17 +300,6 @@ test("no mode is the choice of a context nobody marked, so pressing the guarded 
   });
 });
 
-test("with the variant that shows nothing, a context nobody marked has no chip", async () => {
-  window.history.replaceState(null, "", "/?variant=unmarked:none");
-  try {
-    const { workbench } = await mounted();
-    await act(() => workbench.spaces.open("qa"));
-    expect(screen.queryByRole("button", { name: /^Mode of/ })).toBeNull();
-  } finally {
-    window.history.replaceState(null, "", "/");
-  }
-});
-
 test("a choice that sets a stricter lock aside says which", async () => {
   const workbench = await testWorkbench(
     undefined,

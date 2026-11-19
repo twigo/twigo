@@ -612,111 +612,49 @@ test("an ask that arrives while the question of what a context is is open waits 
   );
 });
 
-test("an ask that arrives while quick access asks what a context is waits behind it too, and one withdrawn there leaves without a word", async () => {
-  window.history.replaceState(null, "", "/?variant=ask:pick");
-  try {
-    const { workbench, raise, withdraw } = await broker("protection");
-    const info = vi.spyOn(notify, "info");
-    raise(ask(1));
+test("an ask withdrawn between the answer to the question what a context is and the command's own confirmation leaves without a word, and the asks wait behind it", async () => {
+  const { workbench, raise, withdraw } = await broker("protection");
+  const info = vi.spyOn(notify, "info");
+  raise(ask(1), ask(2));
+  const outcome = workbench.operations.run(
+    {
+      action: "cordon",
+      space: "qa",
+      node: "qa-node-1",
+      unschedulable: true,
+    },
+    { icon: Trash2 },
+  );
+  await waitFor(() => {
+    expect(workbench.operations.marking).toBeDefined();
+  });
+  expect(titles()).toEqual(["What is qa?"]);
+
+  await act(async () => {
+    workbench.operations.marking?.choose("staging");
+    await Promise.resolve();
+  });
+  expect(workbench.operations.asking).toBeUndefined();
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+  expect(titles()).toEqual([]);
+
+  await waitFor(() => {
+    expect(workbench.operations.asking).toBeDefined();
+  });
+  expect(titles()).toEqual([workbench.operations.asking?.plan.question]);
+
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
     expect(titles()).toEqual([
-      "Allow Terminal 1 to patch deployments/web in default on staging?",
+      "Allow Terminal 2 to patch deployments/web in default on staging?",
     ]);
-    const outcome = workbench.operations.run(
-      {
-        action: "cordon",
-        space: "qa",
-        node: "qa-node-1",
-        unschedulable: true,
-      },
-      { icon: Trash2 },
-    );
-    await waitFor(() => {
-      expect(workbench.quickAccess.session?.pick?.placeholder).toBe(
-        "What is qa?",
-      );
-    });
-    expect(titles()).toEqual([]);
-
-    raise(ask(2));
-    withdraw(1);
-    expect(titles()).toEqual([]);
-    expect(info).not.toHaveBeenCalled();
-
-    act(() => {
-      workbench.quickAccess.session?.pick?.resolve(undefined);
-    });
-    await expect(outcome).resolves.toEqual({ state: "cancelled" });
-    await waitFor(() => {
-      expect(titles()).toEqual([
-        "Allow Terminal 2 to patch deployments/web in default on staging?",
-      ]);
-    });
-    withdraw(2);
-    expect(info).toHaveBeenCalledExactlyOnceWith(
-      "Terminal 2 no longer asks to patch deployments/web in default on staging",
-      expect.anything(),
-    );
-  } finally {
-    window.history.replaceState(null, "", "/");
-  }
+  });
+  expect(info).not.toHaveBeenCalled();
 });
-
-test.each(["dialog", "pick"])(
-  "an ask withdrawn between the answer to the question what a context is and the command's own confirmation leaves without a word, and the asks wait behind it, in the %s variant",
-  async (variant) => {
-    window.history.replaceState(null, "", `/?variant=ask:${variant}`);
-    try {
-      const { workbench, raise, withdraw } = await broker("protection");
-      const info = vi.spyOn(notify, "info");
-      raise(ask(1), ask(2));
-      const outcome = workbench.operations.run(
-        {
-          action: "cordon",
-          space: "qa",
-          node: "qa-node-1",
-          unschedulable: true,
-        },
-        { icon: Trash2 },
-      );
-      await waitFor(() => {
-        expect(
-          workbench.operations.marking ?? workbench.quickAccess.session?.pick,
-        ).toBeDefined();
-      });
-      expect(titles()).toEqual(variant === "dialog" ? ["What is qa?"] : []);
-
-      await act(async () => {
-        const pick = workbench.quickAccess.session?.pick;
-        if (pick)
-          pick.resolve(pick.items.find((item) => item.id === "staging"));
-        else workbench.operations.marking?.choose("staging");
-        await Promise.resolve();
-      });
-      expect(workbench.operations.asking).toBeUndefined();
-      withdraw(1);
-      expect(info).not.toHaveBeenCalled();
-      expect(titles()).toEqual([]);
-
-      await waitFor(() => {
-        expect(workbench.operations.asking).toBeDefined();
-      });
-      expect(titles()).toEqual([workbench.operations.asking?.plan.question]);
-
-      act(() => {
-        workbench.operations.asking?.cancel();
-      });
-      await expect(outcome).resolves.toEqual({ state: "cancelled" });
-      await waitFor(() => {
-        expect(titles()).toEqual([
-          "Allow Terminal 2 to patch deployments/web in default on staging?",
-        ]);
-      });
-      expect(info).not.toHaveBeenCalled();
-    } finally {
-      window.history.replaceState(null, "", "/");
-    }
-  },
-);
 
 async function clickOutside() {
   await act(async () => {

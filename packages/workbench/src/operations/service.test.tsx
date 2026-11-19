@@ -979,117 +979,57 @@ test("the way out of the question sends nothing and leaves the context unmarked"
   });
 });
 
-test("the variant that picks asks in quick access, titled with the question", async () => {
-  window.history.replaceState(null, "", "/?variant=ask:pick");
-  try {
-    const { workbench, planned } = await inProtection();
-    const outcome = workbench.operations.run(CORDON, LOOK);
-    await vi.waitFor(() => {
-      expect(workbench.quickAccess.session?.pick).toBeDefined();
-    });
-    const pick = workbench.quickAccess.session?.pick;
-    expect(pick?.placeholder).toBe("What is qa?");
-    expect(pick?.items.map((item) => item.id)).toEqual([
-      "production",
-      "staging",
-      "development",
-      "local",
-    ]);
-    expect(pick?.items.map((item) => item.description)).toEqual([
-      "Twigo sends no change until you unlock it.",
-      "Every change and exec asks first.",
-      "Changes go through, with a confirmation for what cannot be undone.",
-      "Changes go through, with a confirmation for what cannot be undone.",
-    ]);
-    expect(workbench.operations.marking).toBeUndefined();
-    act(() => {
-      pick?.resolve(pick.items.find((item) => item.id === "development"));
-    });
-    await expect(outcome).resolves.toEqual({ state: "done" });
-    expect(planned.map((request) => request.action)).toEqual([
-      "cordon",
-      "setEnvironment",
-      "cordon",
-    ]);
-  } finally {
-    window.history.replaceState(null, "", "/");
-  }
-});
-
 async function answerQuestion(
   workbench: Awaited<ReturnType<typeof inProtection>>["workbench"],
   environment: Environment | undefined,
 ) {
   await vi.waitFor(() => {
-    expect(
-      workbench.operations.marking ?? workbench.quickAccess.session?.pick,
-    ).toBeDefined();
+    expect(workbench.operations.marking).toBeDefined();
   });
   await act(async () => {
-    if (workbench.operations.marking) {
-      if (environment === undefined) workbench.operations.marking.cancel();
-      else workbench.operations.marking.choose(environment);
-    } else {
-      const pick = workbench.quickAccess.session?.pick;
-      pick?.resolve(pick.items.find((item) => item.id === environment));
-    }
+    if (environment === undefined) workbench.operations.marking?.cancel();
+    else workbench.operations.marking?.choose(environment);
     await Promise.resolve();
   });
 }
 
-test.each(["dialog", "pick"])(
-  "the question what a context is stays open for the asks of processes until the command opens its own confirmation, in the %s variant",
-  async (variant) => {
-    window.history.replaceState(null, "", `/?variant=ask:${variant}`);
-    try {
-      const { workbench } = await inProtection();
-      const gap: boolean[] = [];
-      let opened = false;
-      workbench.operations.changes.subscribe(() => {
-        opened ||= workbench.operations.asking !== undefined;
-        if (!opened) gap.push(workbench.operations.confirming);
-      });
-      const outcome = workbench.operations.run(CORDON, LOOK);
-      await answerQuestion(workbench, "staging");
-      await vi.waitFor(() => {
-        expect(workbench.operations.asking).toBeDefined();
-      });
-      expect(gap.length).toBeGreaterThan(0);
-      expect(gap).not.toContain(false);
-      expect(workbench.operations.confirming).toBe(true);
+test("the question what a context is stays open for the asks of processes until the command opens its own confirmation", async () => {
+  const { workbench } = await inProtection();
+  const gap: boolean[] = [];
+  let opened = false;
+  workbench.operations.changes.subscribe(() => {
+    opened ||= workbench.operations.asking !== undefined;
+    if (!opened) gap.push(workbench.operations.confirming);
+  });
+  const outcome = workbench.operations.run(CORDON, LOOK);
+  await answerQuestion(workbench, "staging");
+  await vi.waitFor(() => {
+    expect(workbench.operations.asking).toBeDefined();
+  });
+  expect(gap.length).toBeGreaterThan(0);
+  expect(gap).not.toContain(false);
+  expect(workbench.operations.confirming).toBe(true);
 
-      act(() => {
-        workbench.operations.asking?.confirm("qa");
-      });
-      await expect(outcome).resolves.toEqual({ state: "done" });
-      expect(workbench.operations.confirming).toBe(false);
-    } finally {
-      window.history.replaceState(null, "", "/");
-    }
-  },
-);
+  act(() => {
+    workbench.operations.asking?.confirm("qa");
+  });
+  await expect(outcome).resolves.toEqual({ state: "done" });
+  expect(workbench.operations.confirming).toBe(false);
+});
 
-test.each(["dialog", "pick"])(
-  "the question what a context is stops counting as open when its command ends without a confirmation of its own, in the %s variant",
-  async (variant) => {
-    window.history.replaceState(null, "", `/?variant=ask:${variant}`);
-    try {
-      const production = (await inProtection()).workbench;
-      const refused = production.operations.run(CORDON, LOOK);
-      await answerQuestion(production, "production");
-      await expect(refused).resolves.toEqual({ state: "refused" });
-      expect(production.operations.confirming).toBe(false);
+test("the question what a context is stops counting as open when its command ends without a confirmation of its own", async () => {
+  const production = (await inProtection()).workbench;
+  const refused = production.operations.run(CORDON, LOOK);
+  await answerQuestion(production, "production");
+  await expect(refused).resolves.toEqual({ state: "refused" });
+  expect(production.operations.confirming).toBe(false);
 
-      const way = (await inProtection()).workbench;
-      const cancelled = way.operations.run(CORDON, LOOK);
-      await answerQuestion(way, undefined);
-      await expect(cancelled).resolves.toEqual({ state: "cancelled" });
-      expect(way.operations.confirming).toBe(false);
-    } finally {
-      window.history.replaceState(null, "", "/");
-    }
-  },
-);
+  const way = (await inProtection()).workbench;
+  const cancelled = way.operations.run(CORDON, LOOK);
+  await answerQuestion(way, undefined);
+  await expect(cancelled).resolves.toEqual({ state: "cancelled" });
+  expect(way.operations.confirming).toBe(false);
+});
 
 test("a change that lowers protection asks for the context's name, and a wrong name changes nothing", async () => {
   const error = vi.spyOn(notify, "error");

@@ -56,9 +56,8 @@ function useChip() {
 /**
  * The mode after the context's name (ARCHITECTURE 6.4), in the context's
  * colour, as NN/g asks of a mode: say it where you are looking. It opens
- * what set it, and the choices the person has. A context nothing says
- * anything of has no chip, and one nobody marked has a quiet one where the
- * variant shows it. Folded, it is its icon, and its words are the tooltip.
+ * what set it, and the choices the person has; a context nobody marked has a
+ * quiet one. Folded, it is its icon, and its words are the tooltip.
  */
 export function ModeChip({ folded }: { folded: boolean }) {
   const chip = useChip();
