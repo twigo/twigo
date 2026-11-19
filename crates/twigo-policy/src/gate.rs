@@ -71,8 +71,8 @@ impl Gate {
     }
 
     /// Whether the request may go on with the approval it carries;
-    /// `sending` where it goes out next, which the audit log notes of a write
-    /// it lets through.
+    /// `sending` where it goes out next, where the audit log notes what it
+    /// lets through.
     fn check(&self, read: &Read, sending: bool) -> Result<(), BoxError> {
         let attributes = &read.attributes;
         let decided = self.policy.authorize_built(

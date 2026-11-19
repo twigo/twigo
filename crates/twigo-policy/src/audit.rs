@@ -1,8 +1,8 @@
 //! The audit log (ARCHITECTURE 6.4): a JSONL file in the app-data directory,
-//! mode 0600, of every write the gate sent or stopped, whoever asked, of
-//! every command a person confirmed and how it ended, and of every answer to
-//! a process's ask. It names what was asked and where, never a value or a
-//! token.
+//! mode 0600, of the requests the gate sent or stopped, every class but a
+//! read of an actor other than the UI and the UI's writes, of every command
+//! a person confirmed and how it ended, and of every answer to a process's
+//! ask. It names what was asked and where, never a value or a token.
 //!
 //! It also records each change of a context's protection, a command's or
 //! the catalog's, each unlock's end, and each credential plugin a person
@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode};
+use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode, RequestClass};
 
 use crate::{Actor, Attributes, Change};
 
@@ -32,12 +32,13 @@ pub struct Audit {
     rename_all_fields = "camelCase"
 )]
 pub enum Entry<'a> {
-    /// A write the gate let out to the server, or stopped.
+    /// A request the gate let out to the server, or stopped.
     Request {
         context: &'a str,
         actor: &'a str,
         verb: &'a str,
         target: &'a str,
+        class: RequestClass,
         mode: Mode,
         /// None when the gate let it on to the connection, just above the
         /// socket; a retry below the gate is noted again, as sent again.
@@ -172,8 +173,9 @@ impl Audit {
         }
     }
 
-    /// A write the gate let out or stopped; reads and the other classes are
-    /// not logged.
+    /// A request the gate let out or stopped: of an actor other than the UI
+    /// every class but a read, and of the UI its writes, as the command bus
+    /// logs its commands.
     pub(crate) fn request(
         &self,
         context: &str,
@@ -182,7 +184,12 @@ impl Audit {
         mode: Mode,
         blocked: Option<BlockReason>,
     ) {
-        if attributes.class != twigo_ipc::RequestClass::Write {
+        let logged = match (actor, attributes.class) {
+            (_, RequestClass::Read) => false,
+            (Actor::Ui, class) => class == RequestClass::Write,
+            _ => true,
+        };
+        if !logged {
             return;
         }
         self.record(&Entry::Request {
@@ -190,6 +197,7 @@ impl Audit {
             actor: actor.name(),
             verb: &attributes.verb,
             target: &attributes.target(),
+            class: attributes.class,
             mode,
             blocked,
         });
