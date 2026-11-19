@@ -1784,6 +1784,23 @@ test("a protection plan is refused once the context changed and changed back, as
   });
 });
 
+test("a protection plan is refused once the person's mode went and came back", async () => {
+  const backend = createMockBackend();
+  const stale = await answered(
+    backend.invoke("command_plan", SET_MODE("dev", "read-write")),
+  );
+  await change(backend, SET_MODE("dev", "guarded"));
+  await change(backend, SET_MODE("dev", null));
+  const error = await refused(
+    backend.subscribe(
+      "command_execute",
+      { plan: stale.id, typed: null },
+      () => undefined,
+    ),
+  );
+  expect(error.kind).toBe("conflict");
+});
+
 test("a change that asks for the name typed refuses the wrong one and changes nothing", async () => {
   const backend = createMockBackend();
   const plan = await answered(

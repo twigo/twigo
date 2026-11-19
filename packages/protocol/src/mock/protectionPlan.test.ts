@@ -194,3 +194,18 @@ test("a plan names, of the sets of locks whose absence shows what a change gives
     "When its kubeconfig's lock goes and its kubeconfig's type goes, its first write or exec asks what qa is.",
   ]);
 });
+
+test("an unlock's plan says nothing of the locks going, as it ends by itself before any does", () => {
+  const access = new MockAccess(false);
+  access.setMode("analytics", null);
+  const { from, to, beneath } = weigh(access, "analytics", { unlock: true });
+  expect(beneath).not.toEqual([]);
+  const { consequences } = words(
+    "analytics",
+    { unlock: true },
+    from,
+    to,
+    beneath,
+  );
+  expect(consequences.some((said) => said.startsWith("When"))).toBe(false);
+});
