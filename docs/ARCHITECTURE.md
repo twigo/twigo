@@ -2291,7 +2291,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The person's mode and type outlive every lock that can go: the policy file's entry, a kubeconfig's `readOnly`, a kubeconfig's type and a provider's lock, each of which an edit or the provider can take away on its own.
   So a lasting change is weighed under every set of those locks taken away, the person's choices kept and the empty set being the change as it is, a context unmarked under a set counting as `guarded` there.
   No lock then hides a lowering from the friction: neither a kubeconfig's type beneath its `readOnly` nor the person's mode cleared beneath a kubeconfig's type.
-  The plan says what the change gives once the locks that hide it go: of the sets whose absence shows it, the one that leaves the context least strict, and of those the smallest.
+  The plan says what the change gives once locks go.
+  Where it asks for the name though it lowers nothing as it is, it names, of the sets under which it lowers the context, the one that leaves the context least strict, and of those the smallest, so it says why it asks even where that set leaves the context as it is now, as an admin's `read-write` entry over a context nobody marked does.
+  Otherwise it names, of the sets under which the change gives other than it does now, the one that leaves the context least strict, and of those the smallest.
   Rust names the friction from the context's access before and after, under each set:
   - a lasting change that leaves the context less strict under any set asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
   - a change that leaves the context unmarked weighs as one to `read-write`, since from there any change runs at once: from `read-only` or `guarded` it asks for the name typed;
