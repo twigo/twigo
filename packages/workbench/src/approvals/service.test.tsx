@@ -714,6 +714,9 @@ test("an ask of a context nobody marked asks what it is, naming the process and 
     "Terminal 5 asks to patch deployments/web/scale in default on qa",
   );
   expect(asked.textContent).toContain("Not marked");
+  expect(asked.textContent).toContain(
+    "Production: Twigo sends no change until you unlock it.Staging: Every change and exec asks first.",
+  );
   expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
 
   choose("Staging");

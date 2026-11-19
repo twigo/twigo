@@ -40,7 +40,7 @@ const ENVIRONMENT_LABEL: Readonly<Record<Environment, string>> = {
 };
 
 const ENVIRONMENT_HELP: Readonly<Record<Environment, string>> = {
-  production: "Reads only: Twigo sends no change until you unlock it.",
+  production: "Twigo sends no change until you unlock it.",
   staging: "Every change and exec asks first.",
   development:
     "Changes go through, with a confirmation for what cannot be undone.",

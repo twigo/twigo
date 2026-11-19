@@ -994,6 +994,12 @@ test("the variant that picks asks in quick access, titled with the question", as
       "development",
       "local",
     ]);
+    expect(pick?.items.map((item) => item.description)).toEqual([
+      "Twigo sends no change until you unlock it.",
+      "Every change and exec asks first.",
+      "Changes go through, with a confirmation for what cannot be undone.",
+      "Changes go through, with a confirmation for what cannot be undone.",
+    ]);
     expect(workbench.operations.marking).toBeUndefined();
     act(() => {
       pick?.resolve(pick.items.find((item) => item.id === "development"));
