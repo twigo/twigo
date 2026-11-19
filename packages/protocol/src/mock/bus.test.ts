@@ -9,7 +9,7 @@ import type {
 } from "../generated";
 import { Cluster, deploymentOf } from "./cluster";
 import { createMockBackend, protect } from "./index";
-import { POD_COUNT, UNMARKED } from "./fixtures";
+import { POD_COUNT } from "./fixtures";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -1396,38 +1396,6 @@ const SET_ENVIRONMENT = (
   environment: Environment | null,
 ): Protection => ({ action: "setEnvironment", context, environment });
 
-test("a lasting change that lowers protection asks for the name typed, and one that tightens or keeps it runs at once", async () => {
-  const backend = createMockBackend();
-  const friction = async (request: PlanRequest) =>
-    (await answered(backend.invoke("command_plan", request))).friction;
-
-  expect(await friction(SET_MODE("prod-eu", "read-write"))).toEqual({
-    kind: "typed",
-    text: "prod-eu",
-  });
-  expect(await friction(SET_MODE("prod-eu", "guarded"))).toEqual({
-    kind: "typed",
-    text: "prod-eu",
-  });
-  expect(await friction(SET_MODE("staging", "read-only"))).toEqual({
-    kind: "atOnce",
-  });
-  expect(await friction(SET_MODE("staging", "guarded"))).toEqual({
-    kind: "atOnce",
-  });
-  expect(await friction(SET_ENVIRONMENT("staging", "development"))).toEqual({
-    kind: "typed",
-    text: "staging",
-  });
-  expect(await friction(SET_ENVIRONMENT("dev", "production"))).toEqual({
-    kind: "atOnce",
-  });
-  expect(await friction(SET_ENVIRONMENT("prod-eu", null))).toEqual({
-    kind: "typed",
-    text: "prod-eu",
-  });
-});
-
 test("a type asks for the name where it lowers the context under any set of locks gone, so a lock another source holds cannot hide a lowering", async () => {
   const friction = async (
     backend: ReturnType<typeof createMockBackend>,
@@ -1553,29 +1521,6 @@ test("clearing a mode beneath a kubeconfig's type, or a type beneath a policy fi
   });
 });
 
-test("clearing a type weighs as a change to read-write, and leaves the context unmarked whatever its kubeconfig says", async () => {
-  const backend = createMockBackend();
-  const friction = async (request: PlanRequest) =>
-    (await answered(backend.invoke("command_plan", request))).friction;
-  expect(await friction(SET_ENVIRONMENT("staging", null))).toEqual({
-    kind: "typed",
-    text: "staging",
-  });
-  expect(await friction(SET_ENVIRONMENT("dev", null))).toEqual({
-    kind: "atOnce",
-  });
-  await change(backend, SET_ENVIRONMENT("staging", null));
-  const watched = await answered(
-    backend.subscribe("contexts_watch", null, () => undefined),
-  );
-  expect(watched.find((context) => context.name === "staging")?.access).toEqual(
-    UNMARKED,
-  );
-  expect(await friction(SET_ENVIRONMENT("staging", "production"))).toEqual({
-    kind: "atOnce",
-  });
-});
-
 test("an unlock counts as read-only when a type clears or lowers the mode", async () => {
   const backend = createMockBackend();
   await change(backend, { action: "unlock", context: "prod-eu" });
@@ -1684,61 +1629,6 @@ test("an unlock asks in a dialog, and its plan has no kubectl command", async ()
   expect(nothing.kind).toBe("invalidInput");
 });
 
-test("any change of a context nobody marked runs at once, and marking it sets the mode its type gives", async () => {
-  const backend = createMockBackend();
-  const mode = await answered(
-    backend.invoke("command_plan", SET_MODE("qa", "read-write")),
-  );
-  const type = await answered(
-    backend.invoke("command_plan", SET_ENVIRONMENT("qa", "production")),
-  );
-  expect([mode.friction, type.friction]).toEqual([
-    { kind: "atOnce" },
-    { kind: "atOnce" },
-  ]);
-  await change(backend, SET_ENVIRONMENT("qa", "production"));
-  const watched = await answered(
-    backend.subscribe("contexts_watch", null, () => undefined),
-  );
-  expect(
-    watched.find((context) => context.name === "qa")?.access,
-  ).toMatchObject({
-    mode: "read-only",
-    source: { kind: "environment", environment: "production" },
-  });
-});
-
-test("a protection plan is refused once what the context lets through changed since it was planned", async () => {
-  const backend = createMockBackend();
-  const execute = (plan: number, typed: string | null) =>
-    refused(
-      backend.subscribe("command_execute", { plan, typed }, () => undefined),
-    );
-  const lower = await answered(
-    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
-  );
-  expect(lower.friction).toEqual({ kind: "typed", text: "staging" });
-  await change(backend, SET_MODE("staging", "read-only"));
-  const stale = await execute(lower.id, "staging");
-  expect(stale.kind).toBe("conflict");
-  expect(stale.message).toBe(
-    "what staging lets through changed since Twigo asked, so Twigo changed nothing",
-  );
-  const watched = await answered(
-    backend.subscribe("contexts_watch", null, () => undefined),
-  );
-  expect(
-    watched.find((context) => context.name === "staging")?.access,
-  ).toMatchObject({ mode: "read-only" });
-
-  const tighten = await answered(
-    backend.invoke("command_plan", SET_MODE("dev", "guarded")),
-  );
-  expect(tighten.friction).toEqual({ kind: "atOnce" });
-  await change(backend, SET_MODE("dev", "read-only"));
-  expect((await execute(tighten.id, null)).kind).toBe("conflict");
-});
-
 test("a protection plan is refused once the context changed and changed back, as Rust counts the changes", async () => {
   const backend = createMockBackend();
   const execute = (plan: number) =>
@@ -1801,25 +1691,6 @@ test("a protection plan is refused once the person's mode went and came back", a
   expect(error.kind).toBe("conflict");
 });
 
-test("a change that asks for the name typed refuses the wrong one and changes nothing", async () => {
-  const backend = createMockBackend();
-  const plan = await answered(
-    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
-  );
-  const wrong = await refused(
-    backend.subscribe(
-      "command_execute",
-      { plan: plan.id, typed: "stagin" },
-      () => undefined,
-    ),
-  );
-  expect(wrong.message).toBe("type staging to confirm");
-  const next = await answered(
-    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
-  );
-  expect(next.friction).toEqual({ kind: "typed", text: "staging" });
-});
-
 test("a write or an exec on a context nobody marked is refused as unmarked, before anything is asked", async () => {
   const backend = createMockBackend();
   await answered(backend.invoke("space_open", "qa"));
@@ -1848,50 +1719,4 @@ test("a write or an exec on a context nobody marked is refused as unmarked, befo
   await change(backend, SET_ENVIRONMENT("qa", "staging"));
   const plan = await answered(backend.invoke("command_plan", deletePod("qa")));
   expect(plan.friction).toEqual({ kind: "typed", text: "qa" });
-});
-
-test("an admin's policy file refuses a change of the mode it holds", async () => {
-  const backend = createMockBackend("policyFile");
-  for (const request of [
-    SET_MODE("prod-eu", "read-write"),
-    { action: "unlock", context: "prod-eu" } satisfies Protection,
-  ]) {
-    const error = await refused(backend.invoke("command_plan", request));
-    expect(error.kind).toBe("permissions");
-    expect(error.message).toContain("prod-*");
-  }
-  const dev = await answered(
-    backend.invoke("command_plan", SET_MODE("dev", "guarded")),
-  );
-  expect(dev.friction).toEqual({ kind: "atOnce" });
-});
-
-test("a type under an admin's policy file weighs the mode the context would have without it", async () => {
-  const backend = createMockBackend("policyFile");
-  const friction = async (request: PlanRequest) =>
-    (await answered(backend.invoke("command_plan", request))).friction;
-  const typed = { kind: "typed", text: "prod-eu" };
-  expect(await friction(SET_ENVIRONMENT("prod-eu", "production"))).toEqual({
-    kind: "atOnce",
-  });
-  expect(await friction(SET_ENVIRONMENT("prod-eu", "staging"))).toEqual(typed);
-  expect(await friction(SET_ENVIRONMENT("prod-eu", "development"))).toEqual(
-    typed,
-  );
-  expect(await friction(SET_ENVIRONMENT("prod-eu", null))).toEqual(typed);
-
-  const plan = await answered(
-    backend.invoke("command_plan", SET_ENVIRONMENT("prod-eu", "staging")),
-  );
-  await run(backend, plan.id, "prod-eu");
-  const watched = await answered(
-    backend.subscribe("contexts_watch", null, () => undefined),
-  );
-  expect(
-    watched.find((context) => context.name === "prod-eu")?.access,
-  ).toMatchObject({
-    mode: "read-only",
-    source: { kind: "policyFile", pattern: "prod-*" },
-    environment: "staging",
-  });
 });

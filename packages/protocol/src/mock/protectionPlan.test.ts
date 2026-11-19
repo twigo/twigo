@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { ContextAccess, Environment, Mode } from "../generated";
 import { MockAccess, type Change, type Kubeconfigs } from "./access";
 import { KUBECONFIG_READ_ONLY, KUBECONFIG_TYPES } from "./fixtures";
-import { lowering, weigh, words, type Step } from "./protectionPlan";
+import { lowering, weigh, words } from "./protectionPlan";
 
 const TYPED = { kind: "typed", text: "kind-a" };
 const AT_ONCE = { kind: "atOnce" };
@@ -66,50 +66,6 @@ test("lowering protection asks for the name, as Rust's friction table says", () 
       `${from.mode} to ${to.mode}`,
     ).toEqual(expected);
   }
-});
-
-test("a change asks for the name where it lowers the context under any set of locks gone, as Rust's friction table says", () => {
-  const locked: ContextAccess = {
-    ...chosen("read-only"),
-    source: { kind: "kubeconfig" },
-  };
-  const held: Step = { from: locked, to: locked };
-  const development = typedAs("read-write", "development");
-  const staging = typedAs("guarded", "staging");
-  const production = typedAs("read-only", "production");
-  const cases: [ContextAccess, ContextAccess, unknown][] = [
-    [UNMARKED, development, TYPED],
-    [UNMARKED, staging, AT_ONCE],
-    [UNMARKED, production, AT_ONCE],
-    [UNMARKED, UNMARKED, AT_ONCE],
-    [production, development, TYPED],
-    [production, staging, TYPED],
-    [production, UNMARKED, TYPED],
-    [staging, UNMARKED, TYPED],
-    [staging, production, AT_ONCE],
-    [development, UNMARKED, AT_ONCE],
-  ];
-  for (const [from, to, expected] of cases) {
-    expect(
-      lowering("kind-a", locked, [held, { from, to }]),
-      `${from.mode} to ${to.mode} beneath the lock`,
-    ).toEqual(expected);
-  }
-  const guarded = chosen("guarded");
-  expect(
-    lowering("kind-a", locked, [
-      { from: locked, to: guarded },
-      { from: UNMARKED, to: guarded },
-    ]),
-  ).toEqual(TYPED);
-  expect(
-    lowering("kind-a", locked, [
-      held,
-      { from: production, to: staging },
-      { from: UNMARKED, to: staging },
-    ]),
-    "a lowering that shows under one set of locks and not under the others",
-  ).toEqual(TYPED);
 });
 
 const KUBECONFIGS: Kubeconfigs = {

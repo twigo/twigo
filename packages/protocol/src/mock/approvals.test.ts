@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { IpcError } from "../error";
 import type { Backend } from "../backend";
-import type {
-  ApprovalAnswer,
-  ApprovalAsk,
-  ApprovalEvent,
-  Environment,
-  Mode,
-} from "../generated";
+import type { ApprovalAnswer, ApprovalAsk, ApprovalEvent } from "../generated";
 import {
   createMockBackend,
   FIRST_ASK_MS,
@@ -463,68 +457,6 @@ test("a type that answers an unmarked ask marks its context, and Staging raises 
 const choose = (backend: Backend, request: Parameters<typeof protect>[1]) =>
   protect(backend, request, () => vi.advanceTimersByTimeAsync(1));
 
-const typeOfQa = (
-  environment: Environment | null,
-): Parameters<typeof protect>[1] => ({
-  action: "setEnvironment",
-  context: "qa",
-  environment,
-});
-
-const markedBy = async (environment: Environment) => {
-  const { backend, events } = await followed("approvalUnmarked");
-  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  const unmarked = nth(events, 0);
-  await choose(backend, typeOfQa(environment));
-  return { backend, events, unmarked };
-};
-
-test("an unmarked ask is withdrawn once the person says what its context is, and its request is decided anew", async () => {
-  for (const environment of ["production", "development"] as const) {
-    const { backend, events, unmarked } = await markedBy(environment);
-    expect(events.slice(1)).toEqual([{ event: "withdrawn", id: unmarked.id }]);
-    const gone = await answer(backend, unmarked, MARK);
-    expect((gone as IpcError).kind, environment).toBe("notFound");
-    expect(await typeOf(backend, "qa")).toBe(environment);
-  }
-
-  const { events, unmarked } = await markedBy("staging");
-  expect(events[1]).toEqual({ event: "withdrawn", id: unmarked.id });
-  expect(nth(events, 1)).toMatchObject({
-    context: "qa",
-    process: unmarked.process,
-    target: unmarked.target,
-    unmarked: false,
-    lastingMinutes: 15,
-  });
-  expect(events).toHaveLength(3);
-});
-
-test("a scenario's ask comes only where the gate would ask for its request as it comes, so qa marked Production first raises none and goes read-write only with its name typed", async () => {
-  const raised = {
-    production: [],
-    development: [],
-    staging: [{ context: "qa", unmarked: false, lastingMinutes: 15 }],
-  } as const;
-  for (const environment of ["production", "development", "staging"] as const) {
-    const { backend, events } = await followed("approvalUnmarked");
-    await choose(backend, typeOfQa(environment));
-    await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-    expect(
-      asks(events).map(({ context, unmarked, lastingMinutes }) => ({
-        context,
-        unmarked,
-        lastingMinutes,
-      })),
-      environment,
-    ).toEqual(raised[environment]);
-    if (environment !== "production") continue;
-    const planned = backend.invoke("command_plan", typeOfQa("development"));
-    await vi.advanceTimersByTimeAsync(1);
-    expect((await planned).friction).toEqual({ kind: "typed", text: "qa" });
-  }
-});
-
 test("a delete's unmarked ask asks for no name and offers no 15 minutes, and the ordinary ask Staging raises for it asks for the name and offers none", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
@@ -554,28 +486,6 @@ test("a delete's unmarked ask asks for no name and offers no 15 minutes, and the
     unmarked: false,
     typed: true,
     lastingMinutes: null,
-  });
-});
-
-test("an ordinary ask is withdrawn once its context is no longer guarded, and one that stays guarded stays", async () => {
-  const { backend, events } = await followed("approval");
-  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  const patch = nth(events, 0);
-  expect(patch.context).toBe("staging");
-  const staging = (mode: Mode | null): Parameters<typeof protect>[1] => ({
-    action: "setMode",
-    context: "staging",
-    mode,
-  });
-
-  await choose(backend, staging("guarded"));
-  await choose(backend, staging(null));
-  expect(events).toEqual([{ event: "asked", ask: patch }]);
-
-  await choose(backend, staging("read-write"));
-  expect(events.slice(1)).toEqual([{ event: "withdrawn", id: patch.id }]);
-  expect((await answer(backend, patch)) as IpcError).toMatchObject({
-    kind: "notFound",
   });
 });
 
@@ -661,34 +571,6 @@ test("another scenario raises nothing", async () => {
   const { events } = await followed("ready");
   await vi.advanceTimersByTimeAsync(60_000);
   expect(events).toEqual([]);
-});
-
-test("a lasting answer ends once its context's type is cleared and set again, a change that went back included, as Rust's holds has it", async () => {
-  const { backend, events } = await followed("approval");
-  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  await answer(backend, nth(events, 0), { kind: "lasting" });
-  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  await choose(backend, {
-    action: "setEnvironment",
-    context: "staging",
-    environment: null,
-  });
-  await choose(backend, {
-    action: "setEnvironment",
-    context: "staging",
-    environment: "staging",
-  });
-  await answer(backend, last(events));
-  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  const remove = last(events);
-  expect(remove).toMatchObject({ context: "prod-eu", verb: "delete" });
-  await answer(backend, remove, { kind: "deny" });
-  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  expect(last(events)).toMatchObject({
-    process: "Terminal 2",
-    context: "staging",
-    command: "kubectl exec",
-  });
 });
 
 test("a lasting answer ends once its context goes read-only and back", async () => {

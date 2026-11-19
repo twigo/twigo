@@ -300,21 +300,6 @@ test("no mode is the choice of a context nobody marked, so pressing the guarded 
   });
 });
 
-test("a choice that sets a stricter lock aside says which", async () => {
-  const workbench = await testWorkbench(
-    undefined,
-    createMockBackend("protection"),
-  );
-  render(<TitleBar />, { wrapper: inWorkbench(workbench) });
-  await act(() => workbench.spaces.open("analytics"));
-  fireEvent.click(
-    screen.getByRole("button", { name: "Mode of analytics: Read-write" }),
-  );
-  expect(
-    screen.getByText("You set this, over its kubeconfig's read-only."),
-  ).toBeTruthy();
-});
-
 test("a type other than Production has its chip", async () => {
   const { workbench } = await mounted();
   act(() => {

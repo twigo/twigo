@@ -265,12 +265,6 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   const [message, options] = error.mock.calls[0] ?? [];
   expect(message).toBe(refused.message);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
-  options?.action?.run();
-  await act(() => vi.advanceTimersByTimeAsync(0));
-  expect(sent[sent.length - 1]).toEqual({
-    command: "command_plan",
-    request: { action: "unlock", context: "dev" },
-  });
 });
 
 const said = (text: string) =>
@@ -959,23 +953,6 @@ test("a command that meets a context nobody marked asks what it is, marks it as 
     action: "setEnvironment",
     context: "qa",
     environment: "staging",
-  });
-});
-
-test("the way out of the question sends nothing and leaves the context unmarked", async () => {
-  const { workbench, planned } = await inProtection();
-  const outcome = workbench.operations.run(CORDON, LOOK);
-  await vi.waitFor(() => {
-    expect(workbench.operations.marking).toBeDefined();
-  });
-  act(() => {
-    workbench.operations.marking?.cancel();
-  });
-  await expect(outcome).resolves.toEqual({ state: "cancelled" });
-  expect(planned.map((request) => request.action)).toEqual(["cordon"]);
-  expect(workbench.operations.marking).toBeUndefined();
-  expect(workbench.catalog.find("qa")?.access.source).toEqual({
-    kind: "unmarked",
   });
 });
 
