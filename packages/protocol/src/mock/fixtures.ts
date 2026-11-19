@@ -1,4 +1,11 @@
-import type { Column, Context, ContextAccess, Mode, Space } from "../generated";
+import type {
+  Column,
+  Context,
+  ContextAccess,
+  Environment,
+  Mode,
+  Space,
+} from "../generated";
 
 export const SPACES: Space[] = [
   { id: "prod-eu", name: "prod-eu", contexts: ["prod-eu"] },
@@ -20,6 +27,24 @@ export const KUBECONFIG_READ_ONLY: ReadonlySet<string> = new Set(["analytics"]);
 /** The modes the person chose before the app started. */
 export const CHOSEN: Readonly<Record<string, Mode>> = {
   analytics: "read-write",
+};
+
+/**
+ * The types the contexts' kubeconfigs say, where they lock: Production and
+ * Staging. A kubeconfig that says Development or Local locks nothing and
+ * marks nothing, so such a context is unmarked until the person marks it.
+ */
+export const KUBECONFIG_TYPES: Readonly<
+  Record<string, Extract<Environment, "production" | "staging">>
+> = {
+  "prod-eu": "production",
+  staging: "staging",
+};
+
+/** The types the person marked before the app started. */
+export const MARKED: Readonly<Record<string, Environment>> = {
+  dev: "development",
+  "kind-local": "local",
 };
 
 /** The spaces of the `protection` scenario: a context nobody marked, and one whose kubeconfig's lock the person set aside. */

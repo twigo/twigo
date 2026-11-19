@@ -5,10 +5,8 @@ import type {
   ApplyRequest,
   Blocked,
   ContextAccess,
-  Environment,
   Execute,
   Friction,
-  Mode,
   ModeSource,
   ObjectRef,
   OperationEvent,
@@ -22,8 +20,9 @@ import type {
   ShellKind,
   ShellTarget,
 } from "../generated";
-import { STRICTNESS, type Change, type MockAccess } from "./access";
+import type { Change, MockAccess } from "./access";
 import { side } from "./edits";
+import { lowering, words } from "./protectionPlan";
 import { counted } from "./sections";
 import {
   cordoned,
@@ -58,7 +57,7 @@ type Risk =
   | {
       /** A change of the context's protection, which asks as what it leaves says. */
       readonly kind: "protection";
-      readonly asks: (access: ContextAccess) => Friction;
+      readonly asks: () => Friction;
     };
 
 /** `twigo_policy::friction::friction`. */
@@ -67,7 +66,7 @@ function frictionOf(
   context: string,
   access: ContextAccess,
 ): Friction {
-  if (risk.kind === "protection") return risk.asks(access);
+  if (risk.kind === "protection") return risk.asks();
   if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
       ? { kind: "atOnce" }
@@ -362,7 +361,13 @@ export interface BusHost {
   /** What a context lets through, and what the person's changes of it do. */
   readonly protection: Pick<
     MockAccess,
-    "would" | "refuse" | "setMode" | "setEnvironment" | "unlock"
+    | "of"
+    | "would"
+    | "unfiled"
+    | "refuse"
+    | "setMode"
+    | "setEnvironment"
+    | "unlock"
   >;
   /** The context of a space, or none. */
   context(space: string): string | undefined;
@@ -432,39 +437,6 @@ const KINDS: Readonly<
 
 /** The characters of a generated name's suffix, as in Rust. */
 const SUFFIX = "bcdfghjklmnpqrstvwxz2456789";
-
-/** What each mode holds back, in the chip's words. */
-const MODE_WORDS: Readonly<Record<Mode, string>> = {
-  "read-write":
-    "Changes go through, with a confirmation for what cannot be undone.",
-  guarded: "Every change and exec asks first.",
-  "read-only": "Reads only: Twigo sends no change, and dry runs still work.",
-};
-
-const ENVIRONMENT_WORDS: Readonly<Record<Environment, string>> = {
-  production: "Production",
-  staging: "Staging",
-  development: "Development",
-  local: "Local",
-};
-
-/**
- * What a lasting change of a context's protection asks: its name typed when
- * it leaves the context less strict than its mode was (an unlock aside),
- * nothing when it tightens or keeps that, or when the context is unmarked, as
- * the question it answers is its friction.
- */
-function lowering(
-  context: string,
-  before: ContextAccess,
-  after: ContextAccess,
-): Friction {
-  const was = before.unlockedUntil === null ? before.mode : "read-only";
-  return before.source.kind !== "unmarked" &&
-    STRICTNESS[after.mode] < STRICTNESS[was]
-    ? { kind: "typed", text: context }
-    : { kind: "atOnce" };
-}
 
 /**
  * The command bus as `twigo-core` runs it, over the mock's cluster: the same
@@ -778,11 +750,13 @@ export class MockBus {
       case "shell":
         return this.#shell(request.target, request.kind);
       case "setMode":
-        return this.#setMode(request.context, request.mode);
+        return this.#protection(request.context, { mode: request.mode });
       case "setEnvironment":
-        return this.#setEnvironment(request.context, request.environment);
+        return this.#protection(request.context, {
+          environment: request.environment,
+        });
       case "unlock":
-        return this.#unlock(request.context);
+        return this.#protection(request.context, { unlock: true });
     }
   }
 
@@ -1719,121 +1693,55 @@ export class MockBus {
     };
   }
 
-  #setMode(context: string, mode: Mode | null): Planned {
+  /**
+   * A change of a context's own protection (`actions::protection` in Rust):
+   * refused where the admin's policy file sets the mode, a type excepted, as
+   * it only names and colours the context there, and where there is nothing
+   * to unlock. A type under the file weighs the mode the context would have
+   * without it, since the type outlives the file's entry.
+   */
+  #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
-    protection.refuse(context);
-    const change: Change = { mode };
-    const after = protection.would(context, change);
-    return {
-      plan: {
-        context,
-        question:
-          mode === null
-            ? `Go back to the default mode of ${context}?`
-            : `Set ${context} to ${mode}?`,
-        confirm: mode === null ? "Use the default" : `Set ${mode}`,
-        destructive: false,
-        consequences: [
-          mode === null
-            ? `${context} is ${after.mode}${setBy(after.source)}.`
-            : MODE_WORDS[mode],
-          "The audit log records the change.",
-        ],
-        affected: [],
-        kubectl: null,
-        doing: `Setting the mode of ${context}`,
-      },
-      risk: {
-        kind: "protection",
-        asks: (now) =>
-          lowering(context, now, protection.would(context, change)),
-      },
-      run: (tell) => {
-        protection.setMode(context, mode);
-        tell({
-          state: "done",
-          text: `Set the mode of ${context}${mode === null ? " to its default" : ` to ${mode}`}`,
-          undoUntil: null,
-        });
-      },
-    };
-  }
-
-  #setEnvironment(context: string, environment: Environment | null): Planned {
-    const { protection } = this.host;
-    const change: Change = { environment };
-    const after = protection.would(context, change);
-    const type =
-      environment === null ? undefined : ENVIRONMENT_WORDS[environment];
-    return {
-      plan: {
-        context,
-        question:
-          type === undefined
-            ? `Remove the type of ${context}?`
-            : `Mark ${context} as ${type}?`,
-        confirm: type === undefined ? "Remove type" : `Mark as ${type}`,
-        destructive: false,
-        consequences: [
-          `${context} is ${after.mode}${setBy(after.source)} then.`,
-          "The audit log records the change.",
-        ],
-        affected: [],
-        kubectl: null,
-        doing: `Marking ${context}`,
-      },
-      risk: {
-        kind: "protection",
-        asks: (now) =>
-          lowering(context, now, protection.would(context, change)),
-      },
-      run: (tell) => {
-        protection.setEnvironment(context, environment);
-        tell({
-          state: "done",
-          text:
-            type === undefined
-              ? `Removed the type of ${context}`
-              : `Marked ${context} as ${type}`,
-          undoUntil: null,
-        });
-      },
-    };
-  }
-
-  #unlock(context: string): Planned {
-    const { protection } = this.host;
-    protection.refuse(context);
-    const now = this.host.access(context);
-    if (now.mode !== "read-only" && now.unlockedUntil === null) {
+    if (!("environment" in change)) protection.refuse(context);
+    const before = protection.of(context);
+    if (
+      "unlock" in change &&
+      before.mode !== "read-only" &&
+      before.unlockedUntil === null
+    ) {
       throw new IpcError(
         "invalidInput",
-        `${context} is ${now.mode}, so there is nothing to unlock`,
+        `${context} is ${before.mode}, so there is nothing to unlock`,
       );
     }
+    const said = words(
+      context,
+      change,
+      before,
+      protection.would(context, change),
+    );
+    const leaves = protection.unfiled(context, change);
+    const asks = (): Friction =>
+      "unlock" in change
+        ? { kind: "confirm" }
+        : lowering(context, protection.unfiled(context), leaves);
     return {
       plan: {
         context,
-        question: `Unlock ${context} for 15 minutes?`,
-        confirm: "Unlock for 15 minutes",
+        question: said.question,
+        confirm: said.confirm,
         destructive: false,
-        consequences: [
-          "Every change and exec asks first.",
-          "It locks again by itself, or when you lock it.",
-          "The audit log records the unlock.",
-        ],
+        consequences: said.consequences,
         affected: [],
         kubectl: null,
-        doing: `Unlocking ${context}`,
+        doing: said.doing,
       },
-      risk: { kind: "protection", asks: () => ({ kind: "confirm" }) },
+      risk: { kind: "protection", asks },
       run: (tell) => {
-        protection.unlock(context);
-        tell({
-          state: "done",
-          text: `Unlocked ${context} for 15 minutes`,
-          undoUntil: null,
-        });
+        if ("unlock" in change) protection.unlock(context);
+        else if ("mode" in change) protection.setMode(context, change.mode);
+        else protection.setEnvironment(context, change.environment);
+        tell({ state: "done", text: said.done, undoUntil: null });
       },
     };
   }

@@ -8,7 +8,13 @@ import type {
   Mode,
   ModeSource,
 } from "../generated";
-import { CHOSEN, CONTEXTS, KUBECONFIG_READ_ONLY } from "./fixtures";
+import {
+  CHOSEN,
+  CONTEXTS,
+  KUBECONFIG_READ_ONLY,
+  KUBECONFIG_TYPES,
+  MARKED,
+} from "./fixtures";
 
 const UNLOCK_MS = 15 * 60 * 1000;
 const POLICY_FILE = "/Library/Application Support/Twigo/policy.json";
@@ -28,15 +34,19 @@ export const STRICTNESS: Readonly<Record<Mode, number>> = {
   "read-only": 2,
 };
 
-/** A change of what the person marked, to see what a context would be. */
+/** A change of what the person marked, or an unlock, to see what a context would be. */
 export type Change =
-  { readonly mode: Mode | null } | { readonly environment: Environment | null };
+  | { readonly mode: Mode | null }
+  | { readonly environment: Environment | null }
+  | { readonly unlock: true };
 
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(contexts: Context[]) => void>();
   readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
-  readonly #environments = new Map<string, Environment | null>();
+  readonly #environments = new Map<string, Environment | null>(
+    Object.entries(MARKED),
+  );
   readonly #unlocks = new Map<string, number>();
   /** Contexts a policy file turned read-only after the app started. */
   readonly #filed = new Set<string>();
@@ -102,9 +112,14 @@ export class MockAccess {
     return this.#access(fixture(name));
   }
 
-  /** What a context would let through once `change` is made, an unlock ended. */
+  /** What a context would let through once `change` is made, an unlock it does not make ended. */
   would(name: string, change: Change): ContextAccess {
     return this.#access(fixture(name), change);
+  }
+
+  /** What a context would let through where no admin's policy file set its mode, now or once `change` is made. */
+  unfiled(name: string, change?: Change): ContextAccess {
+    return this.#access(fixture(name), change, false);
   }
 
   /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
@@ -130,20 +145,25 @@ export class MockAccess {
     for (const watcher of this.#watchers) watcher(contexts);
   }
 
-  #access(context: Context, change?: Change): ContextAccess {
+  #access(context: Context, change?: Change, filed = true): ContextAccess {
     const { name } = context;
     const marked =
       change && "environment" in change
         ? change.environment
         : this.#environments.get(name);
     const environment =
-      marked === undefined ? context.access.environment : marked;
+      marked === undefined ? (KUBECONFIG_TYPES[name] ?? null) : marked;
     const chosen =
       change && "mode" in change
         ? (change.mode ?? undefined)
         : this.#modes.get(name);
-    const { mode, source } = this.#resolve(name, environment, chosen);
-    const until = change ? undefined : this.#unlocks.get(name);
+    const { mode, source } = this.#resolve(name, environment, chosen, filed);
+    const until =
+      change === undefined
+        ? this.#unlocks.get(name)
+        : "unlock" in change
+          ? Date.now() + UNLOCK_MS
+          : undefined;
     const unlocked =
       until !== undefined &&
       until > Date.now() &&
@@ -162,8 +182,9 @@ export class MockAccess {
     name: string,
     environment: Environment | null,
     chosen: Mode | undefined,
+    filed: boolean,
   ): { mode: Mode; source: ModeSource } {
-    if (this.#policyFileSets(name)) {
+    if (filed && this.#policyFileSets(name)) {
       return {
         mode: "read-only",
         source: {
