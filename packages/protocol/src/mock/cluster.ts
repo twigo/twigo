@@ -532,8 +532,12 @@ export class Cluster {
   #waited(pod: Pod, now: number): number {
     let restarts = restartCount(pod);
     while (waits(pod, restarts) <= now) {
-      pod.lastRestart = (pod.lastRestart ?? now) + backOff(restarts);
-      restarts++;
+      const last = pod.lastRestart ?? now;
+      const wait = backOff(restarts);
+      const steps =
+        wait < BACK_OFF_CAP ? 1 : Math.max(1, Math.floor((now - last) / wait));
+      pod.lastRestart = last + steps * wait;
+      restarts += steps;
     }
     return restarts;
   }
@@ -668,6 +672,8 @@ const MINUTE = 60_000;
 /** How long after its pod is made the kubelet starts the pod's first container. */
 export const CONTAINER_START = 2 * SECOND;
 
+const BACK_OFF_CAP = 300 * SECOND;
+
 /**
  * How long the kubelet waits to start a container again after a run that
  * had `restarts` restarts exits: 10 s, doubled at each, to 5 minutes
@@ -676,7 +682,16 @@ export const CONTAINER_START = 2 * SECOND;
  * The first run, which has none, is followed by the next at once.
  */
 export function backOff(restarts: number): number {
-  return Math.min(300, 10 * 2 ** (restarts - 1)) * SECOND;
+  return Math.min(BACK_OFF_CAP, 10 * SECOND * 2 ** (restarts - 1));
+}
+
+/** The back-offs of a container's first `exits` exits together: they double up to the cap, then stay at it. */
+function backedOff(exits: number): number {
+  let total = 0;
+  let exit = 1;
+  for (; exit <= exits && backOff(exit) < BACK_OFF_CAP; exit++)
+    total += backOff(exit);
+  return total + Math.max(0, exits - exit + 1) * BACK_OFF_CAP;
 }
 
 /**
@@ -685,16 +700,19 @@ export function backOff(restarts: number): number {
  * kubelet waits its back-off before every run but the first two.
  */
 function leastTaken(restarts: number): number {
-  let taken = CONTAINER_START;
-  for (let exit = 1; exit < restarts; exit++) taken += backOff(exit);
-  return taken;
+  return CONTAINER_START + backedOff(restarts - 1);
 }
 
 /** How many of `wanted` restarts a pod has had time for in `span`. */
 function restartsIn(span: number, wanted: number): number {
-  let restarts = wanted;
-  while (restarts > 0 && leastTaken(restarts) > span) restarts--;
-  return restarts;
+  let fits = 0;
+  let over = wanted;
+  while (fits < over) {
+    const middle = Math.ceil((fits + over) / 2);
+    if (leastTaken(middle) <= span) fits = middle;
+    else over = middle - 1;
+  }
+  return fits;
 }
 
 /** When a pod's last restart was, `age` before `now`, but not before its first container could have exited `restarts` times. */

@@ -223,6 +223,30 @@ test("the churn keeps what the generator holds, through ten simulated minutes", 
   }
 });
 
+test("a crash loop starts again at each end of its back-off, however far the clock jumps", () => {
+  const start = Date.UTC(2026, 10, 3);
+  const cluster = new Cluster("prod-eu", 1000, start);
+  const loops = cluster.pods
+    .filter((pod) => pod.status === "CrashLoopBackOff")
+    .map((pod) => ({
+      pod,
+      restarts: restartCount(pod),
+      last: pod.lastRestart ?? NaN,
+    }));
+  expect(loops.length).toBeGreaterThan(0);
+  const now = start + 400 * DAY;
+  cluster.change(cluster.pods.length, now);
+  expect([...holdsWhatTheGeneratorHolds(cluster)]).toContain(
+    "CrashLoopBackOff",
+  );
+  for (const { pod, restarts, last } of loops) {
+    if (pod.status !== "CrashLoopBackOff") continue;
+    let [count, at] = [restarts, last];
+    while (at + backOff(count) <= now) at += backOff(count++);
+    expect([restartCount(pod), pod.lastRestart]).toEqual([count, at]);
+  }
+});
+
 test("the churn does not restart or crash a pod before its first container could have exited", () => {
   const start = Date.UTC(2026, 10, 3);
   const cluster = new Cluster("prod-eu", 400, start);
