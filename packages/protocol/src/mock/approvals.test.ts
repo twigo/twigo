@@ -556,6 +556,38 @@ test("a type answers an unmarked ask only while its context is still unmarked, w
   });
 });
 
+test("a delete's unmarked ask asks for no name and offers no 15 minutes, and the ordinary ask Staging raises for it asks for the name and offers none", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, nth(events, 1));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = nth(events, 2);
+  expect(remove).toMatchObject({ context: "prod-eu", verb: "delete" });
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "prod-eu",
+    environment: null,
+  });
+  const unmarked = nth(events, 3);
+  expect(unmarked).toMatchObject({
+    context: "prod-eu",
+    target: remove.target,
+    unmarked: true,
+    typed: false,
+    lastingMinutes: null,
+  });
+  expect(await answer(backend, unmarked, MARK)).toBeUndefined();
+  expect(nth(events, 4)).toMatchObject({
+    context: "prod-eu",
+    target: remove.target,
+    unmarked: false,
+    typed: true,
+    lastingMinutes: null,
+  });
+});
+
 test("an ordinary ask is withdrawn once its context is no longer guarded, and one that stays guarded stays", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
