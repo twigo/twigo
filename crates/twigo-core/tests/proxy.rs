@@ -61,7 +61,9 @@ type FakeBody = UnsyncBoxBody<Bytes, Infallible>;
 /// write of one it answers with a warning that quotes a value. A watch with
 /// `flood=1` in its query it answers with data as fast as it is read. A
 /// write's body it reads as kube-apiserver does, and names a create by its
-/// `generateName` as kube-apiserver would.
+/// `generateName` as kube-apiserver would. The APIService of
+/// `metrics.k8s.io` names a service, that of `example.com` it refuses to
+/// show, and any other names none.
 #[derive(Clone)]
 struct Fake {
     address: SocketAddr,
@@ -136,6 +138,13 @@ async fn answer(
         uri: request.uri().to_string(),
         headers: request.headers().clone(),
     });
+    if let Some(name) = request
+        .uri()
+        .path()
+        .strip_prefix("/apis/apiregistration.k8s.io/v1/apiservices/")
+    {
+        return Ok(api_service(name));
+    }
     let query = request.uri().query().unwrap_or_default();
     if query.contains("slow=1") && !query.contains("dryRun") {
         tokio::time::sleep(SLOW).await;
@@ -237,6 +246,31 @@ async fn answer(
         headers.insert("warning", warning.parse().unwrap());
     }
     Ok(response)
+}
+
+fn api_service(name: &str) -> Response<FakeBody> {
+    let (version, group) = name.split_once('.').unwrap();
+    if group == "example.com" {
+        let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 403, "reason": "Forbidden" });
+        let mut response = Response::new(body(status.to_string()));
+        *response.status_mut() = StatusCode::FORBIDDEN;
+        return response;
+    }
+    let mut service = json!({
+        "apiVersion": "apiregistration.k8s.io/v1",
+        "kind": "APIService",
+        "metadata": { "name": name },
+        "spec": { "group": group, "version": version, "groupPriorityMinimum": 100, "versionPriority": 100 },
+    });
+    if group == "metrics.k8s.io" {
+        service["spec"]["service"] =
+            json!({ "namespace": "kube-system", "name": "metrics-server", "port": 443 });
+    }
+    let mut response = Response::new(body(service.to_string()));
+    response
+        .headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
+    response
 }
 
 /// A value of the Secret `s` as the fake stores it: `secret-value` in
@@ -952,6 +986,66 @@ async fn in_guarded_a_write_with_no_window_to_ask_is_denied_and_not_sent() {
     let process = Process::start(&core, None).await;
     let (response, _connection) = send(process.at(), get(&process)).await;
     assert_eq!(response.status(), StatusCode::OK, "reads need no approval");
+}
+
+#[tokio::test]
+async fn a_dry_run_kube_apiserver_may_not_serve_itself_is_a_write_and_no_ask_dry_runs_it() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let dry_run = |path: &str| {
+        process
+            .request("PATCH", "kind-a", &format!("{path}?dryRun=All"))
+            .header("content-type", "application/merge-patch+json")
+            .body(json_body(&json!({})))
+            .unwrap()
+    };
+    let aggregated = "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods/p";
+    let unread = "/apis/example.com/v1/namespaces/a/widgets/w";
+    for (path, reason) in [
+        (aggregated, NoDiff::Aggregated),
+        (unread, NoDiff::Unverified),
+    ] {
+        core.policy
+            .set_mode("kind-a", Some(Mode::ReadOnly))
+            .unwrap();
+        let (status, _) = refused(process.at(), dry_run(path)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+
+        core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+        let sending = tokio::spawn(send(process.at(), dry_run(path)));
+        let ask = asked(&mut events).await;
+        assert_eq!(ask.class, RequestClass::Write, "{path}");
+        assert_eq!(
+            ask.detail,
+            ApprovalDetail::Unknown {
+                reason,
+                body: Some("{}".to_owned()),
+            },
+            "{path}"
+        );
+        answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+        assert_eq!(sending.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+    }
+    let seen: Vec<String> = fake
+        .seen()
+        .iter()
+        .map(|seen| format!("{} {}", seen.method, seen.uri))
+        .collect();
+    let read = |name: &str| format!("GET /apis/apiregistration.k8s.io/v1/apiservices/{name}");
+    let unreadable = read("v1.example.com");
+    assert_eq!(
+        seen,
+        [
+            read("v1beta1.metrics.k8s.io"),
+            unreadable.clone(),
+            unreadable.clone(),
+            unreadable
+        ],
+        "an answer read is kept, a refusal is not, and no dry run is sent"
+    );
 }
 
 #[tokio::test]

@@ -65,10 +65,10 @@ async fn serve(
     parts.headers = headers::request(&parts.headers, upgrading);
     parts.extensions = http::Extensions::new();
     let request = Request::from_parts(parts, ());
-    let attributes = Attributes::of(&request);
-    let (parts, ()) = request.into_parts();
     let reach = upgrading
-        .then(|| Reach::of(&parts.method, &attributes).ok_or_else(Refusal::no_upgrade))
+        .then(|| {
+            Reach::of(request.method(), &Attributes::of(&request)).ok_or_else(Refusal::no_upgrade)
+        })
         .transpose()?;
     let body = if upgrading {
         Bytes::new()
@@ -77,6 +77,8 @@ async fn serve(
     };
 
     let (clients, actor) = core.proxy.clients(core, &holder).await?;
+    let attributes = actor.attributes(&request).await;
+    let (parts, ()) = request.into_parts();
     // Before anything is sent, so a relock meanwhile reaches what it opens.
     let changes = Changes::new(&core.policy, &core.catalog.subscribe());
     let decided = decide(core, &holder, &actor, &attributes, &parts, &body, reach).await?;
@@ -281,7 +283,7 @@ async fn decide<'a>(
             command,
             impersonate: impersonate(&parts.headers),
         };
-        let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
+        let detail = detail::of(actor, attributes, parts, body);
         return match core.approvals.decide(asking, detail).await {
             Outcome::Approved { approval, once } => Ok(Decided {
                 approval: Some(approval),

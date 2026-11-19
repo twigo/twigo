@@ -12,6 +12,7 @@ pub mod friction;
 mod gate;
 mod policy;
 pub mod redact;
+mod served;
 
 pub use actor::Actor;
 pub use approval::Approval;
@@ -22,3 +23,4 @@ pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
 pub use policy::{
     Change, Choices, Metadata, PlannedChange, Policy, ProviderLock, Refused, TypeLock, UNLOCK,
 };
+pub use served::{Served, Server, api_service};

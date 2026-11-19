@@ -923,6 +923,56 @@ async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn read_only_and_a_context_nobody_marked_preview_no_edit_of_a_group_another_server_serves() {
+    let cluster = Cluster::connect().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _) = core(dir.path(), &cluster).await;
+    let live = json!({
+        "apiVersion": "metrics.k8s.io/v1beta1",
+        "kind": "PodMetrics",
+        "metadata": { "name": "p", "namespace": "kube-system", "resourceVersion": "1" },
+    });
+    let mut edited = live.clone();
+    edited["metadata"]["labels"] = json!({ "mine": "1" });
+    let target = reference(
+        "metrics.k8s.io",
+        "v1beta1",
+        "pods",
+        Some("kube-system"),
+        "p",
+    );
+    let why = "metrics.k8s.io/v1beta1 is served by another server than the cluster's API server, which may not honour a dry run";
+    let context = &cluster.context;
+    core.policy.set_environment(context, None).unwrap();
+    let request = || {
+        edit(
+            &cluster,
+            target.clone(),
+            &live,
+            edited.clone(),
+            false,
+            vec![],
+        )
+    };
+    let refused = core.apply_preview("main", request()).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions, "{refused:?}");
+    assert_eq!(
+        refused.message,
+        format!(
+            "{why}, so Twigo cannot preview this edit in {context} until someone says what it is"
+        )
+    );
+    core.policy.set_mode(context, Some(Mode::ReadOnly)).unwrap();
+    let refused = core.apply_preview("main", request()).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions, "{refused:?}");
+    assert_eq!(
+        refused.message,
+        format!("{why}, so Twigo cannot preview this edit in {context}, which is read-only")
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn a_preview_applies_once_and_belongs_to_its_window() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("apply-once").await;

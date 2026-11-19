@@ -14,7 +14,7 @@ use twigo_ipc::{
     RequestClass,
 };
 
-use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile};
+use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile, Served};
 
 /// How long an unlock lasts.
 pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
@@ -168,6 +168,7 @@ pub struct Policy {
     held: Mutex<Held>,
     changes: watch::Sender<u64>,
     audit: Audit,
+    served: Served,
 }
 
 #[derive(Clone)]
@@ -288,6 +289,7 @@ impl Policy {
             }),
             changes: watch::Sender::new(0),
             audit,
+            served: Served::default(),
         })
     }
 
@@ -295,6 +297,12 @@ impl Policy {
     /// bus what a person confirmed.
     pub fn audit(&self) -> &Audit {
         &self.audit
+    }
+
+    /// Who serves each group-version that a sender has read, which decides
+    /// whether a dry run to it is one.
+    pub fn served(&self) -> &Served {
+        &self.served
     }
 
     /// The gate of `actor` on `context`, for clients built from what the

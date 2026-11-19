@@ -11,7 +11,9 @@ use http::{Method, Request};
 use jiff::{SignedDuration, Timestamp};
 use tower::{ServiceBuilder, ServiceExt};
 use twigo_ipc::{BlockReason, Mode, RequestClass};
-use twigo_policy::{Actor, Approval, Attributes, Audit, Choices, Metadata, Policy, PolicyFile};
+use twigo_policy::{
+    Actor, Approval, Attributes, Audit, Choices, Metadata, Policy, PolicyFile, Server,
+};
 
 const PODS: &str = "/api/v1/namespaces/a/pods";
 const POD: &str = "/api/v1/namespaces/a/pods/p";
@@ -34,6 +36,9 @@ struct Row {
     uri: &'static str,
     accept: Option<&'static str>,
     upgrade: bool,
+    /// Who serves the group-version a dry run outside the core group goes
+    /// to, as read; none where it could not be read.
+    served: Option<Server>,
     class: RequestClass,
     /// The UI's answer in each of [`COLUMNS`].
     answers: [Answer; 4],
@@ -52,6 +57,7 @@ fn row(
         uri,
         accept: None,
         upgrade: false,
+        served: Some(Server::Itself),
         class,
         answers,
     }
@@ -77,6 +83,7 @@ fn table() -> Vec<Row> {
         upgrade: true,
         ..row
     };
+    let serving = |served, row: Row| Row { served, ..row };
     vec![
         // get, list, watch, logs, events, discovery
         row("get", get.clone(), POD, Read, OPEN),
@@ -194,6 +201,36 @@ fn table() -> Vec<Row> {
             "/apis/apps/v1/namespaces/a/deployments/d?dryRun=All&fieldManager=twigo",
             DryRun,
             OPEN,
+        ),
+        serving(
+            Some(Server::Aggregated),
+            row(
+                "a dry run to a group an APIService hands to another server",
+                patch.clone(),
+                "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods/p?dryRun=All",
+                Write,
+                WRITE_OR_EXEC,
+            ),
+        ),
+        serving(
+            None,
+            row(
+                "a dry run to a group whose APIService cannot be read",
+                post.clone(),
+                "/apis/example.com/v1/namespaces/a/widgets?dryRun=All",
+                Write,
+                WRITE_OR_EXEC,
+            ),
+        ),
+        serving(
+            Some(Server::Aggregated),
+            row(
+                "a dry run to the core group, whatever is said of it",
+                post.clone(),
+                "/api/v1/namespaces/a/configmaps?dryRun=All",
+                DryRun,
+                OPEN,
+            ),
         ),
         row(
             "a delete whose body the server would read instead of its dryRun",
@@ -867,7 +904,7 @@ fn unmarked() -> std::sync::Arc<Policy> {
 #[test]
 fn every_row_has_its_class_and_each_mode_its_answer() {
     for row in table() {
-        let attributes = Attributes::of(&request(&row));
+        let attributes = Attributes::served(&request(&row), |_, _| row.served);
         assert_eq!(attributes.class, row.class, "{}: {}", row.what, row.uri);
         for (column, answer) in COLUMNS.into_iter().zip(row.answers) {
             let got = column.policy().authorize("c", &attributes, Actor::Ui);
@@ -1230,6 +1267,27 @@ fn approvals_table() -> Vec<Approved> {
             DryRun,
             [EVERY; 4],
         ),
+        approved(
+            "a dry run to a group an APIService hands to another server",
+            Method::PATCH,
+            "/apis/metrics.k8s.io/v1beta1/namespaces/a/pods/p?dryRun=All",
+            Write,
+            [EVERY, APPROVED, NONE, NONE],
+        ),
+        approved(
+            "a dry run to a group whose APIService cannot be read",
+            Method::POST,
+            "/apis/example.com/v1/namespaces/a/widgets?dryRun=All",
+            Write,
+            [EVERY, APPROVED, NONE, NONE],
+        ),
+        approved(
+            "a dry run to a group kube-apiserver serves itself",
+            Method::PATCH,
+            "/apis/apps/v1/namespaces/a/deployments/d?dryRun=All",
+            DryRun,
+            [EVERY; 4],
+        ),
         approved("read Secrets", Method::GET, SECRETS, SecretRead, [EVERY; 4]),
         upgrading(approved(
             "port-forward",
@@ -1339,10 +1397,19 @@ async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_cov
             request = request.header(UPGRADE, "websocket");
         }
         let sent = request.body(()).unwrap();
-        let attributes = Attributes::of(&sent);
-        assert_eq!(attributes.class, row.class, "{}", row.what);
         for (column, answers) in COLUMNS.into_iter().zip(row.answers) {
             let policy = column.policy();
+            let served = policy.served();
+            served.keep(
+                "c",
+                Some(0),
+                "metrics.k8s.io",
+                "v1beta1",
+                Server::Aggregated,
+            );
+            served.keep("c", Some(0), "apps", "v1", Server::Itself);
+            let attributes = policy.gate("c", Actor::Terminal).attributes(&sent);
+            assert_eq!(attributes.class, row.class, "{} in {column:?}", row.what);
             let approvals = approvals_for(&attributes);
             for ((approval, answer), named) in approvals.into_iter().zip(answers).zip(APPROVALS) {
                 let reached = Arc::new(Mutex::new(0));

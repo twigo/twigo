@@ -41,7 +41,6 @@ pub(crate) struct Approvals {
     policy: Arc<Policy>,
     catalog: watch::Receiver<Option<Arc<Contexts>>>,
     state: Mutex<State>,
-    served: detail::Served,
 }
 
 #[derive(Default)]
@@ -184,7 +183,6 @@ impl Approvals {
             policy,
             catalog,
             state: Mutex::default(),
-            served: detail::Served::default(),
         }
     }
 
