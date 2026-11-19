@@ -1427,6 +1427,58 @@ test("a lasting change that lowers protection asks for the name typed, and one t
   });
 });
 
+test("a type weighs the mode a context would have with no lock but the type, so a lock another source holds cannot hide a lowering", async () => {
+  const friction = async (
+    backend: ReturnType<typeof createMockBackend>,
+    request: PlanRequest,
+  ) => (await answered(backend.invoke("command_plan", request))).friction;
+  const environments = [
+    "production",
+    "staging",
+    "development",
+    "local",
+    null,
+  ] as const;
+  const atOnce = { kind: "atOnce" };
+
+  const kubeconfig = createMockBackend();
+  for (const environment of environments) {
+    expect(
+      await friction(kubeconfig, SET_ENVIRONMENT("analytics", environment)),
+    ).toEqual(atOnce);
+  }
+  await change(kubeconfig, SET_MODE("analytics", null));
+  expect(
+    await Promise.all(
+      environments.map((environment) =>
+        friction(kubeconfig, SET_ENVIRONMENT("analytics", environment)),
+      ),
+    ),
+  ).toEqual([
+    atOnce,
+    atOnce,
+    { kind: "typed", text: "analytics" },
+    { kind: "typed", text: "analytics" },
+    atOnce,
+  ]);
+
+  const filed = createMockBackend("policyFile");
+  await change(filed, SET_ENVIRONMENT("prod-eu", null));
+  expect(
+    await Promise.all(
+      environments.map((environment) =>
+        friction(filed, SET_ENVIRONMENT("prod-eu", environment)),
+      ),
+    ),
+  ).toEqual([
+    atOnce,
+    atOnce,
+    { kind: "typed", text: "prod-eu" },
+    { kind: "typed", text: "prod-eu" },
+    atOnce,
+  ]);
+});
+
 test("clearing a type weighs as a change to read-write, and leaves the context unmarked whatever its kubeconfig says", async () => {
   const backend = createMockBackend();
   const friction = async (request: PlanRequest) =>
@@ -1571,22 +1623,35 @@ test("any change of a context nobody marked runs at once, and marking it sets th
   });
 });
 
-test("a plan that tightened asks for more once the mode it ran against moved", async () => {
+test("a protection plan is refused once what the context lets through changed since it was planned", async () => {
   const backend = createMockBackend();
+  const execute = (plan: number, typed: string | null) =>
+    refused(
+      backend.subscribe("command_execute", { plan, typed }, () => undefined),
+    );
+  const lower = await answered(
+    backend.invoke("command_plan", SET_MODE("staging", "read-write")),
+  );
+  expect(lower.friction).toEqual({ kind: "typed", text: "staging" });
+  await change(backend, SET_MODE("staging", "read-only"));
+  const stale = await execute(lower.id, "staging");
+  expect(stale.kind).toBe("conflict");
+  expect(stale.message).toBe(
+    "what staging lets through changed since Twigo asked, so Twigo changed nothing",
+  );
+  const watched = await answered(
+    backend.subscribe("contexts_watch", null, () => undefined),
+  );
+  expect(
+    watched.find((context) => context.name === "staging")?.access,
+  ).toMatchObject({ mode: "read-only" });
+
   const tighten = await answered(
     backend.invoke("command_plan", SET_MODE("dev", "guarded")),
   );
   expect(tighten.friction).toEqual({ kind: "atOnce" });
   await change(backend, SET_MODE("dev", "read-only"));
-  const error = await refused(
-    backend.subscribe(
-      "command_execute",
-      { plan: tighten.id, typed: null },
-      () => undefined,
-    ),
-  );
-  expect(error.kind).toBe("conflict");
-  expect(error.message).toContain("asks for more than you confirmed");
+  expect((await execute(tighten.id, null)).kind).toBe("conflict");
 });
 
 test("a change that asks for the name typed refuses the wrong one and changes nothing", async () => {

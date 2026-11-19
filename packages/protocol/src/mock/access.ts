@@ -117,8 +117,12 @@ export class MockAccess {
     return this.#access(fixture(name), change);
   }
 
-  /** What a context would let through where no admin's policy file set its mode, now or once `change` is made. */
-  unfiled(name: string, change?: Change): ContextAccess {
+  /**
+   * What a context would let through with no lock but its type, now or once
+   * `change` is made: no admin's policy file and no kubeconfig `readOnly`,
+   * the person's own mode as it stands. A type outlives every lock.
+   */
+  bare(name: string, change?: Change): ContextAccess {
     return this.#access(fixture(name), change, false);
   }
 
@@ -145,7 +149,7 @@ export class MockAccess {
     for (const watcher of this.#watchers) watcher(contexts);
   }
 
-  #access(context: Context, change?: Change, filed = true): ContextAccess {
+  #access(context: Context, change?: Change, locked = true): ContextAccess {
     const { name } = context;
     const marked =
       change && "environment" in change
@@ -157,7 +161,7 @@ export class MockAccess {
       change && "mode" in change
         ? (change.mode ?? undefined)
         : this.#modes.get(name);
-    const { mode, source } = this.#resolve(name, environment, chosen, filed);
+    const { mode, source } = this.#resolve(name, environment, chosen, locked);
     const until =
       change === undefined
         ? this.#unlocks.get(name)
@@ -182,9 +186,9 @@ export class MockAccess {
     name: string,
     environment: Environment | null,
     chosen: Mode | undefined,
-    filed: boolean,
+    locked: boolean,
   ): { mode: Mode; source: ModeSource } {
-    if (filed && this.#policyFileSets(name)) {
+    if (locked && this.#policyFileSets(name)) {
       return {
         mode: "read-only",
         source: {
@@ -194,7 +198,7 @@ export class MockAccess {
         },
       };
     }
-    const lock = strictest(name, environment);
+    const lock = strictest(name, environment, locked);
     if (chosen) {
       const overrides =
         lock && STRICTNESS[lock.mode] > STRICTNESS[chosen] ? lock : null;
@@ -215,13 +219,14 @@ export class MockAccess {
   }
 }
 
-/** The strictest of a context's locks, the kubeconfig's before the type's where they tie. */
+/** The strictest of a context's locks, the kubeconfig's before the type's where they tie; the type's alone where `locked` is false. */
 function strictest(
   name: string,
   environment: Environment | null,
+  locked: boolean,
 ): Lock | undefined {
   const locks: Lock[] = [
-    ...(KUBECONFIG_READ_ONLY.has(name)
+    ...(locked && KUBECONFIG_READ_ONLY.has(name)
       ? [
           {
             mode: "read-only" as const,

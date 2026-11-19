@@ -32,23 +32,33 @@ export interface Words {
 /**
  * What a lasting change of a context's protection asks, as
  * `twigo_policy::friction::friction` does: its name typed when the change
- * leaves the context less strict than the mode it keeps, an unlock counting
- * as `read-only` and a context nobody marked as `read-write`, since from
- * there any change runs at once; nothing when it tightens or keeps that, or
- * when the context is unmarked now, as the question it answers is its
- * friction.
+ * leaves the context less strict than the mode it keeps, from `from` to `to`,
+ * which a type weighs with no lock but the type; nothing when it tightens or
+ * keeps that, or when the context is unmarked now, as the question it answers
+ * is its friction.
  */
 export function lowering(
   context: string,
-  before: ContextAccess,
-  after: ContextAccess,
+  access: ContextAccess,
+  from: ContextAccess,
+  to: ContextAccess,
 ): Friction {
-  if (before.source.kind === "unmarked") return { kind: "atOnce" };
-  const leaves = after.source.kind === "unmarked" ? "read-write" : after.mode;
-  const keeps = before.unlockedUntil === null ? before.mode : "read-only";
-  return STRICTNESS[leaves] >= STRICTNESS[keeps]
+  return access.source.kind === "unmarked" || keeps(from, to)
     ? { kind: "atOnce" }
     : { kind: "typed", text: context };
+}
+
+/**
+ * Whether `to` is at least as strict as the mode `from` keeps, an unlock
+ * counting as `read-only`. Leaving a context unmarked weighs as `read-write`,
+ * since any change from there runs at once, unless it was unmarked already,
+ * and then it counts as `guarded`.
+ */
+function keeps(from: ContextAccess, to: ContextAccess): boolean {
+  const unmarked = ({ source }: ContextAccess) => source.kind === "unmarked";
+  const leaves = unmarked(to) && !unmarked(from) ? "read-write" : to.mode;
+  const kept = from.unlockedUntil === null ? from.mode : "read-only";
+  return STRICTNESS[leaves] >= STRICTNESS[kept];
 }
 
 export function words(

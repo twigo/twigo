@@ -54,10 +54,12 @@ type Risk =
   | { readonly kind: "wide"; readonly name: string }
   | { readonly kind: "reveal" }
   | { readonly kind: "reviewed" }
+  | { readonly kind: "unlock" }
   | {
-      /** A change of the context's protection, which asks as what it leaves says. */
+      /** A lasting change of the context's protection, from the access `from` to `to`. */
       readonly kind: "protection";
-      readonly asks: () => Friction;
+      readonly from: ContextAccess;
+      readonly to: ContextAccess;
     };
 
 /** `twigo_policy::friction::friction`. */
@@ -66,7 +68,10 @@ function frictionOf(
   context: string,
   access: ContextAccess,
 ): Friction {
-  if (risk.kind === "protection") return risk.asks();
+  if (risk.kind === "unlock") return { kind: "confirm" };
+  if (risk.kind === "protection") {
+    return lowering(context, access, risk.from, risk.to);
+  }
   if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
       ? { kind: "atOnce" }
@@ -200,6 +205,8 @@ interface Planned {
   readonly stopped?: string;
   /** The object of the preview it was made from: a newer preview of it drops the plan. */
   readonly previewed?: string;
+  /** Throws once what the plan was made against has changed, which refuses it. */
+  readonly stands?: () => void;
   readonly run: Run;
 }
 
@@ -361,13 +368,7 @@ export interface BusHost {
   /** What a context lets through, and what the person's changes of it do. */
   readonly protection: Pick<
     MockAccess,
-    | "of"
-    | "would"
-    | "unfiled"
-    | "refuse"
-    | "setMode"
-    | "setEnvironment"
-    | "unlock"
+    "of" | "would" | "bare" | "refuse" | "setMode" | "setEnvironment" | "unlock"
   >;
   /** The context of a space, or none. */
   context(space: string): string | undefined;
@@ -786,6 +787,7 @@ export class MockBus {
       throw new IpcError("invalidInput", `type ${friction.text} to confirm`);
     }
     this.#authorize(context, access, planned);
+    planned.stands?.();
     const { space } = planned;
     if (space !== undefined) {
       this.#latest.set(space, id);
@@ -1697,8 +1699,9 @@ export class MockBus {
    * A change of a context's own protection (`actions::protection` in Rust):
    * refused where the admin's policy file sets the mode, a type excepted, as
    * it only names and colours the context there, and where there is nothing
-   * to unlock. A type under the file weighs the mode the context would have
-   * without it, since the type outlives the file's entry.
+   * to unlock. A type weighs the mode the context would have with no lock but
+   * the type, since it outlives every other, and the plan runs only while the
+   * context lets through what it did when planned.
    */
   #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
@@ -1714,17 +1717,9 @@ export class MockBus {
         `${context} is ${before.mode}, so there is nothing to unlock`,
       );
     }
-    const said = words(
-      context,
-      change,
-      before,
-      protection.would(context, change),
-    );
-    const leaves = protection.unfiled(context, change);
-    const asks = (): Friction =>
-      "unlock" in change
-        ? { kind: "confirm" }
-        : lowering(context, protection.unfiled(context), leaves);
+    const after = protection.would(context, change);
+    const said = words(context, change, before, after);
+    const marks = "environment" in change;
     return {
       plan: {
         context,
@@ -1736,7 +1731,22 @@ export class MockBus {
         kubectl: null,
         doing: said.doing,
       },
-      risk: { kind: "protection", asks },
+      risk:
+        "unlock" in change
+          ? { kind: "unlock" }
+          : {
+              kind: "protection",
+              from: marks ? protection.bare(context) : before,
+              to: marks ? protection.bare(context, change) : after,
+            },
+      stands: () => {
+        if (!isEqual(protection.of(context), before)) {
+          throw new IpcError(
+            "conflict",
+            `what ${context} lets through changed since Twigo asked, so Twigo changed nothing`,
+          );
+        }
+      },
       run: (tell) => {
         if ("unlock" in change) protection.unlock(context);
         else if ("mode" in change) protection.setMode(context, change.mode);
