@@ -48,7 +48,9 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     match (risk, access.mode) {
         (Risk::Unlock, _) => Friction::Confirm,
         (Risk::Protection(_), _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
-        (Risk::Protection(views), _) if views.iter().all(keeps) => Friction::AtOnce,
+        (Risk::Protection(views), _) if views.iter().all(|(from, to)| keeps(from, to)) => {
+            Friction::AtOnce
+        }
         (Risk::Protection(_), _) => typed_context(),
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
@@ -75,7 +77,7 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
 /// since any change from there runs at once, unless it was unmarked already;
 /// a context unmarked before, which only a lock leaves unasked, counts as
 /// its `guarded`.
-fn keeps((from, to): &(ContextAccess, ContextAccess)) -> bool {
+pub fn keeps(from: &ContextAccess, to: &ContextAccess) -> bool {
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
     let to = if unmarked(to) && !unmarked(from) {
         Mode::ReadWrite

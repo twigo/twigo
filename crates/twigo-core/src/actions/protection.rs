@@ -3,7 +3,8 @@
 //! cluster, so a plan has no writes and no kubectl command, and it runs only
 //! while the context stands as it was planned.
 
-use twigo_ipc::{ContextAccess, Environment, IpcError, LockSource, Mode, ModeSource};
+use twigo_ipc::{ContextAccess, Environment, Friction, IpcError, LockSource, Mode, ModeSource};
+use twigo_policy::friction::{friction, keeps};
 use twigo_policy::{Change, Outlived, PlannedChange, UNLOCK};
 
 use crate::bus::{self, Planned};
@@ -155,17 +156,29 @@ fn consequences(context: &str, planned: &PlannedChange) -> Vec<String> {
     said
 }
 
-/// What the change gives once locks that hold the context go, where that is
-/// not what it gives now: the person's mode and type outlive them. Of the
-/// sets of locks whose absence shows it, the one that leaves the context
-/// least strict, and of those the smallest.
+/// What the change gives once locks that hold the context go: the person's
+/// mode and type outlive them. Where it asks for the name though it lowers
+/// nothing as it is, of the sets of locks under which it lowers the context,
+/// else of those under which it gives other than now, the one that leaves
+/// the context least strict, and of those the smallest.
 fn beneath(context: &str, planned: &PlannedChange) -> Option<String> {
     let now = &planned.after;
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
+    let typed = matches!(
+        friction(&planned.risk(), context, &planned.before),
+        Friction::Typed { .. }
+    );
+    let hidden = typed && keeps(&planned.before, now);
     let view = planned
         .beneath
         .iter()
-        .filter(|view| view.after.mode != now.mode || unmarked(&view.after) != unmarked(now))
+        .filter(|view| {
+            if hidden {
+                !keeps(&view.before, &view.after)
+            } else {
+                view.after.mode != now.mode || unmarked(&view.after) != unmarked(now)
+            }
+        })
         .min_by_key(|view| (view.after.mode, !unmarked(&view.after)))?;
     let gone: Vec<String> = view
         .gone
@@ -284,7 +297,9 @@ fn name(environment: Environment) -> &'static str {
 #[cfg(test)]
 mod tests {
     use twigo_ipc::Lock;
-    use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile, ProviderLock, TypeLock};
+    use twigo_policy::{
+        Audit, Beneath, Choices, Metadata, Policy, PolicyFile, ProviderLock, TypeLock,
+    };
 
     use super::*;
 
@@ -501,5 +516,157 @@ mod tests {
                 .any(|said| said.starts_with("When")),
             "an unlock ends by itself before any lock goes"
         );
+        let staging = Metadata {
+            environment: Some(TypeLock::Staging),
+            ..locked
+        };
+        let cleared = |mode| {
+            let policy = Policy::new(
+                PolicyFile::default(),
+                move |_| Some(staging),
+                Choices {
+                    modes: [("kind-a".to_owned(), mode)].into(),
+                    ..Choices::default()
+                },
+                Audit::off(),
+            );
+            let planned = policy.plan("kind-a", Change::Mode { mode: None });
+            consequences("kind-a", &planned.unwrap())
+        };
+        let asks = "When its kubeconfig's lock goes and its kubeconfig's type goes, its first write or exec asks what kind-a is.";
+        assert_eq!(
+            cleared(Mode::Guarded),
+            [
+                "Every write, exec and shell is refused; reads, dry runs and port-forwards go on.",
+                asks,
+            ]
+        );
+        assert_eq!(
+            cleared(Mode::ReadOnly),
+            ["It stays read-only as its kubeconfig says.", asks],
+            "of the sets that leave it guarded, the one that leaves it unmarked"
+        );
+    }
+
+    #[test]
+    fn a_plan_that_asks_for_the_name_though_it_lowers_nothing_as_it_is_names_the_least_strict_set_of_locks_it_lowers_under()
+     {
+        let dir = tempfile::tempdir().unwrap();
+        let mut files = vec![PolicyFile::default()];
+        for (name, text) in [
+            ("read-write", r#"{"contexts": {"kind-a": "read-write"}}"#),
+            ("guarded", r#"{"contexts": {"kind-a": "guarded"}}"#),
+            ("read-only", r#"{"contexts": {"kind-a": "read-only"}}"#),
+            ("unreadable", r#"{"contexts": "#),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).unwrap();
+            files.push(PolicyFile::read(&path));
+        }
+        let modes = [
+            None,
+            Some(Mode::ReadWrite),
+            Some(Mode::Guarded),
+            Some(Mode::ReadOnly),
+        ];
+        let types = [
+            None,
+            Some(None),
+            Some(Some(Environment::Production)),
+            Some(Some(Environment::Staging)),
+            Some(Some(Environment::Development)),
+            Some(Some(Environment::Local)),
+        ];
+        let changes: Vec<Change> = modes
+            .map(|mode| Change::Mode { mode })
+            .into_iter()
+            .chain(
+                types
+                    .into_iter()
+                    .flatten()
+                    .map(|environment| Change::Type { environment }),
+            )
+            .collect();
+        let mut metadata = Vec::new();
+        for read_only in [false, true] {
+            for provider in [
+                None,
+                Some(ProviderLock::Guarded),
+                Some(ProviderLock::ReadOnly),
+            ] {
+                for environment in [None, Some(TypeLock::Production), Some(TypeLock::Staging)] {
+                    metadata.push(Metadata {
+                        read_only,
+                        provider,
+                        environment,
+                        ..Metadata::default()
+                    });
+                }
+            }
+        }
+        let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
+        let lowers = |view: &&Beneath| !keeps(&view.before, &view.after);
+        let rank = |view: &Beneath| (view.after.mode, !unmarked(&view.after), view.gone.len());
+        let mut checked = 0;
+        let mut check = |file: &PolicyFile,
+                         metadata: Metadata,
+                         choices: Choices,
+                         unlock,
+                         change| {
+            let case = format!("{metadata:?} {choices:?} unlocked {unlock} {change:?}");
+            let policy = Policy::new(file.clone(), move |_| Some(metadata), choices, Audit::off());
+            if unlock && policy.unlock("kind-a").is_err() {
+                return;
+            }
+            let Ok(planned) = policy.plan("kind-a", change) else {
+                return;
+            };
+            let typed = friction(&planned.risk(), "kind-a", &planned.before);
+            if !matches!(typed, Friction::Typed { .. }) || !keeps(&planned.before, &planned.after) {
+                return;
+            }
+            checked += 1;
+            let said = consequences("kind-a", &planned);
+            let when = said
+                .iter()
+                .find(|said| said.starts_with("When "))
+                .unwrap_or_else(|| panic!("{case}: {said:?}"));
+            let alone = |view: &&Beneath| {
+                let mut one = planned.clone();
+                one.beneath = vec![(*view).clone()];
+                beneath("kind-a", &one).as_ref() == Some(when)
+            };
+            let named = planned.beneath.iter().find(alone).unwrap();
+            assert!(lowers(&named), "{case}: {when}");
+            assert!(
+                planned
+                    .beneath
+                    .iter()
+                    .filter(lowers)
+                    .all(|view| rank(view) >= rank(named)),
+                "{case}: {when}"
+            );
+        };
+        for file in &files {
+            for metadata in &metadata {
+                for mode in modes {
+                    for environment in types {
+                        let mut choices = Choices::default();
+                        choices
+                            .modes
+                            .extend(mode.map(|mode| ("kind-a".to_owned(), mode)));
+                        choices.environments.extend(
+                            environment.map(|environment| ("kind-a".to_owned(), environment)),
+                        );
+                        for unlock in [false, true] {
+                            for change in &changes {
+                                check(file, *metadata, choices.clone(), unlock, *change);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0);
     }
 }

@@ -977,75 +977,70 @@ async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_und
 }
 
 #[tokio::test]
-async fn under_a_policy_file_a_type_asks_as_it_would_with_no_lock_but_itself() {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join("policy.json"),
-        r#"{"contexts": {"kind-*": "read-only"}}"#,
-    )
-    .unwrap();
-    let core = running(dir.path(), UNREACHABLE);
-    core.catalog.contexts().await;
-    let typed = |context: &str| Friction::Typed {
-        text: context.to_owned(),
-    };
-    let file = dir.path().join("policy.json").display().to_string();
-    let gives = |then: &str| Some(format!("When {file} no longer sets its mode{then}."));
-    let read_write = gives(", it will be read-write");
-    let cases = [
+async fn under_a_policy_file_a_type_asks_for_the_name_where_a_set_of_locks_gone_shows_it_lowering_and_names_that_set()
+ {
+    let read_write = Some(", it will be read-write");
+    let unlocked = Some(" and its kubeconfig's lock goes, it will be read-write");
+    let guarded = Some(", it will be guarded");
+    let files = [
         (
-            "kind-local",
-            Environment::Staging,
-            Friction::AtOnce,
-            gives(", it will be guarded"),
+            r#"{"contexts": {"kind-*": "read-only"}}"#,
+            vec![
+                ("kind-local", Environment::Staging, false, guarded),
+                ("kind-local", Environment::Development, true, read_write),
+                ("kind-prod", Environment::Development, true, read_write),
+                ("kind-locked", Environment::Development, true, unlocked),
+                ("kind-unmarked", Environment::Production, false, None),
+            ],
         ),
         (
-            "kind-local",
-            Environment::Development,
-            typed("kind-local"),
-            read_write.clone(),
-        ),
-        (
-            "kind-prod",
-            Environment::Development,
-            typed("kind-prod"),
-            read_write,
-        ),
-        (
-            "kind-locked",
-            Environment::Development,
-            typed("kind-locked"),
-            gives(" and its kubeconfig's lock goes, it will be read-write"),
-        ),
-        (
-            "kind-unmarked",
-            Environment::Production,
-            Friction::AtOnce,
-            None,
+            r#"{"contexts": {"kind-prod": "guarded", "kind-unmarked": "read-write", "kind-locked": "read-write"}}"#,
+            vec![
+                ("kind-prod", Environment::Staging, true, guarded),
+                ("kind-unmarked", Environment::Development, true, read_write),
+                ("kind-locked", Environment::Development, true, unlocked),
+            ],
         ),
     ];
-    for (context, environment, friction, then) in cases {
-        let request = PlanRequest::SetEnvironment {
-            context: context.to_owned(),
-            environment: Some(environment),
-        };
-        let plan = core.command_plan("main", request).await.unwrap();
-        assert_eq!(plan.friction, friction, "{context} as {environment:?}");
-        assert_eq!(plan.consequences.get(1), then.as_ref(), "{context}");
-        let typed = match plan.friction {
-            Friction::Typed { text } => Some(text),
-            _ => None,
-        };
-        let execute = Execute {
-            plan: plan.id,
-            typed,
-        };
-        core.command_execute("main", execute, |_| true)
-            .await
-            .unwrap();
-        let named = access(&core, context);
-        assert_eq!(named.environment, Some(environment), "{context}");
-        assert_eq!(named.mode, Mode::ReadOnly, "{context}");
+    for (entries, cases) in files {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.json");
+        std::fs::write(&path, entries).unwrap();
+        let core = running(dir.path(), UNREACHABLE);
+        core.catalog.contexts().await;
+        let file = path.display().to_string();
+        for (context, environment, typed, then) in cases {
+            let request = PlanRequest::SetEnvironment {
+                context: context.to_owned(),
+                environment: Some(environment),
+            };
+            let plan = core.command_plan("main", request).await.unwrap();
+            let friction = if typed {
+                Friction::Typed {
+                    text: context.to_owned(),
+                }
+            } else {
+                Friction::AtOnce
+            };
+            assert_eq!(plan.friction, friction, "{context} as {environment:?}");
+            let then = then.map(|then| format!("When {file} no longer sets its mode{then}."));
+            assert_eq!(plan.consequences.get(1), then.as_ref(), "{context}");
+            let held = access(&core, context).mode;
+            let typed = match plan.friction {
+                Friction::Typed { text } => Some(text),
+                _ => None,
+            };
+            let execute = Execute {
+                plan: plan.id,
+                typed,
+            };
+            core.command_execute("main", execute, |_| true)
+                .await
+                .unwrap();
+            let named = access(&core, context);
+            assert_eq!(named.environment, Some(environment), "{context}");
+            assert_eq!(named.mode, held, "{context}");
+        }
     }
 }
 
