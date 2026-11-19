@@ -2227,7 +2227,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
       A denial covers every repeat; "once" covers only a repeat of the verb, decoded path and class it was answered for, the `GET` and `POST` of a pod's stream as one, and one request at a time.
       A request takes it as it is sent and gives it back only when it reached no server: after the proxy's own `429`, or a pod's stream answered other than `101`, as nothing of it runs before the kubelet's `101` ([`ServeExec`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/exec.go#L40-L48)); a proxy's answer came from its backend, and a request whose client went may have reached the server, so neither gives it back.
     - An ask is withdrawn when its request goes, as when kubectl is killed, when the process's handle drops, when the window goes, and when the context's access changes so that the ask no longer fits the request, which then meets the gate anew: it goes, is refused, or asks again.
-    - The audit log notes how each ask ended: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`; an unmarked ask answered with a type, by the change it made (below).
+    - The audit log notes how each ask ended in an `approval` line: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+      An unmarked ask answered with a type has no `approval` line, only the `protection` line of the change it made (below), and one denied is noted `denied` as any other.
       An answer counts only when its waiting request takes it: one that comes after the request went, or after its process ended, is refused and grants nothing, and the window gets the withdrawal.
     - Agents may use the scope "this process" for the rest of one run, except for deletes, which comes with them (M3).
       Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell, and only terminals are offered "for 15 minutes": until their own scopes come, an agent's and `helm`'s asks are answered once.
@@ -2273,7 +2274,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The mode is read for every request, so a change reaches clients already built.
   The person's "no type" holds whatever the kubeconfig says, and with no other lock leaves the context unmarked again.
 
-- **A context nobody marked** lets through what `guarded` does, reads, dry runs, Secret reads and port-forwards, and no actor's write or exec, the UI's included, whatever approval it carries: the gate refuses it as `unmarked`.
+- **A context nobody marked** lets through what `guarded` does, reads, dry runs, Secret reads and port-forwards, and no actor's write or exec, the UI's included, whatever approval it carries: the gate refuses it as `unmarked`, and so a dry run to a group-version kube-apiserver may not serve itself, which the classification above takes for a write.
   Every unmarked context asks, local-looking ones included, as a server on `127.0.0.1` is often a tunnel to a remote cluster (Teleport's local proxy, SSH forwards), and so does one whose kubeconfig alone says Development or Local, which only a person can say.
   - A command of the person's own is refused at plan time, before any friction, so the window asks what the context is and plans again.
   - A process's write or exec through the policy proxy raises an ask marked `unmarked`, which the person answers with a type or denies.
@@ -2302,21 +2303,27 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Clients keep to what they were built for.**
   Clients of a context that now names another cluster still reach the old one until their owner re-opens, so their gate reads them as `read-only` from the moment the fingerprint changes, whatever the new one's mode is.
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
-- **The audit log** is `audit.jsonl` in the app-data directory, mode 0600.
-  The gate notes a request as it sends it, just above the socket, or as it stops it, with the actor, the context, its mode and the request's class; a retry below the gate is noted again.
-  Of an actor other than the UI it notes every class but a read: dry runs, writes, reads of a Secret, forwards and execs.
-  Of the UI it notes the writes, since the command bus notes what a person confirmed, through which friction, and how it ended.
-  Of protection it notes, one line each: each change a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; each change of a context's mode, source or type that no command made, with its access before and after, as the catalog publishes the read that made it, before anything reads that read: a kubeconfig edited, a provider's lock that came or went, a source that listed the context or stopped listing it; each unlock that ended by a relock, by its time, or as the context named another cluster or none; and each plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
-  The catalog's first read is no change, and the policy file, read once as the app starts (4.8), changes nothing while it runs; a context that moves to another cluster keeps its mode, source and type, so only the end of its unlock is noted.
-  A change of protection is that line alone, in place of the bus's two.
-  The policy proxy notes, as the gate would, a request it stops itself on the policy's word before the request meets the gate: one its mode refuses or no answer can allow, one the person denied or no window could ask about (`noApproval`, or `unmarked` where the ask was what its context is, beside the ask's own line), and one whose context names another cluster now (`read-only`, `mode`).
-  A request it lets on meets the gate, which notes it, and one it refuses for another reason, a token, a `Host`, a path or a body's size, is no request the policy stopped and has no line.
+- **The audit log** is `audit.jsonl` in the app-data directory, mode 0600, a JSON line per event, which its `event` names:
+  - `request`: a request the gate sends, just above the socket, or stops, with the actor, the context, its mode, the request's class and why it was stopped; a retry below the gate is noted again.
+    Of an actor other than the UI it notes every class but a read: dry runs, writes, reads of a Secret, forwards and execs; of the UI, its writes, since the command bus notes what a person confirmed.
+    The policy proxy notes, as the gate would, a request it stops itself on the policy's word before the request meets the gate: one its mode refuses or no answer can allow, one the person denied or no window could ask about (`noApproval`, or `unmarked` where the ask was what its context is, beside the ask's `approval` line), and one whose context names another cluster now (`read-only`, `mode`).
+    A request whose unmarked ask a type answered meets the gate anew: the gate notes it as it goes, the proxy as the new mode refuses it, and an ask that `guarded` raises for it ends as any other.
+    A request the proxy lets on meets the gate, which notes it, and one it refuses for another reason, a token, a `Host`, a path or a body's size, is no request the policy stopped and has no line.
+  - `confirmed` and `ended`: a command a person confirmed through the command bus, through which friction, and how it ended.
+  - `approval`: how a process's ask through the policy proxy ended (above).
+  - `protection`: a change of protection a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; that line alone, in place of the bus's `confirmed` and `ended`.
+  - `catalog`: a change of a context's mode, source or type that no command made, with its access before and after, as the catalog publishes the read that made it, before anything reads that read: a kubeconfig edited, a provider's lock that came or went, a source that listed the context or stopped listing it.
+    The catalog's first read is no change, and the policy file, read once as the app starts (4.8), changes nothing while it runs; a context that moves to another cluster keeps its mode, source and type, so only the end of its unlock is noted.
+  - `relocked`: an unlock that ended by a relock, by its time, or as the context named another cluster or none.
+  - `trusted`: a plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
+
   The log names targets, never a value, so the actors of M3 only add their name.
   A file that cannot be opened is said on stderr and keeps nothing: the log records, it guards nothing.
   Past 8 MiB the log moves to `audit.1.jsonl`, each older one up by one as far as `audit.5.jsonl`, whose last content goes, and a new `audit.jsonl` opens, each 0600: at most 48 MiB.
   A move that fails is said on stderr and the log goes on where it is, to try again after another 8 MiB.
   A new log that cannot be opened after the move is said on stderr, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
   The older logs move only with the log, so a log gone from its place, as when a person deleted it, is opened anew and moves none of them.
+
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context; its kubeconfig metadata (`twigo.environment`, 5.5) counts only where it tightens, Production or Staging, so a context whose kubeconfig alone says Development or Local is unmarked and asks; the person's mark wins, their None included.
@@ -2370,7 +2377,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
    Both sides are cleaned of managedFields, and Secret data is masked.
    The diff includes defaults and webhook mutations, which a local diff cannot know.
    A preview keeps what it prepared in Rust for its window under an id, once, and the plan of that id sends exactly that.
-   In a mode that refuses the UI's writes, an object of a group-version kube-apiserver does not serve itself is not previewed, as the gate takes its dry run for a write (6.4): the preview says that another server serves the group and may not honour a dry run, or that Twigo could not read whether one does, and sends no dry run.
+   In `read-only` and in a context nobody marked, which refuse the UI's writes, an object of a group-version kube-apiserver does not serve itself is not previewed, as the gate takes its dry run for a write (6.4): the preview says that another server serves the group and may not honour a dry run, or that Twigo could not read whether one does, and sends no dry run.
 6. Apply, by a bus plan that the person has just read the diff of: at once in `read-write`, a confirmation in `guarded`, blocked in `read-only`.
    Apply is offered for a diff that was shown, and again only when the plan of that preview has ended, since the engine plans a preview once.
    Under an admin's policy file the lock cannot be lifted, so Apply is not offered and the diff says why in the words of the context's chip; a read-only the person set refuses it as the gate does, and it works after an unlock.
