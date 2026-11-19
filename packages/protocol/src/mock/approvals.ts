@@ -333,11 +333,13 @@ function asked(ask: Draft, unmarked: boolean): Draft {
  * Rust's `decide` has it: it asks what its context is where nobody marked
  * it, asks to be allowed where the context is guarded, and else goes or is
  * refused with no ask. A lasting answer allows what its process asks on its
- * context for the minutes the ask offered, deletes excepted: an ask that
- * waits then is withdrawn, and one that comes is not raised. An ask of a
- * context nobody marked takes `mark` or `deny` alone; `mark` sets the
- * context's type only while nobody has marked it, as `Policy::mark` does,
- * and the request then meets the mode that type gives: Staging asks again,
+ * context for the minutes the ask offered, deletes excepted, while the
+ * context's mode, its source and its count of changes stay as they were
+ * when it was given, a change that went back included, as Rust's `holds`
+ * has it: an ask that waits then is withdrawn, and one that comes is not
+ * raised. An ask of a context nobody marked takes `mark` or `deny` alone;
+ * `mark` sets the context's type, and the request then meets the mode that
+ * type gives: Staging asks again,
  * as any guarded context does, Production refuses it and Development and
  * Local let it through. Whenever a context's access changes, each ask
  * waiting on it that its block no longer fits is withdrawn and its request
@@ -351,14 +353,14 @@ export class MockApprovals {
   #coming: Draft[] = [];
   #started = false;
   #next = 1;
-  /** When each process's lasting answer on a context ends, in milliseconds. */
-  readonly #lasting = new Map<string, number>();
+  /** Each process's lasting answer on a context: when it ends, in milliseconds, and the context's access it holds to. */
+  readonly #lasting = new Map<string, { until: number; holds: string }>();
 
   constructor(
     private readonly scenario: ApprovalScenario | undefined,
     private readonly access: Pick<
       MockAccess,
-      "of" | "setEnvironment" | "watch"
+      "of" | "setEnvironment" | "watch" | "changes"
     >,
   ) {
     access.watch(() => {
@@ -395,20 +397,14 @@ export class MockApprovals {
     if (answer.kind !== "deny" && ask.typed && typed !== ask.context) {
       throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
     }
-    if (
-      answer.kind === "mark" &&
-      this.access.of(ask.context).source.kind !== "unmarked"
-    ) {
-      throw new IpcError(
-        "conflict",
-        `what ${ask.context} lets through changed since Twigo asked, so Twigo changed nothing`,
-      );
-    }
     if (answer.kind === "lasting") {
       if (ask.lastingMinutes === null) {
         throw new IpcError("invalidInput", "this ask offers no lasting answer");
       }
-      this.#lasting.set(grantOf(ask), Date.now() + ask.lastingMinutes * 60_000);
+      this.#lasting.set(grantOf(ask), {
+        until: Date.now() + ask.lastingMinutes * 60_000,
+        holds: this.#holds(ask.context),
+      });
     }
     this.#waiting.delete(id);
     for (const other of [...this.#waiting.values()]) {
@@ -459,8 +455,19 @@ export class MockApprovals {
   }
 
   #allowed(draft: Draft): boolean {
-    const until = this.#lasting.get(grantOf(draft));
-    return until !== undefined && Date.now() < until && !draft.typed;
+    const lasting = this.#lasting.get(grantOf(draft));
+    return (
+      lasting !== undefined &&
+      Date.now() < lasting.until &&
+      lasting.holds === this.#holds(draft.context) &&
+      !draft.typed
+    );
+  }
+
+  /** What a lasting answer holds to: the context's mode, its source and how many times a choice or an unlock changed it. */
+  #holds(context: string): string {
+    const { mode, source } = this.access.of(context);
+    return JSON.stringify([mode, source, this.access.changes(context)]);
   }
 
   #later(ms: number): void {

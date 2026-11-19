@@ -16,8 +16,6 @@ import {
   WITHDRAWN_AFTER_MS,
   type MockScenario,
 } from "./index";
-import { MockAccess } from "./access";
-import { MockApprovals } from "./approvals";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -53,6 +51,9 @@ function nth(events: ApprovalEvent[], index: number): ApprovalAsk {
   if (ask === undefined) throw new Error(`no ask ${String(index)} was raised`);
   return ask;
 }
+
+const last = (events: ApprovalEvent[]): ApprovalAsk =>
+  nth(events, asks(events).length - 1);
 
 async function answer(
   backend: Backend,
@@ -524,38 +525,6 @@ test("a scenario's ask comes only where the gate would ask for its request as it
   }
 });
 
-test("a type answers an unmarked ask only while its context is still unmarked, whatever withdrew the ask or did not, as Policy::mark does", async () => {
-  const access = new MockAccess(false);
-  const approvals = new MockApprovals("approvalUnmarked", {
-    of: (context) => access.of(context),
-    setEnvironment: (context, environment) => {
-      access.setEnvironment(context, environment);
-    },
-    watch: () => [],
-  });
-  const events: ApprovalEvent[] = [];
-  approvals.watch((event) => events.push(event));
-  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
-  const unmarked = nth(events, 0);
-  access.setEnvironment("qa", "production");
-  expect(() =>
-    approvals.answer({
-      id: unmarked.id,
-      answer: { kind: "mark", environment: "development" },
-      typed: null,
-    }),
-  ).toThrow(
-    new IpcError(
-      "conflict",
-      "what qa lets through changed since Twigo asked, so Twigo changed nothing",
-    ),
-  );
-  expect(access.of("qa")).toMatchObject({
-    mode: "read-only",
-    environment: "production",
-  });
-});
-
 test("a delete's unmarked ask asks for no name and offers no 15 minutes, and the ordinary ask Staging raises for it asks for the name and offers none", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
@@ -692,4 +661,87 @@ test("another scenario raises nothing", async () => {
   const { events } = await followed("ready");
   await vi.advanceTimersByTimeAsync(60_000);
   expect(events).toEqual([]);
+});
+
+test("a lasting answer ends once its context's type is cleared and set again, a change that went back included, as Rust's holds has it", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), { kind: "lasting" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "staging",
+    environment: null,
+  });
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "staging",
+    environment: "staging",
+  });
+  await answer(backend, last(events));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = last(events);
+  expect(remove).toMatchObject({ context: "prod-eu", verb: "delete" });
+  await answer(backend, remove, { kind: "deny" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(last(events)).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    command: "kubectl exec",
+  });
+});
+
+test("a lasting answer ends once its context goes read-only and back", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), { kind: "lasting" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, last(events));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = last(events);
+  await choose(backend, {
+    action: "setMode",
+    context: "staging",
+    mode: "read-only",
+  });
+  await choose(backend, { action: "setMode", context: "staging", mode: null });
+  await answer(backend, remove, { kind: "deny" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(last(events)).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    command: "kubectl exec",
+  });
+});
+
+test("an unmarked ask answered Staging asks to allow the request, whatever the process was allowed before the type was cleared", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), { kind: "lasting" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, last(events));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = last(events);
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "staging",
+    environment: null,
+  });
+  await answer(backend, remove, { kind: "deny" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const exec = last(events);
+  expect(exec).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    unmarked: true,
+  });
+  expect(
+    await answer(backend, exec, { kind: "mark", environment: "staging" }),
+  ).toBeUndefined();
+  expect(last(events)).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    unmarked: false,
+    lastingMinutes: 15,
+  });
 });
