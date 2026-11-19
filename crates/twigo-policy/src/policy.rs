@@ -14,6 +14,7 @@ use twigo_ipc::{
     RequestClass,
 };
 
+use crate::friction::Risk;
 use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile, Served};
 
 /// How long an unlock lasts.
@@ -135,10 +136,30 @@ pub struct PlannedChange {
     pub change: Change,
     pub before: ContextAccess,
     pub after: ContextAccess,
+    /// `before` and `after` as the context would have them without the
+    /// admin's policy file, where it sets the mode: a type, which the file
+    /// lets plan, outlives the file's entry.
+    unfiled: Option<(ContextAccess, ContextAccess)>,
     /// [`Policy::changes_of`] the context when it was planned.
     changes: u64,
     /// [`Metadata::revision`] of the context when it was planned.
     revision: u64,
+}
+
+impl PlannedChange {
+    /// What it risks: an unlock, or a lasting change weighed from the
+    /// context's access before to after, under the admin's policy file as
+    /// the context would have it without the file.
+    pub fn risk(&self) -> Risk {
+        let (from, to) = self
+            .unfiled
+            .clone()
+            .unwrap_or_else(|| (self.before.clone(), self.after.clone()));
+        match self.change {
+            Change::Unlock => Risk::Unlock,
+            Change::Mode { .. } | Change::Type { .. } => Risk::Protection { from, to },
+        }
+    }
 }
 
 /// Why a command could not change a context's mode.
@@ -345,6 +366,20 @@ impl Policy {
         metadata: Option<Metadata>,
         now: Timestamp,
     ) -> ContextAccess {
+        let file = self.file.mode(context);
+        self.resolved_as(held, context, metadata, now, file)
+    }
+
+    /// [`Policy::resolved`] where `file` is what the admin's policy file
+    /// sets, none for what the context would be without it.
+    fn resolved_as(
+        &self,
+        held: &Held,
+        context: &str,
+        metadata: Option<Metadata>,
+        now: Timestamp,
+        file: Option<(Mode, ModeSource)>,
+    ) -> ContextAccess {
         let environment = match held.choices.environments.get(context) {
             Some(marked) => *marked,
             None => self.assumed.or_else(|| {
@@ -353,7 +388,8 @@ impl Policy {
                     .map(TypeLock::environment)
             }),
         };
-        let (mode, source) = self.resolve(context, held, metadata, environment);
+        let (mode, source) =
+            file.unwrap_or_else(|| self.resolve(context, held, metadata, environment));
         let unlocked = held
             .unlocks
             .get(context)
@@ -385,9 +421,6 @@ impl Policy {
         metadata: Option<Metadata>,
         environment: Option<Environment>,
     ) -> (Mode, ModeSource) {
-        if let Some(set) = self.file.mode(context) {
-            return set;
-        }
         // Clients built before it went may still run, and what its kubeconfig
         // said of it is no longer known.
         let Some(metadata) = metadata else {
@@ -529,9 +562,14 @@ impl Policy {
         let before = self.resolved(&held, context, Some(metadata), now);
         let mut changed = held.clone();
         changed.make(context, change, &metadata, unlocked_until(now, UNLOCK));
+        let unfiled = self.file.mode(context).map(|_| {
+            let unfiled = |held: &Held| self.resolved_as(held, context, Some(metadata), now, None);
+            (unfiled(&held), unfiled(&changed))
+        });
         let planned = PlannedChange {
             change,
             after: self.resolved(&changed, context, Some(metadata), now),
+            unfiled,
             changes: held.changes_of(context),
             revision: metadata.revision,
             before,

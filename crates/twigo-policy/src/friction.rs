@@ -30,11 +30,14 @@ pub enum Risk {
     /// A shell or an attach, which a person opens often, so `guarded` asks
     /// in a dialog rather than for a typed name (6.4).
     Shell,
-    /// A lasting change of the context's own protection, which leaves it in
-    /// `mode`, or unmarked where that is none: lowering it asks for the
-    /// context's name typed. Unmarked weighs as `read-write`, since any
-    /// change from there runs at once.
-    Protection { mode: Option<Mode> },
+    /// A lasting change of the context's own protection, from the access
+    /// `from` to `to`: lowering it asks for the context's name typed.
+    /// Under the admin's policy file both are what the context would be
+    /// without the file, which a type outlives.
+    Protection {
+        from: ContextAccess,
+        to: ContextAccess,
+    },
     /// An unlock, which ends by itself and leaves every write in `guarded`
     /// asking for the context's name.
     Unlock,
@@ -49,9 +52,7 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     match (risk, access.mode) {
         (Risk::Unlock, _) => Friction::Confirm,
         (Risk::Protection { .. }, _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
-        (Risk::Protection { mode }, _) if mode.unwrap_or(Mode::ReadWrite) >= lasting(access) => {
-            Friction::AtOnce
-        }
+        (Risk::Protection { from, to }, _) if keeps(from, to) => Friction::AtOnce,
         (Risk::Protection { .. }, _) => typed_context(),
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
@@ -71,6 +72,21 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
         (Risk::Replaced | Risk::Lasting, Mode::ReadWrite) => Friction::Confirm,
         (Risk::Wide { name }, Mode::ReadWrite) => Friction::Typed { text: name.clone() },
     }
+}
+
+/// Whether a change from `from` to `to` leaves the context at least as
+/// strict as the mode it keeps. Leaving it unmarked weighs as `read-write`,
+/// since any change from there runs at once, unless it was unmarked already;
+/// a context unmarked before, which only the admin's policy file leaves
+/// unasked, counts as its `guarded`.
+fn keeps(from: &ContextAccess, to: &ContextAccess) -> bool {
+    let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
+    let to = if unmarked(to) && !unmarked(from) {
+        Mode::ReadWrite
+    } else {
+        to.mode
+    };
+    to >= lasting(from)
 }
 
 /// The mode a context keeps: an unlocked one relocks to `read-only`, which
@@ -184,97 +200,106 @@ mod tests {
         let typed = Friction::Typed {
             text: "kind-a".to_owned(),
         };
+        let marked = |mode| access(mode, None);
         let unmarked = ContextAccess {
             source: ModeSource::Unmarked,
-            ..access(Mode::Guarded, None)
+            ..marked(Mode::Guarded)
         };
         let unlocked = ContextAccess {
             unlocked_until: Some(1),
             ..access(Mode::Guarded, Some(Environment::Production))
         };
-        let protection = |mode| Risk::Protection { mode: Some(mode) };
-        let unmarking = Risk::Protection { mode: None };
+        let (read_write, guarded, read_only) = (
+            marked(Mode::ReadWrite),
+            marked(Mode::Guarded),
+            marked(Mode::ReadOnly),
+        );
         let cases = [
-            (
-                protection(Mode::ReadWrite),
-                access(Mode::ReadOnly, None),
-                typed.clone(),
-            ),
-            (
-                protection(Mode::Guarded),
-                access(Mode::ReadOnly, None),
-                typed.clone(),
-            ),
-            (
-                protection(Mode::ReadWrite),
-                access(Mode::Guarded, None),
-                typed.clone(),
-            ),
-            (
-                protection(Mode::ReadOnly),
-                access(Mode::ReadWrite, None),
-                Friction::AtOnce,
-            ),
-            (
-                protection(Mode::Guarded),
-                access(Mode::ReadWrite, None),
-                Friction::AtOnce,
-            ),
-            (
-                protection(Mode::Guarded),
-                access(Mode::Guarded, None),
-                Friction::AtOnce,
-            ),
-            (
-                protection(Mode::ReadOnly),
-                access(Mode::ReadOnly, None),
-                Friction::AtOnce,
-            ),
-            (
-                protection(Mode::ReadWrite),
-                unmarked.clone(),
-                Friction::AtOnce,
-            ),
-            (
-                protection(Mode::ReadOnly),
-                unmarked.clone(),
-                Friction::AtOnce,
-            ),
-            (
-                unmarking.clone(),
-                access(Mode::ReadOnly, None),
-                typed.clone(),
-            ),
-            (
-                unmarking.clone(),
-                access(Mode::Guarded, None),
-                typed.clone(),
-            ),
-            (unmarking.clone(), unlocked.clone(), typed.clone()),
-            (
-                unmarking.clone(),
-                access(Mode::ReadWrite, None),
-                Friction::AtOnce,
-            ),
-            (unmarking, unmarked, Friction::AtOnce),
-            (protection(Mode::Guarded), unlocked.clone(), typed),
-            (
-                protection(Mode::ReadOnly),
-                unlocked.clone(),
-                Friction::AtOnce,
-            ),
-            (
-                Risk::Unlock,
-                access(Mode::ReadOnly, None),
-                Friction::Confirm,
-            ),
-            (Risk::Unlock, unlocked, Friction::Confirm),
+            (&read_only, &read_write, typed.clone()),
+            (&read_only, &guarded, typed.clone()),
+            (&guarded, &read_write, typed.clone()),
+            (&read_write, &read_only, Friction::AtOnce),
+            (&read_write, &guarded, Friction::AtOnce),
+            (&guarded, &guarded, Friction::AtOnce),
+            (&read_only, &read_only, Friction::AtOnce),
+            (&unmarked, &read_write, Friction::AtOnce),
+            (&unmarked, &read_only, Friction::AtOnce),
+            (&read_only, &unmarked, typed.clone()),
+            (&guarded, &unmarked, typed.clone()),
+            (&unlocked, &unmarked, typed.clone()),
+            (&read_write, &unmarked, Friction::AtOnce),
+            (&unmarked, &unmarked, Friction::AtOnce),
+            (&unlocked, &guarded, typed.clone()),
+            (&unlocked, &read_only, Friction::AtOnce),
         ];
-        for (risk, before, expected) in cases {
+        for (before, after, expected) in cases {
+            let risk = Risk::Protection {
+                from: before.clone(),
+                to: after.clone(),
+            };
             assert_eq!(
-                friction(&risk, "kind-a", &before),
+                friction(&risk, "kind-a", before),
                 expected,
-                "{risk:?} from {before:?}"
+                "from {before:?} to {after:?}"
+            );
+        }
+        for before in [read_only, unlocked] {
+            let unlock = friction(&Risk::Unlock, "kind-a", &before);
+            assert_eq!(unlock, Friction::Confirm, "{before:?}");
+        }
+    }
+
+    #[test]
+    fn under_a_policy_file_a_type_weighs_what_the_context_would_be_without_it() {
+        let typed = Friction::Typed {
+            text: "kind-a".to_owned(),
+        };
+        let filed = ContextAccess {
+            source: ModeSource::PolicyFile {
+                file: "/etc/twigo/policy.json".to_owned(),
+                pattern: Some("kind-*".to_owned()),
+            },
+            ..access(Mode::ReadOnly, None)
+        };
+        let typed_as = |mode, environment| ContextAccess {
+            source: ModeSource::Environment { environment },
+            ..access(mode, Some(environment))
+        };
+        let unmarked = ContextAccess {
+            source: ModeSource::Unmarked,
+            ..access(Mode::Guarded, None)
+        };
+        let (development, staging, production) = (
+            typed_as(Mode::ReadWrite, Environment::Development),
+            typed_as(Mode::Guarded, Environment::Staging),
+            typed_as(Mode::ReadOnly, Environment::Production),
+        );
+        let locked = ContextAccess {
+            source: ModeSource::Kubeconfig,
+            ..typed_as(Mode::ReadOnly, Environment::Development)
+        };
+        let cases = [
+            (&unmarked, &development, typed.clone()),
+            (&unmarked, &staging, Friction::AtOnce),
+            (&unmarked, &production, Friction::AtOnce),
+            (&unmarked, &unmarked, Friction::AtOnce),
+            (&production, &development, typed.clone()),
+            (&production, &staging, typed.clone()),
+            (&production, &unmarked, typed.clone()),
+            (&staging, &unmarked, typed),
+            (&staging, &production, Friction::AtOnce),
+            (&development, &unmarked, Friction::AtOnce),
+            (&production, &locked, Friction::AtOnce),
+        ];
+        for (before, after, expected) in cases {
+            let risk = Risk::Protection {
+                from: before.clone(),
+                to: after.clone(),
+            };
+            assert_eq!(
+                friction(&risk, "kind-a", &filed),
+                expected,
+                "from {before:?} to {after:?}"
             );
         }
     }

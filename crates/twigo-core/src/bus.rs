@@ -78,7 +78,10 @@ pub(crate) enum Run {
     Sends(Sends),
     /// Changes the context's protection at once, while the context stands
     /// as planned, and says `done`.
-    Protects { change: PlannedChange, done: String },
+    Protects {
+        change: Box<PlannedChange>,
+        done: String,
+    },
 }
 
 /// How a run ended.

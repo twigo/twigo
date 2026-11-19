@@ -2285,7 +2285,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 
 - **Changes of protection** are plans of the command bus (5.1): the person's mode, the type they mark a context as, and an unlock.
   They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where no source lists the context.
-  Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans and runs at once, as it only names and colours the context there.
+  Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans: it only names and colours the context while the file's entry holds, but outlives the entry, so it is weighed by the access the context would have without the file, before and after, by the rules below, a context unmarked there counting as `guarded`, as nothing asks what it is.
   Rust names the friction from the context's access before and after:
   - a lasting change that leaves the context less strict asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
   - a change that leaves the context unmarked weighs as one to `read-write`, since from there any change runs at once: from `read-only` or `guarded` it asks for the name typed;

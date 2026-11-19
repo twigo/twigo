@@ -4,7 +4,6 @@
 //! while the context stands as it was planned.
 
 use twigo_ipc::{Environment, IpcError, LockSource, Mode, ModeSource};
-use twigo_policy::friction::Risk;
 use twigo_policy::{Change, PlannedChange, UNLOCK};
 
 use crate::bus::{self, Planned};
@@ -29,12 +28,7 @@ pub(crate) async fn protection(
     Ok(Planned {
         connection: core.policy.connection(&context),
         space: None,
-        risk: match change {
-            Change::Unlock => Risk::Unlock,
-            Change::Mode { .. } | Change::Type { .. } => Risk::Protection {
-                mode: (planned.after.source != ModeSource::Unmarked).then_some(planned.after.mode),
-            },
-        },
+        risk: planned.risk(),
         writes: Vec::new(),
         command: match change {
             Change::Mode { .. } => "mode",
@@ -51,7 +45,7 @@ pub(crate) async fn protection(
         doing,
         previewed: None,
         run: bus::Run::Protects {
-            change: planned,
+            change: Box::new(planned),
             done,
         },
         context,

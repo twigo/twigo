@@ -960,15 +960,7 @@ async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_only_names_
         context: context(),
         environment: Some(Environment::Development),
     };
-    let plan = core.command_plan("main", development).await.unwrap();
-    assert_eq!(plan.friction, Friction::AtOnce);
-    let execute = Execute {
-        plan: plan.id,
-        typed: None,
-    };
-    core.command_execute("main", execute, |_| true)
-        .await
-        .unwrap();
+    protect(&core, development).await.unwrap();
     let named = access(&core, "kind-local");
     assert_eq!(named.environment, Some(Environment::Development));
     assert_eq!(named.mode, Mode::ReadOnly);
@@ -982,6 +974,50 @@ async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_only_names_
     ));
     let blocked = create_a_configmap(&core, "kind-local").await;
     assert_eq!(blocked.kind, ErrorKind::Permissions);
+}
+
+#[tokio::test]
+async fn under_a_policy_file_a_type_asks_as_it_would_without_the_file_which_it_outlives() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.json"),
+        r#"{"contexts": {"kind-*": "read-only"}}"#,
+    )
+    .unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let typed = |context: &str| Friction::Typed {
+        text: context.to_owned(),
+    };
+    let cases = [
+        ("kind-local", Environment::Staging, Friction::AtOnce),
+        ("kind-local", Environment::Development, typed("kind-local")),
+        ("kind-prod", Environment::Development, typed("kind-prod")),
+        ("kind-locked", Environment::Development, Friction::AtOnce),
+        ("kind-unmarked", Environment::Production, Friction::AtOnce),
+    ];
+    for (context, environment, friction) in cases {
+        let request = PlanRequest::SetEnvironment {
+            context: context.to_owned(),
+            environment: Some(environment),
+        };
+        let plan = core.command_plan("main", request).await.unwrap();
+        assert_eq!(plan.friction, friction, "{context} as {environment:?}");
+        let typed = match plan.friction {
+            Friction::Typed { text } => Some(text),
+            _ => None,
+        };
+        let execute = Execute {
+            plan: plan.id,
+            typed,
+        };
+        core.command_execute("main", execute, |_| true)
+            .await
+            .unwrap();
+        let named = access(&core, context);
+        assert_eq!(named.environment, Some(environment), "{context}");
+        assert_eq!(named.mode, Mode::ReadOnly, "{context}");
+    }
 }
 
 #[tokio::test]
