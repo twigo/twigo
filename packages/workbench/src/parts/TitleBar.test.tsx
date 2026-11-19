@@ -251,6 +251,7 @@ test("a choice of the person can go back to the default", async () => {
     });
   });
   fireEvent.click(screen.getByRole("button", { name: "Use the default" }));
+  await confirmAsking(workbench);
   await waitFor(() => {
     expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
   });

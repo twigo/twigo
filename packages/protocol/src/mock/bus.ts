@@ -22,7 +22,7 @@ import type {
 } from "../generated";
 import type { Change, MockAccess } from "./access";
 import { side } from "./edits";
-import { lowering, words, type Step } from "./protectionPlan";
+import { lowering, weigh, words, type Step } from "./protectionPlan";
 import { counted } from "./sections";
 import {
   cordoned,
@@ -56,10 +56,9 @@ type Risk =
   | { readonly kind: "reviewed" }
   | { readonly kind: "unlock" }
   | {
-      /** A lasting change of the context's protection, `now` and with no lock but the person's choices and its type, `bare`. */
+      /** A lasting change of the context's protection, as it is first, then under each set of the locks that can go taken away. */
       readonly kind: "protection";
-      readonly now: Step;
-      readonly bare: Step;
+      readonly steps: readonly Step[];
     };
 
 /** `twigo_policy::friction::friction`. */
@@ -70,7 +69,7 @@ function frictionOf(
 ): Friction {
   if (risk.kind === "unlock") return { kind: "confirm" };
   if (risk.kind === "protection") {
-    return lowering(context, access, risk.now, risk.bare);
+    return lowering(context, access, risk.steps);
   }
   if (risk.kind === "reveal" || risk.kind === "reviewed") {
     return access.mode === "read-write"
@@ -370,7 +369,7 @@ export interface BusHost {
     MockAccess,
     | "of"
     | "would"
-    | "bare"
+    | "without"
     | "locks"
     | "changes"
     | "refuse"
@@ -1707,15 +1706,19 @@ export class MockBus {
    * A change of a context's own protection (`actions::protection` in Rust):
    * refused where the admin's policy file sets the mode, a type excepted, as
    * it only names and colours the context there, and where there is nothing
-   * to unlock. A lasting change is weighed twice, as it is and as the context
-   * would be with no lock but the person's choices and its type, which
-   * outlives every other, and the plan runs only while what the context lets
-   * through and the count of its changes are what they were when planned.
+   * to unlock. A lasting change is weighed as it is and under each set of the
+   * locks that hold the context taken away, and the plan runs only while what
+   * the context lets through and the count of its changes are what they were
+   * when planned.
    */
   #protection(context: string, change: Change): Planned {
     const { protection } = this.host;
     if (!("environment" in change)) protection.refuse(context);
-    const before = protection.of(context);
+    const {
+      from: before,
+      to: after,
+      beneath,
+    } = weigh(protection, context, change);
     if (
       "unlock" in change &&
       before.mode !== "read-only" &&
@@ -1726,14 +1729,8 @@ export class MockBus {
         `${context} is ${before.mode}, so there is nothing to unlock`,
       );
     }
-    const after = protection.would(context, change);
-    const bare = {
-      locks: protection.locks(context),
-      from: protection.bare(context),
-      to: protection.bare(context, change),
-    };
     const changes = protection.changes(context);
-    const said = words(context, change, before, after, bare);
+    const said = words(context, change, before, after, beneath);
     return {
       plan: {
         context,
@@ -1750,8 +1747,7 @@ export class MockBus {
           ? { kind: "unlock" }
           : {
               kind: "protection",
-              now: { from: before, to: after },
-              bare,
+              steps: [{ from: before, to: after }, ...beneath],
             },
       stands: () => {
         if (

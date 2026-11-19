@@ -7,7 +7,12 @@ import type {
   Mode,
   ModeSource,
 } from "../generated";
-import { STRICTNESS, type Change, type Outlived } from "./access";
+import {
+  STRICTNESS,
+  type Change,
+  type MockAccess,
+  type Outlived,
+} from "./access";
 
 const UNLOCK_MINUTES = 15;
 
@@ -36,29 +41,58 @@ export interface Step {
 }
 
 /**
- * The context as it would be with no lock but the person's choices and its
- * type, `twigo_policy::Beneath`: a type outlives the policy file's entry, a
- * kubeconfig's `readOnly` and a provider's lock, which can go.
+ * The context as it would be with the locks `gone` taken away, the person's
+ * mode and type kept: `twigo_policy::Beneath`.
  */
 export interface Beneath extends Step {
-  readonly locks: readonly Outlived[];
+  readonly gone: readonly Outlived[];
+}
+
+/** What a change leaves a context with, as `twigo_policy::Policy::plan` says: its access as it is, and under each nonempty set of the locks that hold it taken away, the smallest sets first. */
+export interface Weighed extends Step {
+  readonly beneath: readonly Beneath[];
+}
+
+export function weigh(
+  access: Pick<MockAccess, "of" | "would" | "without" | "locks">,
+  context: string,
+  change: Change,
+): Weighed {
+  const beneath = sets(access.locks(context))
+    .filter((gone) => gone.length > 0)
+    .map((gone) => ({
+      gone,
+      from: access.without(context, gone),
+      to: access.without(context, gone, change),
+    }));
+  return {
+    from: access.of(context),
+    to: access.would(context, change),
+    beneath,
+  };
+}
+
+/** Every set of `locks`, the smallest first and each size in the order the locks come, as `twigo_policy::policy::sets` does. */
+function sets<T>(locks: readonly T[]): T[][] {
+  let all: T[][] = [[]];
+  for (const lock of locks) all = [...all, ...all.map((set) => [...set, lock])];
+  return all.sort((a, b) => a.length - b.length);
 }
 
 /**
  * What a lasting change of a context's protection asks, as
- * `twigo_policy::friction::friction` does: its name typed when the change
- * leaves the context less strict than the mode it keeps, as it is (`now`) or
- * with no lock but the person's choices and its type (`bare`); nothing when
- * it tightens or keeps that either way, or when the context is unmarked now,
- * as the question it answers is its friction.
+ * `twigo_policy::friction::friction` does: its name typed when, as it is
+ * (the first of `steps`) or under any set of the locks that can go taken
+ * away (the others), it leaves the context less strict than the mode it
+ * keeps; nothing when it tightens or keeps that in every one, or when the
+ * context is unmarked now, as the question it answers is its friction.
  */
 export function lowering(
   context: string,
   access: ContextAccess,
-  now: Step,
-  bare: Step,
+  steps: readonly Step[],
 ): Friction {
-  return access.source.kind === "unmarked" || (keeps(now) && keeps(bare))
+  return access.source.kind === "unmarked" || steps.every(keeps)
     ? { kind: "atOnce" }
     : { kind: "typed", text: context };
 }
@@ -81,11 +115,11 @@ export function words(
   change: Change,
   before: ContextAccess,
   after: ContextAccess,
-  bare: Beneath,
+  beneath: readonly Beneath[],
 ): Words {
   return {
     ...question(context, change, after),
-    consequences: consequences(context, change, before, after, bare),
+    consequences: consequences(context, change, before, after, beneath),
   };
 }
 
@@ -136,7 +170,7 @@ function consequences(
   change: Change,
   before: ContextAccess,
   after: ContextAccess,
-  bare: Beneath,
+  views: readonly Beneath[],
 ): string[] {
   const unlock = "unlock" in change;
   const was =
@@ -155,7 +189,7 @@ function consequences(
   } else {
     said.push(...asks(context, after.mode, was));
   }
-  if (!unlock) said.push(...beneath(context, after, bare));
+  if (!unlock) said.push(...beneath(context, after, views));
   if (after.source.kind === "user" && after.source.overrides !== null) {
     const { mode, source }: Lock = after.source.overrides;
     said.push(`It sets aside the ${mode} ${lockedBy(source)}.`);
@@ -168,24 +202,45 @@ function consequences(
   return said;
 }
 
-/** What the change gives once the locks that hold the context go, where that is not what it gives now: a type outlives them. */
+/**
+ * What the change gives once locks that hold the context go, where that is
+ * not what it gives now: the person's mode and type outlive them. Of the
+ * sets of locks whose absence shows it, the one that leaves the context
+ * least strict, and of those the smallest.
+ */
 function beneath(
   context: string,
   after: ContextAccess,
-  bare: Beneath,
+  views: readonly Beneath[],
 ): string[] {
   const unmarked = ({ source }: ContextAccess) => source.kind === "unmarked";
-  if (bare.to.mode === after.mode && unmarked(bare.to) === unmarked(after)) {
-    return [];
-  }
-  const gone = bare.locks.map((lock) =>
-    lock.kind === "policyFile"
-      ? `${lock.file} no longer sets its mode`
-      : "its kubeconfig's lock goes",
-  );
-  const then = unmarked(bare.to)
+  const strictness = ({ to }: Beneath) =>
+    STRICTNESS[to.mode] * 2 + (unmarked(to) ? 0 : 1);
+  const view = views
+    .filter(
+      ({ to }) => to.mode !== after.mode || unmarked(to) !== unmarked(after),
+    )
+    .reduce<Beneath | undefined>(
+      (least, next) =>
+        least === undefined || strictness(next) < strictness(least)
+          ? next
+          : least,
+      undefined,
+    );
+  if (view === undefined) return [];
+  const gone = view.gone.map((lock) => {
+    switch (lock.kind) {
+      case "policyFile":
+        return `${lock.file} no longer sets its mode`;
+      case "kubeconfig":
+        return "its kubeconfig's lock goes";
+      case "type":
+        return "its kubeconfig's type goes";
+    }
+  });
+  const then = unmarked(view.to)
     ? `its first write or exec asks what ${context} is`
-    : `it will be ${bare.to.mode}`;
+    : `it will be ${view.to.mode}`;
   return [`When ${gone.join(" and ")}, ${then}.`];
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { Backend } from "../backend";
 import { IpcError } from "../error";
 import type {
   Environment,
@@ -1427,7 +1428,7 @@ test("a lasting change that lowers protection asks for the name typed, and one t
   });
 });
 
-test("a type weighs the mode a context would have with no lock but the type, so a lock another source holds cannot hide a lowering", async () => {
+test("a type asks for the name where it lowers the context under any set of locks gone, so a lock another source holds cannot hide a lowering", async () => {
   const friction = async (
     backend: ReturnType<typeof createMockBackend>,
     request: PlanRequest,
@@ -1511,6 +1512,45 @@ test("a type, or a mode cleared, beneath a kubeconfig's lock asks as what it giv
   expect(kept.consequences).toEqual([
     "It stays read-only as its kubeconfig says.",
   ]);
+});
+
+test("clearing a mode beneath a kubeconfig's type, or a type beneath a policy file's lock, asks for the name and says what it gives once the lock goes", async () => {
+  const FILE = "/Library/Application Support/Twigo/policy.json";
+  const typed = (context: string) => ({ kind: "typed", text: context });
+  const plan = async (backend: Backend, request: PlanRequest) => {
+    const { friction, consequences } = await answered(
+      backend.invoke("command_plan", request),
+    );
+    return { friction, consequences };
+  };
+
+  const backend = createMockBackend();
+  await change(backend, SET_MODE("prod-eu", "guarded"));
+  expect(await plan(backend, SET_MODE("prod-eu", null))).toEqual({
+    friction: typed("prod-eu"),
+    consequences: [
+      "Every write, exec and shell is refused; reads, dry runs and port-forwards go on.",
+      "When its kubeconfig's type goes, its first write or exec asks what prod-eu is.",
+    ],
+  });
+  await change(backend, SET_MODE("staging", "guarded"));
+  expect(await plan(backend, SET_MODE("staging", null))).toEqual({
+    friction: typed("staging"),
+    consequences: [
+      "It stays guarded as Staging by default.",
+      "When its kubeconfig's type goes, its first write or exec asks what staging is.",
+    ],
+  });
+
+  const filed = createMockBackend("policyFile");
+  await change(filed, SET_ENVIRONMENT("prod-eu", "staging"));
+  expect(await plan(filed, SET_ENVIRONMENT("prod-eu", null))).toEqual({
+    friction: typed("prod-eu"),
+    consequences: [
+      `It stays read-only by prod-* in ${FILE}.`,
+      `When ${FILE} no longer sets its mode, its first write or exec asks what prod-eu is.`,
+    ],
+  });
 });
 
 test("clearing a type weighs as a change to read-write, and leaves the context unmarked whatever its kubeconfig says", async () => {

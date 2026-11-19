@@ -234,7 +234,7 @@ test("the palette's Default and None send no value, and the current None sends n
   expect(catalog.find("prod-eu")?.access.source).toMatchObject({
     kind: "user",
   });
-  await pickFrom(SET_CONTEXT_MODE, "none");
+  await pickFrom(SET_CONTEXT_MODE, "none", true);
   expect(catalog.find("prod-eu")?.access.source).toEqual({
     kind: "environment",
     environment: "production",
