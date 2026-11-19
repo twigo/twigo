@@ -29,13 +29,13 @@ This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it
 
 Decisions taken with the owner on 2026-11-14, after the [strategic review](reviews/2026-11-fable-strategic-review.md):
 
-| #   | Decision                                                                                                                                                                                                          | Consequence                                                                                                                                                                                                              |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D13 | Twigo is not presented as an open Lens. It is for the person who runs many clusters and has to find what is wrong, why, and what changed, from the keyboard, with every change guarded.                           | The first lines of this document say so. "Performance is the product" stays an engineering principle (0.2).                                                                                                              |
-| D14 | The extension runtime (D3, D4, D11) moves to the end of the roadmap. D3 and D4 stand.                                                                                                                             | M3 and the first beta ship without extensions. Until then a provider's clusters come through the kubeconfig and its exec plugin. Sections 5.3, 7.1, 7.2 and 7.4.                                                         |
-| D15 | Agents read and propose, and the person applies. This is tried first and may change.                                                                                                                              | The MCP server gets no tool that writes, execs or forwards, and the grant `read + approved writes` of 6.6 is not built until this is revisited. The approval broker for child processes (6.4) is unchanged. Section 7.2. |
-| D16 | At the first write to a context nobody marked, Twigo asks once what the context is. Protection is lowered only by a confirmed command that the audit log records; a kubeconfig or a provider can only tighten it. | The `read-write` default for an unmarked context and the order of mode sources in 6.4 change with the code that builds this.                                                                                             |
-| D17 | macOS builds are signed with the maintainer's personal Apple Developer membership, not a company's.                                                                                                               | Section 6.7 and the release work.                                                                                                                                                                                        |
+| #   | Decision                                                                                                                                                                                                          | Consequence                                                                                                                                                                                                                                                                       |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D13 | Twigo is not presented as an open Lens. It is for the person who runs many clusters and has to find what is wrong, why, and what changed, from the keyboard, with every change guarded.                           | The first lines of this document say so. "Performance is the product" stays an engineering principle (0.2).                                                                                                                                                                       |
+| D14 | The extension runtime (D3, D4, D11) moves to the end of the roadmap. D3 and D4 stand.                                                                                                                             | M3 and the first beta ship without extensions. Until then a provider's clusters come through the kubeconfig and its exec plugin. Sections 5.3, 7.1, 7.2 and 7.4.                                                                                                                  |
+| D15 | Agents read and propose, and the person applies. This is tried first and may change.                                                                                                                              | The MCP server gets no tool that writes, execs or forwards, and the grant `read + approved writes` of 6.6 is not built until this is revisited. The approval broker for child processes (6.4) is unchanged. Section 7.2.                                                          |
+| D16 | At the first write to a context nobody marked, Twigo asks once what the context is. Protection is lowered only by a confirmed command that the audit log records; a kubeconfig or a provider can only tighten it. | A context nobody marked is `guarded` and its first write or exec asks what it is; locks from the kubeconfig, a provider or a type only tighten, and a person's choice wins both ways; mode, type and unlock are plans of the command bus that the audit log records. Section 6.4. |
+| D17 | macOS builds are signed with the maintainer's personal Apple Developer membership, not a company's.                                                                                                               | Section 6.7 and the release work.                                                                                                                                                                                                                                                 |
 
 ### 0.2 Principles
 
@@ -1401,7 +1401,7 @@ Extensions add commands, not prefixes.
     kubectl writes a changed entry back to the first file that names it ([`ModifyConfig`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/client-go/tools/clientcmd/config.go#L235-L258)), so `config set-context --current --namespace` writes Twigo's copy and `config use-context` the current context of Twigo's file, and the user's files stay as they were.
     The empty lists keep `az`, which refuses a file without them, and `gcloud`, which moves one aside, working.
     Such a terminal reaches every context with real credentials, read-only ones included, as any terminal app would, and it keeps running when its context stops being `read-write`: ending it would protect little and lose local work, so its tab warns that it holds real credentials and offers a restart through the proxy.
-  - **Terminals of every other context**, including one temporarily unlocked, get only a generated policy-proxy kubeconfig (6.4), a process of the terminal's actor, label and window that ends when its shell does, so a job the shell left, its file and its tokens gone, reaches nothing.
+  - **Terminals of every other context**, including one temporarily unlocked and one nobody marked, get only a generated policy-proxy kubeconfig (6.4), a process of the terminal's actor, label and window that ends when its shell does, so a job the shell left, its file and its tokens gone, reaches nothing.
     In a shell other than zsh, bash, fish and pwsh a startup file that sets `KUBECONFIG` replaces that file, and in those four what runs after their startup files still can (6.4).
     So do terminals of contexts that come from a provider, whatever their mode, because those have no kubeconfig entry to point at; no source lists such contexts yet.
     It holds one proxy entry per catalog context, each with its own token and that context's mode, and none of the user's files.
@@ -1560,7 +1560,7 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered.
     Before users exist there are no migrations.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
-  - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a command changes a mode.
+  - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a confirmed plan of the command bus, or a type given in answer to a process's ask, changes them (6.4).
   - A space's port-forwards (4.6) live here under a key `state_set` refuses as well, with the id the last forward got in the app's scope, since only the manager changes them.
 - **What is skipped from VS Code, and why:**
   - Workspace and folder layers: spaces take their place.
@@ -1723,6 +1723,7 @@ interface CommandDescriptor {
   Every UI action is a command, including the single-key table verbs.
 - **Backend commands.**
   - All Kubernetes operations: apply, delete, scale, restart, drain, cordon, trigger, suspend, Helm, a shell or an attach in a pod (4.6), and a Reveal of secret-grade data (3.6).
+  - A change of a context's protection: the person's mode, the type they mark it as, and an unlock (6.4), which send nothing to a cluster.
   - Each is an action of the command bus in `twigo-core`, planned first through `command_plan`.
     Rust finds what it acts on, refuses what the policy blocks before anything is asked, and answers with what it will do, in words and as the equivalent kubectl command, and the friction its blast radius asks for in the context's mode (6.4).
   - The webview draws the friction and runs the plan by its id through `command_execute`, with what proves the friction was met: the name typed, the countdown passed.
@@ -2217,8 +2218,8 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
       The same bytes acting as someone else, or read as another kind of patch, are another request, which asks again.
       A denial covers every repeat; "once" covers only a repeat of the verb, decoded path and class it was answered for, the `GET` and `POST` of a pod's stream as one, and one request at a time.
       A request takes it as it is sent and gives it back only when it reached no server: after the proxy's own `429`, or a pod's stream answered other than `101`, as nothing of it runs before the kubelet's `101` ([`ServeExec`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/cri-streaming/pkg/streaming/remotecommand/exec.go#L40-L48)); a proxy's answer came from its backend, and a request whose client went may have reached the server, so neither gives it back.
-    - An ask is withdrawn when its request goes, as when kubectl is killed, when the process's handle drops, when the window goes, and when the context's access changes so that the request needs no approval any more, which then goes on as the gate says.
-    - The audit log notes how each ask ended: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`.
+    - An ask is withdrawn when its request goes, as when kubectl is killed, when the process's handle drops, when the window goes, and when the context's access changes so that the ask no longer fits the request, which then meets the gate anew: it goes, is refused, or asks again.
+    - The audit log notes how each ask ended: `once`, `lasting`, `denied`, `nobody` when no window could ask, or `withdrawn`; an unmarked ask answered with a type, by the change it made (below).
       An answer counts only when its waiting request takes it: one that comes after the request went, or after its process ended, is refused and grants nothing, and the window gets the withdrawal.
     - Agents may use the scope "this process" for the rest of one run, except for deletes, which comes with them (M3).
       Terminals get only "once" and "for 15 minutes", because a terminal's token lives as long as the shell, and only terminals are offered "for 15 minutes": until their own scopes come, an agent's and `helm`'s asks are answered once.
@@ -2254,16 +2255,37 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Where the mode comes from**, highest first:
   1. a policy file entry, which the UI cannot change or unlock; of several that match, the strictest;
   2. no source lists the context now: `read-only`, since clients built before it went may still run and nothing says what it lets through;
-  3. the person's choice for the context;
-  4. kubeconfig metadata (`twigo.readOnly`), where a value other than true or false counts as true;
-  5. the provider (Segla can mark production clusters);
-  6. the default of its environment type: `read-only` for Production, `guarded` for Staging and `read-write` for the rest;
-  7. the default `read-write`.
+  3. the person's choice for the context, which wins both ways: where it is less strict than the strictest lock below, its source names that lock as set aside (`user` with `overrides`);
+  4. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
+     - kubeconfig metadata, `twigo.readOnly` there and anything but `false`: `read-only`, while `false` says nothing;
+     - the provider (Segla can mark production clusters), whose lock is `guarded` or `read-only`, never `read-write`;
+     - the default of its environment type, the person's, else its kubeconfig's: `read-only` for Production, `guarded` for Staging and `read-write` for Development and Local;
+  5. nothing marks it: `guarded`, source `unmarked`, until someone says what it is.
 
   The mode is read for every request, so a change reaches clients already built.
+  The person's "no type" holds whatever the kubeconfig says, and with no other lock leaves the context unmarked again.
+
+- **A context nobody marked** lets through what `guarded` does, reads, dry runs, Secret reads and port-forwards, and no actor's write or exec, the UI's included, whatever approval it carries: the gate refuses it as `unmarked`.
+  Every unmarked context asks, local-looking ones included, as a server on `127.0.0.1` is often a tunnel to a remote cluster (Teleport's local proxy, SSH forwards).
+  - A command of the person's own is refused at plan time, before any friction, so the window asks what the context is and plans again.
+  - A process's write or exec through the policy proxy raises an ask marked `unmarked`, which the person answers with a type or denies.
+    A type marks the context, kept with the person's choices and recorded with the process, and the request meets the gate anew: it goes, asks again as `guarded` asks, or is refused in the gate's words.
+    A denial leaves the context unmarked, so the next write asks again; "once" and "for 15 minutes" answer no unmarked ask, and a type answers no other.
+    The ask is withdrawn, and its request decided again, when the context is marked another way meanwhile, as every ask is when its context's access changes, and so are the context's other unmarked asks once one of them is answered.
+  - Its terminals go through the policy proxy, as those of every context that is not `read-write` do; marking it Development leaves a running one there until it is opened again (4.6).
+
+- **Changes of protection** are plans of the command bus (5.1): the person's mode, the type they mark a context as, and an unlock.
+  They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where the policy file sets the context's mode or no source lists it.
+  Rust names the friction from the context's access before and after:
+  - a lasting change that leaves the context less strict asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
+  - an unlock asks in a dialog, as it ends by itself and leaves every write asking for the context's name;
+  - a change that tightens or keeps the mode, and any change of a context nobody marked, runs at once: the question an unmarked context answers is its friction.
+
+  A plan holds only while the context's access stays as it was planned: a choice, an unlock or its end, or a change of what the catalog says of the context meanwhile refuses it as a conflict and changes nothing.
+  A relock (`context_relock`) only tightens and runs at once, and a plugin's trust (`exec_trust`) has its review for confirmation; both stay commands of their own.
 
 - **Unlock for 15 minutes.**
-  A command switches a `read-only` context to `guarded` for a limited time, and a command that such a lock refused offers it in the toast that says so; a policy file's lock offers nothing.
+  A plan switches a `read-only` context to `guarded` for a limited time, and a command that such a lock refused offers it in the toast that says so; a policy file's lock offers nothing.
   A banner shows the countdown, and the context relocks by itself.
   The gate reads the wall clock, as timers stop while the machine sleeps, and nothing stores an unlock, so a restart relocks.
   An unlock holds only while the context's fingerprint stays, so one given on a cluster never reaches another its name moves to, and a new choice or type ends it.
@@ -2272,12 +2294,14 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
 - **The audit log** is `audit.jsonl` in the app-data directory, mode 0600.
   The gate notes each write it sends, just above the socket, or stops, with the actor, the context and its mode; the command bus notes what a person confirmed, through which friction, and how it ended.
+  Of protection it notes, one line each: each change a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; each unlock that ended by a relock, by its time, or as the context named another cluster or none; and each plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
+  A change of protection is that line alone, in place of the bus's two.
   It names targets, never a value, so the actors of M3 only add their name.
   A file that cannot be opened is said on stderr and keeps nothing: the log records, it guards nothing.
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
     A person marks a context, or its kubeconfig metadata says so (`twigo.environment`, 5.5), and the person's mark wins, their None included.
-    Nothing guesses a type from a context's name: a context nobody marked is `read-write` with no chip, and only an admin's policy file sets modes by glob (4.8).
+    Nothing guesses a type from a context's name: a context nobody marked is `guarded` until someone says what it is (above), and only an admin's policy file sets modes by glob (4.8).
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     Where the bar is too narrow the chip folds to its icon, its words in its tooltip, after the search and before the crumbs (4.1).
     The mockup's third, a 2 px line of its colour along the title bar's top, was dropped on 2026-11-07: the chip, the tint and the bar's left end in the context's colour already say it.

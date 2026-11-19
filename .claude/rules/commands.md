@@ -12,6 +12,7 @@ paths:
 # The command bus
 
 - A command that changes a cluster or shows secret-grade data is an action in `crates/twigo-core/src/actions`, run through the bus; the webview never sends a write ([decision](../../docs/decisions/command-bus.md)).
+- So is a change that lowers a context's protection: the person's mode, its type and an unlock are plans with friction Rust names from the access before and after, and the audit log records each.
 - An action plans before anything is asked: its writes as the requests that go out, its risk, its words and its kubectl command; the bus names the friction, and Rust checks it before the plan runs.
 - Its kubectl command does what it does: `crates/twigo-core/tests/bus_live/` runs it on kind.
 - A plan sends no write before the confirmation: the exact objects it lists come from reads, never from a server dry-run of a DELETE or a subresource, which the gate takes for a write.
