@@ -59,8 +59,8 @@ pub enum ModeSource {
     /// `overrides` is the lock it sets aside: what the kubeconfig, the
     /// provider or the type would give, where that is stricter.
     User { overrides: Option<Lock> },
-    /// `twigo.readOnly: true` in its kubeconfig metadata, the strictest of
-    /// the locks.
+    /// `twigo.readOnly` in its kubeconfig metadata with any value but
+    /// `false`, the strictest of the locks.
     Kubeconfig,
     /// Its catalog provider's lock, the strictest of the locks.
     Provider,
