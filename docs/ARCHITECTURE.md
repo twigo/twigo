@@ -2288,10 +2288,12 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Changes of protection** are plans of the command bus (5.1): the person's mode, the type they mark a context as, and an unlock.
   They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where no source lists the context.
   Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans.
-  A type outlives every lock, as the policy file's entry, a kubeconfig's `readOnly` and a provider's lock can go while it stays, so a change is weighed twice: by the context's access as it is, and as it would be with no lock but the person's choices and its type, a context unmarked there counting as `guarded`.
-  A type that a lock hides is weighed by what it will give, and so is the person's mode cleared beneath a lock, and the plan says what the context will be once its locks go.
-  Rust names the friction from the context's access before and after, both ways:
-  - a lasting change that leaves the context less strict either way asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
+  The person's mode and type outlive every lock that can go: the policy file's entry, a kubeconfig's `readOnly`, a kubeconfig's type and a provider's lock, each of which an edit or the provider can take away on its own.
+  So a lasting change is weighed under every set of those locks taken away, the person's choices kept and the empty set being the change as it is, a context unmarked under a set counting as `guarded` there.
+  No lock then hides a lowering from the friction: neither a kubeconfig's type beneath its `readOnly` nor the person's mode cleared beneath a kubeconfig's type.
+  The plan says what the change gives once the locks that hide it go: of the sets whose absence shows it, the one that leaves the context least strict, and of those the smallest.
+  Rust names the friction from the context's access before and after, under each set:
+  - a lasting change that leaves the context less strict under any set asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
   - a change that leaves the context unmarked weighs as one to `read-write`, since from there any change runs at once: from `read-only` or `guarded` it asks for the name typed;
   - an unlock asks in a dialog, as it ends by itself and leaves every write asking for the context's name;
   - a change that tightens or keeps the mode, and any change of a context nobody marked, runs at once: the question an unmarked context answers is its friction.
