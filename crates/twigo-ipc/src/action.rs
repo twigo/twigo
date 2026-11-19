@@ -86,12 +86,14 @@ pub enum PlanRequest {
     /// (ARCHITECTURE 6.4). Refused under the admin's policy file.
     SetMode { context: String, mode: Option<Mode> },
     /// Marks a context as a type, none for no type whatever its kubeconfig
-    /// says. Answers the question of an unmarked context too.
+    /// says; under the admin's policy file it only names and colours it.
+    /// Answers the question of an unmarked context too.
     SetEnvironment {
         context: String,
         environment: Option<Environment>,
     },
     /// Lets a `read-only` context through as `guarded` for 15 minutes.
+    /// Refused under the admin's policy file.
     Unlock { context: String },
 }
 

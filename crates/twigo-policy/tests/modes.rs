@@ -353,16 +353,13 @@ fn a_missing_policy_file_sets_nothing() {
 }
 
 #[test]
-fn a_policy_file_entry_cannot_be_changed_or_unlocked() {
+fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_lowers_nothing() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
     let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
     let by_file = |refused: Refused| matches!(&refused, Refused::PolicyFile(pattern, _) if pattern == "prod-*");
     for change in [
         Change::Mode {
             mode: Some(Mode::ReadWrite),
-        },
-        Change::Type {
-            environment: Some(Environment::Local),
         },
         Change::Unlock,
     ] {
@@ -376,14 +373,21 @@ fn a_policy_file_entry_cannot_be_changed_or_unlocked() {
             .set_mode("prod-eu", Some(Mode::ReadWrite))
             .unwrap_err()
     ));
-    assert!(by_file(
-        policy
-            .set_environment("prod-eu", Some(Environment::Local))
-            .unwrap_err()
-    ));
     assert!(policy.unlock("prod-eu").is_err());
-    assert_eq!(policy.access("prod-eu").mode, Mode::ReadOnly);
-    assert_eq!(policy.access("prod-eu").unlocked_until, None);
+
+    let local = Change::Type {
+        environment: Some(Environment::Local),
+    };
+    let planned = policy.plan("prod-eu", local).unwrap();
+    assert_eq!(planned.after.mode, Mode::ReadOnly);
+    assert_eq!(planned.after.source, planned.before.source);
+    policy
+        .change("prod-eu", &planned, &Friction::AtOnce)
+        .unwrap();
+    let access = policy.access("prod-eu");
+    assert_eq!(access.environment, Some(Environment::Local));
+    assert_eq!(access.mode, Mode::ReadOnly);
+    assert_eq!(access.unlocked_until, None);
     assert!(policy.authorize("prod-eu", &write(), Actor::Ui).is_err());
 }
 

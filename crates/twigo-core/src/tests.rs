@@ -877,7 +877,7 @@ async fn an_unlock_does_not_survive_a_restart() {
 }
 
 #[tokio::test]
-async fn a_policy_file_entry_cannot_be_changed_from_the_ui() {
+async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_only_names_the_context() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("policy.json"),
@@ -893,15 +893,27 @@ async fn a_policy_file_entry_cannot_be_changed_from_the_ui() {
             context: context(),
             mode: Some(Mode::ReadWrite),
         },
-        PlanRequest::SetEnvironment {
-            context: context(),
-            environment: Some(Environment::Development),
-        },
         PlanRequest::Unlock { context: context() },
     ] {
         let refused = core.command_plan("main", request).await.unwrap_err();
         assert_eq!(refused.kind, ErrorKind::Permissions);
     }
+    let development = PlanRequest::SetEnvironment {
+        context: context(),
+        environment: Some(Environment::Development),
+    };
+    let plan = core.command_plan("main", development).await.unwrap();
+    assert_eq!(plan.friction, Friction::AtOnce);
+    let execute = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", execute, |_| true)
+        .await
+        .unwrap();
+    let named = access(&core, "kind-local");
+    assert_eq!(named.environment, Some(Environment::Development));
+    assert_eq!(named.mode, Mode::ReadOnly);
 
     assert!(matches!(
         access(&core, "kind-local").source,

@@ -507,11 +507,11 @@ impl Policy {
             })
     }
 
-    /// What `change` would leave `context` with now: refused where the
-    /// admin's policy file sets its mode or no source lists it, and an unlock
-    /// where it is not `read-only`.
+    /// What `change` would leave `context` with now: refused where no source
+    /// lists it, a mode or an unlock where the admin's policy file sets its
+    /// mode, and an unlock where it is not `read-only`.
     pub fn plan(&self, context: &str, change: Change) -> Result<PlannedChange, Refused> {
-        self.refuse_policy_file(context)?;
+        self.refuse_policy_file(context, change)?;
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
@@ -609,7 +609,7 @@ impl Policy {
         unlock: SignedDuration,
         check: impl FnOnce(&Held, &ContextAccess, &Metadata) -> Result<(), Refused>,
     ) -> Result<(ContextAccess, ContextAccess, Choices), Refused> {
-        self.refuse_policy_file(context)?;
+        self.refuse_policy_file(context, change)?;
         let now = Timestamp::now();
         let metadata =
             (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
@@ -701,7 +701,13 @@ impl Policy {
         })
     }
 
-    fn refuse_policy_file(&self, context: &str) -> Result<(), Refused> {
+    /// Refuses a mode or an unlock where the admin's policy file sets the
+    /// context's mode; a type there names and colours the context and lowers
+    /// nothing.
+    fn refuse_policy_file(&self, context: &str, change: Change) -> Result<(), Refused> {
+        if matches!(change, Change::Type { .. }) {
+            return Ok(());
+        }
         match self.file.mode(context) {
             Some((_, ModeSource::PolicyFile { file, pattern })) => Err(match pattern {
                 Some(pattern) => Refused::PolicyFile(pattern, file),
