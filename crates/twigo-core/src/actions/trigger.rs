@@ -13,7 +13,7 @@ use twigo_policy::friction::Risk;
 
 use super::{Target, attributes, clients_for, get, write};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 /// What a Job's name may hold: a label carries it, so 63 characters.
 const NAME_LENGTH: usize = 63;
@@ -70,7 +70,7 @@ pub(crate) async fn trigger(
             "Job {job} runs once from its template, beside its schedule."
         )],
         affected: Vec::new(),
-        kubectl,
+        kubectl: Some(kubectl),
         command: "trigger",
         target: format!("cronjobs/{cronjob_name} in {namespace}, job {job}"),
         writes: vec![create],
@@ -79,7 +79,7 @@ pub(crate) async fn trigger(
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

@@ -1,6 +1,7 @@
 //! How each context gets its credentials, for the webview: its exec plugin,
 //! whether the person trusts it and how its runs go, followed as they change.
 
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -8,6 +9,7 @@ use twigo_ipc::{
     ContextAuth, EnvVar, ExecPlugin, ExecReview, IpcError, PluginStatus, ReviewedPlugin,
 };
 use twigo_kube::credentials::{Exec, RunError, Source, Status};
+use twigo_policy::Entry;
 
 use crate::Core;
 use crate::catalog::Contexts;
@@ -54,13 +56,35 @@ impl Core {
         }
     }
 
+    /// Trusts the plugins of `digests`, each new one recorded in the audit
+    /// log with the program that the catalog's contexts run for it.
     pub fn trust_plugins(&self, digests: Vec<String>) -> Result<(), IpcError> {
+        let trusted = self.trust.current();
+        let new: BTreeSet<String> = digests
+            .iter()
+            .filter(|digest| !trusted.trusts(digest))
+            .cloned()
+            .collect();
         self.trust.trust(digests).map_err(|error| {
             IpcError::new(
                 twigo_ipc::ErrorKind::Internal,
                 format!("could not save the trusted plugins: {error}"),
             )
-        })
+        })?;
+        let listed = self.catalog.subscribe().borrow().clone();
+        let programs: HashMap<String, String> = listed
+            .iter()
+            .flat_map(|contexts| contexts.iter())
+            .filter_map(|context| context.entries.exec().ok().flatten())
+            .map(|exec| (exec.trust_digest(), exec.command().to_owned()))
+            .collect();
+        for digest in &new {
+            self.policy.audit().record(&Entry::Trusted {
+                digest,
+                program: programs.get(digest).map(String::as_str),
+            });
+        }
+        Ok(())
     }
 }
 

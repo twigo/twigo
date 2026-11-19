@@ -23,7 +23,7 @@ use super::{
     ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 use twigo_kube::client::Clients;
 
 pub(crate) async fn scale(
@@ -97,7 +97,7 @@ pub(crate) async fn scale(
         doing: format!("Scaling {what} to {replicas}"),
         consequences,
         affected,
-        kubectl,
+        kubectl: Some(kubectl),
         command: "scale",
         target: attributes.target(),
         writes: vec![attributes],
@@ -106,7 +106,7 @@ pub(crate) async fn scale(
         space: Some(space.to_owned()),
         risk,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

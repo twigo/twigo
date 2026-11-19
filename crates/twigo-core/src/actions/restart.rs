@@ -20,7 +20,7 @@ use super::{
     sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 
@@ -94,7 +94,7 @@ pub(crate) async fn restart(
         doing: format!("Restarting {what}"),
         consequences,
         affected,
-        kubectl,
+        kubectl: Some(kubectl),
         command: "restart",
         target: attributes.target(),
         writes: vec![attributes],
@@ -103,7 +103,9 @@ pub(crate) async fn restart(
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
         previewed: None,
-        run: Box::new(move |_| Box::pin(send(this, connection, run, uid, what, done))),
+        run: bus::Run::Sends(Box::new(move |_| {
+            Box::pin(send(this, connection, run, uid, what, done))
+        })),
     })
 }
 

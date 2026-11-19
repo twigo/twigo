@@ -5,6 +5,9 @@
 //! minutes", `helm` and agents "once"; every delete asks, with the context's
 //! name typed. A window that follows no asks, or a process with none, is
 //! denied at once.
+//!
+//! On a context nobody marked the ask is what the context is: the type the
+//! person answers marks it, and the request meets the gate anew.
 
 pub(crate) mod detail;
 
@@ -17,11 +20,12 @@ use tokio::sync::{oneshot, watch};
 use tokio_util::sync::CancellationToken;
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId,
-    BlockReason, Blocked, ErrorKind, IpcError, Mode, ModeSource,
+    BlockReason, Blocked, Environment, ErrorKind, IpcError, Mode, ModeSource,
 };
-use twigo_policy::{Actor, Approval, Attributes, Entry, Policy};
+use twigo_policy::{Actor, Approval, Attributes, Choices, Entry, Policy};
 
 use crate::catalog::Contexts;
+use crate::errors;
 use crate::proxy::{Changes, Digest, Holder};
 
 /// How long an answer of "lasting" holds.
@@ -88,7 +92,7 @@ struct Pending {
 /// What the audit log names of an ask's request: never a value or a token.
 struct Audited {
     context: String,
-    actor: &'static str,
+    actor: Actor,
     process: Arc<str>,
     verb: String,
     target: String,
@@ -102,6 +106,9 @@ enum Resolution {
     Granted(Timestamp),
     /// The window that would answer went.
     Nobody,
+    /// The person said what the context is: its request meets the gate
+    /// anew.
+    Marked,
 }
 
 /// "For 15 minutes", which holds only while the context's mode, where it
@@ -137,7 +144,8 @@ enum Cover {
     },
 }
 
-/// A request the gate would stop for want of an approval.
+/// A request the gate would stop for want of an approval, or because nobody
+/// has said what its context is.
 pub(crate) struct Asking<'a> {
     pub holder: &'a Holder,
     pub attributes: &'a Attributes,
@@ -157,9 +165,10 @@ pub(crate) enum Outcome<'a> {
     },
     /// Not sent, in these words.
     Denied(String),
-    /// The context's access changed while it waited, so that it needs no
-    /// approval any more: what the gate says of it now.
-    Decided(Result<(), Box<Blocked>>),
+    /// The context's access changed while it waited, so that the ask no
+    /// longer fits it, or the person said what the context is: the request
+    /// meets the gate anew.
+    Again,
     /// The context names another cluster now.
     Moved,
     /// The process's handle dropped.
@@ -219,6 +228,7 @@ impl Approvals {
                 };
             }
         }
+        let unmarked = asking.blocked.reason == BlockReason::Unmarked;
         let Some(window) = holder.window.clone() else {
             return self.nobody(&asking);
         };
@@ -257,9 +267,10 @@ impl Approvals {
                 target: target(attributes, &detail),
                 impersonate: asking.impersonate.clone(),
                 detail,
-                typed: delete,
-                lasting_minutes: (!delete && holder.actor == Actor::Terminal)
+                typed: delete && !unmarked,
+                lasting_minutes: (!delete && !unmarked && holder.actor == Actor::Terminal)
                     .then_some(LASTING.as_mins() as u32),
+                unmarked,
             };
             let told = state.followers.get_mut(&window).is_some_and(|follower| {
                 follower(ApprovalEvent::Asked {
@@ -315,8 +326,8 @@ impl Approvals {
                         return Outcome::Moved;
                     }
                     match self.policy.authorize(&holder.context, asking.attributes, holder.actor) {
-                        Err(blocked) if blocked.reason == BlockReason::NoApproval => {}
-                        decided => return Outcome::Decided(decided),
+                        Err(blocked) if blocked.reason == asking.blocked.reason => {}
+                        _ => return Outcome::Again,
                     }
                 }
             }
@@ -364,6 +375,7 @@ impl Approvals {
                 drop(state);
                 self.unasked(asking)
             }
+            Resolution::Marked => Outcome::Again,
         }
     }
 
@@ -423,7 +435,12 @@ impl Approvals {
         state.followers.insert(window.into(), follower);
     }
 
-    pub(crate) fn answer(&self, window: &str, answer: AnswerApproval) -> Result<(), IpcError> {
+    /// The person's answer; the choices to keep where it marked a context.
+    pub(crate) fn answer(
+        &self,
+        window: &str,
+        answer: AnswerApproval,
+    ) -> Result<Option<Choices>, IpcError> {
         let mut state = self.state();
         let Some(pending) = state.asks.get(&answer.id.0) else {
             return Err(IpcError::new(
@@ -451,11 +468,32 @@ impl Approvals {
                 format!("type {} to confirm", ask.context),
             ));
         }
-        if answer.answer == ApprovalAnswer::Lasting && ask.lasting_minutes.is_none() {
-            return Err(IpcError::new(
-                ErrorKind::InvalidInput,
-                "this can be allowed only once: only a terminal's writes and exec can be allowed for a while, and never a delete",
-            ));
+        match answer.answer {
+            ApprovalAnswer::Once | ApprovalAnswer::Lasting if ask.unmarked => {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "nobody has said what {} is yet: answer with its type, or deny",
+                        ask.context
+                    ),
+                ));
+            }
+            ApprovalAnswer::Mark { .. } if !ask.unmarked => {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    format!("{} is marked already: allow or deny", ask.context),
+                ));
+            }
+            ApprovalAnswer::Lasting if ask.lasting_minutes.is_none() => {
+                return Err(IpcError::new(
+                    ErrorKind::InvalidInput,
+                    "this can be allowed only once: only a terminal's writes and exec can be allowed for a while, and never a delete",
+                ));
+            }
+            ApprovalAnswer::Mark { environment } => {
+                return self.mark(state, answer.id, environment).map(Some);
+            }
+            ApprovalAnswer::Deny | ApprovalAnswer::Once | ApprovalAnswer::Lasting => {}
         }
         let pending = state.asks.remove(&answer.id.0).expect("found above");
         let (resolution, audited) = match answer.answer {
@@ -467,6 +505,7 @@ impl Approvals {
                     .unwrap_or(Timestamp::MAX);
                 (Resolution::Granted(until), "lasting")
             }
+            ApprovalAnswer::Mark { .. } => unreachable!("answered above"),
         };
         let granted = match resolution {
             Resolution::Granted(until) => Some(until),
@@ -490,7 +529,39 @@ impl Approvals {
         for (audited, answer) in ended {
             self.audit(&audited, answer);
         }
-        Ok(())
+        Ok(None)
+    }
+
+    /// Marks the context of an unmarked ask as `environment`, while its
+    /// request still waits and nothing has marked the context meanwhile; the
+    /// policy records it, naming the process. The request, and every other
+    /// ask on the context, then meets the gate anew.
+    fn mark(
+        &self,
+        mut state: MutexGuard<'_, State>,
+        id: ApprovalId,
+        environment: Environment,
+    ) -> Result<Choices, IpcError> {
+        let pending = state.asks.get(&id.0).expect("found by the caller");
+        if pending.resolve.is_closed() {
+            let pending = state.asks.remove(&id.0).expect("found above");
+            return Err(self.gone(state, id, &pending.window, &pending.audited));
+        }
+        let choices = self
+            .policy
+            .mark(
+                &pending.ask.context,
+                pending.connection,
+                environment,
+                pending.audited.actor,
+                &pending.audited.process,
+            )
+            .map_err(|error| errors::refused(&error))?;
+        let pending = state.asks.remove(&id.0).expect("found above");
+        // A request that went meanwhile has nothing left to decide: the
+        // context is marked all the same, as the person said.
+        let _ = pending.resolve.send(Resolution::Marked);
+        Ok(choices)
     }
 
     /// Refuses an answer that no request waits for: the window that asked
@@ -542,7 +613,10 @@ impl Approvals {
             .asks
             .iter()
             .filter(|(_, other)| {
-                other.process == process && other.ask.context == context && !other.delete
+                other.process == process
+                    && other.ask.context == context
+                    && !other.delete
+                    && !other.ask.unmarked
             })
             .map(|(id, _)| *id)
             .collect();
@@ -599,7 +673,7 @@ impl Approvals {
     fn audit(&self, audited: &Audited, answer: &str) {
         self.policy.audit().record(&Entry::Approval {
             context: &audited.context,
-            actor: audited.actor,
+            actor: audited.actor.name(),
             process: &audited.process,
             verb: &audited.verb,
             target: &audited.target,
@@ -617,7 +691,7 @@ impl Asking<'_> {
     fn audited(&self) -> Audited {
         Audited {
             context: self.holder.context.clone(),
-            actor: self.holder.actor.name(),
+            actor: self.holder.actor,
             process: Arc::clone(&self.holder.label),
             verb: self.attributes.verb.clone(),
             target: self.attributes.target(),
@@ -777,13 +851,14 @@ mod tests {
             },
             typed: false,
             lasting_minutes: Some(15),
+            unmarked: false,
         }
     }
 
     fn audited() -> Audited {
         Audited {
             context: "kind-a".to_owned(),
-            actor: "terminal",
+            actor: Actor::Terminal,
             process: "Terminal 1".into(),
             verb: "create".to_owned(),
             target: "configmaps in a".to_owned(),
@@ -924,7 +999,7 @@ mod tests {
             blocked: Box::new(Blocked {
                 context: "kind-a".to_owned(),
                 mode: Mode::Guarded,
-                source: ModeSource::User,
+                source: ModeSource::User { overrides: None },
                 class: RequestClass::Write,
                 reason: BlockReason::NoApproval,
                 verb: attributes.verb.clone(),

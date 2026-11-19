@@ -6,9 +6,10 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer,
-    KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy, SetContextMode, ShellAck,
-    ShellEnd, ShellEvent, ShellInput, SubscriptionId, TerminalKind,
+    AnswerKubeconfigOffer, Environment, ErrorKind, Execute, Friction, KubeconfigNames,
+    KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell,
+    PlanRequest, ProxyWhy, ShellAck, ShellEnd, ShellEvent, ShellInput, SubscriptionId,
+    TerminalKind,
 };
 use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
@@ -34,10 +35,12 @@ contexts:
     cluster: kind-a
     user: kind-a
     namespace: apps
+    extensions: [{ name: twigo, extension: { environment: local } }]
 - name: kind-b
   context:
     cluster: kind-a
     user: kind-a
+    extensions: [{ name: twigo, extension: { environment: local } }]
 current-context: kind-b
 ";
 
@@ -268,22 +271,26 @@ fn a_terminal_goes_through_the_proxy_where_the_policy_file_or_the_mode_says() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("policy.json");
     std::fs::write(&file, r#"{"terminal": {"usePolicyProxy": ["prod-*"]}}"#).unwrap();
-    let listed = Metadata {
-        read_only: None,
-        provider: None,
-        environment: None,
-        connection: 1,
-        revision: 0,
-    };
     let policy = Policy::new(
         PolicyFile::read(&file),
-        move |_| Some(listed),
+        |context| {
+            Some(Metadata {
+                environment: (context != "new").then_some(Environment::Local),
+                connection: 1,
+                ..Metadata::default()
+            })
+        },
         Choices::default(),
         Audit::off(),
     );
     let proxied = |why| TerminalKind::Proxy { why };
     assert_eq!(kind(&policy, "prod-eu"), proxied(ProxyWhy::PolicyFile));
     assert_eq!(kind(&policy, "dev"), TerminalKind::Kubeconfig);
+    assert_eq!(
+        kind(&policy, "new"),
+        proxied(ProxyWhy::Mode),
+        "a context nobody marked is guarded"
+    );
     policy.set_mode("dev", Some(Mode::Guarded)).unwrap();
     assert_eq!(kind(&policy, "dev"), proxied(ProxyWhy::Mode));
     policy.set_mode("dev", Some(Mode::ReadOnly)).unwrap();
@@ -343,11 +350,8 @@ async fn a_terminal_of_a_guarded_context_has_the_proxy_s_file_alone() {
     let setup = Setup::new().await;
     setup
         .core
-        .set_context_mode(SetContextMode {
-            context: "kind-b".to_owned(),
-            mode: Some(Mode::Guarded),
-        })
-        .await
+        .policy
+        .set_mode("kind-b", Some(Mode::Guarded))
         .unwrap();
     let session = setup
         .create(
@@ -390,15 +394,54 @@ async fn a_terminal_of_a_guarded_context_has_the_proxy_s_file_alone() {
 }
 
 #[tokio::test]
+async fn an_unmarked_context_s_terminal_keeps_the_proxy_once_marked_until_one_opens_anew() {
+    let setup = Setup::new().await;
+    setup.core.policy.set_environment("kind-b", None).unwrap();
+    let session = setup
+        .create("kind-b", r#"printf '%s\n' "$KUBECONFIG""#)
+        .await;
+    let proxied = TerminalKind::Proxy {
+        why: ProxyWhy::Mode,
+    };
+    assert_eq!(session.kind, proxied);
+
+    let plan = setup
+        .core
+        .command_plan(
+            "main",
+            PlanRequest::SetEnvironment {
+                context: "kind-b".to_owned(),
+                environment: Some(Environment::Development),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan.friction, Friction::AtOnce);
+    let execute = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    setup
+        .core
+        .command_execute("main", execute, |_| true)
+        .await
+        .unwrap();
+    assert_eq!(setup.core.policy.access("kind-b").mode, Mode::ReadWrite);
+
+    let (output, _) = setup.run(session.id).await;
+    let proxy = setup.dir.path().join("data").join("proxy");
+    assert!(output.starts_with(&proxy.display().to_string()), "{output}");
+    let reopened = setup.create("kind-b", "true").await;
+    assert_eq!(reopened.kind, TerminalKind::Kubeconfig);
+}
+
+#[tokio::test]
 async fn a_proxy_terminal_s_file_and_tokens_go_when_its_shell_ends() {
     let setup = Setup::new().await;
     setup
         .core
-        .set_context_mode(SetContextMode {
-            context: "kind-b".to_owned(),
-            mode: Some(Mode::Guarded),
-        })
-        .await
+        .policy
+        .set_mode("kind-b", Some(Mode::Guarded))
         .unwrap();
     let session = setup
         .create(
@@ -522,11 +565,8 @@ async fn a_proxy_terminal_keeps_the_proxy_s_file_over_a_bashrc_and_its_directory
     let setup = Setup::new().await;
     setup
         .core
-        .set_context_mode(SetContextMode {
-            context: "kind-b".to_owned(),
-            mode: Some(Mode::Guarded),
-        })
-        .await
+        .policy
+        .set_mode("kind-b", Some(Mode::Guarded))
         .unwrap();
     std::fs::write(setup.home().join(".bashrc"), "export KUBECONFIG=/theirs\n").unwrap();
     let session = setup.create_running("kind-b", "/bin/bash", &[]).await;
@@ -586,12 +626,7 @@ async fn a_terminal_waits_for_the_login_environment_and_takes_its_kind_after() {
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!creating.is_finished(), "made before the login environment");
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(Mode::Guarded),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
     let home = dir.path().join("home");
     let env: ShellEnv = [(OsString::from("HOME"), home.into_os_string())]
         .into_iter()
@@ -1223,11 +1258,8 @@ users:
 impl Setup {
     async fn guard(&self, context: &str) {
         self.core
-            .set_context_mode(SetContextMode {
-                context: context.to_owned(),
-                mode: Some(Mode::Guarded),
-            })
-            .await
+            .policy
+            .set_mode(context, Some(Mode::Guarded))
             .unwrap();
     }
 

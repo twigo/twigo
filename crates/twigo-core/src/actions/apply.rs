@@ -70,7 +70,7 @@ use super::{
     ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned, Previewed, Progress};
+use crate::bus::{self, Finished, Planned, Previewed, Progress};
 
 /// What takes the place of a value in a message.
 const HIDDEN: &str = "<hidden>";
@@ -1361,7 +1361,7 @@ pub(crate) async fn apply(
                 destructive: false,
                 consequences,
                 affected: Vec::new(),
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1371,7 +1371,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Reviewed,
                 previewed: Some(preview_of.clone()),
-                run: Box::new(move |_| Box::pin(run.run())),
+                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
             }
         }
         Step::Patch(step) => {
@@ -1391,7 +1391,7 @@ pub(crate) async fn apply(
                     "An apply cannot express this edit, so it goes as one merge patch under field manager {EDIT_FIELD_MANAGER}, as kubectl edit would."
                 )],
                 affected: Vec::new(),
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1401,7 +1401,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Reviewed,
                 previewed: Some(preview_of.clone()),
-                run: Box::new(move |_| Box::pin(run.run())),
+                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
             }
         }
         Step::Recreate(step) => {
@@ -1449,7 +1449,7 @@ pub(crate) async fn apply(
                 destructive: true,
                 consequences,
                 affected,
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Recreating {what}"),
                 command: "recreate",
                 target: audit_target,
@@ -1459,7 +1459,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Lasting,
                 previewed: Some(preview_of),
-                run: Box::new(move |progress| Box::pin(run.run(progress))),
+                run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
             }
         }
     })

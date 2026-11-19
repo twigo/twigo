@@ -239,7 +239,9 @@ struct Decided<'a> {
 /// ask the person: the request still meets the gate with whatever approval
 /// the broker gives it. Only what an exact approval would let through is
 /// asked about: no answer lets through an agent's read of a Secret, nor its
-/// write to one.
+/// write to one. On a context nobody marked the person is asked what it is,
+/// and the request meets the gate anew with that answer, as it does when the
+/// context's access changes while it waits.
 async fn decide<'a>(
     core: &'a Core,
     holder: &Holder,
@@ -249,45 +251,47 @@ async fn decide<'a>(
     body: &Bytes,
     reach: Option<Reach>,
 ) -> Result<Decided<'a>, Refusal> {
-    let blocked = match core
-        .policy
-        .authorize(&holder.context, attributes, holder.actor)
-    {
-        Ok(()) => return Ok(Decided::default()),
-        Err(blocked)
-            if blocked.reason == BlockReason::NoApproval
-                && core
-                    .policy
-                    .approvable(&holder.context, attributes, holder.actor) =>
+    loop {
+        let blocked = match core
+            .policy
+            .authorize(&holder.context, attributes, holder.actor)
         {
-            blocked
-        }
-        Err(blocked) => return Err(Refusal::blocked(&blocked)),
-    };
-    let command = parts
-        .headers
-        .get("kubectl-command")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let asking = Asking {
-        holder,
-        attributes,
-        blocked,
-        repeat: repeat(holder, parts, reach, body),
-        command,
-        impersonate: impersonate(&parts.headers),
-    };
-    let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
-    match core.approvals.decide(asking, detail).await {
-        Outcome::Approved { approval, once } => Ok(Decided {
-            approval: Some(approval),
-            once,
-        }),
-        Outcome::Denied(message) => Err(Refusal::forbidden(message)),
-        Outcome::Decided(Ok(())) => Ok(Decided::default()),
-        Outcome::Decided(Err(blocked)) => Err(Refusal::blocked(&blocked)),
-        Outcome::Moved => Err(Refusal::moved(&holder.context)),
-        Outcome::Ended => Err(Refusal::revoked()),
+            Ok(()) => return Ok(Decided::default()),
+            Err(blocked) if blocked.reason == BlockReason::Unmarked => blocked,
+            Err(blocked)
+                if blocked.reason == BlockReason::NoApproval
+                    && core
+                        .policy
+                        .approvable(&holder.context, attributes, holder.actor) =>
+            {
+                blocked
+            }
+            Err(blocked) => return Err(Refusal::blocked(&blocked)),
+        };
+        let command = parts
+            .headers
+            .get("kubectl-command")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let asking = Asking {
+            holder,
+            attributes,
+            blocked,
+            repeat: repeat(holder, parts, reach, body),
+            command,
+            impersonate: impersonate(&parts.headers),
+        };
+        let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
+        return match core.approvals.decide(asking, detail).await {
+            Outcome::Approved { approval, once } => Ok(Decided {
+                approval: Some(approval),
+                once,
+            }),
+            Outcome::Denied(message) => Err(Refusal::forbidden(message)),
+            Outcome::Again => continue,
+            Outcome::Moved => Err(Refusal::moved(&holder.context)),
+            Outcome::Ended => Err(Refusal::revoked()),
+        };
     }
 }
 

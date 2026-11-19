@@ -26,7 +26,7 @@ use tokio::sync::watch;
 use twigo_cache::hub::{Query, Resource, RowFormat};
 use twigo_core::{Core, ProxyProcess};
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::{AnswerApproval, ApprovalAnswer, ApprovalEvent, Mode, ViewState};
+use twigo_ipc::{AnswerApproval, ApprovalAnswer, ApprovalEvent, Environment, Mode, ViewState};
 use twigo_policy::Actor;
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -232,6 +232,9 @@ async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, ProxyProcess) {
         }
     });
     core.catalog.contexts().await;
+    core.policy
+        .set_environment(&cluster.context, Some(Environment::Local))
+        .unwrap();
     let process = core
         .proxy_process(
             Actor::Terminal,

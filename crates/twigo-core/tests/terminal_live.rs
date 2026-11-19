@@ -15,9 +15,9 @@ use tokio::sync::{mpsc, watch};
 use twigo_core::{Core, ShellFrame};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, KubeconfigNames,
-    KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell,
-    ProxyWhy, SetContextMode, ShellAck, ShellEnd, ShellEvent, ShellInput, TerminalKind,
+    AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, Environment,
+    KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode,
+    NewTerminal, OpenShell, ProxyWhy, ShellAck, ShellEnd, ShellEvent, ShellInput, TerminalKind,
     TerminalSession,
 };
 
@@ -126,6 +126,11 @@ impl Live {
             async move { core.run(followed, None).await }
         });
         core.catalog.contexts().await;
+        for name in [&context, &alias] {
+            core.policy
+                .set_environment(name, Some(Environment::Local))
+                .unwrap();
+        }
         Self {
             dir,
             core,
@@ -555,11 +560,8 @@ async fn a_write_from_a_guarded_terminal_asks_and_a_denial_leaves_the_server_unt
         .await
         .unwrap();
     live.core
-        .set_context_mode(SetContextMode {
-            context: live.context.clone(),
-            mode: Some(Mode::Guarded),
-        })
-        .await
+        .policy
+        .set_mode(&live.context, Some(Mode::Guarded))
         .unwrap();
     let asked = Arc::new(AtomicUsize::new(0));
     let (asks, mut events) = mpsc::unbounded_channel();

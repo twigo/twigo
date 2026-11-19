@@ -8,7 +8,7 @@ use twigo_policy::redact::secret_value;
 
 use super::kubectl;
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 pub(crate) fn reveal(
     core: &Core,
@@ -53,7 +53,7 @@ pub(crate) fn reveal(
             if binary { ", as base64" } else { "" }
         )],
         affected: Vec::new(),
-        kubectl: line,
+        kubectl: Some(line),
         doing: format!("Revealing {key}"),
         command: "reveal",
         target: format!("secrets/{name} in {namespace}, key {key}"),
@@ -63,7 +63,7 @@ pub(crate) fn reveal(
         space: None,
         risk: Risk::Reveal,
         previewed: None,
-        run: Box::new(move |_| {
+        run: bus::Run::Sends(Box::new(move |_| {
             Box::pin(async move {
                 // Read as it runs, and only while the view it is for is open.
                 let core = this
@@ -75,6 +75,6 @@ pub(crate) fn reveal(
                 let (value, binary) = secret_value(&reading.json()?, &key)?;
                 Ok(Finished::Revealed { value, binary })
             })
-        }),
+        })),
     })
 }

@@ -34,7 +34,7 @@ use twigo_core::{Core, ProxyProcess};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
-    ErrorKind, Mode, NoDiff, RequestClass,
+    ErrorKind, Execute, Mode, ModeSource, NoDiff, PlanRequest, RequestClass,
 };
 use twigo_policy::Actor;
 
@@ -338,8 +338,19 @@ contexts:{kind_a}
 }
 
 /// A core over the kubeconfig `config` in `dir`, of two contexts on the
-/// fake server.
+/// fake server, which the person marked Local.
 async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
+    let core = unmarked(dir, fake).await;
+    for context in ["kind-a", "kind-b"] {
+        core.policy
+            .set_environment(context, Some(Environment::Local))
+            .unwrap();
+    }
+    core
+}
+
+/// [`core`], with its contexts marked by nobody.
+async fn unmarked(dir: &Path, fake: &Fake) -> Arc<Core> {
     let kubeconfig = dir.join("config");
     let server = format!("http://{}", fake.address);
     std::fs::write(&kubeconfig, self::kubeconfig(&server, KIND_A)).unwrap();
@@ -1554,7 +1565,7 @@ async fn a_given_back_once_covers_no_repeat_of_another_content_type() {
 }
 
 /// What the catalog says of `kind-a` for its mode, none while it lists none.
-async fn said_of_kind_a(core: &Core) -> Option<(Option<bool>, Option<Environment>, u64)> {
+async fn said_of_kind_a(core: &Core) -> Option<(bool, Option<Environment>, u64)> {
     let contexts = core.catalog.contexts().await;
     let found = contexts.find("kind-a")?;
     Some((
@@ -1570,7 +1581,7 @@ async fn rewrite(
     core: &Core,
     dir: &Path,
     text: &str,
-    said: Option<(Option<bool>, Option<Environment>, u64)>,
+    said: Option<(bool, Option<Environment>, u64)>,
     wanted: bool,
 ) {
     std::fs::write(dir.join("config"), text).unwrap();
@@ -2783,4 +2794,168 @@ async fn a_later_follower_of_the_window_replaces_the_earlier_and_gets_what_still
     assert_eq!(sent.await.unwrap().0.status(), StatusCode::CREATED);
     assert_eq!(second.await.unwrap().0.status(), StatusCode::CREATED);
     assert_eq!(fake.writes(Method::POST), 2);
+}
+
+/// The lines of the core's audit log of `event`.
+fn audited(dir: &Path, event: &str) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("audit.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["event"] == event)
+        .collect()
+}
+
+fn answered(core: &Core, ask: &ApprovalAsk, answer: ApprovalAnswer) -> Result<(), ErrorKind> {
+    let answer = AnswerApproval {
+        id: ask.id,
+        answer,
+        typed: None,
+    };
+    core.answer_approval("main", answer)
+        .map_err(|error| error.kind)
+}
+
+fn marked(environment: Environment) -> ApprovalAnswer {
+    ApprovalAnswer::Mark { environment }
+}
+
+#[tokio::test]
+async fn a_write_on_a_context_nobody_marked_asks_what_it_is_and_goes_once_it_is_development() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let sent = tokio::spawn(send(process.at(), create(&process, "c")));
+    let ask = asked(&mut events).await;
+    assert!(ask.unmarked);
+    assert_eq!((ask.typed, ask.lasting_minutes), (false, None));
+    for answer in [ApprovalAnswer::Once, ApprovalAnswer::Lasting] {
+        assert_eq!(answered(&core, &ask, answer), Err(ErrorKind::InvalidInput));
+    }
+    assert_eq!(core.policy.access("kind-a").source, ModeSource::Unmarked);
+    assert_eq!(fake.writes(Method::POST), 0, "nothing sent while it asks");
+
+    answered(&core, &ask, marked(Environment::Development)).unwrap();
+    let (response, _connection) = sent.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(fake.writes(Method::POST), 1);
+    let access = core.policy.access("kind-a");
+    assert_eq!(access.mode, Mode::ReadWrite);
+    assert_eq!(access.environment, Some(Environment::Development));
+    assert_eq!(
+        core.state.choices().environments.get("kind-a"),
+        Some(&Some(Environment::Development)),
+        "kept with the person's choices"
+    );
+    let changes = audited(dir.path(), "protection");
+    assert_eq!(changes.len(), 1, "{changes:?}");
+    assert_eq!(
+        changes[0]["by"],
+        json!({"kind": "ask", "actor": "terminal", "process": "Terminal 1"})
+    );
+    assert_eq!(changes[0]["before"]["source"]["kind"], "unmarked");
+}
+
+#[tokio::test]
+async fn marked_staging_a_write_asks_again_and_marked_production_it_is_refused_in_the_gate_s_words()
+{
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+
+    let sent = tokio::spawn(send(process.at(), create(&process, "c")));
+    let ask = asked(&mut events).await;
+    answered(&core, &ask, marked(Environment::Staging)).unwrap();
+    let again = asked(&mut events).await;
+    assert!(!again.unmarked);
+    assert_eq!(again.lasting_minutes, Some(15));
+    assert_eq!(
+        answered(&core, &again, marked(Environment::Development)),
+        Err(ErrorKind::InvalidInput),
+        "a type answers only a context nobody marked"
+    );
+    assert_eq!(core.policy.access("kind-a").mode, Mode::Guarded);
+    answered(&core, &again, ApprovalAnswer::Deny).unwrap();
+    assert_eq!(sent.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+
+    core.policy.set_environment("kind-a", None).unwrap();
+    let refusing = tokio::spawn(refused(process.at(), create(&process, "d")));
+    let ask = asked(&mut events).await;
+    assert!(ask.unmarked);
+    answered(&core, &ask, marked(Environment::Production)).unwrap();
+    let (status, message) = refusing.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(
+        message.contains("kind-a is read-only as Production by default"),
+        "{message}"
+    );
+    assert_eq!(fake.writes(Method::POST), 0);
+}
+
+#[tokio::test]
+async fn a_denied_unmarked_ask_leaves_the_context_unmarked_so_the_next_write_asks_again() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    for name in ["c", "d"] {
+        let sent = tokio::spawn(send(process.at(), create(&process, name)));
+        let ask = asked(&mut events).await;
+        assert!(ask.unmarked, "{name}");
+        answered(&core, &ask, ApprovalAnswer::Deny).unwrap();
+        assert_eq!(sent.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+        assert_eq!(core.policy.access("kind-a").source, ModeSource::Unmarked);
+    }
+    assert_eq!(fake.writes(Method::POST), 0);
+}
+
+#[tokio::test]
+async fn a_mark_given_one_ask_or_a_plan_withdraws_the_other_unmarked_asks_and_decides_them_anew() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let (one, other) = (
+        Process::start(&core, Some("main")).await,
+        Process::start(&core, Some("main")).await,
+    );
+    let first = tokio::spawn(send(one.at(), create(&one, "c")));
+    let first_ask = asked(&mut events).await;
+    let second = tokio::spawn(send(other.at(), create(&other, "d")));
+    let second_ask = asked(&mut events).await;
+    answered(&core, &first_ask, marked(Environment::Development)).unwrap();
+    withdrawn(&mut events, &second_ask).await;
+    for sent in [first, second] {
+        assert_eq!(sent.await.unwrap().0.status(), StatusCode::CREATED);
+    }
+    assert_eq!(fake.writes(Method::POST), 2);
+
+    core.policy.set_environment("kind-a", None).unwrap();
+    let third = tokio::spawn(send(one.at(), create(&one, "e")));
+    let third_ask = asked(&mut events).await;
+    assert!(third_ask.unmarked);
+    let staging = PlanRequest::SetEnvironment {
+        context: "kind-a".to_owned(),
+        environment: Some(Environment::Staging),
+    };
+    let plan = core.command_plan("main", staging).await.unwrap();
+    let execute = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", execute, |_| true)
+        .await
+        .unwrap();
+    withdrawn(&mut events, &third_ask).await;
+    let again = asked(&mut events).await;
+    assert!(!again.unmarked, "guarded asks as it does");
+    answered(&core, &again, ApprovalAnswer::Once).unwrap();
+    assert_eq!(third.await.unwrap().0.status(), StatusCode::CREATED);
+    assert_eq!(fake.writes(Method::POST), 3);
 }

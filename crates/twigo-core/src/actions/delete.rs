@@ -20,7 +20,7 @@ use twigo_policy::friction::Risk;
 use super::dependents::{Deleted, dependents};
 use super::{Target, clients_for, counted, get, kind_words, kubectl, object_ref, plural, sentence};
 use crate::Core;
-use crate::bus::{Finished, Planned, Progress};
+use crate::bus::{self, Finished, Planned, Progress};
 
 /// The controllers that make a new pod for one that goes; a Job's or a
 /// workflow's may not.
@@ -199,7 +199,7 @@ pub(crate) async fn delete(
         destructive: true,
         consequences,
         affected,
-        kubectl: line,
+        kubectl: Some(line),
         command: "delete",
         target: if several {
             format!("{what}{place}")
@@ -212,7 +212,7 @@ pub(crate) async fn delete(
         space: Some(space.to_owned()),
         risk,
         previewed: None,
-        run: Box::new(move |progress| Box::pin(run.run(progress))),
+        run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
     })
 }
 

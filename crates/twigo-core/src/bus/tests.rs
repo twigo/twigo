@@ -7,13 +7,13 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, SetContextMode,
-    ShellEnd, ShellEvent, ShellKind, ShellTarget,
+    ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent,
+    ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
-use super::{Finished, Planned, Previewed, Progress};
+use super::{Finished, Planned, Previewed, Progress, Run};
 use crate::actions::Prepared;
 use crate::{Core, ShellFrame};
 
@@ -22,7 +22,10 @@ clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
 users: [{ name: u, user: {} }]
 contexts:
 - name: kind-a
-  context: { cluster: c, user: u }
+  context:
+    cluster: c
+    user: u
+    extensions: [{ name: twigo, extension: { environment: local } }]
 ";
 
 fn running(dir: &Path) -> Arc<Core> {
@@ -65,17 +68,17 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         destructive: true,
         consequences: Vec::new(),
         affected: Vec::new(),
-        kubectl: "kubectl --context kind-a delete configmaps m -n a".to_owned(),
+        kubectl: Some("kubectl --context kind-a delete configmaps m -n a".to_owned()),
         doing: "Deleting config map m".to_owned(),
         previewed: None,
-        run: Box::new(move |progress: Progress| {
+        run: Run::Sends(Box::new(move |progress: Progress| {
             Box::pin(async move {
                 *runs.lock().unwrap() += 1;
                 progress.running("Waiting for config map m to go");
                 progress.stopped().await;
                 Ok(Finished::Stopped("stopped".to_owned()))
             })
-        }),
+        })),
     }
 }
 
@@ -221,12 +224,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
     let core = running(dir.path());
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(Mode::Guarded),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
     assert_eq!(
         execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::Conflict)
@@ -239,12 +237,9 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
             text: "kind-a".to_owned()
         }
     );
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
     let blocked = core
         .command_execute(
             "main",
@@ -501,8 +496,8 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
     std::fs::write(
         dir.path().join("config"),
         kubeconfig.replace(
-            "context: { cluster: c, user: u }",
-            "context: { cluster: c, user: u, extensions: [{ name: twigo, extension: { readOnly: false } }] }",
+            "extension: { environment: local }",
+            "extension: { environment: local, readOnly: false }",
         ),
     )
     .unwrap();
@@ -1093,7 +1088,10 @@ clusters: [{{ name: c, cluster: {{ server: 'http://127.0.0.1:{port}' }} }}]
 users: [{{ name: u, user: {{}} }}]
 contexts:
 - name: kind-a
-  context: {{ cluster: c, user: u }}
+  context:
+    cluster: c
+    user: u
+    extensions: [{{ name: twigo, extension: {{ environment: local }} }}]
 "
         ),
     )
@@ -1102,12 +1100,7 @@ contexts:
 async fn in_mode(core: &Core, mode: Mode) {
     core.catalog.contexts().await;
     core.state.open_space("kind-a");
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(mode),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode("kind-a", Some(mode)).unwrap();
 }
 
 fn shell_of(kind: ShellKind) -> PlanRequest {
@@ -1177,6 +1170,132 @@ fn ended(told: &Mutex<Vec<ShellEvent>>) -> Option<ShellEnd> {
     })
 }
 
+const PRODUCTION: &str = "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+users: [{ name: u, user: {} }]
+contexts:
+- name: kind-prod
+  context:
+    cluster: c
+    user: u
+    extensions: [{ name: twigo, extension: { environment: production } }]
+";
+
+fn set_mode(mode: Mode) -> PlanRequest {
+    PlanRequest::SetMode {
+        context: "kind-prod".to_owned(),
+        mode: Some(mode),
+    }
+}
+
+#[tokio::test]
+async fn lowering_protection_asks_for_the_name_and_the_log_records_the_change_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    let plan = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap();
+    let typed = Friction::Typed {
+        text: "kind-prod".to_owned(),
+    };
+    assert_eq!(plan.friction, typed);
+    assert_eq!(plan.mode, Mode::ReadOnly);
+    assert_eq!(plan.confirm, "Make read-write");
+    assert_eq!(plan.kubectl, None);
+    assert!(plan.affected.is_empty());
+
+    assert_eq!(
+        execute(&core, "main", plan.id, None).await,
+        Err(ErrorKind::InvalidInput)
+    );
+    assert_eq!(core.policy.access("kind-prod").mode, Mode::ReadOnly);
+    let plan = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap();
+    let (events, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: Some("kind-prod".to_owned()),
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    assert_eq!(
+        *events.lock().unwrap(),
+        [OperationEvent::Done {
+            text: "Made kind-prod read-write".to_owned(),
+            undo_until: None,
+        }]
+    );
+    assert_eq!(core.policy.access("kind-prod").mode, Mode::ReadWrite);
+    assert_eq!(
+        core.state.choices().modes.get("kind-prod"),
+        Some(&Mode::ReadWrite)
+    );
+    let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "protection");
+    assert_eq!(
+        lines[0]["by"],
+        json!({ "kind": "plan", "friction": { "kind": "typed", "text": "kind-prod" } })
+    );
+
+    let tighten = core
+        .command_plan("main", set_mode(Mode::ReadOnly))
+        .await
+        .unwrap();
+    assert_eq!(tighten.friction, Friction::AtOnce);
+    execute(&core, "main", tighten.id, None).await.unwrap();
+    let unlock = PlanRequest::Unlock {
+        context: "kind-prod".to_owned(),
+    };
+    let unlock = core.command_plan("main", unlock).await.unwrap();
+    assert_eq!(unlock.friction, Friction::Confirm);
+    assert_eq!(unlock.confirm, "Unlock for 15 minutes");
+}
+
+#[tokio::test]
+async fn a_protection_plan_runs_only_while_the_context_stands_as_it_was_planned() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    let plan = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap();
+    core.policy.unlock("kind-prod").unwrap();
+    let unlocked = core.policy.access("kind-prod");
+    assert_eq!(
+        execute(&core, "main", plan.id, Some("kind-prod")).await,
+        Err(ErrorKind::Conflict)
+    );
+    assert_eq!(core.policy.access("kind-prod"), unlocked);
+    assert!(core.state.choices().modes.is_empty());
+}
+
+#[tokio::test]
+async fn a_shell_on_a_context_nobody_marked_is_refused_before_anything_is_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    core.catalog.contexts().await;
+    core.state.open_space("kind-a");
+    core.policy.set_environment("kind-a", None).unwrap();
+    for kind in [ShellKind::Shell, ShellKind::Attach] {
+        let refused = core.command_plan("main", shell_of(kind)).await.unwrap_err();
+        assert_eq!(
+            refused.blocked.unwrap().reason,
+            twigo_ipc::BlockReason::Unmarked,
+            "{kind:?}"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
 #[tokio::test]
 async fn read_only_refuses_a_shell_before_anything_is_asked_and_nothing_reaches_the_server() {
     let dir = tempfile::tempdir().unwrap();
@@ -1204,8 +1323,10 @@ async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
     let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
     assert_eq!(plan.friction, Friction::Confirm);
     assert_eq!(
-        plan.kubectl,
-        "kubectl --context kind-a exec -it web-1 -n shop -c app -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'"
+        plan.kubectl.as_deref(),
+        Some(
+            "kubectl --context kind-a exec -it web-1 -n shop -c app -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'"
+        ),
     );
     assert_eq!(
         server.seen(),
@@ -1246,8 +1367,8 @@ async fn read_write_runs_a_shell_at_once_and_attach_takes_the_containers_stdin_a
     let attach = plan_shell(&core, ShellKind::Attach).await.unwrap();
     assert_eq!(attach.friction, Friction::AtOnce);
     assert_eq!(
-        attach.kubectl,
-        "kubectl --context kind-a attach -it web-1 -n shop -c app"
+        attach.kubectl.as_deref(),
+        Some("kubectl --context kind-a attach -it web-1 -n shop -c app"),
     );
     let id = parked(&core, attach.id).await;
     let told = opened(&core, id).await;
@@ -1307,12 +1428,9 @@ async fn a_shell_never_starts_a_context_turned_read_only_after_its_plan_ran() {
     in_mode(&core, Mode::Guarded).await;
     let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
     let id = parked(&core, plan.id).await;
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
 
     let told = opened(&core, id).await;
     until("it ends visibly", || ended(&told).is_some()).await;
@@ -1332,12 +1450,9 @@ async fn a_relock_ends_a_session_whose_upgrade_is_under_way() {
     until("it asks for the upgrade", || !server.sessions().is_empty()).await;
     assert_eq!(ended(&told), None);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-a".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
     until("it ends visibly", || ended(&told).is_some()).await;
     assert_eq!(ended(&told), Some(ShellEnd::Relocked));
 }

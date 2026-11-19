@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use twigo_env::ShellEnv;
-use twigo_ipc::{Gvr, Mode, SetContextMode};
+use twigo_ipc::{Gvr, Mode};
 
 use super::*;
 use crate::state::State;
@@ -574,12 +574,9 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
     core.catalog.contexts().await;
     assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-plain", Some(Mode::ReadOnly))
+        .unwrap();
     let failed = until("the mode fails the forward", || {
         let now = listed(&core)[0].state.clone();
         matches!(now, ForwardState::Failed { .. }).then_some(now)
@@ -619,12 +616,9 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Permissions);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadWrite),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-plain", Some(Mode::ReadWrite))
+        .unwrap();
     until("the mode lets it go back to waiting", || {
         let now = listed(&core)[0].state.clone();
         (now == ForwardState::Restored).then_some(now)
@@ -1623,12 +1617,7 @@ fn other_target(mut saved: SavedForward, name: &str) -> SavedForward {
 const REFUSING: &str = r#"{"readOnly": {"allowPortForward": false}}"#;
 
 async fn set_the_mode(core: &Core, mode: Mode) {
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(mode),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode("kind-plain", Some(mode)).unwrap();
 }
 
 async fn refused_while_restored(dir: &Path, api: &Api) -> Arc<Core> {

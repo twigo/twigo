@@ -9,14 +9,14 @@ use std::sync::Arc;
 use futures::FutureExt;
 use serde_json::Value;
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, Mode, ShellContainers, ShellKind, ShellPod, ShellTarget};
+use twigo_ipc::{ErrorKind, IpcError, ShellContainers, ShellKind, ShellPod, ShellTarget};
 use twigo_policy::friction::Risk;
-use twigo_policy::{Attributes, Policy};
+use twigo_policy::{Actor, Attributes, Policy};
 use twigo_sessions::shell::{Join, SHELL, Session, Spec};
 
 use super::{Target, clients_for, get, kubectl};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 use crate::terminal::Shell;
 
 const DEFAULT_CONTAINER: &str = "kubectl.kubernetes.io/default-container";
@@ -99,13 +99,14 @@ fn name(pod: &Value) -> &str {
     pod["metadata"]["name"].as_str().unwrap_or_default()
 }
 
-/// Ends once `context` is read-only, as a relock or an unlock running out
-/// leaves it.
-async fn relocked(policy: Arc<Policy>, context: String) {
+/// Ends once the gate refuses the session's `exec` on `context`: when it is
+/// read-only, as a relock or an unlock running out leaves it, or nobody has
+/// said what it is any more.
+async fn relocked(policy: Arc<Policy>, context: String, exec: Attributes) {
     let mut changes = policy.changes();
     loop {
         changes.borrow_and_update();
-        if policy.access(&context).mode == Mode::ReadOnly {
+        if policy.authorize(&context, &exec, Actor::Ui).is_err() {
             return;
         }
         // The policy this holds keeps its sender.
@@ -154,6 +155,7 @@ pub(crate) async fn shell(
     let this = core.this.clone();
     let run_context = context.clone();
     let (tty, stdin) = (spec.tty, spec.stdin);
+    let exec = writes[0].clone();
     Ok(Planned {
         target: format!("{}, container {}", writes[0].target(), spec.container),
         writes,
@@ -166,24 +168,25 @@ pub(crate) async fn shell(
         destructive: false,
         consequences: read.consequences,
         affected: Vec::new(),
-        kubectl,
+        kubectl: Some(kubectl),
         doing: read.doing,
         context,
         connection,
         space: None,
         risk: Risk::Shell,
         previewed: None,
-        run: Box::new(move |_| {
+        run: bus::Run::Sends(Box::new(move |_| {
             Box::pin(async move {
                 let (core, clients) =
                     clients_for(&this, &run_context, connection, "opened nothing").await?;
-                let relocked = relocked(Arc::clone(&core.policy), run_context.clone()).boxed();
+                let relocked =
+                    relocked(Arc::clone(&core.policy), run_context.clone(), exec).boxed();
                 let id = core
                     .shells
                     .keep(ticket, Shell::Pod(Session::park(clients, spec, relocked)))?;
                 Ok(Finished::Session { id, tty, stdin })
             })
-        }),
+        })),
     })
 }
 
@@ -283,7 +286,7 @@ mod tests {
 
     use jiff::SignedDuration;
     use serde_json::json;
-    use twigo_ipc::Environment;
+    use twigo_ipc::{Environment, Mode};
 
     use super::*;
 
@@ -377,8 +380,14 @@ mod tests {
         );
     }
 
+    fn exec() -> Attributes {
+        Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"))
+    }
+
     fn production_unlocked(policy: &Policy, length: SignedDuration) {
-        policy.set_environment("c", Some(Environment::Production));
+        policy
+            .set_environment("c", Some(Environment::Production))
+            .unwrap();
         policy.unlock_for("c", length).unwrap();
         assert_eq!(policy.access("c").mode, Mode::Guarded);
     }
@@ -387,7 +396,7 @@ mod tests {
     async fn a_relock_ends_the_wait_of_a_context_that_was_not_read_only() {
         let policy = Policy::open();
         production_unlocked(&policy, SignedDuration::from_mins(15));
-        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned(), exec()).boxed();
         assert!((&mut waiting).now_or_never().is_none(), "guarded: it waits");
         policy.relock("c");
         tokio::time::timeout(Duration::from_secs(5), waiting)
@@ -403,7 +412,7 @@ mod tests {
             let policy = Arc::clone(&policy);
             async move { policy.follow_unlocks().await }
         });
-        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned(), exec()).boxed();
         assert!(
             (&mut waiting).now_or_never().is_none(),
             "unlocked: it waits"
@@ -418,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn a_context_changed_to_another_mode_leaves_the_wait_alone() {
         let policy = Policy::open();
-        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned()).boxed();
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned(), exec()).boxed();
         assert!((&mut waiting).now_or_never().is_none());
         policy.set_mode("c", Some(Mode::Guarded)).unwrap();
         policy.set_mode("other", Some(Mode::ReadOnly)).unwrap();
@@ -428,6 +437,17 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), waiting)
             .await
             .expect("read-only ends it");
+    }
+
+    #[tokio::test]
+    async fn a_context_nobody_marks_any_more_ends_the_wait() {
+        let policy = Policy::open();
+        let mut waiting = relocked(Arc::clone(&policy), "c".to_owned(), exec()).boxed();
+        assert!((&mut waiting).now_or_never().is_none());
+        policy.set_environment("c", None).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("an unmarked context refuses its exec");
     }
 
     #[test]

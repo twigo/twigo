@@ -8,11 +8,11 @@ use kube::api::PostParams;
 use serde_json::{Value, json};
 use twigo_core::Core;
 use twigo_ipc::{
-    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, Mode, OpenedEdit, Plan,
-    PlanRequest, PreviewId, ResourceRef, SetContextMode,
+    ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, BlockReason, ErrorKind, Mode,
+    OpenedEdit, Plan, PlanRequest, PreviewId, ResourceRef,
 };
 
-use super::{Cluster, core, eventually, kubectl, reference, run, unique};
+use super::{Cluster, core, eventually, kubectl, line, reference, run, unique};
 
 fn deployments(namespace: &str) -> String {
     format!("/apis/apps/v1/namespaces/{namespace}/deployments")
@@ -378,12 +378,11 @@ async fn a_field_another_manager_owns_goes_by_the_merge_patch_inside_a_list_too(
     );
     let plan = plan(&core, &cluster, id).await;
     assert!(
-        plan.kubectl.contains("patch deployments.apps web")
-            && plan.kubectl.contains("--type=merge"),
+        line(&plan).contains("patch deployments.apps web") && line(&plan).contains("--type=merge"),
         "{}",
-        plan.kubectl
+        line(&plan)
     );
-    assert!(!plan.kubectl.contains(" apply "), "{}", plan.kubectl);
+    assert!(!line(&plan).contains(" apply "), "{}", line(&plan));
     let events = run(&core, &plan, None).await.unwrap();
     assert!(
         matches!(events.last(), Some(twigo_ipc::OperationEvent::Done { .. })),
@@ -436,7 +435,7 @@ async fn a_field_only_twigo_owns_goes_without_a_merge_patch() {
     assert!(removals.is_empty(), "{removals:?}");
     assert_eq!(result["data"], json!({ "a": "1" }));
     let plan = plan(&core, &cluster, id).await;
-    assert!(!plan.kubectl.contains(" patch "), "{}", plan.kubectl);
+    assert!(!line(&plan).contains(" patch "), "{}", line(&plan));
     let events = run(&core, &plan, None).await.unwrap();
     assert!(matches!(
         events.last(),
@@ -479,15 +478,11 @@ async fn a_plan_s_kubectl_line_does_what_the_plan_does_with_its_merge_patch() {
         ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
     assert_eq!(removals, vec![".metadata.annotations.theirs"]);
     let plan = plan(&core, &cluster, id).await;
+    assert!(line(&plan).contains("--force-conflicts"), "{}", line(&plan));
     assert!(
-        plan.kubectl.contains("--force-conflicts"),
+        line(&plan).contains("--field-manager=twigo"),
         "{}",
-        plan.kubectl
-    );
-    assert!(
-        plan.kubectl.contains("--field-manager=twigo"),
-        "{}",
-        plan.kubectl
+        line(&plan)
     );
     kubectl(&plan, &kubeconfig);
     let after = read(&cluster.admin, &path).await;
@@ -813,11 +808,11 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
     let plan = plan(&core, &cluster, id).await;
     secret_text_free("the plan", &serde_json::to_string(&plan).unwrap());
     assert!(
-        plan.kubectl.ends_with(&format!("-f - -n {namespace}")),
+        line(&plan).ends_with(&format!("-f - -n {namespace}")),
         "{}",
-        plan.kubectl
+        line(&plan)
     );
-    assert!(!plan.kubectl.contains("printf"), "{}", plan.kubectl);
+    assert!(!line(&plan).contains("printf"), "{}", line(&plan));
     let events = run(&core, &plan, None).await.unwrap();
     secret_text_free("the events", &serde_json::to_string(&events).unwrap());
 
@@ -885,7 +880,7 @@ async fn no_secret_value_reaches_the_webview_by_any_answer() {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn read_only_lets_the_preview_answer_and_blocks_the_apply() {
+async fn read_only_and_a_context_nobody_marked_let_the_preview_answer_and_block_the_apply() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("apply-readonly").await;
     let dir = tempfile::tempdir().unwrap();
@@ -893,12 +888,7 @@ async fn read_only_lets_the_preview_answer_and_blocks_the_apply() {
     let path = format!("{}/web", deployments(&namespace));
     post(&cluster.admin, &deployments(&namespace), &deployment("web")).await;
     let live = settled(&cluster.admin, &path).await;
-    core.set_context_mode(SetContextMode {
-        context: cluster.context.clone(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy.set_environment(&cluster.context, None).unwrap();
 
     let mut edited = view(&live);
     edited["metadata"]["annotations"]["mine"] = json!("1");
@@ -907,27 +897,24 @@ async fn read_only_lets_the_preview_answer_and_blocks_the_apply() {
         ready(preview(&core, edit(&cluster, target, &live, edited, true, vec![])).await);
     assert_eq!(result["metadata"]["annotations"]["mine"], "1");
 
-    let refused = core
-        .command_plan(
-            "main",
-            PlanRequest::Apply {
-                space: cluster.context.clone(),
-                preview: id,
-            },
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::Permissions);
+    let apply = || PlanRequest::Apply {
+        space: cluster.context.clone(),
+        preview: id,
+    };
+    let refused = core.command_plan("main", apply()).await.unwrap_err();
+    assert_eq!(refused.blocked.unwrap().reason, BlockReason::Unmarked);
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::ReadOnly))
+        .unwrap();
+    let refused = core.command_plan("main", apply()).await.unwrap_err();
+    assert_eq!(refused.blocked.unwrap().reason, BlockReason::Mode);
     let after = read(&cluster.admin, &path).await;
     assert_eq!(rv(&after), rv(&live), "the server saw no write");
     assert_eq!(after["metadata"]["annotations"].get("mine"), None);
 
-    core.set_context_mode(SetContextMode {
-        context: cluster.context.clone(),
-        mode: Some(Mode::ReadWrite),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::ReadWrite))
+        .unwrap();
     applied(&core, &cluster, id).await;
     let after = read(&cluster.admin, &path).await;
     assert_eq!(after["metadata"]["annotations"]["mine"], "1");
@@ -1646,13 +1633,13 @@ async fn an_edit_an_apply_cannot_express_goes_by_one_merge_patch_and_owns_nothin
     assert_eq!(result["spec"]["strategy"], json!({ "type": "Recreate" }));
     let plan_of = plan(&core, &cluster, id).await;
     assert!(
-        plan_of.kubectl.contains("patch deployments.apps web")
-            && plan_of.kubectl.contains("--type=merge")
-            && plan_of.kubectl.contains("--field-manager=twigo-edit"),
+        line(&plan_of).contains("patch deployments.apps web")
+            && line(&plan_of).contains("--type=merge")
+            && line(&plan_of).contains("--field-manager=twigo-edit"),
         "{}",
-        plan_of.kubectl
+        line(&plan_of)
     );
-    assert!(!plan_of.kubectl.contains(" apply "), "{}", plan_of.kubectl);
+    assert!(!line(&plan_of).contains(" apply "), "{}", line(&plan_of));
     let events = run(&core, &plan_of, None).await.unwrap();
     assert!(
         matches!(events.last(), Some(twigo_ipc::OperationEvent::Done { .. })),
@@ -2757,12 +2744,10 @@ async fn deleting_an_object_s_only_label_map_removes_it_and_its_kubectl_line_is_
     );
     let plan_of = plan(&core, &cluster, id).await;
     assert!(
-        plan_of.kubectl.contains("\"labels\":null")
-            && plan_of
-                .kubectl
-                .contains(&format!("\"resourceVersion\":\"{}\"", rv(&live))),
+        line(&plan_of).contains("\"labels\":null")
+            && line(&plan_of).contains(&format!("\"resourceVersion\":\"{}\"", rv(&live))),
         "{}",
-        plan_of.kubectl
+        line(&plan_of)
     );
     kubectl(&plan_of, &kubeconfig);
     assert_eq!(

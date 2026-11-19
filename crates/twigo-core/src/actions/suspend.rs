@@ -21,7 +21,7 @@ use super::{
     ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 pub(crate) async fn suspend(
     core: &Core,
@@ -96,7 +96,7 @@ pub(crate) async fn suspend(
         doing: format!("{} {what}", words.doing),
         consequences,
         affected,
-        kubectl,
+        kubectl: Some(kubectl),
         command: if suspend { "suspend" } else { "resume" },
         target: attributes.target(),
         writes: vec![attributes],
@@ -105,7 +105,7 @@ pub(crate) async fn suspend(
         space: Some(space.to_owned()),
         risk,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

@@ -17,7 +17,7 @@ use twigo_policy::friction::Risk;
 use super::undo::{Asks, Revert, Unchanged};
 use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, lost, patch_as_of, same};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 pub(crate) fn node(context: String, name: String) -> Result<Target, IpcError> {
     let nodes = Resource {
@@ -125,7 +125,7 @@ pub(crate) async fn cordon(
         doing: format!("{doing} node {name}"),
         consequences: vec![consequence.to_owned()],
         affected: Vec::new(),
-        kubectl,
+        kubectl: Some(kubectl),
         command: verb,
         target: attributes.target(),
         writes: vec![attributes],
@@ -134,7 +134,7 @@ pub(crate) async fn cordon(
         space: Some(space.to_owned()),
         risk: Risk::Reversible,
         previewed: None,
-        run: Box::new(move |_| {
+        run: bus::Run::Sends(Box::new(move |_| {
             Box::pin(send(
                 this,
                 connection,
@@ -143,7 +143,7 @@ pub(crate) async fn cordon(
                 unschedulable,
                 format!("{done} node"),
             ))
-        }),
+        })),
     })
 }
 
