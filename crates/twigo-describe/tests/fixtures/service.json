@@ -10,7 +10,7 @@
             "endpoints": [
               {
                 "addresses": [
-                  "10.244.0.8"
+                  "10.244.0.10"
                 ],
                 "conditions": {
                   "ready": true,
@@ -20,14 +20,14 @@
                 "nodeName": "twigo-overviews-control-plane",
                 "targetRef": {
                   "kind": "Pod",
-                  "name": "web-54454cf656-dvb7s",
+                  "name": "web-54454cf656-2lllp",
                   "namespace": "overview",
-                  "uid": "4d628f1b-063c-451b-8e42-d07498e421c6"
+                  "uid": "d6a686fe-a22b-47df-89ee-d78bb6b2e422"
                 }
               },
               {
                 "addresses": [
-                  "10.244.0.15"
+                  "10.244.0.17"
                 ],
                 "conditions": {
                   "ready": true,
@@ -37,18 +37,18 @@
                 "nodeName": "twigo-overviews-control-plane",
                 "targetRef": {
                   "kind": "Pod",
-                  "name": "web-54454cf656-hbgcx",
+                  "name": "web-54454cf656-94nbs",
                   "namespace": "overview",
-                  "uid": "c5755e87-0b75-44aa-9d0d-98e355e05635"
+                  "uid": "188170a4-a0a1-42e6-b2ac-bd0e9c594e49"
                 }
               }
             ],
             "kind": "EndpointSlice",
             "metadata": {
               "annotations": {
-                "endpoints.kubernetes.io/last-change-trigger-time": "2026-11-03T11:36:42Z"
+                "endpoints.kubernetes.io/last-change-trigger-time": "2026-11-17T21:08:33Z"
               },
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "web-",
               "generation": 7,
               "labels": {
@@ -75,17 +75,17 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"d722a86c-ec50-4c25-bfde-5ed90848ccb6\"}": {}
+                        "k:{\"uid\":\"41666061-c43a-484a-98d6-ef3705f3619d\"}": {}
                       }
                     },
                     "f:ports": {}
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:42Z"
+                  "time": "2026-11-17T21:08:33Z"
                 }
               ],
-              "name": "web-m2hts",
+              "name": "web-p2zcd",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -94,11 +94,11 @@
                   "controller": true,
                   "kind": "Service",
                   "name": "web",
-                  "uid": "d722a86c-ec50-4c25-bfde-5ed90848ccb6"
+                  "uid": "41666061-c43a-484a-98d6-ef3705f3619d"
                 }
               ],
-              "resourceVersion": "2496",
-              "uid": "b596d98f-7dfc-4c31-9709-aa49cf6e3c18"
+              "resourceVersion": "1178",
+              "uid": "45ba3458-ffc8-41c1-9a29-bc244bfdd83c"
             },
             "ports": [
               {
@@ -125,7 +125,7 @@
     "apiVersion": "v1",
     "kind": "Service",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "managedFields": [
         {
           "apiVersion": "v1",
@@ -145,18 +145,18 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         }
       ],
       "name": "web",
       "namespace": "overview",
-      "resourceVersion": "2337",
-      "uid": "d722a86c-ec50-4c25-bfde-5ed90848ccb6"
+      "resourceVersion": "1005",
+      "uid": "41666061-c43a-484a-98d6-ef3705f3619d"
     },
     "spec": {
-      "clusterIP": "10.96.189.89",
+      "clusterIP": "10.96.253.133",
       "clusterIPs": [
-        "10.96.189.89"
+        "10.96.253.133"
       ],
       "internalTrafficPolicy": "Cluster",
       "ipFamilies": [
@@ -188,7 +188,7 @@
     },
     {
       "column": "Cluster-IP",
-      "value": "10.96.189.89"
+      "value": "10.96.253.133"
     },
     {
       "column": "Port(s)",

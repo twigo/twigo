@@ -67,7 +67,7 @@ test("a saved layout that does not load is reported and leaves an empty area tha
   expect(screen.getByText("body of note://b")).toBeTruthy();
 });
 
-test("a tab whose title ends in what tells tabs apart cuts it in the middle past the floor and keeps the last part of its name, any other title is left whole for the end to cut", async () => {
+test("a tab whose title ends in what tells tabs apart cuts it in the middle past the floor, unless the middle measures 2em or less, and keeps the last part of its name, any other title is left whole for the end to cut", async () => {
   const workbench = await testWorkbench();
   workbench.editors.register({
     id: "test.note",
@@ -85,6 +85,9 @@ test("a tab whose title ends in what tells tabs apart cuts it in the middle past
   render(<WorkbenchView workbench={workbench} />);
   act(() => {
     workbench.editors.open("note://auth-api-1tvckat-tszk7", {
+      preview: false,
+    });
+    workbench.editors.open("note://auth-api-1tv-tszk7", {
       preview: false,
     });
     workbench.editors.open("list://validating-webhook-configurations", {
@@ -107,6 +110,7 @@ test("a tab whose title ends in what tells tabs apart cuts it in the middle past
   const cut = parts("auth-api-1tvckat-tszk7");
   expect(cut).toEqual(["auth-api-1t", "vckat-", "tszk7"]);
   expect((cut[0] ?? "").length + (cut[2] ?? "").length).toBe(TITLE_FLOOR);
+  expect(parts("auth-api-1tv-tszk7")).toEqual([]);
   expect(parts("pods")).toEqual([]);
   expect(title("validating-webhook-configurations").children).toHaveLength(0);
 });

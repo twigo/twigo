@@ -12,7 +12,7 @@
     },
     "kind": "ConfigMap",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:40Z",
+      "creationTimestamp": "2026-11-17T21:08:30Z",
       "managedFields": [
         {
           "apiVersion": "v1",
@@ -28,13 +28,13 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:40Z"
+          "time": "2026-11-17T21:08:30Z"
         }
       ],
       "name": "settings",
       "namespace": "overview",
-      "resourceVersion": "2292",
-      "uid": "5c286cca-1d40-41ea-b7d1-127c19dafb57"
+      "resourceVersion": "954",
+      "uid": "7d39c70a-1048-4709-b0ad-77ad6500318e"
     }
   },
   "printed": [

@@ -299,7 +299,6 @@ async fn create(admin: &kube::Client) -> String {
                 "replicas": 2,
                 "revisionHistoryLimit": 3,
                 "selector": { "matchLabels": { "app": "web" } },
-                "strategy": { "rollingUpdate": { "maxSurge": "25%", "maxUnavailable": 0 } },
                 "template": {
                     "metadata": { "labels": { "app": "web" }, "annotations": { "twigo.io/revision": revision } },
                     "spec": {

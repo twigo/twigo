@@ -374,7 +374,8 @@ async fn an_open_object_follows_an_edit_and_its_events_while_they_are_shown() {
     api.create(&PostParams::default(), &event).await.unwrap();
     opened
         .until(|batch| {
-            events(batch).is_some_and(|list| list.events.iter().any(|e| e.reason == "Probed"))
+            events(batch)
+                .is_some_and(|list| list.listed && list.events.iter().any(|e| e.reason == "Probed"))
         })
         .await;
 
@@ -432,6 +433,10 @@ async fn events_that_may_not_be_listed_say_why() {
     assert!(
         reason.as_deref().is_some_and(|why| why.contains("events")),
         "{reason:?}"
+    );
+    assert!(
+        events(&batch).is_some_and(|list| !list.listed),
+        "events that cannot be listed were never listed"
     );
     assert!(batch.exists, "the pod itself may be read");
     core.object_close("main", opened.id).unwrap();

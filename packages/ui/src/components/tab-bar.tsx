@@ -1,6 +1,6 @@
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -24,6 +24,13 @@ export interface Tab<V extends string> {
   /** A count after the label, with a warning mark and the warning tone when `warn`: an object's warning events. */
   readonly count?: number;
   readonly warn?: boolean;
+  /**
+   * The digits `count` keeps room for in the widths the row reads, its mark
+   * too: a count of that many digits or fewer, coming, growing or going, moves
+   * no fold and no width a part beside the row decides by. A count of more
+   * digits is drawn wider than the row reads it.
+   */
+  readonly digits?: number;
 }
 
 const PLATE =
@@ -42,6 +49,9 @@ const TAB_PLATE = cn(
 
 /** Below this much spare width a row keeps the fold it narrowed to, so that a width on a boundary does not flicker. */
 const MARGIN = 16;
+
+/** The row's `px-1.5` on both sides, which its tabs' own widths leave out. */
+const PADDING = 12;
 
 function foldedAt(
   count: number,
@@ -73,11 +83,18 @@ function fitFold(
   return fits < 0 ? needs.length - 1 : fits;
 }
 
-function Face<V extends string>({ tab }: { tab: Tab<V> }) {
+function Face<V extends string>({
+  tab,
+  reserved = false,
+}: {
+  tab: Tab<V>;
+  reserved?: boolean;
+}) {
+  const room = reserved ? tab.digits : undefined;
   return (
     <>
       <span className="truncate">{tab.label}</span>
-      {tab.count !== undefined && tab.count > 0 && (
+      {tab.count !== undefined && (tab.count > 0 || room !== undefined) && (
         <span className="inline-flex items-center gap-1 text-label">
           {tab.warn && (
             <TriangleAlert
@@ -86,7 +103,11 @@ function Face<V extends string>({ tab }: { tab: Tab<V> }) {
               className="size-3 text-warn-foreground"
             />
           )}
-          <Count value={tab.count} tone={tab.warn ? "warn" : "quiet"} />
+          <Count
+            value={room === undefined ? tab.count : 0}
+            tone={tab.warn ? "warn" : "quiet"}
+            digits={room}
+          />
         </span>
       )}
     </>
@@ -110,7 +131,13 @@ function MoreFace({ warns }: { warns: boolean }) {
   );
 }
 
-/** A copy of the row at one fold, out of sight, whose width says what that fold takes. */
+/**
+ * A copy of the row at one fold, out of sight, whose width says what that
+ * fold takes. It is read in a layout effect on every render, so that a part
+ * deciding by it never paints a stage the copy had already outgrown; the
+ * observer only brings a render for what changes outside one, as a font that
+ * loads. A copy that is not laid out keeps the width it had.
+ */
 function Measured({
   stage,
   onMeasure,
@@ -121,10 +148,11 @@ function Measured({
   children: ReactNode;
 }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const width = useWidth(element);
-  useEffect(() => {
-    onMeasure(stage, width);
-  }, [onMeasure, stage, width]);
+  useWidth(element);
+  useLayoutEffect(() => {
+    const width = element?.clientWidth ?? 0;
+    if (width > 0) onMeasure(stage, width);
+  });
   return (
     <div
       ref={setElement}
@@ -143,23 +171,50 @@ function Measured({
  * reach. As the row narrows the last tabs fold into More, which opens them
  * as a menu; the shown tab never folds, and where even it and More are too
  * wide for the row its label is cut, down to a floor, and a tooltip says it
- * whole.
+ * whole. A part that shares the row with it can read the width the row takes
+ * with every tab shown, and leave it that much, and keep every tab shown in
+ * that room.
  */
 export function TabBar<V extends string>({
   label,
   tabs,
   value,
   onChange,
+  onFullWidth,
+  folds = true,
   className,
 }: {
   label: string;
   tabs: readonly Tab<V>[];
   value: V;
   onChange: (value: V) => void;
+  /** Called with the row's width, padding included, with every tab shown, each time it is measured. */
+  onFullWidth?: (width: number) => void;
+  /** False keeps every tab shown, whatever the room, for a row whose room was made for them. */
+  folds?: boolean;
   className?: string;
 }) {
   const [row, setRow] = useState<HTMLDivElement | null>(null);
-  const width = useWidth(row);
+  const rowBox = useRef<HTMLDivElement | null>(null);
+  const bindRow = useCallback((element: HTMLDivElement | null) => {
+    rowBox.current = element;
+    setRow(element);
+  }, []);
+  const [width, setWidth] = useState(0);
+  const observed = useWidth(row);
+  // Read as the copies are, so that a part that moves the row never has a
+  // fold decided by the width the row had before.
+  useLayoutEffect(() => {
+    const element = rowBox.current;
+    if (!element) return;
+    const { paddingLeft, paddingRight } = getComputedStyle(element);
+    const measured = Math.round(
+      element.clientWidth -
+        (Number.parseFloat(paddingLeft) || 0) -
+        (Number.parseFloat(paddingRight) || 0),
+    );
+    if (measured > 0 && measured !== width) setWidth(measured);
+  }, [row, width, observed, folds]);
   const [needs, setNeeds] = useState<Readonly<Record<number, number>>>({});
   const onMeasure = useCallback((stage: number, need: number) => {
     setNeeds((was) => (was[stage] === need ? was : { ...was, [stage]: need }));
@@ -168,7 +223,11 @@ export function TabBar<V extends string>({
   const stages = tabs.map((_, stage) => stage);
   const [count, setCount] = useState(0);
   const need = stages.map((stage) => needs[stage] ?? 0);
-  const fitted = fitFold(width, need, count);
+  const full = need[0] ?? 0;
+  useLayoutEffect(() => {
+    if (full > 0) onFullWidth?.(full + PADDING);
+  }, [full, onFullWidth]);
+  const fitted = folds ? fitFold(width, need, count) : 0;
   if (fitted !== count) setCount(fitted);
   const last = tabs.length - 1;
   const cut = fitted === last && width > 0 && (need[last] ?? 0) > width;
@@ -177,15 +236,17 @@ export function TabBar<V extends string>({
   const hidden = tabs.filter((_, index) => folded.has(index));
   const picked = useRef(false);
   const moreViews = `More ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
-  const warns = (at: ReadonlySet<number>) =>
+  const warns = (at: ReadonlySet<number>, reserved = false) =>
     tabs.some(
       (tab, index) =>
-        at.has(index) && tab.warn === true && (tab.count ?? 0) > 0,
+        at.has(index) &&
+        tab.warn === true &&
+        ((tab.count ?? 0) > 0 || (reserved && tab.digits !== undefined)),
     );
 
   return (
     <div
-      ref={setRow}
+      ref={bindRow}
       className={cn(
         "relative flex h-8 shrink-0 items-center gap-0.5 px-1.5",
         className,
@@ -279,13 +340,13 @@ export function TabBar<V extends string>({
                 (tab, index) =>
                   !away.has(index) && (
                     <span key={tab.value} className={cn(TAB_PLATE, "shrink-0")}>
-                      <Face tab={tab} />
+                      <Face tab={tab} reserved />
                     </span>
                   ),
               )}
               {away.size > 0 && (
                 <span className={MORE_PLATE}>
-                  <MoreFace warns={warns(away)} />
+                  <MoreFace warns={warns(away, true)} />
                 </span>
               )}
             </Measured>

@@ -3,9 +3,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Created pod: web-54454cf656-hbgcx",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
+      "message": "Created pod: web-54454cf656-94nbs",
       "reason": "SuccessfulCreate",
       "source": "replicaset-controller",
       "type": "Normal"
@@ -13,9 +13,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Created pod: web-54454cf656-dvb7s",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
+      "message": "Created pod: web-54454cf656-2lllp",
       "reason": "SuccessfulCreate",
       "source": "replicaset-controller",
       "type": "Normal"
@@ -31,7 +31,7 @@
         "deployment.kubernetes.io/max-replicas": "3",
         "deployment.kubernetes.io/revision": "2"
       },
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 2,
       "labels": {
         "app": "web",
@@ -56,7 +56,7 @@
               },
               "f:ownerReferences": {
                 ".": {},
-                "k:{\"uid\":\"9bafb8d8-72d0-4d21-a63c-513a720633ae\"}": {}
+                "k:{\"uid\":\"a6f4a88c-f73f-4549-9796-018afb268d2e\"}": {}
               }
             },
             "f:spec": {
@@ -175,7 +175,7 @@
           },
           "manager": "kube-controller-manager",
           "operation": "Update",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:32Z"
         },
         {
           "apiVersion": "apps/v1",
@@ -193,7 +193,7 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:42Z"
+          "time": "2026-11-17T21:08:33Z"
         }
       ],
       "name": "web-54454cf656",
@@ -205,11 +205,11 @@
           "controller": true,
           "kind": "Deployment",
           "name": "web",
-          "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+          "uid": "a6f4a88c-f73f-4549-9796-018afb268d2e"
         }
       ],
-      "resourceVersion": "2477",
-      "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
+      "resourceVersion": "1159",
+      "uid": "145101ff-9ee8-4b8c-be9b-5448f3b09354"
     },
     "spec": {
       "replicas": 2,

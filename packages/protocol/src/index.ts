@@ -8,6 +8,7 @@ export type {
   SubscriptionCommand,
 } from "./backend";
 export { IpcError, toIpcError } from "./error";
+export { lowerAscii, parseText, type TextFilter } from "./textFilter";
 export type {
   Access,
   AccessQuery,
@@ -104,6 +105,7 @@ export type {
   EmbeddedList,
   Finding,
   Field,
+  Header,
   Label,
   ListBatch,
   ListQuery,
@@ -116,6 +118,7 @@ export type {
   ObjectRef,
   OpenShell,
   Overview,
+  Printed,
   Related,
   RelatedObject,
   Section,
@@ -124,6 +127,7 @@ export type {
   TreeNode,
   Usage,
   Value,
+  Vital,
   PluginStatus,
   ProxyWhy,
   Resource,

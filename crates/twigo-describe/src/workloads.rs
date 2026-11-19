@@ -3,15 +3,21 @@
 //! `describeDaemonSet`), their rollout and their pods as a live list.
 
 use serde_json::Value;
-use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown};
+use twigo_ipc::{Block, Finding, Section, Span, Tone, Value as Shown, Vital};
 
-use crate::show::{Fields, REPLICA_SET, SERVICE, code, link, list, plain, toned};
+use crate::show::{
+    Fields, REPLICA_SET, SERVICE, Summary, code, counted, link, list, plain, said, section, toned,
+};
 use crate::template::{self, PODS};
 use crate::{Described, Fact, Found, Input, Need, text};
 
 /// The label a Deployment's controller adds to the templates of its
 /// ReplicaSets, which their comparison with its own template ignores.
 const TEMPLATE_HASH: &str = "pod-template-hash";
+
+const ROLLOUT: &str = "core.rollout";
+const PODS_SECTION: &str = "core.pods";
+const REVISION: &str = "deployment.kubernetes.io/revision";
 
 /// The ReplicaSets of a Deployment's namespace, to find its own.
 fn replica_sets(object: &Value) -> Vec<Need> {
@@ -29,6 +35,21 @@ pub(crate) fn deployment_needs(object: &Value) -> Vec<Need> {
     replica_sets(object)
 }
 
+/// Pods that are ready or updated against the ones wanted, short of them
+/// toned when `short_is_wrong`.
+fn count(label: &str, have: u64, want: u64, short_is_wrong: bool) -> Vital {
+    let shown = format!("{have}/{want}");
+    Vital {
+        label: label.to_owned(),
+        value: if short_is_wrong && have < want {
+            toned(shown, Tone::Warning)
+        } else {
+            plain(shown)
+        },
+        note: Vec::new(),
+    }
+}
+
 pub(crate) fn deployment(input: &Input<'_>) -> Described {
     let object = input.object;
     let spec = &object["spec"];
@@ -37,80 +58,171 @@ pub(crate) fn deployment(input: &Input<'_>) -> Described {
     let uid = text(&object["metadata"]["uid"]).unwrap_or_default();
     let desired = spec["replicas"].as_u64().unwrap_or(1);
     let number = |key: &str| status[key].as_u64().unwrap_or_default();
+    let (ready, updated, total) = (
+        number("readyReplicas"),
+        number("updatedReplicas"),
+        number("replicas"),
+    );
+    let revision = text(&object["metadata"]["annotations"][REVISION]);
     let mut fields = Fields::default();
     let unavailable = number("unavailableReplicas");
     let replicas = format!(
-        "{desired} desired | {} updated | {} total | {} available | {unavailable} unavailable",
-        number("updatedReplicas"),
-        number("replicas"),
+        "{desired} desired | {updated} updated | {total} total | {} available | {unavailable} unavailable",
         number("availableReplicas"),
     );
-    fields.add(
-        "Replicas",
-        if unavailable > 0 {
-            toned(replicas, Tone::Warning)
-        } else {
-            plain(replicas)
-        },
-    );
-    fields.maybe(
-        "Selector",
-        crate::show::selector(&spec["selector"]).map(code),
-    );
-    fields.maybe("Strategy", strategy(&spec["strategy"]).map(plain));
-    fields.scalar("Min ready seconds", &spec["minReadySeconds"]);
-    fields.maybe(
-        "Progress deadline",
-        spec["progressDeadlineSeconds"]
-            .as_i64()
-            .map(|seconds| plain(format!("{seconds} s"))),
-    );
-    fields.scalar("Revision history limit", &spec["revisionHistoryLimit"]);
-    fields.flag("Paused", &spec["paused"]);
-    fields.text(
-        "Revision",
-        &object["metadata"]["annotations"]["deployment.kubernetes.io/revision"],
-    );
-
-    let mut sections = vec![Section {
-        id: "core.deployment".to_owned(),
-        title: "Deployment".to_owned(),
-        blocks: vec![Block::Fields { fields: fields.0 }],
-    }];
+    fields.add("Replicas", plain(replicas));
+    fields.maybe("Revision", revision.clone().map(plain));
     let found = fact(input.facts, &replica_sets(object)[0]);
     let owned: Option<Vec<&Value>> = match found {
         Some(Found::Listed { objects }) => Some(controlled(objects, &uid)),
         _ => None,
     };
-    if let Some(found) = found {
-        sections.push(rollout(
-            object,
+    let new = owned
+        .as_deref()
+        .and_then(|owned| new_replica_set(object, owned));
+    let findings = deployment_findings(object);
+    let about = |id: &str| {
+        findings
+            .iter()
+            .find_map(|(finding, subject)| (*subject == id).then_some(finding))
+    };
+    let paused = spec["paused"] == true;
+    let rolling = updated < desired || total > updated;
+    let (summary, tone) = said(about(ROLLOUT), || {
+        if paused {
+            Summary::default()
+                .part("paused")
+                .part(format!("{updated}/{desired} updated"))
+                .done()
+        } else if rolling {
+            Summary::default()
+                .part(format!("{updated}/{desired} updated"))
+                .done()
+        } else {
+            revision_line(Summary::default(), revision.as_deref(), new).done()
+        }
+    });
+    let mut sections = vec![Section {
+        summary,
+        tone,
+        ..rollout(
+            fields,
             found,
             owned.as_deref().unwrap_or_default(),
+            new,
             namespace.as_deref(),
-        ));
-    }
+        )
+    }];
     if let Some(owned) = &owned {
-        sections.push(template::owned_list(
-            "core.pods",
-            "Pods",
-            PODS,
+        sections.push(pods(
             namespace.as_deref(),
             owned
                 .iter()
                 .filter_map(|rs| text(&rs["metadata"]["uid"]))
                 .collect(),
+            ready,
+            desired,
+            about(PODS_SECTION),
         ));
     }
     sections.push(template::section(&spec["template"], namespace.as_deref()));
+    let mut strategy = Fields::default();
+    strategy.maybe(
+        "Selector",
+        crate::show::selector(&spec["selector"]).map(code),
+    );
+    strategy.maybe("Strategy", strategy_of(&spec["strategy"]).map(plain));
+    strategy.scalar("Min ready seconds", &spec["minReadySeconds"]);
+    strategy.maybe(
+        "Progress deadline",
+        spec["progressDeadlineSeconds"]
+            .as_i64()
+            .map(|seconds| plain(format!("{seconds} s"))),
+    );
+    strategy.scalar("Revision history limit", &spec["revisionHistoryLimit"]);
+    strategy.flag("Paused", &spec["paused"]);
+    sections.push(strategy_section(
+        strategy,
+        text(&spec["strategy"]["type"]),
+        Some(desired),
+        paused,
+    ));
+    let sentence = if paused {
+        let at = match &revision {
+            Some(revision) => format!("Paused at revision {revision}"),
+            None => "Paused".to_owned(),
+        };
+        Summary::default()
+            .part(format!("{at}: {updated}/{desired} updated"))
+            .done()
+    } else if rolling {
+        let rolling = match &revision {
+            Some(revision) => format!("Rolling out revision {revision}"),
+            None => "Rolling out".to_owned(),
+        };
+        Summary::default()
+            .part(format!(
+                "{rolling}: {updated}/{desired} updated, {ready}/{desired} ready"
+            ))
+            .done()
+    } else {
+        revision_line(
+            Summary::default().part(format!("{ready}/{desired} ready")),
+            revision.as_deref(),
+            new,
+        )
+        .done()
+    };
+    let mut revision_vital = Vital {
+        label: "Revision".to_owned(),
+        value: plain(revision.clone().unwrap_or_default()),
+        note: Vec::new(),
+    };
+    if let Some(tag) = single_tag(&spec["template"]["spec"]) {
+        revision_vital.note = vec![Span::Text { text: tag }];
+    }
+    let mut vitals = vec![
+        count("Ready", ready, desired, true),
+        count("Updated", updated, desired, false),
+    ];
+    if revision.is_some() {
+        vitals.push(revision_vital);
+    }
     Described {
-        findings: deployment_findings(object),
+        findings: findings.into_iter().map(|(finding, _)| finding).collect(),
         sections,
+        sentence,
+        vitals,
+        ..Described::default()
     }
 }
 
+/// `revision 12, 3d ago`: the revision the Deployment is at and when its
+/// ReplicaSet was made; the time is left out where that ReplicaSet is not
+/// listed.
+fn revision_line(summary: Summary, revision: Option<&str>, new: Option<&Value>) -> Summary {
+    let Some(revision) = revision else {
+        return summary;
+    };
+    match new.and_then(|new| text(&new["metadata"]["creationTimestamp"])) {
+        Some(at) => summary.ago(&format!("revision {revision}, "), at),
+        None => summary.part(format!("revision {revision}")),
+    }
+}
+
+/// The tag of the one container's image, which says what revision it is.
+fn single_tag(pod: &Value) -> Option<String> {
+    let [container] = pod["containers"].as_array()?.as_slice() else {
+        return None;
+    };
+    let image = container["image"].as_str()?;
+    let (reference, _) = image.split_once('@').unwrap_or((image, ""));
+    let (_, tag) = reference.rsplit('/').next()?.split_once(':')?;
+    Some(tag.to_owned())
+}
+
 /// `RollingUpdate, 0 max unavailable, 25% max surge`, or the type alone.
-fn strategy(strategy: &Value) -> Option<String> {
+fn strategy_of(strategy: &Value) -> Option<String> {
     let kind = text(&strategy["type"])?;
     let rolling = &strategy["rollingUpdate"];
     Some(if rolling.is_object() {
@@ -131,6 +243,50 @@ fn strategy(strategy: &Value) -> Option<String> {
     } else {
         kind
     })
+}
+
+/// How it updates and how many it runs: `RollingUpdate · 3 replicas`, and
+/// `paused` while its updates are held.
+fn strategy_section(
+    fields: Fields,
+    kind: Option<String>,
+    replicas: Option<u64>,
+    paused: bool,
+) -> Section {
+    let summary = Summary::default().part(kind.unwrap_or_default());
+    let summary = match replicas {
+        Some(replicas) => summary.part(counted(replicas as usize, "replica")),
+        None => summary,
+    };
+    Section {
+        summary: summary.part(if paused { "paused" } else { "" }).done(),
+        ..section(
+            "core.strategy",
+            "Strategy and scaling",
+            vec![Block::Fields { fields: fields.0 }],
+        )
+    }
+}
+
+/// The live list of what a workload controls: `2/3 ready`, or the finding
+/// about it.
+fn pods(
+    namespace: Option<&str>,
+    owners: Vec<String>,
+    ready: u64,
+    desired: u64,
+    finding: Option<&Finding>,
+) -> Section {
+    let (summary, tone) = said(finding, || {
+        Summary::default()
+            .part(format!("{ready}/{desired} ready"))
+            .done()
+    });
+    Section {
+        summary,
+        tone,
+        ..template::owned_list(PODS_SECTION, "Pods", PODS, namespace, owners)
+    }
 }
 
 pub(crate) fn fact<'a>(facts: &'a [Fact], need: &Need) -> Option<&'a Found> {
@@ -166,27 +322,28 @@ pub(crate) fn controlled<'a>(objects: &'a [Value], uid: &str) -> Vec<&'a Value> 
     owned
 }
 
-/// The new ReplicaSet, the old ones that still have replicas, as kubectl
-/// names them, and every revision with its images.
-fn rollout(
-    deployment: &Value,
-    found: &Found,
-    owned: &[&Value],
-    namespace: Option<&str>,
-) -> Section {
-    let mut blocks = Vec::new();
-    if let Found::Unavailable { message } = found {
-        blocks.push(Block::Fields {
-            fields: vec![twigo_ipc::Field {
-                label: "ReplicaSets".to_owned(),
-                value: plain(message.clone()),
-            }],
-        });
-    }
-    let new = owned
+/// The ReplicaSet whose template is the Deployment's.
+fn new_replica_set<'a>(deployment: &Value, owned: &[&'a Value]) -> Option<&'a Value> {
+    owned
         .iter()
         .find(|rs| same_template(&rs["spec"]["template"], &deployment["spec"]["template"]))
-        .copied();
+        .copied()
+}
+
+/// What the Deployment's rollout is at: `fields` first, then the new
+/// ReplicaSet, the old ones that still have replicas, as kubectl names
+/// them, and every revision with its images.
+fn rollout(
+    mut fields: Fields,
+    found: Option<&Found>,
+    owned: &[&Value],
+    new: Option<&Value>,
+    namespace: Option<&str>,
+) -> Section {
+    let mut table = None;
+    if let Some(Found::Unavailable { message }) = found {
+        fields.add("ReplicaSets", plain(message.clone()));
+    }
     let replicas = |rs: &Value| {
         format!(
             "{}/{} replicas created",
@@ -194,7 +351,7 @@ fn rollout(
             rs["spec"]["replicas"].as_u64().unwrap_or_default()
         )
     };
-    let named = |rs: &Value| {
+    let linked = |rs: &Value| {
         let name = rs["metadata"]["name"].as_str().unwrap_or_default();
         link(
             REPLICA_SET,
@@ -203,22 +360,20 @@ fn rollout(
             format!("{name} ({})", replicas(rs)),
         )
     };
-    if matches!(found, Found::Listed { .. }) {
-        let mut fields = Fields::default();
-        fields.add("New ReplicaSet", new.map_or_else(|| plain("none"), named));
+    if matches!(found, Some(Found::Listed { .. })) {
+        fields.add("New ReplicaSet", new.map_or_else(|| plain("none"), linked));
         let old: Vec<Shown> = owned
             .iter()
             .filter(|rs| {
                 new.is_none_or(|new| new["metadata"]["uid"] != rs["metadata"]["uid"])
                     && rs["spec"]["replicas"].as_u64() != Some(0)
             })
-            .map(|rs| named(rs))
+            .map(|rs| linked(rs))
             .collect();
         fields.add(
             "Old ReplicaSets",
             list(old).unwrap_or_else(|| plain("none")),
         );
-        blocks.push(Block::Fields { fields: fields.0 });
         let mut history: Vec<&Value> = owned.to_vec();
         history.sort_by_key(|rs| std::cmp::Reverse(revision(rs)));
         let rows: Vec<Vec<Shown>> = history
@@ -241,7 +396,7 @@ fn rollout(
             })
             .collect();
         if !rows.is_empty() {
-            blocks.push(Block::Table {
+            table = Some(Block::Table {
                 columns: ["Revision", "ReplicaSet", "Images", "Ready", "Created"]
                     .map(str::to_owned)
                     .to_vec(),
@@ -249,11 +404,9 @@ fn rollout(
             });
         }
     }
-    Section {
-        id: "core.rollout".to_owned(),
-        title: "Rollout".to_owned(),
-        blocks,
-    }
+    let mut blocks = vec![Block::Fields { fields: fields.0 }];
+    blocks.extend(table);
+    section(ROLLOUT, "Rollout", blocks)
 }
 
 /// Whether a ReplicaSet's template is the Deployment's, its hash label
@@ -272,7 +425,7 @@ fn same_template(replica_set: &Value, deployment: &Value) -> bool {
 }
 
 fn revision(replica_set: &Value) -> Option<u64> {
-    replica_set["metadata"]["annotations"]["deployment.kubernetes.io/revision"]
+    replica_set["metadata"]["annotations"][REVISION]
         .as_str()?
         .parse()
         .ok()
@@ -302,30 +455,37 @@ fn condition<'a>(object: &'a Value, kind: &str) -> Option<&'a Value> {
 }
 
 /// A rollout past its deadline, pods the ReplicaSet cannot create, or
-/// fewer available pods than the Deployment needs.
-fn deployment_findings(deployment: &Value) -> Vec<Finding> {
+/// fewer available pods than the Deployment needs, each with the section it
+/// is about.
+fn deployment_findings(deployment: &Value) -> Vec<(Finding, &'static str)> {
     let mut findings = Vec::new();
     if let Some(progressing) = condition(deployment, "Progressing")
         && progressing["status"] == "False"
     {
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Danger,
-            title: "The rollout is stuck".to_owned(),
-            detail: since(progressing, "Not progressing since "),
-            message: crate::message(&progressing["message"]),
-        });
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Danger,
+                title: "The rollout is stuck".to_owned(),
+                detail: since(progressing, "Not progressing since "),
+                message: crate::message(&progressing["message"]),
+            },
+            ROLLOUT,
+        ));
     }
     if let Some(failure) = condition(deployment, "ReplicaFailure")
         && failure["status"] == "True"
     {
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Danger,
-            title: "Its ReplicaSet cannot create pods".to_owned(),
-            detail: since(failure, "Failing since "),
-            message: crate::message(&failure["message"]),
-        });
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Danger,
+                title: "Its ReplicaSet cannot create pods".to_owned(),
+                detail: since(failure, "Failing since "),
+                message: crate::message(&failure["message"]),
+            },
+            ROLLOUT,
+        ));
     }
     if let Some(available) = condition(deployment, "Available")
         && available["status"] == "False"
@@ -340,13 +500,16 @@ fn deployment_findings(deployment: &Value) -> Vec<Finding> {
             detail.push(Span::Ago { at });
         }
         detail.push(span("."));
-        findings.push(Finding {
-            logs: None,
-            tone: Tone::Warning,
-            title: "Fewer pods are available than it needs".to_owned(),
-            detail,
-            message: crate::message(&available["message"]),
-        });
+        findings.push((
+            Finding {
+                logs: None,
+                tone: Tone::Warning,
+                title: "Fewer pods are available than it needs".to_owned(),
+                detail,
+                message: crate::message(&available["message"]),
+            },
+            PODS_SECTION,
+        ));
     }
     findings
 }
@@ -376,40 +539,34 @@ pub(crate) fn stateful_set(input: &Input<'_>) -> Described {
     let namespace = text(&object["metadata"]["namespace"]);
     let uid = text(&object["metadata"]["uid"]).unwrap_or_default();
     let desired = spec["replicas"].as_u64().unwrap_or(1);
-    let ready = status["readyReplicas"].as_u64().unwrap_or_default();
-    let mut fields = Fields::default();
-    fields.add(
+    let number = |key: &str| status[key].as_u64().unwrap_or_default();
+    let (ready, updated) = (number("readyReplicas"), number("updatedReplicas"));
+    let mut rollout = Fields::default();
+    rollout.add(
         "Replicas",
-        plain(format!(
-            "{desired} desired | {} total",
-            status["replicas"].as_u64().unwrap_or_default()
-        )),
+        plain(format!("{desired} desired | {} total", number("replicas"))),
     );
-    fields.add(
-        "Ready",
-        if ready < desired {
-            toned(format!("{ready}/{desired}"), Tone::Warning)
-        } else {
-            plain(format!("{ready}/{desired}"))
-        },
-    );
-    fields.maybe(
+    rollout.add("Ready", plain(format!("{ready}/{desired}")));
+    rollout.text("Current revision", &status["currentRevision"]);
+    rollout.text("Update revision", &status["updateRevision"]);
+    let mut strategy = Fields::default();
+    strategy.maybe(
         "Selector",
         crate::show::selector(&spec["selector"]).map(code),
     );
-    fields.maybe(
+    strategy.maybe(
         "Service",
         text(&spec["serviceName"])
             .map(|name| link(SERVICE, namespace.as_deref(), &name, name.clone())),
     );
-    fields.maybe(
+    strategy.maybe(
         "Update strategy",
-        strategy(&spec["updateStrategy"]).map(plain),
+        strategy_of(&spec["updateStrategy"]).map(plain),
     );
-    fields.text("Pod management", &spec["podManagementPolicy"]);
+    strategy.text("Pod management", &spec["podManagementPolicy"]);
     if spec["persistentVolumeClaimRetentionPolicy"].is_object() {
         let policy = &spec["persistentVolumeClaimRetentionPolicy"];
-        fields.add(
+        strategy.add(
             "Claim retention",
             plain(format!(
                 "{} when deleted, {} when scaled",
@@ -418,27 +575,44 @@ pub(crate) fn stateful_set(input: &Input<'_>) -> Described {
             )),
         );
     }
-    fields.scalar("Ordinals start", &spec["ordinals"]["start"]);
-    fields.scalar("Min ready seconds", &spec["minReadySeconds"]);
-    fields.text("Current revision", &status["currentRevision"]);
-    fields.text("Update revision", &status["updateRevision"]);
-    let mut sections = vec![Section {
-        id: "core.statefulset".to_owned(),
-        title: "StatefulSet".to_owned(),
-        blocks: vec![Block::Fields { fields: fields.0 }],
-    }];
+    strategy.scalar("Ordinals start", &spec["ordinals"]["start"]);
+    strategy.scalar("Min ready seconds", &spec["minReadySeconds"]);
+    let findings: Vec<Finding> = short(ready, desired).into_iter().collect();
+    let mut sections = vec![
+        Section {
+            summary: Summary::default()
+                .part(format!("{updated}/{desired} updated"))
+                .done(),
+            ..section(
+                ROLLOUT,
+                "Rollout",
+                vec![Block::Fields { fields: rollout.0 }],
+            )
+        },
+        pods(
+            namespace.as_deref(),
+            vec![uid],
+            ready,
+            desired,
+            findings.first(),
+        ),
+        template::section(&spec["template"], namespace.as_deref()),
+    ];
     sections.extend(claim_templates(&spec["volumeClaimTemplates"]));
-    sections.push(template::owned_list(
-        "core.pods",
-        "Pods",
-        PODS,
-        namespace.as_deref(),
-        vec![uid],
+    sections.push(strategy_section(
+        strategy,
+        text(&spec["updateStrategy"]["type"]),
+        Some(desired),
+        false,
     ));
-    sections.push(template::section(&spec["template"], namespace.as_deref()));
     Described {
-        findings: short(ready, desired).into_iter().collect(),
+        findings,
         sections,
+        vitals: vec![
+            count("Ready", ready, desired, true),
+            count("Updated", updated, desired, false),
+        ],
+        ..Described::default()
     }
 }
 
@@ -467,15 +641,19 @@ fn claim_templates(templates: &Value) -> Option<Section> {
             ]
         })
         .collect();
+    let count = rows.len();
     (!rows.is_empty()).then(|| Section {
-        id: "core.claims".to_owned(),
-        title: "Volume claims".to_owned(),
-        blocks: vec![Block::Table {
-            columns: ["Name", "Storage class", "Capacity", "Access modes"]
-                .map(str::to_owned)
-                .to_vec(),
-            rows,
-        }],
+        summary: Summary::default().count(count, "claim").done(),
+        ..section(
+            "core.claims",
+            "Volume claims",
+            vec![Block::Table {
+                columns: ["Name", "Storage class", "Capacity", "Access modes"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows,
+            }],
+        )
     })
 }
 
@@ -488,39 +666,34 @@ pub(crate) fn daemon_set(input: &Input<'_>) -> Described {
     let number = |key: &str| status[key].as_u64().unwrap_or_default();
     let desired = number("desiredNumberScheduled");
     let ready = number("numberReady");
+    let updated = number("updatedNumberScheduled");
     let misscheduled = number("numberMisscheduled");
-    let mut fields = Fields::default();
+    let mut rollout = Fields::default();
     let nodes = format!(
-        "{desired} desired | {} current | {ready} ready | {} up-to-date | {} available",
+        "{desired} desired | {} current | {ready} ready | {updated} up-to-date | {} available",
         number("currentNumberScheduled"),
-        number("updatedNumberScheduled"),
         number("numberAvailable"),
     );
-    fields.add(
-        "Nodes",
-        if ready < desired {
-            toned(nodes, Tone::Warning)
-        } else {
-            plain(nodes)
-        },
-    );
+    rollout.add("Nodes", plain(nodes));
     if misscheduled > 0 {
-        fields.add(
+        rollout.add(
             "Misscheduled",
             toned(misscheduled.to_string(), Tone::Warning),
         );
     }
-    fields.maybe(
+    let mut strategy = Fields::default();
+    strategy.maybe(
         "Selector",
         crate::show::selector(&spec["selector"]).map(code),
     );
-    fields.maybe(
+    strategy.maybe(
         "Update strategy",
-        strategy(&spec["updateStrategy"]).map(plain),
+        strategy_of(&spec["updateStrategy"]).map(plain),
     );
-    fields.scalar("Min ready seconds", &spec["minReadySeconds"]);
-    fields.scalar("Revision history limit", &spec["revisionHistoryLimit"]);
+    strategy.scalar("Min ready seconds", &spec["minReadySeconds"]);
+    strategy.scalar("Revision history limit", &spec["revisionHistoryLimit"]);
     let mut findings: Vec<Finding> = short(ready, desired).into_iter().collect();
+    let unready = findings.len();
     if misscheduled > 0 {
         findings.push(Finding {
             logs: None,
@@ -532,16 +705,38 @@ pub(crate) fn daemon_set(input: &Input<'_>) -> Described {
             message: None,
         });
     }
+    let (summary, tone) = said(findings.get(unready), || {
+        Summary::default()
+            .part(format!("{updated}/{desired} updated"))
+            .done()
+    });
+    let sections = vec![
+        Section {
+            summary,
+            tone,
+            ..section(
+                ROLLOUT,
+                "Rollout",
+                vec![Block::Fields { fields: rollout.0 }],
+            )
+        },
+        pods(
+            namespace.as_deref(),
+            vec![uid],
+            ready,
+            desired,
+            findings.first().filter(|_| unready > 0),
+        ),
+        template::section(&spec["template"], namespace.as_deref()),
+        strategy_section(strategy, text(&spec["updateStrategy"]["type"]), None, false),
+    ];
     Described {
         findings,
-        sections: vec![
-            Section {
-                id: "core.daemonset".to_owned(),
-                title: "DaemonSet".to_owned(),
-                blocks: vec![Block::Fields { fields: fields.0 }],
-            },
-            template::owned_list("core.pods", "Pods", PODS, namespace.as_deref(), vec![uid]),
-            template::section(&spec["template"], namespace.as_deref()),
+        sections,
+        vitals: vec![
+            count("Ready", ready, desired, true),
+            count("Updated", updated, desired, false),
         ],
+        ..Described::default()
     }
 }

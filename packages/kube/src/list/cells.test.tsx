@@ -1,3 +1,4 @@
+import { Profiler } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Column, Gvr, Row } from "@twigo/protocol";
@@ -546,4 +547,63 @@ test("what raises a row's alarm does not depend on the time, so the one alarm of
   const after = states();
   expect(after.alarmed).toBe(before.alarmed);
   expect(after.failing).toEqual(before.failing);
+});
+
+test("an Age draws again only as its text or its role changes", () => {
+  const ticked = (ago: number) => {
+    vi.setSystemTime(Date.parse(RECEIVED));
+    let commits = 0;
+    const row: Row = {
+      id: "r",
+      created: new Date(Date.parse(RECEIVED) - ago).toISOString(),
+      received: RECEIVED,
+      generated: null,
+      cells: [null],
+    };
+    const { container } = render(
+      <Profiler
+        id="age"
+        onRender={() => {
+          commits++;
+        }}
+      >
+        <CellView
+          row={row}
+          column={{
+            name: "Age",
+            index: 0,
+            rule: columnRule(PODS, { name: "Age", kind: "age", priority: 0 }),
+          }}
+          tone={undefined}
+          alarmed={false}
+          finished={false}
+        />
+      </Profiler>,
+    );
+    const first = commits;
+    advance(5_000);
+    const age = container.firstElementChild;
+    return {
+      commits: commits - first,
+      text: age?.textContent,
+      role: age?.className,
+    };
+  };
+  expect(ticked(15 * 60_000 + 5_000)).toEqual({
+    commits: 0,
+    text: "15m",
+    role: "text-support",
+  });
+  cleanup();
+  expect(ticked(2 * 60_000 + 5_000)).toEqual({
+    commits: 1,
+    text: "2m10s",
+    role: "text-content",
+  });
+  cleanup();
+  expect(ticked(9 * 60_000 + 57_000)).toEqual({
+    commits: 1,
+    text: "10m",
+    role: "text-support",
+  });
 });

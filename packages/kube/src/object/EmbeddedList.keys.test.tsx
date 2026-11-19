@@ -64,7 +64,12 @@ test("keys in a Deployment's pods list inside its details act on that list alone
   ).toBeDefined();
   fireEvent.keyDown(pods, { code: "Slash", key: "/" });
   await settle(2);
-  expect(document.activeElement).toBe(pods);
+  expect(document.activeElement).toBe(
+    within(drawer).getByRole("textbox", { name: "Filter this page" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Filter rows" })).not.toBe(
+    document.activeElement,
+  );
   expect(workbench.keys.lookup(pods)("resource.selected")).toBe(false);
   expect(workbench.keys.lookup(pods)("listMarked")).toBe(false);
   fireEvent.keyDown(pods, { code: "Escape", key: "Escape" });

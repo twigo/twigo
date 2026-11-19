@@ -9,7 +9,7 @@ import type {
   ShellTarget,
 } from "../generated";
 import { SHELL_FRAME_BYTES, SHELL_HIGH_WATER, SHELL_LOW_WATER } from "../shell";
-import type { Pod } from "./cluster";
+import { containerNames, containerOf, type Pod } from "./cluster";
 
 /**
  * Pins what a shell does: `shellQueued` waits for a place among the
@@ -61,9 +61,6 @@ const CONNECT_MS = 150;
 /** An attached process writes a line this often. */
 const LINE_MS = 1000;
 
-/** The recorded pods' containers, as the logs' streams name them. */
-export const CONTAINER_NAMES = ["api", "istio-proxy", "log-shipper"];
-
 /**
  * The containers of a pod a shell can reach: those that run, a pod that
  * runs none refused in words. The mock's pods run two or three, in the order
@@ -82,9 +79,9 @@ export function shellContainers(
   }
   const count =
     scenario === "shellOneContainer" ? 1 : Math.max(2, pod.containers);
-  const containers = CONTAINER_NAMES.slice(0, count);
+  const containers = containerNames(pod, count);
   const annotated = scenario === "shellDefaultSecond" ? 1 : 0;
-  return { containers, default: containers[annotated] ?? "api" };
+  return { containers, default: containers[annotated] ?? containerOf(pod) };
 }
 
 const FILES = [

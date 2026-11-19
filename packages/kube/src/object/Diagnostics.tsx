@@ -1,7 +1,7 @@
 import { History, ScrollText } from "lucide-react";
 import type { Finding } from "@twigo/protocol";
 import { Button, Callout } from "@twigo/ui";
-import { Sentence } from "./values";
+import { Prose, Sentence } from "./values";
 
 /** Which logs of a container a finding's button opens. */
 export interface FindingLogsChoice {
@@ -36,9 +36,10 @@ export function Diagnostics({
             </p>
           )}
           {finding.message !== null && (
-            <p className="font-mono text-xs break-words whitespace-pre-wrap text-support">
-              {finding.message}
-            </p>
+            <Prose
+              text={finding.message}
+              className="font-mono text-xs whitespace-pre-wrap text-support"
+            />
           )}
           {finding.logs?.lastLine && (
             <p className="truncate font-mono text-xs text-support">

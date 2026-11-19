@@ -263,7 +263,12 @@ lastTransition: string | null,
  * RFC 3339, when its reporter last confirmed it, as a node's kubelet
  * does.
  */
-lastHeartbeat: string | null, };
+lastHeartbeat: string | null, 
+/**
+ * The Diagnostics section already says why it is wrong, so it shows
+ * only as its chip.
+ */
+explained: boolean, };
 
 export type Container = { name: string, role: ContainerRole, image: string, 
 /**
@@ -275,13 +280,16 @@ state: ContainerState | null,
  */
 ports: Array<string>, 
 /**
- * What its card shows: its state's times, how it last ended, its
- * resources.
+ * What its card shows: how it ended, as its code and when, `Exited` for
+ * a termination that is its state now, whose reason the state says, and
+ * `Last exit`, with its reason, for an earlier one. Empty for a container
+ * that never ended.
  */
 fields: Array<Field>, 
 /**
- * What else kubectl describe prints of it, folded: the last
- * termination's message, command, probes, security, image and
+ * What else kubectl describe prints of it, folded: when it started, the
+ * last termination's message, its requests and limits, command,
+ * arguments, working directory, pull policy, probes, security, image and
  * container IDs.
  */
 details: Array<Field>, 
@@ -414,6 +422,12 @@ export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" |
  */
 export type EventList = { events: Array<ObjectEvent>, 
 /**
+ * They have been listed, so that an empty list means there are none:
+ * false while they are still coming, and once true it stays true,
+ * whatever `unavailable` says of a later relist.
+ */
+listed: boolean, 
+/**
  * Why they cannot be listed, as when the person may not list events;
  * None while they are listed or still coming.
  */
@@ -454,7 +468,12 @@ export type Execute = { plan: PlanId,
  */
 typed: string | null, };
 
-export type Field = { label: string, value: Value, };
+export type Field = { label: string, value: Value, 
+/**
+ * It holds the cluster's default, as a pod's Restart policy Always:
+ * its section folds such fields behind their count.
+ */
+default: boolean, };
 
 export type Finding = { 
 /**
@@ -492,6 +511,8 @@ previous: boolean,
  * wrote none.
  */
 lastLine: string | null, };
+
+export type Fold = "open" | "folded" | "finding";
 
 export type Forward = { id: ForwardId, target: ForwardTarget, 
 /**
@@ -642,6 +663,51 @@ export type Gvr = {
  * Empty for the core group.
  */
 group: string, version: string, resource: string, };
+
+/**
+ * What the object's page says around its name and under its views, the
+ * same in the inspector and on the full page.
+ */
+export type Header = { 
+/**
+ * The controller at the top of its owners: a pod's Deployment through
+ * its ReplicaSet, a Job's CronJob. The direct controller while the one
+ * above it is not listed; None without a controller.
+ */
+owner: ObjectRef | null, 
+/**
+ * The node a pod is bound to; None before it is scheduled, and for
+ * other kinds.
+ */
+node: string | null, 
+/**
+ * RFC 3339, `metadata.creationTimestamp`: the object's age, which an
+ * object opened on its own has no list row to take it from.
+ */
+created: string | null, 
+/**
+ * Where the generated part of its name starts, in UTF-16 units, as a
+ * list row's [`generated`](crate::Row::generated) says it, so that an
+ * object opened on its own cuts its name as the list does. The core
+ * fills it: the rule lives with the rows.
+ */
+generated: number | null, 
+/**
+ * The cells the server prints for it in a list, Name, Namespace and Age
+ * left out, from which the page takes the word of its list's health
+ * column, so the two always say the same.
+ */
+printed: Array<Printed>, 
+/**
+ * One sentence after that word: the first finding's title, else the
+ * object's vitals in words; empty when neither says anything.
+ */
+sentence: Array<Span>, 
+/**
+ * The strip under the views, in order; empty for a kind without one.
+ * A pod's CPU and Memory are not among them: they come with its usage.
+ */
+vitals: Array<Vital>, };
 
 /**
  * The view's lines over time, its range aside, in equal spans from `from`
@@ -1137,8 +1203,9 @@ related: Related | null,
  * scope that serves the object has answered once it is `waiting`, or
  * says the failure its last request ended in, or `unavailable` where the
  * API is stale; after that a `ready` usage whose `used` is null says
- * that an answer came without the object. An object that had an answer
- * keeps its figures while the request that serves it is asked anew.
+ * that an answer came without the object, with the containers that run
+ * listed all the same. An object that had an answer keeps its figures
+ * while the request that serves it is asked anew.
  */
 usage: Usage | null, };
 
@@ -1169,28 +1236,36 @@ last: string | null,
 fieldPath: string | null, };
 
 /**
- * What the views of an open object show; Rust follows only these.
+ * What the views of an open object ask for; Rust follows only these. The page
+ * asks for the Overview on every view, so that its header and its keys hold on
+ * all of them. It asks for the events and the related objects only while their
+ * view is shown, for the manifest while the YAML view is shown or, in an
+ * editor, an edit is held, and for the usage only of a pod or a node, on the
+ * Overview, in a visible window.
  */
 export type ObjectParts = { 
 /**
- * The Overview document, its events included.
+ * The Overview document, its events included: Rust watches the object's
+ * events for as long as it is asked, whichever view is shown.
  */
 overview: boolean, 
 /**
- * The object as the YAML tab shows it.
+ * The object as the YAML tab shows it, while that view is shown or an
+ * edit is held.
  */
 manifest: boolean, 
 /**
- * The object's events, for the Events tab.
+ * The object's events as the Events tab lists them, while that view is
+ * shown.
  */
 events: boolean, 
 /**
- * Its owners and the objects it owns.
+ * Its owners and the objects it owns, while the Related tab is shown.
  */
 related: boolean, 
 /**
- * What a pod or a node uses, read while it is drawn and the document
- * is visible.
+ * What a pod or a node uses, read while the Overview is shown and the
+ * document is visible.
  */
 usage: boolean, };
 
@@ -1273,10 +1348,10 @@ tty: boolean,
 stdin: boolean, } | { "state": "failed", error: IpcError, };
 
 /**
- * An object described for people: sections in their order, each a list of
- * blocks from a closed set (ARCHITECTURE 4.3).
+ * An object described for people: what its header says, then sections in
+ * their order, each a list of blocks from a closed set (ARCHITECTURE 4.3).
  */
-export type Overview = { sections: Array<Section>, };
+export type Overview = { header: Header, sections: Array<Section>, };
 
 /**
  * What a command will do, for the person to confirm. It runs only by its
@@ -1343,6 +1418,11 @@ installHint: string | null, };
  * of the same object replaces it.
  */
 export type PreviewId = number;
+
+/**
+ * A cell the server printed for an object, as text.
+ */
+export type Printed = { column: string, value: string, };
 
 /**
  * Why a terminal goes through the policy proxy.
@@ -1463,7 +1543,21 @@ export type Section = {
 /**
  * Stable, such as `core.metadata`; folding is kept by it.
  */
-id: string, title: string, blocks: Array<Block>, };
+id: string, title: string, 
+/**
+ * What its header says at its end, so that it answers while folded,
+ * such as `2 volumes · 1 claim`; empty where nothing would.
+ */
+summary: Array<Span>, 
+/**
+ * Danger or warning when it holds what is wrong with the object, which
+ * its header marks with an edge in that tone.
+ */
+tone: Tone | null, 
+/**
+ * How it opens until the person folds or opens it.
+ */
+fold: Fold, blocks: Array<Block>, };
 
 /**
  * Marks a context as an environment type; none says it has no type, whatever
@@ -1690,8 +1784,9 @@ export type Usage = { state: MetricsState,
  * answered once: the state is `ready`, the figures are null, and
  * `containers` names the pod's running containers by its own status,
  * in the order the answer lists them and with their requests and
- * limits, so the webview draws the section at its height at once.
- * False for a stale API, which says `unavailable` at once since
+ * limits, so the webview draws the section at its height at once; an
+ * answer that comes without the pod lists them as well, with `waiting`
+ * false. False for a stale API, which says `unavailable` at once since
  * discovery knows it without a request, and for a scope whose last
  * request failed, which says that failure at once and is asked all the
  * same.
@@ -1707,12 +1802,16 @@ sampled: string | null,
  */
 cpu: Measure, memory: Measure, 
 /**
- * A pod's containers that have a sample, or while `waiting` those that
- * run, in the pod's order; empty for a node.
+ * A ready usage lists every container that runs by the pod's own status
+ * and every one that has a sample, in the pod's order, each with its
+ * request and limit; `used` is null for one the answer lacks, as for a
+ * container that has just started or restarted, whose pod metrics-server
+ * leaves out while any of its containers has no earlier point. Empty for
+ * a node and for a usage that is not ready.
  */
 containers: Array<ContainerUsage>, };
 
-export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, };
+export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, } | { "type": "spans", spans: Array<Span>, };
 
 export type ValueCount = { value: string, count: number, };
 
@@ -1720,6 +1819,19 @@ export type ValueCount = { value: string, count: number, };
  * The state of the upstream behind a subscription (ARCHITECTURE 3.7).
  */
 export type ViewState = { "state": "queued" } | { "state": "connecting" } | { "state": "syncing", loaded: number, } | { "state": "ready" } | { "state": "relisting" } | { "state": "stale" } | { "state": "forbidden", verb: string, resource: string, } | { "state": "unauthorized" } | { "state": "error", error: IpcError, };
+
+/**
+ * One cell of the vitals strip, such as `Restarts` `4` `11 d ago`.
+ */
+export type Vital = { label: string, 
+/**
+ * Toned only when it is abnormal.
+ */
+value: Value, 
+/**
+ * What follows the value, quieter, such as when a pod last restarted.
+ */
+note: Array<Span>, };
 
 export type Window = { 
 /**

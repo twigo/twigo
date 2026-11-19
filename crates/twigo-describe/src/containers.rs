@@ -5,7 +5,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, Container, ContainerRole, ContainerState, Field, Tone, Value as Shown};
 
-use crate::show::{CONFIG_MAP, Fields, SECRET, code, link, plain, quantities};
+use crate::show::{CONFIG_MAP, Fields, SECRET, Summary, code, link, plain, quantities};
 use crate::{message, text};
 use twigo_quantity::{Quantity, div_ceil};
 
@@ -77,19 +77,33 @@ fn describe(
     let mut fields = Fields::default();
     let mut details = Fields::default();
     if let Some(status) = status {
-        state_fields(&mut fields, &status["state"]);
-        let last = &status["lastState"]["terminated"];
-        if last.is_object() {
-            fields.add("Last state", plain(terminated(last)));
-            fields.time("Last finished", &last["finishedAt"]);
-            details.maybe("Last message", message(&last["message"]).map(plain));
-        }
+        let state = &status["state"];
+        let last = if state["terminated"].is_object() {
+            &state["terminated"]
+        } else {
+            &status["lastState"]["terminated"]
+        };
+        fields.maybe("Exited", exit(&state["terminated"], false));
+        fields.maybe("Last exit", exit(&status["lastState"]["terminated"], true));
+        let ran = if state["running"].is_object() {
+            &state["running"]
+        } else {
+            &state["terminated"]
+        };
+        details.time("Started", &ran["startedAt"]);
+        details.maybe("Last message", message(&last["message"]).map(plain));
     }
-    fields.maybe("Requests", quantities(&container["resources"]["requests"]));
-    fields.maybe("Limits", quantities(&container["resources"]["limits"]));
-    details.maybe("Command", lines(&container["command"]));
-    details.maybe("Args", lines(&container["args"]));
+    details.maybe("Requests", quantities(&container["resources"]["requests"]));
+    details.maybe("Limits", quantities(&container["resources"]["limits"]));
+    details.maybe("Command", argv(&container["command"]));
+    details.maybe("Args", argv(&container["args"]));
     details.text("Working directory", &container["workingDir"]);
+    let image = container["image"].as_str().unwrap_or_default();
+    details.add_default_maybe(
+        "Image pull policy",
+        text(&container["imagePullPolicy"]).map(plain),
+        container["imagePullPolicy"] == pull_policy(image),
+    );
     for (label, key) in [
         ("Liveness", "livenessProbe"),
         ("Readiness", "readinessProbe"),
@@ -117,6 +131,27 @@ fn describe(
         details: details.0,
         env: env(container, pod, namespace),
         mounts: mounts(container),
+    }
+}
+
+/// The pull policy the API server gives a container that sets none: `Always`
+/// for the tag `latest` and for an image with neither a tag nor a digest,
+/// else `IfNotPresent` (kubernetes v1.37.0,
+/// [`SetDefaults_Container`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/apis/core/v1/defaults.go#L82-L93) over
+/// [`ParseImageName`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/util/parsers/parsers.go#L32-L55)).
+fn pull_policy(image: &str) -> &'static str {
+    let (name, digest) = image
+        .split_once('@')
+        .map_or((image, false), |(name, _)| (name, true));
+    let tag = name
+        .rsplit('/')
+        .next()
+        .and_then(|last| last.split_once(':'))
+        .map(|(_, tag)| tag);
+    match tag {
+        Some("latest") => "Always",
+        None if !digest => "Always",
+        _ => "IfNotPresent",
     }
 }
 
@@ -177,41 +212,38 @@ fn state(status: &Value, role: ContainerRole) -> ContainerState {
     }
 }
 
-fn state_fields(fields: &mut Fields, state: &Value) {
-    if state["running"].is_object() {
-        fields.time("Started", &state["running"]["startedAt"]);
-    } else if state["terminated"].is_object() {
-        let terminated = &state["terminated"];
-        fields.maybe("Exit code", exit(terminated).map(plain));
-        fields.maybe("Message", message(&terminated["message"]).map(plain));
-        fields.time("Started", &terminated["startedAt"]);
-        fields.time("Finished", &terminated["finishedAt"]);
+/// `code 1 (Error) · 11d ago`: how a container ended and when; None without
+/// an exit code. A container that is terminated now has its reason in its
+/// state, so its row leaves it out: `code 1 · 11d ago`.
+fn exit(terminated: &Value, with_reason: bool) -> Option<Shown> {
+    let mut how = format!("code {}", terminated["exitCode"].as_i64()?);
+    if let Some(signal) = terminated["signal"].as_i64().filter(|signal| *signal > 0) {
+        how.push_str(&format!(", signal {signal}"));
     }
+    if let Some(reason) = text(&terminated["reason"]).filter(|_| with_reason) {
+        how.push_str(&format!(" ({reason})"));
+    }
+    let summary = Summary::default().part(how);
+    let spans = match text(&terminated["finishedAt"]) {
+        Some(at) => summary.ago("", at),
+        None => summary,
+    };
+    Some(Shown::Spans {
+        spans: spans.done(),
+    })
 }
 
-/// `Error, exit code 1`, as one line.
-pub(crate) fn terminated(terminated: &Value) -> String {
-    let mut parts = vec!["Terminated".to_owned()];
-    parts.extend(text(&terminated["reason"]));
-    parts.extend(exit(terminated));
-    parts.join(" · ")
-}
-
-/// `exit code 137, signal 9`; None without an exit code.
-fn exit(terminated: &Value) -> Option<String> {
-    let code = terminated["exitCode"].as_i64()?;
-    Some(
-        match terminated["signal"].as_i64().filter(|signal| *signal > 0) {
-            Some(signal) => format!("exit code {code}, signal {signal}"),
-            None => format!("exit code {code}"),
-        },
-    )
-}
-
-/// Each element on a line of its own, as kubectl prints a command.
-fn lines(list: &Value) -> Option<Shown> {
-    let items: Vec<&str> = list.as_array()?.iter().filter_map(Value::as_str).collect();
-    (!items.is_empty()).then(|| code(items.join("\n")))
+/// One `code` item per element, even for one, since an element may hold a
+/// line end, which a copy of the command line must quote and not mistake
+/// for the end of an element.
+fn argv(list: &Value) -> Option<Shown> {
+    let items: Vec<Shown> = list
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(code)
+        .collect();
+    (!items.is_empty()).then_some(Shown::List { items })
 }
 
 /// `8080/TCP (http)`, with its host port when it has one.
@@ -376,7 +408,11 @@ fn env(container: &Value, pod: Option<&Value>, namespace: Option<&str>) -> Vec<F
                 .unwrap_or_default();
             plain(format!("from {source}"))
         };
-        fields.push(Field { label: name, value });
+        fields.push(Field {
+            label: name,
+            value,
+            default: false,
+        });
     }
     for source in container["envFrom"].as_array().into_iter().flatten() {
         let (kind, reference, noun) = if source["configMapRef"].is_object() {
@@ -395,6 +431,7 @@ fn env(container: &Value, pod: Option<&Value>, namespace: Option<&str>) -> Vec<F
             shown.push_str(", optional");
         }
         fields.push(Field {
+            default: false,
             label: "From".to_owned(),
             value: link(kind, namespace, name, shown),
         });
@@ -506,6 +543,7 @@ fn mounts(container: &Value) -> Vec<Field> {
                 flags.push(format!("path={path:?}"));
             }
             Field {
+                default: false,
                 label: text(&mount["mountPath"]).unwrap_or_default(),
                 value: plain(format!(
                     "{} ({})",
@@ -522,6 +560,7 @@ fn mounts(container: &Value) -> Vec<Field> {
         .collect();
     devices.sort_by_key(|device| device["devicePath"].as_str().unwrap_or_default());
     fields.extend(devices.into_iter().map(|device| Field {
+        default: false,
         label: text(&device["devicePath"]).unwrap_or_default(),
         value: plain(format!(
             "{} (device)",
@@ -529,4 +568,122 @@ fn mounts(container: &Value) -> Vec<Field> {
         )),
     }));
     fields
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use twigo_ipc::Span;
+
+    use super::*;
+
+    const FIRST: &str = "2026-11-01T10:00:00Z";
+    const SECOND: &str = "2026-11-02T10:00:00Z";
+
+    fn card(status: Value) -> Container {
+        let spec = json!({ "containers": [{ "name": "api", "image": "api:1" }] });
+        let mut status = status;
+        status["name"] = json!("api");
+        let pod = json!({
+            "metadata": { "namespace": "default" },
+            "status": { "containerStatuses": [status] },
+        });
+        let Some(Block::Containers { mut containers }) = block(&spec, Some(&pod)) else {
+            panic!("a container");
+        };
+        containers.remove(0)
+    }
+
+    fn terminated(code: i64, reason: &str, finished: &str) -> Value {
+        json!({ "exitCode": code, "reason": reason, "finishedAt": finished })
+    }
+
+    fn rows(card: &Container) -> Vec<(&str, String)> {
+        card.fields
+            .iter()
+            .map(|field| {
+                let Shown::Spans { spans } = &field.value else {
+                    panic!("spans: {:?}", field.value);
+                };
+                let said = spans
+                    .iter()
+                    .map(|span| match span {
+                        Span::Text { text } => text.clone(),
+                        Span::Ago { at } | Span::Until { at } => format!("<{at}>"),
+                    })
+                    .collect();
+                (field.label.as_str(), said)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_container_terminated_now_says_its_code_and_when_not_its_reason() {
+        for (code, reason) in [(0, "Completed"), (1, "Error")] {
+            let card = card(json!({
+                "state": { "terminated": terminated(code, reason, SECOND) },
+            }));
+            assert_eq!(
+                card.state.as_ref().map(|state| state.text.as_str()),
+                Some(format!("Terminated · {reason}").as_str())
+            );
+            assert_eq!(
+                rows(&card),
+                [("Exited", format!("code {code} · <{SECOND}>"))],
+                "{reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signal_stays_in_the_row_of_a_container_terminated_now() {
+        let mut ended = terminated(137, "Error", SECOND);
+        ended["signal"] = json!(9);
+        let card = card(json!({ "state": { "terminated": ended } }));
+        assert_eq!(
+            rows(&card),
+            [("Exited", format!("code 137, signal 9 · <{SECOND}>"))]
+        );
+    }
+
+    #[test]
+    fn an_earlier_termination_stays_as_the_last_exit_with_its_reason() {
+        for (code, reason) in [(0, "Completed"), (1, "Error")] {
+            let card = card(json!({
+                "state": { "terminated": terminated(code, reason, SECOND) },
+                "lastState": { "terminated": terminated(137, "OOMKilled", FIRST) },
+            }));
+            assert_eq!(
+                rows(&card),
+                [
+                    ("Exited", format!("code {code} · <{SECOND}>")),
+                    ("Last exit", format!("code 137 (OOMKilled) · <{FIRST}>")),
+                ],
+                "{reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_running_or_waiting_container_keeps_its_last_exit_as_it_was() {
+        for state in [
+            json!({ "running": { "startedAt": SECOND } }),
+            json!({ "waiting": { "reason": "CrashLoopBackOff" } }),
+        ] {
+            let card = card(json!({
+                "state": state,
+                "lastState": { "terminated": terminated(1, "Error", FIRST) },
+            }));
+            assert_eq!(
+                rows(&card),
+                [("Last exit", format!("code 1 (Error) · <{FIRST}>"))]
+            );
+        }
+    }
+
+    #[test]
+    fn a_container_that_never_ended_has_no_row() {
+        let card = card(json!({ "state": { "running": { "startedAt": SECOND } } }));
+        assert!(card.fields.is_empty(), "{:?}", card.fields);
+    }
 }

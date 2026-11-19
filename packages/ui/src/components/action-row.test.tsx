@@ -16,7 +16,12 @@ import {
 } from "lucide-react";
 import { afterEach, expect, test, vi } from "vitest";
 import { resize } from "../../test/resize";
-import { ActionRow, type Action, type ActionGroups } from "./actions";
+import {
+  ActionRow,
+  FullActionRow,
+  type Action,
+  type ActionGroups,
+} from "./actions";
 
 afterEach(cleanup);
 
@@ -42,6 +47,11 @@ const toolbar = () => screen.getByRole("toolbar", { name: "Pod actions" });
 const buttons = () => within(toolbar()).getAllByRole("button");
 const names = () =>
   buttons().map((button) => button.getAttribute("aria-label"));
+const button = (index: number): HTMLElement => {
+  const found = buttons()[index];
+  if (!found) throw new Error(`no button ${String(index)}`);
+  return found;
+};
 
 test("the pinned actions keep their order, then More, always last, holds the rest in their groups with Delete last behind a separator", () => {
   render(<ActionRow label="Pod actions" actions={pod()} />);
@@ -243,4 +253,71 @@ test("a pinned action's tooltip stays shut while it has nothing to tell, and ope
   rerender(row());
   expect(screen.queryByRole("tooltip")).toBeNull();
   expect(warn).not.toHaveBeenCalled();
+});
+
+test("the full row holds every action inline with its label and keys, in its groups, Delete last behind its own spacer, with no More", () => {
+  render(<FullActionRow label="Pod actions" actions={pod()} />);
+  expect(names()).toEqual(["Logs", "Shell", "Attach", "Forward", "Delete"]);
+  expect(buttons()[0]?.querySelector("kbd")?.textContent).toBe("L");
+  expect(buttons()[3]?.querySelector("kbd")?.textContent).toBe("F");
+  expect(buttons()[4]?.className).toContain("text-error");
+  expect(buttons()[4]?.previousElementSibling?.className).toContain("ml-auto");
+});
+
+test("a group that does not destroy is set off from the one before it by a separator", () => {
+  render(
+    <FullActionRow
+      label="Pod actions"
+      actions={[
+        [action("Logs", { icon: ScrollText })],
+        [action("Restart", { icon: RotateCcw })],
+        [action("Delete", { icon: Trash2, danger: true })],
+      ]}
+    />,
+  );
+  expect(button(0).nextElementSibling).toBe(button(1).previousElementSibling);
+  expect(button(1).previousElementSibling?.getAttribute("aria-hidden")).toBe(
+    "true",
+  );
+});
+
+test("the full row is one tab stop, and the arrows, Home and End move along it", () => {
+  render(<FullActionRow label="Pod actions" actions={pod()} />);
+  expect(buttons().map((button) => button.tabIndex)).toEqual([
+    0, -1, -1, -1, -1,
+  ]);
+  act(() => {
+    buttons()[0]?.focus();
+  });
+  fireEvent.keyDown(button(0), { key: "ArrowRight" });
+  expect(document.activeElement).toBe(buttons()[1]);
+  fireEvent.keyDown(button(1), { key: "End" });
+  expect(document.activeElement).toBe(buttons()[4]);
+  expect(buttons().map((button) => button.tabIndex)).toEqual([
+    -1, -1, -1, -1, 0,
+  ]);
+  fireEvent.keyDown(button(4), { key: "Home" });
+  expect(document.activeElement).toBe(buttons()[0]);
+});
+
+test("a disabled action of the full row keeps its place, says why and does nothing", () => {
+  const run = vi.fn();
+  render(
+    <FullActionRow
+      label="Pod actions"
+      actions={pod({
+        Shell: { disabled: true, reason: "No container runs", run },
+      })}
+    />,
+  );
+  const shell = within(toolbar()).getByRole("button", { name: "Shell" });
+  expect(shell.getAttribute("aria-disabled")).toBe("true");
+  act(() => {
+    shell.focus();
+  });
+  expect(screen.getByRole("tooltip").textContent).toContain(
+    "No container runs",
+  );
+  fireEvent.click(shell);
+  expect(run).not.toHaveBeenCalled();
 });

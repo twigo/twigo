@@ -15,6 +15,7 @@ import type {
   ViewState,
 } from "../generated";
 import {
+  containerNames,
   deploymentOf,
   generatedAt,
   hash,
@@ -45,8 +46,6 @@ import {
 const TICK_MS = 100;
 /** How often a workload's tab sees one of its pods replaced, as in a rollout. */
 const ROLLOUT_MS = 25_000;
-/** The recorded pods' first container is `api`, so a finding's logs reach a mock stream. */
-const NAMES = ["api", "istio-proxy", "log-shipper"];
 
 interface Stream {
   readonly pod: Pod;
@@ -177,7 +176,7 @@ export class MockLogs {
 
   /** The containers of each pod the source picks. */
   #chosen(pod: Pod): string[] {
-    const names = NAMES.slice(0, pod.containers);
+    const names = containerNames(pod);
     const { containers, pods } = this.#source;
     if (pods !== null && !pods.includes(pod.name)) return [];
     switch (containers.type) {
@@ -515,7 +514,7 @@ export class MockLogs {
           : pod.status === "Pending" || pod.status === "ContainerCreating"
             ? "warning"
             : "danger",
-      containers: NAMES.slice(0, pod.containers).map((name) => ({
+      containers: containerNames(pod).map((name) => ({
         name,
         stream: this.#state(pod, name, order, granted),
       })),

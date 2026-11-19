@@ -93,7 +93,6 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
         namespace: target.namespace,
         name,
       }),
-      { preview: true },
     );
   };
   const items: Property[] = [

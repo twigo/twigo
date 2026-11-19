@@ -1,11 +1,11 @@
 {
   "events": [
     {
-      "count": 1064,
+      "count": 25,
       "fieldPath": "spec.containers{api}",
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T12:11:43Z",
-      "message": "Readiness probe failed: dial tcp 10.244.0.14:9: connect: connection refused",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:09:19Z",
+      "message": "Readiness probe failed: dial tcp 10.244.0.16:9: connect: connection refused",
       "reason": "Unhealthy",
       "source": "kubelet",
       "type": "Warning"
@@ -13,8 +13,8 @@
     {
       "count": 1,
       "fieldPath": "spec.containers{api}",
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
       "message": "Container image \"registry.k8s.io/pause:3.10\" already present on machine and can be accessed by the pod",
       "reason": "Pulled",
       "source": "kubelet",
@@ -23,8 +23,8 @@
     {
       "count": 1,
       "fieldPath": "spec.containers{api}",
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
       "message": "Container started",
       "reason": "Started",
       "source": "kubelet",
@@ -32,22 +32,22 @@
     },
     {
       "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Successfully assigned overview/unready to twigo-overviews-control-plane",
-      "reason": "Scheduled",
-      "source": "default-scheduler",
+      "fieldPath": "spec.containers{api}",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
+      "message": "Container created",
+      "reason": "Created",
+      "source": "kubelet",
       "type": "Normal"
     },
     {
       "count": 1,
-      "fieldPath": "spec.containers{api}",
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Container created",
-      "reason": "Created",
-      "source": "kubelet",
+      "fieldPath": null,
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
+      "message": "Successfully assigned overview/unready to twigo-overviews-control-plane",
+      "reason": "Scheduled",
+      "source": "default-scheduler",
       "type": "Normal"
     }
   ],
@@ -56,7 +56,7 @@
     "apiVersion": "v1",
     "kind": "Pod",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "labels": {
         "app": "unready"
@@ -91,7 +91,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "v1",
@@ -147,7 +147,7 @@
               "f:podIP": {},
               "f:podIPs": {
                 ".": {},
-                "k:{\"ip\":\"10.244.0.14\"}": {
+                "k:{\"ip\":\"10.244.0.16\"}": {
                   ".": {},
                   "f:ip": {}
                 }
@@ -159,13 +159,13 @@
           "manager": "kubelet",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:32Z"
         }
       ],
       "name": "unready",
       "namespace": "overview",
-      "resourceVersion": "2450",
-      "uid": "cdfcf731-2bcd-4740-b7e3-928df7b5abdc"
+      "resourceVersion": "1124",
+      "uid": "9e377a57-db0a-4a54-97be-c5e0485c0367"
     },
     "spec": {
       "containers": [
@@ -188,7 +188,7 @@
           "volumeMounts": [
             {
               "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-              "name": "kube-api-access-kwl6m",
+              "name": "kube-api-access-7b6lg",
               "readOnly": true
             }
           ]
@@ -224,7 +224,7 @@
       ],
       "volumes": [
         {
-          "name": "kube-api-access-kwl6m",
+          "name": "kube-api-access-7b6lg",
           "projected": {
             "defaultMode": 420,
             "sources": [
@@ -267,21 +267,21 @@
       "conditions": [
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:32Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "PodReadyToStartContainers"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "Initialized"
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
           "message": "containers with unready status: [api]",
           "observedGeneration": 1,
           "reason": "ContainersNotReady",
@@ -290,7 +290,7 @@
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
           "message": "containers with unready status: [api]",
           "observedGeneration": 1,
           "reason": "ContainersNotReady",
@@ -299,7 +299,7 @@
         },
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
           "observedGeneration": 1,
           "status": "True",
           "type": "PodScheduled"
@@ -307,7 +307,7 @@
       ],
       "containerStatuses": [
         {
-          "containerID": "containerd://0b85c39d84e06479b8a18ecd2263cedb756c67d5cba8dbb76b9f0dfdab8b6b32",
+          "containerID": "containerd://a90207d723efed28a41d4563e75e8d7586313ebbf4549cf5bad1b46ac7718ed3",
           "image": "registry.k8s.io/pause:3.10",
           "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
           "lastState": {},
@@ -318,7 +318,7 @@
           "started": true,
           "state": {
             "running": {
-              "startedAt": "2026-11-03T11:36:41Z"
+              "startedAt": "2026-11-17T21:08:32Z"
             }
           },
           "user": {
@@ -333,7 +333,7 @@
           "volumeMounts": [
             {
               "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-              "name": "kube-api-access-kwl6m",
+              "name": "kube-api-access-7b6lg",
               "readOnly": true,
               "recursiveReadOnly": "Disabled"
             }
@@ -348,15 +348,15 @@
       ],
       "observedGeneration": 1,
       "phase": "Running",
-      "podIP": "10.244.0.14",
+      "podIP": "10.244.0.16",
       "podIPs": [
         {
-          "ip": "10.244.0.14"
+          "ip": "10.244.0.16"
         }
       ],
       "qosClass": "BestEffort",
       "resources": {},
-      "startTime": "2026-11-03T11:36:41Z"
+      "startTime": "2026-11-17T21:08:31Z"
     }
   },
   "printed": [
@@ -374,7 +374,7 @@
     },
     {
       "column": "IP",
-      "value": "10.244.0.14"
+      "value": "10.244.0.16"
     },
     {
       "column": "Node",

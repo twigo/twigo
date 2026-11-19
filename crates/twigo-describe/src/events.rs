@@ -4,9 +4,47 @@ use std::cmp::Reverse;
 
 use jiff::Timestamp;
 use serde_json::Value;
-use twigo_ipc::ObjectEvent;
+use twigo_ipc::{Block, EventList, ObjectEvent, Section};
 
+use crate::show::{Summary, counted};
 use crate::text;
+
+/// The Events section: its line counts the warnings and names the newest,
+/// else counts the events and says when the newest came; it says nothing
+/// while they are still being listed, since none would be false.
+pub(crate) fn section(list: &EventList) -> Section {
+    let events = &list.events;
+    let summary = Summary::default();
+    let summary = if list.unavailable.is_some() {
+        summary.part("unavailable")
+    } else if !list.listed {
+        summary
+    } else if let Some(newest) = events.iter().find(|event| event.kind == "Warning") {
+        let warnings = events
+            .iter()
+            .filter(|event| event.kind == "Warning")
+            .count();
+        summary
+            .part(counted(warnings, "warning"))
+            .part(if newest.count > 1 {
+                format!("{} ×{}", newest.reason, newest.count)
+            } else {
+                newest.reason.clone()
+            })
+    } else if let Some(newest) = events.first() {
+        let summary = summary.part(counted(events.len(), "event"));
+        match &newest.last {
+            Some(at) => summary.ago("", at.clone()),
+            None => summary,
+        }
+    } else {
+        summary.part("none")
+    };
+    Section {
+        summary: summary.done(),
+        ..crate::show::section("core.events", "Events", vec![Block::Events(list.clone())])
+    }
+}
 
 /// An `events.k8s.io/v1` Event. A repeat counts its series, or the count of
 /// a core/v1 event read through events.k8s.io, and is last seen when its

@@ -51,6 +51,21 @@ export function deploymentOf(pod: Pod): string {
   return pod.generateName.slice(0, -(pod.templateHash.length + 2));
 }
 
+/** Its Deployment's one container, named after the workload. */
+export function containerOf(pod: Pod): string {
+  const deployment = deploymentOf(pod);
+  return deployment.slice(deployment.indexOf("-") + 1);
+}
+
+/** The first `count` containers of a pod: its Deployment's, then the sidecars the mock adds. */
+export function containerNames(pod: Pod, count = pod.containers): string[] {
+  return [containerOf(pod), "istio-proxy", "log-shipper"].slice(0, count);
+}
+
+export function imageOf(pod: Pod, container = containerOf(pod)): string {
+  return `registry.example.com/${pod.namespace}/${container}:1.42.0`;
+}
+
 const ABNORMAL: [string, number][] = [
   ["Pending", 0.02],
   ["ContainerCreating", 0.01],
@@ -100,6 +115,12 @@ export interface Job {
   started: number | null;
   /** When it ran to completion; none while it runs. */
   completed: number | null;
+  /** When it was last suspended, which its Suspended condition and event date from. */
+  suspendedAt: number | null;
+  /** When it was last resumed, which its Suspended condition and Resumed event date from. */
+  resumedAt: number | null;
+  /** Whether a person ran it from its CronJob's template, so the CronJob's schedule did not make it. */
+  triggered: boolean;
   created: number;
 }
 
@@ -113,7 +134,7 @@ const CRON_JOBS: readonly (readonly [string, string, string])[] = [
   ["monitoring", "prune-metrics", "0 4 * * 0"],
 ];
 
-const DAY = 86_400_000;
+export const DAY = 86_400_000;
 
 /** The nodes of a cluster with pods, which the pods spread over. */
 const NODES = 40;
@@ -199,15 +220,18 @@ export class Cluster {
         suspend: false,
         started: lastSchedule,
         completed: lastSchedule + Math.floor(5_000 + random() * 60_000),
+        suspendedAt: null,
+        resumedAt: null,
+        triggered: false,
         created: lastSchedule,
       });
     }
   }
 
-  /** Changes `count` random pods plus every pod in `focus`, and replaces one pod. */
+  /** Changes `count` random pods plus every pod in `focus` and every crash loop whose back-off has ended, and replaces one pod. */
   churn(count: number, focus: Iterable<RowId>, now: number): void {
     const byId = new Map(this.pods.map((pod) => [pod.id, pod]));
-    const targets = new Set<Pod>();
+    const targets = new Set<Pod>(this.#due(now));
     for (const id of focus) {
       const pod = byId.get(id);
       if (pod && this.#random() < 0.08) targets.add(pod);
@@ -405,6 +429,9 @@ export class Cluster {
       suspend: false,
       started: now,
       completed: null,
+      suspendedAt: null,
+      resumedAt: null,
+      triggered: true,
       created: now,
     });
     this.now = now;
@@ -413,8 +440,13 @@ export class Cluster {
 
   /** Suspends a Job or a CronJob, or resumes it. */
   suspend(of: CronJob | Job, suspend: boolean, now: number): void {
+    const changed = of.suspend !== suspend;
     of.suspend = suspend;
-    if ("started" in of) of.started = suspend ? null : now;
+    if ("started" in of && changed) {
+      of.started = suspend ? null : now;
+      if (suspend) of.suspendedAt = now;
+      else of.resumedAt = now;
+    }
     this.version++;
   }
 
@@ -454,9 +486,9 @@ export class Cluster {
     return printed;
   }
 
-  /** Changes `count` distinct random pods. */
+  /** Changes `count` distinct pods: the crash loops whose back-off has ended first, then random ones. */
   change(count: number, now: number): void {
-    const picked = new Set<Pod>();
+    const picked = new Set<Pod>(this.#due(now).slice(0, count));
     while (picked.size < Math.min(count, this.pods.length)) {
       const pod = this.pods[Math.floor(this.#random() * this.pods.length)];
       if (pod) picked.add(pod);
@@ -468,15 +500,13 @@ export class Cluster {
 
   /** Prints the pod anew at `now`, as the API server does each time it sends a row. */
   #change(pod: Pod, now: number): void {
-    let count = Number.parseInt(pod.restarts, 10);
+    let count = this.#waited(pod, now);
     const roll = this.#random();
     if (roll < 0.5) {
-      count++;
-      pod.lastRestart = now - Math.ceil(this.#random() * 50) * 1000;
+      count = this.#restart(pod, count, now);
     } else if (roll < 0.8) {
-      pod.status = pod.status === "Running" ? "CrashLoopBackOff" : "Running";
-      pod.ready = pod.status === "Running" ? pod.containers : 0;
-    } else {
+      count = this.#flip(pod, count, now);
+    } else if (pod.status === "Running") {
       pod.ready = pod.ready === pod.containers ? pod.ready - 1 : pod.containers;
     }
     const printed =
@@ -488,6 +518,75 @@ export class Cluster {
     }
     pod.restarts = printed;
     pod.version++;
+  }
+
+  /** The crash loops whose back-off has ended by `now`: their kubelets start them again. */
+  #due(now: number): Pod[] {
+    return this.pods.filter((pod) => waits(pod, restartCount(pod)) <= now);
+  }
+
+  /**
+   * A crash loop's container starts again each time its back-off ends, and
+   * exits again. Returns the pod's restarts.
+   */
+  #waited(pod: Pod, now: number): number {
+    let restarts = restartCount(pod);
+    while (waits(pod, restarts) <= now) {
+      const last = pod.lastRestart ?? now;
+      const wait = backOff(restarts);
+      const steps =
+        wait < BACK_OFF_CAP ? 1 : Math.max(1, Math.floor((now - last) / wait));
+      pod.lastRestart = last + steps * wait;
+      restarts += steps;
+    }
+    return restarts;
+  }
+
+  /** A container of the pod that is not in a crash loop restarts, if it has run, and has not finished. Returns the pod's restarts. */
+  #restart(pod: Pod, count: number, now: number): number {
+    if (
+      [
+        "Pending",
+        "ContainerCreating",
+        "Completed",
+        "CrashLoopBackOff",
+      ].includes(pod.status)
+    )
+      return count;
+    const restarts = count + 1;
+    if (restartsIn(now - pod.created - SECOND, restarts) < restarts)
+      return count;
+    pod.lastRestart = restartedAt(
+      pod.created,
+      restarts,
+      now,
+      Math.ceil(this.#random() * 50) * SECOND,
+    );
+    return restarts;
+  }
+
+  /**
+   * A running pod's container crashes, which takes a restart to wait after;
+   * the container of any other pod runs. Returns the pod's restarts.
+   */
+  #flip(pod: Pod, count: number, now: number): number {
+    if (pod.status !== "Running") {
+      pod.status = "Running";
+      pod.ready = readyOf(pod.status, pod.containers);
+      return count;
+    }
+    const restarts = count + 1;
+    if (restartsIn(now - pod.created - SECOND, restarts) < restarts)
+      return count;
+    pod.status = "CrashLoopBackOff";
+    pod.ready = readyOf(pod.status, pod.containers);
+    pod.lastRestart = restartedAt(
+      pod.created,
+      restarts,
+      now,
+      restartAge(pod.status, this.#random(), restarts),
+    );
+    return restarts;
   }
 
   #pod(now: number, created?: number): Pod {
@@ -512,28 +611,46 @@ export class Cluster {
       }
       roll -= share;
     }
-    const restarts =
+    const drawn =
       status === "CrashLoopBackOff"
         ? 5 + Math.floor(random() * 40)
         : random() < 0.8
           ? 0
           : 1 + Math.floor(random() * 4);
+    const ageRoll = drawn === 0 ? null : random();
+    const born = created ?? now - Math.floor(random() * random() * 90 * DAY);
+    const id = `${this.context}/${namespace}/${name}`;
+    const finished = finishedBy(id, born, now);
+    const half = Math.floor((finished - born) / 2);
+    const restarts =
+      status === "Pending" || status === "ContainerCreating"
+        ? 0
+        : status === "Completed"
+          ? finished - born < MINUTE
+            ? 0
+            : restartsIn(half, drawn)
+          : restartsIn(now - born - SECOND, drawn);
+    if (status === "CrashLoopBackOff" && restarts === 0) status = "Running";
     const lastRestart =
-      restarts === 0 ? null : now - restartAge(status, random());
+      restarts === 0 || ageRoll === null
+        ? null
+        : status === "Completed"
+          ? born + half
+          : restartedAt(
+              born,
+              restarts,
+              now,
+              restartAge(status, ageRoll, restarts),
+            );
     this.#serial++;
     return {
-      id: `${this.context}/${namespace}/${name}`,
+      id,
       namespace,
       name,
       generateName,
       templateHash,
       containers,
-      ready:
-        status === "Running"
-          ? containers
-          : status === "CrashLoopBackOff"
-            ? containers - 1
-            : 0,
+      ready: readyOf(status, containers),
       status,
       restarts:
         lastRestart === null
@@ -541,7 +658,7 @@ export class Cluster {
           : `${restarts} (${humanDuration(now - lastRestart)} ago)`,
       lastRestart,
       received: now,
-      created: created ?? now - Math.floor(random() * random() * 90 * DAY),
+      created: born,
       ip: `10.244.${this.#serial % 250}.${1 + Math.floor(random() * 250)}`,
       node: `${this.context}-node-${Math.floor(random() * NODES)}`,
       version: 0,
@@ -549,19 +666,113 @@ export class Cluster {
   }
 }
 
+const SECOND = 1000;
 const MINUTE = 60_000;
 
+/** How long after its pod is made the kubelet starts the pod's first container. */
+export const CONTAINER_START = 2 * SECOND;
+
+const BACK_OFF_CAP = 300 * SECOND;
+
 /**
- * How long before it is first printed a pod's last restart was: a pod that
- * is not running restarted minutes ago, a running one minutes, hours or
- * days ago, which the list's steps of Restarts tell apart.
+ * How long the kubelet waits to start a container again after a run that
+ * had `restarts` restarts exits: 10 s, doubled at each, to 5 minutes
+ * ([`newCrashLoopBackOff`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/pkg/kubelet/kubelet.go#L353-L369),
+ * [`Backoff.Next`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/client-go/util/flowcontrol/backoff.go#L95-L109)).
+ * The first run, which has none, is followed by the next at once.
  */
-function restartAge(status: string, roll: number): number {
+export function backOff(restarts: number): number {
+  return Math.min(BACK_OFF_CAP, 10 * SECOND * 2 ** (restarts - 1));
+}
+
+/** The back-offs of a container's first `exits` exits together: they double up to the cap, then stay at it. */
+function backedOff(exits: number): number {
+  let total = 0;
+  let exit = 1;
+  for (; exit <= exits && backOff(exit) < BACK_OFF_CAP; exit++)
+    total += backOff(exit);
+  return total + Math.max(0, exits - exit + 1) * BACK_OFF_CAP;
+}
+
+/**
+ * The least time after its pod is made that the run of its first container
+ * that has `restarts` restarts can exit: the container starts, and the
+ * kubelet waits its back-off before every run but the first two.
+ */
+function leastTaken(restarts: number): number {
+  return CONTAINER_START + backedOff(restarts - 1);
+}
+
+/** How many of `wanted` restarts a pod has had time for in `span`. */
+function restartsIn(span: number, wanted: number): number {
+  let fits = 0;
+  let over = wanted;
+  while (fits < over) {
+    const middle = Math.ceil((fits + over) / 2);
+    if (leastTaken(middle) <= span) fits = middle;
+    else over = middle - 1;
+  }
+  return fits;
+}
+
+/** When a pod's last restart was, `age` before `now`, but not before its first container could have exited `restarts` times. */
+function restartedAt(
+  created: number,
+  restarts: number,
+  now: number,
+  age: number,
+): number {
+  return Math.max(now - age, created + leastTaken(restarts));
+}
+
+export function restartCount(pod: Pod): number {
+  return Number.parseInt(pod.restarts, 10);
+}
+
+/** When a crash loop's container starts again, at the end of its back-off after its last exit; never for another pod. */
+function waits(pod: Pod, restarts: number): number {
+  return pod.status === "CrashLoopBackOff"
+    ? (pod.lastRestart ?? 0) + backOff(restarts)
+    : Infinity;
+}
+
+/** How many of a pod's containers are ready in a status: the first is the one that crashes, errors or cannot start, the others run. */
+function readyOf(status: string, containers: number): number {
+  switch (status) {
+    case "Running":
+      return containers;
+    case "CrashLoopBackOff":
+    case "Error":
+    case "ImagePullBackOff":
+      return containers - 1;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * How long before it is first printed a pod's last restart was: a crash
+ * loop's is within the back-off it waits, a pod that is not running
+ * restarted minutes ago, a running one minutes, hours or days ago, which
+ * the list's steps of Restarts tell apart.
+ */
+function restartAge(status: string, roll: number, restarts: number): number {
+  if (status === "CrashLoopBackOff")
+    return SECOND + Math.floor(roll * (backOff(restarts) - 2 * SECOND));
   if (status !== "Running") return (1 + Math.floor(roll * 59)) * MINUTE;
   if (roll < 0.4) return (1 + Math.floor((roll / 0.4) * 59)) * MINUTE;
   if (roll < 0.7)
     return (60 + Math.floor(((roll - 0.4) / 0.3) * 1380)) * MINUTE;
   return (1440 + Math.floor(((roll - 0.7) / 0.3) * 28 * 1440)) * MINUTE;
+}
+
+/** When a pod that completed ended: minutes after it started, and not after its row was received. */
+export function finishedAt(pod: Pod): number {
+  return finishedBy(pod.id, pod.created, pod.received);
+}
+
+function finishedBy(id: RowId, created: number, received: number): number {
+  return Math.min(created + (1 + (hash(id) % 20)) * MINUTE, received);
 }
 
 /** The cells of a pod, matching `queryColumns(POD_COLUMNS, query)`. */

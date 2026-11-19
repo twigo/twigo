@@ -17,7 +17,7 @@ import { startForward } from "./start";
 import { forwardEntries } from "./statusEntries";
 import { forwardTitle, sessionOf } from "./words";
 
-/** A `k8s.forward.open` request: a target, and whether to pick its port whatever the number. */
+/** A `k8s.forward.open` request: a target. */
 const REQUEST = v.object({
   space: v.string(),
   gvr: v.object({
@@ -27,7 +27,6 @@ const REQUEST = v.object({
   }),
   namespace: v.string(),
   name: v.string(),
-  pick: v.optional(v.boolean()),
 });
 
 /**
@@ -85,20 +84,13 @@ export function registerForwards(
     run: async (args) => {
       const parsed = v.safeParse(REQUEST, args);
       if (!parsed.success || !canForward(parsed.output.gvr)) return;
-      const { pick, ...target } = parsed.output;
-      await start(target, { pick: pick === true });
+      await start(parsed.output);
     },
   });
   // It acts on the object its caller names, so the palette has nothing to give it.
   menus.append("commandPalette", {
     command: "k8s.forward.open",
     when: "false",
-  });
-  menus.append("editor/title", {
-    command: "k8s.forward.open",
-    group: "navigation",
-    order: 3,
-    when: "resource.forward",
   });
 
   views.registerContainer({

@@ -3,8 +3,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:42Z",
-      "last": "2026-11-03T11:36:42Z",
+      "first": "2026-11-17T21:08:33Z",
+      "last": "2026-11-17T21:08:33Z",
       "message": "Scaled down replica set web-6db7bd6549 from 1 to 0",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
@@ -13,8 +13,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
       "message": "Scaled down replica set web-6db7bd6549 from 2 to 1",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
@@ -23,8 +23,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:32Z",
+      "last": "2026-11-17T21:08:32Z",
       "message": "Scaled up replica set web-54454cf656 from 1 to 2",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
@@ -33,8 +33,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
       "message": "Scaled up replica set web-54454cf656 from 0 to 1",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
@@ -43,8 +43,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:40Z",
-      "last": "2026-11-03T11:36:40Z",
+      "first": "2026-11-17T21:08:30Z",
+      "last": "2026-11-17T21:08:30Z",
       "message": "Scaled up replica set web-6db7bd6549 from 0 to 2",
       "reason": "ScalingReplicaSet",
       "source": "deployment-controller",
@@ -64,7 +64,7 @@
                 "deployment.kubernetes.io/max-replicas": "2",
                 "deployment.kubernetes.io/revision": "1"
               },
-              "creationTimestamp": "2026-11-03T12:13:01Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generation": 1,
               "labels": {
                 "app": "api",
@@ -89,7 +89,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"1361df21-37c1-479e-bfd7-49c834086f43\"}": {}
+                        "k:{\"uid\":\"521cf493-9883-4feb-ba52-0b04d75ca9e0\"}": {}
                       }
                     },
                     "f:spec": {
@@ -128,7 +128,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:13:01Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "apps/v1",
@@ -144,7 +144,7 @@
                   "manager": "kube-controller-manager",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:14:31Z"
+                  "time": "2026-11-17T21:10:08Z"
                 }
               ],
               "name": "api-c8894f678",
@@ -156,11 +156,11 @@
                   "controller": true,
                   "kind": "Deployment",
                   "name": "api",
-                  "uid": "1361df21-37c1-479e-bfd7-49c834086f43"
+                  "uid": "521cf493-9883-4feb-ba52-0b04d75ca9e0"
                 }
               ],
-              "resourceVersion": "7550",
-              "uid": "d5a58dfc-d7c6-4945-8e5f-943c1c450598"
+              "resourceVersion": "1562",
+              "uid": "bb2fdafb-6918-4456-b353-19065d9526c0"
             },
             "spec": {
               "replicas": 1,
@@ -220,7 +220,7 @@
                 "deployment.kubernetes.io/max-replicas": "3",
                 "deployment.kubernetes.io/revision": "2"
               },
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generation": 2,
               "labels": {
                 "app": "web",
@@ -245,7 +245,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"9bafb8d8-72d0-4d21-a63c-513a720633ae\"}": {}
+                        "k:{\"uid\":\"a6f4a88c-f73f-4549-9796-018afb268d2e\"}": {}
                       }
                     },
                     "f:spec": {
@@ -364,7 +364,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:32Z"
                 },
                 {
                   "apiVersion": "apps/v1",
@@ -382,7 +382,7 @@
                   "manager": "kube-controller-manager",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:42Z"
+                  "time": "2026-11-17T21:08:33Z"
                 }
               ],
               "name": "web-54454cf656",
@@ -394,11 +394,11 @@
                   "controller": true,
                   "kind": "Deployment",
                   "name": "web",
-                  "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+                  "uid": "a6f4a88c-f73f-4549-9796-018afb268d2e"
                 }
               ],
-              "resourceVersion": "2477",
-              "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
+              "resourceVersion": "1159",
+              "uid": "145101ff-9ee8-4b8c-be9b-5448f3b09354"
             },
             "spec": {
               "replicas": 2,
@@ -535,7 +535,7 @@
                 "deployment.kubernetes.io/max-replicas": "3",
                 "deployment.kubernetes.io/revision": "1"
               },
-              "creationTimestamp": "2026-11-03T11:36:40Z",
+              "creationTimestamp": "2026-11-17T21:08:30Z",
               "generation": 3,
               "labels": {
                 "app": "web",
@@ -560,7 +560,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"9bafb8d8-72d0-4d21-a63c-513a720633ae\"}": {}
+                        "k:{\"uid\":\"a6f4a88c-f73f-4549-9796-018afb268d2e\"}": {}
                       }
                     },
                     "f:spec": {
@@ -679,7 +679,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:42Z"
+                  "time": "2026-11-17T21:08:33Z"
                 },
                 {
                   "apiVersion": "apps/v1",
@@ -694,7 +694,7 @@
                   "manager": "kube-controller-manager",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:42Z"
+                  "time": "2026-11-17T21:08:33Z"
                 }
               ],
               "name": "web-6db7bd6549",
@@ -706,11 +706,11 @@
                   "controller": true,
                   "kind": "Deployment",
                   "name": "web",
-                  "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+                  "uid": "a6f4a88c-f73f-4549-9796-018afb268d2e"
                 }
               ],
-              "resourceVersion": "2495",
-              "uid": "fc882f3f-4457-4cac-be72-545fff4aa7f9"
+              "resourceVersion": "1177",
+              "uid": "fafe9f7c-5b84-4cf1-b3ed-12531ffe7c3c"
             },
             "spec": {
               "replicas": 0,
@@ -855,7 +855,7 @@
       "annotations": {
         "deployment.kubernetes.io/revision": "2"
       },
-      "creationTimestamp": "2026-11-03T11:36:40Z",
+      "creationTimestamp": "2026-11-17T21:08:30Z",
       "generation": 2,
       "labels": {
         "app": "web"
@@ -874,12 +874,6 @@
               "f:replicas": {},
               "f:revisionHistoryLimit": {},
               "f:selector": {},
-              "f:strategy": {
-                "f:rollingUpdate": {
-                  "f:maxSurge": {},
-                  "f:maxUnavailable": {}
-                }
-              },
               "f:template": {
                 "f:metadata": {
                   "f:annotations": {
@@ -968,7 +962,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "apps/v1",
@@ -1013,13 +1007,13 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:42Z"
+          "time": "2026-11-17T21:08:33Z"
         }
       ],
       "name": "web",
       "namespace": "overview",
-      "resourceVersion": "2497",
-      "uid": "9bafb8d8-72d0-4d21-a63c-513a720633ae"
+      "resourceVersion": "1179",
+      "uid": "a6f4a88c-f73f-4549-9796-018afb268d2e"
     },
     "spec": {
       "progressDeadlineSeconds": 600,
@@ -1033,7 +1027,7 @@
       "strategy": {
         "rollingUpdate": {
           "maxSurge": "25%",
-          "maxUnavailable": 0
+          "maxUnavailable": "25%"
         },
         "type": "RollingUpdate"
       },
@@ -1149,16 +1143,16 @@
       "availableReplicas": 2,
       "conditions": [
         {
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
-          "lastUpdateTime": "2026-11-03T11:36:41Z",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
+          "lastUpdateTime": "2026-11-17T21:08:31Z",
           "message": "Deployment has minimum availability.",
           "reason": "MinimumReplicasAvailable",
           "status": "True",
           "type": "Available"
         },
         {
-          "lastTransitionTime": "2026-11-03T11:36:40Z",
-          "lastUpdateTime": "2026-11-03T11:36:42Z",
+          "lastTransitionTime": "2026-11-17T21:08:30Z",
+          "lastUpdateTime": "2026-11-17T21:08:33Z",
           "message": "ReplicaSet \"web-54454cf656\" has successfully progressed.",
           "reason": "NewReplicaSetAvailable",
           "status": "True",

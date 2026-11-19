@@ -6,7 +6,7 @@ import { IN_FLIGHT, type ColumnRule } from "../columns";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
-import { useNow, useNowAs } from "../useNow";
+import { useNowAs } from "../useNow";
 import { measureText } from "./metrics";
 
 /** A column as the grid draws it: where its cells are and how they read. */
@@ -24,10 +24,12 @@ function cellText(cell: Cell): string {
   return cell === null ? "" : String(cell);
 }
 
-/** An Age from the row's creation, which ticks in a component of its own, so its row does not render every second. */
+/** An Age from the row's creation, which ticks in a component of its own and draws again only when its text or its role changes, so neither its row nor the grid renders every second. */
 function Age({ created }: { created: string }) {
-  const age = useNow() - Date.parse(created);
-  return <span className={ageRole(age)}>{humanDuration(age)}</span>;
+  const at = Date.parse(created);
+  const text = useNowAs((now) => humanDuration(now - at));
+  const role = useNowAs((now) => ageRole(now - at));
+  return <span className={role}>{text}</span>;
 }
 
 /**

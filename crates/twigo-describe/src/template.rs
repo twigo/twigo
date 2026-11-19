@@ -4,7 +4,7 @@
 use serde_json::Value;
 use twigo_ipc::{Block, EmbeddedList, Gvr, Section};
 
-use crate::show::{Fields, SERVICE_ACCOUNT, labels, link};
+use crate::show::{Fields, SERVICE_ACCOUNT, Summary, labels, link, plain, section as shown};
 use crate::{containers, pod, text, volumes};
 
 /// The template's labels, containers, volumes and scheduling.
@@ -35,15 +35,38 @@ pub(crate) fn section(template: &Value, namespace: Option<&str>) -> Section {
     }
     blocks.extend(containers::block(spec, None));
     blocks.extend(volumes::block(spec, namespace));
-    blocks.extend(
-        pod::scheduling(spec)
-            .into_iter()
-            .flat_map(|section| section.blocks),
-    );
+    let mut scheduling = pod::scheduling(spec);
+    if let Some(scheduler) = text(&spec["schedulerName"]).filter(|name| name != "default-scheduler")
+    {
+        scheduling.add("Scheduler", plain(scheduler));
+    }
+    if !scheduling.is_empty() {
+        blocks.push(Block::Fields {
+            fields: scheduling.0,
+        });
+    }
+    blocks.extend(pod::affinity(spec));
     Section {
-        id: "core.template".to_owned(),
-        title: "Pod template".to_owned(),
-        blocks,
+        summary: images_summary(spec),
+        ..shown("core.template", "Pod template", blocks)
+    }
+}
+
+/// What the template runs: its one image with its tag, or how many
+/// containers it has.
+fn images_summary(spec: &Value) -> Vec<twigo_ipc::Span> {
+    let containers = spec["containers"].as_array().map_or(&[][..], Vec::as_slice);
+    match containers {
+        [only] => {
+            let image = only["image"].as_str().unwrap_or_default();
+            let (reference, _) = image.split_once('@').unwrap_or((image, ""));
+            Summary::default()
+                .part(reference.rsplit('/').next().unwrap_or(reference))
+                .done()
+        }
+        _ => Summary::default()
+            .count(containers.len(), "container")
+            .done(),
     }
 }
 
@@ -56,10 +79,10 @@ pub(crate) fn owned_list(
     namespace: Option<&str>,
     owners: Vec<String>,
 ) -> Section {
-    Section {
-        id: id.to_owned(),
-        title: title.to_owned(),
-        blocks: vec![Block::List(EmbeddedList {
+    shown(
+        id,
+        title,
+        vec![Block::List(EmbeddedList {
             gvr: Gvr {
                 group: group.to_owned(),
                 version: version.to_owned(),
@@ -71,7 +94,7 @@ pub(crate) fn owned_list(
             field_selector: None,
             owners: Some(owners),
         })],
-    }
+    )
 }
 
 pub(crate) const PODS: (&str, &str, &str, &str) = ("", "v1", "pods", "Pod");

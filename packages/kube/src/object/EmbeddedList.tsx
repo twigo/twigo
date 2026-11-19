@@ -6,13 +6,13 @@ import type {
   Row,
 } from "@twigo/protocol";
 import {
+  ACTIONS_WIDTH,
   Count,
   DataGrid,
   EmptyState,
   Frame,
   ROW_HEIGHT,
   TonedText,
-  type GridColumn,
   type GridItem,
   useWidth,
 } from "@twigo/ui";
@@ -27,13 +27,13 @@ import {
   rowFinished,
   rowTone,
   statusColumn,
-  type CellKind,
 } from "../columns";
 import { kindIcon } from "../kinds";
 import { decideRows } from "../list/alarm";
-import { CellView, type ShownColumn } from "../list/cells";
+import { CellView } from "../list/cells";
+import { fitGrid } from "../list/fit";
 import { SHOWS_ROWS } from "../list/listStatus";
-import { metricsNote, readsMetrics } from "../list/metrics";
+import { readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
@@ -43,23 +43,24 @@ import type { OverviewStates } from "./overviewStates";
 
 /**
  * Inside a row's details, the list editor's selection and marks are not
- * this list's, so its resource keys find no row here; and Space and `/`
- * stay with it rather than hide the details or filter the editor.
+ * this list's, so its resource keys find no row here; and Space stays with
+ * it rather than hide the details, and `/` opens the filter of the page it
+ * is in rather than the editor's.
  */
 const EMBEDDED_KEYS = { "resource.selected": false, listMarked: false };
 
 /** Rows an embedded list shows before it scrolls. */
 const VISIBLE = 8;
 const HEADER = 28;
-/** Narrower than this, as in the details beside a list, it keeps fewer columns. */
-const WIDE = 640;
-const NARROW: ReadonlySet<CellKind> = new Set(["name", "ratio", "status"]);
+/** The frame's border on each side of the grid. */
+const FRAME_BORDER = 2;
 
 /**
  * A live list inside an Overview (ARCHITECTURE 4.3), such as a workload's
  * pods: a query view of the object's space like any list, with the
  * columns the server prints first, its rows counted by their status, and
- * a row opening its object.
+ * a row opening its object. As its width falls its columns leave in the
+ * order a list's do (4.4).
  */
 export function EmbeddedList({
   list,
@@ -109,31 +110,20 @@ export function EmbeddedList({
   const [element, setElement] = useState<HTMLElement | null>(null);
   // 0 until the first measure, which comes after the first window.
   const width = useWidth(element);
-  const narrow = width > 0 && width < WIDE;
   const every = snapshot.columns.map((column, index) => ({
     name: column.name,
     index,
     rule: columnRule(gvr, column),
     priority: column.priority,
   }));
-  const columns: readonly ShownColumn[] = every.filter(
-    (column) =>
-      column.name === "Name" ||
-      (column.priority === 0 && (!narrow || NARROW.has(column.rule.cell))),
-  );
-  const byName = new Map(columns.map((column) => [column.name, column]));
-  const gridColumns: readonly GridColumn[] = columns.map((column) => {
-    const note = metricsNote(snapshot.metrics, column);
-    return {
-      id: column.name,
-      title: column.name,
-      width: column.rule.width,
-      grow: column.rule.grow,
-      align: column.rule.align,
-      numeric: column.rule.figures,
-      descendFirst: column.rule.descendFirst,
-      ...(note !== undefined && { note }),
-    };
+  const { columns, byName, widened, gridColumns } = fitGrid({
+    chosen: every.filter(
+      (column) => column.name === "Name" || column.priority === 0,
+    ),
+    widths,
+    room: width > 0 ? width - FRAME_BORDER - ACTIONS_WIDTH : Infinity,
+    metrics: snapshot.metrics,
+    sort,
   });
   const reads = readsMetrics({
     measures:
@@ -142,7 +132,7 @@ export function EmbeddedList({
         : undefined,
     drawn: (name) => byName.has(name),
     sort,
-    visible: visible && !narrow,
+    visible,
   });
   useEffect(() => {
     setMetrics(reads);
@@ -224,7 +214,7 @@ export function EmbeddedList({
         <DataGrid<Row, never>
           label={gvr.resource}
           columns={gridColumns}
-          widths={widths}
+          widths={{ ...widths, ...widened }}
           onResize={(column, width) => {
             states.resize(kind, id, column, width);
           }}

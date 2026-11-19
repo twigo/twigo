@@ -1,61 +1,11 @@
 {
   "events": [
     {
-      "count": 25,
-      "fieldPath": null,
-      "first": "2026-11-03T11:48:03Z",
-      "last": "2026-11-03T12:12:03Z",
-      "message": "(combined from similar events): Deleted job report-29895130",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:47:03Z",
-      "last": "2026-11-03T11:47:03Z",
-      "message": "Deleted job report-29895105",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:45:03Z",
-      "last": "2026-11-03T11:45:03Z",
-      "message": "Deleted job report-29895103",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:45:00Z",
-      "last": "2026-11-03T11:45:00Z",
-      "message": "Created job report-29895105",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:44:03Z",
-      "last": "2026-11-03T11:44:03Z",
-      "message": "Deleted job report-29895102",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:44:03Z",
-      "last": "2026-11-03T11:44:03Z",
-      "message": "Saw completed job: report-29895104, condition: Complete",
+      "first": "2026-11-17T21:11:03Z",
+      "last": "2026-11-17T21:11:03Z",
+      "message": "Saw completed job: report-29915831, condition: Complete",
       "reason": "SawCompletedJob",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -63,29 +13,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:44:00Z",
-      "last": "2026-11-03T11:44:00Z",
-      "message": "Created job report-29895104",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:43:03Z",
-      "last": "2026-11-03T11:43:03Z",
-      "message": "Saw completed job: report-29895103, condition: Complete",
-      "reason": "SawCompletedJob",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:43:03Z",
-      "last": "2026-11-03T11:43:03Z",
-      "message": "Deleted job report-29895101",
+      "first": "2026-11-17T21:11:03Z",
+      "last": "2026-11-17T21:11:03Z",
+      "message": "Deleted job report-29915829",
       "reason": "SuccessfulDelete",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -93,39 +23,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:43:00Z",
-      "last": "2026-11-03T11:43:00Z",
-      "message": "Created job report-29895103",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 2,
-      "fieldPath": null,
-      "first": "2026-11-03T11:42:02Z",
-      "last": "2026-11-03T11:42:02Z",
-      "message": "Saw completed job: report-29895102, condition: Complete",
-      "reason": "SawCompletedJob",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:42:02Z",
-      "last": "2026-11-03T11:42:02Z",
-      "message": "Deleted job report-29895100",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:42:00Z",
-      "last": "2026-11-03T11:42:00Z",
-      "message": "Created job report-29895102",
+      "first": "2026-11-17T21:11:00Z",
+      "last": "2026-11-17T21:11:00Z",
+      "message": "Created job report-29915831",
       "reason": "SuccessfulCreate",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -133,19 +33,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:41:03Z",
-      "last": "2026-11-03T11:41:03Z",
-      "message": "Deleted job report-29895099",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:41:03Z",
-      "last": "2026-11-03T11:41:03Z",
-      "message": "Saw completed job: report-29895101, condition: Complete",
+      "first": "2026-11-17T21:10:03Z",
+      "last": "2026-11-17T21:10:03Z",
+      "message": "Saw completed job: report-29915830, condition: Complete",
       "reason": "SawCompletedJob",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -153,9 +43,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:41:00Z",
-      "last": "2026-11-03T11:41:00Z",
-      "message": "Created job report-29895101",
+      "first": "2026-11-17T21:10:00Z",
+      "last": "2026-11-17T21:10:00Z",
+      "message": "Created job report-29915830",
       "reason": "SuccessfulCreate",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -163,19 +53,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:40:03Z",
-      "last": "2026-11-03T11:40:03Z",
-      "message": "Deleted job report-29895098",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 2,
-      "fieldPath": null,
-      "first": "2026-11-03T11:40:03Z",
-      "last": "2026-11-03T11:40:03Z",
-      "message": "Saw completed job: report-29895100, condition: Complete",
+      "first": "2026-11-17T21:09:03Z",
+      "last": "2026-11-17T21:09:03Z",
+      "message": "Saw completed job: report-29915829, condition: Complete",
       "reason": "SawCompletedJob",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -183,79 +63,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:40:00Z",
-      "last": "2026-11-03T11:40:00Z",
-      "message": "Created job report-29895100",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:39:02Z",
-      "last": "2026-11-03T11:39:02Z",
-      "message": "Deleted job report-29895097",
-      "reason": "SuccessfulDelete",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:39:02Z",
-      "last": "2026-11-03T11:39:02Z",
-      "message": "Saw completed job: report-29895099, condition: Complete",
-      "reason": "SawCompletedJob",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:39:00Z",
-      "last": "2026-11-03T11:39:00Z",
-      "message": "Created job report-29895099",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:38:02Z",
-      "last": "2026-11-03T11:38:02Z",
-      "message": "Saw completed job: report-29895098, condition: Complete",
-      "reason": "SawCompletedJob",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:38:00Z",
-      "last": "2026-11-03T11:38:00Z",
-      "message": "Created job report-29895098",
-      "reason": "SuccessfulCreate",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:37:03Z",
-      "last": "2026-11-03T11:37:03Z",
-      "message": "Saw completed job: report-29895097, condition: Complete",
-      "reason": "SawCompletedJob",
-      "source": "cronjob-controller",
-      "type": "Normal"
-    },
-    {
-      "count": 1,
-      "fieldPath": null,
-      "first": "2026-11-03T11:37:00Z",
-      "last": "2026-11-03T11:37:00Z",
-      "message": "Created job report-29895097",
+      "first": "2026-11-17T21:09:00Z",
+      "last": "2026-11-17T21:09:00Z",
+      "message": "Created job report-29915829",
       "reason": "SuccessfulCreate",
       "source": "cronjob-controller",
       "type": "Normal"
@@ -266,7 +76,7 @@
     "apiVersion": "batch/v1",
     "kind": "CronJob",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "managedFields": [
         {
@@ -300,7 +110,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "batch/v1",
@@ -314,13 +124,13 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T12:15:03Z"
+          "time": "2026-11-17T21:11:03Z"
         }
       ],
       "name": "report",
       "namespace": "overview",
-      "resourceVersion": "7623",
-      "uid": "d217e071-f9d8-46b4-83fb-3c7af5e08bd4"
+      "resourceVersion": "1723",
+      "uid": "7b07ddc2-844d-4eb2-a442-f7dcb6ac79f4"
     },
     "spec": {
       "concurrencyPolicy": "Forbid",
@@ -364,8 +174,8 @@
       "timeZone": "Etc/UTC"
     },
     "status": {
-      "lastScheduleTime": "2026-11-03T12:15:00Z",
-      "lastSuccessfulTime": "2026-11-03T12:15:03Z"
+      "lastScheduleTime": "2026-11-17T21:11:00Z",
+      "lastSuccessfulTime": "2026-11-17T21:11:03Z"
     }
   },
   "printed": [
@@ -387,7 +197,7 @@
     },
     {
       "column": "Last Schedule",
-      "value": "42s"
+      "value": "15s"
     },
     {
       "column": "Containers",

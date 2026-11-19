@@ -19,7 +19,7 @@ import {
 } from "../capabilities";
 import { logsKind } from "../logs/entries";
 import { rowState } from "../rowState";
-import { LIST_URI, objectOf, objectOfRow } from "../selection";
+import { cellsOf, LIST_URI, objectOf, objectOfRow } from "../selection";
 import { servedAs, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
@@ -144,7 +144,7 @@ function Loaded({
   const allowed = capabilities.values(uri, referenced);
   const scoped = JSON.stringify({
     ...allowed,
-    ...rowState(resource, selected),
+    ...rowState(resource, selected && cellsOf(selected)),
     [MARKED_DELETE]: capabilities.marked(uri),
   });
   const [open, setOpen] = useState(selected?.reveal === true);
@@ -273,7 +273,7 @@ function Loaded({
           docked={docked}
           onOpen={(object) => {
             editors.pin(uri);
-            editors.open(object, { preview: true });
+            editors.open(object);
           }}
           onClose={() => {
             setOpen(false);

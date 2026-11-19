@@ -311,6 +311,11 @@ export function rowTone(
   return status === undefined ? undefined : cellTone(gvr, health, status);
 }
 
+/** Whether a value of a resource's health column says the object ran to completion. */
+export function cellFinished(gvr: Gvr, column: string, text: string): boolean {
+  return BY_RESOURCE[key(gvr, column)]?.finished?.(text) === true;
+}
+
 /** Whether a row's value in its resource's health column says the object ran to completion. */
 export function rowFinished(
   gvr: Gvr,
@@ -320,10 +325,7 @@ export function rowFinished(
 ): boolean {
   if (health === undefined) return false;
   const status = healthText(health, columns, row);
-  return (
-    status !== undefined &&
-    BY_RESOURCE[key(gvr, health)]?.finished?.(status) === true
-  );
+  return status !== undefined && cellFinished(gvr, health, status);
 }
 
 /** A row's health by its status column: healthy, or the tone of an abnormal state. */

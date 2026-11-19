@@ -3,6 +3,11 @@ import { formatCpu, formatMemory } from "@twigo/utils";
 
 export type Resource = "cpu" | "memory";
 
+export const LABEL: Readonly<Record<Resource, string>> = {
+  cpu: "CPU",
+  memory: "Memory",
+};
+
 /** The printed percent of its limit, or of what a node can allocate, from which a measure is a warning. */
 const WARN_FROM = 90;
 /** The printed percent at which it is an error: at the limit or past it. */
@@ -13,7 +18,7 @@ export function hasUsage({ group, resource }: Gvr): boolean {
   return group === "" && (resource === "pods" || resource === "nodes");
 }
 
-export type Base = "limit" | "request" | "allocatable";
+type Base = "limit" | "request" | "allocatable";
 
 export interface Figure {
   /** Null while there is no sample, which is no data yet and never zero. */
@@ -89,4 +94,44 @@ function percent(resource: Resource, used: number, whole: number): number {
       ? [Math.ceil(used / MILLI), Math.ceil(whole / MILLI)]
       : [used, whole];
   return Math.trunc((a / b) * 100);
+}
+
+export const TONE_WORDS = { warn: "Warning", error: "Error" } as const;
+
+const MI = 1024 * 1024;
+
+const SHARE_MAX = 9999;
+
+/** Whether a share is past what a row draws, so that its tooltip says it in full. */
+export const isCapped = (percent: number): boolean => percent > SHARE_MAX;
+
+/** A share as a row draws it: its percent, and `>9999%` from 10,000 % on. */
+export function shareText(percent: number): string {
+  return isCapped(percent) ? `>${String(SHARE_MAX)}%` : `${String(percent)}%`;
+}
+
+/**
+ * The widest row a container's meter draws: a figure of four digits and its
+ * unit, and the widest share, a request that its use overruns by 10,000 % or
+ * more, which reads `>9999%`, held against a request, the longer base. A
+ * figure of more digits is not held to it.
+ */
+export const WIDEST: Measure = {
+  used: 1023 * MI,
+  request: MI,
+  limit: null,
+  allocatable: null,
+};
+
+/** A figure as a screen reader says it: what is used against what it is held to, its share and its tone. */
+export function spoken(shown: Figure): string {
+  const { used, base, percent, tone } = shown;
+  const against = base === null ? "" : ` of ${shown[base] ?? ""} ${base}`;
+  return [
+    `${used ?? ""}${against}`,
+    percent === null ? "" : `${String(percent)}%`,
+    tone === undefined ? "" : TONE_WORDS[tone].toLowerCase(),
+  ]
+    .filter((part) => part !== "")
+    .join(", ");
 }

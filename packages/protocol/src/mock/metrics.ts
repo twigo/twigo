@@ -7,9 +7,8 @@ import type {
   RowId,
   Usage,
 } from "../generated";
-import { hash, type Node, type Pod } from "./cluster";
+import { containerNames, hash, type Node, type Pod } from "./cluster";
 import type { MockRow } from "./kinds";
-import { CONTAINER_NAMES } from "./shell";
 
 /**
  * What the context says of the Metrics API: `metricsNone` serves none, so
@@ -85,7 +84,7 @@ function choose<T>(items: readonly T[], text: string): T {
  * twenty-five asks for two cores and 2 Gi.
  */
 export function containerSpecs(pod: Pod): ContainerSpec[] {
-  return CONTAINER_NAMES.slice(0, pod.containers).map((name) => {
+  return containerNames(pod).map((name) => {
     const seed = `${pod.id}/${name}`;
     const big = unit(`${seed}/big`) < 0.04;
     const cpu =
@@ -221,7 +220,8 @@ export class MockMetrics {
   /**
    * What an open pod is told of what its scope `said`: the running
    * containers with no figure while it has said nothing, as Rust says them
-   * with the Overview, else its figures or the state alone.
+   * with the Overview, and again once it has answered without the pod,
+   * else its figures or the state alone.
    */
   podUsage(pod: Pod, said: MetricsState | null): Usage {
     if (said === null) {
@@ -231,11 +231,7 @@ export class MockMetrics {
         sampled: null,
         cpu: NOTHING,
         memory: NOTHING,
-        containers: this.running(pod).map(({ name, request, limit }) => ({
-          name,
-          cpu: measure(null, request.cpu, limit.cpu),
-          memory: measure(null, request.memory, limit.memory),
-        })),
+        containers: this.unsampled(pod),
       };
     }
     const containers = said === "ready" ? this.containers(pod) : null;
@@ -246,7 +242,7 @@ export class MockMetrics {
         sampled: null,
         cpu: NOTHING,
         memory: NOTHING,
-        containers: [],
+        containers: said === "ready" ? this.unsampled(pod) : [],
       };
     }
     const total = (pick: (container: ContainerUsage) => Measure): Measure => {
@@ -265,6 +261,14 @@ export class MockMetrics {
       memory: total((container) => container.memory),
       containers,
     };
+  }
+
+  unsampled(pod: Pod): ContainerUsage[] {
+    return this.running(pod).map(({ name, request, limit }) => ({
+      name,
+      cpu: measure(null, request.cpu, limit.cpu),
+      memory: measure(null, request.memory, limit.memory),
+    }));
   }
 
   nodeUsage(node: Node, said: MetricsState | null): Usage {

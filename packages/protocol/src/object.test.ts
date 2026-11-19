@@ -27,7 +27,25 @@ const OVERVIEW: ObjectParts = {
 };
 
 const DOCUMENT: Overview = {
-  sections: [{ id: "core.metadata", title: "Metadata", blocks: [] }],
+  header: {
+    owner: null,
+    node: null,
+    created: null,
+    generated: null,
+    printed: [],
+    sentence: [],
+    vitals: [],
+  },
+  sections: [
+    {
+      id: "core.metadata",
+      title: "Metadata",
+      summary: [],
+      tone: null,
+      fold: "open",
+      blocks: [],
+    },
+  ],
 };
 
 function batch(seq: number, rest: Partial<ObjectBatch> = {}): ObjectBatch {
@@ -207,9 +225,10 @@ test("the mock answers with the recorded pod under the name asked for", async ()
   expect(metadata?.type === "fields" && metadata.fields[0]).toEqual({
     label: "Name",
     value: { type: "text", text: "api-0" },
+    default: false,
   });
   const sections = overview?.sections ?? [];
-  expect(sections[sections.length - 1]?.id).toBe("core.events");
+  expect(sections[sections.length - 1]?.id).toBe("core.metadata");
   view.setParts({ ...OVERVIEW, manifest: true, related: true });
   await vi.runAllTimersAsync();
   const manifest = JSON.parse(view.getSnapshot().manifest ?? "{}") as {

@@ -10,7 +10,9 @@ import { ListIcon, ObjectIcon } from "./KindIcon";
 import { ListActions } from "./list/ListActions";
 import { ListEditor } from "./list/ListEditor";
 import { clusterEntries, listEntries } from "./list/statusEntries";
-import { ObjectActions, ObjectEditor } from "./object/ObjectEditor";
+import { ObjectEditor } from "./object/ObjectEditor";
+import { OverviewStates } from "./object/overviewStates";
+import { OBJECT_FILTERED, OBJECT_URI } from "./object/pageStates";
 import { ObjectTabs } from "./object/tabs";
 import {
   listProvider,
@@ -119,6 +121,7 @@ export function registerKube(workbench: Workbench): void {
   });
 
   const objectTabs = new ObjectTabs();
+  const fullPages = new OverviewStates();
   editors.register({
     id: "kube.object",
     scheme: OBJECT_SCHEME,
@@ -132,13 +135,17 @@ export function registerKube(workbench: Workbench): void {
         uri={uri}
         discovery={services.discovery}
         overviews={services.overviews}
+        pages={services.pages}
         tabs={objectTabs}
         edits={services.edits}
+        capabilities={services.capabilities}
+        fullPages={fullPages}
       />
     ),
-    actions: ({ uri }) => <ObjectActions uri={uri} />,
     focus: (uri) => {
-      if (objectTabs.get(uri) === "yaml") services.edits.copies.focus(uri);
+      const tab = objectTabs.get(uri);
+      if (tab === "yaml") services.edits.copies.focus(uri);
+      else if (tab === "overview") services.pages.focusPageOnceDrawn(uri);
     },
   });
 
@@ -209,8 +216,44 @@ export function registerKube(workbench: Workbench): void {
     enablement: "detailsOpen",
     run: () => workbench.lists.focused("close")?.close(),
   });
+  commands.register({
+    id: "k8s.object.filter",
+    title: "Filter This Page",
+    category: "Resource",
+    enablement: OBJECT_URI,
+    run: (_args, lookup) => {
+      const uri = lookup(OBJECT_URI);
+      if (typeof uri === "string") services.pages.openFilter(uri);
+    },
+  });
+  commands.register({
+    id: "k8s.object.filter.clear",
+    title: "Clear Page Filter",
+    category: "Resource",
+    enablement: OBJECT_FILTERED,
+    run: (_args, lookup) => {
+      const uri = lookup(OBJECT_URI);
+      if (typeof uri !== "string") return;
+      services.pages.setText(uri, "");
+      services.pages.openFilter(uri);
+    },
+  });
+  menus.append("commandPalette", {
+    command: "k8s.object.filter",
+    when: OBJECT_URI,
+  });
+  menus.append("commandPalette", {
+    command: "k8s.object.filter.clear",
+    when: OBJECT_FILTERED,
+  });
   keybindings.register("core", [
     { key: "escape", command: "k8s.details.close", when: "detailsOpen" },
+    {
+      key: "escape",
+      command: "k8s.object.filter.clear",
+      when: `pageFocus && ${OBJECT_FILTERED}`,
+    },
+    { key: "/", command: "k8s.object.filter", when: "pageFocus" },
   ]);
   const logs = new LogsTabs(workbench.backend);
   const shells = createExecTabs(workbench);

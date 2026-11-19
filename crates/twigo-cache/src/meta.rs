@@ -141,7 +141,12 @@ pub(crate) struct RawMeta {
 impl RawMeta {
     pub fn into_meta(self, received: Timestamp) -> Result<Meta, DecodeError> {
         let name = self.name.ok_or(DecodeError::Missing("metadata.name"))?;
-        let generated = generated(&name, self.generate_name.as_deref(), &self.labels);
+        let generated = generated(&name, self.generate_name.as_deref(), |key| {
+            self.labels
+                .iter()
+                .find(|(found, _)| &**found == key)
+                .map(|(_, value)| &**value)
+        });
         Ok(Meta {
             name,
             namespace: self.namespace,
@@ -201,13 +206,11 @@ const STATEFUL_SET_POD_NAME: &str = "statefulset.kubernetes.io/pod-name";
 /// `generate_name` too (`GetPodFromTemplate` in kubernetes v1.37.1,
 /// pkg/controller/controller_utils.go), but its controller names it with
 /// an ordinal, which can be five digits long.
-fn generated(name: &str, generate_name: Option<&str>, labels: &Labels) -> Option<u32> {
-    let label = |key: &str| {
-        labels
-            .iter()
-            .find(|(found, _)| &**found == key)
-            .map(|(_, value)| &**value)
-    };
+fn generated<'a>(
+    name: &str,
+    generate_name: Option<&str>,
+    label: impl Fn(&str) -> Option<&'a str>,
+) -> Option<u32> {
     let base = generate_name.filter(|base| !base.is_empty())?;
     if label(STATEFUL_SET_POD_NAME) == Some(name) {
         return None;
@@ -230,6 +233,16 @@ fn generated(name: &str, generate_name: Option<&str>, labels: &Labels) -> Option
         })
         .map_or(kept.len(), |before| kept.len().min(before.len() + 1));
     u32::try_from(name[..start].encode_utf16().count()).ok()
+}
+
+/// Where the generated part of the name of an object, given by its
+/// `metadata`, starts: what a row of the list says in [`Meta::generated`].
+pub fn generated_in(metadata: &serde_json::Value) -> Option<u32> {
+    generated(
+        metadata["name"].as_str()?,
+        metadata["generateName"].as_str(),
+        |key| metadata["labels"][key].as_str(),
+    )
 }
 
 #[derive(Deserialize)]
@@ -415,6 +428,28 @@ mod tests {
             "labels": { "statefulset.kubernetes.io/pod-name": "db-24567" },
         });
         assert_eq!(decoded(pod), None);
+    }
+
+    #[test]
+    fn an_objects_own_metadata_says_it_as_its_row_does() {
+        let deployment = json!({
+            "name": "api-7f9c8d6b5-x2kq9",
+            "generateName": "api-7f9c8d6b5-",
+            "labels": { "app": "api", "pod-template-hash": "7f9c8d6b5" },
+        });
+        let stateful = json!({
+            "name": "db-0",
+            "generateName": "db-",
+            "labels": { "statefulset.kubernetes.io/pod-name": "db-0" },
+        });
+        let bare = json!({ "name": "web" });
+        for metadata in [deployment, stateful, bare] {
+            assert_eq!(generated_in(&metadata), decoded(metadata.clone()));
+        }
+        assert_eq!(
+            generated_in(&json!({ "name": "agent-x7k2p", "generateName": "agent-" })),
+            Some(6)
+        );
     }
 
     #[test]

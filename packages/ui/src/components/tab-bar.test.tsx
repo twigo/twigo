@@ -23,14 +23,26 @@ const TABS: readonly Tab<View>[] = [
   { value: "related", label: "Related", count: 14 },
 ];
 
-function Views({ first = "overview" }: { first?: View }) {
+function Views({
+  first = "overview",
+  tabs = TABS,
+  onFullWidth,
+  folds,
+}: {
+  first?: View;
+  tabs?: readonly Tab<View>[];
+  onFullWidth?: (width: number) => void;
+  folds?: boolean;
+}) {
   const [value, setValue] = useState<View>(first);
   return (
     <TabBar
       label="Views of the object"
-      tabs={TABS}
+      tabs={tabs}
       value={value}
       onChange={setValue}
+      {...(onFullWidth && { onFullWidth })}
+      {...(folds !== undefined && { folds })}
     />
   );
 }
@@ -262,4 +274,80 @@ test("the arrows, Home and End move among the tabs that show, and the focus foll
   expect(shown()).toEqual(["Overview"]);
   press("ArrowLeft");
   expect(shown()).toEqual(["YAML"]);
+});
+
+test("it says the width it takes with every tab shown, its padding included, whatever fold it is at", () => {
+  const reported: number[] = [];
+  render(
+    <Views
+      onFullWidth={(width) => {
+        reported.push(width);
+      }}
+    />,
+  );
+  layOut(240, NEEDS);
+  expect(names()).toEqual(["Overview", "YAML"]);
+  expect(reported[reported.length - 1]).toBe(312);
+});
+
+test("a row told not to fold keeps every tab shown, whatever the room, and still says what it takes", () => {
+  const reported: number[] = [];
+  render(
+    <Views
+      folds={false}
+      onFullWidth={(width) => {
+        reported.push(width);
+      }}
+    />,
+  );
+  layOut(240, NEEDS);
+  expect(names()).toEqual(["Overview", "YAML", "Events", "Related"]);
+  expect(more()).toBeNull();
+  layOut(150, NEEDS);
+  expect(names()).toEqual(["Overview", "YAML", "Events", "Related"]);
+  expect(reported[reported.length - 1]).toBe(312);
+});
+
+test("a row that has folded and is then told not to shows every tab again, with no margin to spare", () => {
+  const { rerender } = render(<Views />);
+  layOut(240, NEEDS);
+  expect(names()).toEqual(["Overview", "YAML"]);
+  rerender(<Views folds={false} />);
+  layOut(300, NEEDS);
+  expect(names()).toEqual(["Overview", "YAML", "Events", "Related"]);
+});
+
+test("the copy that the row measures keeps room for the widest count of a tab, with its mark, whether the tab holds a count or not", () => {
+  const tabs: readonly Tab<View>[] = [
+    { value: "overview", label: "Overview" },
+    { value: "events", label: "Events", count: 0, warn: true, digits: 3 },
+  ];
+  render(<Views tabs={tabs} />);
+  const copy = document.querySelector('[data-stage="0"]');
+  expect(
+    copy?.querySelector("[data-reserve]")?.getAttribute("data-reserve"),
+  ).toBe("000");
+  expect(copy?.querySelector('[aria-label="Warnings"]')).not.toBeNull();
+  expect(screen.getByRole("tab", { name: "Events" }).textContent).toBe(
+    "Events",
+  );
+  expect(
+    screen.getByRole("tab", { name: "Events" }).querySelector("svg"),
+  ).toBeNull();
+});
+
+test("the copy that the row measures holds a count of more digits than it keeps room for at that room, while the tab itself shows the count", () => {
+  const tabs: readonly Tab<View>[] = [
+    { value: "overview", label: "Overview" },
+    { value: "events", label: "Events", count: 120, warn: true, digits: 2 },
+  ];
+  render(<Views tabs={tabs} />);
+  const copy = document
+    .querySelector('[data-stage="0"]')
+    ?.querySelector("[data-reserve]");
+  expect(copy?.getAttribute("data-reserve")).toBe("00");
+  expect(copy?.textContent.length ?? 0).toBeLessThanOrEqual(2);
+  expect(screen.getByRole("tab", { name: /^Events/ }).textContent).toBe(
+    "Events120",
+  );
 });

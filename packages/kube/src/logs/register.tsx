@@ -103,11 +103,6 @@ export function registerLogs(
   });
   // It acts on the object its caller names, so the palette has nothing to give it.
   menus.append("commandPalette", { command: "k8s.logs.open", when: "false" });
-  menus.append("editor/title", {
-    command: "k8s.logs.open",
-    group: "navigation",
-    when: "resource.logs",
-  });
 
   const active = () => editors.activeIn("panel");
   const toggles: readonly {

@@ -167,3 +167,24 @@ test("a new manifest, and an object on its YAML tab, ask for the focus of the vi
   await settle();
   expect(asked()).toEqual([manifest, object]);
 });
+
+const OBJECT = "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk";
+const filterField = () =>
+  screen.getByRole("textbox", { name: "Filter this page" });
+const slash = () => {
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    code: "Slash",
+    key: "/",
+  });
+};
+
+test("/ right after an object's editor opens opens the filter of its page", async () => {
+  const workbench = await mountKube();
+  act(() => {
+    workbench.editors.open(OBJECT);
+  });
+  await settle();
+  slash();
+  await settle(2);
+  expect(document.activeElement).toBe(filterField());
+});

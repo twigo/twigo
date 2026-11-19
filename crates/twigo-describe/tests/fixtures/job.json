@@ -3,8 +3,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:44Z",
-      "last": "2026-11-03T11:36:44Z",
+      "first": "2026-11-17T21:08:35Z",
+      "last": "2026-11-17T21:08:35Z",
       "message": "Job completed",
       "reason": "Completed",
       "source": "job-controller",
@@ -13,9 +13,9 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
-      "message": "Created pod: migrate-72fj4",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
+      "message": "Created pod: migrate-sddsh",
       "reason": "SuccessfulCreate",
       "source": "job-controller",
       "type": "Normal"
@@ -26,12 +26,12 @@
     "apiVersion": "batch/v1",
     "kind": "Job",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "labels": {
-        "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+        "batch.kubernetes.io/controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
         "batch.kubernetes.io/job-name": "migrate",
-        "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+        "controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
         "job-name": "migrate"
       },
       "managedFields": [
@@ -60,7 +60,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "batch/v1",
@@ -79,13 +79,13 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:44Z"
+          "time": "2026-11-17T21:08:35Z"
         }
       ],
       "name": "migrate",
       "namespace": "overview",
-      "resourceVersion": "2519",
-      "uid": "23d14ace-b325-473f-bb93-bad78aaa7928"
+      "resourceVersion": "1196",
+      "uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb"
     },
     "spec": {
       "backoffLimit": 2,
@@ -96,16 +96,16 @@
       "podReplacementPolicy": "TerminatingOrFailed",
       "selector": {
         "matchLabels": {
-          "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928"
+          "batch.kubernetes.io/controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb"
         }
       },
       "suspend": false,
       "template": {
         "metadata": {
           "labels": {
-            "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "batch.kubernetes.io/controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
             "batch.kubernetes.io/job-name": "migrate",
-            "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+            "controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
             "job-name": "migrate"
           }
         },
@@ -138,19 +138,19 @@
       "ttlSecondsAfterFinished": 86400
     },
     "status": {
-      "completionTime": "2026-11-03T11:36:44Z",
+      "completionTime": "2026-11-17T21:08:35Z",
       "conditions": [
         {
-          "lastProbeTime": "2026-11-03T11:36:44Z",
-          "lastTransitionTime": "2026-11-03T11:36:44Z",
+          "lastProbeTime": "2026-11-17T21:08:35Z",
+          "lastTransitionTime": "2026-11-17T21:08:35Z",
           "message": "Reached expected number of succeeded pods",
           "reason": "CompletionsReached",
           "status": "True",
           "type": "SuccessCriteriaMet"
         },
         {
-          "lastProbeTime": "2026-11-03T11:36:44Z",
-          "lastTransitionTime": "2026-11-03T11:36:44Z",
+          "lastProbeTime": "2026-11-17T21:08:35Z",
+          "lastTransitionTime": "2026-11-17T21:08:35Z",
           "message": "Reached expected number of succeeded pods",
           "reason": "CompletionsReached",
           "status": "True",
@@ -158,7 +158,7 @@
         }
       ],
       "ready": 0,
-      "startTime": "2026-11-03T11:36:41Z",
+      "startTime": "2026-11-17T21:08:31Z",
       "succeeded": 1,
       "terminating": 0,
       "uncountedTerminatedPods": {}
@@ -175,7 +175,7 @@
     },
     {
       "column": "Duration",
-      "value": "3s"
+      "value": "4s"
     },
     {
       "column": "Containers",
@@ -187,7 +187,7 @@
     },
     {
       "column": "Selector",
-      "value": "batch.kubernetes.io/controller-uid=23d14ace-b325-473f-bb93-bad78aaa7928"
+      "value": "batch.kubernetes.io/controller-uid=d6baf7b2-bc3a-46d0-8b83-709acc7c00fb"
     }
   ]
 }

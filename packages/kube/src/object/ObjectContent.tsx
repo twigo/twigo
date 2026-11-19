@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import type {
   ObjectRef,
   ObjectSnapshot,
@@ -10,6 +10,8 @@ import { ViewStatus } from "../ViewStatus";
 import { objectProblem } from "../viewProblem";
 import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
+import type { PageStates } from "./pageStates";
+import { keepPlace } from "./place";
 import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
 /** The one label column of an object's page, which every property list in it reads. */
@@ -25,6 +27,9 @@ export function ObjectContent({
   space,
   states,
   kind,
+  pages,
+  uri,
+  object,
   snapshot,
   values,
   reveal,
@@ -32,6 +37,8 @@ export function ObjectContent({
   kept,
   onOpen,
   onLogs,
+  onEvents,
+  fullPage,
 }: {
   tab: ObjectTab;
   /** The object's space, which its Overview's live lists query. */
@@ -39,6 +46,10 @@ export function ObjectContent({
   states: OverviewProps["states"];
   /** The object's resource, `apps/deployments`. */
   kind: string;
+  pages: PageStates;
+  uri: string;
+  /** The object shown, as `namespace/name`. */
+  object: string;
   snapshot: ObjectSnapshot;
   values: OverviewProps["values"];
   reveal?: OverviewProps["reveal"];
@@ -51,13 +62,33 @@ export function ObjectContent({
   kept?: (problem: { title: string; body: string }) => ReactNode;
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
+  onEvents: OverviewProps["onEvents"];
+  /** The full page, whose sections open but the Metadata. */
+  fullPage?: boolean;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const overview = tab === "overview" && snapshot.overview !== undefined;
+  useEffect(() => {
+    const element = scroller.current;
+    return element ? pages.attach(uri, element) : undefined;
+  }, [pages, uri]);
+  // Another object of the kind opens where the last was left, which one of
+  // its changes, drawn again, must not undo.
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!overview || !element) return;
+    return keepPlace(element, pages.place(uri), (place) => {
+      pages.setPlace(uri, place);
+    });
+  }, [pages, uri, overview]);
   return (
     <div
+      ref={scroller}
       role="tabpanel"
       aria-label={OBJECT_TABS.find(({ id }) => id === tab)?.title}
+      tabIndex={-1}
       className={cn(
-        "h-full bg-editor",
+        "h-full bg-editor outline-none",
         LABEL_COLUMN,
         tab === "yaml" ? "overflow-hidden" : "overflow-auto",
         (tab === "events" || tab === "related") && "p-3 text-body",
@@ -71,11 +102,16 @@ export function ObjectContent({
               space={space}
               states={states}
               kind={kind}
+              object={object}
+              pages={pages}
+              uri={uri}
               onOpen={onOpen}
               values={values}
               reveal={reveal}
               onLogs={onLogs}
+              onEvents={onEvents}
               usage={snapshot.usage}
+              {...(fullPage !== undefined && { fullPage })}
             />
           )}
         </Shown>

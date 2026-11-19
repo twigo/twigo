@@ -1,32 +1,27 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
-import type { ObjectQuery, ObjectRef, Overview, Row } from "@twigo/protocol";
-import {
-  ActionRow,
-  cn,
-  IconButton,
-  LinkButton,
-  Pill,
-  PropertyList,
-} from "@twigo/ui";
-import { humanDuration } from "@twigo/utils";
+import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
+import { ActionRow, cn, IconButton, PropertyList } from "@twigo/ui";
 import { useChanges, useWorkbench } from "@twigo/workbench";
-import { ageRole } from "./age";
-import { cellTone, columnRule, statusColumn } from "./columns";
+import { columnRule, rowFinished, rowTone, statusColumn } from "./columns";
 import { useResources } from "./discovery";
-import { KindIcon } from "./KindIcon";
-import { measureText } from "./list/metrics";
-import { ObjectName } from "./ObjectName";
+import { decideRows } from "./list/alarm";
+import { CellView, type ShownColumn } from "./list/cells";
+import { noContainerRuns } from "./object/noContainerRuns";
+import { ObjectHeader } from "./object/ObjectHeader";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { ObjectViews } from "./object/ObjectViews";
+import { Vitals } from "./object/Vitals";
+import { useHeader } from "./object/useHeader";
+import { foundTone } from "./object/verdict";
 import { useReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
+import { OBJECT_FILTERED, OBJECT_URI, useFiltered } from "./object/pageStates";
 import { refResource, refUri, useObject } from "./object/useObject";
-import { objectOf, type Selected } from "./selection";
+import { cellsOf, objectOf, type Selected, type Selection } from "./selection";
 import type { ListServices } from "./services";
 import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
-import { useNow } from "./useNow";
 import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
@@ -79,6 +74,12 @@ export function Details({
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
   const { group, version, resource } = gvr;
+  const object = objectUri({
+    space,
+    gvr,
+    ...(namespace !== undefined && { namespace }),
+    name,
+  });
   const query: ObjectQuery = useMemo(
     () => ({
       space,
@@ -105,10 +106,10 @@ export function Details({
     backend,
     rested === query ? query : undefined,
     {
-      overview: tab === "overview",
+      overview: true,
       manifest: tab === "yaml",
       events: tab === "events",
-      related: true,
+      related: tab === "related",
       usage: asked,
     },
   );
@@ -118,36 +119,38 @@ export function Details({
     const next = refUri(space, resources.value, target);
     if (next) onOpen(next);
   };
-  const owner = snapshot.related?.owners.find(
-    (candidate) => candidate.controller,
-  );
+  const header = snapshot.overview?.header;
+  const owner = header?.owner ?? undefined;
   const ownerGvr =
     owner && resources.state === "ready"
-      ? refResource(resources.value, owner.target)?.gvr
+      ? refResource(resources.value, owner)?.gvr
       : undefined;
-  const statusAt = selected.columns.findIndex(
-    (column) => column.name === statusColumn(gvr),
-  );
-  const status = statusAt < 0 ? undefined : row.cells[statusAt];
-  const tone =
-    typeof status === "string"
-      ? (cellTone(gvr, selected.columns[statusAt]?.name ?? "", status) ?? "ok")
-      : undefined;
-  const idle = tab === "overview" && noContainerRuns(snapshot.overview);
+  const cellOf = (column: string) => {
+    const cell = cellsOf(selected)(column);
+    return typeof cell === "string" ? cell : undefined;
+  };
+  const { verdict, strip, line } = useHeader({
+    gvr,
+    header,
+    found: foundTone(snapshot.overview),
+    usage: snapshot.usage,
+    row: cellOf,
+  });
+  const idle = noContainerRuns(snapshot.overview);
+  const page = tab === "overview";
+  const filtered = useFiltered(services.pages, uri) && page;
   useEffect(() => {
     if (!element) return;
     const scope = keys.scope(element);
     scope.set("resource.noContainerRuns", idle);
+    scope.set("pageFocus", page);
+    scope.set(OBJECT_URI, page ? uri : undefined);
+    scope.set(OBJECT_FILTERED, filtered);
     return () => {
       scope.dispose();
     };
-  }, [keys, element, idle]);
-  const now = useNow();
+  }, [keys, element, idle, page, filtered, uri]);
   const lookup = keys.lookup(element);
-  const measured = useSyncExternalStore(selection.watch, () =>
-    selection.get(uri),
-  );
-  const cells = measured?.row.id === row.id ? measured.row : row;
 
   return (
     <aside
@@ -195,114 +198,65 @@ export function Details({
         }}
         className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
       />
-      <header className="flex shrink-0 flex-col gap-1.5 border-b border-border-subtle pt-2.5 pr-2 pb-2 pl-3.5">
-        <div className="flex items-center gap-1.5">
-          <KindIcon gvr={gvr} className="size-4 shrink-0 text-support" />
-          <h2 className="flex min-w-0 flex-1 items-baseline text-title font-semibold text-strong">
-            <span className="min-w-0 truncate text-xs text-support">
-              {kind}
-            </span>{" "}
-            <ObjectName
-              name={name}
-              generated={row.generated}
-              className="max-w-full shrink-0 pl-1.5 text-strong"
+      <ObjectHeader
+        object={object}
+        gvr={gvr}
+        kind={kind}
+        name={name}
+        generated={row.generated}
+        controls={
+          <>
+            <IconButton
+              icon={Copy}
+              label="Copy Name"
+              onClick={() => {
+                void workbench.commands.execute(
+                  "k8s.resource.copyName",
+                  lookup,
+                );
+              }}
             />
-          </h2>
-          <IconButton
-            icon={Copy}
-            label="Copy Name"
-            onClick={() => {
-              void workbench.commands.execute("k8s.resource.copyName", lookup);
-            }}
+            <IconButton
+              icon={SquareArrowOutUpRight}
+              label="Open in an editor"
+              onClick={() => {
+                onOpen(object);
+              }}
+            />
+            <IconButton
+              icon={X}
+              label="Close details"
+              keys="esc"
+              onClick={onClose}
+            />
+          </>
+        }
+        namespace={namespace}
+        owner={owner && { target: owner, gvr: ownerGvr }}
+        node={header?.node ?? undefined}
+        created={header?.created ?? row.created ?? undefined}
+        verdict={verdict}
+        sentence={header?.sentence ?? []}
+        verdictLine={line}
+        onOpen={open}
+        actions={
+          <ActionRow
+            label={`${kind} actions`}
+            actions={workbench.actions("resource/details", lookup)}
           />
-          <IconButton
-            icon={SquareArrowOutUpRight}
-            label="Open in an editor"
-            onClick={() => {
-              onOpen(
-                objectUri({
-                  space,
-                  gvr,
-                  ...(namespace !== undefined && { namespace }),
-                  name,
-                }),
-              );
-            }}
-          />
-          <IconButton
-            icon={X}
-            label="Close details"
-            keys="esc"
-            onClick={onClose}
-          />
-        </div>
-        <div className="flex min-w-0 items-center gap-2 text-xs text-support">
-          {tone && typeof status === "string" && (
-            <Pill tone={tone}>{status}</Pill>
-          )}
-          {[
-            namespace !== undefined && (
-              <span key="namespace" className="ident truncate">
-                {namespace}
-              </span>
-            ),
-            owner && (
-              <LinkButton
-                key="owner"
-                onClick={() => {
-                  open(owner.target);
-                }}
-                className="flex min-w-0 items-center gap-1"
-              >
-                {ownerGvr && (
-                  <KindIcon gvr={ownerGvr} className="size-3 shrink-0" />
-                )}
-                <span className="ident truncate">
-                  {owner.target.kind} {owner.target.name}
-                </span>
-              </LinkButton>
-            ),
-            row.created && (
-              <span
-                key="age"
-                className={cn(
-                  "shrink-0 tabular-nums",
-                  ageRole(now - Date.parse(row.created)),
-                )}
-              >
-                {humanDuration(now - Date.parse(row.created))}
-              </span>
-            ),
-          ]
-            .filter(Boolean)
-            .flatMap((part, index) =>
-              index === 0
-                ? [part]
-                : [
-                    <span
-                      key={`dot-${String(index)}`}
-                      aria-hidden
-                      className="text-quiet"
-                    >
-                      ·
-                    </span>,
-                    part,
-                  ],
-            )}
-        </div>
-        <ActionRow
-          label={`${kind} actions`}
-          actions={workbench.actions("resource/details", lookup)}
-          className="-ml-1.5"
-        />
-      </header>
+        }
+      />
       <ObjectViews
         tab={tab}
         snapshot={snapshot}
         onChange={(next) => {
           states.setDetailsTab(uri, next);
         }}
+        pages={services.pages}
+        uri={uri}
+        kind={kind}
       />
+      {page && <Vitals cells={strip} verdict={verdict} />}
       <div className="min-h-0 flex-1 overflow-auto">
         {snapshot.overview || tab !== "overview" ? (
           <ObjectContent
@@ -310,10 +264,16 @@ export function Details({
             space={space}
             states={services.overviews}
             kind={`${group}/${resource}`}
+            pages={services.pages}
+            uri={uri}
+            object={`${namespace ?? ""}/${name}`}
             snapshot={snapshot}
             values={values}
             reveal={reveal}
             onOpen={open}
+            onEvents={() => {
+              states.setDetailsTab(uri, "events");
+            }}
             {...(namespace !== undefined && {
               onLogs: (choice) => {
                 void workbench.commands.execute("k8s.logs.open", lookup, {
@@ -329,7 +289,7 @@ export function Details({
         ) : (
           <>
             <ViewStatus status={snapshot.status} what="the object" inline />
-            <Cells selected={selected} row={cells} now={now} />
+            <Cells selected={selected} uri={uri} selection={selection} />
           </>
         )}
       </div>
@@ -337,48 +297,52 @@ export function Details({
   );
 }
 
-/** Whether the Overview lists containers and none of them runs: false while it lists none, as before it comes. */
-function noContainerRuns(overview: Overview | undefined): boolean {
-  const containers = (overview?.sections ?? [])
-    .flatMap((section) => section.blocks)
-    .flatMap((block) => (block.type === "containers" ? block.containers : []));
-  return (
-    containers.length > 0 &&
-    containers.every((container) => container.state?.running !== true)
-  );
-}
-
-/** The row's cells, wide columns included, until the object comes; `row` is the selection's with the measures a poll brought. */
+/** The row's cells, wide columns included, until the object comes, each as its list draws it, with the measures a poll brought to the selection. */
 function Cells({
   selected,
-  row,
-  now,
+  uri,
+  selection,
 }: {
   selected: Selected;
-  row: Row;
-  now: number;
+  uri: string;
+  selection: Selection;
 }) {
+  const measured = useSyncExternalStore(selection.watch, () =>
+    selection.get(uri),
+  );
+  const row =
+    measured?.row.id === selected.row.id ? measured.row : selected.row;
   const { gvr, columns } = selected;
+  const shown: ShownColumn[] = columns.map((column, index) => ({
+    name: column.name,
+    index,
+    rule: columnRule(gvr, column),
+  }));
+  const health = statusColumn(gvr);
+  const { tone, alarmed, finished } = decideRows(
+    (each) => rowTone(gvr, health, columns, each),
+    (each) => rowFinished(gvr, health, columns, each),
+    shown,
+  )(row);
   return (
     <PropertyList
       className={cn("p-3 text-body", LABEL_COLUMN)}
-      items={columns.map((column, index) => {
-        const { cell, figures } = columnRule(gvr, column);
-        const value =
-          cell === "age"
-            ? row.created
-              ? humanDuration(now - Date.parse(row.created))
-              : ""
-            : cell === "cpu" || cell === "memory"
-              ? (measureText(cell, row.cells[index] ?? null) ?? "–")
-              : String(row.cells[index] ?? "");
-        return {
-          key: column.name,
-          label: column.name,
-          numeric: figures || isTabular(value),
-          value,
-        };
-      })}
+      items={shown.map((column) => ({
+        key: column.name,
+        label: column.name,
+        numeric:
+          column.rule.figures ||
+          isTabular(String(row.cells[column.index] ?? "")),
+        value: (
+          <CellView
+            row={row}
+            column={column}
+            tone={tone}
+            alarmed={alarmed}
+            finished={finished}
+          />
+        ),
+      }))}
     />
   );
 }

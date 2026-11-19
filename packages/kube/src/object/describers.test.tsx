@@ -5,6 +5,7 @@ import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
 import OBJECTS from "../../../protocol/src/mock/objects.json";
 import { Overview } from "./Overview";
 import { OverviewStates } from "./overviewStates";
+import { NO_HEADER, PAGE } from "../../test/object";
 
 afterEach(() => {
   cleanup();
@@ -20,6 +21,7 @@ async function shown(name: string) {
   const workbench = await testWorkbench("ready");
   render(
     <Overview
+      {...PAGE}
       overview={overview}
       space="prod-eu"
       states={new OverviewStates()}
@@ -38,12 +40,36 @@ function section(title: string): HTMLElement {
   return screen.getByRole("region", { name: title });
 }
 
+const toggleOf = (title: string): HTMLButtonElement => {
+  const toggle = section(title).querySelector<HTMLButtonElement>(
+    "button[aria-expanded]",
+  );
+  if (!toggle) throw new Error(`no toggle in ${title}`);
+  return toggle;
+};
+
+function unfold(title: string) {
+  act(() => {
+    toggleOf(title).click();
+  });
+}
+
 test.each(Object.keys(RECORDED))(
-  "the recorded %s renders every section its document holds",
+  "the recorded %s draws each section as its fold says: a folded one by its header and summary, an open one whole",
   async (name) => {
     const overview = await shown(name);
-    for (const { title, blocks } of overview.sections) {
+    for (const { title, fold, summary, blocks } of overview.sections) {
       const region = section(title);
+      const toggle = toggleOf(title);
+      for (const span of summary)
+        if (span.type === "text")
+          expect(toggle.textContent).toContain(span.text);
+      if (fold === "folded") {
+        expect(toggle.getAttribute("aria-expanded")).toBe("false");
+        expect(region.textContent).toBe(toggle.textContent);
+        unfold(title);
+      }
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
       for (const block of blocks) {
         if (block.type === "table")
           expect(
@@ -83,7 +109,11 @@ test("a crashing pod says why first, and its container's card folds its details"
   expect(
     within(containers).getByText("Waiting · CrashLoopBackOff"),
   ).toBeDefined();
-  expect(within(containers).getByText("Last state")).toBeDefined();
+  expect(
+    within(containers).getByText("Last exit").nextElementSibling?.textContent,
+  ).toMatch(/^code 1 \(Error\) · .+ ago$/);
+  for (const folded of ["Last state", "Started", "Requests", "Limits"])
+    expect(within(containers).queryByText(folded)).toBeNull();
   expect(within(containers).queryByText("Command")).toBeNull();
   expect(
     within(containers).getByRole("button", { name: /^Details \d+$/ }),
@@ -97,6 +127,7 @@ test("a finding that comes or goes is announced once, and its tone has a name", 
   const workbench = await testWorkbench("ready");
   const view = (overview: Document) => (
     <Overview
+      {...PAGE}
       overview={overview}
       space="prod-eu"
       states={new OverviewStates()}
@@ -126,6 +157,7 @@ test("a container's folds stay open for the kind's next object", async () => {
   const mounted = (kind: string) =>
     render(
       <Overview
+        {...PAGE}
         overview={overview}
         space="prod-eu"
         states={states}
@@ -156,6 +188,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const node = RECORDED.node?.overview;
   if (!node) throw new Error("the node");
   const beating: Document = {
+    header: NO_HEADER,
     sections: node.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) =>
@@ -174,6 +207,7 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
   const workbench = await testWorkbench("ready");
   render(
     <Overview
+      {...PAGE}
       overview={beating}
       space="prod-eu"
       states={new OverviewStates()}
@@ -182,18 +216,19 @@ test("a node's condition tells its last heartbeat in its tooltip", async () => {
     />,
     { wrapper: inWorkbench(workbench) },
   );
+  unfold("Conditions");
   const ready = within(section("Conditions")).getByText("Ready").closest("li");
   expect(ready?.getAttribute("title")).toContain(
     `Last heartbeat ${new Date("2026-11-03T10:00:00Z").toLocaleString()}`,
   );
 });
 
-test("a node adds up its pods' requests in its resources table", async () => {
+test("a node adds up its pods' requests in its capacity table", async () => {
   await shown("node");
-  const resources = within(section("Resources")).getByRole("table", {
-    name: "Resources",
+  const resources = within(section("Capacity")).getByRole("table", {
+    name: "Capacity",
   });
-  const cpu = within(resources).getByText("970m (6%)");
+  const cpu = within(resources).getByText("1070m (6%)");
   expect(cpu.closest("tr")?.textContent).toContain("cpu");
 });
 
@@ -204,6 +239,7 @@ test("a claim links the pod that uses it, and a Service its endpoints", async ()
   ).toBeDefined();
   cleanup();
   await shown("service");
+  unfold("Ports");
   const ports = within(section("Ports")).getByRole("table", { name: "Ports" });
   expect(ports.textContent).toMatch(
     /10\.244\.\d+\.\d+:8080, 10\.244\.\d+\.\d+:8080/,

@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ListView,
+  lowerAscii,
   toIpcError,
   type Backend,
   type Column,
@@ -422,8 +423,4 @@ export function substring(label: string, filter: string): TextRange[] {
   const search = lowerAscii(filter.trim());
   const at = search === "" ? -1 : lowerAscii(label).indexOf(search);
   return at < 0 ? [] : [{ start: at, end: at + search.length }];
-}
-
-function lowerAscii(text: string): string {
-  return text.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }

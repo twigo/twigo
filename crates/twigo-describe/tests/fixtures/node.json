@@ -1,5 +1,86 @@
 {
-  "events": [],
+  "events": [
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:34Z",
+      "last": "2026-11-17T21:07:34Z",
+      "message": "Node twigo-overviews-control-plane status is now: NodeReady",
+      "reason": "NodeReady",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:24.645802Z",
+      "last": "2026-11-17T21:07:24.645802Z",
+      "message": "",
+      "reason": "Starting",
+      "source": "kube-proxy",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:22Z",
+      "last": "2026-11-17T21:07:22Z",
+      "message": "Node twigo-overviews-control-plane event: Registered Node twigo-overviews-control-plane in Controller",
+      "reason": "RegisteredNode",
+      "source": "node-controller",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:21Z",
+      "last": "2026-11-17T21:07:21Z",
+      "message": "Updated Node Allocatable limit across pods",
+      "reason": "NodeAllocatableEnforced",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:21Z",
+      "last": "2026-11-17T21:07:21Z",
+      "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientMemory",
+      "reason": "NodeHasSufficientMemory",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:21Z",
+      "last": "2026-11-17T21:07:21Z",
+      "message": "Node twigo-overviews-control-plane status is now: NodeHasNoDiskPressure",
+      "reason": "NodeHasNoDiskPressure",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:21Z",
+      "last": "2026-11-17T21:07:21Z",
+      "message": "Node twigo-overviews-control-plane status is now: NodeHasSufficientPID",
+      "reason": "NodeHasSufficientPID",
+      "source": "kubelet",
+      "type": "Normal"
+    },
+    {
+      "count": 1,
+      "fieldPath": null,
+      "first": "2026-11-17T21:07:21Z",
+      "last": "2026-11-17T21:07:21Z",
+      "message": "Starting kubelet.",
+      "reason": "Starting",
+      "source": "kubelet",
+      "type": "Normal"
+    }
+  ],
   "facts": [
     {
       "found": {
@@ -8,7 +89,7 @@
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:55Z",
+              "creationTimestamp": "2026-11-17T21:07:22Z",
               "generateName": "coredns-559f6c778d-",
               "generation": 1,
               "labels": {
@@ -29,7 +110,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"f4656b6e-16fe-4726-aca7-5d1b224003be\"}": {}
+                        "k:{\"uid\":\"68968642-3d15-4be3-a85f-c3a2490c8263\"}": {}
                       }
                     },
                     "f:spec": {
@@ -170,7 +251,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:22Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -194,7 +275,7 @@
                   "manager": "kube-scheduler",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:23Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -274,10 +355,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:08Z"
+                  "time": "2026-11-17T21:07:36Z"
                 }
               ],
-              "name": "coredns-559f6c778d-q6gn5",
+              "name": "coredns-559f6c778d-9hksr",
               "namespace": "kube-system",
               "ownerReferences": [
                 {
@@ -286,11 +367,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "coredns-559f6c778d",
-                  "uid": "f4656b6e-16fe-4726-aca7-5d1b224003be"
+                  "uid": "68968642-3d15-4be3-a85f-c3a2490c8263"
                 }
               ],
-              "resourceVersion": "550",
-              "uid": "6a9869be-c93d-4040-808f-14a6285553d8"
+              "resourceVersion": "546",
+              "uid": "7a45d121-3765-4053-8196-8e9455c13499"
             },
             "spec": {
               "affinity": {
@@ -406,7 +487,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-gbcqt",
+                      "name": "kube-api-access-pbsl9",
                       "readOnly": true
                     }
                   ]
@@ -464,7 +545,7 @@
                   "name": "config-volume"
                 },
                 {
-                  "name": "kube-api-access-gbcqt",
+                  "name": "kube-api-access-pbsl9",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -511,35 +592,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -551,7 +632,7 @@
                     "cpu": "100m",
                     "memory": "70Mi"
                   },
-                  "containerID": "containerd://354eb932048716d92d3870c309ff85a3f65172903a8568de26726b267185d034",
+                  "containerID": "containerd://67afd8d4e074a43474a9a0b3619b2ce9131f3f4d99844def139f609801cbc296",
                   "image": "registry.k8s.io/coredns/coredns:v1.14.6",
                   "imageID": "sha256:fbccbf70a429fb9ce1cdb13a40ed96b16272ef763dafe050b2c0d121dd29811b",
                   "lastState": {},
@@ -570,7 +651,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:19:07Z"
+                      "startedAt": "2026-11-17T21:07:35Z"
                     }
                   },
                   "user": {
@@ -591,7 +672,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-gbcqt",
+                      "name": "kube-api-access-pbsl9",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -622,14 +703,14 @@
                   "memory": "70Mi"
                 }
               },
-              "startTime": "2026-11-03T11:19:06Z"
+              "startTime": "2026-11-17T21:07:34Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:55Z",
+              "creationTimestamp": "2026-11-17T21:07:22Z",
               "generateName": "coredns-559f6c778d-",
               "generation": 1,
               "labels": {
@@ -650,7 +731,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"f4656b6e-16fe-4726-aca7-5d1b224003be\"}": {}
+                        "k:{\"uid\":\"68968642-3d15-4be3-a85f-c3a2490c8263\"}": {}
                       }
                     },
                     "f:spec": {
@@ -791,7 +872,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:22Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -815,7 +896,7 @@
                   "manager": "kube-scheduler",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:23Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -872,7 +953,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.2\"}": {
+                        "k:{\"ip\":\"10.244.0.3\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -895,10 +976,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:08Z"
+                  "time": "2026-11-17T21:07:36Z"
                 }
               ],
-              "name": "coredns-559f6c778d-vvxlg",
+              "name": "coredns-559f6c778d-g476l",
               "namespace": "kube-system",
               "ownerReferences": [
                 {
@@ -907,11 +988,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "coredns-559f6c778d",
-                  "uid": "f4656b6e-16fe-4726-aca7-5d1b224003be"
+                  "uid": "68968642-3d15-4be3-a85f-c3a2490c8263"
                 }
               ],
-              "resourceVersion": "549",
-              "uid": "a5a6e74b-341a-48a6-bead-660c7086bce3"
+              "resourceVersion": "545",
+              "uid": "133b7b8d-2ed8-43d1-a132-41461ea2aaa0"
             },
             "spec": {
               "affinity": {
@@ -1027,7 +1108,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-cjttj",
+                      "name": "kube-api-access-npt92",
                       "readOnly": true
                     }
                   ]
@@ -1085,7 +1166,7 @@
                   "name": "config-volume"
                 },
                 {
-                  "name": "kube-api-access-cjttj",
+                  "name": "kube-api-access-npt92",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -1132,35 +1213,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -1172,7 +1253,7 @@
                     "cpu": "100m",
                     "memory": "70Mi"
                   },
-                  "containerID": "containerd://31efc79923731c75fb56f17e90fe96773fa81f52af6f77d6661c6065677b5449",
+                  "containerID": "containerd://39a9d9c68ef6bf69f4b79d5cdfc5050f6ba74535d3ffaf3dc144e9ad5de98a88",
                   "image": "registry.k8s.io/coredns/coredns:v1.14.6",
                   "imageID": "sha256:fbccbf70a429fb9ce1cdb13a40ed96b16272ef763dafe050b2c0d121dd29811b",
                   "lastState": {},
@@ -1191,7 +1272,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:19:07Z"
+                      "startedAt": "2026-11-17T21:07:35Z"
                     }
                   },
                   "user": {
@@ -1212,7 +1293,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-cjttj",
+                      "name": "kube-api-access-npt92",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -1227,10 +1308,10 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.2",
+              "podIP": "10.244.0.3",
               "podIPs": [
                 {
-                  "ip": "10.244.0.2"
+                  "ip": "10.244.0.3"
                 }
               ],
               "qosClass": "Burstable",
@@ -1243,7 +1324,7 @@
                   "memory": "70Mi"
                 }
               },
-              "startTime": "2026-11-03T11:19:06Z"
+              "startTime": "2026-11-17T21:07:34Z"
             }
           },
           {
@@ -1254,10 +1335,10 @@
                 "kubeadm.kubernetes.io/etcd.advertise-client-urls": "https://172.18.0.2:2379",
                 "kubernetes.io/config.hash": "a6b33209c7f0e32a6ac0264aa3be4aa1",
                 "kubernetes.io/config.mirror": "a6b33209c7f0e32a6ac0264aa3be4aa1",
-                "kubernetes.io/config.seen": "2026-11-03T11:18:49.379284011Z",
+                "kubernetes.io/config.seen": "2026-11-17T21:07:17.754588345Z",
                 "kubernetes.io/config.source": "file"
               },
-              "creationTimestamp": "2026-11-03T11:18:53Z",
+              "creationTimestamp": "2026-11-17T21:07:21Z",
               "generation": 1,
               "labels": {
                 "component": "etcd",
@@ -1284,7 +1365,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"}": {}
+                        "k:{\"uid\":\"b8686811-2f73-42b9-b7a5-ac0f5bbd318a\"}": {}
                       }
                     },
                     "f:spec": {
@@ -1416,7 +1497,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:53Z"
+                  "time": "2026-11-17T21:07:21Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -1492,7 +1573,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:05Z"
+                  "time": "2026-11-17T21:07:33Z"
                 }
               ],
               "name": "etcd-twigo-overviews-control-plane",
@@ -1503,11 +1584,11 @@
                   "controller": true,
                   "kind": "Node",
                   "name": "twigo-overviews-control-plane",
-                  "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+                  "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
                 }
               ],
-              "resourceVersion": "438",
-              "uid": "af03433b-45e3-41ea-9cd4-475271b76d0c"
+              "resourceVersion": "430",
+              "uid": "661b5b13-f190-4236-a47e-8756eac889b0"
             },
             "spec": {
               "containers": [
@@ -1649,31 +1730,31 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:05Z",
+                  "lastTransitionTime": "2026-11-17T21:07:33Z",
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:05Z",
+                  "lastTransitionTime": "2026-11-17T21:07:33Z",
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodScheduled"
                 }
@@ -1684,7 +1765,7 @@
                     "cpu": "100m",
                     "memory": "100Mi"
                   },
-                  "containerID": "containerd://e7ad7897de43b3ba75839ea84978ad908aa96c498491e84e930db589d6a0378f",
+                  "containerID": "containerd://ccb1c8cb88a5d2ee16e148254f111e2ccea153b5be0a82c62577fbe69636171f",
                   "image": "registry.k8s.io/etcd:3.7.0-0",
                   "imageID": "sha256:c2e426bbd1cd63b4d1cbdca2eba371a0a2e64b6934dcc48c51a62d488fe64fe8",
                   "lastState": {},
@@ -1700,7 +1781,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:50Z"
+                      "startedAt": "2026-11-17T21:07:18Z"
                     }
                   },
                   "user": {
@@ -1734,14 +1815,14 @@
                   "memory": "100Mi"
                 }
               },
-              "startTime": "2026-11-03T11:18:53Z"
+              "startTime": "2026-11-17T21:07:21Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:55Z",
+              "creationTimestamp": "2026-11-17T21:07:23Z",
               "generateName": "kindnet-",
               "generation": 1,
               "labels": {
@@ -1768,7 +1849,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"0e0d35ff-ee30-4ff4-b5b3-34c21ac3f405\"}": {}
+                        "k:{\"uid\":\"0ea28949-506d-431b-99e0-cd0037b6a58c\"}": {}
                       }
                     },
                     "f:spec": {
@@ -1913,7 +1994,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:23Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -1989,10 +2070,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:20:13Z"
+                  "time": "2026-11-17T21:08:51Z"
                 }
               ],
-              "name": "kindnet-4dkcs",
+              "name": "kindnet-mrsfh",
               "namespace": "kube-system",
               "ownerReferences": [
                 {
@@ -2001,11 +2082,11 @@
                   "controller": true,
                   "kind": "DaemonSet",
                   "name": "kindnet",
-                  "uid": "0e0d35ff-ee30-4ff4-b5b3-34c21ac3f405"
+                  "uid": "0ea28949-506d-431b-99e0-cd0037b6a58c"
                 }
               ],
-              "resourceVersion": "717",
-              "uid": "22dce2e4-3035-4af1-888c-53081430e9e2"
+              "resourceVersion": "1281",
+              "uid": "f3eee192-e899-4f26-af82-2336214a2517"
             },
             "spec": {
               "affinity": {
@@ -2097,7 +2178,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-64228",
+                      "name": "kube-api-access-2smbg",
                       "readOnly": true
                     }
                   ]
@@ -2189,7 +2270,7 @@
                   "name": "nri-plugin"
                 },
                 {
-                  "name": "kube-api-access-64228",
+                  "name": "kube-api-access-2smbg",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -2236,35 +2317,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:23Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:56Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:56Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:23Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -2276,7 +2357,7 @@
                     "cpu": "100m",
                     "memory": "50Mi"
                   },
-                  "containerID": "containerd://8fb35958d04931d69f5426a878b48194f75e065b874bd5ea255a6da5c5844c14",
+                  "containerID": "containerd://65a4cd80dce4eef87cc479c166f21d46dcab2361d1f7de812e6c666ef3867683",
                   "image": "docker.io/kindest/kindnetd:v20260820-69b56db7",
                   "imageID": "sha256:8e13ccc0aaa682502a49e5f98b88acf75fbf5f724875058b3e7a78b1f38a11e7",
                   "lastState": {},
@@ -2292,7 +2373,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:56Z"
+                      "startedAt": "2026-11-17T21:07:24Z"
                     }
                   },
                   "user": {
@@ -2325,7 +2406,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-64228",
+                      "name": "kube-api-access-2smbg",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -2353,7 +2434,7 @@
                   "memory": "50Mi"
                 }
               },
-              "startTime": "2026-11-03T11:18:55Z"
+              "startTime": "2026-11-17T21:07:23Z"
             }
           },
           {
@@ -2364,10 +2445,10 @@
                 "kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint": "172.18.0.2:6443",
                 "kubernetes.io/config.hash": "a4abaabd37df5d60db8881c161dc8fa4",
                 "kubernetes.io/config.mirror": "a4abaabd37df5d60db8881c161dc8fa4",
-                "kubernetes.io/config.seen": "2026-11-03T11:18:49.379288302Z",
+                "kubernetes.io/config.seen": "2026-11-17T21:07:17.754590678Z",
                 "kubernetes.io/config.source": "file"
               },
-              "creationTimestamp": "2026-11-03T11:18:53Z",
+              "creationTimestamp": "2026-11-17T21:07:21Z",
               "generation": 1,
               "labels": {
                 "component": "kube-apiserver",
@@ -2394,7 +2475,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"}": {}
+                        "k:{\"uid\":\"b8686811-2f73-42b9-b7a5-ac0f5bbd318a\"}": {}
                       }
                     },
                     "f:spec": {
@@ -2572,7 +2653,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:53Z"
+                  "time": "2026-11-17T21:07:21Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -2646,7 +2727,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:07Z"
+                  "time": "2026-11-17T21:07:36Z"
                 }
               ],
               "name": "kube-apiserver-twigo-overviews-control-plane",
@@ -2657,11 +2738,11 @@
                   "controller": true,
                   "kind": "Node",
                   "name": "twigo-overviews-control-plane",
-                  "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+                  "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
                 }
               ],
-              "resourceVersion": "548",
-              "uid": "ab35d349-3ff9-4501-b4ad-b228e4c7392a"
+              "resourceVersion": "544",
+              "uid": "3a1421ec-a80f-43af-bbc2-29f46385e5ad"
             },
             "spec": {
               "containers": [
@@ -2848,31 +2929,31 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:36Z",
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:36Z",
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodScheduled"
                 }
@@ -2882,7 +2963,7 @@
                   "allocatedResources": {
                     "cpu": "250m"
                   },
-                  "containerID": "containerd://42aa99aee98f5be22e85080e4b6b8bff989f5d928fec7b395a696f9e17156f06",
+                  "containerID": "containerd://d5877a99393698213126dd55bb3f9f356527524c237ef005f04f1357e330d393",
                   "image": "registry.k8s.io/kube-apiserver-arm64:v1.37.0",
                   "imageID": "docker.io/library/import-2026-08-26@sha256:4fbbef5581e6ed60b96426e3786371b57da07f66e350b4ff2b0077413c2b0444",
                   "lastState": {},
@@ -2897,7 +2978,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:50Z"
+                      "startedAt": "2026-11-17T21:07:18Z"
                     }
                   },
                   "user": {
@@ -2930,7 +3011,7 @@
                   "cpu": "250m"
                 }
               },
-              "startTime": "2026-11-03T11:18:53Z"
+              "startTime": "2026-11-17T21:07:21Z"
             }
           },
           {
@@ -2940,10 +3021,10 @@
               "annotations": {
                 "kubernetes.io/config.hash": "9b9b5c88e1f50ae897b92519e5ea9a7b",
                 "kubernetes.io/config.mirror": "9b9b5c88e1f50ae897b92519e5ea9a7b",
-                "kubernetes.io/config.seen": "2026-11-03T11:18:53.666564929Z",
+                "kubernetes.io/config.seen": "2026-11-17T21:07:17.754591178Z",
                 "kubernetes.io/config.source": "file"
               },
-              "creationTimestamp": "2026-11-03T11:18:53Z",
+              "creationTimestamp": "2026-11-17T21:07:21Z",
               "generation": 1,
               "labels": {
                 "component": "kube-controller-manager",
@@ -2969,7 +3050,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"}": {}
+                        "k:{\"uid\":\"b8686811-2f73-42b9-b7a5-ac0f5bbd318a\"}": {}
                       }
                     },
                     "f:spec": {
@@ -3148,7 +3229,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:53Z"
+                  "time": "2026-11-17T21:07:21Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -3222,7 +3303,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:11Z"
+                  "time": "2026-11-17T21:07:33Z"
                 }
               ],
               "name": "kube-controller-manager-twigo-overviews-control-plane",
@@ -3233,11 +3314,11 @@
                   "controller": true,
                   "kind": "Node",
                   "name": "twigo-overviews-control-plane",
-                  "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+                  "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
                 }
               ],
-              "resourceVersion": "559",
-              "uid": "dd7fd646-cefa-4760-aae1-78f3af766641"
+              "resourceVersion": "431",
+              "uid": "c3a2abbf-e760-43ca-b2a2-94b11e6c282b"
             },
             "spec": {
               "containers": [
@@ -3416,31 +3497,31 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:11Z",
+                  "lastTransitionTime": "2026-11-17T21:07:33Z",
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:11Z",
+                  "lastTransitionTime": "2026-11-17T21:07:33Z",
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodScheduled"
                 }
@@ -3450,7 +3531,7 @@
                   "allocatedResources": {
                     "cpu": "200m"
                   },
-                  "containerID": "containerd://3fbac01e2d7f4ea0c16995ddb226294e03de8e719fcd3c94eea4803197130703",
+                  "containerID": "containerd://aeefb50ecc339bdbadd4189ff09dc43df94d6f7d498b16458e3e0c45e7ee84f6",
                   "image": "registry.k8s.io/kube-controller-manager-arm64:v1.37.0",
                   "imageID": "docker.io/library/import-2026-08-26@sha256:dda35f6553455c1dde75aebfbb20759d24b7de776b884eb06415f242f276200c",
                   "lastState": {},
@@ -3465,7 +3546,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:50Z"
+                      "startedAt": "2026-11-17T21:07:18Z"
                     }
                   },
                   "user": {
@@ -3498,14 +3579,14 @@
                   "cpu": "200m"
                 }
               },
-              "startTime": "2026-11-03T11:18:53Z"
+              "startTime": "2026-11-17T21:07:21Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:55Z",
+              "creationTimestamp": "2026-11-17T21:07:22Z",
               "generateName": "kube-proxy-",
               "generation": 1,
               "labels": {
@@ -3528,7 +3609,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"476d2a0e-16e5-47b6-91f8-d81df8f53515\"}": {}
+                        "k:{\"uid\":\"7946948e-1ab4-4b5a-9e39-202bbb88f852\"}": {}
                       }
                     },
                     "f:spec": {
@@ -3631,7 +3712,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:22Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -3695,10 +3776,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:18:56Z"
+                  "time": "2026-11-17T21:07:24Z"
                 }
               ],
-              "name": "kube-proxy-dxz78",
+              "name": "kube-proxy-nxjnt",
               "namespace": "kube-system",
               "ownerReferences": [
                 {
@@ -3707,11 +3788,11 @@
                   "controller": true,
                   "kind": "DaemonSet",
                   "name": "kube-proxy",
-                  "uid": "476d2a0e-16e5-47b6-91f8-d81df8f53515"
+                  "uid": "7946948e-1ab4-4b5a-9e39-202bbb88f852"
                 }
               ],
-              "resourceVersion": "411",
-              "uid": "3cb472ff-280d-4056-8cf1-54025e6c7eee"
+              "resourceVersion": "408",
+              "uid": "8b8f49bf-a658-4f54-a266-eb0102a018ad"
             },
             "spec": {
               "affinity": {
@@ -3776,7 +3857,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-7jxl2",
+                      "name": "kube-api-access-xw9zl",
                       "readOnly": true
                     }
                   ]
@@ -3861,7 +3942,7 @@
                   "name": "lib-modules"
                 },
                 {
-                  "name": "kube-api-access-7jxl2",
+                  "name": "kube-api-access-xw9zl",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -3904,35 +3985,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:23Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:56Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:56Z",
+                  "lastTransitionTime": "2026-11-17T21:07:24Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:55Z",
+                  "lastTransitionTime": "2026-11-17T21:07:23Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -3940,7 +4021,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://67007037edf7ebc91ebc6124977ce4fb5382e1fe08df39eff83d89e7abacd06d",
+                  "containerID": "containerd://59b81a9204cbcea2d4235fc8d7b9b9f7a38d84802d333448d6440537f8768e39",
                   "image": "registry.k8s.io/kube-proxy-arm64:v1.37.0",
                   "imageID": "docker.io/library/import-2026-08-26@sha256:d5e740cce95911da5590b633aae2f7f7e3370ec9d212d4dbbbf3bf19fa07551f",
                   "lastState": {},
@@ -3951,7 +4032,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:56Z"
+                      "startedAt": "2026-11-17T21:07:24Z"
                     }
                   },
                   "user": {
@@ -3980,7 +4061,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-7jxl2",
+                      "name": "kube-api-access-xw9zl",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -4003,7 +4084,7 @@
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:18:55Z"
+              "startTime": "2026-11-17T21:07:23Z"
             }
           },
           {
@@ -4013,10 +4094,10 @@
               "annotations": {
                 "kubernetes.io/config.hash": "6632fee350ad7ca271af51b9f9743371",
                 "kubernetes.io/config.mirror": "6632fee350ad7ca271af51b9f9743371",
-                "kubernetes.io/config.seen": "2026-11-03T11:18:49.379289177Z",
+                "kubernetes.io/config.seen": "2026-11-17T21:07:17.754591511Z",
                 "kubernetes.io/config.source": "file"
               },
-              "creationTimestamp": "2026-11-03T11:18:53Z",
+              "creationTimestamp": "2026-11-17T21:07:21Z",
               "generation": 1,
               "labels": {
                 "component": "kube-scheduler",
@@ -4042,7 +4123,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"}": {}
+                        "k:{\"uid\":\"b8686811-2f73-42b9-b7a5-ac0f5bbd318a\"}": {}
                       }
                     },
                     "f:spec": {
@@ -4160,7 +4241,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:53Z"
+                  "time": "2026-11-17T21:07:21Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -4234,7 +4315,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:13Z"
+                  "time": "2026-11-17T21:07:36Z"
                 }
               ],
               "name": "kube-scheduler-twigo-overviews-control-plane",
@@ -4245,11 +4326,11 @@
                   "controller": true,
                   "kind": "Node",
                   "name": "twigo-overviews-control-plane",
-                  "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+                  "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
                 }
               ],
-              "resourceVersion": "572",
-              "uid": "e301c4c3-56c6-40a0-86d9-01299d6e17ab"
+              "resourceVersion": "543",
+              "uid": "ab0b8c4e-21d6-4d89-9cf5-4d29f8b518c2"
             },
             "spec": {
               "containers": [
@@ -4367,31 +4448,31 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:13Z",
+                  "lastTransitionTime": "2026-11-17T21:07:36Z",
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:13Z",
+                  "lastTransitionTime": "2026-11-17T21:07:36Z",
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:18:53Z",
+                  "lastTransitionTime": "2026-11-17T21:07:21Z",
                   "status": "True",
                   "type": "PodScheduled"
                 }
@@ -4401,7 +4482,7 @@
                   "allocatedResources": {
                     "cpu": "100m"
                   },
-                  "containerID": "containerd://b903b3896506fda54382cd2db2b128e88f1895a88091451ee1690149dac6bc56",
+                  "containerID": "containerd://907d75d6a64ad4a339fdfbba131a043ba6769851b075e97a314191ce4c335a10",
                   "image": "registry.k8s.io/kube-scheduler-arm64:v1.37.0",
                   "imageID": "docker.io/library/import-2026-08-26@sha256:2aa78b45454b3df79d15bf6a57b4f9871f11ce16c8b645109ba2310076d228dd",
                   "lastState": {},
@@ -4416,7 +4497,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:18:50Z"
+                      "startedAt": "2026-11-17T21:07:18Z"
                     }
                   },
                   "user": {
@@ -4449,14 +4530,14 @@
                   "cpu": "100m"
                 }
               },
-              "startTime": "2026-11-03T11:18:53Z"
+              "startTime": "2026-11-17T21:07:21Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:19:07Z",
+              "creationTimestamp": "2026-11-17T21:07:35Z",
               "generateName": "kwok-controller-6cdd54b655-",
               "generation": 1,
               "labels": {
@@ -4477,7 +4558,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"b24694ff-a20e-4dd9-8f3d-8d1c8c18b436\"}": {}
+                        "k:{\"uid\":\"c4a56502-85c1-44e7-b31f-809a97022712\"}": {}
                       }
                     },
                     "f:spec": {
@@ -4588,7 +4669,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:19:07Z"
+                  "time": "2026-11-17T21:07:35Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -4652,10 +4733,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:19Z"
+                  "time": "2026-11-17T21:07:49Z"
                 }
               ],
-              "name": "kwok-controller-6cdd54b655-5qhgq",
+              "name": "kwok-controller-6cdd54b655-ww76v",
               "namespace": "kube-system",
               "ownerReferences": [
                 {
@@ -4664,11 +4745,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "kwok-controller-6cdd54b655",
-                  "uid": "b24694ff-a20e-4dd9-8f3d-8d1c8c18b436"
+                  "uid": "c4a56502-85c1-44e7-b31f-809a97022712"
                 }
               ],
-              "resourceVersion": "580",
-              "uid": "173f2d16-9489-4d38-815c-f324a2fa6733"
+              "resourceVersion": "575",
+              "uid": "5020d849-f650-4547-a158-aaba1fba3204"
             },
             "spec": {
               "containers": [
@@ -4748,7 +4829,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-xwh8m",
+                      "name": "kube-api-access-dtj2d",
                       "readOnly": true
                     }
                   ]
@@ -4788,7 +4869,7 @@
                   "name": "kwok-config"
                 },
                 {
-                  "name": "kube-api-access-xwh8m",
+                  "name": "kube-api-access-dtj2d",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -4831,35 +4912,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:36Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:19Z",
+                  "lastTransitionTime": "2026-11-17T21:07:49Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:19Z",
+                  "lastTransitionTime": "2026-11-17T21:07:49Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -4867,7 +4948,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://973e6baced517205108e87152549214a28e4b74ef014ab54d9378bc4c680f276",
+                  "containerID": "containerd://e74b91446358b61c3ad9cf6c3eba93e480cbe373afddf8c32a6673400ad874c4",
                   "image": "registry.k8s.io/kwok/kwok:v0.8.0",
                   "imageID": "registry.k8s.io/kwok/kwok@sha256:6d25aa8fbdfe78845423160bf125b5513f9522e2770981f0945c2a250c2b26f0",
                   "lastState": {},
@@ -4878,7 +4959,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:19:11Z"
+                      "startedAt": "2026-11-17T21:07:40Z"
                     }
                   },
                   "user": {
@@ -4909,7 +4990,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-xwh8m",
+                      "name": "kube-api-access-dtj2d",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -4932,14 +5013,504 @@
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:19:07Z"
+              "startTime": "2026-11-17T21:07:35Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:55Z",
+              "creationTimestamp": "2026-11-17T21:07:52Z",
+              "generateName": "metrics-server-76558b4bb9-",
+              "generation": 1,
+              "labels": {
+                "k8s-app": "metrics-server",
+                "pod-template-hash": "76558b4bb9"
+              },
+              "managedFields": [
+                {
+                  "apiVersion": "v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:metadata": {
+                      "f:generateName": {},
+                      "f:labels": {
+                        ".": {},
+                        "f:k8s-app": {},
+                        "f:pod-template-hash": {}
+                      },
+                      "f:ownerReferences": {
+                        ".": {},
+                        "k:{\"uid\":\"9823ef48-6761-4cf1-96e8-25ad69d866ef\"}": {}
+                      }
+                    },
+                    "f:spec": {
+                      "f:containers": {
+                        "k:{\"name\":\"metrics-server\"}": {
+                          ".": {},
+                          "f:args": {},
+                          "f:image": {},
+                          "f:imagePullPolicy": {},
+                          "f:livenessProbe": {
+                            ".": {},
+                            "f:failureThreshold": {},
+                            "f:httpGet": {
+                              ".": {},
+                              "f:path": {},
+                              "f:port": {},
+                              "f:scheme": {}
+                            },
+                            "f:periodSeconds": {},
+                            "f:successThreshold": {},
+                            "f:timeoutSeconds": {}
+                          },
+                          "f:name": {},
+                          "f:ports": {
+                            ".": {},
+                            "k:{\"containerPort\":10250,\"protocol\":\"TCP\"}": {
+                              ".": {},
+                              "f:containerPort": {},
+                              "f:name": {},
+                              "f:protocol": {}
+                            }
+                          },
+                          "f:readinessProbe": {
+                            ".": {},
+                            "f:failureThreshold": {},
+                            "f:httpGet": {
+                              ".": {},
+                              "f:path": {},
+                              "f:port": {},
+                              "f:scheme": {}
+                            },
+                            "f:initialDelaySeconds": {},
+                            "f:periodSeconds": {},
+                            "f:successThreshold": {},
+                            "f:timeoutSeconds": {}
+                          },
+                          "f:resources": {
+                            ".": {},
+                            "f:requests": {
+                              ".": {},
+                              "f:cpu": {},
+                              "f:memory": {}
+                            }
+                          },
+                          "f:securityContext": {
+                            ".": {},
+                            "f:allowPrivilegeEscalation": {},
+                            "f:capabilities": {
+                              ".": {},
+                              "f:drop": {}
+                            },
+                            "f:readOnlyRootFilesystem": {},
+                            "f:runAsNonRoot": {},
+                            "f:runAsUser": {},
+                            "f:seccompProfile": {
+                              ".": {},
+                              "f:type": {}
+                            }
+                          },
+                          "f:terminationMessagePath": {},
+                          "f:terminationMessagePolicy": {},
+                          "f:volumeMounts": {
+                            ".": {},
+                            "k:{\"mountPath\":\"/tmp\"}": {
+                              ".": {},
+                              "f:mountPath": {},
+                              "f:name": {}
+                            }
+                          }
+                        }
+                      },
+                      "f:dnsPolicy": {},
+                      "f:enableServiceLinks": {},
+                      "f:nodeSelector": {},
+                      "f:priorityClassName": {},
+                      "f:restartPolicy": {},
+                      "f:schedulerName": {},
+                      "f:securityContext": {},
+                      "f:serviceAccount": {},
+                      "f:serviceAccountName": {},
+                      "f:terminationGracePeriodSeconds": {},
+                      "f:volumes": {
+                        ".": {},
+                        "k:{\"name\":\"tmp-dir\"}": {
+                          ".": {},
+                          "f:emptyDir": {},
+                          "f:name": {}
+                        }
+                      }
+                    }
+                  },
+                  "manager": "kube-controller-manager",
+                  "operation": "Update",
+                  "time": "2026-11-17T21:07:52Z"
+                },
+                {
+                  "apiVersion": "v1",
+                  "fieldsType": "FieldsV1",
+                  "fieldsV1": {
+                    "f:status": {
+                      "f:allocatedResources": {
+                        ".": {},
+                        "f:cpu": {},
+                        "f:memory": {}
+                      },
+                      "f:conditions": {
+                        "k:{\"type\":\"ContainersReady\"}": {
+                          ".": {},
+                          "f:lastProbeTime": {},
+                          "f:lastTransitionTime": {},
+                          "f:observedGeneration": {},
+                          "f:status": {},
+                          "f:type": {}
+                        },
+                        "k:{\"type\":\"Initialized\"}": {
+                          ".": {},
+                          "f:lastProbeTime": {},
+                          "f:lastTransitionTime": {},
+                          "f:observedGeneration": {},
+                          "f:status": {},
+                          "f:type": {}
+                        },
+                        "k:{\"type\":\"PodReadyToStartContainers\"}": {
+                          ".": {},
+                          "f:lastProbeTime": {},
+                          "f:lastTransitionTime": {},
+                          "f:observedGeneration": {},
+                          "f:status": {},
+                          "f:type": {}
+                        },
+                        "k:{\"type\":\"PodScheduled\"}": {
+                          "f:observedGeneration": {}
+                        },
+                        "k:{\"type\":\"Ready\"}": {
+                          ".": {},
+                          "f:lastProbeTime": {},
+                          "f:lastTransitionTime": {},
+                          "f:observedGeneration": {},
+                          "f:status": {},
+                          "f:type": {}
+                        }
+                      },
+                      "f:containerStatuses": {},
+                      "f:hostIP": {},
+                      "f:hostIPs": {},
+                      "f:observedGeneration": {},
+                      "f:phase": {},
+                      "f:podIP": {},
+                      "f:podIPs": {
+                        ".": {},
+                        "k:{\"ip\":\"10.244.0.7\"}": {
+                          ".": {},
+                          "f:ip": {}
+                        }
+                      },
+                      "f:resources": {
+                        ".": {},
+                        "f:requests": {
+                          ".": {},
+                          "f:cpu": {},
+                          "f:memory": {}
+                        }
+                      },
+                      "f:startTime": {}
+                    }
+                  },
+                  "manager": "kubelet",
+                  "operation": "Update",
+                  "subresource": "status",
+                  "time": "2026-11-17T21:08:17Z"
+                }
+              ],
+              "name": "metrics-server-76558b4bb9-xqmvw",
+              "namespace": "kube-system",
+              "ownerReferences": [
+                {
+                  "apiVersion": "apps/v1",
+                  "blockOwnerDeletion": true,
+                  "controller": true,
+                  "kind": "ReplicaSet",
+                  "name": "metrics-server-76558b4bb9",
+                  "uid": "9823ef48-6761-4cf1-96e8-25ad69d866ef"
+                }
+              ],
+              "resourceVersion": "890",
+              "uid": "e69ab3d4-5cb8-49ee-a252-53fddc29579a"
+            },
+            "spec": {
+              "containers": [
+                {
+                  "args": [
+                    "--cert-dir=/tmp",
+                    "--secure-port=10250",
+                    "--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname",
+                    "--kubelet-use-node-status-port",
+                    "--metric-resolution=15s",
+                    "--kubelet-insecure-tls"
+                  ],
+                  "image": "registry.k8s.io/metrics-server/metrics-server:v0.9.1",
+                  "imagePullPolicy": "IfNotPresent",
+                  "livenessProbe": {
+                    "failureThreshold": 3,
+                    "httpGet": {
+                      "path": "/livez",
+                      "port": "https",
+                      "scheme": "HTTPS"
+                    },
+                    "periodSeconds": 10,
+                    "successThreshold": 1,
+                    "timeoutSeconds": 1
+                  },
+                  "name": "metrics-server",
+                  "ports": [
+                    {
+                      "containerPort": 10250,
+                      "name": "https",
+                      "protocol": "TCP"
+                    }
+                  ],
+                  "readinessProbe": {
+                    "failureThreshold": 3,
+                    "httpGet": {
+                      "path": "/readyz",
+                      "port": "https",
+                      "scheme": "HTTPS"
+                    },
+                    "initialDelaySeconds": 20,
+                    "periodSeconds": 10,
+                    "successThreshold": 1,
+                    "timeoutSeconds": 1
+                  },
+                  "resources": {
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "200Mi"
+                    }
+                  },
+                  "securityContext": {
+                    "allowPrivilegeEscalation": false,
+                    "capabilities": {
+                      "drop": [
+                        "ALL"
+                      ]
+                    },
+                    "readOnlyRootFilesystem": true,
+                    "runAsNonRoot": true,
+                    "runAsUser": 1000,
+                    "seccompProfile": {
+                      "type": "RuntimeDefault"
+                    }
+                  },
+                  "terminationMessagePath": "/dev/termination-log",
+                  "terminationMessagePolicy": "File",
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/tmp",
+                      "name": "tmp-dir"
+                    },
+                    {
+                      "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                      "name": "kube-api-access-bl2p7",
+                      "readOnly": true
+                    }
+                  ]
+                }
+              ],
+              "dnsPolicy": "ClusterFirst",
+              "enableServiceLinks": true,
+              "nodeName": "twigo-overviews-control-plane",
+              "nodeSelector": {
+                "kubernetes.io/os": "linux"
+              },
+              "preemptionPolicy": "PreemptLowerPriority",
+              "priority": 2000000000,
+              "priorityClassName": "system-cluster-critical",
+              "restartPolicy": "Always",
+              "schedulerName": "default-scheduler",
+              "securityContext": {},
+              "serviceAccount": "metrics-server",
+              "serviceAccountName": "metrics-server",
+              "terminationGracePeriodSeconds": 30,
+              "tolerations": [
+                {
+                  "effect": "NoExecute",
+                  "key": "node.kubernetes.io/not-ready",
+                  "operator": "Exists",
+                  "tolerationSeconds": 300
+                },
+                {
+                  "effect": "NoExecute",
+                  "key": "node.kubernetes.io/unreachable",
+                  "operator": "Exists",
+                  "tolerationSeconds": 300
+                }
+              ],
+              "volumes": [
+                {
+                  "emptyDir": {},
+                  "name": "tmp-dir"
+                },
+                {
+                  "name": "kube-api-access-bl2p7",
+                  "projected": {
+                    "defaultMode": 420,
+                    "sources": [
+                      {
+                        "serviceAccountToken": {
+                          "expirationSeconds": 3607,
+                          "path": "token"
+                        }
+                      },
+                      {
+                        "configMap": {
+                          "items": [
+                            {
+                              "key": "ca.crt",
+                              "path": "ca.crt"
+                            }
+                          ],
+                          "name": "kube-root-ca.crt"
+                        }
+                      },
+                      {
+                        "downwardAPI": {
+                          "items": [
+                            {
+                              "fieldRef": {
+                                "apiVersion": "v1",
+                                "fieldPath": "metadata.namespace"
+                              },
+                              "path": "namespace"
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "status": {
+              "allocatedResources": {
+                "cpu": "100m",
+                "memory": "200Mi"
+              },
+              "conditions": [
+                {
+                  "lastProbeTime": null,
+                  "lastTransitionTime": "2026-11-17T21:07:52Z",
+                  "observedGeneration": 1,
+                  "status": "True",
+                  "type": "PodReadyToStartContainers"
+                },
+                {
+                  "lastProbeTime": null,
+                  "lastTransitionTime": "2026-11-17T21:07:52Z",
+                  "observedGeneration": 1,
+                  "status": "True",
+                  "type": "Initialized"
+                },
+                {
+                  "lastProbeTime": null,
+                  "lastTransitionTime": "2026-11-17T21:08:17Z",
+                  "observedGeneration": 1,
+                  "status": "True",
+                  "type": "Ready"
+                },
+                {
+                  "lastProbeTime": null,
+                  "lastTransitionTime": "2026-11-17T21:08:17Z",
+                  "observedGeneration": 1,
+                  "status": "True",
+                  "type": "ContainersReady"
+                },
+                {
+                  "lastProbeTime": null,
+                  "lastTransitionTime": "2026-11-17T21:07:52Z",
+                  "observedGeneration": 1,
+                  "status": "True",
+                  "type": "PodScheduled"
+                }
+              ],
+              "containerStatuses": [
+                {
+                  "allocatedResources": {
+                    "cpu": "100m",
+                    "memory": "200Mi"
+                  },
+                  "containerID": "containerd://74c4a27be56f307022af1b00eb99ddefbb932cbad3d78af2e1df278c56ff7198",
+                  "image": "registry.k8s.io/metrics-server/metrics-server:v0.9.1",
+                  "imageID": "registry.k8s.io/metrics-server/metrics-server@sha256:9b0ba1926e1d3089673f45461c3c1416109dea33b3ba3434048defd380df329b",
+                  "lastState": {},
+                  "name": "metrics-server",
+                  "ready": true,
+                  "resources": {
+                    "requests": {
+                      "cpu": "100m",
+                      "memory": "200Mi"
+                    }
+                  },
+                  "restartCount": 0,
+                  "started": true,
+                  "state": {
+                    "running": {
+                      "startedAt": "2026-11-17T21:07:56Z"
+                    }
+                  },
+                  "user": {
+                    "linux": {
+                      "gid": 0,
+                      "supplementalGroups": [
+                        0
+                      ],
+                      "uid": 1000
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/tmp",
+                      "name": "tmp-dir"
+                    },
+                    {
+                      "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                      "name": "kube-api-access-bl2p7",
+                      "readOnly": true,
+                      "recursiveReadOnly": "Disabled"
+                    }
+                  ]
+                }
+              ],
+              "hostIP": "172.18.0.2",
+              "hostIPs": [
+                {
+                  "ip": "172.18.0.2"
+                }
+              ],
+              "observedGeneration": 1,
+              "phase": "Running",
+              "podIP": "10.244.0.7",
+              "podIPs": [
+                {
+                  "ip": "10.244.0.7"
+                }
+              ],
+              "qosClass": "Burstable",
+              "resources": {
+                "requests": {
+                  "cpu": "79m",
+                  "memory": "200Mi"
+                }
+              },
+              "startTime": "2026-11-17T21:07:52Z"
+            }
+          },
+          {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+              "creationTimestamp": "2026-11-17T21:07:23Z",
               "generateName": "local-path-provisioner-75f7fc7dc5-",
               "generation": 1,
               "labels": {
@@ -4960,7 +5531,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"bd1515de-2895-4a28-a5e7-0cd592f9895b\"}": {}
+                        "k:{\"uid\":\"9ea82d55-6330-474c-bab0-762a84a6f2c7\"}": {}
                       }
                     },
                     "f:spec": {
@@ -5026,7 +5597,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:23Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -5050,7 +5621,7 @@
                   "manager": "kube-scheduler",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:18:55Z"
+                  "time": "2026-11-17T21:07:23Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -5102,7 +5673,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.3\"}": {
+                        "k:{\"ip\":\"10.244.0.2\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -5114,10 +5685,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:19:07Z"
+                  "time": "2026-11-17T21:07:35Z"
                 }
               ],
-              "name": "local-path-provisioner-75f7fc7dc5-wbpqk",
+              "name": "local-path-provisioner-75f7fc7dc5-9c76p",
               "namespace": "local-path-storage",
               "ownerReferences": [
                 {
@@ -5126,11 +5697,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "local-path-provisioner-75f7fc7dc5",
-                  "uid": "bd1515de-2895-4a28-a5e7-0cd592f9895b"
+                  "uid": "9ea82d55-6330-474c-bab0-762a84a6f2c7"
                 }
               ],
-              "resourceVersion": "461",
-              "uid": "9127e04f-bc4d-4571-8c4d-8baf70cc9d2c"
+              "resourceVersion": "457",
+              "uid": "7d40c926-78bc-4b66-8a70-77aca2a9f9e4"
             },
             "spec": {
               "containers": [
@@ -5172,7 +5743,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-8qhf6",
+                      "name": "kube-api-access-89795",
                       "readOnly": true
                     }
                   ]
@@ -5225,7 +5796,7 @@
                   "name": "config-volume"
                 },
                 {
-                  "name": "kube-api-access-8qhf6",
+                  "name": "kube-api-access-89795",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -5268,35 +5839,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:07Z",
+                  "lastTransitionTime": "2026-11-17T21:07:35Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:19:06Z",
+                  "lastTransitionTime": "2026-11-17T21:07:34Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -5304,7 +5875,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://a38ede209229a58940be7d6a76ff4f8dca4f9a132d1d209251a7a5c8a07fb44e",
+                  "containerID": "containerd://126b8896a5bf21c1a3afb2324ee22e5a9a7b8a9b9499b3d27754801f7d53195d",
                   "image": "docker.io/kindest/local-path-provisioner:v20260820-69b56db7",
                   "imageID": "sha256:0771a8a05619f4bb6f4c8484f942f509b21a04ebe56ee26d17a3006e250bfd46",
                   "lastState": {},
@@ -5315,7 +5886,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:19:07Z"
+                      "startedAt": "2026-11-17T21:07:35Z"
                     }
                   },
                   "user": {
@@ -5334,7 +5905,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-8qhf6",
+                      "name": "kube-api-access-89795",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -5349,22 +5920,22 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.3",
+              "podIP": "10.244.0.2",
               "podIPs": [
                 {
-                  "ip": "10.244.0.3"
+                  "ip": "10.244.0.2"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:19:06Z"
+              "startTime": "2026-11-17T21:07:34Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "agent-",
               "generation": 1,
               "labels": {
@@ -5387,7 +5958,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"50ad4f58-a985-4f1e-83d8-4506a695a60d\"}": {}
+                        "k:{\"uid\":\"49579b1c-b166-415d-bf1d-9859bdcab2f0\"}": {}
                       }
                     },
                     "f:spec": {
@@ -5421,7 +5992,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -5473,7 +6044,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.9\"}": {
+                        "k:{\"ip\":\"10.244.0.11\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -5485,10 +6056,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:32Z"
                 }
               ],
-              "name": "agent-v2kwv",
+              "name": "agent-c8xqr",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -5497,11 +6068,11 @@
                   "controller": true,
                   "kind": "DaemonSet",
                   "name": "agent",
-                  "uid": "50ad4f58-a985-4f1e-83d8-4506a695a60d"
+                  "uid": "49579b1c-b166-415d-bf1d-9859bdcab2f0"
                 }
               ],
-              "resourceVersion": "2421",
-              "uid": "addb1065-f5a1-4e45-a38c-cad1f8201188"
+              "resourceVersion": "1093",
+              "uid": "2642d548-bf44-4bb4-8016-a2a22b0224ba"
             },
             "spec": {
               "affinity": {
@@ -5534,7 +6105,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-m5zpt",
+                      "name": "kube-api-access-xcjss",
                       "readOnly": true
                     }
                   ]
@@ -5588,7 +6159,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-m5zpt",
+                  "name": "kube-api-access-xcjss",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -5631,35 +6202,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -5667,7 +6238,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://57bce72b38f04542df2776d6b3af944fb916186d858b0eaf36719d00767bd812",
+                  "containerID": "containerd://2905883d318c5fa13870cea5c7e1257dd43da5a2f17b6f007bead3a6d8fd2513",
                   "image": "registry.k8s.io/pause:3.10",
                   "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
                   "lastState": {},
@@ -5678,7 +6249,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:36:41Z"
+                      "startedAt": "2026-11-17T21:08:32Z"
                     }
                   },
                   "user": {
@@ -5693,7 +6264,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-m5zpt",
+                      "name": "kube-api-access-xcjss",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -5708,22 +6279,22 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.9",
+              "podIP": "10.244.0.11",
               "podIPs": [
                 {
-                  "ip": "10.244.0.9"
+                  "ip": "10.244.0.11"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T12:13:01Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "api-c8894f678-",
               "generation": 1,
               "labels": {
@@ -5744,7 +6315,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"d5a58dfc-d7c6-4945-8e5f-943c1c450598\"}": {}
+                        "k:{\"uid\":\"bb2fdafb-6918-4456-b353-19065d9526c0\"}": {}
                       }
                     },
                     "f:spec": {
@@ -5771,7 +6342,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:13:01Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -5827,7 +6398,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.54\"}": {
+                        "k:{\"ip\":\"10.244.0.13\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -5839,10 +6410,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:55:30Z"
+                  "time": "2026-11-17T21:11:15Z"
                 }
               ],
-              "name": "api-c8894f678-vmnxl",
+              "name": "api-c8894f678-cfzbt",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -5851,11 +6422,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "api-c8894f678",
-                  "uid": "d5a58dfc-d7c6-4945-8e5f-943c1c450598"
+                  "uid": "bb2fdafb-6918-4456-b353-19065d9526c0"
                 }
               ],
-              "resourceVersion": "12647",
-              "uid": "1b638b55-cff7-4253-99ee-2baa87001aea"
+              "resourceVersion": "1768",
+              "uid": "eb1e0091-11c4-44fd-904a-0b44f17b7f2b"
             },
             "spec": {
               "containers": [
@@ -5874,7 +6445,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-xsxv2",
+                      "name": "kube-api-access-j7zz4",
                       "readOnly": true
                     }
                   ]
@@ -5910,7 +6481,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-xsxv2",
+                  "name": "kube-api-access-j7zz4",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -5953,21 +6524,21 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:13:01Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:13:01Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:54:28Z",
+                  "lastTransitionTime": "2026-11-17T21:10:09Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -5976,7 +6547,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:54:28Z",
+                  "lastTransitionTime": "2026-11-17T21:10:09Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -5985,7 +6556,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:13:01Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -5993,27 +6564,27 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://f008a57fa5632bf105800d4ad1e4c76253b56324582ad893344dba8c93b7b96c",
+                  "containerID": "containerd://1d69f9e097819a3c2ecd9dde680a2eae4fff803aedd53aee2d213b28d77e6f08",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {
                     "terminated": {
-                      "containerID": "containerd://f008a57fa5632bf105800d4ad1e4c76253b56324582ad893344dba8c93b7b96c",
+                      "containerID": "containerd://1d69f9e097819a3c2ecd9dde680a2eae4fff803aedd53aee2d213b28d77e6f08",
                       "exitCode": 1,
-                      "finishedAt": "2026-11-03T12:54:27Z",
+                      "finishedAt": "2026-11-17T21:10:08Z",
                       "message": "panic: dial tcp 10.96.0.20:5432: connect: connection refused\n",
                       "reason": "Error",
-                      "startedAt": "2026-11-03T12:54:27Z"
+                      "startedAt": "2026-11-17T21:10:08Z"
                     }
                   },
                   "name": "api",
                   "ready": false,
                   "resources": {},
-                  "restartCount": 13,
+                  "restartCount": 4,
                   "started": false,
                   "state": {
                     "waiting": {
-                      "message": "back-off 5m0s restarting failed container=api pod=api-c8894f678-vmnxl_overview(1b638b55-cff7-4253-99ee-2baa87001aea)",
+                      "message": "back-off 1m20s restarting failed container=api pod=api-c8894f678-cfzbt_overview(eb1e0091-11c4-44fd-904a-0b44f17b7f2b)",
                       "reason": "CrashLoopBackOff"
                     }
                   },
@@ -6029,7 +6600,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-xsxv2",
+                      "name": "kube-api-access-j7zz4",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -6044,22 +6615,22 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.54",
+              "podIP": "10.244.0.13",
               "podIPs": [
                 {
-                  "ip": "10.244.0.54"
+                  "ip": "10.244.0.13"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T12:13:01Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "db-",
               "generation": 1,
               "labels": {
@@ -6084,7 +6655,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"47e4660a-9b80-481b-a117-d69094325a94\"}": {}
+                        "k:{\"uid\":\"1c36ea6d-5cbd-4416-8e9a-6ddc5bf621b1\"}": {}
                       }
                     },
                     "f:spec": {
@@ -6131,7 +6702,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -6144,7 +6715,7 @@
                   "manager": "kube-scheduler",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -6196,7 +6767,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.16\"}": {
+                        "k:{\"ip\":\"10.244.0.18\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -6208,7 +6779,7 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:45Z"
+                  "time": "2026-11-17T21:08:37Z"
                 }
               ],
               "name": "db-0",
@@ -6220,11 +6791,11 @@
                   "controller": true,
                   "kind": "StatefulSet",
                   "name": "db",
-                  "uid": "47e4660a-9b80-481b-a117-d69094325a94"
+                  "uid": "1c36ea6d-5cbd-4416-8e9a-6ddc5bf621b1"
                 }
               ],
-              "resourceVersion": "2531",
-              "uid": "62d2c3b7-30b8-40ea-8b5b-e7d986234eb7"
+              "resourceVersion": "1216",
+              "uid": "d1d55ca5-b68d-4ce2-ad05-12e84482d44f"
             },
             "spec": {
               "containers": [
@@ -6242,7 +6813,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-cpr6h",
+                      "name": "kube-api-access-7kg82",
                       "readOnly": true
                     }
                   ]
@@ -6286,7 +6857,7 @@
                   }
                 },
                 {
-                  "name": "kube-api-access-cpr6h",
+                  "name": "kube-api-access-7kg82",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -6329,35 +6900,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:45Z",
+                  "lastTransitionTime": "2026-11-17T21:08:37Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:44Z",
+                  "lastTransitionTime": "2026-11-17T21:08:36Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:45Z",
+                  "lastTransitionTime": "2026-11-17T21:08:37Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:45Z",
+                  "lastTransitionTime": "2026-11-17T21:08:37Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:44Z",
+                  "lastTransitionTime": "2026-11-17T21:08:36Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -6365,7 +6936,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://12c75ea8f76c0c3b5d8456cf4c3accbc4ffa42ee587aa7c6faa87479d9c859dc",
+                  "containerID": "containerd://cf86124d331d831996248ce981dbb662a799e171f3b07ec67512896fa0b662ff",
                   "image": "registry.k8s.io/pause:3.10",
                   "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
                   "lastState": {},
@@ -6376,7 +6947,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:36:45Z"
+                      "startedAt": "2026-11-17T21:08:37Z"
                     }
                   },
                   "user": {
@@ -6395,7 +6966,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-cpr6h",
+                      "name": "kube-api-access-7kg82",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -6410,28 +6981,28 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.16",
+              "podIP": "10.244.0.18",
               "podIPs": [
                 {
-                  "ip": "10.244.0.16"
+                  "ip": "10.244.0.18"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:36:44Z"
+              "startTime": "2026-11-17T21:08:36Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "migrate-",
               "generation": 1,
               "labels": {
-                "batch.kubernetes.io/controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+                "batch.kubernetes.io/controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
                 "batch.kubernetes.io/job-name": "migrate",
-                "controller-uid": "23d14ace-b325-473f-bb93-bad78aaa7928",
+                "controller-uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb",
                 "job-name": "migrate"
               },
               "managedFields": [
@@ -6450,7 +7021,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"23d14ace-b325-473f-bb93-bad78aaa7928\"}": {}
+                        "k:{\"uid\":\"d6baf7b2-bc3a-46d0-8b83-709acc7c00fb\"}": {}
                       }
                     },
                     "f:spec": {
@@ -6477,7 +7048,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -6534,7 +7105,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.11\"}": {
+                        "k:{\"ip\":\"10.244.0.12\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -6546,10 +7117,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:43Z"
+                  "time": "2026-11-17T21:08:34Z"
                 }
               ],
-              "name": "migrate-72fj4",
+              "name": "migrate-sddsh",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -6558,11 +7129,11 @@
                   "controller": true,
                   "kind": "Job",
                   "name": "migrate",
-                  "uid": "23d14ace-b325-473f-bb93-bad78aaa7928"
+                  "uid": "d6baf7b2-bc3a-46d0-8b83-709acc7c00fb"
                 }
               ],
-              "resourceVersion": "2518",
-              "uid": "a3ab8af4-0572-4b43-acd6-21b8406d6951"
+              "resourceVersion": "1195",
+              "uid": "38dab92a-f945-4b92-addc-e8b61798d5b7"
             },
             "spec": {
               "containers": [
@@ -6581,7 +7152,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-4vqk6",
+                      "name": "kube-api-access-kvzmd",
                       "readOnly": true
                     }
                   ]
@@ -6617,7 +7188,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-4vqk6",
+                  "name": "kube-api-access-kvzmd",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -6660,7 +7231,7 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:43Z",
+                  "lastTransitionTime": "2026-11-17T21:08:34Z",
                   "message": "pod sandbox is not ready",
                   "observedGeneration": 1,
                   "reason": "PodSandboxNotReady",
@@ -6669,7 +7240,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "True",
@@ -6677,7 +7248,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:42Z",
+                  "lastTransitionTime": "2026-11-17T21:08:33Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -6685,7 +7256,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:42Z",
+                  "lastTransitionTime": "2026-11-17T21:08:33Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -6693,7 +7264,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -6701,7 +7272,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://a517a752e5cadc89a02b30dfce7a732facabd84991e07daa36c2b657669c52e2",
+                  "containerID": "containerd://e7ab4705f27bf95f85d81cd23951f2363e0cad98e1d7c11654dcb4f9866ef07f",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {},
@@ -6712,11 +7283,11 @@
                   "started": false,
                   "state": {
                     "terminated": {
-                      "containerID": "containerd://a517a752e5cadc89a02b30dfce7a732facabd84991e07daa36c2b657669c52e2",
+                      "containerID": "containerd://e7ab4705f27bf95f85d81cd23951f2363e0cad98e1d7c11654dcb4f9866ef07f",
                       "exitCode": 0,
-                      "finishedAt": "2026-11-03T11:36:41Z",
+                      "finishedAt": "2026-11-17T21:08:32Z",
                       "reason": "Completed",
-                      "startedAt": "2026-11-03T11:36:41Z"
+                      "startedAt": "2026-11-17T21:08:32Z"
                     }
                   },
                   "user": {
@@ -6731,7 +7302,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-4vqk6",
+                      "name": "kube-api-access-kvzmd",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -6746,22 +7317,22 @@
               ],
               "observedGeneration": 1,
               "phase": "Succeeded",
-              "podIP": "10.244.0.11",
+              "podIP": "10.244.0.12",
               "podIPs": [
                 {
-                  "ip": "10.244.0.11"
+                  "ip": "10.244.0.12"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generation": 1,
               "labels": {
                 "app": "pull"
@@ -6789,7 +7360,7 @@
                   },
                   "manager": "twigo-record",
                   "operation": "Apply",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -6844,7 +7415,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.13\"}": {
+                        "k:{\"ip\":\"10.244.0.14\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -6856,13 +7427,13 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:54:33Z"
+                  "time": "2026-11-17T21:10:16Z"
                 }
               ],
               "name": "pull",
               "namespace": "overview",
-              "resourceVersion": "12532",
-              "uid": "1ad7b2f9-68b1-4215-89dd-1ff5c4486e16"
+              "resourceVersion": "1587",
+              "uid": "e1fe4fc6-8450-4eff-ad17-622ee279dc55"
             },
             "spec": {
               "containers": [
@@ -6876,7 +7447,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-r286z",
+                      "name": "kube-api-access-czw2p",
                       "readOnly": true
                     }
                   ]
@@ -6912,7 +7483,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-r286z",
+                  "name": "kube-api-access-czw2p",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -6955,21 +7526,21 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -6978,7 +7549,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -6987,7 +7558,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7011,7 +7582,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-r286z",
+                      "name": "kube-api-access-czw2p",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -7026,29 +7597,29 @@
               ],
               "observedGeneration": 1,
               "phase": "Pending",
-              "podIP": "10.244.0.13",
+              "podIP": "10.244.0.14",
               "podIPs": [
                 {
-                  "ip": "10.244.0.13"
+                  "ip": "10.244.0.14"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T12:57:00Z",
-              "generateName": "report-29895177-",
+              "creationTimestamp": "2026-11-17T21:10:00Z",
+              "generateName": "report-29915830-",
               "generation": 1,
               "labels": {
-                "batch.kubernetes.io/controller-uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc",
-                "batch.kubernetes.io/job-name": "report-29895177",
-                "controller-uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc",
-                "job-name": "report-29895177"
+                "batch.kubernetes.io/controller-uid": "6cefec53-7f40-4926-8845-eaf68a7d9379",
+                "batch.kubernetes.io/job-name": "report-29915830",
+                "controller-uid": "6cefec53-7f40-4926-8845-eaf68a7d9379",
+                "job-name": "report-29915830"
               },
               "managedFields": [
                 {
@@ -7066,7 +7637,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"58a702d2-d70d-4a43-8dc6-4e2148755bcc\"}": {}
+                        "k:{\"uid\":\"6cefec53-7f40-4926-8845-eaf68a7d9379\"}": {}
                       }
                     },
                     "f:spec": {
@@ -7093,7 +7664,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:57:00Z"
+                  "time": "2026-11-17T21:10:00Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -7150,7 +7721,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.98\"}": {
+                        "k:{\"ip\":\"10.244.0.20\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -7162,10 +7733,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:57:01Z"
+                  "time": "2026-11-17T21:10:02Z"
                 }
               ],
-              "name": "report-29895177-n4wct",
+              "name": "report-29915830-v87sz",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -7173,12 +7744,12 @@
                   "blockOwnerDeletion": true,
                   "controller": true,
                   "kind": "Job",
-                  "name": "report-29895177",
-                  "uid": "58a702d2-d70d-4a43-8dc6-4e2148755bcc"
+                  "name": "report-29915830",
+                  "uid": "6cefec53-7f40-4926-8845-eaf68a7d9379"
                 }
               ],
-              "resourceVersion": "12841",
-              "uid": "c6e2de25-2949-4b70-9ed4-9c70e1af7e79"
+              "resourceVersion": "1538",
+              "uid": "fa809450-f17e-4e5c-a24b-f7b222b13a06"
             },
             "spec": {
               "containers": [
@@ -7197,7 +7768,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-fd7c7",
+                      "name": "kube-api-access-sfwp8",
                       "readOnly": true
                     }
                   ]
@@ -7233,7 +7804,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-fd7c7",
+                  "name": "kube-api-access-sfwp8",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -7276,7 +7847,7 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:57:01Z",
+                  "lastTransitionTime": "2026-11-17T21:10:02Z",
                   "message": "pod sandbox is not ready",
                   "observedGeneration": 1,
                   "reason": "PodSandboxNotReady",
@@ -7285,7 +7856,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:57:00Z",
+                  "lastTransitionTime": "2026-11-17T21:10:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "True",
@@ -7293,7 +7864,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:57:00Z",
+                  "lastTransitionTime": "2026-11-17T21:10:01Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7301,7 +7872,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:57:00Z",
+                  "lastTransitionTime": "2026-11-17T21:10:01Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7309,7 +7880,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:57:00Z",
+                  "lastTransitionTime": "2026-11-17T21:10:00Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7317,7 +7888,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://07e71b0080252250f6508a84aa3ec178e86bcb89960a798469cc6e32a8f45cf8",
+                  "containerID": "containerd://2e86849595290a03d4deb12e7b529814d392322f001dcef69876719f57545868",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {},
@@ -7328,11 +7899,11 @@
                   "started": false,
                   "state": {
                     "terminated": {
-                      "containerID": "containerd://07e71b0080252250f6508a84aa3ec178e86bcb89960a798469cc6e32a8f45cf8",
+                      "containerID": "containerd://2e86849595290a03d4deb12e7b529814d392322f001dcef69876719f57545868",
                       "exitCode": 0,
-                      "finishedAt": "2026-11-03T12:57:00Z",
+                      "finishedAt": "2026-11-17T21:10:00Z",
                       "reason": "Completed",
-                      "startedAt": "2026-11-03T12:57:00Z"
+                      "startedAt": "2026-11-17T21:10:00Z"
                     }
                   },
                   "user": {
@@ -7347,7 +7918,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-fd7c7",
+                      "name": "kube-api-access-sfwp8",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -7362,29 +7933,29 @@
               ],
               "observedGeneration": 1,
               "phase": "Succeeded",
-              "podIP": "10.244.0.98",
+              "podIP": "10.244.0.20",
               "podIPs": [
                 {
-                  "ip": "10.244.0.98"
+                  "ip": "10.244.0.20"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T12:57:00Z"
+              "startTime": "2026-11-17T21:10:00Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T12:58:00Z",
-              "generateName": "report-29895178-",
+              "creationTimestamp": "2026-11-17T21:11:00Z",
+              "generateName": "report-29915831-",
               "generation": 1,
               "labels": {
-                "batch.kubernetes.io/controller-uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399",
-                "batch.kubernetes.io/job-name": "report-29895178",
-                "controller-uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399",
-                "job-name": "report-29895178"
+                "batch.kubernetes.io/controller-uid": "12ed4e82-4918-4af1-a381-145c47b4eccb",
+                "batch.kubernetes.io/job-name": "report-29915831",
+                "controller-uid": "12ed4e82-4918-4af1-a381-145c47b4eccb",
+                "job-name": "report-29915831"
               },
               "managedFields": [
                 {
@@ -7402,7 +7973,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"94d53e79-a1a7-4b14-8603-e1bdb7541399\"}": {}
+                        "k:{\"uid\":\"12ed4e82-4918-4af1-a381-145c47b4eccb\"}": {}
                       }
                     },
                     "f:spec": {
@@ -7429,7 +8000,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T12:58:00Z"
+                  "time": "2026-11-17T21:11:00Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -7486,7 +8057,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.99\"}": {
+                        "k:{\"ip\":\"10.244.0.21\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -7498,10 +8069,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T12:58:01Z"
+                  "time": "2026-11-17T21:11:02Z"
                 }
               ],
-              "name": "report-29895178-v22rs",
+              "name": "report-29915831-5bl4h",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -7509,12 +8080,12 @@
                   "blockOwnerDeletion": true,
                   "controller": true,
                   "kind": "Job",
-                  "name": "report-29895178",
-                  "uid": "94d53e79-a1a7-4b14-8603-e1bdb7541399"
+                  "name": "report-29915831",
+                  "uid": "12ed4e82-4918-4af1-a381-145c47b4eccb"
                 }
               ],
-              "resourceVersion": "12961",
-              "uid": "675e2520-8f43-4b10-b71d-47340026ac77"
+              "resourceVersion": "1719",
+              "uid": "7b5fd7e1-8de8-4654-91b0-107e51d5f7f6"
             },
             "spec": {
               "containers": [
@@ -7533,7 +8104,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-c6x5l",
+                      "name": "kube-api-access-f9pmc",
                       "readOnly": true
                     }
                   ]
@@ -7569,7 +8140,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-c6x5l",
+                  "name": "kube-api-access-f9pmc",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -7612,7 +8183,7 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:58:01Z",
+                  "lastTransitionTime": "2026-11-17T21:11:02Z",
                   "message": "pod sandbox is not ready",
                   "observedGeneration": 1,
                   "reason": "PodSandboxNotReady",
@@ -7621,7 +8192,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:58:00Z",
+                  "lastTransitionTime": "2026-11-17T21:11:00Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "True",
@@ -7629,7 +8200,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:58:00Z",
+                  "lastTransitionTime": "2026-11-17T21:11:01Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7637,7 +8208,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:58:00Z",
+                  "lastTransitionTime": "2026-11-17T21:11:01Z",
                   "observedGeneration": 1,
                   "reason": "PodCompleted",
                   "status": "False",
@@ -7645,7 +8216,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T12:58:00Z",
+                  "lastTransitionTime": "2026-11-17T21:11:00Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7653,7 +8224,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://1a34d238abc3a917e1a959215f52debcafc1eed1e827844c5d53505ae54e88a8",
+                  "containerID": "containerd://a8caeb42223bbf14c94f7bcf2589f5eaeea70872b272f027ed83e397b1a643b4",
                   "image": "docker.io/kindest/local-path-helper:v20260131-7181c60a",
                   "imageID": "sha256:8f375e9f935137d1f92bd9bbfb860bbb6862a90c54e086f2696ce2385d0a5b78",
                   "lastState": {},
@@ -7664,11 +8235,11 @@
                   "started": false,
                   "state": {
                     "terminated": {
-                      "containerID": "containerd://1a34d238abc3a917e1a959215f52debcafc1eed1e827844c5d53505ae54e88a8",
+                      "containerID": "containerd://a8caeb42223bbf14c94f7bcf2589f5eaeea70872b272f027ed83e397b1a643b4",
                       "exitCode": 0,
-                      "finishedAt": "2026-11-03T12:58:00Z",
+                      "finishedAt": "2026-11-17T21:11:00Z",
                       "reason": "Completed",
-                      "startedAt": "2026-11-03T12:58:00Z"
+                      "startedAt": "2026-11-17T21:11:00Z"
                     }
                   },
                   "user": {
@@ -7683,7 +8254,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-c6x5l",
+                      "name": "kube-api-access-f9pmc",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -7698,22 +8269,22 @@
               ],
               "observedGeneration": 1,
               "phase": "Succeeded",
-              "podIP": "10.244.0.99",
+              "podIP": "10.244.0.21",
               "podIPs": [
                 {
-                  "ip": "10.244.0.99"
+                  "ip": "10.244.0.21"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T12:58:00Z"
+              "startTime": "2026-11-17T21:11:00Z"
             }
           },
           {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generation": 1,
               "labels": {
                 "app": "unready"
@@ -7748,7 +8319,7 @@
                   },
                   "manager": "twigo-record",
                   "operation": "Apply",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -7804,7 +8375,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.14\"}": {
+                        "k:{\"ip\":\"10.244.0.16\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -7816,13 +8387,13 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:32Z"
                 }
               ],
               "name": "unready",
               "namespace": "overview",
-              "resourceVersion": "2450",
-              "uid": "cdfcf731-2bcd-4740-b7e3-928df7b5abdc"
+              "resourceVersion": "1124",
+              "uid": "9e377a57-db0a-4a54-97be-c5e0485c0367"
             },
             "spec": {
               "containers": [
@@ -7845,7 +8416,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-kwl6m",
+                      "name": "kube-api-access-7b6lg",
                       "readOnly": true
                     }
                   ]
@@ -7881,7 +8452,7 @@
               ],
               "volumes": [
                 {
-                  "name": "kube-api-access-kwl6m",
+                  "name": "kube-api-access-7b6lg",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -7924,21 +8495,21 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -7947,7 +8518,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "message": "containers with unready status: [api]",
                   "observedGeneration": 1,
                   "reason": "ContainersNotReady",
@@ -7956,7 +8527,7 @@
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -7964,7 +8535,7 @@
               ],
               "containerStatuses": [
                 {
-                  "containerID": "containerd://0b85c39d84e06479b8a18ecd2263cedb756c67d5cba8dbb76b9f0dfdab8b6b32",
+                  "containerID": "containerd://a90207d723efed28a41d4563e75e8d7586313ebbf4549cf5bad1b46ac7718ed3",
                   "image": "registry.k8s.io/pause:3.10",
                   "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
                   "lastState": {},
@@ -7975,7 +8546,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:36:41Z"
+                      "startedAt": "2026-11-17T21:08:32Z"
                     }
                   },
                   "user": {
@@ -7990,7 +8561,7 @@
                   "volumeMounts": [
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-kwl6m",
+                      "name": "kube-api-access-7b6lg",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -8005,15 +8576,15 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.14",
+              "podIP": "10.244.0.16",
               "podIPs": [
                 {
-                  "ip": "10.244.0.14"
+                  "ip": "10.244.0.16"
                 }
               ],
               "qosClass": "BestEffort",
               "resources": {},
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
@@ -8023,7 +8594,7 @@
               "annotations": {
                 "twigo.io/revision": "2"
               },
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:31Z",
               "generateName": "web-54454cf656-",
               "generation": 1,
               "labels": {
@@ -8048,7 +8619,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"cd05d603-d2a6-417d-ba62-1130a0711b7e\"}": {}
+                        "k:{\"uid\":\"145101ff-9ee8-4b8c-be9b-5448f3b09354\"}": {}
                       }
                     },
                     "f:spec": {
@@ -8151,7 +8722,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:31Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -8208,7 +8779,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.8\"}": {
+                        "k:{\"ip\":\"10.244.0.10\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -8230,10 +8801,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:32Z"
                 }
               ],
-              "name": "web-54454cf656-dvb7s",
+              "name": "web-54454cf656-2lllp",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -8242,11 +8813,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "web-54454cf656",
-                  "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
+                  "uid": "145101ff-9ee8-4b8c-be9b-5448f3b09354"
                 }
               ],
-              "resourceVersion": "2699",
-              "uid": "4d628f1b-063c-451b-8e42-d07498e421c6"
+              "resourceVersion": "1456",
+              "uid": "d6a686fe-a22b-47df-89ee-d78bb6b2e422"
             },
             "spec": {
               "containers": [
@@ -8326,7 +8897,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-szhp5",
+                      "name": "kube-api-access-l4sc8",
                       "readOnly": true
                     }
                   ]
@@ -8369,7 +8940,7 @@
                   "name": "settings"
                 },
                 {
-                  "name": "kube-api-access-szhp5",
+                  "name": "kube-api-access-l4sc8",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -8416,35 +8987,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:31Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -8456,7 +9027,7 @@
                     "cpu": "10m",
                     "memory": "16Mi"
                   },
-                  "containerID": "containerd://a221fdcc856190fdcc285c9d072643cea87e57d5e7d3cd8f8ca6241732cc7e66",
+                  "containerID": "containerd://5c596f6703838f4c10043e93bbac4ce9364c2665bf9e070e302cee1c5dd7fac9",
                   "image": "registry.k8s.io/pause:3.10",
                   "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
                   "lastState": {},
@@ -8475,7 +9046,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:36:41Z"
+                      "startedAt": "2026-11-17T21:08:32Z"
                     }
                   },
                   "user": {
@@ -8496,7 +9067,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-szhp5",
+                      "name": "kube-api-access-l4sc8",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -8511,10 +9082,10 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.8",
+              "podIP": "10.244.0.10",
               "podIPs": [
                 {
-                  "ip": "10.244.0.8"
+                  "ip": "10.244.0.10"
                 }
               ],
               "qosClass": "Burstable",
@@ -8526,7 +9097,7 @@
                   "memory": "16Mi"
                 }
               },
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:31Z"
             }
           },
           {
@@ -8536,7 +9107,7 @@
               "annotations": {
                 "twigo.io/revision": "2"
               },
-              "creationTimestamp": "2026-11-03T11:36:41Z",
+              "creationTimestamp": "2026-11-17T21:08:32Z",
               "generateName": "web-54454cf656-",
               "generation": 1,
               "labels": {
@@ -8561,7 +9132,7 @@
                       },
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"cd05d603-d2a6-417d-ba62-1130a0711b7e\"}": {}
+                        "k:{\"uid\":\"145101ff-9ee8-4b8c-be9b-5448f3b09354\"}": {}
                       }
                     },
                     "f:spec": {
@@ -8664,7 +9235,7 @@
                   },
                   "manager": "kube-controller-manager",
                   "operation": "Update",
-                  "time": "2026-11-03T11:36:41Z"
+                  "time": "2026-11-17T21:08:32Z"
                 },
                 {
                   "apiVersion": "v1",
@@ -8721,7 +9292,7 @@
                       "f:podIP": {},
                       "f:podIPs": {
                         ".": {},
-                        "k:{\"ip\":\"10.244.0.15\"}": {
+                        "k:{\"ip\":\"10.244.0.17\"}": {
                           ".": {},
                           "f:ip": {}
                         }
@@ -8743,10 +9314,10 @@
                   "manager": "kubelet",
                   "operation": "Update",
                   "subresource": "status",
-                  "time": "2026-11-03T11:36:42Z"
+                  "time": "2026-11-17T21:08:33Z"
                 }
               ],
-              "name": "web-54454cf656-hbgcx",
+              "name": "web-54454cf656-94nbs",
               "namespace": "overview",
               "ownerReferences": [
                 {
@@ -8755,11 +9326,11 @@
                   "controller": true,
                   "kind": "ReplicaSet",
                   "name": "web-54454cf656",
-                  "uid": "cd05d603-d2a6-417d-ba62-1130a0711b7e"
+                  "uid": "145101ff-9ee8-4b8c-be9b-5448f3b09354"
                 }
               ],
-              "resourceVersion": "2714",
-              "uid": "c5755e87-0b75-44aa-9d0d-98e355e05635"
+              "resourceVersion": "1517",
+              "uid": "188170a4-a0a1-42e6-b2ac-bd0e9c594e49"
             },
             "spec": {
               "containers": [
@@ -8839,7 +9410,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-hffsb",
+                      "name": "kube-api-access-gr4lf",
                       "readOnly": true
                     }
                   ]
@@ -8882,7 +9453,7 @@
                   "name": "settings"
                 },
                 {
-                  "name": "kube-api-access-hffsb",
+                  "name": "kube-api-access-gr4lf",
                   "projected": {
                     "defaultMode": 420,
                     "sources": [
@@ -8929,35 +9500,35 @@
               "conditions": [
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:42Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodReadyToStartContainers"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Initialized"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:42Z",
+                  "lastTransitionTime": "2026-11-17T21:08:33Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "Ready"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:42Z",
+                  "lastTransitionTime": "2026-11-17T21:08:33Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "ContainersReady"
                 },
                 {
                   "lastProbeTime": null,
-                  "lastTransitionTime": "2026-11-03T11:36:41Z",
+                  "lastTransitionTime": "2026-11-17T21:08:32Z",
                   "observedGeneration": 1,
                   "status": "True",
                   "type": "PodScheduled"
@@ -8969,7 +9540,7 @@
                     "cpu": "10m",
                     "memory": "16Mi"
                   },
-                  "containerID": "containerd://beef77630ea3a34c892f910e8ea5a53d3afd59da5ea913a03aad73d472350f5d",
+                  "containerID": "containerd://5f3e51a3d7c8a96c8c549e752df82767a8495550b16a255e95ca23335448a6c2",
                   "image": "registry.k8s.io/pause:3.10",
                   "imageID": "sha256:afb61768ce381961ca0beff95337601f29dc70ff3ed14e5e4b3e5699057e6aa8",
                   "lastState": {},
@@ -8988,7 +9559,7 @@
                   "started": true,
                   "state": {
                     "running": {
-                      "startedAt": "2026-11-03T11:36:42Z"
+                      "startedAt": "2026-11-17T21:08:33Z"
                     }
                   },
                   "user": {
@@ -9009,7 +9580,7 @@
                     },
                     {
                       "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-                      "name": "kube-api-access-hffsb",
+                      "name": "kube-api-access-gr4lf",
                       "readOnly": true,
                       "recursiveReadOnly": "Disabled"
                     }
@@ -9024,10 +9595,10 @@
               ],
               "observedGeneration": 1,
               "phase": "Running",
-              "podIP": "10.244.0.15",
+              "podIP": "10.244.0.17",
               "podIPs": [
                 {
-                  "ip": "10.244.0.15"
+                  "ip": "10.244.0.17"
                 }
               ],
               "qosClass": "Burstable",
@@ -9039,7 +9610,7 @@
                   "memory": "16Mi"
                 }
               },
-              "startTime": "2026-11-03T11:36:41Z"
+              "startTime": "2026-11-17T21:08:32Z"
             }
           }
         ],
@@ -9061,7 +9632,7 @@
             "apiVersion": "coordination.k8s.io/v1",
             "kind": "Lease",
             "metadata": {
-              "creationTimestamp": "2026-11-03T11:18:53Z",
+              "creationTimestamp": "2026-11-17T21:07:21Z",
               "managedFields": [
                 {
                   "apiVersion": "coordination.k8s.io/v1",
@@ -9070,7 +9641,7 @@
                     "f:metadata": {
                       "f:ownerReferences": {
                         ".": {},
-                        "k:{\"uid\":\"e6f2f01c-db59-43e1-8768-b9600f2f77b8\"}": {}
+                        "k:{\"uid\":\"b8686811-2f73-42b9-b7a5-ac0f5bbd318a\"}": {}
                       }
                     },
                     "f:spec": {
@@ -9081,7 +9652,7 @@
                   },
                   "manager": "kubelet",
                   "operation": "Update",
-                  "time": "2026-11-03T12:58:45Z"
+                  "time": "2026-11-17T21:11:07Z"
                 }
               ],
               "name": "twigo-overviews-control-plane",
@@ -9091,16 +9662,16 @@
                   "apiVersion": "v1",
                   "kind": "Node",
                   "name": "twigo-overviews-control-plane",
-                  "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+                  "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
                 }
               ],
-              "resourceVersion": "13039",
-              "uid": "96856fb8-8c7c-412e-8130-9eb41df7d8a1"
+              "resourceVersion": "1742",
+              "uid": "41305e62-f880-4bfb-891f-7f94103468e4"
             },
             "spec": {
               "holderIdentity": "twigo-overviews-control-plane",
               "leaseDurationSeconds": 40,
-              "renewTime": "2026-11-03T12:58:45.400262Z"
+              "renewTime": "2026-11-17T21:11:07.072253Z"
             }
           }
         ],
@@ -9138,7 +9709,7 @@
         "node.alpha.kubernetes.io/ttl": "0",
         "volumes.kubernetes.io/controller-managed-attach-detach": "true"
       },
-      "creationTimestamp": "2026-11-03T11:18:51Z",
+      "creationTimestamp": "2026-11-17T21:07:19Z",
       "labels": {
         "beta.kubernetes.io/arch": "arm64",
         "beta.kubernetes.io/os": "linux",
@@ -9172,7 +9743,7 @@
           },
           "manager": "kubelet",
           "operation": "Update",
-          "time": "2026-11-03T11:18:51Z"
+          "time": "2026-11-17T21:07:19Z"
         },
         {
           "apiVersion": "v1",
@@ -9186,7 +9757,7 @@
           },
           "manager": "kubeadm",
           "operation": "Update",
-          "time": "2026-11-03T11:18:53Z"
+          "time": "2026-11-17T21:07:21Z"
         },
         {
           "apiVersion": "v1",
@@ -9207,7 +9778,7 @@
           },
           "manager": "kube-controller-manager",
           "operation": "Update",
-          "time": "2026-11-03T11:18:55Z"
+          "time": "2026-11-17T21:07:22Z"
         },
         {
           "apiVersion": "v1",
@@ -9238,12 +9809,12 @@
           "manager": "kubelet",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T12:55:46Z"
+          "time": "2026-11-17T21:08:23Z"
         }
       ],
       "name": "twigo-overviews-control-plane",
-      "resourceVersion": "12674",
-      "uid": "e6f2f01c-db59-43e1-8768-b9600f2f77b8"
+      "resourceVersion": "937",
+      "uid": "b8686811-2f73-42b9-b7a5-ac0f5bbd318a"
     },
     "spec": {
       "podCIDR": "10.244.0.0/24",
@@ -9285,32 +9856,32 @@
       },
       "conditions": [
         {
-          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
-          "lastTransitionTime": "2026-11-03T11:18:50Z",
+          "lastHeartbeatTime": "2026-11-17T21:08:23Z",
+          "lastTransitionTime": "2026-11-17T21:07:19Z",
           "message": "kubelet has sufficient memory available",
           "reason": "KubeletHasSufficientMemory",
           "status": "False",
           "type": "MemoryPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
-          "lastTransitionTime": "2026-11-03T11:18:50Z",
+          "lastHeartbeatTime": "2026-11-17T21:08:23Z",
+          "lastTransitionTime": "2026-11-17T21:07:19Z",
           "message": "kubelet has no disk pressure",
           "reason": "KubeletHasNoDiskPressure",
           "status": "False",
           "type": "DiskPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
-          "lastTransitionTime": "2026-11-03T11:18:50Z",
+          "lastHeartbeatTime": "2026-11-17T21:08:23Z",
+          "lastTransitionTime": "2026-11-17T21:07:19Z",
           "message": "kubelet has sufficient PID available",
           "reason": "KubeletHasSufficientPID",
           "status": "False",
           "type": "PIDPressure"
         },
         {
-          "lastHeartbeatTime": "2026-11-03T12:55:46Z",
-          "lastTransitionTime": "2026-11-03T11:19:06Z",
+          "lastHeartbeatTime": "2026-11-17T21:08:23Z",
+          "lastTransitionTime": "2026-11-17T21:07:34Z",
           "message": "kubelet is posting ready status",
           "reason": "KubeletReady",
           "status": "True",
@@ -9346,7 +9917,7 @@
             "registry.k8s.io/kube-controller-manager-arm64:v1.37.0",
             "registry.k8s.io/kube-controller-manager:v1.37.0"
           ],
-          "sizeBytes": 85082212
+          "sizeBytes": 85081821
         },
         {
           "names": [
@@ -9385,6 +9956,13 @@
         },
         {
           "names": [
+            "registry.k8s.io/metrics-server/metrics-server@sha256:9b0ba1926e1d3089673f45461c3c1416109dea33b3ba3434048defd380df329b",
+            "registry.k8s.io/metrics-server/metrics-server:v0.9.1"
+          ],
+          "sizeBytes": 21228250
+        },
+        {
+          "names": [
             "registry.k8s.io/etcd:3.7.0-0"
           ],
           "sizeBytes": 20455189
@@ -9410,19 +9988,19 @@
       ],
       "nodeInfo": {
         "architecture": "arm64",
-        "bootID": "9372f463-3bc7-48d2-9b53-ad6149948273",
+        "bootID": "e58fe041-732f-4744-8260-97ebe73802c0",
         "containerRuntimeVersion": "containerd://2.3.4",
         "kernelVersion": "6.12.54-linuxkit",
         "kubeProxyVersion": "",
         "kubeletVersion": "v1.37.0",
-        "machineID": "87526d77fd6b4de09eb9a1afd3b56023",
+        "machineID": "ed59e58fd7f947c58072231c8f39e906",
         "operatingSystem": "linux",
         "osImage": "Debian GNU/Linux 13 (trixie)",
         "runningInUserNamespace": false,
         "swap": {
           "capacity": 1073737728
         },
-        "systemUUID": "87526d77fd6b4de09eb9a1afd3b56023"
+        "systemUUID": "ed59e58fd7f947c58072231c8f39e906"
       },
       "runtimeHandlers": [
         {

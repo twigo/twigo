@@ -1,4 +1,4 @@
-import type { Column, Gvr, Row, RowId } from "@twigo/protocol";
+import type { Cell, Column, Gvr, Row, RowId } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface Selected {
@@ -14,6 +14,15 @@ export interface Selected {
 
 /** The context key a list editor sets to its URI, so a command finds the list it was run from. */
 export const LIST_URI = "list.uri";
+
+/** A selected row's cell in the column of that name, as the list's table has it. */
+export function cellsOf({
+  columns,
+  row,
+}: Selected): (column: string) => Cell | undefined {
+  return (column) =>
+    row.cells[columns.findIndex((each) => each.name === column)];
+}
 
 /**
  * A row's object, from its ID: `context/namespace/name`, or `context/name`

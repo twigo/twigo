@@ -20,19 +20,27 @@ pub struct ObjectQuery {
     pub name: String,
 }
 
-/// What the views of an open object show; Rust follows only these.
+/// What the views of an open object ask for; Rust follows only these. The page
+/// asks for the Overview on every view, so that its header and its keys hold on
+/// all of them. It asks for the events and the related objects only while their
+/// view is shown, for the manifest while the YAML view is shown or, in an
+/// editor, an edit is held, and for the usage only of a pod or a node, on the
+/// Overview, in a visible window.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ObjectParts {
-    /// The Overview document, its events included.
+    /// The Overview document, its events included: Rust watches the object's
+    /// events for as long as it is asked, whichever view is shown.
     pub overview: bool,
-    /// The object as the YAML tab shows it.
+    /// The object as the YAML tab shows it, while that view is shown or an
+    /// edit is held.
     pub manifest: bool,
-    /// The object's events, for the Events tab.
+    /// The object's events as the Events tab lists them, while that view is
+    /// shown.
     pub events: bool,
-    /// Its owners and the objects it owns.
+    /// Its owners and the objects it owns, while the Related tab is shown.
     pub related: bool,
-    /// What a pod or a node uses, read while it is drawn and the document
-    /// is visible.
+    /// What a pod or a node uses, read while the Overview is shown and the
+    /// document is visible.
     pub usage: bool,
 }
 
@@ -82,8 +90,9 @@ pub struct ObjectBatch {
     /// scope that serves the object has answered once it is `waiting`, or
     /// says the failure its last request ended in, or `unavailable` where the
     /// API is stale; after that a `ready` usage whose `used` is null says
-    /// that an answer came without the object. An object that had an answer
-    /// keeps its figures while the request that serves it is asked anew.
+    /// that an answer came without the object, with the containers that run
+    /// listed all the same. An object that had an answer keeps its figures
+    /// while the request that serves it is asked anew.
     pub usage: Option<Usage>,
 }
 
@@ -95,8 +104,9 @@ pub struct Usage {
     /// answered once: the state is `ready`, the figures are null, and
     /// `containers` names the pod's running containers by its own status,
     /// in the order the answer lists them and with their requests and
-    /// limits, so the webview draws the section at its height at once.
-    /// False for a stale API, which says `unavailable` at once since
+    /// limits, so the webview draws the section at its height at once; an
+    /// answer that comes without the pod lists them as well, with `waiting`
+    /// false. False for a stale API, which says `unavailable` at once since
     /// discovery knows it without a request, and for a scope whose last
     /// request failed, which says that failure at once and is asked all the
     /// same.
@@ -107,8 +117,12 @@ pub struct Usage {
     /// A pod's sum over its containers, or the node's own figures.
     pub cpu: Measure,
     pub memory: Measure,
-    /// A pod's containers that have a sample, or while `waiting` those that
-    /// run, in the pod's order; empty for a node.
+    /// A ready usage lists every container that runs by the pod's own status
+    /// and every one that has a sample, in the pod's order, each with its
+    /// request and limit; `used` is null for one the answer lacks, as for a
+    /// container that has just started or restarted, whose pod metrics-server
+    /// leaves out while any of its containers has no earlier point. Empty for
+    /// a node and for a usage that is not ready.
     pub containers: Vec<ContainerUsage>,
 }
 
@@ -134,11 +148,60 @@ pub struct Measure {
     pub allocatable: Option<i64>,
 }
 
-/// An object described for people: sections in their order, each a list of
-/// blocks from a closed set (ARCHITECTURE 4.3).
+/// An object described for people: what its header says, then sections in
+/// their order, each a list of blocks from a closed set (ARCHITECTURE 4.3).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 pub struct Overview {
+    pub header: Header,
     pub sections: Vec<Section>,
+}
+
+/// What the object's page says around its name and under its views, the
+/// same in the inspector and on the full page.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+pub struct Header {
+    /// The controller at the top of its owners: a pod's Deployment through
+    /// its ReplicaSet, a Job's CronJob. The direct controller while the one
+    /// above it is not listed; None without a controller.
+    pub owner: Option<ObjectRef>,
+    /// The node a pod is bound to; None before it is scheduled, and for
+    /// other kinds.
+    pub node: Option<String>,
+    /// RFC 3339, `metadata.creationTimestamp`: the object's age, which an
+    /// object opened on its own has no list row to take it from.
+    pub created: Option<String>,
+    /// Where the generated part of its name starts, in UTF-16 units, as a
+    /// list row's [`generated`](crate::Row::generated) says it, so that an
+    /// object opened on its own cuts its name as the list does. The core
+    /// fills it: the rule lives with the rows.
+    pub generated: Option<u32>,
+    /// The cells the server prints for it in a list, Name, Namespace and Age
+    /// left out, from which the page takes the word of its list's health
+    /// column, so the two always say the same.
+    pub printed: Vec<Printed>,
+    /// One sentence after that word: the first finding's title, else the
+    /// object's vitals in words; empty when neither says anything.
+    pub sentence: Vec<Span>,
+    /// The strip under the views, in order; empty for a kind without one.
+    /// A pod's CPU and Memory are not among them: they come with its usage.
+    pub vitals: Vec<Vital>,
+}
+
+/// A cell the server printed for an object, as text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Printed {
+    pub column: String,
+    pub value: String,
+}
+
+/// One cell of the vitals strip, such as `Restarts` `4` `11 d ago`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Vital {
+    pub label: String,
+    /// Toned only when it is abnormal.
+    pub value: Value,
+    /// What follows the value, quieter, such as when a pod last restarted.
+    pub note: Vec<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -146,7 +209,27 @@ pub struct Section {
     /// Stable, such as `core.metadata`; folding is kept by it.
     pub id: String,
     pub title: String,
+    /// What its header says at its end, so that it answers while folded,
+    /// such as `2 volumes · 1 claim`; empty where nothing would.
+    pub summary: Vec<Span>,
+    /// Danger or warning when it holds what is wrong with the object, which
+    /// its header marks with an edge in that tone.
+    pub tone: Option<Tone>,
+    /// How it opens until the person folds or opens it.
+    pub fold: Fold,
     pub blocks: Vec<Block>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Fold {
+    /// Open, as the sections a triage reads first are.
+    Open,
+    /// One line with its summary.
+    Folded,
+    /// Open over what the person last chose for the kind, since it holds a
+    /// finding that the Diagnostics section does not explain.
+    Finding,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -241,11 +324,14 @@ pub struct Container {
     pub state: Option<ContainerState>,
     /// As kubectl prints them: `8080/TCP (http)`.
     pub ports: Vec<String>,
-    /// What its card shows: its state's times, how it last ended, its
-    /// resources.
+    /// What its card shows: how it ended, as its code and when, `Exited` for
+    /// a termination that is its state now, whose reason the state says, and
+    /// `Last exit`, with its reason, for an earlier one. Empty for a container
+    /// that never ended.
     pub fields: Vec<Field>,
-    /// What else kubectl describe prints of it, folded: the last
-    /// termination's message, command, probes, security, image and
+    /// What else kubectl describe prints of it, folded: when it started, the
+    /// last termination's message, its requests and limits, command,
+    /// arguments, working directory, pull policy, probes, security, image and
     /// container IDs.
     pub details: Vec<Field>,
     /// Each variable by name, then each source of many as "From".
@@ -295,6 +381,10 @@ pub struct EmbeddedList {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct EventList {
     pub events: Vec<ObjectEvent>,
+    /// They have been listed, so that an empty list means there are none:
+    /// false while they are still coming, and once true it stays true,
+    /// whatever `unavailable` says of a later relist.
+    pub listed: bool,
     /// Why they cannot be listed, as when the person may not list events;
     /// None while they are listed or still coming.
     pub unavailable: Option<String>,
@@ -304,6 +394,9 @@ pub struct EventList {
 pub struct Field {
     pub label: String,
     pub value: Value,
+    /// It holds the cluster's default, as a pod's Restart policy Always:
+    /// its section folds such fields behind their count.
+    pub default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -312,7 +405,7 @@ pub enum Value {
     Text {
         text: String,
     },
-    /// RFC 3339, shown as an age with the date beside it.
+    /// RFC 3339, shown as an age, with the date in its tooltip.
     Time {
         at: String,
     },
@@ -334,6 +427,11 @@ pub enum Value {
     Toned {
         text: String,
         tone: Tone,
+    },
+    /// Text and times in one line that ticks, such as `code 1 (Error) · 11d
+    /// ago`.
+    Spans {
+        spans: Vec<Span>,
     },
 }
 
@@ -368,6 +466,9 @@ pub struct Condition {
     /// RFC 3339, when its reporter last confirmed it, as a node's kubelet
     /// does.
     pub last_heartbeat: Option<String>,
+    /// The Diagnostics section already says why it is wrong, so it shows
+    /// only as its chip.
+    pub explained: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

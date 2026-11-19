@@ -16,11 +16,7 @@ pub(crate) fn section(id: &str, title: &str, value: &Value, skip: &[&str]) -> Op
             .collect(),
         _ => Vec::new(),
     };
-    (!nodes.is_empty()).then(|| Section {
-        id: id.to_owned(),
-        title: title.to_owned(),
-        blocks: vec![Block::Tree { nodes }],
-    })
+    (!nodes.is_empty()).then(|| crate::show::section(id, title, vec![Block::Tree { nodes }]))
 }
 
 /// A map's entries as nodes, nulls and empty values left out; none when

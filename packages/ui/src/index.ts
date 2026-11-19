@@ -21,6 +21,7 @@ export * from "./components/banner";
 export * from "./components/callout";
 export * from "./components/card";
 export * from "./components/chip";
+export * from "./components/copy-button";
 export * from "./components/count";
 export * from "./components/cut-in-the-middle";
 export * from "./components/icon-button";
@@ -45,6 +46,7 @@ export * from "./components/unsaved-mark";
 export * from "./components/tile";
 export * from "./components/trigger";
 export {
+  ACTIONS_WIDTH,
   DataGrid,
   GUTTERS_WIDTH,
   GridSkeleton,

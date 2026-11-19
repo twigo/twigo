@@ -3,7 +3,7 @@
 //! and limits, or the node allocates.
 
 use serde_json::Value;
-use twigo_cache::metrics::{Container, Kind, Sample};
+use twigo_cache::metrics::{Kind, Sample};
 use twigo_ipc::{ContainerUsage, Measure, MetricsState, Usage};
 use twigo_quantity::Quantity;
 
@@ -17,7 +17,7 @@ const RUNNING: [&str; 3] = [
 /// A pod without a sample uses nothing known, which is no zero.
 pub fn usage(kind: Kind, object: &Value, sample: Option<&Sample>, state: MetricsState) -> Usage {
     let (cpu, memory, containers) = match kind {
-        Kind::Pods => pod(object, sample),
+        Kind::Pods => pod(object, sample, state == MetricsState::Ready),
         Kind::Nodes => node(object, sample),
     };
     Usage {
@@ -108,30 +108,59 @@ fn container(declared: &[&Value], name: &str, used: Option<(i64, i64)>) -> Conta
     }
 }
 
+/// The containers that run by the pod's own status, in the order a sample lists them. The
+/// kubelet's resource metrics hold only running containers, so a sample lists these.
+fn running<'a>(object: &'a Value, declared: &[&Value]) -> Vec<&'a str> {
+    let mut running: Vec<&str> = RUNNING
+        .iter()
+        .flat_map(|list| object["status"][list].as_array().into_iter().flatten())
+        .filter(|status| status["state"]["running"].is_object())
+        .filter_map(|status| status["name"].as_str())
+        .collect();
+    running.sort_by_key(|name| order(declared, name));
+    running
+}
+
 /// The pod's request and limit are sums only where every container counted in its usage has
 /// one, since a sum over some would put the pod's whole usage against part of what it may use.
-fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<ContainerUsage>) {
-    let Some(sample) = sample else {
-        return (Measure::default(), Measure::default(), Vec::new());
-    };
+/// A ready usage lists every container that runs, with no figure for one the sample lacks, as
+/// metrics-server leaves out a pod while any of its containers has no earlier point, one that
+/// has just started or restarted (v0.9.1,
+/// [`GetMetrics`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L65-L97)).
+fn pod(
+    object: &Value,
+    sample: Option<&Sample>,
+    ready: bool,
+) -> (Measure, Measure, Vec<ContainerUsage>) {
     let declared = declared(object);
-    let mut sampled: Vec<&Container> = sample.containers.iter().collect();
-    sampled.sort_by_key(|container| order(&declared, &container.name));
-    let containers: Vec<ContainerUsage> = sampled
-        .iter()
-        .map(|sampled| {
-            container(
-                &declared,
-                &sampled.name,
-                Some((sampled.cpu, sampled.memory)),
-            )
-        })
+    let mut listed: Vec<(&str, Option<(i64, i64)>)> = sample
+        .into_iter()
+        .flat_map(|sample| &sample.containers)
+        .map(|sampled| (&*sampled.name, Some((sampled.cpu, sampled.memory))))
         .collect();
+    if ready {
+        for name in running(object, &declared) {
+            if !listed.iter().any(|(listed, _)| *listed == name) {
+                listed.push((name, None));
+            }
+        }
+    }
+    listed.sort_by_key(|(name, _)| order(&declared, name));
+    let containers: Vec<ContainerUsage> = listed
+        .iter()
+        .map(|(name, used)| container(&declared, name, *used))
+        .collect();
+    let Some(sample) = sample else {
+        return (Measure::default(), Measure::default(), containers);
+    };
     let total = |used: i64, pick: fn(&ContainerUsage) -> Measure| {
         let sum = |field: fn(&Measure) -> Option<i64>| {
-            containers.iter().try_fold(0i64, |sum, container| {
-                sum.checked_add(field(&pick(container))?)
-            })
+            containers
+                .iter()
+                .filter(|container| pick(container).used.is_some())
+                .try_fold(0i64, |sum, container| {
+                    sum.checked_add(field(&pick(container))?)
+                })
         };
         Measure {
             used: Some(used),
@@ -149,20 +178,12 @@ fn pod(object: &Value, sample: Option<&Sample>) -> (Measure, Measure, Vec<Contai
 
 /// What a pod or a node is told before the request that serves it has answered once: no figure,
 /// and for a pod the containers that run by its own status, in the order a sample lists them,
-/// each against its request and limit. The kubelet's resource metrics hold only running
-/// containers, so the answer lists these (ARCHITECTURE 3.6).
+/// each against its request and limit (ARCHITECTURE 3.6).
 pub fn waiting(kind: Kind, object: &Value) -> Usage {
     let containers = match kind {
         Kind::Pods => {
             let declared = declared(object);
-            let mut running: Vec<&str> = RUNNING
-                .iter()
-                .flat_map(|list| object["status"][list].as_array().into_iter().flatten())
-                .filter(|status| status["state"]["running"].is_object())
-                .filter_map(|status| status["name"].as_str())
-                .collect();
-            running.sort_by_key(|name| order(&declared, name));
-            running
+            running(object, &declared)
                 .into_iter()
                 .map(|name| container(&declared, name, None))
                 .collect()
@@ -182,6 +203,7 @@ pub fn waiting(kind: Kind, object: &Value) -> Usage {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use twigo_cache::metrics::Container;
 
     use super::*;
 
@@ -294,6 +316,79 @@ mod tests {
         assert_eq!(usage.cpu, Measure::default());
         assert_eq!(usage.memory, Measure::default());
         assert!(usage.containers.is_empty());
+    }
+
+    fn running_pod() -> Value {
+        json!({
+            "kind": "Pod",
+            "metadata": { "name": "p" },
+            "spec": { "containers": [
+                { "name": "web", "resources": { "requests": { "cpu": "1" }, "limits": { "cpu": "2" } } },
+                { "name": "worker", "resources": { "requests": { "cpu": "500m" }, "limits": { "cpu": "1" } } },
+                { "name": "idle", "resources": { "requests": { "cpu": "1" } } },
+            ] },
+            "status": { "containerStatuses": [
+                { "name": "worker", "state": { "running": {} } },
+                { "name": "web", "state": { "running": {} } },
+                { "name": "idle", "state": { "waiting": { "reason": "CrashLoopBackOff" } } },
+            ] },
+        })
+    }
+
+    #[test]
+    fn an_answer_without_the_pod_still_lists_the_containers_that_run() {
+        let pod = running_pod();
+        let usage = usage(Kind::Pods, &pod, None, MetricsState::Ready);
+        let rows: Vec<(&str, Option<i64>, Option<i64>)> = usage
+            .containers
+            .iter()
+            .map(|c| (c.name.as_str(), c.cpu.used, c.cpu.request))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("web", None, Some(1_000_000_000)),
+                ("worker", None, Some(500_000_000))
+            ],
+            "the pod's order, each against its request, none with a figure"
+        );
+        assert_eq!(usage.cpu, Measure::default());
+        assert!(!usage.waiting);
+        for state in [
+            MetricsState::Unavailable,
+            MetricsState::Forbidden,
+            MetricsState::Absent,
+        ] {
+            assert!(
+                super::usage(Kind::Pods, &pod, None, state)
+                    .containers
+                    .is_empty(),
+                "{state:?} says no rows"
+            );
+        }
+    }
+
+    #[test]
+    fn an_answer_that_lacks_a_running_container_lists_it_without_a_figure() {
+        let pod = running_pod();
+        let sampled = sample(&[("worker", 3_000_000, 5)]);
+        let usage = usage(Kind::Pods, &pod, Some(&sampled), MetricsState::Ready);
+        let rows: Vec<(&str, Option<i64>)> = usage
+            .containers
+            .iter()
+            .map(|c| (c.name.as_str(), c.cpu.used))
+            .collect();
+        assert_eq!(rows, [("web", None), ("worker", Some(3_000_000))]);
+        assert_eq!(
+            usage.cpu,
+            Measure {
+                used: Some(3_000_000),
+                request: Some(500_000_000),
+                limit: Some(1_000_000_000),
+                allocatable: None,
+            },
+            "the pod's figures count the containers that were sampled"
+        );
     }
 
     #[test]

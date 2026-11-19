@@ -299,7 +299,8 @@ struct Around {
     uid: Box<str>,
     events: Option<Subscription<Object>>,
     owned: Option<Vec<(Owned, Subscription<Row>)>>,
-    /// What its describer needs, while the Overview is shown.
+    /// What its describer needs, while the Overview part is asked, which the page
+    /// does on every view.
     facts: Option<Vec<Held>>,
 }
 
@@ -429,7 +430,11 @@ async fn run(
             }
             if let Some(subscription) = &held.events {
                 let unavailable = unavailable(&subscription.state());
-                if drained(subscription) || unavailable != events.unavailable {
+                let whole = subscription.listed();
+                if drained(subscription)
+                    || unavailable != events.unavailable
+                    || whole != events.listed
+                {
                     let mut listed: Vec<ObjectEvent> = subscription
                         .items()
                         .iter()
@@ -439,6 +444,7 @@ async fn run(
                     twigo_describe::newest_first(&mut listed);
                     events = EventList {
                         events: listed,
+                        listed: whole,
                         unavailable,
                     };
                     dirty.overview = true;
@@ -694,12 +700,15 @@ impl Shown<'_> {
             overview: object
                 .filter(|_| parts.overview && dirty.overview)
                 .map(|object| {
-                    twigo_describe::describe(Input {
+                    let mut overview = twigo_describe::describe(Input {
                         object,
                         printed,
                         events,
                         facts,
-                    })
+                    });
+                    overview.header.generated =
+                        twigo_cache::meta::generated_in(&object["metadata"]);
+                    overview
                 }),
             manifest: object
                 .filter(|_| parts.manifest && dirty.manifest)
@@ -830,10 +839,10 @@ fn needs_of(hub: &Hub, target: &Target, needs: Vec<Need>) -> Vec<Held> {
         .collect()
 }
 
-/// Holds the needs `wanted` while the Overview is shown, None letting them
-/// go, and reads what they found: the facts when they changed, or when the
-/// needs are held anew, so what a need the hub refused already says goes
-/// out at once.
+/// Holds the needs `wanted` while the Overview part is asked, which the page
+/// does on every view, None letting them go, and reads what they found: the
+/// facts when they changed, or when the needs are held anew, so what a need the
+/// hub refused already says goes out at once.
 fn follow_needs(
     held: &mut Option<Vec<Held>>,
     wanted: Option<Vec<Need>>,
@@ -1052,6 +1061,39 @@ mod tests {
     }
 
     #[test]
+    fn an_open_pods_header_says_where_its_name_was_generated_as_its_row_does() {
+        let pod = json!({
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "name": "api-7f9c8d6b5-x2kq9",
+                "namespace": "payments",
+                "generateName": "api-7f9c8d6b5-",
+                "labels": { "pod-template-hash": "7f9c8d6b5" },
+            },
+        });
+        let related = Related::default();
+        let batch = Shown {
+            parts: ObjectParts {
+                overview: true,
+                manifest: false,
+                events: false,
+                related: false,
+                usage: false,
+            },
+            dirty: &Dirty::all(),
+            object: Some(&pod),
+            printed: &[],
+            events: &EventList::default(),
+            related: &related,
+            facts: &[],
+            usage: None,
+        }
+        .batch(1, ViewState::Ready);
+        assert_eq!(batch.overview.unwrap().header.generated, Some(4));
+    }
+
+    #[test]
     fn values_come_from_a_config_map_only() {
         let keys = [
             "password".to_owned(),
@@ -1145,9 +1187,13 @@ mod tests {
             })
         };
         let overview = || Overview {
+            header: twigo_ipc::Header::default(),
             sections: vec![twigo_ipc::Section {
                 id: "core.diagnostics".to_owned(),
                 title: "Diagnostics".to_owned(),
+                summary: Vec::new(),
+                tone: None,
+                fold: twigo_ipc::Fold::Open,
                 blocks: vec![Block::Diagnostics {
                     findings: vec![twigo_ipc::Finding {
                         tone: twigo_ipc::Tone::Danger,

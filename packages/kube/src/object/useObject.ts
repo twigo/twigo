@@ -21,9 +21,9 @@ const NOTHING = () => () => undefined;
 const INITIAL = () => INITIAL_OBJECT;
 
 /**
- * An open object while `query` names one, following the parts shown. A new
- * query opens its object, which replaces the last one's on its first
- * batch; the snapshot is only ever the current query's.
+ * An open object while `query` names one, following the parts that `parts`
+ * asks for. A new query opens its object, which replaces the last one's on its
+ * first batch; the snapshot is only ever the current query's.
  */
 export function useObject(
   backend: Backend,

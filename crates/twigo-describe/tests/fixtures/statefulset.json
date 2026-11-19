@@ -3,8 +3,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
       "message": "Create Claim data-db-0 Pod db-0 in StatefulSet db success",
       "reason": "SuccessfulCreate",
       "source": "statefulset-controller",
@@ -13,8 +13,8 @@
     {
       "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T11:36:41Z",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
       "message": "Create Pod db-0 in StatefulSet db successful",
       "reason": "SuccessfulCreate",
       "source": "statefulset-controller",
@@ -26,7 +26,7 @@
     "apiVersion": "apps/v1",
     "kind": "StatefulSet",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "managedFields": [
         {
@@ -66,7 +66,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "apps/v1",
@@ -87,13 +87,13 @@
           "manager": "kube-controller-manager",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:45Z"
+          "time": "2026-11-17T21:08:37Z"
         }
       ],
       "name": "db",
       "namespace": "overview",
-      "resourceVersion": "2532",
-      "uid": "47e4660a-9b80-481b-a117-d69094325a94"
+      "resourceVersion": "1217",
+      "uid": "1c36ea6d-5cbd-4416-8e9a-6ddc5bf621b1"
     },
     "spec": {
       "persistentVolumeClaimRetentionPolicy": {

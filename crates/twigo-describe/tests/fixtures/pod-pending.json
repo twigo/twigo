@@ -1,11 +1,11 @@
 {
   "events": [
     {
-      "count": 8,
+      "count": 1,
       "fieldPath": null,
-      "first": "2026-11-03T11:36:41Z",
-      "last": "2026-11-03T12:11:55Z",
-      "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+      "first": "2026-11-17T21:08:31Z",
+      "last": "2026-11-17T21:08:31Z",
+      "message": "0/11 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 10 node(s) had untolerated taint(s). preemption: 0/11 nodes are available: 11 Preemption is not helpful for scheduling.",
       "reason": "FailedScheduling",
       "source": "default-scheduler",
       "type": "Warning"
@@ -16,7 +16,7 @@
     "apiVersion": "v1",
     "kind": "Pod",
     "metadata": {
-      "creationTimestamp": "2026-11-03T11:36:41Z",
+      "creationTimestamp": "2026-11-17T21:08:31Z",
       "generation": 1,
       "managedFields": [
         {
@@ -36,7 +36,7 @@
           },
           "manager": "twigo-record",
           "operation": "Apply",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         },
         {
           "apiVersion": "v1",
@@ -61,13 +61,13 @@
           "manager": "kube-scheduler",
           "operation": "Update",
           "subresource": "status",
-          "time": "2026-11-03T11:36:41Z"
+          "time": "2026-11-17T21:08:31Z"
         }
       ],
       "name": "pending",
       "namespace": "overview",
-      "resourceVersion": "2389",
-      "uid": "a2d02d9f-b485-4877-ad61-8d40d466cb00"
+      "resourceVersion": "1067",
+      "uid": "26cf9f6b-b05e-4024-a4c1-30da439eed3e"
     },
     "spec": {
       "containers": [
@@ -81,7 +81,7 @@
           "volumeMounts": [
             {
               "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
-              "name": "kube-api-access-4ngb6",
+              "name": "kube-api-access-m5rqj",
               "readOnly": true
             }
           ]
@@ -116,7 +116,7 @@
       ],
       "volumes": [
         {
-          "name": "kube-api-access-4ngb6",
+          "name": "kube-api-access-m5rqj",
           "projected": {
             "defaultMode": 420,
             "sources": [
@@ -159,8 +159,8 @@
       "conditions": [
         {
           "lastProbeTime": null,
-          "lastTransitionTime": "2026-11-03T11:36:41Z",
-          "message": "0/3 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 2 node(s) had untolerated taint(s). preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.",
+          "lastTransitionTime": "2026-11-17T21:08:31Z",
+          "message": "0/11 nodes are available: 1 node(s) didn't match Pod's node affinity/selector, 10 node(s) had untolerated taint(s). preemption: 0/11 nodes are available: 11 Preemption is not helpful for scheduling.",
           "observedGeneration": 1,
           "reason": "Unschedulable",
           "status": "False",
