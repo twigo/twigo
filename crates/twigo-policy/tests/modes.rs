@@ -2,15 +2,22 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use jiff::SignedDuration;
-use twigo_ipc::{BlockReason, Environment, Mode, ModeSource};
-use twigo_policy::{Actor, Attributes, Audit, Choices, Metadata, Policy, PolicyFile, Refused};
+use twigo_ipc::{BlockReason, Environment, Friction, Lock, LockSource, Mode, ModeSource};
+use twigo_policy::{
+    Actor, Attributes, Audit, Change, Choices, Metadata, Policy, PolicyFile, ProviderLock, Refused,
+};
 
 const NOTHING: Metadata = Metadata {
-    read_only: None,
+    read_only: false,
     provider: None,
     environment: None,
     connection: 0,
     revision: 0,
+};
+
+const LOCAL: Metadata = Metadata {
+    environment: Some(Environment::Local),
+    ..NOTHING
 };
 
 fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
@@ -35,55 +42,73 @@ fn write() -> Attributes {
 }
 
 #[test]
-fn a_context_nobody_marked_is_read_write_with_no_type() {
-    let access = Policy::open().access("prod-eu");
-    assert_eq!(access.mode, Mode::ReadWrite);
-    assert_eq!(access.source, ModeSource::Default);
+fn a_context_nobody_marked_is_guarded_until_someone_says_what_it_is() {
+    let access = with_metadata(NOTHING).access("prod-eu");
+    assert_eq!(access.mode, Mode::Guarded);
+    assert_eq!(access.source, ModeSource::Unmarked);
     assert_eq!(access.environment, None);
     assert_eq!(access.unlocked_until, None);
 }
 
 #[test]
+fn the_open_policy_has_every_context_read_write_as_a_local_one() {
+    let access = Policy::open().access("prod-eu");
+    assert_eq!(access.mode, Mode::ReadWrite);
+    assert_eq!(
+        access.source,
+        ModeSource::Environment {
+            environment: Environment::Local
+        }
+    );
+}
+
+#[test]
 fn an_environment_type_sets_the_default_mode() {
-    let policy = Policy::open();
+    let policy = with_metadata(NOTHING);
     for (environment, mode) in [
         (Environment::Production, Mode::ReadOnly),
         (Environment::Staging, Mode::Guarded),
         (Environment::Development, Mode::ReadWrite),
         (Environment::Local, Mode::ReadWrite),
     ] {
-        policy.set_environment("c", Some(environment));
+        policy.set_environment("c", Some(environment)).unwrap();
         let access = policy.access("c");
         assert_eq!(access.mode, mode);
         assert_eq!(access.source, ModeSource::Environment { environment });
         assert_eq!(access.environment, Some(environment));
     }
-    policy.set_environment("c", None);
-    assert_eq!(policy.access("c").mode, Mode::ReadWrite);
+    policy.set_environment("c", None).unwrap();
+    assert_eq!(policy.access("c").source, ModeSource::Unmarked);
     assert_eq!(policy.access("c").environment, None);
 }
 
 #[test]
-fn no_type_holds_over_the_kubeconfig_s_mark() {
+fn no_type_holds_over_the_kubeconfig_s_mark_and_leaves_the_context_unmarked() {
     let policy = with_metadata(Metadata {
         environment: Some(Environment::Production),
         ..NOTHING
     });
-    policy.set_environment("c", None);
+    policy.set_environment("c", None).unwrap();
     let access = policy.access("c");
     assert_eq!(access.environment, None);
-    assert_eq!(access.mode, Mode::ReadWrite);
-    assert_eq!(access.source, ModeSource::Default);
+    assert_eq!(access.mode, Mode::Guarded);
+    assert_eq!(access.source, ModeSource::Unmarked);
 }
 
 #[test]
 fn a_new_type_ends_an_unlock_so_marking_it_again_does_not_bring_it_back() {
     let policy = Policy::open();
-    policy.set_environment("c", Some(Environment::Production));
+    policy
+        .set_environment("c", Some(Environment::Production))
+        .unwrap();
     policy.unlock("c").unwrap();
     assert_eq!(policy.access("c").mode, Mode::Guarded);
-    policy.set_environment("c", Some(Environment::Development));
-    policy.set_environment("c", Some(Environment::Production));
+    policy
+        .set_environment("c", Some(Environment::Development))
+        .unwrap();
+    policy
+        .set_environment("c", Some(Environment::Production))
+        .unwrap();
     let access = policy.access("c");
     assert_eq!(access.mode, Mode::ReadOnly);
     assert_eq!(access.unlocked_until, None);
@@ -96,68 +121,150 @@ fn a_mark_in_the_kubeconfig_counts_until_a_person_marks_otherwise() {
         ..NOTHING
     });
     assert_eq!(policy.access("c").mode, Mode::ReadOnly);
-    policy.set_environment("c", Some(Environment::Local));
+    policy
+        .set_environment("c", Some(Environment::Local))
+        .unwrap();
     assert_eq!(policy.access("c").mode, Mode::ReadWrite);
     assert_eq!(policy.access("c").environment, Some(Environment::Local));
 }
 
 #[test]
-fn the_sources_rank_as_the_architecture_lists_them() {
-    let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
-    let all = Metadata {
-        read_only: Some(false),
-        provider: Some(Mode::Guarded),
+fn the_policy_file_comes_first_and_the_person_s_choice_before_any_lock() {
+    let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-write"}}"#);
+    let locked = Metadata {
+        read_only: true,
         environment: Some(Environment::Production),
         ..NOTHING
     };
     let policy = Policy::new(
-        entries.clone(),
-        move |_| Some(all),
+        entries,
+        move |_| Some(locked),
         Choices::default(),
         Audit::off(),
     );
-    let source = |context: &str| policy.access(context).source;
-
-    // The kubeconfig's word comes before the provider's and the type's.
-    assert_eq!(source("c"), ModeSource::Kubeconfig);
-    assert_eq!(policy.access("c").mode, Mode::ReadWrite);
-
-    policy.set_mode("c", Some(Mode::Guarded)).unwrap();
-    assert_eq!(source("c"), ModeSource::User, "the person's choice is next");
-    policy.set_mode("c", None).unwrap();
-    assert_eq!(source("c"), ModeSource::Kubeconfig);
-
-    let policy_file = source("prod-eu");
+    let by_file = policy.access("prod-eu");
+    assert_eq!(
+        by_file.mode,
+        Mode::ReadWrite,
+        "the admin's file may open it"
+    );
     assert!(
-        matches!(&policy_file, ModeSource::PolicyFile { pattern: Some(p), .. } if p == "prod-*"),
-        "{policy_file:?}"
+        matches!(&by_file.source, ModeSource::PolicyFile { pattern: Some(p), .. } if p == "prod-*"),
+        "{by_file:?}"
     );
 
-    let provider = Policy::new(
-        PolicyFile::default(),
-        |_| {
-            Some(Metadata {
-                provider: Some(Mode::Guarded),
-                environment: Some(Environment::Production),
-                ..NOTHING
-            })
-        },
-        Choices::default(),
-        Audit::off(),
-    );
-    assert_eq!(provider.access("c").source, ModeSource::Provider);
-    assert_eq!(provider.access("c").mode, Mode::Guarded);
+    let kubeconfig = Lock {
+        mode: Mode::ReadOnly,
+        source: LockSource::Kubeconfig,
+    };
+    for (mode, overrides) in [
+        (Mode::ReadWrite, Some(kubeconfig.clone())),
+        (Mode::Guarded, Some(kubeconfig)),
+        (Mode::ReadOnly, None),
+    ] {
+        policy.set_mode("c", Some(mode)).unwrap();
+        let access = policy.access("c");
+        assert_eq!(access.mode, mode);
+        assert_eq!(access.source, ModeSource::User { overrides }, "{mode:?}");
+    }
+    policy.set_mode("c", None).unwrap();
+    assert_eq!(policy.access("c").source, ModeSource::Kubeconfig);
 
-    let kubeconfig = with_metadata(Metadata {
-        read_only: Some(true),
+    let development = with_metadata(Metadata {
+        environment: Some(Environment::Development),
         ..NOTHING
     });
-    assert_eq!(kubeconfig.access("c").mode, Mode::ReadOnly);
+    development.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    assert_eq!(
+        development.access("c").source,
+        ModeSource::User { overrides: None },
+        "a choice stricter than the locks sets none aside"
+    );
+}
+
+#[test]
+fn the_strictest_lock_wins_and_of_equal_ones_the_kubeconfig_s_then_the_provider_s() {
+    let production = Some(Environment::Production);
+    let environment = |environment| ModeSource::Environment { environment };
+    let cases = [
+        (true, None, None, Mode::ReadOnly, ModeSource::Kubeconfig),
+        (
+            false,
+            Some(ProviderLock::Guarded),
+            None,
+            Mode::Guarded,
+            ModeSource::Provider,
+        ),
+        (
+            false,
+            Some(ProviderLock::Guarded),
+            production,
+            Mode::ReadOnly,
+            environment(Environment::Production),
+        ),
+        (
+            false,
+            Some(ProviderLock::Guarded),
+            Some(Environment::Local),
+            Mode::Guarded,
+            ModeSource::Provider,
+        ),
+        (
+            false,
+            Some(ProviderLock::Guarded),
+            Some(Environment::Staging),
+            Mode::Guarded,
+            ModeSource::Provider,
+        ),
+        (
+            false,
+            Some(ProviderLock::ReadOnly),
+            production,
+            Mode::ReadOnly,
+            ModeSource::Provider,
+        ),
+        (
+            true,
+            Some(ProviderLock::ReadOnly),
+            production,
+            Mode::ReadOnly,
+            ModeSource::Kubeconfig,
+        ),
+        (
+            true,
+            None,
+            Some(Environment::Development),
+            Mode::ReadOnly,
+            ModeSource::Kubeconfig,
+        ),
+        (
+            false,
+            None,
+            Some(Environment::Development),
+            Mode::ReadWrite,
+            environment(Environment::Development),
+        ),
+        (false, None, None, Mode::Guarded, ModeSource::Unmarked),
+    ];
+    for (read_only, provider, environment, mode, source) in cases {
+        let policy = with_metadata(Metadata {
+            read_only,
+            provider,
+            environment,
+            ..NOTHING
+        });
+        let access = policy.access("c");
+        assert_eq!(
+            (access.mode, &access.source),
+            (mode, &source),
+            "{read_only} {provider:?} {environment:?}"
+        );
+    }
 }
 
 #[test]
 fn the_catalog_is_read_anew_for_every_request() {
-    let metadata = Arc::new(Mutex::new(NOTHING));
+    let metadata = Arc::new(Mutex::new(LOCAL));
     let policy = {
         let metadata = Arc::clone(&metadata);
         Policy::new(
@@ -169,7 +276,7 @@ fn the_catalog_is_read_anew_for_every_request() {
     };
     let gate = write();
     policy.authorize("c", &gate, Actor::Ui).unwrap();
-    metadata.lock().unwrap().read_only = Some(true);
+    metadata.lock().unwrap().read_only = true;
     assert!(policy.authorize("c", &gate, Actor::Ui).is_err());
 }
 
@@ -237,7 +344,7 @@ fn the_policy_file_has_terminals_of_the_contexts_it_names_use_the_proxy() {
     assert!(policy.uses_policy_proxy("prod-eu"));
     assert!(policy.uses_policy_proxy("arn:aws:eks:eu-west-1:1:cluster/a"));
     assert!(!policy.uses_policy_proxy("staging-eu"));
-    assert_eq!(policy.access("prod-eu").mode, Mode::ReadWrite);
+    assert_eq!(policy.access("prod-eu").source, ModeSource::Unmarked);
 }
 
 #[test]
@@ -249,7 +356,7 @@ fn a_missing_policy_file_sets_nothing() {
         Choices::default(),
         Audit::off(),
     );
-    assert_eq!(policy.access("c").mode, Mode::ReadWrite);
+    assert_eq!(policy.access("c").source, ModeSource::Unmarked);
     assert!(!policy.uses_policy_proxy("c"));
 }
 
@@ -257,18 +364,34 @@ fn a_missing_policy_file_sets_nothing() {
 fn a_policy_file_entry_cannot_be_changed_or_unlocked() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
     let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
-    let refused = policy
-        .set_mode("prod-eu", Some(Mode::ReadWrite))
-        .unwrap_err();
-    assert!(matches!(&refused, Refused::PolicyFile(pattern, _) if pattern == "prod-*"));
+    let by_file = |refused: Refused| matches!(&refused, Refused::PolicyFile(pattern, _) if pattern == "prod-*");
+    for change in [
+        Change::Mode {
+            mode: Some(Mode::ReadWrite),
+        },
+        Change::Type {
+            environment: Some(Environment::Local),
+        },
+        Change::Unlock,
+    ] {
+        assert!(
+            by_file(policy.plan("prod-eu", change).unwrap_err()),
+            "{change:?}"
+        );
+    }
+    assert!(by_file(
+        policy
+            .set_mode("prod-eu", Some(Mode::ReadWrite))
+            .unwrap_err()
+    ));
+    assert!(by_file(
+        policy
+            .set_environment("prod-eu", Some(Environment::Local))
+            .unwrap_err()
+    ));
     assert!(policy.unlock("prod-eu").is_err());
     assert_eq!(policy.access("prod-eu").mode, Mode::ReadOnly);
     assert_eq!(policy.access("prod-eu").unlocked_until, None);
-    assert!(
-        policy.authorize("prod-eu", &write(), Actor::Ui).is_err(),
-        "a type a person marks does not open it either"
-    );
-    policy.set_environment("prod-eu", Some(Environment::Local));
     assert!(policy.authorize("prod-eu", &write(), Actor::Ui).is_err());
 }
 
@@ -289,7 +412,9 @@ fn only_a_read_only_context_unlocks() {
 #[test]
 fn an_unlock_is_guarded_for_a_quarter_of_an_hour_and_a_relock_ends_it() {
     let policy = Policy::open();
-    policy.set_environment("c", Some(Environment::Production));
+    policy
+        .set_environment("c", Some(Environment::Production))
+        .unwrap();
     assert!(policy.authorize("c", &write(), Actor::Ui).is_err());
     policy.unlock("c").unwrap();
 
@@ -339,8 +464,8 @@ fn a_new_choice_ends_an_unlock() {
 #[test]
 fn an_unlock_holds_only_for_what_it_was_given_on() {
     let metadata = Arc::new(Mutex::new(Metadata {
-        read_only: Some(true),
-        ..NOTHING
+        read_only: true,
+        ..LOCAL
     }));
     let policy = {
         let metadata = Arc::clone(&metadata);
@@ -357,16 +482,15 @@ fn an_unlock_holds_only_for_what_it_was_given_on() {
     // Its kubeconfig opens the context and locks it again, or moves it to
     // another cluster and back: another fingerprint, then the same again.
     *metadata.lock().unwrap() = Metadata {
-        read_only: Some(false),
         connection: 1,
-        ..NOTHING
+        ..LOCAL
     };
     let open = policy.access("c");
     assert_eq!((open.mode, open.unlocked_until), (Mode::ReadWrite, None));
     *metadata.lock().unwrap() = Metadata {
-        read_only: Some(true),
+        read_only: true,
         connection: 0,
-        ..NOTHING
+        ..LOCAL
     };
     let locked = policy.access("c");
     assert_eq!((locked.mode, locked.unlocked_until), (Mode::ReadOnly, None));
@@ -393,12 +517,15 @@ fn a_context_no_source_lists_lets_no_write_through_whatever_was_chosen() {
             )
             .is_ok()
     );
+    assert!(matches!(policy.unlock("gone"), Err(Refused::Unlisted(_))));
     assert!(matches!(
-        policy.unlock("gone"),
-        Err(Refused::NotLocked(_, "listed by no source"))
+        policy.plan("gone", Change::Mode { mode: None }),
+        Err(Refused::Unlisted(_))
     ));
-
-    policy.set_mode("gone", Some(Mode::ReadWrite)).unwrap();
+    assert!(matches!(
+        policy.set_mode("gone", Some(Mode::ReadWrite)),
+        Err(Refused::Unlisted(_))
+    ));
     assert_eq!(policy.access("gone").mode, Mode::ReadOnly);
 }
 
@@ -459,7 +586,9 @@ fn every_change_ticks() {
     assert!(!ticked());
     policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
     assert!(ticked());
-    policy.set_environment("c", Some(Environment::Staging));
+    policy
+        .set_environment("c", Some(Environment::Staging))
+        .unwrap();
     assert!(ticked());
     policy.unlock("c").unwrap();
     assert!(ticked());
@@ -489,7 +618,9 @@ async fn each_change_of_a_context_counts_for_it_alone_and_never_goes_back() {
     policy.set_mode("c", Some(Mode::ReadWrite)).unwrap();
     policy.set_mode("c", Some(Mode::Guarded)).unwrap();
     assert!(changed(&policy), "back to what it was is still a change");
-    policy.set_environment("c", Some(Environment::Staging));
+    policy
+        .set_environment("c", Some(Environment::Staging))
+        .unwrap();
     assert!(changed(&policy));
     policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
     assert!(changed(&policy));
@@ -525,7 +656,7 @@ fn the_blocked_error_names_the_rule() {
     let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("web-1"));
     let blocked = policy.authorize("prod-eu", &exec, Actor::Ui).unwrap_err();
     assert_eq!(blocked.mode, Mode::ReadOnly);
-    assert_eq!(blocked.source, ModeSource::User);
+    assert_eq!(blocked.source, ModeSource::User { overrides: None });
     assert_eq!(blocked.reason, BlockReason::Mode);
     assert_eq!(
         blocked.to_string(),
@@ -560,7 +691,7 @@ fn a_gate_holds_its_clients_to_what_they_were_built_for() {
 
     let metadata = Arc::new(Mutex::new(Metadata {
         connection: 1,
-        ..NOTHING
+        ..LOCAL
     }));
     let policy = {
         let metadata = Arc::clone(&metadata);
@@ -612,4 +743,263 @@ fn a_gate_holds_its_clients_to_what_they_were_built_for() {
                 }));
         rebuilt.ready().await.unwrap().call(write()).await.unwrap();
     });
+}
+
+/// The lines of the audit log at `path`.
+fn audited(path: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+fn audited_policy(metadata: Metadata) -> (tempfile::TempDir, std::path::PathBuf, Arc<Policy>) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let policy = Policy::new(
+        PolicyFile::default(),
+        move |_| Some(metadata),
+        Choices::default(),
+        Audit::open(&path),
+    );
+    (dir, path, policy)
+}
+
+#[test]
+fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_friction() {
+    let (_dir, path, policy) = audited_policy(Metadata {
+        read_only: true,
+        ..NOTHING
+    });
+    let change = Change::Mode {
+        mode: Some(Mode::ReadWrite),
+    };
+    let planned = policy.plan("c", change).unwrap();
+    assert_eq!(planned.before.mode, Mode::ReadOnly);
+    assert_eq!(planned.before.source, ModeSource::Kubeconfig);
+    let kubeconfig = Lock {
+        mode: Mode::ReadOnly,
+        source: LockSource::Kubeconfig,
+    };
+    assert_eq!(planned.after.mode, Mode::ReadWrite);
+    assert_eq!(
+        planned.after.source,
+        ModeSource::User {
+            overrides: Some(kubeconfig)
+        }
+    );
+    assert_eq!(policy.access("c"), planned.before, "a plan changes nothing");
+    assert!(audited(&path).is_empty());
+
+    let typed = Friction::Typed {
+        text: "c".to_owned(),
+    };
+    let choices = policy.change("c", &planned, &typed).unwrap();
+    assert_eq!(choices.modes.get("c"), Some(&Mode::ReadWrite));
+    assert_eq!(policy.access("c"), planned.after);
+    let lines = audited(&path);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = &lines[0];
+    assert_eq!(line["event"], "protection");
+    assert_eq!(line["context"], "c");
+    assert_eq!(
+        line["change"],
+        serde_json::json!({"kind": "mode", "mode": "read-write"})
+    );
+    assert_eq!(
+        line["before"]["source"],
+        serde_json::json!({"kind": "kubeconfig"})
+    );
+    assert_eq!(
+        line["after"]["source"],
+        serde_json::json!({
+            "kind": "user",
+            "overrides": {"mode": "read-only", "source": {"kind": "kubeconfig"}},
+        })
+    );
+    assert_eq!(
+        line["by"],
+        serde_json::json!({"kind": "plan", "friction": {"kind": "typed", "text": "c"}})
+    );
+}
+
+#[test]
+fn a_plan_holds_only_while_the_context_stands_as_it_was_planned() {
+    let metadata = Arc::new(Mutex::new(Metadata {
+        environment: Some(Environment::Production),
+        ..NOTHING
+    }));
+    let policy = {
+        let metadata = Arc::clone(&metadata);
+        Policy::new(
+            PolicyFile::default(),
+            move |_| Some(*metadata.lock().unwrap()),
+            Choices::default(),
+            Audit::off(),
+        )
+    };
+    let lower = Change::Mode {
+        mode: Some(Mode::ReadWrite),
+    };
+    let typed = Friction::Typed {
+        text: "c".to_owned(),
+    };
+    let refused_after = |what: &str, meanwhile: &dyn Fn()| {
+        let planned = policy.plan("c", lower).unwrap();
+        meanwhile();
+        let before = policy.access("c");
+        assert_eq!(
+            policy.change("c", &planned, &typed).unwrap_err(),
+            Refused::Changed("c".to_owned()),
+            "{what}"
+        );
+        assert_eq!(policy.access("c"), before, "{what}: nothing changed");
+        policy.relock("c");
+    };
+    refused_after("a choice that went back", &|| {
+        policy.set_mode("c", Some(Mode::Guarded)).unwrap();
+        policy.set_mode("c", None).unwrap();
+    });
+    refused_after("an unlock", &|| policy.unlock("c").unwrap());
+    refused_after("an unlock that ended", &|| {
+        policy.unlock("c").unwrap();
+        policy.relock("c");
+    });
+    refused_after("what the catalog says of it", &|| {
+        metadata.lock().unwrap().revision += 1;
+    });
+    let planned = policy.plan("c", lower).unwrap();
+    policy.change("c", &planned, &typed).unwrap();
+    assert_eq!(policy.access("c").mode, Mode::ReadWrite);
+    assert_eq!(
+        policy.change("c", &planned, &typed).unwrap_err(),
+        Refused::Changed("c".to_owned()),
+        "a plan runs once"
+    );
+}
+
+#[test]
+fn an_unlock_is_planned_only_for_a_read_only_context() {
+    let policy = Policy::open();
+    assert!(matches!(
+        policy.plan("c", Change::Unlock),
+        Err(Refused::NotLocked(_, "read-write"))
+    ));
+    policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    let planned = policy.plan("c", Change::Unlock).unwrap();
+    assert_eq!(planned.after.mode, Mode::Guarded);
+    assert!(planned.after.unlocked_until.is_some());
+    policy.change("c", &planned, &Friction::Confirm).unwrap();
+    assert_eq!(policy.access("c").mode, Mode::Guarded);
+}
+
+#[test]
+fn a_process_s_answer_marks_only_a_context_still_unmarked_on_the_same_cluster() {
+    let (_dir, path, policy) = audited_policy(Metadata {
+        connection: 7,
+        ..NOTHING
+    });
+    assert_eq!(
+        policy
+            .mark(
+                "c",
+                8,
+                Environment::Development,
+                Actor::Terminal,
+                "Terminal 2"
+            )
+            .unwrap_err(),
+        Refused::Changed("c".to_owned()),
+        "another cluster"
+    );
+    policy
+        .mark("c", 7, Environment::Staging, Actor::Terminal, "Terminal 2")
+        .unwrap();
+    let access = policy.access("c");
+    assert_eq!(access.mode, Mode::Guarded);
+    assert_eq!(access.environment, Some(Environment::Staging));
+    assert_eq!(
+        policy
+            .mark(
+                "c",
+                7,
+                Environment::Development,
+                Actor::Terminal,
+                "Terminal 3"
+            )
+            .unwrap_err(),
+        Refused::Changed("c".to_owned()),
+        "marked meanwhile"
+    );
+    assert_eq!(policy.access("c"), access);
+    let lines = audited(&path);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(
+        lines[0]["change"],
+        serde_json::json!({"kind": "type", "environment": "staging"})
+    );
+    assert_eq!(lines[0]["before"]["source"]["kind"], "unmarked");
+    assert_eq!(
+        lines[0]["by"],
+        serde_json::json!({"kind": "ask", "actor": "terminal", "process": "Terminal 2"})
+    );
+}
+
+#[tokio::test]
+async fn the_log_records_each_unlock_s_end_and_why() {
+    let metadata = Arc::new(Mutex::new(Metadata {
+        read_only: true,
+        connection: 1,
+        ..NOTHING
+    }));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("audit.jsonl");
+    let policy = {
+        let metadata = Arc::clone(&metadata);
+        Policy::new(
+            PolicyFile::default(),
+            move |_| Some(*metadata.lock().unwrap()),
+            Choices::default(),
+            Audit::open(&path),
+        )
+    };
+    let follower = {
+        let policy = Arc::clone(&policy);
+        tokio::spawn(async move { policy.follow_unlocks().await })
+    };
+    policy.relock("c");
+    assert!(audited(&path).is_empty(), "nothing ended");
+
+    policy.unlock("c").unwrap();
+    policy.relock("c");
+    policy
+        .unlock_for("c", SignedDuration::from_millis(20))
+        .unwrap();
+    let expired = async {
+        while audited(&path).len() < 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), expired)
+        .await
+        .expect("the unlock ran out");
+    policy.unlock("c").unwrap();
+    metadata.lock().unwrap().connection = 2;
+    assert_eq!(policy.access("c").mode, Mode::ReadOnly);
+    follower.abort();
+
+    let ended: Vec<_> = audited(&path)
+        .iter()
+        .map(|line| (line["event"].clone(), line["by"].clone()))
+        .collect();
+    assert_eq!(
+        ended,
+        [
+            ("relocked", "command"),
+            ("relocked", "time"),
+            ("relocked", "moved")
+        ]
+        .map(|(event, by)| (event.into(), by.into()))
+    );
 }

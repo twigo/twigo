@@ -293,14 +293,11 @@ contexts:
         let found = context(&catalog, name);
         (found.read_only, found.environment)
     };
-    assert_eq!(
-        read("kind-locked"),
-        (Some(true), Some(Environment::Production))
-    );
-    assert_eq!(read("kind-open"), (Some(false), Some(Environment::Local)));
-    assert_eq!(read("kind-unknown"), (Some(true), None));
+    assert_eq!(read("kind-locked"), (true, Some(Environment::Production)));
+    assert_eq!(read("kind-open"), (false, Some(Environment::Local)));
+    assert_eq!(read("kind-unknown"), (true, None));
     assert_eq!(context(&catalog, "kind-unknown").order, Some(3));
-    assert_eq!(read("kind-plain"), (None, None));
+    assert_eq!(read("kind-plain"), (false, None));
 }
 
 #[test]

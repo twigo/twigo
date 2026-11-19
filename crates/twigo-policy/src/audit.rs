@@ -3,6 +3,9 @@
 //! every command a person confirmed and how it ended, and of every answer to
 //! a process's ask. It names what was asked and where, never a value or a
 //! token.
+//!
+//! It also records each change of a context's protection, each unlock's
+//! end, and each credential plugin a person trusted.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -11,9 +14,9 @@ use std::sync::Mutex;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, Friction, Mode};
+use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode};
 
-use crate::{Actor, Attributes};
+use crate::{Actor, Attributes, Change};
 
 /// Where entries go; nowhere for the tools and tests that own their clusters.
 pub struct Audit {
@@ -67,6 +70,41 @@ pub enum Entry<'a> {
         outcome: &'a str,
         message: &'a str,
     },
+    /// A change of a context's protection: what the context was before and
+    /// is after, a lock that a person's mode sets aside named in its source.
+    Protection {
+        context: &'a str,
+        change: &'a Change,
+        before: &'a ContextAccess,
+        after: &'a ContextAccess,
+        by: By<'a>,
+    },
+    /// An unlock ended before a person changed the context: by a relock
+    /// (`command`), by its time (`time`), or as the context named another
+    /// cluster (`moved`) or none (`unlisted`).
+    Relocked { context: &'a str, by: &'a str },
+    /// A person trusted a credential plugin: its digest and the program it
+    /// runs, none where no context lists it now; never its arguments or
+    /// environment, which may hold tokens.
+    Trusted {
+        digest: &'a str,
+        program: Option<&'a str>,
+    },
+}
+
+/// Who changed a context's protection.
+#[derive(Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum By<'a> {
+    /// A plan of the command bus the person confirmed through `friction`.
+    Plan { friction: &'a Friction },
+    /// The person's answer to the ask of a process through the policy
+    /// proxy, named as an approval names it.
+    Ask { actor: &'a str, process: &'a str },
 }
 
 #[derive(Serialize)]

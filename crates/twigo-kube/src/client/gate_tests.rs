@@ -92,7 +92,7 @@ async fn a_write_in_a_read_only_context_never_reaches_the_server() {
     assert_eq!(error.kind, ErrorKind::Permissions);
     let blocked = error.blocked.unwrap();
     assert_eq!(blocked.mode, Mode::ReadOnly);
-    assert_eq!(blocked.source, ModeSource::User);
+    assert_eq!(blocked.source, ModeSource::User { overrides: None });
     assert_eq!(blocked.class, RequestClass::Write);
     assert_eq!(blocked.reason, BlockReason::Mode);
     assert_eq!(blocked.verb, "create");

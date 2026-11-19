@@ -1,6 +1,7 @@
 //! The one table of what the gate does with each way to reach a cluster
 //! (ARCHITECTURE 6.4). A step that adds a way to change a cluster adds its
-//! row here: the request it sends, its class, and what each mode answers.
+//! row here: the request it sends, its class, and what each mode answers,
+//! and a context nobody marked.
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
@@ -10,7 +11,7 @@ use http::{Method, Request};
 use jiff::{SignedDuration, Timestamp};
 use tower::{ServiceBuilder, ServiceExt};
 use twigo_ipc::{BlockReason, Mode, RequestClass};
-use twigo_policy::{Actor, Approval, Attributes, Audit, Choices, Policy, PolicyFile};
+use twigo_policy::{Actor, Approval, Attributes, Audit, Choices, Metadata, Policy, PolicyFile};
 
 const PODS: &str = "/api/v1/namespaces/a/pods";
 const POD: &str = "/api/v1/namespaces/a/pods/p";
@@ -34,8 +35,8 @@ struct Row {
     accept: Option<&'static str>,
     upgrade: bool,
     class: RequestClass,
-    /// The UI's answer in `read-write`, `guarded` and `read-only`.
-    answers: [Answer; 3],
+    /// The UI's answer in each of [`COLUMNS`].
+    answers: [Answer; 4],
 }
 
 fn row(
@@ -43,7 +44,7 @@ fn row(
     method: Method,
     uri: &'static str,
     class: RequestClass,
-    answers: [Answer; 3],
+    answers: [Answer; 4],
 ) -> Row {
     Row {
         what,
@@ -56,8 +57,10 @@ fn row(
     }
 }
 
-const OPEN: [Answer; 3] = [Pass, Pass, Pass];
-const NOT_READ_ONLY: [Answer; 3] = [Pass, Pass, Block];
+const OPEN: [Answer; 4] = [Pass; 4];
+/// A write or an exec: neither `read-only` nor a context nobody marked lets
+/// it through.
+const WRITE_OR_EXEC: [Answer; 4] = [Pass, Pass, Block, Block];
 
 fn table() -> Vec<Row> {
     use RequestClass::{DryRun, Exec, Forward, Read, SecretRead, Write};
@@ -139,21 +142,21 @@ fn table() -> Vec<Row> {
             post.clone(),
             "/apis/authorization.k8s.io/v1/subjectaccessreviews",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a token review",
             post.clone(),
             "/apis/authentication.k8s.io/v1/tokenreviews",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a review in another group",
             post.clone(),
             "/apis/example.com/v1/selfsubjectaccessreviews",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         // create, apply, patch, update, and their dry runs
         row(
@@ -161,22 +164,22 @@ fn table() -> Vec<Row> {
             post.clone(),
             "/api/v1/namespaces/a/configmaps",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "update",
             put.clone(),
             "/api/v1/namespaces/a/configmaps/c",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
-        row("patch", patch.clone(), DEPLOYMENT, Write, NOT_READ_ONLY),
+        row("patch", patch.clone(), DEPLOYMENT, Write, WRITE_OR_EXEC),
         row(
             "apply",
             patch.clone(),
             "/apis/apps/v1/namespaces/a/deployments/d?fieldManager=twigo",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "create, dry run",
@@ -197,28 +200,28 @@ fn table() -> Vec<Row> {
             delete.clone(),
             "/api/v1/namespaces/a/pods/p?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a delete of a collection, the same",
             delete.clone(),
             "/api/v1/namespaces/a/pods?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a subresource that ignores dryRun and mints a token",
             post.clone(),
             "/api/v1/namespaces/a/serviceaccounts/s/token?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a dry run of a subresource, even one that honours it",
             patch.clone(),
             "/apis/apps/v1/namespaces/a/deployments/d/scale?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a dry run of a Secret, answered with what it stores",
@@ -239,65 +242,65 @@ fn table() -> Vec<Row> {
             post.clone(),
             "/api/v1/namespaces/a/configmaps?dryRun=all",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "dryRun with two values",
             post.clone(),
             "/api/v1/namespaces/a/configmaps?dryRun=All&dryRun=No",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "dryRun without a value",
             post.clone(),
             "/api/v1/namespaces/a/configmaps?dryRun=",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         // delete, scale, rollout restart, cordon, drain, evict
-        row("delete", delete.clone(), POD, Write, NOT_READ_ONLY),
+        row("delete", delete.clone(), POD, Write, WRITE_OR_EXEC),
         row(
             "delete a collection",
             delete.clone(),
             PODS,
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "delete a namespace",
             delete.clone(),
             "/api/v1/namespaces/a",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "finalize a namespace",
             put.clone(),
             "/api/v1/namespaces/a/finalize",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "scale, and its undo",
             patch.clone(),
             "/apis/apps/v1/namespaces/a/deployments/d/scale",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "rollout restart",
             patch.clone(),
             DEPLOYMENT,
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "apply of an edit, and its merge patch",
             patch.clone(),
             "/apis/apps/v1/namespaces/a/deployments/d?fieldManager=twigo&fieldValidation=Strict&force=true",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "an apply's dry-run",
@@ -325,7 +328,7 @@ fn table() -> Vec<Row> {
             patch.clone(),
             "/apis/apps/v1/namespaces/a/deployments/d?fieldManager=twigo-edit&fieldValidation=Strict",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "that merge patch's dry-run",
@@ -346,56 +349,56 @@ fn table() -> Vec<Row> {
             post.clone(),
             "/api/v1/namespaces/a/pods?fieldManager=twigo&fieldValidation=Strict",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "cordon or uncordon, a drain's first step, and their undo",
             patch.clone(),
             "/api/v1/nodes/n",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "evict, as a drain does",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/eviction",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "trigger a cron job: a job from its template",
             post.clone(),
             "/apis/batch/v1/namespaces/a/jobs",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "suspend or resume a job, and its undo",
             patch.clone(),
             "/apis/batch/v1/namespaces/a/jobs/j",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "suspend or resume a cron job, and its undo",
             patch.clone(),
             "/apis/batch/v1/namespaces/a/cronjobs/c",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "mint a token",
             post.clone(),
             "/api/v1/namespaces/a/serviceaccounts/s/token",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "an ephemeral container",
             patch.clone(),
             "/api/v1/namespaces/a/pods/p/ephemeralcontainers",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         // Reveal: the UI reads, whatever the mode; the command asks first.
         accepting(
@@ -584,7 +587,7 @@ fn table() -> Vec<Row> {
             post.clone(),
             SECRETS,
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         // port-forward
         upgrading(row(
@@ -621,49 +624,49 @@ fn table() -> Vec<Row> {
             get.clone(),
             "/api/v1/namespaces/a/pods/p/exec?command=sh",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         upgrading(row(
             "exec by POST",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/exec?command=sh",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         row(
             "exec without an upgrade",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/exec",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "exec with dryRun",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/exec?dryRun=All",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         upgrading(row(
             "attach",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/attach",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         row(
             "attach without an upgrade",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/attach",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         upgrading(row(
             "attach as kube sends it",
             get.clone(),
             "/api/v1/namespaces/a/pods/p/attach?stdin=true&stdout=true&tty=true&container=c",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         // the conservative cases
         row(
@@ -671,142 +674,142 @@ fn table() -> Vec<Row> {
             get.clone(),
             "/api/v1/nodes/n/proxy/stats",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a kubelet's exec through its proxy",
             post.clone(),
             "/api/v1/nodes/n/proxy/exec/a/p/c",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         upgrading(row(
             "an unknown Upgrade",
             get.clone(),
             PODS,
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         upgrading(row(
             "an Upgrade with a dry run",
             post.clone(),
             "/api/v1/namespaces/a/configmaps?dryRun=All",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         upgrading(row(
             "an Upgrade through a pod's proxy",
             get.clone(),
             "/api/v1/namespaces/a/pods/p/proxy/ws",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         )),
         row(
             "a POST through a pod's proxy",
             post.clone(),
             "/api/v1/namespaces/a/pods/p/proxy/x",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a POST through a service's proxy",
             post.clone(),
             "/api/v1/namespaces/a/services/s/proxy/x",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a HEAD through a pod's proxy",
             Method::HEAD,
             "/api/v1/namespaces/a/pods/p/proxy/x",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "another resource's proxy",
             get.clone(),
             "/apis/example.com/v1/things/t/proxy/x",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a pod's proxy in another group",
             get.clone(),
             "/apis/example.com/v1/namespaces/a/pods/p/proxy",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "the old proxy path",
             get.clone(),
             "/api/v1/proxy/namespaces/a/pods/p/x",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "exec behind an escaped slash",
             post.clone(),
             "/api/v1/namespaces/a/pods/p%2Fexec",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a path that cleans into another",
             get.clone(),
             "/api/v1/namespaces/a/pods/p/log/../exec",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "an empty segment",
             get.clone(),
             "/api/v1/namespaces/a//pods/p",
             Exec,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
-        row("CONNECT", Method::CONNECT, POD, Exec, NOT_READ_ONLY),
+        row("CONNECT", Method::CONNECT, POD, Exec, WRITE_OR_EXEC),
         row(
             "a write with no resource",
             post.clone(),
             "/foo",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a dry run with no resource",
             post.clone(),
             "/foo?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
-        row("OPTIONS", Method::OPTIONS, POD, Write, NOT_READ_ONLY),
+        row("OPTIONS", Method::OPTIONS, POD, Write, WRITE_OR_EXEC),
         row(
             "a method that is no write, with dryRun",
             Method::OPTIONS,
             "/api/v1/namespaces/a/configmaps?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a token review, which answers whatever dryRun says",
             post.clone(),
             "/apis/authentication.k8s.io/v1/tokenreviews?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a review of someone else, the same",
             post.clone(),
             "/apis/authorization.k8s.io/v1/subjectaccessreviews?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
         row(
             "a review of someone in a namespace, the same",
             post.clone(),
             "/apis/authorization.k8s.io/v1/namespaces/a/localsubjectaccessreviews?dryRun=All",
             Write,
-            NOT_READ_ONLY,
+            WRITE_OR_EXEC,
         ),
     ]
 }
@@ -828,18 +831,74 @@ fn policy_in(mode: Mode) -> std::sync::Arc<Policy> {
     policy
 }
 
-const MODES: [Mode; 3] = [Mode::ReadWrite, Mode::Guarded, Mode::ReadOnly];
+/// The context `c` as each column of the tables has it: in each mode, and
+/// marked by nobody.
+#[derive(Debug, Clone, Copy)]
+enum Column {
+    In(Mode),
+    Unmarked,
+}
+
+const COLUMNS: [Column; 4] = [
+    Column::In(Mode::ReadWrite),
+    Column::In(Mode::Guarded),
+    Column::In(Mode::ReadOnly),
+    Column::Unmarked,
+];
+
+impl Column {
+    fn policy(self) -> std::sync::Arc<Policy> {
+        match self {
+            Column::In(mode) => policy_in(mode),
+            Column::Unmarked => unmarked(),
+        }
+    }
+}
+
+fn unmarked() -> std::sync::Arc<Policy> {
+    Policy::new(
+        PolicyFile::default(),
+        |_| Some(Metadata::default()),
+        Choices::default(),
+        Audit::off(),
+    )
+}
 
 #[test]
 fn every_row_has_its_class_and_each_mode_its_answer() {
     for row in table() {
         let attributes = Attributes::of(&request(&row));
         assert_eq!(attributes.class, row.class, "{}: {}", row.what, row.uri);
-        for (mode, answer) in MODES.into_iter().zip(row.answers) {
-            let got = policy_in(mode).authorize("c", &attributes, Actor::Ui);
+        for (column, answer) in COLUMNS.into_iter().zip(row.answers) {
+            let got = column.policy().authorize("c", &attributes, Actor::Ui);
             let got = if got.is_ok() { Pass } else { Block };
-            assert_eq!(got, answer, "{} in {mode:?}", row.what);
+            assert_eq!(got, answer, "{} in {column:?}", row.what);
         }
+    }
+}
+
+#[test]
+fn a_context_nobody_marked_refuses_every_actor_s_write_and_exec() {
+    let write = Attributes::action("patch", "deployments", None, Some("a"), Some("d"));
+    let exec = Attributes::action("create", "pods", Some("exec"), Some("a"), Some("p"));
+    let forward = Attributes::action("create", "pods", Some("portforward"), Some("a"), Some("p"));
+    let policy = unmarked();
+    let actors = [
+        Actor::Ui,
+        Actor::Terminal,
+        Actor::Helm,
+        Actor::Mcp,
+        Actor::Extension { secrets: true },
+        Actor::Agent,
+    ];
+    for actor in actors {
+        for attributes in [&write, &exec] {
+            let blocked = policy.authorize("c", attributes, actor).unwrap_err();
+            assert_eq!(blocked.reason, BlockReason::Unmarked, "{actor:?}");
+            assert_eq!(blocked.mode, Mode::Guarded, "{actor:?}");
+            assert!(!policy.approvable("c", attributes, actor), "{actor:?}");
+        }
+        policy.authorize("c", &forward, actor).unwrap();
     }
 }
 
@@ -850,7 +909,7 @@ fn a_read_only_context_lets_a_port_forward_through_unless_the_file_says_no() {
     std::fs::write(&file, r#"{"readOnly": {"allowPortForward": false}}"#).unwrap();
     let policy = Policy::new(
         PolicyFile::read(&file),
-        |_| Some(twigo_policy::Metadata::default()),
+        |_| Some(Metadata::default()),
         Choices::default(),
         Audit::off(),
     );
@@ -880,11 +939,11 @@ fn reading_a_secret_is_decided_by_the_actor_and_not_the_mode() {
         ),
         (Actor::Agent, Some(BlockReason::NoApproval)),
     ];
-    for mode in MODES {
-        let policy = policy_in(mode);
+    for column in COLUMNS {
+        let policy = column.policy();
         for (actor, reason) in cases {
             let got = policy.authorize("c", &read, actor).err().map(|b| b.reason);
-            assert_eq!(got, reason, "{actor:?} in {mode:?}");
+            assert_eq!(got, reason, "{actor:?} in {column:?}");
         }
     }
 }
@@ -933,10 +992,10 @@ fn only_what_an_exact_approval_lets_through_is_approvable() {
         assert!(guarded.approvable("c", &exec, actor), "{actor:?}");
     }
     assert!(guarded.approvable("c", &secret, Actor::Terminal));
-    for mode in MODES {
-        let policy = policy_in(mode);
-        assert!(!policy.approvable("c", &secret, Actor::Agent), "{mode:?}");
-        assert!(!policy.approvable("c", &read, Actor::Agent), "{mode:?}");
+    for column in COLUMNS {
+        let policy = column.policy();
+        assert!(!policy.approvable("c", &secret, Actor::Agent), "{column:?}");
+        assert!(!policy.approvable("c", &read, Actor::Agent), "{column:?}");
     }
     let read_only = policy_in(Mode::ReadOnly);
     assert!(!read_only.approvable("c", &write, Actor::Terminal));
@@ -1120,7 +1179,7 @@ const APPROVALS: [&str; 8] = [
     "a lasting one for another context",
 ];
 
-/// What a mode answers a terminal's request with each of [`APPROVALS`].
+/// What a column answers a terminal's request with each of [`APPROVALS`].
 type Answers = [Answer; 8];
 
 const EVERY: Answers = [Pass; 8];
@@ -1128,15 +1187,15 @@ const NONE: Answers = [Block; 8];
 const APPROVED: Answers = [Block, Pass, Block, Block, Block, Pass, Block, Block];
 const ONLY_EXACT: Answers = [Block, Pass, Block, Block, Block, Block, Block, Block];
 
-/// A terminal's request through the policy proxy, and what `read-write`,
-/// `guarded` and `read-only` answer it with each approval.
+/// A terminal's request through the policy proxy, and what each of
+/// [`COLUMNS`] answers it with each approval.
 struct Approved {
     what: &'static str,
     method: Method,
     uri: &'static str,
     upgrade: bool,
     class: RequestClass,
-    answers: [Answers; 3],
+    answers: [Answers; 4],
 }
 
 fn approved(
@@ -1144,7 +1203,7 @@ fn approved(
     method: Method,
     uri: &'static str,
     class: RequestClass,
-    answers: [Answers; 3],
+    answers: [Answers; 4],
 ) -> Approved {
     Approved {
         what,
@@ -1163,91 +1222,91 @@ fn approvals_table() -> Vec<Approved> {
         ..row
     };
     vec![
-        approved("get", Method::GET, POD, Read, [EVERY; 3]),
+        approved("get", Method::GET, POD, Read, [EVERY; 4]),
         approved(
             "a dry run",
             Method::POST,
             "/api/v1/namespaces/a/configmaps?dryRun=All",
             DryRun,
-            [EVERY; 3],
+            [EVERY; 4],
         ),
-        approved("read Secrets", Method::GET, SECRETS, SecretRead, [EVERY; 3]),
+        approved("read Secrets", Method::GET, SECRETS, SecretRead, [EVERY; 4]),
         upgrading(approved(
             "port-forward",
             Method::GET,
             "/api/v1/namespaces/a/pods/p/portforward",
             Forward,
-            [EVERY; 3],
+            [EVERY; 4],
         )),
         approved(
             "create",
             Method::POST,
             "/api/v1/namespaces/a/configmaps",
             Write,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         ),
         approved(
             "patch",
             Method::PATCH,
             DEPLOYMENT,
             Write,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         ),
         approved(
             "scale",
             Method::PATCH,
             "/apis/apps/v1/namespaces/a/deployments/d/scale",
             Write,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         ),
         approved(
             "write a Secret, which the terminal may read",
             Method::PUT,
             "/api/v1/namespaces/a/secrets/s",
             Write,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         ),
         approved(
             "delete",
             Method::DELETE,
             POD,
             Write,
-            [EVERY, ONLY_EXACT, NONE],
+            [EVERY, ONLY_EXACT, NONE, NONE],
         ),
         approved(
             "delete a collection",
             Method::DELETE,
             PODS,
             Write,
-            [EVERY, ONLY_EXACT, NONE],
+            [EVERY, ONLY_EXACT, NONE, NONE],
         ),
         approved(
             "evict, which deletes the pod",
             Method::POST,
             "/api/v1/namespaces/a/pods/p/eviction",
             Write,
-            [EVERY, ONLY_EXACT, NONE],
+            [EVERY, ONLY_EXACT, NONE, NONE],
         ),
         approved(
             "a DELETE by the old proxy path, which RBAC calls proxy",
             Method::DELETE,
             "/api/v1/proxy/namespaces/a/pods/p/x",
             Exec,
-            [EVERY, ONLY_EXACT, NONE],
+            [EVERY, ONLY_EXACT, NONE, NONE],
         ),
         upgrading(approved(
             "exec",
             Method::GET,
             "/api/v1/namespaces/a/pods/p/exec?command=sh",
             Exec,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         )),
         upgrading(approved(
             "attach over SPDY",
             Method::POST,
             "/api/v1/namespaces/a/pods/p/attach?stdin=true",
             Exec,
-            [EVERY, APPROVED, NONE],
+            [EVERY, APPROVED, NONE, NONE],
         )),
     ]
 }
@@ -1282,8 +1341,8 @@ async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_cov
         let sent = request.body(()).unwrap();
         let attributes = Attributes::of(&sent);
         assert_eq!(attributes.class, row.class, "{}", row.what);
-        for (mode, answers) in MODES.into_iter().zip(row.answers) {
-            let policy = policy_in(mode);
+        for (column, answers) in COLUMNS.into_iter().zip(row.answers) {
+            let policy = column.policy();
             let approvals = approvals_for(&attributes);
             for ((approval, answer), named) in approvals.into_iter().zip(answers).zip(APPROVALS) {
                 let reached = Arc::new(Mutex::new(0));
@@ -1310,7 +1369,7 @@ async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_cov
                 }
                 let answered = service.oneshot(request).await;
                 let got = if answered.is_ok() { Pass } else { Block };
-                assert_eq!(got, answer, "{} with {named} in {mode:?}", row.what);
+                assert_eq!(got, answer, "{} with {named} in {column:?}", row.what);
                 let expected = usize::from(answer == Pass);
                 assert_eq!(
                     *reached.lock().unwrap(),
@@ -1322,14 +1381,15 @@ async fn a_terminal_s_write_and_exec_pass_guarded_only_with_an_approval_that_cov
                     let reason = blocked
                         .downcast_ref::<twigo_ipc::Blocked>()
                         .map(|blocked| blocked.reason);
-                    let wanted = match mode {
-                        Mode::ReadOnly => BlockReason::Mode,
-                        _ => BlockReason::NoApproval,
+                    let wanted = match column {
+                        Column::In(Mode::ReadOnly) => BlockReason::Mode,
+                        Column::Unmarked => BlockReason::Unmarked,
+                        Column::In(_) => BlockReason::NoApproval,
                     };
                     assert_eq!(
                         reason,
                         Some(wanted),
-                        "{} with {named} in {mode:?}",
+                        "{} with {named} in {column:?}",
                         row.what
                     );
                 }

@@ -9,9 +9,12 @@ use jiff::{SignedDuration, Timestamp};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::watch;
-use twigo_ipc::{Blocked, ContextAccess, Environment, Mode, ModeSource};
+use twigo_ipc::{
+    BlockReason, Blocked, ContextAccess, Environment, Friction, Lock, LockSource, Mode, ModeSource,
+    RequestClass,
+};
 
-use crate::{Actor, Approval, Attributes, Audit, Gate, PolicyFile};
+use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile};
 
 /// How long an unlock lasts.
 pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
@@ -21,13 +24,30 @@ pub const UNLOCK: SignedDuration = SignedDuration::from_mins(15);
 /// the UI hears.
 const RELOCK_CHECK: Duration = Duration::from_secs(30);
 
+/// What a provider can lock a context to: a lock only tightens, so it never
+/// says `read-write`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderLock {
+    Guarded,
+    ReadOnly,
+}
+
+impl ProviderLock {
+    fn mode(self) -> Mode {
+        match self {
+            ProviderLock::Guarded => Mode::Guarded,
+            ProviderLock::ReadOnly => Mode::ReadOnly,
+        }
+    }
+}
+
 /// What the catalog says of a context it lists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Metadata {
-    /// `twigo.readOnly` in its kubeconfig.
-    pub read_only: Option<bool>,
-    /// What its provider marks it as; kubeconfig contexts have none.
-    pub provider: Option<Mode>,
+    /// `twigo.readOnly` in its kubeconfig, a lock to `read-only`.
+    pub read_only: bool,
+    /// What its provider locks it to; kubeconfig contexts have none.
+    pub provider: Option<ProviderLock>,
     pub environment: Option<Environment>,
     /// Changes when what it connects to does, or what its kubeconfig says of
     /// it: an unlock holds only for what it was given on.
@@ -63,6 +83,36 @@ where
         .collect())
 }
 
+/// A change of a context's protection that a person asks for (ARCHITECTURE
+/// 6.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Change {
+    /// The person's mode, none for what its locks say.
+    Mode { mode: Option<Mode> },
+    /// The person's type, none for no type whatever its kubeconfig says.
+    Type { environment: Option<Environment> },
+    /// `read-only` through as `guarded` for [`UNLOCK`].
+    Unlock,
+}
+
+/// A change as a plan shows it: what the context is before and after, and
+/// what [`Policy::change`] holds it to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedChange {
+    pub change: Change,
+    pub before: ContextAccess,
+    pub after: ContextAccess,
+    /// [`Policy::changes_of`] the context when it was planned.
+    changes: u64,
+    /// [`Metadata::revision`] of the context when it was planned.
+    revision: u64,
+}
+
 /// Why a command could not change a context's mode.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refused {
@@ -72,6 +122,10 @@ pub enum Refused {
     PolicyFileUnreadable(String),
     #[error("{0} is {1}, so there is nothing to unlock")]
     NotLocked(String, &'static str),
+    #[error("no source lists {0}, so Twigo changed nothing of it")]
+    Unlisted(String),
+    #[error("what {0} lets through changed since Twigo asked, so Twigo changed nothing")]
+    Changed(String),
 }
 
 /// None for a context no source lists now.
@@ -85,6 +139,7 @@ pub struct Policy {
     audit: Audit,
 }
 
+#[derive(Clone)]
 struct Held {
     choices: Choices,
     /// By context. Never stored: a restart relocks.
@@ -99,12 +154,59 @@ impl Held {
         *self.changed.entry(context.to_owned()).or_default() += 1;
     }
 
+    fn changes_of(&self, context: &str) -> u64 {
+        self.changed.get(context).copied().unwrap_or_default()
+    }
+
     fn end_unlock(&mut self, context: &str) -> bool {
         let ended = self.unlocks.remove(context).is_some();
         if ended {
             self.changed(context);
         }
         ended
+    }
+
+    /// Ends for good an unlock given on another connection than the
+    /// context's now: a kubeconfig edited back gives the same fingerprint
+    /// again. Says why, as the audit log names it.
+    fn end_moved(&mut self, context: &str, metadata: Option<Metadata>) -> Option<&'static str> {
+        let unlock = self.unlocks.get(context)?;
+        let by = match metadata {
+            None => "unlisted",
+            Some(metadata) if metadata.connection != unlock.connection => "moved",
+            Some(_) => return None,
+        };
+        self.end_unlock(context);
+        Some(by)
+    }
+
+    /// Makes `change`. A choice ends an unlock, since it is what the person
+    /// means now, and marking a context Production again must not bring an
+    /// unlock back.
+    fn make(&mut self, context: &str, change: Change, metadata: &Metadata, until: Timestamp) {
+        match change {
+            Change::Mode { mode } => {
+                self.unlocks.remove(context);
+                match mode {
+                    Some(mode) => self.choices.modes.insert(context.to_owned(), mode),
+                    None => self.choices.modes.remove(context),
+                };
+            }
+            Change::Type { environment } => {
+                self.unlocks.remove(context);
+                self.choices
+                    .environments
+                    .insert(context.to_owned(), environment);
+            }
+            Change::Unlock => {
+                let unlock = Unlock {
+                    until,
+                    connection: metadata.connection,
+                };
+                self.unlocks.insert(context.to_owned(), unlock);
+            }
+        }
+        self.changed(context);
     }
 }
 
@@ -135,12 +237,16 @@ impl Policy {
         })
     }
 
-    /// Where nothing sets a mode: every context is `read-write`. For the
-    /// tools and tests that own the clusters they reach.
+    /// Where every context is a Local one, so `read-write`: for the tools
+    /// and tests that own the clusters they reach.
     pub fn open() -> Arc<Self> {
+        let local = Metadata {
+            environment: Some(Environment::Local),
+            ..Metadata::default()
+        };
         Self::new(
             PolicyFile::default(),
-            |_| Some(Metadata::default()),
+            move |_| Some(local),
             Choices::default(),
             Audit::off(),
         )
@@ -177,16 +283,11 @@ impl Policy {
     fn access_at(&self, context: &str, now: Timestamp) -> ContextAccess {
         let metadata = (self.metadata)(context);
         let mut held = self.held();
-        // For good: a kubeconfig edited back gives the same fingerprint again.
-        let connection = metadata.map(|metadata| metadata.connection);
-        if held
-            .unlocks
-            .get(context)
-            .is_some_and(|unlock| Some(unlock.connection) != connection)
-        {
-            held.end_unlock(context);
-        }
-        self.resolved(&held, context, metadata, now)
+        let ended = held.end_moved(context, metadata);
+        let access = self.resolved(&held, context, metadata, now);
+        drop(held);
+        self.relocked(context, ended);
+        access
     }
 
     fn resolved(
@@ -240,26 +341,14 @@ impl Policy {
         let Some(metadata) = metadata else {
             return (Mode::ReadOnly, ModeSource::Unlisted);
         };
+        let lock = strictest(&metadata, environment);
         if let Some(mode) = held.choices.modes.get(context) {
-            return (*mode, ModeSource::User);
+            let overrides = lock.filter(|lock| lock.mode > *mode);
+            return (*mode, ModeSource::User { overrides });
         }
-        if let Some(read_only) = metadata.read_only {
-            let mode = if read_only {
-                Mode::ReadOnly
-            } else {
-                Mode::ReadWrite
-            };
-            return (mode, ModeSource::Kubeconfig);
-        }
-        if let Some(mode) = metadata.provider {
-            return (mode, ModeSource::Provider);
-        }
-        match environment {
-            Some(environment) => (
-                default_mode(environment),
-                ModeSource::Environment { environment },
-            ),
-            None => (Mode::ReadWrite, ModeSource::Default),
+        match lock {
+            Some(Lock { mode, source }) => (mode, mode_source(source)),
+            None => (Mode::Guarded, ModeSource::Unmarked),
         }
     }
 
@@ -341,13 +430,19 @@ impl Policy {
                 approval.covers(context, actor, attributes, Timestamp::now())
             })
         };
-        actor
-            .decide(
+        let unmarked = access.source == ModeSource::Unmarked
+            && matches!(attributes.class, RequestClass::Write | RequestClass::Exec);
+        let decided = if unmarked {
+            Err(BlockReason::Unmarked)
+        } else {
+            actor.decide(
                 attributes.class,
                 access.mode,
                 self.file.allow_port_forward(),
                 approved,
             )
+        };
+        decided
             .and_then(|()| {
                 if attributes.writes_a_secret() {
                     actor.read_secrets()
@@ -369,78 +464,142 @@ impl Policy {
             })
     }
 
-    /// The person's mode for `context`, or none for what the rest says.
-    /// Ends an unlock, since the choice is what they mean now.
-    pub fn set_mode(&self, context: &str, mode: Option<Mode>) -> Result<Choices, Refused> {
+    /// What `change` would leave `context` with now: refused where the
+    /// admin's policy file sets its mode or no source lists it, and an unlock
+    /// where it is not `read-only`.
+    pub fn plan(&self, context: &str, change: Change) -> Result<PlannedChange, Refused> {
         self.refuse_policy_file(context)?;
+        let now = Timestamp::now();
+        let metadata =
+            (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
         let mut held = self.held();
-        held.unlocks.remove(context);
-        held.changed(context);
-        match mode {
-            Some(mode) => held.choices.modes.insert(context.to_owned(), mode),
-            None => held.choices.modes.remove(context),
+        let ended = held.end_moved(context, Some(metadata));
+        let before = self.resolved(&held, context, Some(metadata), now);
+        let mut changed = held.clone();
+        changed.make(context, change, &metadata, unlocked_until(now, UNLOCK));
+        let planned = PlannedChange {
+            change,
+            after: self.resolved(&changed, context, Some(metadata), now),
+            changes: held.changes_of(context),
+            revision: metadata.revision,
+            before,
         };
-        let choices = held.choices.clone();
         drop(held);
-        self.changed();
+        self.relocked(context, ended);
+        refuse_unlock(context, change, &planned.before)?;
+        Ok(planned)
+    }
+
+    /// Makes a change a person confirmed through `friction`, while the
+    /// context stands as it was planned: a choice, an unlock or its end, or
+    /// what the catalog says of it meanwhile refuses it. The audit log
+    /// records it.
+    pub fn change(
+        &self,
+        context: &str,
+        planned: &PlannedChange,
+        friction: &Friction,
+    ) -> Result<Choices, Refused> {
+        let change = planned.change;
+        let (before, after, choices) =
+            self.make(context, change, UNLOCK, |held, before, metadata| {
+                let stands = *before == planned.before
+                    && held.changes_of(context) == planned.changes
+                    && metadata.revision == planned.revision;
+                stands
+                    .then_some(())
+                    .ok_or_else(|| Refused::Changed(context.to_owned()))
+            })?;
+        self.audit.record(&Entry::Protection {
+            context,
+            change: &change,
+            before: &before,
+            after: &after,
+            by: By::Plan { friction },
+        });
         Ok(choices)
     }
 
-    /// What the person marks `context` as, none for no type at all. Ends an
-    /// unlock, which marking it Production again must not bring back.
-    pub fn set_environment(&self, context: &str, environment: Option<Environment>) -> Choices {
-        let mut held = self.held();
-        held.unlocks.remove(context);
-        held.changed(context);
-        held.choices
-            .environments
-            .insert(context.to_owned(), environment);
-        let choices = held.choices.clone();
-        drop(held);
-        self.changed();
-        choices
+    /// Marks an unmarked context as `environment`, the answer to the ask of
+    /// `actor`'s process `process`, while nothing has marked it meanwhile
+    /// and it still connects to `connection`, as the ask's request does. The
+    /// audit log records it, naming the process.
+    pub fn mark(
+        &self,
+        context: &str,
+        connection: u64,
+        environment: Environment,
+        actor: Actor,
+        process: &str,
+    ) -> Result<Choices, Refused> {
+        let change = Change::Type {
+            environment: Some(environment),
+        };
+        let (before, after, choices) =
+            self.make(context, change, UNLOCK, |_, before, metadata| {
+                let unmarked =
+                    before.source == ModeSource::Unmarked && metadata.connection == connection;
+                unmarked
+                    .then_some(())
+                    .ok_or_else(|| Refused::Changed(context.to_owned()))
+            })?;
+        self.audit.record(&Entry::Protection {
+            context,
+            change: &change,
+            before: &before,
+            after: &after,
+            by: By::Ask {
+                actor: actor.name(),
+                process,
+            },
+        });
+        Ok(choices)
     }
 
-    /// Lets `read-only` through as `guarded` for [`UNLOCK`].
-    pub fn unlock(&self, context: &str) -> Result<(), Refused> {
-        self.unlock_for(context, UNLOCK)
-    }
-
-    /// [`Policy::unlock`], for as long as a test can wait.
-    pub fn unlock_for(&self, context: &str, length: SignedDuration) -> Result<(), Refused> {
+    /// Makes `change` once `check` lets it, given what the context is now,
+    /// under the lock every decision reads: says what it was and what it
+    /// is, and the person's choices to keep.
+    fn make(
+        &self,
+        context: &str,
+        change: Change,
+        unlock: SignedDuration,
+        check: impl FnOnce(&Held, &ContextAccess, &Metadata) -> Result<(), Refused>,
+    ) -> Result<(ContextAccess, ContextAccess, Choices), Refused> {
         self.refuse_policy_file(context)?;
         let now = Timestamp::now();
-        let metadata = (self.metadata)(context);
-        // Under one lock, so a choice made meanwhile is not unlocked unasked.
+        let metadata =
+            (self.metadata)(context).ok_or_else(|| Refused::Unlisted(context.to_owned()))?;
         let mut held = self.held();
-        let access = self.resolved(&held, context, metadata, now);
-        if access.mode != Mode::ReadOnly && access.unlocked_until.is_none() {
-            return Err(Refused::NotLocked(context.to_owned(), access.mode.name()));
+        let ended = held.end_moved(context, Some(metadata));
+        let before = self.resolved(&held, context, Some(metadata), now);
+        let checked = check(&held, &before, &metadata);
+        if checked.is_ok() {
+            held.make(context, change, &metadata, unlocked_until(now, unlock));
         }
-        let Some(metadata) = metadata else {
-            return Err(Refused::NotLocked(
-                context.to_owned(),
-                "listed by no source",
-            ));
-        };
-        let until = now.saturating_add(length).unwrap_or(Timestamp::MAX);
-        held.unlocks.insert(
-            context.to_owned(),
-            Unlock {
-                until,
-                connection: metadata.connection,
-            },
-        );
-        held.changed(context);
+        let after = self.resolved(&held, context, Some(metadata), now);
+        let choices = held.choices.clone();
         drop(held);
+        self.relocked(context, ended);
+        checked?;
         self.changed();
-        Ok(())
+        Ok((before, after, choices))
     }
 
-    /// Ends an unlock now.
+    /// Ends an unlock now, which the audit log records.
     pub fn relock(&self, context: &str) {
-        if self.held().end_unlock(context) {
+        let ended = self.held().end_unlock(context);
+        if ended {
             self.changed();
+        }
+        self.relocked(context, ended.then_some("command"));
+    }
+
+    /// Records an unlock that ended `by` a relock, its time, or the context
+    /// naming another cluster or none.
+    fn relocked(&self, context: &str, by: Option<&str>) {
+        if let Some(by) = by {
+            self.audit.record(&Entry::Relocked { context, by });
         }
     }
 
@@ -448,11 +607,7 @@ impl Policy {
     /// lets through: what someone holds to it lasts only while this stays,
     /// and [`Policy::revision`] too.
     pub fn changes_of(&self, context: &str) -> u64 {
-        self.held()
-            .changed
-            .get(context)
-            .copied()
-            .unwrap_or_default()
+        self.held().changes_of(context)
     }
 
     /// Tells [`Policy::changes`] as each unlock ends, while the policy lives.
@@ -489,11 +644,13 @@ impl Policy {
         for context in &ended {
             held.end_unlock(context);
         }
-        let ended = !ended.is_empty();
         let next = held.unlocks.values().map(|unlock| unlock.until).min();
         drop(held);
-        if ended {
+        if !ended.is_empty() {
             self.changed();
+        }
+        for context in &ended {
+            self.relocked(context, Some("time"));
         }
         next.map(|next| {
             let left = now.duration_until(next).unsigned_abs();
@@ -517,6 +674,88 @@ impl Policy {
 
     fn held(&self) -> MutexGuard<'_, Held> {
         self.held.lock().expect("policy lock")
+    }
+}
+
+#[cfg(any(test, feature = "test-util"))]
+impl Policy {
+    /// The person's mode for `context`, or none for what its locks say,
+    /// unplanned and unrecorded, for the tests that set a mode.
+    pub fn set_mode(&self, context: &str, mode: Option<Mode>) -> Result<Choices, Refused> {
+        let change = Change::Mode { mode };
+        Ok(self.make(context, change, UNLOCK, |_, _, _| Ok(()))?.2)
+    }
+
+    /// The person's type for `context`, none for no type, unplanned and
+    /// unrecorded, for the tests that mark one.
+    pub fn set_environment(
+        &self,
+        context: &str,
+        environment: Option<Environment>,
+    ) -> Result<Choices, Refused> {
+        let change = Change::Type { environment };
+        Ok(self.make(context, change, UNLOCK, |_, _, _| Ok(()))?.2)
+    }
+
+    /// Lets `read-only` through as `guarded` for [`UNLOCK`], unplanned and
+    /// unrecorded.
+    pub fn unlock(&self, context: &str) -> Result<(), Refused> {
+        self.unlock_for(context, UNLOCK)
+    }
+
+    /// [`Policy::unlock`], for as long as a test can wait.
+    pub fn unlock_for(&self, context: &str, length: SignedDuration) -> Result<(), Refused> {
+        let change = Change::Unlock;
+        self.make(context, change, length, |_, before, _| {
+            refuse_unlock(context, change, before)
+        })
+        .map(|_| ())
+    }
+}
+
+/// Refuses an unlock of a context that is not `read-only`: one unlocked
+/// already may be unlocked anew.
+fn refuse_unlock(context: &str, change: Change, before: &ContextAccess) -> Result<(), Refused> {
+    let locked = before.mode == Mode::ReadOnly || before.unlocked_until.is_some();
+    if change == Change::Unlock && !locked {
+        return Err(Refused::NotLocked(context.to_owned(), before.mode.name()));
+    }
+    Ok(())
+}
+
+fn unlocked_until(now: Timestamp, length: SignedDuration) -> Timestamp {
+    now.saturating_add(length).unwrap_or(Timestamp::MAX)
+}
+
+/// The strictest of what the kubeconfig, the provider and the type lock the
+/// context to; of equal ones the kubeconfig's, then the provider's, then the
+/// type's.
+fn strictest(metadata: &Metadata, environment: Option<Environment>) -> Option<Lock> {
+    let locks = [
+        metadata.read_only.then_some(Lock {
+            mode: Mode::ReadOnly,
+            source: LockSource::Kubeconfig,
+        }),
+        metadata.provider.map(|provider| Lock {
+            mode: provider.mode(),
+            source: LockSource::Provider,
+        }),
+        environment.map(|environment| Lock {
+            mode: default_mode(environment),
+            source: LockSource::Environment { environment },
+        }),
+    ];
+    locks
+        .into_iter()
+        .flatten()
+        .reduce(|kept, next| if next.mode > kept.mode { next } else { kept })
+}
+
+fn mode_source(source: LockSource) -> ModeSource {
+    match source {
+        LockSource::Kubeconfig => ModeSource::Kubeconfig,
+        LockSource::Provider => ModeSource::Provider,
+        LockSource::Environment { environment } => ModeSource::Environment { environment },
     }
 }
 

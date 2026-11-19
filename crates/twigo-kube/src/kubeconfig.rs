@@ -192,8 +192,10 @@ pub struct Context {
     pub server: Option<String>,
     /// Where the context goes among the others, lowest first.
     pub order: Option<i64>,
-    /// `twigo.readOnly`, one of the sources of its mode.
-    pub read_only: Option<bool>,
+    /// `twigo.readOnly` there and anything but `false`: a lock to
+    /// `read-only`, which can only tighten its mode, so `false` says
+    /// nothing.
+    pub read_only: bool,
     pub environment: Option<Environment>,
     pub fingerprint: Fingerprint,
     /// Why no connection can be made, when the kubeconfig already says.
@@ -388,12 +390,12 @@ impl FileFailure {
 
 /// The `twigo` extension of a context. Each field is read on its own, so a
 /// value Twigo does not know drops only that field; but a `readOnly` that says
-/// something else than true or false stays a lock, as somebody meant one.
+/// something else than false stays a lock, as somebody meant one.
 #[derive(Default)]
 struct Extension {
     color: Option<ContextColor>,
     order: Option<i64>,
-    read_only: Option<bool>,
+    read_only: bool,
     environment: Option<Environment>,
 }
 
@@ -413,7 +415,7 @@ impl Extension {
             order: field(value, "order"),
             read_only: value
                 .get("readOnly")
-                .map(|read_only| read_only.as_bool().unwrap_or(true)),
+                .is_some_and(|read_only| read_only.as_bool() != Some(false)),
             environment: environment(value),
         }
     }
