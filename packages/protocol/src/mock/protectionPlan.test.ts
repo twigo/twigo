@@ -134,6 +134,9 @@ test("a lasting change asks for the name where any set of the locks that can go 
   access.setEnvironment("analytics", "development");
   const filed = new MockAccess(true, KUBECONFIGS);
   filed.setEnvironment("prod-eu", "staging");
+  const pair = new MockAccess(false, KUBECONFIGS);
+  pair.setMode("analytics", null);
+  pair.lockByFile("analytics");
   const typed = (context: string) => ({ kind: "typed", text: context });
 
   const rows: [MockAccess, string, Change, unknown][] = [
@@ -145,6 +148,8 @@ test("a lasting change asks for the name where any set of the locks that can go 
     [access, "analytics", mark("local"), AT_ONCE],
     [filed, "prod-eu", CLEAR_TYPE, typed("prod-eu")],
     [filed, "prod-eu", mark("production"), AT_ONCE],
+    [pair, "analytics", mark("development"), typed("analytics")],
+    [pair, "analytics", mark("production"), AT_ONCE],
   ];
   for (const [from, context, change, expected] of rows) {
     expect(
