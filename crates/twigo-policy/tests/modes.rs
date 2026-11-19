@@ -945,6 +945,31 @@ fn a_plan_holds_only_while_the_context_stands_as_it_was_planned() {
 }
 
 #[test]
+fn a_plan_made_under_an_unlock_is_refused_once_the_unlock_ran_out_before_anything_ended_it() {
+    let policy = with_metadata(Metadata {
+        read_only: true,
+        ..NOTHING
+    });
+    policy
+        .unlock_for("c", SignedDuration::from_millis(20))
+        .unwrap();
+    let lower = Change::Mode {
+        mode: Some(Mode::ReadWrite),
+    };
+    let planned = policy.plan("c", lower).unwrap();
+    assert_eq!(planned.before.mode, Mode::Guarded);
+    std::thread::sleep(Duration::from_millis(40));
+    let typed = Friction::Typed {
+        text: "c".to_owned(),
+    };
+    assert_eq!(
+        policy.change("c", &planned, &typed).unwrap_err(),
+        Refused::Changed("c".to_owned())
+    );
+    assert_eq!(policy.access("c").mode, Mode::ReadOnly);
+}
+
+#[test]
 fn an_unlock_is_planned_only_for_a_read_only_context() {
     let policy = Policy::open();
     assert!(matches!(
