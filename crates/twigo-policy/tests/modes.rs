@@ -822,7 +822,7 @@ fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_fri
 
 #[test]
 fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_shows_it_lowering() {
-    let (_dir, file) = file(r#"{"contexts": {"filed": "guarded"}}"#);
+    let (_dir, file) = file(r#"{"contexts": {"filed": "guarded", "filed-locked": "read-only"}}"#);
     let policy = Policy::new(
         file,
         |context| {
@@ -844,7 +844,7 @@ fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_sho
                     environment: Some(TypeLock::Production),
                     ..NOTHING
                 },
-                "locked" => Metadata {
+                "locked" | "filed-locked" => Metadata {
                     read_only: true,
                     ..NOTHING
                 },
@@ -879,6 +879,8 @@ fn a_lasting_change_asks_for_the_name_where_any_set_of_the_locks_that_can_go_sho
         ("locked", mark(Environment::Local), false),
         ("filed", clear_type, true),
         ("filed", mark(Environment::Production), false),
+        ("filed-locked", mark(Environment::Development), true),
+        ("filed-locked", mark(Environment::Production), false),
     ];
     for (context, change, typed) in asks {
         let planned = policy.plan(context, change).unwrap();
