@@ -50,9 +50,11 @@ import { Vitals } from "./Vitals";
  * A `k8s://` editor (ARCHITECTURE 4.3): one object, live, as its Overview,
  * its YAML, its events and its related objects, under the same header as the
  * inspector's, whose commands act on this object; Rust always follows its
- * Overview, its events and related objects only while their view is shown, its
- * manifest while the YAML view is shown or an edit is held, and its usage, for
- * a kind that has one, while the Overview is shown in a visible window.
+ * Overview, which holds its events, so that they are watched on every view and
+ * the batch's own part of them goes only while the Events view is shown, its
+ * related objects only while the Related view is shown, its manifest while the
+ * YAML view is shown or an edit is held, and its usage, for a kind that has
+ * one, while the Overview is shown in a visible window.
  */
 export function ObjectEditor({
   uri,

@@ -13,7 +13,6 @@ export type MenuId =
   | "resource/context"
   | "resource/details"
   | "resource/marked"
-  | "resource/title"
   | "view/title"
   | "panel/title"
   | "panel/empty"

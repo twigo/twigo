@@ -20,19 +20,27 @@ pub struct ObjectQuery {
     pub name: String,
 }
 
-/// What the views of an open object show; Rust follows only these.
+/// What the views of an open object ask for; Rust follows only these. The page
+/// asks for the Overview on every view, so that its header and its keys hold on
+/// all of them. It asks for the events and the related objects only while their
+/// view is shown, for the manifest while the YAML view is shown or, in an
+/// editor, an edit is held, and for the usage only of a pod or a node, on the
+/// Overview, in a visible window.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct ObjectParts {
-    /// The Overview document, its events included.
+    /// The Overview document, its events included: Rust watches the object's
+    /// events for as long as it is asked, whichever view is shown.
     pub overview: bool,
-    /// The object as the YAML tab shows it.
+    /// The object as the YAML tab shows it, while that view is shown or an
+    /// edit is held.
     pub manifest: bool,
-    /// The object's events, for the Events tab.
+    /// The object's events as the Events tab lists them, while that view is
+    /// shown.
     pub events: bool,
-    /// Its owners and the objects it owns.
+    /// Its owners and the objects it owns, while the Related tab is shown.
     pub related: bool,
-    /// What a pod or a node uses, read while it is drawn and the document
-    /// is visible.
+    /// What a pod or a node uses, read while the Overview is shown and the
+    /// document is visible.
     pub usage: bool,
 }
 
@@ -397,7 +405,7 @@ pub enum Value {
     Text {
         text: String,
     },
-    /// RFC 3339, shown as an age with the date beside it.
+    /// RFC 3339, shown as an age, with the date in its tooltip.
     Time {
         at: String,
     },

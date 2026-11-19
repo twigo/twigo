@@ -97,6 +97,55 @@ test("a sentence draws again only for its times, and each time as its own text c
   );
 });
 
+test("a time draws again only as its text or its role changes", () => {
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  vi.useFakeTimers({
+    now,
+    toFake: ["Date", "setInterval", "clearInterval"],
+  });
+  const ticked = (ago: number) => {
+    let commits = 0;
+    const { container } = render(
+      <Profiler
+        id="time"
+        onRender={() => {
+          commits++;
+        }}
+      >
+        <ValueView
+          value={{ type: "time", at: new Date(Date.now() - ago).toISOString() }}
+          onOpen={() => undefined}
+        />
+      </Profiler>,
+    );
+    const first = commits;
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    const time = container.firstElementChild;
+    return {
+      commits: commits - first,
+      text: time?.textContent,
+      role: time?.className,
+    };
+  };
+  const day = 24 * 60 * 60_000;
+  expect(ticked(11 * day).commits).toBe(0);
+  cleanup();
+  expect(ticked(3 * 60 * 60_000 + 5 * 60_000 + 20_000)).toMatchObject({
+    commits: 0,
+    text: "3h5m ago",
+  });
+  cleanup();
+  expect(ticked(2 * 60_000 + 5_000)).toMatchObject({
+    text: "2m10s ago",
+  });
+  cleanup();
+  const crossing = ticked(9 * 60_000 + 57_000);
+  expect(crossing.text).toBe("10m ago");
+  expect(crossing.role).toContain("text-support");
+});
+
 test("a name that is a link has its whole text in its tooltip, where its copy icon hides the end of a cut one", () => {
   const text = "payments-api-production-checkout-7d9f8c6b5-x2x4q";
   const { container } = view({

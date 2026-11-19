@@ -299,7 +299,8 @@ struct Around {
     uid: Box<str>,
     events: Option<Subscription<Object>>,
     owned: Option<Vec<(Owned, Subscription<Row>)>>,
-    /// What its describer needs, while the Overview is shown.
+    /// What its describer needs, while the Overview part is asked, which the page
+    /// does on every view.
     facts: Option<Vec<Held>>,
 }
 
@@ -838,10 +839,10 @@ fn needs_of(hub: &Hub, target: &Target, needs: Vec<Need>) -> Vec<Held> {
         .collect()
 }
 
-/// Holds the needs `wanted` while the Overview is shown, None letting them
-/// go, and reads what they found: the facts when they changed, or when the
-/// needs are held anew, so what a need the hub refused already says goes
-/// out at once.
+/// Holds the needs `wanted` while the Overview part is asked, which the page
+/// does on every view, None letting them go, and reads what they found: the
+/// facts when they changed, or when the needs are held anew, so what a need the
+/// hub refused already says goes out at once.
 fn follow_needs(
     held: &mut Option<Vec<Held>>,
     wanted: Option<Vec<Need>>,

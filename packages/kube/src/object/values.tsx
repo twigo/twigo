@@ -3,7 +3,7 @@ import type { Label, ObjectRef, Span, Value } from "@twigo/protocol";
 import { cn, CutInTheMiddle, LinkButton, TonedText } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole } from "../age";
-import { useNow, useNowAs } from "../useNow";
+import { useNowAs } from "../useNow";
 import { splitImage } from "./image";
 import { LABELS_SHOWN, splitKey, valueFold } from "./labels";
 import { lineCount } from "./lines";
@@ -224,7 +224,7 @@ export function Prose({
   );
 }
 
-/** How long ago, ticking: `12m`. */
+/** How long ago, ticking: `12m`, drawn again only when its text or its role changes. */
 export function Age({
   at,
   suffix = "",
@@ -233,16 +233,17 @@ export function Age({
   /** After the age: ` ago`. */
   suffix?: string;
 }) {
-  const now = useNow();
   const when = at === null ? Number.NaN : Date.parse(at);
+  const age = (now: number) => Math.max(0, now - when);
+  const text = useNowAs((now) => humanDuration(age(now)));
+  const role = useNowAs((now) => ageRole(age(now)));
   if (Number.isNaN(when)) return null;
-  const age = Math.max(0, now - when);
   return (
     <span
       title={new Date(when).toLocaleString()}
-      className={cn("tabular-nums", ageRole(age))}
+      className={cn("tabular-nums", role)}
     >
-      {humanDuration(age)}
+      {text}
       {suffix}
     </span>
   );

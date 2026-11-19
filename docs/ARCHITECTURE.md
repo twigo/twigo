@@ -388,11 +388,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 
 ### 3.3 Three upstream kinds
 
-| Kind         | Request                                                                                                                                                                                 | Used for                                                                                                                                                                                                                     |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::request_stream` | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                                |
-| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                             |
-| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                             | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while its Overview is shown, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. |
+| Kind         | Request                                                                                                                                                                                 | Used for                                                                                                                                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::request_stream` | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                     |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation               | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                  |
+| **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                             | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. |
 
 All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 5.0 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/5.0.0/kube-runtime/src/watcher.rs#L529-L548)).
 
@@ -534,7 +534,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     Reading Secrets through the policy proxy or `host-kube` is its own policy class, `secret-read` (6.4).
 - **Events for an object.**
   A watch of `events.k8s.io/v1` with a field selector on the regarding object: its `regarding.uid`, a node's `regarding.kind=Node,regarding.name=…`, since the kubelet reports a node's name as its uid, and a mirror pod's the uid of the pod it mirrors, as kubectl describe reads them ([research](research/details.md#events)).
-  It runs only while the object's events are shown: the Events tab, or the events section of the drawer or the Overview.
+  It runs while the object's Overview is followed, which is on every view, or its events are asked for: the Overview holds its events section, and the Events view's own part of the batch goes only while that view is shown (4.3).
   No field of an event is indexed and the API server keeps no watch cache for events by default, so such a query is filtered, by inference from the source, from the namespace's events in etcd ([research](research/details.md#events)).
 - **Metrics** (metrics-server).
   - `metrics.k8s.io` cannot be watched, and its lists carry no `resourceVersion`, uid or ETag, so a poller of its own, `twigo_cache::metrics`, reads it beside the hub, as plain JSON through the UI's client with gzip asked for: the Table has no namespace, containers or time.
@@ -587,7 +587,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The figures are the growth of the heap, from `dhat` in a throwaway unit test, over a run without the contexts, with 100 and 300 of them, followers alive and then dropped, twice each, a debug build, macOS 27.2, Rust 1.99.1, 2026-11-14; Linux was not measured.
     A list that has said a state keeps it while its scopes are asked anew, as when its tab returns, so in a context that refuses metrics the header's mark does not go and come back.
     The first batch of a list with the columns says what the poller remembers of the scopes of its window, so the mark is there from the start and the first answers correct it, and nothing where it remembers nothing, but for a stale API, which says `unavailable` with the columns, since discovery knows it without a request.
-    An open pod or node of a context that serves the resource is sent a usage with the batch that carries its Overview once the context's discovery is known, or in the next one when the part is asked for later, so the section's shape is known before any request answers.
+    An open pod or node of a context that serves the resource is sent a usage with the batch that carries its Overview once the context's discovery is known, or in the next one when the part is asked for later, so that what it draws, a node's Usage section and a pod's vitals cells and its containers' lines, is known before any request answers.
     An object opened before that, as when an editor is restored at a start and its `GET` beats the follower's first fetch, gets its usage in a later batch, which the usual order of events, resources first, makes rare; a list opened before any discovery answered gets its columns in the batch after the answer in the same way.
     Where its scope has answered already, as when a list reads its namespace, that usage has the figures.
     Where it has not but the scope's last request failed, the usage says that state, `waiting` false, and the request is made all the same: the answer replaces it with the figures if the refusal has ended.
@@ -597,7 +597,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     On CRI-O the kubelet takes cadvisor's provider by default, since `UsingLegacyCadvisorStats` is true for a runtime endpoint ending in `run/crio/crio.sock` unless `PodAndContainerStatsFromCRI` is on ([`util.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/pkg/kubelet/cadvisor/util.go#L76-L84)), a gate that is Beta and off by default at v1.37.1 ([`kube_features.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/pkg/features/kube_features.go#L1940-L1943)), and the kubelet then uses cadvisor's ([`kubelet.go`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/pkg/kubelet/kubelet.go#L873-L874)).
     That provider filters on use, not on the runtime's state: `ListPodCPUAndMemoryStats` keeps a container's cgroup unless cadvisor reads it as terminated, with zero instantaneous CPU, zero RSS and no network traffic, and, among the cgroups of one container name, only the newest with both CPU and RSS non-zero ([`filterTerminatedContainerInfoAndAssembleByPodCgroupKey`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/pkg/kubelet/stats/cadvisor_stats_provider.go#L437-L482), [`isContainerTerminated`](https://github.com/kubernetes/kubernetes/blob/v1.37.1/pkg/kubelet/stats/cadvisor_stats_provider.go#L538-L560)).
     So the usage's rule, the containers that run by the pod's own status, follows the runtime's state on containerd and, on CRI-O, only as far as use shows it, which was not run there.
-    metrics-server v0.9.1 lists each container of the last scrape that has an earlier point, but leaves a pod out when one of its containers has none ([`GetMetrics`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L48-L100), [L66-L71](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L66-L71)), and a pod with a container of zero CPU or memory ([`checkContainerMetrics`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/scraper/client/resource/decode.go#L190-L204)): that pod has no sample, and its section shrinks to the no-data rows.
+    metrics-server v0.9.1 lists each container of the last scrape that has an earlier point, but leaves a pod out when one of its containers has none ([`GetMetrics`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L48-L100), [L66-L71](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L66-L71)), and a pod with a container of zero CPU or memory ([`checkContainerMetrics`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/scraper/client/resource/decode.go#L190-L204)): that pod has no sample, and its vitals cells and its containers' lines say no data yet.
     A container that started less than 10 s before the scrape ([`freshContainerMinMetricsResolution`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L31)) has an earlier point only if the scrape before listed it, but one that started between 10 s and one resolution before it, 15 s in the manifest, is given one at its start time ([`Store`](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L121-L125)), so its pod is listed.
     A container whose start time or cumulative CPU went back is skipped while its pod is listed ([L72-L76](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/storage/pod.go#L72-L76)), so a pod's containers may be fewer than the running ones.
     On kind 1.37 with metrics-server v0.9.1, a pod with a finished init container, a running restartable one, a running container and a crash-looping one was listed with the two running ones, in four reads of `/apis/metrics.k8s.io/v1beta1/namespaces/default/pods/<name>` over 30 s (2026-11-14).
@@ -804,7 +804,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 
 | URI                                                                 | Editor                                                                                                                                                                 |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with views: Overview, YAML, Events, Related; Logs in its title opens the object's logs tab in the panel, and Shell for pods its shell tab              |
+| `k8s://<space>/<group>/<version>/<resource>[/<ns>]/<name>`          | Resource editor with views: Overview, YAML, Events, Related; Logs in its header opens the object's logs tab in the panel, and Shell for pods its shell tab             |
 | `k8s-list://<space>/<gvr>?ns=…&q=…`                                 | Resource table as an editor, so one can pin "pods in payments where status≠Running" next to another list                                                               |
 | `logs://<space>/<group>/<version>/<resource>/<ns>/<name>`           | Logs tab in the panel (4.6): a pod's, or a workload's pods' merged; the core group an empty segment, as in `k8s://`                                                    |
 | `exec://<space>/<ns>/<pod>/<container>[?n=2][?attach=1]`            | Shell tab in the panel (4.6): xterm over an exec of the container, `n` for a second shell on it, `attach` for its main process                                         |
@@ -814,27 +814,47 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 | `untitled://<space>/manifest-n`                                     | New manifest of a space, numbered within it; its first Apply asks for the target context and, once applied, opens the object it made                                   |
 | `twigo://settings`, `twigo://keybindings`, `twigo://extension/<id>` | Settings UI, keybindings UI, extension details                                                                                                                         |
 
-- **Details and preview tabs.**
+- **Details.**
   A click or Enter on a row opens its details, and Space shows or hides them, as Linear's peek; arrows move them along and Esc closes them.
+  They are the quick look and hold no tab: a double-click on the row, or ⌘Enter on the selected one, opens the object in a tab of its own (below).
   - In an editor at least 960 px wide they stand beside the list as an inspector, and the list gives up columns by its width (4.4), so the selected row stays in view (WCAG 2.4.11); in a narrower one they slide over the list from the right, as Lens's drawer.
   - Their width is the person's, kept with the part sizes (4.8): a drag of their left edge stores it as it was clamped when the drag ended, within 320 px while docked and 85 % of the editor, and lying over the list the cap wins over the 320 px.
     Docked, they shrink, down to those 320 px, so that the list keeps the room its strip needs (4.4).
-  - Their header says what the object is and how it is: the kind's word, then the name at 16 px in strong, its hash and last segment as the list draws them (4.4), the kind's word giving way first in a narrow inspector; the status as a pill; the namespace; the controlling owner as a link; the age, in content for its first ten minutes.
-    Beside the name, Copy Name, an icon that opens the object in an editor, and Close.
+  - Their header is three lines, which an object editor draws too, the third only where there is something to say (below), and each that is drawn keeps its height while the selection moves along rows of one kind:
+    - who it is: the kind's icon and word, then the name at 16 px in strong, its hash and last segment as the list draws them (4.4), then Copy Name, an icon that opens the object in an editor, and Close, of which an object editor has Copy Name alone;
+    - where it is: the namespace, the controlling owner at the top of its owners, the node of a pod and the age, in content for its first ten minutes, between quiet dots; the owner and the node are links that open them, the owner a Deployment through its ReplicaSet and a CronJob through its Job, and the controller itself while the one above it is not listed;
+    - how it is: the status as a pill, then one sentence from Rust, the first finding's title, else the vitals in words (`2/2 ready · no restarts`).
+  - The pill's word is the one the list's health column prints for the object, a pod's or node's Status and a Deployment's Ready, from the cells the server printed for it (`header.printed`) once the object has come and from the selected row before, so the page and the list never say two things.
+    Its tone is the list's rule for that word, else the tone of the core's findings where the rule calls the word healthy, as for a Deployment past its progress deadline, whose Ready still reads `4/4`.
+  - The third line is drawn where the object has a word of the list's health column, where its strip has cells, or where it has a sentence (`useHeader`).
+    After the object comes those are its own: its printed cell for a pod's or a node's Status or a Deployment's Ready, its vitals, and its sentence, which the core gives a pod, a node and a Deployment, and any other kind only as its first finding's title (`header.rs`).
+    So a Job, a Service, an Ingress, a claim or a ConfigMap, which have no health column and no vitals, has the line only while the object has a finding, and it comes and goes with the sentence as the selection moves along rows of one kind.
+    Before the object comes the details have the selected row's word, and the strip's places and whether there is a sentence are those of the last object of its kind that these details showed, kept in the header's own state (`useHeldPerKind`) until the details close.
+    So a kind with vitals and no health column, a StatefulSet or a DaemonSet, draws the line once an object of its kind has come, and a Job's line stands through the dwell and the wait for its object only, and stays only if that object has a sentence.
+    An object editor keeps nothing before its first batch: it has no row and no last object, so it has no word, no strip and no third line until its object comes.
+  - Each of the first two lines takes the fullest of its stages that fits, from hidden copies of the stages, and comes back to a fuller one only with 16 px to spare ([decision](decisions/parts-give-way-by-width.md)):
+    - the first line: the kind's word and the whole name; the name's generated part cut as a list row cuts it; the kind's word gone, its icon saying the kind in its tooltip; the name cut in the middle, down to a floor of 12 characters;
+    - the second line: every part whole; the node cut in the middle; the owner's name cut too; the owner's kind word gone; the node gone; the namespace cut; the age never cuts and never leaves;
+    - what a stage cuts or leaves out is in the tooltip of what stays.
   - Then the commands of `resource/details` as one row ([decision](decisions/parts-give-way-by-width.md)):
     - each kind pins up to three verbs, with their labels and keys, in the same places whatever the object's state: a pod Logs, Shell and Forward; a Deployment or StatefulSet Logs, Restart and Scale; a DaemonSet Logs and Restart; a CronJob Trigger, then Suspend or Resume; a node Cordon or Uncordon, then Drain; any other kind Forward where it has one, else nothing;
     - More comes last, always, with the rest in their groups, and Delete last in it, in a group of its own, in the error tone;
-    - Show YAML and Open in Editor are not on the row: the YAML view shows the same, and the icon beside the name opens the object in a preview tab;
+    - Show YAML and Open in Editor are not on the row: the YAML view shows the same, and the icon beside the name opens the object in a tab of its own;
     - a pinned verb that cannot run keeps its place, disabled, with the reason in its tooltip, as `No container runs` for Shell while the Overview lists containers and none runs, or `You may not restart it` where RBAC refuses (5.1), and an item of More that cannot run says why under its label;
     - a write or an exec that the context's mode will refuse stays clickable, dimmed, with a lock and `prod-eu is read-only`, and the gate refuses it as it runs, a Delete keeping its error tone (5.1, 6.4);
     - as the row narrows the keys go first, then the labels from the last pinned verb back, and a fuller stage comes back only with 16 px to spare;
     - the row is one tab stop, and the arrows, Home and End move along it, as along the views' tabs.
   - Below, the object's views as a row of plates (4.9), Overview, YAML, Events with its warnings counted, and Related, the same row the editor shows; the view shown stays as the selection moves.
+    Over the Overview the row also holds the page's filter (below).
+  - Under the views, on the Overview, a strip of up to four equal cells of 44 px holds the object's vitals, each a caption over a value that takes a tone only where it is abnormal, in the same places while the selection moves along rows of one kind: before the object comes, the places of the last object of its kind that these details showed stand as dashes, and an object editor has none; once it has come the cells are the object's own.
+    - A pod has Ready and Restarts from Rust, the restarts' note saying when the last was, then CPU and Memory from its usage: the figure, a 2 px meter, and beside the figure as much as the cell holds with 16 px to spare, the share and its base in words (`17m 34% of request`), else the base's amount (`17m of 50m`), else the figure alone, the tooltip saying what is left out.
+      Without a sample, or while the Metrics API does not answer, may not be read or is absent, a cell is a dash with the reason in its tooltip.
+    - A Deployment has Ready, Updated and, where it carries the revision annotation, Revision; a StatefulSet and a DaemonSet Ready and Updated; a node Pods, CPU requested, Memory requested and Kubelet; any other kind has none, and no strip.
+    - Rust tones a pod's Restarts only where a container crashes or failed, and the webview adds the warning tone for a restart within the hour as the list does (4.4), unless the verdict is toned, the pod finished or another vital is toned, since a row raises one alarm.
   - The Diagnostics section of step 9 comes first in the Overview when something is wrong: why, in words, with its exit code, restarts, next try and the last log line of the instance that ended, and Previous logs and Logs buttons that open the container's logs tab.
     After a 150 ms pause they hold the object's Object upstream and follow it, as an editor does ([research](research/details.md#following-the-object)).
+    Until the object comes, the row's cells stand in for its page: every column of the list, the wide ones too, each drawn as the list draws it, its printed durations counted from the row's stamp (3.4) and its measures as the polls bring them, so that the stand-in and the row say the same.
     The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
-    Opening the resource from its details opens a preview tab (italic title); editing it or double-clicking its tab pins it.
-    Opening an object from a list's details, or following a link in an object, pins the tab it came from, so the object opens beside it rather than in its place.
 - **Compare with….**
   The picker offers the editor's own kind first, from every namespace and not the ones the lists have selected, and asks Rust for it with the text typed, as the pod search of quick access does, so an object past the first rows is found by its name; the objects the space opened lately, of any kind, follow.
   Forbidden cluster-wide, it falls back to the selected namespaces and the object's own, and says so.
@@ -848,10 +868,24 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A new manifest's URI names the space it was written in, as an object's does, and its number counts within that space, so a number reused after a restart cannot show the text of one space in another's tab.
 - **Object URIs.**
   The core group is an empty segment, `k8s://prod//v1/pods/payments/api-0`, so an object in a namespace has five path segments and a cluster-scoped one four.
+- **Opening an object.**
+  An object always opens in a tab of its own, pinned, and the tab it was opened from stays.
+  - The ways are a double-click on a list's row, ⌘Enter on the selected one (`k8s.resource.openEditor`, which the row's menu shows as Open in Editor), the icon in the details' header, a link to the object in another object's page, a row of a list inside an Overview, and the target's and the pod's links in a port-forward's tab.
+  - Opening from a list's tab or a port-forward's tab pins that tab, and a link followed in an object's page pins that page's tab, so the object opens beside the tab and never in its place.
+  - A double-click opens a row only when both its presses were on that row, and not from its mark cell or a button, link or field in it.
+  - Quick access keeps its own ⌘Enter, which opens to the side and only while it has the focus (4.5).
+  - No object opens as a preview tab; a list does, by a single click on a kind in the explorer and by Go to Resource's pick of a pod (4.5), which opens the pods list filtered to that name with the row selected and its details shown, and so does a port-forward's tab by a click in the Port forwards view.
 - **Views.**
-  A resource editor's Overview, YAML, Events and Related are a row of plates at the top of its content, under its group's tab strip, as they are under the details' header: one definition and one `TabBar` for both, its tablist one tab stop, whose arrows, Home and End show the view they reach.
-  The tab strip's actions keep the editor's own commands of `editor/title`, and the YAML view keeps its toolbar.
-  Rust follows only the view shown.
+  A resource editor's Overview, YAML, Events and Related are a row of plates under the object's header, in the editor as in the details: one definition and one `TabBar` for both, its tablist one tab stop, whose arrows, Home and End show the view they reach.
+  The YAML view keeps its toolbar, and an object editor's tab strip holds no actions of its own: its verbs are in its header's row, said once.
+  Rust follows the object's Overview whichever view is shown, so that the pill, the sentence, the verbs' state, `resource.noContainerRuns` and an editor's subject are right on every view and the keys that read the Overview hold (`useObject`); the vitals' strip is drawn on the Overview alone.
+  It follows the manifest while the YAML view is shown or an edit is held, which only an editor has, the related objects only while the Related view is shown, and a pod's or a node's usage while the Overview is shown in a visible window.
+  The object's events are watched while its Overview is followed, which is on every view, and the batch's own `events` part, which the Events view draws, goes only while that view is shown.
+- **The full page.**
+  An object editor draws the full page once it is 900 px wide, measured on the editor itself since the editor area can be split, and keeps it down to 884 px so that a width on the boundary does not flicker; narrower, it draws the inspector's layout and shares the inspector's folds.
+  - It is one column under the same header and views: the space's name leads the second line in its context's colour, `prod-eu › auth › Deployment auth-api`; the row of actions holds every verb of the kind in its groups with Delete set apart at the far right, where the inspector keeps its pinned verbs and More; the vitals strip is the inspector's.
+  - Every section is open but Metadata, until the person folds or opens one, and those choices are kept per kind apart from the inspector's; a section that holds a finding opens over what was kept, as in the inspector.
+  - Property rows run in two columns, each a label of 112 px and its value, 12 px apart, a long or plural value taking both; a pod's containers sit as two cards side by side.
 - **Closing a tab.**
   When an editor that opens, closes or moves, or a space that shows, drops the keyboard focus to the page, the active group takes it, and the active editor its own where it has something to hold it, a text editor or a list's grid, so a key such as ⌘S, ⌘Z or `j` still reaches an editor.
   A person's close is `Editors.dismiss`: a tab's X, a middle click, ⌘W and Close Editor, Delete or Backspace on a focused tab, which dockview 8.8.3 would otherwise close itself ([`_closeTab`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L782-L817)), the Close Terminal… and Close Shell… picks, and the Close button of a port-forward tab whose forward is gone.
@@ -934,27 +968,66 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     They go when the editor closes, the copy staying as text; a text that comes from outside, the live object once a copy has ended, replaces the model's and leaves the cursor and scroll where they were, and clears the undo stack.
 - **Overview.**
   One document per object, described in Rust by `twigo-describe` and rendered alike by the drawer, the Overview tab and MCP's describe-style summaries (6.6) ([research](research/details.md)).
-  - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, the kind's first section, conditions, the kind's other sections, extension sections, then metadata and events last.
-    Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
-    A section's title is strong, 13 px at weight 600 over a hairline, with 24 px above the section and 8 px under the title (4.9).
-    The property lists of a page read one label column of 112 px, in which a label wraps, so values share one axis, except a container's environment and mounts: keys and paths in the monospace, they keep a column of their own up to 14 rem, which cuts what does not fit.
+  - Its `header` holds what the page says around the name (above): `owner`, the controller at the top of the object's owners; `node`; `created`, which gives an object opened with no list row its age; `generated`, where the generated part of its name starts, as a list row's does; `printed`, the cells the server prints for it in a list, from which the page takes its pill's word; `sentence`; and the `vitals`.
+    A pod's describer names its controlling ReplicaSet or Job as a need, for its owner to be the Deployment or CronJob above it.
+  - Sections have ids and an order, the object's state first: Diagnostics when something is wrong, then what a triage of the kind reads, down to how it is configured and what it is, as data of the kind's layout in `twigo-describe`:
+    - a pod: Containers, Events, Conditions, Placement, Storage, Configuration, Metadata;
+    - a Deployment, StatefulSet and DaemonSet: Rollout, Pods, Events, Conditions, Pod template, a StatefulSet's Volume claims, Strategy and scaling, Metadata;
+    - a node: Capacity, Conditions, Pods, Pod resources, Events, Taints and labels, System, Resource slices, Metadata;
+    - any other kind: its first section, Conditions, its other sections, Events, Metadata; the first section of a Job, a CronJob, a Service, an Ingress and a claim is named after the kind, `Job`, `CronJob`, `Service`, `Ingress` and `Claim`.
+  - A thing is said once: no section of a pod, a Deployment, a StatefulSet, a DaemonSet or a node is named after the kind, and a pod's node, addresses, class, priority and scheduling rows are in Placement, its volumes in Storage, its policies and service account in Configuration, and its phase and readiness, which the pill and the vitals hold, are not rows at all.
+  - Each section says what it holds before it is opened, and whether it must be:
+    - `summary`, a line of text and times that keep counting at its header's end, such as `3 of 5 ok`, `2 volumes · 1 claim` or `1 warning · BackOff ×5`, naming the finding where one is about the section;
+    - `tone`, danger or warning where it holds what is wrong, which its header marks with an edge;
+    - `fold`: `open` for the triage set, Diagnostics, a pod's Containers, a workload's Rollout and Pods, a node's Capacity, the first section of a kind whose layout names none, and Events while one is a warning; `finding` for a section that holds something wrong that the Diagnostics section does not explain, which opens over what the person last chose; `folded` for the rest.
+  - Each section holds blocks from a closed set (fields, diagnostics, tables, conditions, containers, data keys, live lists, events, a tree), which the webview renders with a switch that lint holds exhaustive.
+    - A field has `default` where its value is the cluster's own (a pod's Priority 0, its Service account `default`, Restart policy `Always`, DNS policy `ClusterFirst`, Termination grace 30 s, Scheduler `default-scheduler`, a container's image pull policy where it is the one the API server gives that image), and the section hides such fields behind their count.
+    - A condition has `explained` where a finding already says why it is wrong, and then shows only as its chip.
+    - An event list has `listed` once the events have been listed, so that an empty one means there are none, and the Events section's line says nothing until then.
+    - A value of `spans` is text and times in one line that keeps counting, as `code 1 (Error) · 11d ago`.
+  - The core says what is wrong, and the webview how it looks ([decision](decisions/object-page.md)).
+  - A section's header is one toggle of 24 px: the chevron leading, the title strong at 13 px and weight 600, and its summary at the end in the support role, cut before the title is; the tone is a 3 px edge at its left, as a problem row of a list has; the header of the section whose content is at the top sticks under the views while that content scrolls; and ⌥-click folds or opens every section.
+    There are 24 px above a section and 8 px under its header, and 4 px between two folded ones.
+    A section opens as its `fold` says until the person folds or opens it, and that is kept per kind while the app runs, a `finding` over it; the person can still fold a finding's section for the object they folded it in.
+    The fields a section hides behind `5 defaults` show, in the support role with a `default` tag, once the person reveals them, which is kept per kind too, and `Hide defaults` folds them again.
+  - `/` while an Overview holds the focus opens a filter at the end of the views row, or on a line of its own where the row has no room, `Filter this Pod`, in the list's syntax (`!not`, `/regex/`), by the one matcher the list's text filter has, `parseText`, which the mock's tests and Rust's hold to `query-cases.json`.
+    It matches section titles, labels, values and the rows of a container's groups, the hidden defaults too, since a filter shows what a fold hides: a section with a match opens, the others and the rows that do not match hide, and the row says `3 matches in 2 sections`.
+    Enter moves the focus to the first match, Escape clears the text, and the folds the person had come back.
+    The filter's text, and where the page was scrolled to, are kept by the editor's URI, the list editor's for the inspector, so that moving to another object of the kind leaves the text where it was and the section that was at the top at the top, at the same offset into it.
+  - Values follow rules in one place (`stacking.ts`, `labels.ts`, `image.ts`):
+    - the property lists of a page read one label column of 112 px, in which a label wraps, so values share one axis, except a container's environment and mounts: keys and paths in the monospace, they keep a column of their own up to 14 rem, which cuts what does not fit;
+    - a value that is long or plural takes the page's width under its label: labels and annotations, lists, and text or code of more than 40 characters or with line ends;
+    - labels draw as lines, `key=value`, the key's domain prefix quiet, three shown and then `Show all 9`, a value of more than two lines folded to two and the `last-applied-configuration` annotation folded from the start;
+    - an image's registry and path are quiet before its name and tag and a digest is folded to its first four hex digits, the copy icon giving the whole reference;
+    - an object's name is cut in the middle, with its whole text in its tooltip;
+    - prose is at most 640 px wide, in the inspector as on the full page, three lines and then `more` (`Prose`, `max-w-160`);
+    - a time is an age, its moment in the tooltip and in what copy gives, and an empty value is a dash in the quiet role;
+    - a 12 px copy icon lies at the end of a row on hover or while the focus is within it, and is out of the Tab order.
   - Core kinds get describers (Pod, Deployment, StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, Node, PVC, ConfigMap, Secret): at least what `kubectl describe` prints, plus a Diagnostics section when something is wrong.
-    A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the Overview is shown.
-  - A container's card shows its state, how it last ended and its resources; the rest of what `kubectl describe` prints of it, its environment and its mounts fold.
-    The state the IPC carries says in `running` whether the container's process runs, set where its status has `state.running`, which the details read for Shell and Attach (4.6).
+    A describer names the objects of other resources it reads, such as a Deployment its ReplicaSets, a pod its controlling ReplicaSet or Job, a Service its EndpointSlices or a node its pods, and `twigo-core` follows them through the hub while the object is open, on every view.
+  - Conditions are chips, a mark in the condition's tone, its type and its age, with its status, reason and message in the tooltip; a wrong condition that no finding explains says why in a line below, once for the conditions that say the same.
+    Events show the newest three, warnings first, then `All 23 events`, which opens the Events view; under the page's filter they show every event it keeps and no link.
+  - A container's card shows its name, role, state and restarts, its ports and image, how it ended, and its CPU and Memory.
+    - A container terminated now says `Exited` with its code and age, since its state already says why, and an earlier termination says `Last exit` with its reason, as `code 1 (Error) · 11d ago`.
+    - Each of CPU and Memory is one line, the figure, a meter and its share, as high as a text row and in one form whatever it has to say, so that no answer moves what is below it.
+    - What else `kubectl describe` prints of it, its environment and its mounts folds into one line of counts, `Details 4 · Env 5 · Mounts 1`, whose groups open in place; Details holds when it started, the last termination's message, requests and limits, command, arguments, working directory, pull policy, probes, security and the image and container IDs.
+    - The state the IPC carries says in `running` whether the container's process runs, set where its status has `state.running`, which the details read for Shell and Attach (4.6).
   - A pod's and a node's Overview also show what the object uses, from the poller's sample (3.6).
-    Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown, under the gate a list reads its metrics by (4.4).
+    Usage is not part of the document but of the object's batch beside it, with a dirty flag of its own, so a new sample describes nothing again; the webview asks for it while the Overview is shown in a visible window, under the gate a list reads its metrics by (4.4).
     Each container that has a sample comes against its request and limit, the pod's own against the sums only where every container counted has them, and a node's against its allocatable.
-    A Usage section follows the Diagnostics with the pod's total and each of its containers, or the node, as meters against the limit with the request marked, else against the request, and a node's against what it can allocate; the percent is kubectl's, truncated and past 100 where it passes.
-    A meter is 11 rem wide at most, so a wide editor does not stretch it, and a quantity's unit is quiet beside its number.
+    A pod's total is the CPU and Memory cells of its vitals (above), each container's the lines of its card, and a node's a Usage section after its Diagnostics, as meters against what it can allocate.
+    A measure is held against what a node allocates, else a container's limit, else its request, whose mark its meter carries; the percent is kubectl's, truncated and past 100 where it passes, and from 10,000 % a share reads `>9999%` with the exact share in its tooltip.
+    A node's meter is 11 rem wide at most, so a wide editor does not stretch it, and a quantity's unit is quiet beside its number.
     Against a limit or what a node allocates, 90 % is a warning and the limit an error, in the meter and in words.
     A row without a sample says no data yet, never zero, and a Metrics API that does not answer or may not be read says so in place.
-    The usage comes with the Overview once the context's discovery is known, and in a later batch before that, which the usual order of events, resources first, makes rare, and a usage that has `waiting` draws the section at its height: the rows it names, the pod's and each container in `containers` or the node's, with empty meters that a screen reader hears as loading and no figures, and the answer fills the same rows.
-    The webview guesses nothing of the section from discovery, which lists no resource of a stale API, or from the Overview's containers, some of which the usage does not name, as a finished init container; without a usage in the batch there is no section.
-    The webview remembers nothing of what the Metrics API said and draws the usage it is sent: the core says a refusal with the Overview where it remembers one for the scope (a namespace of pods, or the nodes), and keeps an object's last figures while its scope is asked anew, so a tab that returns or a document shown again does not blank the section (3.6).
-    A usage that says `absent`, once the context stops serving the resource, withdraws the section as if none had come, until a later batch brings one.
+    The usage comes with the Overview once the context's discovery is known, and in a later batch before that, which the usual order of events, resources first, makes rare, and a usage that has `waiting` draws its rows at their height: a node's meters, a container's line with an empty meter, a vitals cell as a dash that says it waits for the first sample, and the answer fills the same rows.
+    A container has a line where the usage names it or its state says it runs, so a finished init container has none and a running one the usage lacks says no data yet; the webview guesses nothing from discovery, which lists no resource of a stale API.
+    Without a usage in the batch a node has no section, a pod's containers no lines and its cells a dash.
+    The webview remembers nothing of what the Metrics API said and draws the usage it is sent: the core says a refusal with the Overview where it remembers one for the scope (a namespace of pods, or the nodes), and keeps an object's last figures while its scope is asked anew, so a tab that returns or a document shown again does not blank what it shows (3.6).
+    A usage that says `absent`, once the context stops serving the resource, withdraws the figures as if none had come, until a later batch brings one.
   - Any kind, CRDs included, gets a generic overview: the server's printer columns, a `status.conditions` table when present, spec and status as a tree with the descriptions of their schema, metadata, events.
   - A workload's pods, a CronJob's jobs and a node's pods are live resource tables inside the Overview, run by query views: a workload's by the uids of what controls them, a node's by a field selector.
+    They draw as a list does (4.4): their columns of priority 0 give way by their measured width, and the rows of a pods list that fail come first, then the pending ones, while it holds at most 100 rows and the person has not sorted it; a click or Enter on a row opens its object in a tab of its own.
   - Extensions add declarative sections per GVK (5.4), and replace a core section only by naming its id.
 
 ### 4.4 Resource tables and the keyboard
@@ -969,7 +1042,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A kind's health column always goes last, as a node's Status or a Deployment's Ready; among equals the right-hand one goes first, a column no rule ranks, as a DaemonSet's Ready, goes before every ranked one, and the name column never goes.
   What shows is worked out from the widths in effect, the user's or the rule's, against the grid's measured width, so a width shows the same columns whichever way the grid came to it, and a wider one brings back the last gone first.
   A column that leaves is only hidden: the preset keeps the user's choices and widths, and a sort by it holds, with a note on the Name header that the column has no room at this width.
-  A list inside an Overview gives up none that way: narrower than 640 px it shows only its name, ratio and status columns, else every column of priority 0, and scrolls sideways where they do not fit.
+  A list inside an Overview draws the name and the columns of priority 0 and gives way by the same rule, by its measured width: those columns leave in the list's drop order until the rest fit, the name column never, and every column shows until the width is measured.
   A grid's first column stays at its left edge while the grid scrolls sideways, and only where it leaves the actions column its room beside it, so that it never lies over a row's ⋯ or the choice of columns.
 - Cells read by what matters, data near-monochrome, in the text roles of 4.9:
   - a name reads in three parts (3.4): what comes before its generated part in content, the hash quiet, and the last segment, after the generated part's last `-`, in support; one that does not fit gives up the hash first, to its first character and an ellipsis, its trailing `-` going with the rest (`auth-api-7…x2kq9`), then the end of its first part, and never the last segment, which tells siblings apart; in the row under the cursor and in a selected one the name is strong;
@@ -996,7 +1069,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   Marked rows get a bar at the bottom with the commands of `resource/marked`; Esc clears them.
   A change of the list's text, health or, for a namespaced kind, namespaces clears them too, as a new search clears a selection, so no command acts on rows the list no longer shows.
   Marks are row IDs (3.4).
-- Focus model: arrows or `j`/`k` move, Enter opens, Left and Right fold, `/` or ⌘F filters, Esc clears.
+- Focus model: arrows or `j`/`k` move, Enter shows the details, a double-click or ⌘Enter opens the object in a tab of its own (4.3), Left and Right fold, `/` or ⌘F filters, Esc clears.
   These are the workbench's `list.*` commands, which drive every list and tree.
 - A list's filters sit at the right of its group's tab strip, as the editor's actions (`editor/title`): its health as one control of All, Failing, Pending and Healthy with their counts, for kinds with a health column, a pod's or a node's Status or a Deployment's Ready; the text field, which names its syntax and its key; the grouping; and a pin.
   They take no row of their own, so a table sits under three bars: title, tabs, header.
@@ -1017,7 +1090,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.8.3 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L839-L888)).
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - An empty list names where it looked, the context, then the namespaces it is narrowed to: `No pods in prod-eu`, `No pods in prod-eu · payments`, and `No matching pods in dev · payments-x, auth-x` under a filter; so do a list inside an Overview and the Port forwards view, as the empty panel names its space (4.1).
-- Single-key verbs work only when a table is focused (context key `listFocus`): `l` logs, `s` shell, `e` edit YAML, `d` describe/overview, `y` copy YAML, `f` port-forward, `⇧J` jump to owner, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
+- Single-key verbs work only when a table is focused (context key `listFocus`), or on an object editor's Overview outside a text field (5.1): `l` logs, `s` shell, `f` port-forward, which asks which port, even of one, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
+  `e` shows the YAML and `⌘↵` opens the object in an editor in a list only, since both need `list.uri`.
   Bare letters read; a write is ⇧ and a letter, with its friction (6.4): `⇧S` scale, `⇧R` restart, `⇧C` cordon, `⇧U` uncordon, `⇧D` drain, `⇧T` trigger, `⇧P` suspend, `⇧O` resume.
   `⌘⌫` deletes the marked rows while there are marks, else the selected one.
   These are ordinary commands with keybindings, so users can remap them.
@@ -1028,7 +1102,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   They never flash, and count for none of a batch's 8 rows, since a poll moves them every 15 s.
   The list says with its window that it reads them while its editor is on screen, behind no other tab and under no maximized panel, and the document is visible, and either it does not know yet which columns of its resource are measures, from its own columns or from a list of the resource opened earlier in the session in the same space, since one space's cluster may serve the Metrics API and another's not, so that a list sorted by one is held from its first rows, or it draws one or is sorted by one; a resource whose columns came with none says it reads nothing, and a list too narrow for its metric columns draws none and reads none unless it is sorted by one.
   While a new subscription has no columns yet, the list keeps the metric columns it last drew, so a narrow list does not read them meanwhile.
-  A list inside an Overview follows the same rule and counts as wide until its width is measured, which comes after its first window, so that one sorted by a measure is held from its first rows; once measured narrower than 640 px it draws and reads none.
+  A list inside an Overview follows the same rule and counts every column as drawn until its width is measured, which comes after its first window, so that one sorted by a measure is held from its first rows; once measured it reads only the measures that its width leaves drawn, or that it is sorted by.
   A new query, from a sort, a filter or a change of namespaces, opens its subscription before the old one closes, and the old one stays on screen and open until the new one's first batch, so a scope the old one read keeps its reader and its samples.
   A first click on their header sorts the largest first, as [`kubectl top --sort-by`](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/kubectl/pkg/metricsutil/metrics_sorter.go#L71-L83) orders, and the second ascends.
   A header whose Metrics API does not answer, or may not be read, carries a quiet mark with the reason in its tooltip, and its cells stay dashes.
@@ -1108,7 +1182,7 @@ Extensions add commands, not prefixes.
     - a narrow pod column of each line's generated suffix, levels read from structured fields, and only warning and error lines tinted;
     - a container's end as a separator line with its exit code and when it restarts.
   - In the webview, as the owner chose on 2026-11-03 from a mockup of the viewer:
-    - a logs tab lives in the panel (4.1), a `logs://` input; `l` on a row, in the details and in their context menu, Logs in an object editor's title and a finding's buttons open it or focus the open one, so logs live in one place and a pod's editor has no Logs sub-tab;
+    - a logs tab lives in the panel (4.1), a `logs://` input; `l` on a row, in the details and in their context menu, Logs in an object editor's row of actions and a finding's buttons open it or focus the open one, so logs live in one place and a pod's editor has no Logs sub-tab;
     - a tab starts from the last 15 minutes; the range offers the last 1,000 lines per container, 5 min, 1 h, 6 h and each container's start, and a drag on the histogram narrows the view until the range's ✕;
     - the pod picker lists the workload's pods with their state, `Queued` and `Not followed` included, all of them with the new ones, or some, and the container: the default, one by name, or all;
     - the filter is the list's syntax; the search marks every match and steps back from the newest, `238 of 238`, on ↑↓ and Enter, a step asked before Rust applied the search waiting for its matches, and a match stepped to stays the current one when newer matches leave it out of the last 10,000, `≤ 2,000 of 12,000`, until a step goes on from the oldest listed or the window asked around it shows that the view no longer keeps its line;
@@ -1157,8 +1231,8 @@ Extensions add commands, not prefixes.
     A pod deleted under a session ended it as exit 137 (`shell_live` on kind 1.37 with containerd, 2026-11-09).
     A context that turns read-only, by a relock or an unlock running out, ends its shells as `Relocked`, those parked or queued as well as those connecting or running; `guarded` does not.
   - **A tab and its terminal.**
-    A shell is a `exec://` editor of the panel, opened by `s` on a pod, by Shell in its details, context menu and editor title, and by Attach, which joins the container's main process.
-    While the details show a pod's Overview and it lists containers of which none runs, by each container's `running` (4.3), they set `resource.noContainerRuns`, and Shell and Attach there are disabled, saying `No container runs`; on their other tabs, in the list, by the keys and in a palette opened outside the details nothing knows, and `shell_containers` decides.
+    A shell is a `exec://` editor of the panel, opened by `s` on a pod, by Shell in the row of actions of its details and of an object editor's header and in its context menu, and by Attach, which joins the container's main process.
+    While the details or an object editor hold a pod's Overview, whichever view is shown, and it lists containers of which none runs, by each container's `running` (4.3), they set `resource.noContainerRuns`, and Shell and Attach there are disabled, saying `No container runs`; in the list, by its keys and in a palette opened outside them nothing knows, and `shell_containers` decides.
     `s` asks which container when several run, the default first, then plans `action: "shell"` through the command bus, which draws its friction (6.4); only a run that answers with a session opens the tab, so a cancel or a refusal opens nothing.
     The terminal and its element belong to a service keyed by the tab's URI, not to the view, which moves the element in when it mounts: moving a tab between groups or hiding the panel loses nothing, and the session goes on writing to the terminal meanwhile.
     The first size goes in `shell_open`, once the terminal is mounted and fitted, and `shell_resize` follows a layout change that has held still for 100 ms, when cols or rows changed.
@@ -1571,6 +1645,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - Hairlines: `--border` on the sashes between the parts, under the tab strips and under a table's header and a group's, and `--border-subtle` under an object's views; the panel's top edge is its sash's line alone.
 - **Giving way.**
   A part too narrow for itself gives way in a fixed order of stages, decided by widths its stages cannot change, and folds before it cuts: the title bar (4.1), the details' row of actions (4.3), a row of views (above), and a list editor's actions, its scope chip among them, and columns (4.4) ([decision](decisions/parts-give-way-by-width.md)).
+  An object page's header gives way too, its two first lines cutting their texts first and dropping a fact only after its cut, and so do its vitals' cells and its filter's row, and the page itself from 900 px of editor (4.3).
   A text that is cut keeps its end where the end tells things apart, as a name keeps its last segment (4.4), a context's name its cluster (4.1), an object's tab its name and a forward's its port (above).
 - **Motion.**
   An instant-in, gentle-out ladder (`--dur-instant` 100 ms to `--dur-slow` 300 ms).
@@ -1618,6 +1693,15 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - the sashes in the full hairline, `--border`;
   - no tint of the context on the tab strips, the title bar keeping its gradient;
   - the status bar's space entry as a full-height block of the context's colour in the bar's corner, not an inset plate.
+- **Settled with the owner** on 2026-11-18 and 2026-11-19, on the object page (4.3):
+  - one Forward, which always asks which port: `f` and the verb ask whatever the number of ports, and `⇧F` and Forward Port… are gone;
+  - an object always opens in a tab of its own, and the tab it was opened from stays; a double-click or ⌘Enter on a list's row opens its object, and the docked details are the quick look;
+  - the full page in one column of sections, with no summary column or index beside it;
+  - the chevron leads a section's title, as it does in a side bar;
+  - the failing pods first in a list of pods inside an Overview;
+  - copy buttons out of the Tab order;
+  - a pill keeps the list's word and takes the core's finding tone where the list's rule calls that word healthy, as for a rollout past its deadline;
+  - labels as lines, a pending pod's sentence as it is, shares from 10,000 % as `>9999%`, and no step of its own for the mock's fidelity.
 
 ## 5. Commands, keybindings and extensions
 
@@ -1660,9 +1744,8 @@ interface CommandDescriptor {
   The menu IDs:
   - `commandPalette`
   - `resource/context` (row context menu)
-  - `resource/details` (details header, 4.3, whose first two pinned verbs a hovered row shows, 4.4)
+  - `resource/details` (the row of actions in the header of the details and of an object editor, 4.3, whose first two pinned verbs a hovered row shows, 4.4)
   - `resource/marked` (marked rows' bar, 4.4)
-  - `resource/title` (resource editor toolbar)
   - `view/title`, `view/item`
   - `editor/title`
   - `panel/title`, `panel/empty` (the panel's strip and what an empty panel offers, 4.1)
@@ -1673,16 +1756,27 @@ interface CommandDescriptor {
 
   The native macOS menu is generated from the registry, replacing legacy `menu.ts`'s hand-written list.
 
+- **Commands on an object** take their subject from their argument, else from `object.subject` where an object editor runs them, else from the list's selected row (`list.uri`).
+  - Their keys work while `listFocus`, and while an object editor's Overview holds the focus outside a text field, where `pageFocus && !inputFocus && object.subject` stands for the list's focus, so a key typed into the page's filter is the field's.
+  - Show YAML, Open Details and Open in Editor need `list.uri`, so an object editor does not offer them.
+  - Forward is one command, `k8s.resource.forward`, on `f`: it asks which of the target's ports, the default first, and goes to the forward a port already has rather than start a second; there is no `⇧F` and no Forward Port….
+  - `k8s.resource.openEditor`, Open in Editor, is on ⌘Enter, and a double-click on a list's row runs it.
+
 - **Context keys** are typed values scoped to the focused element.
   A `when` expression evaluates them, using a subset of the VS Code grammar: `==`, `!=`, `&&`, `||`, `!`, `=~`, `in`, `<`, `>`.
   Core keys:
   - `space.id`, `space.contexts`, `space.multiContext`
   - `context.name`, `context.readOnly`, `context.mode`, `context.unlocked`, `context.provider`
   - `listFocus`, `treeFocus` (a tree, which is also a list: left and right close and open), `editorFocus`, `inputFocus`
+  - `pageFocus`: the focus is in the details or an object editor while their Overview view is shown, which the bare keys of 5.2 and the filter's `/` and Escape read
+  - `object.uri`: the URI of the editor whose Overview holds the focus, the list editor's for the details, which the page's own commands act on, and unset while another view is shown
+  - `object.filtered`: that page's filter holds text
+  - `object.subject`: the object an object editor shows, as `resource/details` names it, once discovery has named its resource; the commands of a resource take it as their subject where they are given none, and the details set none, their verbs acting on the list's selected row
   - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
-  - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
-  - `resource.noContainerRuns`: on the details' scope, true only while they show an Overview that lists containers and none of them runs (4.6)
+  - `resource.selected`: a command of a resource has an object to act on, the list's selected row, or an object editor's once discovery names its resource, and false in a list inside an Overview
+  - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, or an object editor's printed cells (`header.printed`) once its Overview has come, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
+  - `resource.noContainerRuns`: on the scope of the details and of an object editor, true only while the object's Overview lists containers and none of them runs, on every view (4.6)
   - `list.uri`: the list editor's URI on its scope, so a command on rows acts on that list's selected row or marks, and on nothing where no list is named (4.4)
   - `selection.count`
   - `editor.open`, `editor.dirty`, `editor.type`
@@ -1723,7 +1817,7 @@ interface CommandDescriptor {
   - The keybinding service maps bindings as VS Code's keyboard mappers do.
     Letter shortcuts follow the character on Latin layouts (QWERTZ, AZERTY, Dvorak) and fall back to the US key position on non-Latin layouts such as Ukrainian.
   - Labels show what is printed on the key.
-- **Bare keys** fire only in `listFocus` and never inside inputs or Monaco.
+- **Bare keys** fire only in `listFocus` or `pageFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
   Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
 - **The keybindings editor** shows conflicts and the source of every binding.

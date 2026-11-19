@@ -12,5 +12,6 @@ paths:
 - A row keeps its stamp while each of its printed durations can stand for the held moment (`printed::keeps_stamp`), and the view sends a row again when its stamp changed.
 - Such a column sorts by its moment and is not filtered by its age; a cell whose text is no duration, as `<unknown>`, is drawn, sorted and filtered as text, and one with no usable stamp is drawn as printed.
 - A cell that ticks draws again only when its text or its tone changes (`useNowAs`), on the page's one timer, never rendering its row or the grid.
+- The details draw the selected row's cells through `CellView` until their object comes, never as the text the row holds.
 - Rust and the mock decide alike: a change to the stamp, the sort or the filter adds a case to `packages/protocol/src/printed-cases.json` or `query-cases.json`, which both run.
 - `Meta` and `Row` keep the sizes their const assertions hold: a new field is a decision about a stored row's malloc class.

@@ -15,12 +15,13 @@ export const printedOf =
     header?.printed.find((cell) => cell.column === column)?.value;
 
 /**
- * What the header and the vitals of an object say, which an object's page
- * draws the same on every view: the verdict, from the cells the object printed
+ * What the header and the vitals of an object say, the header the same on
+ * every view and the vitals on the Overview: the verdict, from the cells the object printed
  * once it has come, and from the list row until then; the strip, whose places
- * the last object of its kind holds; and whether the third line is drawn, for a
- * kind that has a verdict or vitals always, and for another where its last
- * object had a sentence, so that the header does not move while the next comes.
+ * the last object of its kind holds; and whether the third line is drawn: where
+ * there is a verdict, a strip or a sentence, the strip's places and whether
+ * there is a sentence being the last object's of its kind until the next comes,
+ * so that the header does not move meanwhile.
  */
 export function useHeader({
   gvr,
