@@ -805,6 +805,64 @@ async fn a_context_s_mode_comes_from_its_kubeconfig_and_reaches_its_clients() {
 }
 
 #[tokio::test]
+async fn an_edit_of_a_kubeconfig_only_tightens_and_the_log_records_what_it_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let mut contexts = core.catalog.subscribe();
+    contexts.borrow_and_update();
+    let edited = UNREACHABLE
+        .replace("environment: production", "environment: development")
+        .replace(
+            "- name: kind-unmarked\n  context: { cluster: c, user: u }",
+            "- name: kind-unmarked\n  context: { cluster: c, user: u, extensions: [{ name: twigo, extension: { environment: development } }] }",
+        );
+    assert_eq!(edited.matches("environment: development").count(), 2);
+    std::fs::write(dir.path().join("config"), edited).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the edit")
+        .unwrap();
+
+    for context in ["kind-prod", "kind-unmarked"] {
+        let unmarked = access(&core, context);
+        assert_eq!(unmarked.mode, Mode::Guarded, "{context}");
+        assert_eq!(unmarked.source, ModeSource::Unmarked, "{context}");
+        assert_eq!(unmarked.environment, None, "{context}");
+        let blocked = create_a_configmap(&core, context).await;
+        assert_eq!(blocked.blocked.unwrap().reason, BlockReason::Unmarked);
+    }
+    protect(
+        &core,
+        PlanRequest::SetMode {
+            context: "kind-prod".to_owned(),
+            mode: Some(Mode::ReadOnly),
+        },
+    )
+    .await
+    .unwrap();
+
+    let logged = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines: Vec<serde_json::Value> = logged
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|line: &serde_json::Value| line["event"] != "request")
+        .collect();
+    assert_eq!(lines.len(), 2, "{logged}");
+    let edit = &lines[0];
+    assert_eq!(edit["event"], "catalog");
+    assert_eq!(edit["context"], "kind-prod");
+    assert_eq!(edit["before"]["mode"], "read-only");
+    assert_eq!(
+        edit["before"]["source"],
+        serde_json::json!({ "kind": "environment", "environment": "production" })
+    );
+    assert_eq!(edit["after"]["mode"], "guarded");
+    assert_eq!(edit["after"]["source"]["kind"], "unmarked");
+    assert_eq!(lines[1]["event"], "protection");
+}
+
+#[tokio::test]
 async fn a_person_s_choice_changes_clients_already_built_and_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);

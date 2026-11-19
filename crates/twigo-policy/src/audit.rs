@@ -4,8 +4,9 @@
 //! a process's ask. It names what was asked and where, never a value or a
 //! token.
 //!
-//! It also records each change of a context's protection, each unlock's
-//! end, and each credential plugin a person trusted.
+//! It also records each change of a context's protection, a command's or
+//! the catalog's, each unlock's end, and each credential plugin a person
+//! trusted.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -83,6 +84,14 @@ pub enum Entry<'a> {
     /// (`command`), by its time (`time`), or as the context named another
     /// cluster (`moved`) or none (`unlisted`).
     Relocked { context: &'a str, by: &'a str },
+    /// What the catalog says of a context changed its mode, its source or
+    /// its type, with no command: its kubeconfig was edited, its provider's
+    /// lock came or went, or a source listed it or stopped listing it.
+    Catalog {
+        context: &'a str,
+        before: &'a ContextAccess,
+        after: &'a ContextAccess,
+    },
     /// A person trusted a credential plugin: its digest and the program it
     /// runs, none where no context lists it now; never its arguments or
     /// environment, which may hold tokens.

@@ -999,3 +999,69 @@ async fn the_log_records_each_unlock_s_end_and_why() {
         .map(|(event, by)| (event.into(), by.into()))
     );
 }
+
+#[test]
+fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once() {
+    let locked = Metadata {
+        read_only: true,
+        connection: 1,
+        ..NOTHING
+    };
+    let (_dir, path, policy) = audited_policy(locked);
+    let open = Metadata {
+        connection: 1,
+        ..NOTHING
+    };
+    policy.catalog_changed("c", Some(locked), Some(open));
+    let elsewhere = Metadata {
+        connection: 2,
+        ..NOTHING
+    };
+    policy.catalog_changed("c", Some(open), Some(elsewhere));
+    policy.unlock("c").unwrap();
+    let moved = Metadata {
+        connection: 2,
+        ..locked
+    };
+    policy.catalog_changed("c", Some(locked), Some(moved));
+    policy.set_mode("d", Some(Mode::ReadWrite)).unwrap();
+    policy.catalog_changed("d", None, Some(locked));
+
+    let lines: Vec<_> = audited(&path)
+        .iter()
+        .map(|line| {
+            (
+                line["event"].clone(),
+                line["context"].clone(),
+                line["before"]["source"]["kind"].clone(),
+                line["after"]["source"]["kind"].clone(),
+                line["by"].clone(),
+            )
+        })
+        .collect();
+    let null = serde_json::Value::Null;
+    assert_eq!(
+        lines,
+        [
+            (
+                "catalog",
+                "c",
+                "kubeconfig".into(),
+                "unmarked".into(),
+                null.clone()
+            ),
+            ("relocked", "c", null.clone(), null.clone(), "moved".into()),
+            ("catalog", "d", "unlisted".into(), "user".into(), null),
+        ]
+        .map(|(event, context, before, after, by)| (
+            event.into(),
+            context.into(),
+            before,
+            after,
+            by
+        ))
+    );
+    let line = &audited(&path)[0];
+    assert_eq!(line["before"]["mode"], "read-only");
+    assert_eq!(line["after"]["mode"], "guarded");
+}

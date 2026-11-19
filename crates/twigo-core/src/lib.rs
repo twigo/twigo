@@ -131,6 +131,7 @@ impl Core {
             state.choices(),
             Audit::open(&data.join("audit.jsonl")),
         );
+        let catalog = catalog.audited_by(Arc::clone(&policy));
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         let discovery = Arc::new(Cache::new(cache.join("discovery")));
         Arc::new_cyclic(|core| {

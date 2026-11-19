@@ -638,6 +638,35 @@ impl Policy {
         self.relocked(context, ended.then_some("command"));
     }
 
+    /// Records what a change of the catalog did to `context`, which no
+    /// command made: `before` and `after` are what the catalog said of it,
+    /// none where no source listed it. An unlock that the change moved ends
+    /// first, on a line of its own; then the context's access before and
+    /// after, where its mode, its source or its type changed. The catalog
+    /// calls it as it publishes the change, before anything reads it, so it
+    /// reads nothing of the catalog itself.
+    pub fn catalog_changed(
+        &self,
+        context: &str,
+        before: Option<Metadata>,
+        after: Option<Metadata>,
+    ) {
+        let now = Timestamp::now();
+        let mut held = self.held();
+        let ended = held.end_moved(context, after);
+        let was = self.resolved(&held, context, before, now);
+        let is = self.resolved(&held, context, after, now);
+        drop(held);
+        self.relocked(context, ended);
+        if was != is {
+            self.audit.record(&Entry::Catalog {
+                context,
+                before: &was,
+                after: &is,
+            });
+        }
+    }
+
     /// Records an unlock that ended `by` a relock, its time, or the context
     /// naming another cluster or none.
     fn relocked(&self, context: &str, by: Option<&str>) {
