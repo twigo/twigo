@@ -31,8 +31,10 @@ pub enum Risk {
     /// in a dialog rather than for a typed name (6.4).
     Shell,
     /// A lasting change of the context's own protection, which leaves it in
-    /// `mode`: lowering it asks for the context's name typed.
-    Protection { mode: Mode },
+    /// `mode`, or unmarked where that is none: lowering it asks for the
+    /// context's name typed. Unmarked weighs as `read-write`, since any
+    /// change from there runs at once.
+    Protection { mode: Option<Mode> },
     /// An unlock, which ends by itself and leaves every write in `guarded`
     /// asking for the context's name.
     Unlock,
@@ -47,7 +49,9 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     match (risk, access.mode) {
         (Risk::Unlock, _) => Friction::Confirm,
         (Risk::Protection { .. }, _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
-        (Risk::Protection { mode }, _) if *mode >= lasting(access) => Friction::AtOnce,
+        (Risk::Protection { mode }, _) if mode.unwrap_or(Mode::ReadWrite) >= lasting(access) => {
+            Friction::AtOnce
+        }
         (Risk::Protection { .. }, _) => typed_context(),
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
@@ -188,7 +192,8 @@ mod tests {
             unlocked_until: Some(1),
             ..access(Mode::Guarded, Some(Environment::Production))
         };
-        let protection = |mode| Risk::Protection { mode };
+        let protection = |mode| Risk::Protection { mode: Some(mode) };
+        let unmarking = Risk::Protection { mode: None };
         let cases = [
             (
                 protection(Mode::ReadWrite),
@@ -230,7 +235,28 @@ mod tests {
                 unmarked.clone(),
                 Friction::AtOnce,
             ),
-            (protection(Mode::ReadOnly), unmarked, Friction::AtOnce),
+            (
+                protection(Mode::ReadOnly),
+                unmarked.clone(),
+                Friction::AtOnce,
+            ),
+            (
+                unmarking.clone(),
+                access(Mode::ReadOnly, None),
+                typed.clone(),
+            ),
+            (
+                unmarking.clone(),
+                access(Mode::Guarded, None),
+                typed.clone(),
+            ),
+            (unmarking.clone(), unlocked.clone(), typed.clone()),
+            (
+                unmarking.clone(),
+                access(Mode::ReadWrite, None),
+                Friction::AtOnce,
+            ),
+            (unmarking, unmarked, Friction::AtOnce),
             (protection(Mode::Guarded), unlocked.clone(), typed),
             (
                 protection(Mode::ReadOnly),

@@ -32,7 +32,7 @@ pub(crate) async fn protection(
         risk: match change {
             Change::Unlock => Risk::Unlock,
             Change::Mode { .. } | Change::Type { .. } => Risk::Protection {
-                mode: planned.after.mode,
+                mode: (planned.after.source != ModeSource::Unmarked).then_some(planned.after.mode),
             },
         },
         writes: Vec::new(),

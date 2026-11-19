@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Environment, ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, ShellEnd,
-    ShellEvent, ShellKind, ShellTarget,
+    Environment, ErrorKind, Execute, Friction, Mode, ModeSource, OperationEvent, PlanId,
+    PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
@@ -1249,6 +1249,47 @@ async fn lowering_protection_asks_for_the_name_and_the_log_records_the_change_on
     let unlock = core.command_plan("main", unlock).await.unwrap();
     assert_eq!(unlock.friction, Friction::Confirm);
     assert_eq!(unlock.confirm, "Unlock for 15 minutes");
+}
+
+#[tokio::test]
+async fn clearing_a_mark_asks_for_the_name_so_two_steps_lower_no_more_than_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let staging = PRODUCTION.replace("environment: production", "environment: staging");
+    let core = running_with(dir.path(), &staging);
+    core.catalog.contexts().await;
+    let clear = || PlanRequest::SetEnvironment {
+        context: "kind-prod".to_owned(),
+        environment: None,
+    };
+    let plan = core.command_plan("main", clear()).await.unwrap();
+    assert_eq!(plan.mode, Mode::Guarded);
+    assert_eq!(
+        plan.friction,
+        Friction::Typed {
+            text: "kind-prod".to_owned()
+        }
+    );
+    assert_eq!(
+        execute(&core, "main", plan.id, None).await,
+        Err(ErrorKind::InvalidInput)
+    );
+    assert_eq!(
+        core.policy.access("kind-prod").source,
+        ModeSource::Environment {
+            environment: Environment::Staging
+        }
+    );
+
+    let plan = core.command_plan("main", clear()).await.unwrap();
+    execute(&core, "main", plan.id, Some("kind-prod"))
+        .await
+        .unwrap();
+    assert_eq!(core.policy.access("kind-prod").source, ModeSource::Unmarked);
+    let open = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap();
+    assert_eq!(open.friction, Friction::AtOnce);
 }
 
 #[tokio::test]
