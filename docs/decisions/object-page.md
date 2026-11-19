@@ -55,24 +55,26 @@ A header that holds its height lets a person read the fact that changes, where a
 
 ## Consequences
 
-- The page follows the Overview whichever view is shown, so the pill, the sentence, `resource.noContainerRuns`, the editor's subject and its row state are right on every view, and only the vitals' strip is drawn on the Overview alone: one describe and one Overview over the IPC for each open page and each change of its object; arrowing through rows is not slower for it, as measured at `b6823641` ([below](#what-following-the-overview-on-every-view-costs)).
+- The page follows the Overview whichever view is shown, so the pill, the sentence, `resource.noContainerRuns`, the editor's subject and its row state are right on every view, and only the vitals' strip is drawn on the Overview alone: one describe and one Overview over the IPC for each open page and each change of its object; arrowing through rows is not slower for it, as measured at `d4db0b7f` ([below](#what-following-the-overview-on-every-view-costs)).
 - While the object comes, the page under the strip is the row's cells, and the page comes back with the object's first batch: 11 frames after each of six presses of ↓, 201 to 267 ms by the frames' own times, with the header and the strip at the same box in every sample, from a per-frame probe of the parts' boxes that is not in the repository (Chrome 157.0.8103.80, headless, on the mock at `c1711200`, 2026-11-19); `4f1450c5`, which has no strip, drew the row's cells for 10 or 11 frames and 200 to 267 ms, by the same probe on 2026-11-18 (`TODO.md`).
 - Each line of the header and the vitals' cells draw hidden copies of their stages, per header and per cell, never per row.
 - A fold's summary needs a rule in the describer of each section; a section with no useful line has none.
 
 ## What following the Overview on every view costs
 
-`bench/harness.sh`'s app built at each tree, with a driver that pressed ↓ 64 times, about 300 ms apart, through the pods of kind 1.37 with 5,000 pods under churn of 100 changes/s, three runs of each tree in turn on 2026-11-18, on an Apple M4 Max, read these medians, the base being `4f1450c5` and the branch `b6823641`:
+`bench/harness.sh`'s app built at each tree, with a driver that pressed ↓ 64 times, about 300 ms apart, through the pods of kind 1.37 with 5,000 pods under churn of 100 changes/s, the details 470 px wide, three runs of each tree in turn on 2026-11-19, on an Apple M4 Max, read these medians, the base being `4f1450c5` and the branch `d4db0b7f`:
 
 | What                                            | Base   | Branch |
 | ----------------------------------------------- | ------ | ------ |
-| The inspector's name painted, p50               | 14 ms  | 13 ms  |
-| The Overview's first section painted, p50       | 223 ms | 222 ms |
-| The first content painted on the YAML view, p50 | 236 ms | 239 ms |
+| The inspector's name painted, p50               | 12 ms  | 14 ms  |
+| The Overview's first section painted, p50       | 222 ms | 219 ms |
+| The first content painted on the YAML view, p50 | 238 ms | 240 ms |
 
-The Overview's 222 ms holds the 150 ms of the dwell before an object opens (ARCHITECTURE 4.3).
-Over 60 s on the YAML view of one pod that the churn patches, the branch received 72 Overview messages (70 to 73) where the base received 71 of the Related part (71 to 71), and the app's core, WebContent and GPU processes took 8.4 % of one core against 8.7 %, medians of three runs each: the part followed on every view replaces the one the base sent.
-The driver is in no commit, and `b6823641` is before the header's lines were decided from hidden copies of their stages (`53c668cb`): this is what following the Overview on every view costs, and not what those copies cost.
+The Overview's 219 ms holds the 150 ms of the dwell before an object opens (ARCHITECTURE 4.3).
+On the branch the object's subscription opened 1 to 2 ms later after the press in every run (158 to 159 ms against 157 to 158, the dwell included), while the core's own time from the subscription to the part's arrival was 52 to 53 ms on both trees; no painted figure was worse in every run beyond the base's range.
+At 360 and 320 px the branch's header changed stages as the room asked, and the runs that WebKit did not draw at half speed (a page it marked visually idle once another app was active) read the same as the base, one run each; the others are not counted.
+Over 60 s on the YAML view of one pod patched about once a second, the branch received 71 Overview messages (71 to 73) where the base received none, and the app's core, WebContent and GPU processes took 7.1 % of one core against 7.4 %, medians of three runs each: the part followed on every view replaces the Related part the base sent on every change.
+The driver is in no commit.
 
 ## Where it is implemented
 
