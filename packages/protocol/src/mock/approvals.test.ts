@@ -16,6 +16,8 @@ import {
   WITHDRAWN_AFTER_MS,
   type MockScenario,
 } from "./index";
+import { MockAccess } from "./access";
+import { MockApprovals } from "./approvals";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -335,7 +337,7 @@ test("a lasting answer spares the writes of its process and context, and a delet
   ]);
 });
 
-test("a lasting answer ends after the minutes the ask offered", async () => {
+test("a lasting answer ends after the minutes the ask offered, and the delete in prod-eu, relocked by then, is refused with no ask", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   const patch = nth(events, 0);
@@ -343,9 +345,10 @@ test("a lasting answer ends after the minutes the ask offered", async () => {
   await vi.advanceTimersByTimeAsync((patch.lastingMinutes ?? 0) * 60_000);
   await answer(backend, nth(events, 1));
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  await answer(backend, nth(events, 2), { kind: "deny" });
-  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  expect(nth(events, 3).command).toBe("kubectl exec");
+  expect(nth(events, 2)).toMatchObject({
+    command: "kubectl exec",
+    context: "staging",
+  });
 });
 
 test("a lasting answer allows the asks of its process and context that already wait, and withdraws them", async () => {
@@ -494,6 +497,63 @@ test("an unmarked ask is withdrawn once the person says what its context is, and
     lastingMinutes: 15,
   });
   expect(events).toHaveLength(3);
+});
+
+test("a scenario's ask comes only where the gate would ask for its request as it comes, so qa marked Production first raises none and goes read-write only with its name typed", async () => {
+  const raised = {
+    production: [],
+    development: [],
+    staging: [{ context: "qa", unmarked: false, lastingMinutes: 15 }],
+  } as const;
+  for (const environment of ["production", "development", "staging"] as const) {
+    const { backend, events } = await followed("approvalUnmarked");
+    await choose(backend, typeOfQa(environment));
+    await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+    expect(
+      asks(events).map(({ context, unmarked, lastingMinutes }) => ({
+        context,
+        unmarked,
+        lastingMinutes,
+      })),
+      environment,
+    ).toEqual(raised[environment]);
+    if (environment !== "production") continue;
+    const planned = backend.invoke("command_plan", typeOfQa("development"));
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await planned).friction).toEqual({ kind: "typed", text: "qa" });
+  }
+});
+
+test("a type answers an unmarked ask only while its context is still unmarked, whatever withdrew the ask or did not, as Policy::mark does", async () => {
+  const access = new MockAccess(false);
+  const approvals = new MockApprovals("approvalUnmarked", {
+    of: (context) => access.of(context),
+    setEnvironment: (context, environment) => {
+      access.setEnvironment(context, environment);
+    },
+    watch: () => [],
+  });
+  const events: ApprovalEvent[] = [];
+  approvals.watch((event) => events.push(event));
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const unmarked = nth(events, 0);
+  access.setEnvironment("qa", "production");
+  expect(() =>
+    approvals.answer({
+      id: unmarked.id,
+      answer: { kind: "mark", environment: "development" },
+      typed: null,
+    }),
+  ).toThrow(
+    new IpcError(
+      "conflict",
+      "what qa lets through changed since Twigo asked, so Twigo changed nothing",
+    ),
+  );
+  expect(access.of("qa")).toMatchObject({
+    mode: "read-only",
+    environment: "production",
+  });
 });
 
 test("an ordinary ask is withdrawn once its context is no longer guarded, and one that stays guarded stays", async () => {

@@ -329,17 +329,21 @@ function asked(ask: Draft, unmarked: boolean): Draft {
  * The approval broker as a window sees it: it sends the asks waiting and
  * every new one to the window that follows, takes the answers and refuses
  * one for an ask that is gone, a name typed wrong or a lasting answer that
- * was not offered. A lasting answer allows what its process asks on its
+ * was not offered. A scenario's request meets the gate as it comes, as
+ * Rust's `decide` has it: it asks what its context is where nobody marked
+ * it, asks to be allowed where the context is guarded, and else goes or is
+ * refused with no ask. A lasting answer allows what its process asks on its
  * context for the minutes the ask offered, deletes excepted: an ask that
  * waits then is withdrawn, and one that comes is not raised. An ask of a
  * context nobody marked takes `mark` or `deny` alone; `mark` sets the
- * context's type, and the request then meets the mode that type gives:
- * Staging asks again, as any guarded context does, Production refuses it
- * and Development and Local let it through. Whenever a context's access
- * changes, each ask waiting on it that its block no longer fits is withdrawn
- * and its request meets the gate anew in the same way, as Rust's `wait` does:
- * an ask whose reason still holds, an ordinary one on a context still
- * guarded or an unmarked one on a context still unmarked, stays.
+ * context's type only while nobody has marked it, as `Policy::mark` does,
+ * and the request then meets the mode that type gives: Staging asks again,
+ * as any guarded context does, Production refuses it and Development and
+ * Local let it through. Whenever a context's access changes, each ask
+ * waiting on it that its block no longer fits is withdrawn and its request
+ * meets the gate anew in the same way, as Rust's `wait` does: an ask whose
+ * reason still holds, an ordinary one on a context still guarded or an
+ * unmarked one on a context still unmarked, stays.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
@@ -391,6 +395,15 @@ export class MockApprovals {
     if (answer.kind !== "deny" && ask.typed && typed !== ask.context) {
       throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
     }
+    if (
+      answer.kind === "mark" &&
+      this.access.of(ask.context).source.kind !== "unmarked"
+    ) {
+      throw new IpcError(
+        "conflict",
+        `what ${ask.context} lets through changed since Twigo asked, so Twigo changed nothing`,
+      );
+    }
     if (answer.kind === "lasting") {
       if (ask.lastingMinutes === null) {
         throw new IpcError("invalidInput", "this ask offers no lasting answer");
@@ -420,11 +433,20 @@ export class MockApprovals {
       : source.kind !== "unmarked" && mode === "guarded";
   }
 
-  /** The request of an ask meets its context's access anew: it goes, it is refused, or the person is asked what the context is, or to allow it. */
-  #decide(ask: ApprovalAsk): void {
+  /** The request of an ask meets its context's access: it goes, it is refused, or the person is asked what the context is, or to allow it unless a lasting answer allows it. Says whether it asks. */
+  #decide(ask: Draft): boolean {
     const { mode, source } = this.access.of(ask.context);
-    if (source.kind === "unmarked") this.#raise(asked(ask, true));
-    else if (mode === "guarded") this.#raise(asked(ask, false));
+    const raised =
+      source.kind === "unmarked"
+        ? asked(ask, true)
+        : mode === "guarded"
+          ? asked(ask, false)
+          : null;
+    if (raised === null || (!raised.unmarked && this.#allowed(raised))) {
+      return false;
+    }
+    this.#raise(raised);
+    return true;
   }
 
   #changed(): void {
@@ -449,8 +471,7 @@ export class MockApprovals {
         draft !== undefined;
         draft = this.#coming.shift()
       ) {
-        if (this.#allowed(draft)) continue;
-        this.#raise(draft);
+        if (!this.#decide(draft)) continue;
         if (!several) return;
       }
     }, ms);
