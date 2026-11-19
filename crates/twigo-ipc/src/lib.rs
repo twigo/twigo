@@ -23,8 +23,8 @@ mod terminal;
 mod typescript;
 
 pub use access::{
-    Access, AccessQuery, BlockReason, Blocked, ContextAccess, Environment, Mode, ModeSource,
-    RequestClass, SetContextEnvironment, SetContextMode,
+    Access, AccessQuery, BlockReason, Blocked, ContextAccess, Environment, Lock, LockSource, Mode,
+    ModeSource, RequestClass,
 };
 pub use action::{
     Affected, Execute, Friction, OperationEvent, Plan, PlanId, PlanRequest, ResourceRef,

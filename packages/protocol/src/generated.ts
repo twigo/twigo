@@ -110,7 +110,7 @@ drop: Array<string>, };
  */
 export type ApplyStrategy = "serverSideApply" | "mergePatch";
 
-export type ApprovalAnswer = "deny" | "once" | "lasting";
+export type ApprovalAnswer = { "kind": "deny" } | { "kind": "once" } | { "kind": "lasting" } | { "kind": "mark", environment: Environment, };
 
 /**
  * What a process asks to do, for the person to allow or deny.
@@ -162,7 +162,13 @@ typed: boolean,
  * but a delete's: every write and exec of this process on this context
  * for that long, deletes excepted. Any other process is allowed once.
  */
-lastingMinutes: number | null, };
+lastingMinutes: number | null, 
+/**
+ * Nobody has said what the context is: the person answers `mark` with
+ * its type, or `deny`, and the request then meets the mode that type
+ * gives, which may ask again.
+ */
+unmarked: boolean, };
 
 /**
  * What Twigo could show of what the request would do.
@@ -195,7 +201,7 @@ readable: boolean, } | { "type": "tree", nodes: Array<TreeNode>, } | { "type": "
 /**
  * Why the gate stopped it.
  */
-export type BlockReason = "mode" | "noGrant" | "noApproval";
+export type BlockReason = "mode" | "noGrant" | "noApproval" | "unmarked";
 
 /**
  * A request the gate stopped before it left the process.
@@ -916,6 +922,17 @@ groupBy: Grouping | null,
 values: ColumnValues | null, };
 
 /**
+ * A mode that a kubeconfig, a provider or a type gives, which can only
+ * tighten a context.
+ */
+export type Lock = { mode: Mode, source: LockSource, };
+
+/**
+ * Where a lock comes from.
+ */
+export type LockSource = { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, };
+
+/**
  * The entry a [`LogWindow::Around`] was asked around, and where it
  * stands: at its index while the view keeps it, else where it would
  * stand if the view kept it.
@@ -1149,9 +1166,9 @@ export type MetricsState = "ready" | "unavailable" | "forbidden" | "absent";
 export type Mode = "read-write" | "guarded" | "read-only";
 
 /**
- * Where a context's mode comes from, highest first.
+ * Where a context's mode comes from, highest first (ARCHITECTURE 6.4).
  */
-export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user" } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "default" };
+export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user", overrides: Lock | null, } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "unmarked" };
 
 /**
  * A terminal to start for `context`.
@@ -1381,9 +1398,10 @@ consequences: Array<string>,
  */
 affected: Array<Affected>, 
 /**
- * The kubectl command that does the same.
+ * The kubectl command that does the same; none for what only Twigo
+ * does, such as a change of a context's mode.
  */
-kubectl: string, 
+kubectl: string | null, 
 /**
  * What a toast or the status bar says while it counts down or runs:
  * `Deleting pod web-1`.
@@ -1395,7 +1413,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, } | { "action": "shell", target: ShellTarget, kind: ShellKind, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, } | { "action": "shell", target: ShellTarget, kind: ShellKind, } | { "action": "setMode", context: string, mode: Mode | null, } | { "action": "setEnvironment", context: string, environment: Environment | null, } | { "action": "unlock", context: string, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -1558,18 +1576,6 @@ tone: Tone | null,
  * How it opens until the person folds or opens it.
  */
 fold: Fold, blocks: Array<Block>, };
-
-/**
- * Marks a context as an environment type; none says it has no type, whatever
- * its kubeconfig says.
- */
-export type SetContextEnvironment = { context: string, environment: Environment | null, };
-
-/**
- * Sets the person's mode for a context; none goes back to what the rest
- * says.
- */
-export type SetContextMode = { context: string, mode: Mode | null, };
 
 export type SetLogSource = { id: SubscriptionId, source: LogSource, };
 
@@ -1842,9 +1848,6 @@ start: number, ids: Array<RowId>, };
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
   contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
-  context_mode_set: { request: SetContextMode; response: null; message: null };
-  context_environment_set: { request: SetContextEnvironment; response: null; message: null };
-  context_unlock: { request: string; response: null; message: null };
   context_relock: { request: string; response: null; message: null };
   command_plan: { request: PlanRequest; response: Plan; message: null };
   command_execute: { request: Execute; response: null; message: OperationEvent };

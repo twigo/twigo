@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::RequestClass;
+use crate::{Environment, RequestClass};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct ApprovalId(pub u32);
@@ -50,6 +50,10 @@ pub struct ApprovalAsk {
     /// but a delete's: every write and exec of this process on this context
     /// for that long, deletes excepted. Any other process is allowed once.
     pub lasting_minutes: Option<u32>,
+    /// Nobody has said what the context is: the person answers `mark` with
+    /// its type, or `deny`, and the request then meets the mode that type
+    /// gives, which may ask again.
+    pub unmarked: bool,
 }
 
 /// What Twigo could show of what the request would do.
@@ -134,12 +138,20 @@ pub enum ApprovalEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ApprovalAnswer {
     Deny,
     Once,
     /// For the ask's `lasting_minutes`.
     Lasting,
+    /// For an `unmarked` ask: what the context is.
+    Mark {
+        environment: Environment,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

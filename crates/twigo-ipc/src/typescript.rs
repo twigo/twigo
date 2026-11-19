@@ -7,16 +7,15 @@ use ts_rs::{Config, TS, TypeVisitor};
 use crate::ShellEvent;
 use crate::command::{
     AccessReview, ApplyPreview, ApprovalAnswerSend, ApprovalsWatch, ClusterVersionGet, Command,
-    CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextEnvironmentSet,
-    ContextModeSet, ContextRelock, ContextSignIn, ContextSignInCancel, ContextUnlock,
-    ContextsWatch, ExecReviewGet, ExecTrust, ForwardPortsGet, ForwardRemove, ForwardResume,
-    ForwardStart, ForwardStop, ForwardsWatch, KeyboardLayoutWatch, KubeconfigOfferAnswerSend,
-    KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe, ListUnsubscribe, LogsAck,
-    LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList,
-    ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet,
-    ShellAcknowledge, ShellClose, ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch,
-    ShellOpen, ShellSendInput, ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet,
-    TerminalCreate, UrlOpen,
+    CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextRelock, ContextSignIn,
+    ContextSignInCancel, ContextsWatch, ExecReviewGet, ExecTrust, ForwardPortsGet, ForwardRemove,
+    ForwardResume, ForwardStart, ForwardStop, ForwardsWatch, KeyboardLayoutWatch,
+    KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe,
+    ListUnsubscribe, LogsAck, LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView,
+    LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts,
+    ObjectValues, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet,
+    ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput, ShellSetSize,
+    SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
 };
 
 /// The TypeScript module of `packages/protocol`: every type the commands
@@ -30,9 +29,6 @@ pub fn typescript() -> String {
     };
     module.command::<SpacesList>();
     module.command::<ContextsWatch>();
-    module.command::<ContextModeSet>();
-    module.command::<ContextEnvironmentSet>();
-    module.command::<ContextUnlock>();
     module.command::<ContextRelock>();
     module.command::<CommandPlan>();
     module.command::<CommandExecute>();

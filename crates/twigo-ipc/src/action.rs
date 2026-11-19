@@ -82,6 +82,17 @@ pub enum PlanRequest {
         target: ShellTarget,
         kind: ShellKind,
     },
+    /// Sets the person's mode for a context, none for what its locks say
+    /// (ARCHITECTURE 6.4). Refused under the admin's policy file.
+    SetMode { context: String, mode: Option<Mode> },
+    /// Marks a context as a type, none for no type whatever its kubeconfig
+    /// says. Answers the question of an unmarked context too.
+    SetEnvironment {
+        context: String,
+        environment: Option<Environment>,
+    },
+    /// Lets a `read-only` context through as `guarded` for 15 minutes.
+    Unlock { context: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
@@ -109,8 +120,9 @@ pub struct Plan {
     /// The exact objects it acts on and those that follow, by what happens
     /// to them.
     pub affected: Vec<Affected>,
-    /// The kubectl command that does the same.
-    pub kubectl: String,
+    /// The kubectl command that does the same; none for what only Twigo
+    /// does, such as a change of a context's mode.
+    pub kubectl: Option<String>,
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,

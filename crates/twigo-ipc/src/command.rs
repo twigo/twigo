@@ -10,10 +10,10 @@ use crate::{
     Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget,
     GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
     LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
-    PlanId, PlanRequest, ResumeForward, SchemaQuery, SetContextEnvironment, SetContextMode,
-    SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers,
-    ShellEnvironment, ShellInput, ShellMessage, ShellPod, ShellResize, Space, StartForward,
-    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
+    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
+    TerminalSession,
 };
 
 pub trait Command {
@@ -45,39 +45,8 @@ impl Command for ContextsWatch {
     type Message = Vec<Context>;
 }
 
-/// The person's mode for a context (ARCHITECTURE 6.4), refused when the
-/// policy file sets it. The contexts' watch says what follows.
-pub struct ContextModeSet;
-
-impl Command for ContextModeSet {
-    const NAME: &'static str = "context_mode_set";
-    type Request = SetContextMode;
-    type Response = ();
-    type Message = ();
-}
-
-/// What the person marks a context as.
-pub struct ContextEnvironmentSet;
-
-impl Command for ContextEnvironmentSet {
-    const NAME: &'static str = "context_environment_set";
-    type Request = SetContextEnvironment;
-    type Response = ();
-    type Message = ();
-}
-
-/// Lets a `read-only` context through as `guarded` for 15 minutes, by its
-/// name, refused when the policy file sets it.
-pub struct ContextUnlock;
-
-impl Command for ContextUnlock {
-    const NAME: &'static str = "context_unlock";
-    type Request = String;
-    type Response = ();
-    type Message = ();
-}
-
-/// Ends a context's unlock now, by its name.
+/// Ends a context's unlock now, by its name, which the audit log records.
+/// A change that lowers protection is a plan of the command bus instead.
 pub struct ContextRelock;
 
 impl Command for ContextRelock {
@@ -454,7 +423,8 @@ impl Command for ExecReviewGet {
 }
 
 /// Trusts the plugins of these digests (`ExecPlugin::digest`) and marks the
-/// review answered, an empty list included.
+/// review answered, an empty list included; the audit log records each
+/// plugin trusted.
 pub struct ExecTrust;
 
 impl Command for ExecTrust {
