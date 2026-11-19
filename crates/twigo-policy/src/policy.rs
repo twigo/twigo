@@ -814,8 +814,8 @@ impl Policy {
     }
 
     /// Refuses a mode or an unlock where the admin's policy file sets the
-    /// context's mode; a type there names and colours the context and lowers
-    /// nothing.
+    /// context's mode; a type plans there, weighed by what it gives once the
+    /// file's entry goes, as it outlives the entry.
     fn refuse_policy_file(&self, context: &str, change: Change) -> Result<(), Refused> {
         if matches!(change, Change::Type { .. }) {
             return Ok(());

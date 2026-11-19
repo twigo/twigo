@@ -354,7 +354,7 @@ fn a_missing_policy_file_sets_nothing() {
 }
 
 #[test]
-fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_lowers_nothing() {
+fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_under_a_type() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-only"}}"#);
     let policy = Policy::new(entries, |_| Some(NOTHING), Choices::default(), Audit::off());
     let by_file = |refused: Refused| matches!(&refused, Refused::PolicyFile(pattern, _) if pattern == "prod-*");
@@ -382,9 +382,8 @@ fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_lowers_nothing() 
     let planned = policy.plan("prod-eu", local).unwrap();
     assert_eq!(planned.after.mode, Mode::ReadOnly);
     assert_eq!(planned.after.source, planned.before.source);
-    policy
-        .change("prod-eu", &planned, &Friction::AtOnce)
-        .unwrap();
+    let typed = friction(&planned.risk(), "prod-eu", &planned.before);
+    policy.change("prod-eu", &planned, &typed).unwrap();
     let access = policy.access("prod-eu");
     assert_eq!(access.environment, Some(Environment::Local));
     assert_eq!(access.mode, Mode::ReadOnly);

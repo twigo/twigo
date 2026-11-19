@@ -935,7 +935,7 @@ async fn an_unlock_does_not_survive_a_restart() {
 }
 
 #[tokio::test]
-async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_only_names_the_context() {
+async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_under_a_type() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("policy.json"),
