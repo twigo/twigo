@@ -516,6 +516,16 @@ mod tests {
                 .any(|said| said.starts_with("When")),
             "an unlock ends by itself before any lock goes"
         );
+        let typed = Metadata {
+            environment: Some(TypeLock::Production),
+            ..Metadata::default()
+        };
+        assert!(
+            !said(typed, mark(Environment::Development))
+                .iter()
+                .any(|said| said.starts_with("When")),
+            "a change that lowers the context as it is says nothing its type's going would repeat"
+        );
         let staging = Metadata {
             environment: Some(TypeLock::Staging),
             ..locked
