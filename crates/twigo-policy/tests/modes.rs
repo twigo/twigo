@@ -1038,18 +1038,18 @@ fn a_process_s_answer_marks_only_a_context_still_unmarked_on_the_same_cluster() 
 
 #[tokio::test]
 async fn the_log_records_each_unlock_s_end_and_why() {
-    let metadata = Arc::new(Mutex::new(Metadata {
+    let metadata = Arc::new(Mutex::new(Some(Metadata {
         read_only: true,
         connection: 1,
         ..NOTHING
-    }));
+    })));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.jsonl");
     let policy = {
         let metadata = Arc::clone(&metadata);
         Policy::new(
             PolicyFile::default(),
-            move |_| Some(*metadata.lock().unwrap()),
+            move |_| *metadata.lock().unwrap(),
             Choices::default(),
             Audit::open(&path),
         )
@@ -1075,8 +1075,11 @@ async fn the_log_records_each_unlock_s_end_and_why() {
         .await
         .expect("the unlock ran out");
     policy.unlock("c").unwrap();
-    metadata.lock().unwrap().connection = 2;
+    metadata.lock().unwrap().as_mut().unwrap().connection = 2;
     assert_eq!(policy.access("c").mode, Mode::ReadOnly);
+    policy.unlock("c").unwrap();
+    *metadata.lock().unwrap() = None;
+    policy.access("c");
     follower.abort();
 
     let ended: Vec<_> = audited(&path)
@@ -1088,7 +1091,8 @@ async fn the_log_records_each_unlock_s_end_and_why() {
         [
             ("relocked", "command"),
             ("relocked", "time"),
-            ("relocked", "moved")
+            ("relocked", "moved"),
+            ("relocked", "unlisted")
         ]
         .map(|(event, by)| (event.into(), by.into()))
     );
