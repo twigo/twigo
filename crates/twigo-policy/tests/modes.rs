@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use jiff::SignedDuration;
 use twigo_ipc::{BlockReason, Environment, Friction, Lock, LockSource, Mode, ModeSource};
+use twigo_policy::friction::friction;
 use twigo_policy::{
     Actor, Attributes, Audit, Change, Choices, Metadata, Policy, PolicyFile, ProviderLock, Refused,
     TypeLock,
@@ -818,6 +819,66 @@ fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_fri
         line["by"],
         serde_json::json!({"kind": "plan", "friction": {"kind": "typed", "text": "c"}})
     );
+}
+
+#[test]
+fn a_type_or_a_cleared_mode_asks_as_it_would_with_no_lock_but_the_person_s_choices_and_the_type() {
+    let policy = Policy::new(
+        PolicyFile::default(),
+        |context| {
+            Some(match context {
+                "provided" => Metadata {
+                    provider: Some(ProviderLock::Guarded),
+                    ..NOTHING
+                },
+                "production" => Metadata {
+                    read_only: true,
+                    environment: Some(TypeLock::Production),
+                    ..NOTHING
+                },
+                _ => Metadata {
+                    read_only: true,
+                    ..NOTHING
+                },
+            })
+        },
+        Choices::default(),
+        Audit::off(),
+    );
+    let asks = |context: &str, change| {
+        let planned = policy.plan(context, change).unwrap();
+        friction(&planned.risk(), context, &planned.before)
+    };
+    let typed = |context: &str| Friction::Typed {
+        text: context.to_owned(),
+    };
+    let mark = |environment| Change::Type {
+        environment: Some(environment),
+    };
+    assert_eq!(
+        asks("provided", mark(Environment::Development)),
+        typed("provided")
+    );
+    assert_eq!(
+        asks("provided", mark(Environment::Staging)),
+        Friction::AtOnce
+    );
+    assert_eq!(
+        asks("production", mark(Environment::Staging)),
+        typed("production"),
+        "its kubeconfig's Production stays beneath its readOnly"
+    );
+
+    policy.set_mode("locked", Some(Mode::ReadOnly)).unwrap();
+    assert_eq!(
+        asks("locked", mark(Environment::Development)),
+        Friction::AtOnce,
+        "the person's mode stays beneath every lock"
+    );
+    policy
+        .set_environment("locked", Some(Environment::Development))
+        .unwrap();
+    assert_eq!(asks("locked", Change::Mode { mode: None }), typed("locked"));
 }
 
 #[test]

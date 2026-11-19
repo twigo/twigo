@@ -14,7 +14,7 @@ use twigo_ipc::{
     RequestClass,
 };
 
-use crate::friction::Risk;
+use crate::friction::{Protection, Risk};
 use crate::{Actor, Approval, Attributes, Audit, By, Entry, Gate, PolicyFile, Served};
 
 /// How long an unlock lasts.
@@ -129,35 +129,40 @@ pub enum Change {
     Unlock,
 }
 
-/// A change as a plan shows it: what the context is before and after, and
-/// what [`Policy::change`] holds it to.
+/// A change as a plan shows it: what the context is before and after, the
+/// same beneath its locks, and what [`Policy::change`] holds it to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedChange {
     pub change: Change,
     pub before: ContextAccess,
     pub after: ContextAccess,
-    /// `before` and `after` as the context would have them without the
-    /// admin's policy file, where it sets the mode: a type, which the file
-    /// lets plan, outlives the file's entry.
-    unfiled: Option<(ContextAccess, ContextAccess)>,
+    pub beneath: Beneath,
     /// [`Policy::changes_of`] the context when it was planned.
     changes: u64,
     /// [`Metadata::revision`] of the context when it was planned.
     revision: u64,
 }
 
+/// A context's access before and after a change as it would have them with
+/// no lock but the person's choices and its type: the locks can go, an
+/// admin's entry or a kubeconfig's `readOnly` with an edit, while a type
+/// outlives them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Beneath {
+    pub before: ContextAccess,
+    pub after: ContextAccess,
+}
+
 impl PlannedChange {
     /// What it risks: an unlock, or a lasting change weighed from the
-    /// context's access before to after, under the admin's policy file as
-    /// the context would have it without the file.
+    /// context's access before to after, now and beneath its locks.
     pub fn risk(&self) -> Risk {
-        let (from, to) = self
-            .unfiled
-            .clone()
-            .unwrap_or_else(|| (self.before.clone(), self.after.clone()));
         match self.change {
             Change::Unlock => Risk::Unlock,
-            Change::Mode { .. } | Change::Type { .. } => Risk::Protection { from, to },
+            Change::Mode { .. } | Change::Type { .. } => Risk::Protection(Box::new(Protection {
+                now: (self.before.clone(), self.after.clone()),
+                bare: (self.beneath.before.clone(), self.beneath.after.clone()),
+            })),
         }
     }
 }
@@ -562,14 +567,19 @@ impl Policy {
         let before = self.resolved(&held, context, Some(metadata), now);
         let mut changed = held.clone();
         changed.make(context, change, &metadata, unlocked_until(now, UNLOCK));
-        let unfiled = self.file.mode(context).map(|_| {
-            let unfiled = |held: &Held| self.resolved_as(held, context, Some(metadata), now, None);
-            (unfiled(&held), unfiled(&changed))
-        });
+        let bare = Metadata {
+            read_only: false,
+            provider: None,
+            ..metadata
+        };
+        let bare = |held: &Held| self.resolved_as(held, context, Some(bare), now, None);
         let planned = PlannedChange {
             change,
             after: self.resolved(&changed, context, Some(metadata), now),
-            unfiled,
+            beneath: Beneath {
+                before: bare(&held),
+                after: bare(&changed),
+            },
             changes: held.changes_of(context),
             revision: metadata.revision,
             before,

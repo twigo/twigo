@@ -30,17 +30,22 @@ pub enum Risk {
     /// A shell or an attach, which a person opens often, so `guarded` asks
     /// in a dialog rather than for a typed name (6.4).
     Shell,
-    /// A lasting change of the context's own protection, from the access
-    /// `from` to `to`: lowering it asks for the context's name typed.
-    /// Under the admin's policy file both are what the context would be
-    /// without the file, which a type outlives.
-    Protection {
-        from: ContextAccess,
-        to: ContextAccess,
-    },
+    /// A lasting change of the context's own protection.
+    Protection(Box<Protection>),
     /// An unlock, which ends by itself and leaves every write in `guarded`
     /// asking for the context's name.
     Unlock,
+}
+
+/// A lasting change of a context's own protection: the context's access
+/// before and after it, `now`, and the same with no lock but the person's
+/// choices and its type, `bare`, as a type outlives the admin's policy file,
+/// a kubeconfig's `readOnly` and a provider's lock. Lowering either asks for
+/// the context's name typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Protection {
+    pub now: (ContextAccess, ContextAccess),
+    pub bare: (ContextAccess, ContextAccess),
 }
 
 /// The friction of `risk` on `context`. A `read-only` context blocks a
@@ -51,9 +56,11 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
     };
     match (risk, access.mode) {
         (Risk::Unlock, _) => Friction::Confirm,
-        (Risk::Protection { .. }, _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
-        (Risk::Protection { from, to }, _) if keeps(from, to) => Friction::AtOnce,
-        (Risk::Protection { .. }, _) => typed_context(),
+        (Risk::Protection(_), _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
+        (Risk::Protection(change), _) if keeps(&change.now) && keeps(&change.bare) => {
+            Friction::AtOnce
+        }
+        (Risk::Protection(_), _) => typed_context(),
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (Risk::Reviewed, Mode::ReadWrite) => Friction::AtOnce,
@@ -77,9 +84,9 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
 /// Whether a change from `from` to `to` leaves the context at least as
 /// strict as the mode it keeps. Leaving it unmarked weighs as `read-write`,
 /// since any change from there runs at once, unless it was unmarked already;
-/// a context unmarked before, which only the admin's policy file leaves
-/// unasked, counts as its `guarded`.
-fn keeps(from: &ContextAccess, to: &ContextAccess) -> bool {
+/// a context unmarked before, which only a lock leaves unasked, counts as
+/// its `guarded`.
+fn keeps((from, to): &(ContextAccess, ContextAccess)) -> bool {
     let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
     let to = if unmarked(to) && !unmarked(from) {
         Mode::ReadWrite
@@ -233,10 +240,11 @@ mod tests {
             (&unlocked, &read_only, Friction::AtOnce),
         ];
         for (before, after, expected) in cases {
-            let risk = Risk::Protection {
-                from: before.clone(),
-                to: after.clone(),
-            };
+            let now = (before.clone(), after.clone());
+            let risk = Risk::Protection(Box::new(Protection {
+                bare: now.clone(),
+                now,
+            }));
             assert_eq!(
                 friction(&risk, "kind-a", before),
                 expected,
@@ -250,15 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn under_a_policy_file_a_type_weighs_what_the_context_would_be_without_it() {
+    fn a_change_weighs_what_the_context_would_be_with_no_lock_but_its_type() {
         let typed = Friction::Typed {
             text: "kind-a".to_owned(),
         };
-        let filed = ContextAccess {
-            source: ModeSource::PolicyFile {
-                file: "/etc/twigo/policy.json".to_owned(),
-                pattern: Some("kind-*".to_owned()),
-            },
+        let locked = ContextAccess {
+            source: ModeSource::Kubeconfig,
             ..access(Mode::ReadOnly, None)
         };
         let typed_as = |mode, environment| ContextAccess {
@@ -274,10 +279,7 @@ mod tests {
             typed_as(Mode::Guarded, Environment::Staging),
             typed_as(Mode::ReadOnly, Environment::Production),
         );
-        let locked = ContextAccess {
-            source: ModeSource::Kubeconfig,
-            ..typed_as(Mode::ReadOnly, Environment::Development)
-        };
+        let held = (locked.clone(), locked.clone());
         let cases = [
             (&unmarked, &development, typed.clone()),
             (&unmarked, &staging, Friction::AtOnce),
@@ -286,22 +288,27 @@ mod tests {
             (&production, &development, typed.clone()),
             (&production, &staging, typed.clone()),
             (&production, &unmarked, typed.clone()),
-            (&staging, &unmarked, typed),
+            (&staging, &unmarked, typed.clone()),
             (&staging, &production, Friction::AtOnce),
             (&development, &unmarked, Friction::AtOnce),
-            (&production, &locked, Friction::AtOnce),
         ];
         for (before, after, expected) in cases {
-            let risk = Risk::Protection {
-                from: before.clone(),
-                to: after.clone(),
-            };
+            let risk = Risk::Protection(Box::new(Protection {
+                now: held.clone(),
+                bare: (before.clone(), after.clone()),
+            }));
             assert_eq!(
-                friction(&risk, "kind-a", &filed),
+                friction(&risk, "kind-a", &locked),
                 expected,
-                "from {before:?} to {after:?}"
+                "from {before:?} to {after:?} beneath the lock"
             );
         }
+        let guarded = access(Mode::Guarded, None);
+        let lowered = Risk::Protection(Box::new(Protection {
+            now: (locked.clone(), guarded.clone()),
+            bare: (unmarked, guarded),
+        }));
+        assert_eq!(friction(&lowered, "kind-a", &locked), typed);
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub use audit::{Audit, By, Entry};
 pub use file::PolicyFile;
 pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
 pub use policy::{
-    Change, Choices, Metadata, PlannedChange, Policy, ProviderLock, Refused, TypeLock, UNLOCK,
+    Beneath, Change, Choices, Metadata, PlannedChange, Policy, ProviderLock, Refused, TypeLock,
+    UNLOCK,
 };
 pub use served::{Served, Server, api_service};

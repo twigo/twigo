@@ -977,7 +977,7 @@ async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_a_type_only_names_
 }
 
 #[tokio::test]
-async fn under_a_policy_file_a_type_asks_as_it_would_without_the_file_which_it_outlives() {
+async fn under_a_policy_file_a_type_asks_as_it_would_with_no_lock_but_itself() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("policy.json"),
@@ -993,7 +993,11 @@ async fn under_a_policy_file_a_type_asks_as_it_would_without_the_file_which_it_o
         ("kind-local", Environment::Staging, Friction::AtOnce),
         ("kind-local", Environment::Development, typed("kind-local")),
         ("kind-prod", Environment::Development, typed("kind-prod")),
-        ("kind-locked", Environment::Development, Friction::AtOnce),
+        (
+            "kind-locked",
+            Environment::Development,
+            typed("kind-locked"),
+        ),
         ("kind-unmarked", Environment::Production, Friction::AtOnce),
     ];
     for (context, environment, friction) in cases {
@@ -1018,6 +1022,46 @@ async fn under_a_policy_file_a_type_asks_as_it_would_without_the_file_which_it_o
         assert_eq!(named.environment, Some(environment), "{context}");
         assert_eq!(named.mode, Mode::ReadOnly, "{context}");
     }
+}
+
+#[tokio::test]
+async fn a_type_under_a_kubeconfig_s_lock_asks_as_what_it_gives_once_the_lock_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let development = PlanRequest::SetEnvironment {
+        context: "kind-locked".to_owned(),
+        environment: Some(Environment::Development),
+    };
+    let plan = core.command_plan("main", development).await.unwrap();
+    let typed = Friction::Typed {
+        text: "kind-locked".to_owned(),
+    };
+    assert_eq!(plan.friction, typed);
+    let execute = Execute {
+        plan: plan.id,
+        typed: Some("kind-locked".to_owned()),
+    };
+    core.command_execute("main", execute, |_| true)
+        .await
+        .unwrap();
+    assert_eq!(access(&core, "kind-locked").mode, Mode::ReadOnly);
+
+    let mut contexts = core.catalog.subscribe();
+    contexts.borrow_and_update();
+    let unlocked = UNREACHABLE.replace(
+        "\n    extensions: [{ name: twigo, extension: { readOnly: true } }]",
+        "",
+    );
+    assert_ne!(unlocked, UNREACHABLE);
+    std::fs::write(dir.path().join("config"), unlocked).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the edit")
+        .unwrap();
+    let lifted = access(&core, "kind-locked");
+    assert_eq!(lifted.mode, Mode::ReadWrite);
+    assert_eq!(lifted.environment, Some(Environment::Development));
 }
 
 #[tokio::test]
