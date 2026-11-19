@@ -1,6 +1,7 @@
 //! The audit log (ARCHITECTURE 6.4): a JSONL file in the app-data directory,
-//! mode 0600, of the requests the gate sent or stopped, every class but a
-//! read of an actor other than the UI and the UI's writes, of every command
+//! mode 0600, of the requests the gate sent or stopped, or the policy proxy
+//! stopped itself, every class but a read of an actor other than the UI and
+//! the UI's writes, of every command
 //! a person confirmed and how it ended, and of every answer to a process's
 //! ask. It names what was asked and where, never a value or a token. Past
 //! [`LIMIT`] it moves to `audit.1.jsonl`, the older ones up by one, and
@@ -48,7 +49,8 @@ struct Log {
     rename_all_fields = "camelCase"
 )]
 pub enum Entry<'a> {
-    /// A request the gate let out to the server, or stopped.
+    /// A request the gate let out to the server, or it or the policy proxy
+    /// stopped.
     Request {
         context: &'a str,
         actor: &'a str,
@@ -198,10 +200,11 @@ impl Audit {
         }
     }
 
-    /// A request the gate let out or stopped: of an actor other than the UI
-    /// every class but a read, and of the UI its writes, as the command bus
+    /// A request the gate let out or stopped, or the policy proxy stopped on
+    /// the policy's word before it met the gate: of an actor other than the
+    /// UI every class but a read, and of the UI its writes, as the command bus
     /// logs its commands.
-    pub(crate) fn request(
+    pub fn request(
         &self,
         context: &str,
         actor: Actor,

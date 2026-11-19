@@ -2292,6 +2292,110 @@ async fn no_audit_line_holds_a_token() {
     assert_eq!(answers, ["once", "denied", "lasting", "nobody"]);
 }
 
+#[tokio::test]
+async fn each_request_the_proxy_stops_or_lets_on_leaves_one_request_line() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let agent = Process::start_as(&core, Actor::Agent, Some("main")).await;
+
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    refused(process.at(), create(&process, "c")).await;
+    refused(process.at(), exec(&process, "p", "sh", true)).await;
+
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let denied = tokio::spawn(send(process.at(), create(&process, "c")));
+    let ask = asked(&mut events).await;
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    assert_eq!(denied.await.unwrap().0.status(), StatusCode::FORBIDDEN);
+
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadWrite))
+        .unwrap();
+    let secret = agent
+        .request("GET", "kind-a", "/api/v1/namespaces/a/secrets/s")
+        .body(empty())
+        .unwrap();
+    refused(agent.at(), secret).await;
+    let (created, _connection) = send(process.at(), create(&process, "c")).await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+
+    let said = said_of_kind_a(&core).await;
+    let moved = kubeconfig("http://127.0.0.1:1", KIND_A);
+    rewrite(&core, dir.path(), &moved, said, false).await;
+    let (status, message) = refused(process.at(), create(&process, "c")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(message.contains("names another cluster now"), "{message}");
+
+    let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines: Vec<Value> = audit
+        .lines()
+        .map(|line| {
+            let mut line: Value = serde_json::from_str(line).unwrap();
+            line.as_object_mut().unwrap().remove("at");
+            line
+        })
+        .collect();
+    let request = |actor: &str, verb: &str, target: &str, class: &str, mode: &str, blocked| {
+        json!({
+            "event": "request", "context": "kind-a", "actor": actor, "verb": verb,
+            "target": target, "class": class, "mode": mode, "blocked": blocked,
+        })
+    };
+    let create = |mode, blocked| {
+        request(
+            "terminal",
+            "create",
+            "configmaps in a",
+            "write",
+            mode,
+            blocked,
+        )
+    };
+    assert_eq!(
+        lines,
+        [
+            create("read-only", json!("mode")),
+            request(
+                "terminal",
+                "get",
+                "pods/p/exec in a",
+                "exec",
+                "read-only",
+                json!("mode")
+            ),
+            request(
+                "terminal",
+                "create",
+                "configmaps in a",
+                "dryRun",
+                "guarded",
+                Value::Null
+            ),
+            json!({
+                "event": "approval", "context": "kind-a", "actor": "terminal",
+                "process": "Terminal 1", "verb": "create", "target": "configmaps in a",
+                "mode": "guarded", "answer": "denied",
+            }),
+            create("guarded", json!("noApproval")),
+            request(
+                "agent",
+                "get",
+                "secrets/s in a",
+                "secretRead",
+                "read-write",
+                json!("noApproval")
+            ),
+            create("read-write", Value::Null),
+            create("read-only", json!("mode")),
+        ]
+    );
+}
+
 fn delete(process: &Process, name: &str) -> Request<Full<Bytes>> {
     process
         .request("DELETE", "kind-a", &format!("{CONFIGMAPS}/{name}"))
@@ -3023,6 +3127,59 @@ async fn a_denied_unmarked_ask_leaves_the_context_unmarked_so_the_next_write_ask
         assert_eq!(core.policy.access("kind-a").source, ModeSource::Unmarked);
     }
     assert_eq!(fake.writes(Method::POST), 0);
+}
+
+#[tokio::test]
+async fn each_answer_to_an_unmarked_ask_leaves_its_request_line_and_a_type_no_approval_line() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = unmarked(dir.path(), &fake).await;
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let answers = [
+        ("c", ApprovalAnswer::Deny, StatusCode::FORBIDDEN),
+        ("d", marked(Environment::Production), StatusCode::FORBIDDEN),
+        ("e", marked(Environment::Development), StatusCode::CREATED),
+    ];
+    for (name, answer, status) in answers {
+        core.policy.set_environment("kind-a", None).unwrap();
+        let sent = tokio::spawn(send(process.at(), create(&process, name)));
+        let ask = asked(&mut events).await;
+        assert!(ask.unmarked, "{name}");
+        answered(&core, &ask, answer).unwrap();
+        assert_eq!(sent.await.unwrap().0.status(), status, "{name}");
+    }
+    assert_eq!(fake.writes(Method::POST), 1);
+
+    let lines: Vec<Value> = std::fs::read_to_string(dir.path().join("audit.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let line: Value = serde_json::from_str(line).unwrap();
+            match line["event"].as_str().unwrap() {
+                "request" => json!(["request", line["class"], line["mode"], line["blocked"]]),
+                "approval" => json!(["approval", line["mode"], line["answer"]]),
+                "protection" => json!(["protection", line["change"], line["by"]["kind"]]),
+                event => json!([event]),
+            }
+        })
+        .collect();
+    let typed = |environment| json!({ "kind": "type", "environment": environment });
+    let dry_run = json!(["request", "dryRun", "guarded", null]);
+    assert_eq!(
+        lines,
+        [
+            dry_run.clone(),
+            json!(["approval", "guarded", "denied"]),
+            json!(["request", "write", "guarded", "unmarked"]),
+            dry_run.clone(),
+            json!(["protection", typed("production"), "ask"]),
+            json!(["request", "write", "read-only", "mode"]),
+            dry_run,
+            json!(["protection", typed("development"), "ask"]),
+            json!(["request", "write", "read-write", null]),
+        ]
+    );
 }
 
 #[tokio::test]

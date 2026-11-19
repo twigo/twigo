@@ -293,8 +293,9 @@ impl Policy {
         })
     }
 
-    /// Where the gate logs the writes it sends or stops, and the command
-    /// bus what a person confirmed.
+    /// Where the gate and the policy proxy log the requests they send or
+    /// stop, the command bus what a person confirmed, and the approval broker
+    /// how each ask ended.
     pub fn audit(&self) -> &Audit {
         &self.audit
     }
