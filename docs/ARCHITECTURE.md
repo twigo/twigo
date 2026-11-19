@@ -1981,7 +1981,7 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
     "Export to kubeconfig" is an explicit command; for Segla it writes an exec entry for `sgl cluster credentials <label>`.
 - **Metadata from kubeconfig** `extensions` (name `twigo`): `color`, `tags`, `readOnly`, `environment`, `order`.
   Twigo reads it and never writes it.
-  Each field is read on its own, so a value Twigo does not know drops only that field; `readOnly` alone reads anything but `false` as a lock (6.4).
+  Each field is read on its own, so a value Twigo does not know drops only that field; `readOnly` alone reads anything but `false` as a lock, and `environment` counts only as Production or Staging, which tighten (6.4).
   Contexts with an `order` come first, lowest first, then the rest, each group by name.
   `tags` comes with the catalog's views.
 - **The generic "Add cluster…" command.**
@@ -2259,25 +2259,27 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   4. the strictest of the locks, each of which can only tighten, and of equal ones the first listed:
      - kubeconfig metadata, `twigo.readOnly` there and anything but `false`: `read-only`, while `false` says nothing;
      - the provider (Segla can mark production clusters), whose lock is `guarded` or `read-only`, never `read-write`;
-     - the default of its environment type, the person's, else its kubeconfig's: `read-only` for Production, `guarded` for Staging and `read-write` for Development and Local;
+     - the default of its environment type, the person's, else its kubeconfig's where that tightens: `read-only` for Production, `guarded` for Staging and `read-write` for Development and Local, which a kubeconfig cannot give, so Development or Local there is no lock and no mark;
   5. nothing marks it: `guarded`, source `unmarked`, until someone says what it is.
 
   The mode is read for every request, so a change reaches clients already built.
   The person's "no type" holds whatever the kubeconfig says, and with no other lock leaves the context unmarked again.
 
 - **A context nobody marked** lets through what `guarded` does, reads, dry runs, Secret reads and port-forwards, and no actor's write or exec, the UI's included, whatever approval it carries: the gate refuses it as `unmarked`.
-  Every unmarked context asks, local-looking ones included, as a server on `127.0.0.1` is often a tunnel to a remote cluster (Teleport's local proxy, SSH forwards).
+  Every unmarked context asks, local-looking ones included, as a server on `127.0.0.1` is often a tunnel to a remote cluster (Teleport's local proxy, SSH forwards), and so does one whose kubeconfig alone says Development or Local, which only a person can say.
   - A command of the person's own is refused at plan time, before any friction, so the window asks what the context is and plans again.
   - A process's write or exec through the policy proxy raises an ask marked `unmarked`, which the person answers with a type or denies.
     A type marks the context, kept with the person's choices and recorded with the process, and the request meets the gate anew: it goes, asks again as `guarded` asks, or is refused in the gate's words.
     A denial leaves the context unmarked, so the next write asks again; "once" and "for 15 minutes" answer no unmarked ask, and a type answers no other.
-    The ask is withdrawn, and its request decided again, when the context is marked another way meanwhile, as every ask is when its context's access changes, and so are the context's other unmarked asks once one of them is answered.
+    The ask is withdrawn, and its request decided again, when the context is marked another way meanwhile, as every ask is when its context's access changes, and so are the context's other unmarked asks once an answer marks it; a denial settles its own request alone.
   - Its terminals go through the policy proxy, as those of every context that is not `read-write` do; marking it Development leaves a running one there until it is opened again (4.6).
 
 - **Changes of protection** are plans of the command bus (5.1): the person's mode, the type they mark a context as, and an unlock.
-  They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where the policy file sets the context's mode or no source lists it.
+  They send nothing to a cluster, so a plan has no writes and no kubectl command, and each is refused at plan time where no source lists the context.
+  Where the policy file sets the context's mode, a mode and an unlock are refused at plan time, and a type plans and runs at once, as it only names and colours the context there.
   Rust names the friction from the context's access before and after:
   - a lasting change that leaves the context less strict asks for the context's name typed, weighed against the mode it keeps, so an unlocked context counts as `read-only`;
+  - a change that leaves the context unmarked weighs as one to `read-write`, since from there any change runs at once: from `read-only` or `guarded` it asks for the name typed;
   - an unlock asks in a dialog, as it ends by itself and leaves every write asking for the context's name;
   - a change that tightens or keeps the mode, and any change of a context nobody marked, runs at once: the question an unmarked context answers is its friction.
 
@@ -2294,13 +2296,14 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
 - **Every blocked request** returns a typed `permissions` error with the mode and its source, and the UI shows which rule blocked it.
 - **The audit log** is `audit.jsonl` in the app-data directory, mode 0600.
   The gate notes each write it sends, just above the socket, or stops, with the actor, the context and its mode; the command bus notes what a person confirmed, through which friction, and how it ended.
-  Of protection it notes, one line each: each change a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; each unlock that ended by a relock, by its time, or as the context named another cluster or none; and each plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
+  Of protection it notes, one line each: each change a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; each change of a context's mode, source or type that no command made, with its access before and after, as the catalog publishes the read that made it, before anything reads that read: a kubeconfig edited, a provider's lock that came or went, a source that listed the context or stopped listing it; each unlock that ended by a relock, by its time, or as the context named another cluster or none; and each plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
+  The catalog's first read is no change, and the policy file, read once as the app starts (4.8), changes nothing while it runs; a context that moves to another cluster keeps its mode, source and type, so only the end of its unlock is noted.
   A change of protection is that line alone, in place of the bus's two.
   It names targets, never a value, so the actors of M3 only add their name.
   A file that cannot be opened is said on stderr and keeps nothing: the log records, it guards nothing.
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
   - Environment types, Production, Staging, Development and Local, set a context's colour and its default mode.
-    A person marks a context, or its kubeconfig metadata says so (`twigo.environment`, 5.5), and the person's mark wins, their None included.
+    A person marks a context; its kubeconfig metadata (`twigo.environment`, 5.5) counts only where it tightens, Production or Staging, so a context whose kubeconfig alone says Development or Local is unmarked and asks; the person's mark wins, their None included.
     Nothing guesses a type from a context's name: a context nobody marked is `guarded` until someone says what it is (above), and only an admin's policy file sets modes by glob (4.8).
   - A production context is a mode with two cues (NN/g): a chip in the title bar after its name that says the type and the lock (`Production · read-only`), and the status bar tinted in it.
     Where the bar is too narrow the chip folds to its icon, its words in its tooltip, after the search and before the crumbs (4.1).

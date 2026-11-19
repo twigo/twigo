@@ -15,7 +15,7 @@ Decided 2026-11-07 with the command bus (ARCHITECTURE 5.1, 6.4).
 - Scale, cordon and suspend end with what reverts them: for 30 s the space's last action can be put back, from its toast or ⌘Z, refused once anyone else changed the object (decided 2026-11-08).
 - The mock backend's bus (`packages/protocol/src/mock/bus.ts`) mirrors each action and the friction table.
 - An action's writes add their rows to the gate's table ([decision](policy-gate.md)).
-- A change of a context's protection, the person's mode, its type or an unlock, is a plan too, with no writes and no kubectl command: lowering it asks for the context's name typed, an unlock asks in a dialog, and a change that tightens, or of a context nobody marked, runs at once; it runs only while the context stands as planned, and the audit log records it (decided 2026-11-19, D16).
+- A change of a context's protection, the person's mode, its type or an unlock, is a plan too, with no writes and no kubectl command: lowering it asks for the context's name typed, an unlock asks in a dialog, and a change that tightens, or of a context nobody marked, runs at once; clearing a mark weighs as making the context `read-write`, so two steps through an unmarked context ask no less than one; it runs only while the context stands as planned, and the audit log records it (decided 2026-11-19, D16).
 
 ## Why
 
