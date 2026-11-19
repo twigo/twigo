@@ -35,12 +35,10 @@ contexts:
     cluster: kind-a
     user: kind-a
     namespace: apps
-    extensions: [{ name: twigo, extension: { environment: local } }]
 - name: kind-b
   context:
     cluster: kind-a
     user: kind-a
-    extensions: [{ name: twigo, extension: { environment: local } }]
 current-context: kind-b
 ";
 
@@ -121,6 +119,11 @@ impl Setup {
             async move { core.run(followed, None).await }
         });
         core.catalog.contexts().await;
+        for context in ["kind-a", "kind-b"] {
+            core.policy
+                .set_environment(context, Some(Environment::Local))
+                .unwrap();
+        }
         Self {
             dir,
             core,
@@ -271,16 +274,21 @@ fn a_terminal_goes_through_the_proxy_where_the_policy_file_or_the_mode_says() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("policy.json");
     std::fs::write(&file, r#"{"terminal": {"usePolicyProxy": ["prod-*"]}}"#).unwrap();
+    let local = Choices {
+        environments: ["prod-eu", "dev"]
+            .map(|context| (context.to_owned(), Some(Environment::Local)))
+            .into(),
+        ..Choices::default()
+    };
     let policy = Policy::new(
         PolicyFile::read(&file),
-        |context| {
+        |_| {
             Some(Metadata {
-                environment: (context != "new").then_some(Environment::Local),
                 connection: 1,
                 ..Metadata::default()
             })
         },
-        Choices::default(),
+        local,
         Audit::off(),
     );
     let proxied = |why| TerminalKind::Proxy { why };

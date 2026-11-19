@@ -41,6 +41,33 @@ impl ProviderLock {
     }
 }
 
+/// What a kubeconfig's `twigo.environment` can lock a context to: a type
+/// there only tightens, so Development and Local say nothing (D16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeLock {
+    Production,
+    Staging,
+}
+
+impl TypeLock {
+    /// The lock a kubeconfig's `environment` gives, none for a type that
+    /// would lower the context's mode.
+    pub fn of(environment: Environment) -> Option<Self> {
+        match environment {
+            Environment::Production => Some(TypeLock::Production),
+            Environment::Staging => Some(TypeLock::Staging),
+            Environment::Development | Environment::Local => None,
+        }
+    }
+
+    fn environment(self) -> Environment {
+        match self {
+            TypeLock::Production => Environment::Production,
+            TypeLock::Staging => Environment::Staging,
+        }
+    }
+}
+
 /// What the catalog says of a context it lists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Metadata {
@@ -48,7 +75,8 @@ pub struct Metadata {
     pub read_only: bool,
     /// What its provider locks it to; kubeconfig contexts have none.
     pub provider: Option<ProviderLock>,
-    pub environment: Option<Environment>,
+    /// The type its kubeconfig locks it to.
+    pub environment: Option<TypeLock>,
     /// Changes when what it connects to does, or what its kubeconfig says of
     /// it: an unlock holds only for what it was given on.
     pub connection: u64,
@@ -134,6 +162,9 @@ type ReadMetadata = Box<dyn Fn(&str) -> Option<Metadata> + Send + Sync>;
 pub struct Policy {
     file: PolicyFile,
     metadata: ReadMetadata,
+    /// The type of a context the person has not marked: Local in
+    /// [`Policy::open`], none in the app's, where such a context asks.
+    assumed: Option<Environment>,
     held: Mutex<Held>,
     changes: watch::Sender<u64>,
     audit: Audit,
@@ -224,9 +255,32 @@ impl Policy {
         choices: Choices,
         audit: Audit,
     ) -> Arc<Self> {
+        Self::assuming(file, metadata, choices, audit, None)
+    }
+
+    /// Where every context is a Local one, so `read-write`: for the tools
+    /// and tests that own the clusters they reach.
+    pub fn open() -> Arc<Self> {
+        Self::assuming(
+            PolicyFile::default(),
+            |_| Some(Metadata::default()),
+            Choices::default(),
+            Audit::off(),
+            Some(Environment::Local),
+        )
+    }
+
+    fn assuming(
+        file: PolicyFile,
+        metadata: impl Fn(&str) -> Option<Metadata> + Send + Sync + 'static,
+        choices: Choices,
+        audit: Audit,
+        assumed: Option<Environment>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             file,
             metadata: Box::new(metadata),
+            assumed,
             held: Mutex::new(Held {
                 choices,
                 unlocks: HashMap::new(),
@@ -235,21 +289,6 @@ impl Policy {
             changes: watch::Sender::new(0),
             audit,
         })
-    }
-
-    /// Where every context is a Local one, so `read-write`: for the tools
-    /// and tests that own the clusters they reach.
-    pub fn open() -> Arc<Self> {
-        let local = Metadata {
-            environment: Some(Environment::Local),
-            ..Metadata::default()
-        };
-        Self::new(
-            PolicyFile::default(),
-            move |_| Some(local),
-            Choices::default(),
-            Audit::off(),
-        )
     }
 
     /// Where the gate logs the writes it sends or stops, and the command
@@ -299,7 +338,11 @@ impl Policy {
     ) -> ContextAccess {
         let environment = match held.choices.environments.get(context) {
             Some(marked) => *marked,
-            None => metadata.and_then(|metadata| metadata.environment),
+            None => self.assumed.or_else(|| {
+                metadata
+                    .and_then(|metadata| metadata.environment)
+                    .map(TypeLock::environment)
+            }),
         };
         let (mode, source) = self.resolve(context, held, metadata, environment);
         let unlocked = held

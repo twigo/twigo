@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
-use twigo_policy::{Metadata, Policy};
+use twigo_policy::{Metadata, Policy, TypeLock};
 
 /// The contexts, ordered by their `order`, those without one last, then by
 /// name.
@@ -94,7 +94,7 @@ fn metadata(context: &kubeconfig::Context, revision: u64) -> Metadata {
     Metadata {
         read_only: context.read_only,
         provider: None,
-        environment: context.environment,
+        environment: context.environment.and_then(TypeLock::of),
         connection: context.fingerprint.value(),
         revision,
     }

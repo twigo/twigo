@@ -23,8 +23,9 @@ impl Mode {
     }
 }
 
-/// What a context is marked as, by a person or its kubeconfig; a context
-/// nobody marked has none. It sets the default mode and colour.
+/// What a context is marked as, by a person, or by its kubeconfig where that
+/// tightens: Production or Staging; a context nobody marked has none. It
+/// sets the default mode and colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum Environment {
@@ -100,6 +101,7 @@ pub struct ContextAccess {
     pub mode: Mode,
     /// Where the mode comes from, an unlock aside.
     pub source: ModeSource,
+    /// The person's type, else its kubeconfig's where that is a lock.
     pub environment: Option<Environment>,
     /// When an unlock ends and the context relocks, in milliseconds since
     /// the epoch.

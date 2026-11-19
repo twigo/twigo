@@ -362,7 +362,11 @@ mode: Mode,
 /**
  * Where the mode comes from, an unlock aside.
  */
-source: ModeSource, environment: Environment | null, 
+source: ModeSource, 
+/**
+ * The person's type, else its kubeconfig's where that is a lock.
+ */
+environment: Environment | null, 
 /**
  * When an unlock ends and the context relocks, in milliseconds since
  * the epoch.
@@ -416,8 +420,9 @@ owners: Array<string> | null, };
 export type EnvVar = { name: string, value: string, };
 
 /**
- * What a context is marked as, by a person or its kubeconfig; a context
- * nobody marked has none. It sets the default mode and colour.
+ * What a context is marked as, by a person, or by its kubeconfig where that
+ * tightens: Production or Staging; a context nobody marked has none. It
+ * sets the default mode and colour.
  */
 export type Environment = "production" | "staging" | "development" | "local";
 

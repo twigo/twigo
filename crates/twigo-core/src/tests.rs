@@ -766,31 +766,42 @@ fn access(core: &Core, context: &str) -> twigo_ipc::ContextAccess {
     found.unwrap().access
 }
 
+/// Marks kind-local Local, as a person would: its kubeconfig's `local` is
+/// no mark.
+fn mark_local(core: &Core) {
+    core.policy
+        .set_environment("kind-local", Some(Environment::Local))
+        .unwrap();
+}
+
 #[tokio::test]
 async fn a_context_s_mode_comes_from_its_kubeconfig_and_reaches_its_clients() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
 
-    assert_eq!(access(&core, "kind-local").mode, Mode::ReadWrite);
     assert_eq!(access(&core, "kind-locked").mode, Mode::ReadOnly);
     assert_eq!(access(&core, "kind-locked").source, ModeSource::Kubeconfig);
     let prod = access(&core, "kind-prod");
     assert_eq!(prod.mode, Mode::ReadOnly);
     assert_eq!(prod.environment, Some(Environment::Production));
 
-    let unmarked = access(&core, "kind-unmarked");
-    assert_eq!(unmarked.mode, Mode::Guarded);
-    assert_eq!(unmarked.source, ModeSource::Unmarked);
-
-    let open = create_a_configmap(&core, "kind-local").await;
-    assert_eq!(open.kind, ErrorKind::Unavailable, "it reached the network");
+    for context in ["kind-unmarked", "kind-local"] {
+        let unmarked = access(&core, context);
+        assert_eq!(unmarked.mode, Mode::Guarded, "{context}");
+        assert_eq!(unmarked.source, ModeSource::Unmarked, "{context}");
+        assert_eq!(unmarked.environment, None, "{context}");
+        let blocked = create_a_configmap(&core, context).await;
+        assert_eq!(blocked.blocked.unwrap().reason, BlockReason::Unmarked);
+    }
     for context in ["kind-locked", "kind-prod"] {
         let blocked = create_a_configmap(&core, context).await;
         assert_eq!(blocked.kind, ErrorKind::Permissions, "{context}");
     }
-    let blocked = create_a_configmap(&core, "kind-unmarked").await;
-    assert_eq!(blocked.blocked.unwrap().reason, BlockReason::Unmarked);
+
+    mark_local(&core);
+    let open = create_a_configmap(&core, "kind-local").await;
+    assert_eq!(open.kind, ErrorKind::Unavailable, "it reached the network");
 }
 
 #[tokio::test]
@@ -798,6 +809,7 @@ async fn a_person_s_choice_changes_clients_already_built_and_survives_a_restart(
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
+    mark_local(&core);
     let mut changes = core.policy.changes();
 
     let open = create_a_configmap(&core, "kind-local").await;
@@ -925,6 +937,7 @@ async fn clients_already_built_stop_writing_once_no_source_lists_their_context()
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
+    mark_local(&core);
     let clients = core.clients("kind-local").await.unwrap();
     let write = || {
         http::Request::post("/api/v1/namespaces/a/configmaps")
@@ -1010,6 +1023,7 @@ async fn clients_built_for_one_cluster_write_nothing_once_their_name_means_anoth
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
+    mark_local(&core);
     let clients = core.clients("kind-local").await.unwrap();
     let write = || {
         http::Request::post("/api/v1/namespaces/a/configmaps")

@@ -19,4 +19,6 @@ pub use attributes::Attributes;
 pub use audit::{Audit, By, Entry};
 pub use file::PolicyFile;
 pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
-pub use policy::{Change, Choices, Metadata, PlannedChange, Policy, ProviderLock, Refused, UNLOCK};
+pub use policy::{
+    Change, Choices, Metadata, PlannedChange, Policy, ProviderLock, Refused, TypeLock, UNLOCK,
+};

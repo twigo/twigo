@@ -5,6 +5,7 @@ use jiff::SignedDuration;
 use twigo_ipc::{BlockReason, Environment, Friction, Lock, LockSource, Mode, ModeSource};
 use twigo_policy::{
     Actor, Attributes, Audit, Change, Choices, Metadata, Policy, PolicyFile, ProviderLock, Refused,
+    TypeLock,
 };
 
 const NOTHING: Metadata = Metadata {
@@ -15,10 +16,14 @@ const NOTHING: Metadata = Metadata {
     revision: 0,
 };
 
-const LOCAL: Metadata = Metadata {
-    environment: Some(Environment::Local),
-    ..NOTHING
-};
+/// The person marked `c` Local, so it is `read-write` while nothing locks
+/// it.
+fn local() -> Choices {
+    Choices {
+        environments: [("c".to_owned(), Some(Environment::Local))].into(),
+        ..Choices::default()
+    }
+}
 
 fn file(text: &str) -> (tempfile::TempDir, PolicyFile) {
     let dir = tempfile::tempdir().unwrap();
@@ -85,7 +90,7 @@ fn an_environment_type_sets_the_default_mode() {
 #[test]
 fn no_type_holds_over_the_kubeconfig_s_mark_and_leaves_the_context_unmarked() {
     let policy = with_metadata(Metadata {
-        environment: Some(Environment::Production),
+        environment: Some(TypeLock::Production),
         ..NOTHING
     });
     policy.set_environment("c", None).unwrap();
@@ -117,7 +122,7 @@ fn a_new_type_ends_an_unlock_so_marking_it_again_does_not_bring_it_back() {
 #[test]
 fn a_mark_in_the_kubeconfig_counts_until_a_person_marks_otherwise() {
     let policy = with_metadata(Metadata {
-        environment: Some(Environment::Production),
+        environment: Some(TypeLock::Production),
         ..NOTHING
     });
     assert_eq!(policy.access("c").mode, Mode::ReadOnly);
@@ -133,7 +138,7 @@ fn the_policy_file_comes_first_and_the_person_s_choice_before_any_lock() {
     let (_dir, entries) = file(r#"{"contexts": {"prod-*": "read-write"}}"#);
     let locked = Metadata {
         read_only: true,
-        environment: Some(Environment::Production),
+        environment: Some(TypeLock::Production),
         ..NOTHING
     };
     let policy = Policy::new(
@@ -170,13 +175,13 @@ fn the_policy_file_comes_first_and_the_person_s_choice_before_any_lock() {
     policy.set_mode("c", None).unwrap();
     assert_eq!(policy.access("c").source, ModeSource::Kubeconfig);
 
-    let development = with_metadata(Metadata {
-        environment: Some(Environment::Development),
+    let staging = with_metadata(Metadata {
+        environment: Some(TypeLock::Staging),
         ..NOTHING
     });
-    development.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    staging.set_mode("c", Some(Mode::ReadOnly)).unwrap();
     assert_eq!(
-        development.access("c").source,
+        staging.access("c").source,
         ModeSource::User { overrides: None },
         "a choice stricter than the locks sets none aside"
     );
@@ -184,7 +189,7 @@ fn the_policy_file_comes_first_and_the_person_s_choice_before_any_lock() {
 
 #[test]
 fn the_strictest_lock_wins_and_of_equal_ones_the_kubeconfig_s_then_the_provider_s() {
-    let production = Some(Environment::Production);
+    let (production, staging) = (Some(TypeLock::Production), Some(TypeLock::Staging));
     let environment = |environment| ModeSource::Environment { environment };
     let cases = [
         (true, None, None, Mode::ReadOnly, ModeSource::Kubeconfig),
@@ -205,14 +210,7 @@ fn the_strictest_lock_wins_and_of_equal_ones_the_kubeconfig_s_then_the_provider_
         (
             false,
             Some(ProviderLock::Guarded),
-            Some(Environment::Local),
-            Mode::Guarded,
-            ModeSource::Provider,
-        ),
-        (
-            false,
-            Some(ProviderLock::Guarded),
-            Some(Environment::Staging),
+            staging,
             Mode::Guarded,
             ModeSource::Provider,
         ),
@@ -230,19 +228,13 @@ fn the_strictest_lock_wins_and_of_equal_ones_the_kubeconfig_s_then_the_provider_
             Mode::ReadOnly,
             ModeSource::Kubeconfig,
         ),
-        (
-            true,
-            None,
-            Some(Environment::Development),
-            Mode::ReadOnly,
-            ModeSource::Kubeconfig,
-        ),
+        (true, None, staging, Mode::ReadOnly, ModeSource::Kubeconfig),
         (
             false,
             None,
-            Some(Environment::Development),
-            Mode::ReadWrite,
-            environment(Environment::Development),
+            staging,
+            Mode::Guarded,
+            environment(Environment::Staging),
         ),
         (false, None, None, Mode::Guarded, ModeSource::Unmarked),
     ];
@@ -264,13 +256,13 @@ fn the_strictest_lock_wins_and_of_equal_ones_the_kubeconfig_s_then_the_provider_
 
 #[test]
 fn the_catalog_is_read_anew_for_every_request() {
-    let metadata = Arc::new(Mutex::new(LOCAL));
+    let metadata = Arc::new(Mutex::new(NOTHING));
     let policy = {
         let metadata = Arc::clone(&metadata);
         Policy::new(
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
-            Choices::default(),
+            local(),
             Audit::off(),
         )
     };
@@ -465,14 +457,14 @@ fn a_new_choice_ends_an_unlock() {
 fn an_unlock_holds_only_for_what_it_was_given_on() {
     let metadata = Arc::new(Mutex::new(Metadata {
         read_only: true,
-        ..LOCAL
+        ..NOTHING
     }));
     let policy = {
         let metadata = Arc::clone(&metadata);
         Policy::new(
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
-            Choices::default(),
+            local(),
             Audit::off(),
         )
     };
@@ -483,14 +475,14 @@ fn an_unlock_holds_only_for_what_it_was_given_on() {
     // another cluster and back: another fingerprint, then the same again.
     *metadata.lock().unwrap() = Metadata {
         connection: 1,
-        ..LOCAL
+        ..NOTHING
     };
     let open = policy.access("c");
     assert_eq!((open.mode, open.unlocked_until), (Mode::ReadWrite, None));
     *metadata.lock().unwrap() = Metadata {
         read_only: true,
         connection: 0,
-        ..LOCAL
+        ..NOTHING
     };
     let locked = policy.access("c");
     assert_eq!((locked.mode, locked.unlocked_until), (Mode::ReadOnly, None));
@@ -691,14 +683,14 @@ fn a_gate_holds_its_clients_to_what_they_were_built_for() {
 
     let metadata = Arc::new(Mutex::new(Metadata {
         connection: 1,
-        ..LOCAL
+        ..NOTHING
     }));
     let policy = {
         let metadata = Arc::clone(&metadata);
         Policy::new(
             PolicyFile::default(),
             move |_| Some(*metadata.lock().unwrap()),
-            Choices::default(),
+            local(),
             Audit::off(),
         )
     };
@@ -827,7 +819,7 @@ fn a_planned_change_says_what_it_leaves_and_the_log_records_it_once_with_its_fri
 #[test]
 fn a_plan_holds_only_while_the_context_stands_as_it_was_planned() {
     let metadata = Arc::new(Mutex::new(Metadata {
-        environment: Some(Environment::Production),
+        environment: Some(TypeLock::Production),
         ..NOTHING
     }));
     let policy = {

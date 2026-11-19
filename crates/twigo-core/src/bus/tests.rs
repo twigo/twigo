@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent,
-    ShellKind, ShellTarget,
+    Environment, ErrorKind, Execute, Friction, Mode, OperationEvent, PlanId, PlanRequest, ShellEnd,
+    ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
@@ -22,14 +22,22 @@ clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
 users: [{ name: u, user: {} }]
 contexts:
 - name: kind-a
-  context:
-    cluster: c
-    user: u
-    extensions: [{ name: twigo, extension: { environment: local } }]
+  context: { cluster: c, user: u }
 ";
 
-fn running(dir: &Path) -> Arc<Core> {
-    running_with(dir, KUBECONFIG)
+/// A core over [`KUBECONFIG`], whose kind-a the person marked Local.
+async fn running(dir: &Path) -> Arc<Core> {
+    marked(running_with(dir, KUBECONFIG)).await
+}
+
+/// `core` once its catalog is read, with kind-a marked Local, as a person
+/// would.
+async fn marked(core: Arc<Core>) -> Arc<Core> {
+    core.catalog.contexts().await;
+    core.policy
+        .set_environment("kind-a", Some(Environment::Local))
+        .unwrap();
+    core
 }
 
 fn running_with(dir: &Path, text: &str) -> Arc<Core> {
@@ -132,7 +140,7 @@ async fn until(what: &str, mut done: impl FnMut() -> bool) {
 #[tokio::test]
 async fn a_plan_runs_once_and_only_from_its_own_window() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     assert_eq!(plan.friction, Friction::Confirm);
@@ -153,7 +161,7 @@ async fn a_plan_runs_once_and_only_from_its_own_window() {
 #[tokio::test]
 async fn a_typed_friction_runs_only_with_its_name_typed() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let wide = || Risk::Wide {
         name: "payments".to_owned(),
@@ -190,7 +198,7 @@ async fn a_typed_friction_runs_only_with_its_name_typed() {
 #[tokio::test]
 async fn a_countdown_runs_only_once_it_has_ended_and_a_cancel_drops_it() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     core.catalog.contexts().await;
     tokio::time::pause();
@@ -221,7 +229,7 @@ async fn a_countdown_runs_only_once_it_has_ended_and_a_cancel_drops_it() {
 #[tokio::test]
 async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
@@ -259,7 +267,7 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
 #[tokio::test]
 async fn a_plan_never_runs_on_another_cluster_its_context_names_now() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let mut contexts = core.catalog.subscribe();
@@ -283,7 +291,7 @@ async fn a_plan_never_runs_on_another_cluster_its_context_names_now() {
 #[tokio::test]
 async fn a_reload_drops_the_window_s_plans_and_stops_its_runs() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let waiting = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let started = new_plan(&core, "main", Risk::Lasting, &runs).await;
@@ -329,7 +337,7 @@ async fn a_reload_drops_the_window_s_plans_and_stops_its_runs() {
 #[tokio::test]
 async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     execute(&core, "main", plan.id, None).await.unwrap();
@@ -360,7 +368,7 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
 #[tokio::test]
 async fn a_plan_asked_for_by_a_page_that_reloaded_is_not_kept() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     core.catalog.contexts().await;
     let ticket = core.bus.ticket("main");
@@ -376,7 +384,7 @@ async fn a_plan_asked_for_by_a_page_that_reloaded_is_not_kept() {
 #[tokio::test]
 async fn a_plan_taken_before_its_page_reloaded_does_not_run() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let plan = new_plan(&core, "main", Risk::Lasting, &runs).await;
     let (_, ticket) = core.bus.take("main", plan.id).unwrap();
@@ -450,20 +458,8 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
     let dir = tempfile::tempdir().unwrap();
     let server = Held::start().await;
     let kubeconfig = KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port));
-    let core = running(dir.path());
-    std::fs::write(dir.path().join("config"), &kubeconfig).unwrap();
+    let core = marked(running_with(dir.path(), &kubeconfig)).await;
     let mut contexts = core.catalog.subscribe();
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        contexts.wait_for(|listed| {
-            listed
-                .as_ref()
-                .is_some_and(|listed| listed.iter().any(|c| c.name == "kind-a"))
-        }),
-    )
-    .await
-    .unwrap()
-    .unwrap();
     let space = core.state.open_space("kind-a").id;
     let planning = tokio::spawn({
         let core = Arc::clone(&core);
@@ -496,8 +492,8 @@ async fn a_plan_whose_read_waited_across_an_edit_of_its_context_never_runs() {
     std::fs::write(
         dir.path().join("config"),
         kubeconfig.replace(
-            "extension: { environment: local }",
-            "extension: { environment: local, readOnly: false }",
+            "context: { cluster: c, user: u }",
+            "context: { cluster: c, user: u, extensions: [{ name: twigo, extension: { readOnly: false } }] }",
         ),
     )
     .unwrap();
@@ -618,11 +614,11 @@ async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_it
     })
     .await;
     let dir = tempfile::tempdir().unwrap();
-    let core = running_with(
+    let core = marked(running_with(
         dir.path(),
         &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
-    );
-    core.catalog.contexts().await;
+    ))
+    .await;
     let space = core.state.open_space("kind-a").id;
     let target = twigo_ipc::ResourceRef {
         gvr: twigo_ipc::Gvr {
@@ -701,11 +697,11 @@ async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_it
 }
 
 async fn scripted_core(server: &Scripted, dir: &Path) -> (Arc<Core>, String) {
-    let core = running_with(
+    let core = marked(running_with(
         dir,
         &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
-    );
-    core.catalog.contexts().await;
+    ))
+    .await;
     let space = core.state.open_space("kind-a").id;
     (core, space)
 }
@@ -907,7 +903,7 @@ async fn plan_started(
 #[tokio::test]
 async fn a_newer_preview_stops_a_plan_still_being_built_from_an_older_one() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let object = previewed("m");
     let older = core.bus.start_preview("main", &object);
@@ -927,7 +923,7 @@ async fn a_newer_preview_stops_a_plan_still_being_built_from_an_older_one() {
 #[tokio::test]
 async fn a_newer_preview_drops_a_plan_made_from_an_older_one_and_no_other() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     let runs = Runs::default();
     let object = previewed("m");
     let started = core.bus.start_preview("main", &object);
@@ -957,7 +953,7 @@ async fn a_newer_preview_drops_a_plan_made_from_an_older_one_and_no_other() {
 #[tokio::test]
 async fn a_manifest_whose_preview_fails_at_discovery_still_ends_the_older_preview_and_its_plan() {
     let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path());
+    let core = running(dir.path()).await;
     core.catalog.contexts().await;
     core.state.open_space("kind-a");
     let object = previewed("m");
@@ -1088,10 +1084,7 @@ clusters: [{{ name: c, cluster: {{ server: 'http://127.0.0.1:{port}' }} }}]
 users: [{{ name: u, user: {{}} }}]
 contexts:
 - name: kind-a
-  context:
-    cluster: c
-    user: u
-    extensions: [{{ name: twigo, extension: {{ environment: local }} }}]
+  context: {{ cluster: c, user: u }}
 "
         ),
     )
@@ -1283,7 +1276,6 @@ async fn a_shell_on_a_context_nobody_marked_is_refused_before_anything_is_asked(
     let core = over_server(dir.path(), port);
     core.catalog.contexts().await;
     core.state.open_space("kind-a");
-    core.policy.set_environment("kind-a", None).unwrap();
     for kind in [ShellKind::Shell, ShellKind::Attach] {
         let refused = core.command_plan("main", shell_of(kind)).await.unwrap_err();
         assert_eq!(
