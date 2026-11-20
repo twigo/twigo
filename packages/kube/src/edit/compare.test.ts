@@ -56,14 +56,14 @@ test("forbidden cluster-wide falls back to the selected namespaces and the objec
   expect(items.every(({ id }) => id.includes("/default/"))).toBe(true);
 });
 
-test("one namespace selected that may not be listed leaves the object's own, and the picker says what was refused", async () => {
+test("a namespace selected that may not be listed is named, and the rows of the others are offered", async () => {
   const workbench = await testWorkbench("rbacNamespaces");
   for (const namespaces of [["default", "auth"], ["auth"]]) {
     workbench.spaces.update("prod-eu", (state) => ({ ...state, namespaces }));
     const found = await comparisons(workbench, POD, true)("");
     expect(found).toMatchObject({
       notice:
-        "You may not list pods in this cluster, nor in the namespaces selected and the object's own: these are from the object's own namespace.",
+        "You may not list pods in this cluster, nor in auth: these are from the other namespaces selected and the object's own.",
     });
     const items = rows(found);
     expect(items.length).toBeGreaterThan(0);
@@ -71,20 +71,18 @@ test("one namespace selected that may not be listed leaves the object's own, and
   }
 });
 
-test("forbidden in those too says that, not nothing", async () => {
+test("forbidden in the selected namespaces and the object's own says that, not nothing", async () => {
   const workbench = await testWorkbench("rbacNamespaces");
+  const auth = "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk";
+  await expect(comparisons(workbench, auth, true)("")).rejects.toThrow(
+    "You may not list pods in this cluster, nor in the object's own namespace (auth).",
+  );
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
-    namespaces: ["default", "auth"],
+    namespaces: ["payments"],
   }));
-  await expect(
-    comparisons(
-      workbench,
-      "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk",
-      true,
-    )(""),
-  ).rejects.toThrow(
-    "You may not list pods in this cluster, nor in the object's own namespace (auth).",
+  await expect(comparisons(workbench, auth, true)("")).rejects.toThrow(
+    "You may not list pods in this cluster, nor in the namespaces selected and the object's own.",
   );
   await expect(
     comparisons(workbench, "k8s://prod-eu//v1/nodes/some-node", false)(""),

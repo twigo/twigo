@@ -1,10 +1,18 @@
-import type { Column, ValueCount, ViewState } from "@twigo/protocol";
+import type {
+  Column,
+  ListSnapshot,
+  Parts,
+  ValueCount,
+  ViewState,
+} from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
+import { isProblem } from "../viewProblem";
 
 export interface ListStatus {
   readonly title: string;
   readonly total: number;
   readonly status: ViewState;
+  readonly parts: Parts;
   readonly columns: readonly Column[];
   /** Rows per value of the list's status column, when it has one. */
   readonly counts: readonly ValueCount[];
@@ -28,11 +36,22 @@ export class ListStatuses {
   }
 }
 
-export const SHOWS_ROWS = new Set<ViewState["state"]>([
-  "ready",
-  "relisting",
-  "stale",
-]);
+/** Whether every part has listed or been refused, so nothing more is on its way. */
+export function settled({ unready }: Parts): boolean {
+  return unready.every(({ shown, state }) => shown || isProblem(state));
+}
+
+/** Whether a list can say no more than why it has no rows: its state is a problem and no part is still on its way. */
+export function failed({
+  status,
+  parts,
+}: Pick<ListSnapshot, "status" | "parts">): boolean {
+  return isProblem(status) && settled(parts);
+}
+
+export function leavesOut({ unready }: Parts): boolean {
+  return unready.some(({ shown }) => !shown);
+}
 
 export function stateLabel(status: ViewState): string | undefined {
   switch (status.state) {
@@ -58,6 +77,7 @@ function same(a: ListStatus, b: ListStatus): boolean {
     a.total === b.total &&
     a.columns === b.columns &&
     a.counts === b.counts &&
+    a.parts === b.parts &&
     JSON.stringify(a.status) === JSON.stringify(b.status)
   );
 }

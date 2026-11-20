@@ -883,8 +883,8 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
 - **Compare with….**
   The picker offers the editor's own kind first, from every namespace and not the ones the lists have selected, and asks Rust for it with the text typed, as the pod search of quick access does, so an object past the first rows is found by its name; the objects the space opened lately, of any kind, follow.
-  Forbidden cluster-wide, it falls back to the selected namespaces and the object's own, and says so.
-  A view reads all its namespaces or none (`combine` takes the least ready part), so one selected namespace that may not be listed refuses the rest: it then tries the object's own namespace alone, and says so; forbidden there too, it says that.
+  Forbidden cluster-wide, it falls back to the selected namespaces and the object's own, which give the rows of those that may be listed, and says so, naming the namespaces that may not.
+  Forbidden in all of them, it says that.
 - **A URI and its space.**
   Each space has its own docks, and an editor opens in the dock of the space its URI names.
   An open for the URI of a space other than the one shown waits for that space's dock and opens there when it is the next one mounted; if another space comes first, it is forgotten.

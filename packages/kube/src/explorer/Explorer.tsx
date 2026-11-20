@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Gvr, Resource } from "@twigo/protocol";
+import { SHOWS_ROWS, type Gvr, type Resource } from "@twigo/protocol";
 import { Count, Skeleton, StatusDot, Tree, type TreeRow } from "@twigo/ui";
 import {
   useChanges,
@@ -9,7 +9,7 @@ import {
 import { byHealth, statusColumn, worstHealth } from "../columns";
 import { useResources } from "../discovery";
 import { kindIcon, pluralTitle, sections, type Section } from "../kinds";
-import { SHOWS_ROWS, type ListStatus } from "../list/listStatus";
+import type { ListStatus } from "../list/listStatus";
 import type { ListServices } from "../services";
 import { listUri, parseListUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";

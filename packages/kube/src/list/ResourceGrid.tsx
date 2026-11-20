@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Columns3 } from "lucide-react";
 import {
+  SHOWS_ROWS,
   type ListQuery,
   type Resource,
   type Row,
@@ -47,12 +48,12 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { failed, leavesOut } from "./listStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
-import { SHOWS_ROWS } from "./listStatus";
 import { readsMetrics, sameBesidesMetrics } from "./metrics";
-import { namespacesOf, whereWords } from "./scope";
+import { namespacesOf, shownWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -303,6 +304,7 @@ function Grid({
       title,
       total: snapshot.total,
       status: snapshot.status,
+      parts: snapshot.parts,
       columns: snapshot.columns,
       counts: snapshot.counts,
     });
@@ -375,7 +377,7 @@ function Grid({
     },
     [register, grids, uri],
   );
-  const problem = isProblem(snapshot.status.state);
+  const problem = failed(snapshot);
   // The problem takes the grid's place, and with it the focus it held, which
   // falls to the page.
   useLayoutEffect(() => {
@@ -428,7 +430,7 @@ function Grid({
   const filtered = text !== "" || picked !== undefined;
   const scope = resource.namespaced ? query.namespaces : [];
   const narrowed = scope.length > 0;
-  const where = whereWords(spaces, input.space, scope);
+  const where = shownWords(spaces, input.space, scope, snapshot.parts);
   return (
     <DataGrid<Row, RowGroup>
       label={title}
@@ -567,9 +569,11 @@ function Grid({
             className="py-16"
           >
             <p>
-              {narrowed
-                ? "Nothing of this kind exists in these namespaces."
-                : "Nothing of this kind exists in the space."}
+              {leavesOut(snapshot.parts)
+                ? "The namespaces that are not ready are left out; the status bar says which."
+                : narrowed
+                  ? "Nothing of this kind exists in these namespaces."
+                  : "Nothing of this kind exists in the space."}
             </p>
           </EmptyState>
         )
@@ -581,10 +585,6 @@ function Grid({
       register={registerGrid}
     />
   );
-}
-
-function isProblem(state: string): boolean {
-  return state === "forbidden" || state === "unauthorized" || state === "error";
 }
 
 /** A group's value, its rows, and how many fail or wait (ARCHITECTURE 4.4). */

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  EmbeddedList as Spec,
-  ListQuery,
-  ObjectRef,
-  Row,
+import {
+  SHOWS_ROWS,
+  type EmbeddedList as Spec,
+  type ListQuery,
+  type ObjectRef,
+  type Row,
 } from "@twigo/protocol";
 import {
   ACTIONS_WIDTH,
@@ -32,13 +33,13 @@ import { kindIcon } from "../kinds";
 import { decideRows } from "../list/alarm";
 import { CellView } from "../list/cells";
 import { fitGrid } from "../list/fit";
-import { SHOWS_ROWS } from "../list/listStatus";
 import { readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { isProblem } from "../viewProblem";
 import type { OverviewStates } from "./overviewStates";
 
 /**
@@ -177,11 +178,10 @@ export function EmbeddedList({
       name,
     });
   };
-  const state = snapshot.status.state;
-  if (state === "forbidden" || state === "unauthorized" || state === "error")
+  if (isProblem(snapshot.status))
     return <ViewStatus status={snapshot.status} what={gvr.resource} inline />;
   const Icon = kindIcon(gvr);
-  const loading = !SHOWS_ROWS.has(state);
+  const loading = !SHOWS_ROWS.has(snapshot.status.state);
   if (!loading && snapshot.total === 0)
     return (
       <EmptyState icon={Icon} density="inline" className="px-0">
