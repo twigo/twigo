@@ -555,18 +555,19 @@ impl Fake {
                 state.silent.push(sender);
                 return stream(receiver, false);
             }
-            return full(StatusCode::OK, json!({ "gitVersion": "v1.37.0" }));
+            return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }), false);
         }
         if path.ends_with("selfsubjectaccessreviews") {
             let allowed = state.may_list;
             return full(
                 StatusCode::CREATED,
-                json!({
+                &json!({
                     "apiVersion": "authorization.k8s.io/v1",
                     "kind": "SelfSubjectAccessReview",
                     "spec": {},
                     "status": { "allowed": allowed }
                 }),
+                false,
             );
         }
         if state.unavailable > 0 {
@@ -619,7 +620,7 @@ impl Fake {
                 state.gzipped.push(uri.to_string());
             }
             if state.body_takes.is_zero() {
-                return list(StatusCode::OK, &page, gzip);
+                return full(StatusCode::OK, &page, gzip);
             }
             return slow(StatusCode::OK, &page, state.body_takes, gzip);
         }
@@ -856,16 +857,16 @@ impl State {
         } else {
             "PodMetricsList"
         };
-        let body = serde_json::to_vec(&json!({
-            "kind": kind,
-            "apiVersion": "metrics.k8s.io/v1beta1",
-            "metadata": {},
-            "items": items,
-        }))
-        .unwrap();
-        let body = frame(Bytes::from(body), gzip);
-        let mut response = Response::new(Full::new(body).boxed_unsync());
-        encoded(&mut response, gzip);
+        let mut response = full(
+            StatusCode::OK,
+            &json!({
+                "kind": kind,
+                "apiVersion": "metrics.k8s.io/v1beta1",
+                "metadata": {},
+                "items": items,
+            }),
+            gzip,
+        );
         response.headers_mut().insert(
             http::header::CONTENT_TYPE,
             http::HeaderValue::from_static("application/json"),
@@ -964,16 +965,12 @@ fn line(value: &Value) -> Bytes {
     line.into()
 }
 
-fn full(code: StatusCode, value: Value) -> Response<Body> {
-    let mut response =
-        Response::new(Full::new(Bytes::from(serde_json::to_vec(&value).unwrap())).boxed_unsync());
-    *response.status_mut() = code;
-    response
+fn json_body(value: &Value, gzip: bool) -> Bytes {
+    frame(Bytes::from(serde_json::to_vec(value).unwrap()), gzip)
 }
 
-/// A list's answer, gzipped when the request asked.
-fn list(code: StatusCode, value: &Value, gzip: bool) -> Response<Body> {
-    let body = frame(Bytes::from(serde_json::to_vec(value).unwrap()), gzip);
+fn full(code: StatusCode, value: &Value, gzip: bool) -> Response<Body> {
+    let body = json_body(value, gzip);
     let mut response = Response::new(Full::new(body).boxed_unsync());
     *response.status_mut() = code;
     encoded(&mut response, gzip);
@@ -983,7 +980,7 @@ fn list(code: StatusCode, value: &Value, gzip: bool) -> Response<Body> {
 /// A response whose status and headers come at once and whose body comes after `takes`.
 fn slow(code: StatusCode, value: &Value, takes: std::time::Duration, gzip: bool) -> Response<Body> {
     let (sender, receiver) = mpsc::unbounded();
-    let body = frame(Bytes::from(serde_json::to_vec(value).unwrap()), gzip);
+    let body = json_body(value, gzip);
     tokio::spawn(async move {
         tokio::time::sleep(takes).await;
         let _ = sender.unbounded_send(Ok(Frame::data(body)));
@@ -997,7 +994,7 @@ fn slow(code: StatusCode, value: &Value, takes: std::time::Duration, gzip: bool)
 fn invalid(field: &str, message: &str) -> Response<Body> {
     full(
         StatusCode::UNPROCESSABLE_ENTITY,
-        json!({
+        &json!({
             "kind": "Status",
             "apiVersion": "v1",
             "status": "Failure",
@@ -1006,13 +1003,14 @@ fn invalid(field: &str, message: &str) -> Response<Body> {
             "message": message,
             "details": { "causes": [{ "reason": "FieldValueForbidden", "field": field }] }
         }),
+        false,
     )
 }
 
 fn status(code: StatusCode, reason: &str) -> Response<Body> {
     full(
         code,
-        json!({
+        &json!({
             "kind": "Status",
             "apiVersion": "v1",
             "status": "Failure",
@@ -1020,6 +1018,7 @@ fn status(code: StatusCode, reason: &str) -> Response<Body> {
             "code": code.as_u16(),
             "message": reason,
         }),
+        false,
     )
 }
 
