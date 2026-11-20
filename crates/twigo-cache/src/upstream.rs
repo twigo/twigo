@@ -15,7 +15,8 @@ use std::time::Duration;
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use bytes::Bytes;
 use futures::{AsyncBufRead, AsyncBufReadExt};
-use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::{HeaderMap, Request};
 use http_body_util::BodyExt;
 use jiff::Timestamp;
 use kube::client::Body;
@@ -25,6 +26,7 @@ use twigo_kube::client::{Clients, Waiting};
 
 use crate::cluster::Cluster;
 use crate::decode::{Decode, DecodeError, Event};
+use crate::encoding;
 use crate::request::{self, Collection, Format, WatchFrom};
 use crate::store::{Item, Items, RowKey, Store};
 
@@ -511,9 +513,12 @@ where
             None => WatchFrom::ResourceVersion(&from),
         };
         let mut request = request::watch(&self.collection(), start, TIMEOUT_SECONDS);
+        request
+            .headers_mut()
+            .insert(ACCEPT_ENCODING, encoding::GZIP);
         request.extensions_mut().insert(self.watch_waiting.clone());
         let mut lines: Lines = tokio::select! {
-            opened = clients.api.request_stream(request) => match opened {
+            opened = open(clients, request) => match opened {
                 Ok(lines) => Box::pin(lines),
                 Err(error) => {
                     let next = again(&from, &listing);
@@ -705,17 +710,40 @@ fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
 /// printing to writing the first bytes, and the network's for them.
 async fn fetch(
     clients: &Clients,
-    request: Request<Vec<u8>>,
+    mut request: Request<Vec<u8>>,
     clock: &Clock,
 ) -> Result<(Bytes, Timestamp), kube::Error> {
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, encoding::GZIP);
     let response = clients.api.send(request.map(Body::from)).await?;
     let started = clock();
     let (parts, body) = response.into_parts();
-    let body = body.collect().await?.to_bytes();
+    let body = whole(&parts.headers, body).await?;
     if !parts.status.is_success() {
         return Err(twigo_kube::errors::refused(parts.status, &body));
     }
     Ok((body, started))
+}
+
+/// A watch's answer read line by line, or why the server refused it.
+async fn open(
+    clients: &Clients,
+    request: Request<Vec<u8>>,
+) -> Result<impl AsyncBufRead + Send + use<>, kube::Error> {
+    let response = clients.api.send(request.map(Body::from)).await?;
+    let (parts, body) = response.into_parts();
+    if !parts.status.is_success() {
+        let body = whole(&parts.headers, body).await?;
+        return Err(twigo_kube::errors::refused(parts.status, &body));
+    }
+    Ok(encoding::lines(&parts.headers, body))
+}
+
+/// A response's whole body, decoded.
+async fn whole(headers: &HeaderMap, body: Body) -> Result<Bytes, kube::Error> {
+    let body = body.collect().await?.to_bytes();
+    encoding::page(headers, body).map_err(|error| kube::Error::Service(Box::new(error)))
 }
 
 /// Whether the connection still answers, any status included: a quiet

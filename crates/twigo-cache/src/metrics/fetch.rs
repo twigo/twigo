@@ -1,9 +1,6 @@
 //! One list of the Metrics API: the plain JSON, since the Table has no namespace, containers or time, gzipped.
 
-use std::io::Read;
-
-use flate2::read::MultiGzDecoder;
-use http::header::{ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING};
+use http::header::{ACCEPT, ACCEPT_ENCODING};
 use http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use kube::client::Body;
@@ -11,6 +8,7 @@ use twigo_kube::client::Clients;
 
 use super::sample::{self, Samples};
 use super::{GROUP, Kind, Scope};
+use crate::encoding;
 use crate::hub::{Resource, Scope as Path};
 use crate::request::field_value;
 
@@ -54,7 +52,7 @@ pub(super) async fn fetch(
 ) -> Result<Samples, Failure> {
     let request = Request::get(uri(kind, version, scope))
         .header(ACCEPT, "application/json")
-        .header(ACCEPT_ENCODING, "gzip")
+        .header(ACCEPT_ENCODING, encoding::GZIP)
         .body(Body::from(Vec::new()))
         .expect("a path and constant headers form a valid request");
     let response = clients.api.send(request).await.map_err(|error| {
@@ -64,34 +62,19 @@ pub(super) async fn fetch(
             Failure::Unavailable
         }
     })?;
-    let (status, gzipped) = (
-        response.status(),
-        response
-            .headers()
-            .get(CONTENT_ENCODING)
-            .is_some_and(|encoding| encoding.as_bytes().eq_ignore_ascii_case(b"gzip")),
-    );
-    match status {
+    let (parts, body) = response.into_parts();
+    match parts.status {
         StatusCode::OK => {}
         StatusCode::FORBIDDEN => return Err(Failure::Forbidden),
         StatusCode::UNAUTHORIZED => return Err(Failure::Unauthorized),
         _ => return Err(Failure::Unavailable),
     }
-    let body = response
-        .into_body()
+    let body = body
         .collect()
         .await
         .map_err(|_| Failure::Unavailable)?
         .to_bytes();
-    let body = if gzipped {
-        let mut plain = Vec::with_capacity(body.len() * 8);
-        MultiGzDecoder::new(&body[..])
-            .read_to_end(&mut plain)
-            .map_err(|_| Failure::Unavailable)?;
-        plain.into()
-    } else {
-        body
-    };
+    let body = encoding::page(&parts.headers, body).map_err(|_| Failure::Unavailable)?;
     sample::parse(&body, kind).map_err(|_| Failure::Unavailable)
 }
 

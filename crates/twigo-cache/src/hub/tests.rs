@@ -6,7 +6,7 @@ use twigo_kube::client::Budgets;
 
 use super::*;
 use crate::decode::{DecodeError, Event, Page};
-use crate::fake::Fake;
+use crate::fake::{Fake, Streams};
 use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::IDLE;
@@ -710,7 +710,9 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
 
 async fn stamped_as_it_arrives(streaming: bool) {
     let fake = Fake::default();
-    fake.state().no_streaming = !streaming;
+    if !streaming {
+        fake.streams("", Streams::NoWatchList);
+    }
     for name in ["p1", "p2", "p3"] {
         fake.add("pods", Some("a"), name);
     }
@@ -815,7 +817,7 @@ async fn stamped_as_it_arrives(streaming: bool) {
 #[tokio::test(start_paused = true)]
 async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut a = hub.rows(query(&["a"])).await.unwrap();
@@ -831,9 +833,21 @@ async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_streaming_list_and_the_changes_after_it_come_gzipped_in_members() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    fake.add("pods", Some("a"), "p2");
+    until_rows(&mut pods, &["p1", "p2"]).await;
+    assert_eq!(fake.count_gzipped("sendInitialEvents"), 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_list_in_pages_follows_its_continue_tokens() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     for index in 0..1200 {
         fake.add("pods", Some("a"), &format!("p{index:04}"));
     }
@@ -842,6 +856,11 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
     ready(&mut pods).await;
     assert_eq!(pods.items().len(), 1200);
     assert_eq!(fake.count("limit=500"), 3);
+    assert_eq!(
+        fake.count_gzipped("limit=500"),
+        3,
+        "every page came gzipped"
+    );
     assert_eq!(fake.count("continue=1200%3A500"), 1);
     assert_eq!(fake.count("continue=1200%3A1000"), 1);
     assert_eq!(
@@ -854,7 +873,7 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
 #[tokio::test(start_paused = true)]
 async fn a_page_is_stamped_when_its_response_starts_whatever_its_body_takes() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     fake.state().body_takes = Duration::from_secs(4);
     for index in 0..1200 {
         fake.add("pods", Some("a"), &format!("p{index:04}"));
@@ -999,7 +1018,9 @@ async fn clients_abandoned_before_their_first_list_are_left_at_once() {
 
 async fn clients_abandoned_before_listing(streaming: bool) {
     let fake = Fake::default();
-    fake.state().no_streaming = !streaming;
+    if !streaming {
+        fake.streams("", Streams::NoWatchList);
+    }
     fake.add("pods", Some("a"), "p1");
     let abandoned = fake.clients(Budgets::default());
     abandoned.connections().abandon();

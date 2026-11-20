@@ -5,6 +5,7 @@ pub mod batcher;
 mod cluster;
 pub mod decode;
 pub mod discovery;
+pub mod encoding;
 #[cfg(any(test, feature = "test-util"))]
 pub mod fake;
 pub mod hub;
