@@ -334,7 +334,9 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - When the watch budget is full, the least recently used idle upstreams are evicted.
     The counter tells a watch that it waits, through an extension of its request, and that is when the hub evicts one: an idle upstream with a watch open, since evicting one in its backoff or in a paged list frees none.
     The freed watch goes to the one that has waited longest, as the counter admits them in order, and an upstream whose watch waits while nobody shows it goes at once, so it takes none from one that is shown.
-    When nothing is idle, the new subscription waits in the state `queued` and its view says why, until an upstream of the context lingers and makes way at once.
+    When nothing is idle, the new subscription waits in the state `queued` and its view says why, until an upstream of the context lingers and makes way at once, or a watch ends.
+  - A watch ends after its `timeoutSeconds` and asks the counter again, behind the one that waits, since the counter's semaphore is fair (tokio's `Semaphore` hands permits out in the order they were asked for).
+    So over the budget, once the watches end, the one that waits takes a watch and a part that had one waits in its place as `queued`, keeping its rows as `stale` (3.7), until the next watches end.
   - When the log or session budget is full, a new log stream, exec session or port-forward connection waits in `queued` the same way.
     Its tab says why, and the status bar lists open sessions so the user can close some.
   - Nothing fails silently.
@@ -461,7 +463,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - A CPU or Memory cell is an integer of nanocores or bytes, empty for a row without a sample, which sorts last in both directions; no text filter, count, group or value reads it (3.6).
   - A sort, a count, a group or values for a column the list lacks do nothing, and no sort sorts by Name.
 - Each reader of a row store has a feed of the keys changed since it last read, coalesced, and a key added since then and deleted again leaves it, so it holds no more keys than the reader held and the store holds, however long the reader waits.
-  A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns or new upstreams send every row again.
+  A flush drains it, updates the index row by row and computes what changed **inside the window**; a relist, new columns, new upstreams or a part that starts or stops showing send every row again.
 - Text filter on the columns the table shows, Name always among them: a substring in any case of ASCII letters; `!` before it keeps the rows without one; `/…/` is a case-insensitive regex, and `!/…/` its negation.
   Until the closing slash the text stays a substring, so typing a regex never turns the list into an error; a closed regex that does not parse is refused.
   In a column that prints a duration the filter reads no age, since the age on screen is no longer the one printed: it reads a pod's Restarts by its count, and nothing of a cell that is only a duration; counts and groups by value read the text as printed.
@@ -482,7 +484,7 @@ The webview then sends `setWindow(start, end)` as the user scrolls, covering the
   - So a pod printed again, by a relist or by a change of its status under the same restart age, keeps its stamp, and sends nothing when its cells read as before, while an age that reads otherwise, or an event's Last Seen that reads `0s` again 3 s or more after the held print (its second and the 2 s margin), as each repeat of the event prints it, takes the new stamp.
   - The view sends a row again when its stamp changed, as when a cell did, since the webview draws its ages and the sort orders it by the stamp; by the rule above that happens only when a moment moved.
   - The mock backend stamps rows and keeps their stamps by the same rule, and `packages/protocol/src/printed-cases.json` holds cases that both it and Rust run.
-- A list sends rows only while it is ready, relisting or stale; in the other states its view shows the state, as 3.7 has it.
+- A list sends the rows of each part that has listed and is not refused, whatever the other parts are, so a view of 22 namespaces, one of them forbidden, shows the rows of the other 21, and its sort, filter, counts, groups and total are exact over them (3.7).
 - The mock backend sorts, filters and groups by the same rules, and `packages/protocol/src/query-cases.json` holds cases that both it and Rust's query view run.
   Its regexes are the browser's, which agree with Rust's `regex` crate only where both the pattern and the text are ASCII, without carriage returns, in the syntax both have, since the crate's `\d`, `\w`, `\s` and case folding follow Unicode and its `.` matches a carriage return, and it prints numbers as JavaScript does, `1e-7` where Rust prints `0.0000001`: the shared cases keep to what both read alike.
   It sends the pod columns once a list knows them, from its first page on, and an empty list of columns before, as Rust does.
@@ -666,9 +668,23 @@ Each upstream reports one of:
 - `unauthorized` (a sign-in action is offered)
 - `error` (a typed kind plus a retry)
 
+A refusal outranks `queued`: a `forbidden` part whose retry waits for a watch says `forbidden`.
+
 Every view header and the status bar render these states.
 A blank table is never an error state.
-A view of several upstreams, one per namespace, shows the least ready of their states.
+
+A list reads its upstreams as parts, one per namespace or one for the cluster (`Parts`, `ListBatch.parts`):
+
+- A part's rows are in the list once it has listed and while it is not refused (not `forbidden`, `unauthorized` or `error`), whatever the other parts are.
+  So a part that is `syncing`, `queued` before its first list, `connecting` or refused adds none, and one that has listed and waits for a watch, or is `stale` or `relisting`, keeps its rows.
+- `status` is the state of the rows shown: the least ready of the parts shown, one that waits for a watch after its whole list counting as `stale`.
+  While no part shows, it is the least ready of all the parts, as a view of one upstream says it.
+- `parts` has `count`, the parts the list reads, and `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`).
+  It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
+- A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.
+- A part that starts or stops showing sends every row of the parts shown again (3.4).
+
+What needs the rows of every part, as an object's page and a workload's pods do, reads the least ready state of all of them.
 
 ### 3.8 Performance budgets and the benchmark
 
