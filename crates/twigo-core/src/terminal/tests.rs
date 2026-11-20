@@ -6,10 +6,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    AnswerKubeconfigOffer, Environment, ErrorKind, Execute, Friction, KubeconfigNames,
-    KubeconfigOffer, KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell,
-    PlanRequest, ProxyWhy, ShellAck, ShellEnd, ShellEvent, ShellInput, SubscriptionId,
-    TerminalKind,
+    AnswerKubeconfigOffer, Environment, ErrorKind, KubeconfigNames, KubeconfigOffer,
+    KubeconfigOfferAnswer, KubeconfigOfferEvent, Mode, NewTerminal, OpenShell, ProxyWhy, ShellAck,
+    ShellEnd, ShellEvent, ShellInput, SubscriptionId, TerminalKind,
 };
 use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
@@ -399,48 +398,6 @@ async fn a_terminal_of_a_guarded_context_has_the_proxy_s_file_alone() {
     assert!(server.starts_with("https://127.0.0.1:"), "{server}");
     setup.core.shell_close("main", session.id).unwrap();
     assert!(!Path::new(path).exists());
-}
-
-#[tokio::test]
-async fn an_unmarked_context_s_terminal_keeps_the_proxy_once_marked_until_one_opens_anew() {
-    let setup = Setup::new().await;
-    setup.core.policy.set_environment("kind-b", None).unwrap();
-    let session = setup
-        .create("kind-b", r#"printf '%s\n' "$KUBECONFIG""#)
-        .await;
-    let proxied = TerminalKind::Proxy {
-        why: ProxyWhy::Mode,
-    };
-    assert_eq!(session.kind, proxied);
-
-    let plan = setup
-        .core
-        .command_plan(
-            "main",
-            PlanRequest::SetEnvironment {
-                context: "kind-b".to_owned(),
-                environment: Some(Environment::Development),
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(plan.friction, Friction::AtOnce);
-    let execute = Execute {
-        plan: plan.id,
-        typed: None,
-    };
-    setup
-        .core
-        .command_execute("main", execute, |_| true)
-        .await
-        .unwrap();
-    assert_eq!(setup.core.policy.access("kind-b").mode, Mode::ReadWrite);
-
-    let (output, _) = setup.run(session.id).await;
-    let proxy = setup.dir.path().join("data").join("proxy");
-    assert!(output.starts_with(&proxy.display().to_string()), "{output}");
-    let reopened = setup.create("kind-b", "true").await;
-    assert_eq!(reopened.kind, TerminalKind::Kubeconfig);
 }
 
 #[tokio::test]

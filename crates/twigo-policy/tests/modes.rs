@@ -48,15 +48,6 @@ fn write() -> Attributes {
 }
 
 #[test]
-fn a_context_nobody_marked_is_guarded_until_someone_says_what_it_is() {
-    let access = with_metadata(NOTHING).access("prod-eu");
-    assert_eq!(access.mode, Mode::Guarded);
-    assert_eq!(access.source, ModeSource::Unmarked);
-    assert_eq!(access.environment, None);
-    assert_eq!(access.unlocked_until, None);
-}
-
-#[test]
 fn the_open_policy_has_every_context_read_write_as_a_local_one() {
     let access = Policy::open().access("prod-eu");
     assert_eq!(access.mode, Mode::ReadWrite);

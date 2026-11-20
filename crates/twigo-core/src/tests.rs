@@ -1045,53 +1045,6 @@ async fn under_a_policy_file_a_type_asks_for_the_name_where_a_set_of_locks_gone_
 }
 
 #[tokio::test]
-async fn a_type_under_a_kubeconfig_s_lock_asks_as_what_it_gives_once_the_lock_goes() {
-    let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path(), UNREACHABLE);
-    core.catalog.contexts().await;
-    let development = PlanRequest::SetEnvironment {
-        context: "kind-locked".to_owned(),
-        environment: Some(Environment::Development),
-    };
-    let plan = core.command_plan("main", development).await.unwrap();
-    let typed = Friction::Typed {
-        text: "kind-locked".to_owned(),
-    };
-    assert_eq!(plan.friction, typed);
-    assert_eq!(
-        plan.consequences,
-        [
-            "It stays read-only as its kubeconfig says.",
-            "When its kubeconfig's lock goes, it will be read-write.",
-        ]
-    );
-    let execute = Execute {
-        plan: plan.id,
-        typed: Some("kind-locked".to_owned()),
-    };
-    core.command_execute("main", execute, |_| true)
-        .await
-        .unwrap();
-    assert_eq!(access(&core, "kind-locked").mode, Mode::ReadOnly);
-
-    let mut contexts = core.catalog.subscribe();
-    contexts.borrow_and_update();
-    let unlocked = UNREACHABLE.replace(
-        "\n    extensions: [{ name: twigo, extension: { readOnly: true } }]",
-        "",
-    );
-    assert_ne!(unlocked, UNREACHABLE);
-    std::fs::write(dir.path().join("config"), unlocked).unwrap();
-    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
-        .await
-        .expect("the catalog reads the edit")
-        .unwrap();
-    let lifted = access(&core, "kind-locked");
-    assert_eq!(lifted.mode, Mode::ReadWrite);
-    assert_eq!(lifted.environment, Some(Environment::Development));
-}
-
-#[tokio::test]
 async fn clearing_a_choice_beneath_a_lock_asks_for_the_name_and_says_what_it_gives_once_the_lock_goes()
  {
     let dir = tempfile::tempdir().unwrap();

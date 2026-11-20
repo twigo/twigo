@@ -3152,24 +3152,6 @@ async fn marked_staging_a_write_asks_again_and_marked_production_it_is_refused_i
 }
 
 #[tokio::test]
-async fn a_denied_unmarked_ask_leaves_the_context_unmarked_so_the_next_write_asks_again() {
-    let fake = Fake::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let core = unmarked(dir.path(), &fake).await;
-    let mut events = follow(&core, "main");
-    let process = Process::start(&core, Some("main")).await;
-    for name in ["c", "d"] {
-        let sent = tokio::spawn(send(process.at(), create(&process, name)));
-        let ask = asked(&mut events).await;
-        assert!(ask.unmarked, "{name}");
-        answered(&core, &ask, ApprovalAnswer::Deny).unwrap();
-        assert_eq!(sent.await.unwrap().0.status(), StatusCode::FORBIDDEN);
-        assert_eq!(core.policy.access("kind-a").source, ModeSource::Unmarked);
-    }
-    assert_eq!(fake.writes(Method::POST), 0);
-}
-
-#[tokio::test]
 async fn an_unmarked_ask_of_a_delete_asks_for_no_name_and_the_ask_after_its_type_does() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();

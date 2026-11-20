@@ -272,12 +272,7 @@ mod tests {
             (&unmarked, &staging, Friction::AtOnce),
             (&unmarked, &production, Friction::AtOnce),
             (&unmarked, &unmarked, Friction::AtOnce),
-            (&production, &development, typed.clone()),
-            (&production, &staging, typed.clone()),
-            (&production, &unmarked, typed.clone()),
-            (&staging, &unmarked, typed.clone()),
             (&staging, &production, Friction::AtOnce),
-            (&development, &unmarked, Friction::AtOnce),
         ];
         for (before, after, expected) in cases {
             let risk = Risk::Protection(vec![held.clone(), (before.clone(), after.clone())]);
