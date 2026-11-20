@@ -1049,6 +1049,38 @@ async fn a_dry_run_kube_apiserver_may_not_serve_itself_is_a_write_and_no_ask_dry
 }
 
 #[tokio::test]
+async fn a_dry_run_to_a_group_whose_name_cuts_the_apiservice_url_short_stays_a_write() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    let process = Process::start(&core, None).await;
+    let dry_run = process
+        .request(
+            "PATCH",
+            "kind-a",
+            "/apis/x%3Fy/v1/namespaces/a/widgets/w?dryRun=All",
+        )
+        .header("content-type", "application/merge-patch+json")
+        .body(json_body(&json!({})))
+        .unwrap();
+    let (status, _) = refused(process.at(), dry_run).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let seen: Vec<String> = fake
+        .seen()
+        .iter()
+        .map(|seen| format!("{} {}", seen.method, seen.uri))
+        .collect();
+    assert_eq!(
+        seen,
+        ["GET /apis/apiregistration.k8s.io/v1/apiservices/v1.x?y"],
+        "the read was of another APIService, whose answer is not the group's"
+    );
+}
+
+#[tokio::test]
 async fn once_sends_the_write_once_and_its_repeat_asks_again_after_it_reached_the_server() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
