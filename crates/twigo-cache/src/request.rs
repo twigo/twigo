@@ -24,6 +24,23 @@ pub enum Format {
     Object,
 }
 
+/// What a request reads: a list's whole answer, or a watch's events.
+#[derive(Clone, Copy)]
+enum Answer {
+    List,
+    Watch,
+}
+
+impl Format {
+    fn accept(self, answer: Answer) -> &'static str {
+        match (self, answer) {
+            (Format::Table | Format::Object, _) => ACCEPT_TABLE,
+            (Format::Metadata, Answer::List) => ACCEPT_METADATA_LIST,
+            (Format::Metadata, Answer::Watch) => ACCEPT_METADATA,
+        }
+    }
+}
+
 /// A collection as an upstream watches it.
 #[derive(Debug, Clone, Copy)]
 pub struct Collection<'a> {
@@ -91,11 +108,11 @@ pub fn list(
     if let Some(token) = continue_token {
         query.append_pair("continue", token);
     }
-    let accept = match collection.format {
-        Format::Table | Format::Object => ACCEPT_TABLE,
-        Format::Metadata => ACCEPT_METADATA_LIST,
-    };
-    get(collection.path, query.finish(), accept)
+    get(
+        collection.path,
+        query.finish(),
+        collection.format.accept(Answer::List),
+    )
 }
 
 pub fn watch(
@@ -116,11 +133,11 @@ pub fn watch(
             query.append_pair("resourceVersionMatch", "NotOlderThan");
         }
     }
-    let accept = match collection.format {
-        Format::Table | Format::Object => ACCEPT_TABLE,
-        Format::Metadata => ACCEPT_METADATA,
-    };
-    get(collection.path, query.finish(), accept)
+    get(
+        collection.path,
+        query.finish(),
+        collection.format.accept(Answer::Watch),
+    )
 }
 
 fn get(path: &str, query: String, accept: &'static str) -> Request<Vec<u8>> {
