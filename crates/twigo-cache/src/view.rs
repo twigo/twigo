@@ -149,12 +149,7 @@ impl Layout {
                 (CPU, ipc::ColumnKind::Cpu, Metric::Cpu),
                 (MEMORY, ipc::ColumnKind::Memory, Metric::Memory),
             ] {
-                wire.push(ipc::Column {
-                    name: name.to_owned(),
-                    kind,
-                    priority: 0,
-                    prints_duration: false,
-                });
+                wire.push(added(name, kind));
                 sources.push(Source::Metric(metric));
             }
         };
@@ -172,12 +167,7 @@ impl Layout {
             });
             sources.push(Source::Cell(at));
             if at == 0 && spec.namespace_column {
-                wire.push(ipc::Column {
-                    name: NAMESPACE.to_owned(),
-                    kind: ipc::ColumnKind::String,
-                    priority: 0,
-                    prints_duration: false,
-                });
+                wire.push(added(NAMESPACE, ipc::ColumnKind::String));
                 sources.push(Source::Namespace);
             }
         }
@@ -306,6 +296,16 @@ impl Layout {
             generated: row.meta.generated,
             cells,
         }
+    }
+}
+
+/// A column Rust adds to the server's: always shown, printing no duration.
+fn added(name: &str, kind: ipc::ColumnKind) -> ipc::Column {
+    ipc::Column {
+        name: name.to_owned(),
+        kind,
+        priority: 0,
+        prints_duration: false,
     }
 }
 
