@@ -13,7 +13,7 @@ use twigo_policy::friction::Risk;
 
 use super::{Target, attributes, clients_for, get, write};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 /// What a Job's name may hold: a label carries it, so 63 characters.
 const NAME_LENGTH: usize = 63;
@@ -38,7 +38,14 @@ pub(crate) async fn trigger(
     let namespace = target.namespace.clone().expect("a CronJob is namespaced");
     let jobs = format!("/apis/batch/v1/namespaces/{namespace}/jobs");
     let create = attributes(Method::POST, &jobs);
-    core.authorize(&target.context, std::slice::from_ref(&create))?;
+    let job = job_name(&target.name);
+    let named = format!("cronjobs/{} in {namespace}, job {job}", target.name);
+    core.authorize(
+        &target.context,
+        "trigger",
+        &named,
+        std::slice::from_ref(&create),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -48,7 +55,6 @@ pub(crate) async fn trigger(
         .as_str()
         .unwrap_or_default()
         .to_owned();
-    let job = job_name(&target.name);
     let from = format!("cronjob/{}", target.name);
     let kubectl = target.kubectl(&["create", "job", &job, "--from", &from])?;
     let (cronjob_name, context) = (target.name.clone(), target.context.clone());
@@ -70,16 +76,16 @@ pub(crate) async fn trigger(
             "Job {job} runs once from its template, beside its schedule."
         )],
         affected: Vec::new(),
-        kubectl,
+        kubectl: Some(kubectl),
         command: "trigger",
-        target: format!("cronjobs/{cronjob_name} in {namespace}, job {job}"),
+        target: named,
         writes: vec![create],
         context,
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

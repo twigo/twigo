@@ -23,8 +23,9 @@ impl Mode {
     }
 }
 
-/// What a context is marked as, by a person or its kubeconfig; a context
-/// nobody marked has none. It sets the default mode and colour.
+/// What a context is marked as, by a person, or by its kubeconfig where that
+/// tightens: Production or Staging; a context nobody marked has none. It
+/// sets the default mode and colour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum Environment {
@@ -34,7 +35,7 @@ pub enum Environment {
     Local,
 }
 
-/// Where a context's mode comes from, highest first.
+/// Where a context's mode comes from, highest first (ARCHITECTURE 6.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
@@ -54,16 +55,42 @@ pub enum ModeSource {
     /// Only in what a request was blocked by: its name means another cluster
     /// now than the clients the request came through reach.
     Moved,
-    /// The person's choice for this context.
-    User,
-    /// `twigo.readOnly` in its kubeconfig metadata.
+    /// The person's choice for this context, through a confirmed command.
+    /// `overrides` is the lock it sets aside: what the kubeconfig, the
+    /// provider or the type would give, where that is stricter.
+    User { overrides: Option<Lock> },
+    /// `twigo.readOnly` in its kubeconfig metadata with any value but
+    /// `false`, the strictest of the locks.
     Kubeconfig,
-    /// Its catalog provider.
+    /// Its catalog provider's lock, the strictest of the locks.
     Provider,
-    /// The default of its environment type.
+    /// The default of its environment type, the strictest of the locks.
     Environment { environment: Environment },
-    /// Nothing says otherwise.
-    Default,
+    /// Nothing marks it: no type, no lock and no choice. It is `guarded`
+    /// until the person says what it is, which its first write or exec asks.
+    Unmarked,
+}
+
+/// A mode that a kubeconfig, a provider or a type gives, which can only
+/// tighten a context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Lock {
+    pub mode: Mode,
+    pub source: LockSource,
+}
+
+/// Where a lock comes from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LockSource {
+    Kubeconfig,
+    Provider,
+    Environment { environment: Environment },
 }
 
 /// What a context lets through now, and why.
@@ -74,26 +101,11 @@ pub struct ContextAccess {
     pub mode: Mode,
     /// Where the mode comes from, an unlock aside.
     pub source: ModeSource,
+    /// The person's type, else its kubeconfig's where that is a lock.
     pub environment: Option<Environment>,
     /// When an unlock ends and the context relocks, in milliseconds since
     /// the epoch.
     pub unlocked_until: Option<i64>,
-}
-
-/// Sets the person's mode for a context; none goes back to what the rest
-/// says.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct SetContextMode {
-    pub context: String,
-    pub mode: Option<Mode>,
-}
-
-/// Marks a context as an environment type; none says it has no type, whatever
-/// its kubeconfig says.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct SetContextEnvironment {
-    pub context: String,
-    pub environment: Option<Environment>,
 }
 
 /// What the person asks whether they may do in a space, as RBAC names it,
@@ -141,6 +153,9 @@ pub enum BlockReason {
     NoGrant,
     /// It needs a person's approval, and nothing can ask.
     NoApproval,
+    /// A write or an exec on a context nobody marked: the person says what
+    /// the context is first.
+    Unmarked,
 }
 
 /// A request the gate stopped before it left the process.
@@ -178,6 +193,7 @@ impl fmt::Display for Blocked {
             BlockReason::NoApproval => {
                 write!(f, "{context} asks for an approval, and nothing can ask")?;
             }
+            BlockReason::Unmarked => write!(f, "nobody has said what {context} is yet")?,
         }
         write!(f, ", so Twigo did not send {verb} {target}")
     }
@@ -193,13 +209,13 @@ fn write_source(f: &mut fmt::Formatter<'_>, source: &ModeSource) -> fmt::Result 
             file,
             pattern: None,
         } => write!(f, " because {file} cannot be read"),
-        ModeSource::User => write!(f, " by your choice"),
+        ModeSource::User { .. } => write!(f, " by your choice"),
         ModeSource::Kubeconfig => write!(f, " by its kubeconfig"),
         ModeSource::Provider => write!(f, " by its provider"),
         ModeSource::Environment { environment } => {
             write!(f, " as {environment:?} by default")
         }
-        ModeSource::Default => Ok(()),
+        ModeSource::Unmarked => write!(f, " until you say what it is"),
         ModeSource::Unlisted => write!(f, " because no source lists it now"),
         ModeSource::Moved => write!(f, " because it names another cluster now"),
     }

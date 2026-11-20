@@ -9,6 +9,8 @@ mod identity;
 pub(crate) mod idp;
 mod proxy;
 mod retry;
+mod served;
+mod user_agent;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +32,7 @@ use tower::timeout::TimeoutLayer;
 pub use connections::Connections;
 pub use counter::{Budgets, Class, OverBudget, Party, Permit, Proxied, Slots, Usage, Waiting};
 pub use proxy::{Proxy, ProxyEnv, ProxyError, proxy_for};
-pub use twigo_policy::{Actor, Gate};
+pub use twigo_policy::{Actor, Gate, Server};
 
 use auth::AuthLayer;
 use connections::{ConnectionsLayer, Tracked};
@@ -38,6 +40,7 @@ use counter::{Counter, CounterLayer};
 use dial::Dialer;
 use identity::Identity;
 use retry::RetryLayer;
+use user_agent::UserAgentLayer;
 
 use crate::credentials::{Provider, token_or_basic};
 
@@ -72,6 +75,21 @@ type BuildActor = Arc<dyn Fn(&Gate) -> Result<ActorClients, Error> + Send + Sync
 pub struct ActorClients {
     pub api: Client,
     pub sessions: Client,
+    gate: Gate,
+}
+
+impl ActorClients {
+    /// What the gate reads of `request`, once who serves the group-version
+    /// it dry-runs is read as this actor where nothing kept knows it.
+    pub async fn attributes<B>(&self, request: &http::Request<B>) -> twigo_policy::Attributes {
+        served::attributes(&self.api, &self.gate, request).await
+    }
+
+    /// Who serves `group/version`, read as this actor where nothing kept
+    /// knows it; none when it cannot be read.
+    pub async fn server(&self, group: &str, version: &str) -> Option<Server> {
+        served::server(&self.api, &self.gate, group, version).await
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -133,6 +151,7 @@ where
             .option_layer(config.auth_layer()?)
             .option_layer(auth())
             .layer(config.extra_headers_layer()?)
+            .layer(UserAgentLayer::of(gate.actor()))
             .layer(CounterLayer(self.counter.clone(), party(gate.actor())))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
             .layer(RetryLayer)
@@ -145,11 +164,13 @@ where
             .option_layer(config.auth_layer()?)
             .option_layer(auth())
             .layer(config.extra_headers_layer()?)
+            .layer(UserAgentLayer::of(gate.actor()))
             .layer(gate.recheck())
             .service(self.sessions.clone());
         Ok(ActorClients {
             api: Client::new(api, config.default_namespace.clone()),
             sessions: Client::new(sessions, config.default_namespace.clone()),
+            gate: gate.clone(),
         })
     }
 }
@@ -266,6 +287,7 @@ impl Clients {
                 Ok(ActorClients {
                     api: Client::new(api, "default"),
                     sessions: Client::new(sessions, "default"),
+                    gate: gate.clone(),
                 })
             }
         };
@@ -279,6 +301,18 @@ impl Clients {
             gate,
             actors: Arc::new(actors),
         }
+    }
+
+    /// What the UI's gate reads of `request`, once who serves the
+    /// group-version it dry-runs is read where nothing kept knows it.
+    pub async fn attributes<B>(&self, request: &http::Request<B>) -> twigo_policy::Attributes {
+        served::attributes(&self.api, &self.gate, request).await
+    }
+
+    /// Who serves `group/version`, read as the UI where nothing kept knows
+    /// it; none when it cannot be read.
+    pub async fn server(&self, group: &str, version: &str) -> Option<Server> {
+        served::server(&self.api, &self.gate, group, version).await
     }
 
     /// Another actor's clients of this context, over its shared connections

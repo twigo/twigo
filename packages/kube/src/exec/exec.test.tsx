@@ -7,7 +7,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
-import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import {
+  createMockBackend,
+  protect,
+  type MockScenario,
+} from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { WorkbenchView, type Platform, type Workbench } from "@twigo/workbench";
 import {
@@ -88,6 +92,13 @@ async function mounted(
       })
     : createExecTabs(workbench);
   registerExec(workbench, tabs, bareTabPaths(workbench));
+  await act(() =>
+    protect(backend, {
+      action: "setEnvironment",
+      context: "qa",
+      environment: "development",
+    }),
+  );
   await act(() => workbench.spaces.open("qa"));
   act(() => {
     workbench.spaces.select("qa");

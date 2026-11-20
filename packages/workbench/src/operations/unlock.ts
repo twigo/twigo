@@ -1,6 +1,7 @@
-import type { Backend, Blocked } from "@twigo/protocol";
+import type { Blocked } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import type { ToastAction } from "@twigo/ui";
+import type { Operations } from "./service";
 
 /**
  * Whether the person may lift what the gate refused with (ARCHITECTURE
@@ -16,11 +17,10 @@ export function canUnlock(blocked: Blocked): boolean {
   );
 }
 
-/** The button of a toast that says the mode refused a command, where the person may lift the lock. */
+/** The button of a toast that says the mode refused a command, where the person may lift the lock: it plans the unlock, which asks in a dialog. */
 export function unlockAction(
-  backend: Backend,
+  operations: Pick<Operations, "unlock">,
   error: unknown,
-  report: (error: unknown) => void,
 ): ToastAction | undefined {
   const { blocked } = toIpcError(error);
   if (!blocked || !canUnlock(blocked)) return undefined;
@@ -28,7 +28,7 @@ export function unlockAction(
   return {
     label: "Unlock for 15 minutes",
     run: () => {
-      backend.invoke("context_unlock", context).catch(report);
+      void operations.unlock(context);
     },
   };
 }

@@ -15,6 +15,7 @@ import {
   type MockScenario,
 } from "@twigo/protocol/mock";
 import type { Workbench } from "@twigo/workbench";
+import { confirmAsking } from "@twigo/workbench/testing";
 import { openList, settle, withScreenSize } from "../../test/workbench";
 import { pfUri } from "../uri";
 
@@ -508,8 +509,12 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
     "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itUnlock for 15 minutes",
   ]);
   fireEvent.click(toastButton("Unlock for 15 minutes"));
+  await confirmAsking(workbench);
   await settle(6);
-  expect(unlock).toHaveBeenCalledWith("context_unlock", "prod-eu");
+  expect(unlock).toHaveBeenCalledWith("command_plan", {
+    action: "unlock",
+    context: "prod-eu",
+  });
   expect(
     workbench.catalog.find("prod-eu")?.access.unlockedUntil,
   ).not.toBeNull();
@@ -522,6 +527,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   await start();
   expect(live()).toEqual([
     "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
+    "PEUnlocked prod-eu for 15 minutes",
   ]);
 });
 

@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { Context } from "@twigo/protocol";
 import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
 import { StateStore } from "../state/store";
-import { testWorkbench } from "../testing";
+import { confirmAsking, testWorkbench } from "../testing";
 import { ContextColors } from "./colors";
 import { SET_SPACE_COLOR } from "./colorCommand";
 import { SET_CONTEXT_ENVIRONMENT } from "./modeCommands";
@@ -61,12 +61,12 @@ test("an environment type colours a context nothing else colours, and Automatic 
   });
   await run;
 
-  await act(() =>
-    commands.execute(SET_CONTEXT_ENVIRONMENT, keys.lookup(null), {
-      context: "qa",
-      value: null,
-    }),
-  );
+  const unmark = commands.execute(SET_CONTEXT_ENVIRONMENT, keys.lookup(null), {
+    context: "qa",
+    value: null,
+  });
+  await confirmAsking(workbench);
+  await act(() => unmark);
   expect(colors.of("qa")).toBe(automatic);
 });
 

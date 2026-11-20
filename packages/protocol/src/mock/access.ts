@@ -3,10 +3,18 @@ import type {
   Context,
   ContextAccess,
   Environment,
+  Lock,
+  LockSource,
   Mode,
   ModeSource,
 } from "../generated";
-import { CONTEXTS } from "./fixtures";
+import {
+  CHOSEN,
+  CONTEXTS,
+  KUBECONFIG_READ_ONLY,
+  KUBECONFIG_TYPES,
+  MARKED,
+} from "./fixtures";
 
 const UNLOCK_MS = 15 * 60 * 1000;
 const POLICY_FILE = "/Library/Application Support/Twigo/policy.json";
@@ -19,16 +27,51 @@ const DEFAULT_MODE: Readonly<Record<Environment, Mode>> = {
   local: "read-write",
 };
 
+/** How much a mode holds back, as `twigo_policy::Mode`'s order does. */
+export const STRICTNESS: Readonly<Record<Mode, number>> = {
+  "read-write": 0,
+  guarded: 1,
+  "read-only": 2,
+};
+
+/** A change of what the person marked, or an unlock, to see what a context would be. */
+export type Change =
+  | { readonly mode: Mode | null }
+  | { readonly environment: Environment | null }
+  | { readonly unlock: true };
+
+/** A lock that can go while the person's mode and type stay, as `twigo_policy::Outlived` says. */
+export type Outlived =
+  | { readonly kind: "policyFile"; readonly file: string }
+  | { readonly kind: "kubeconfig" }
+  | { readonly kind: "type" };
+
+/** What the kubeconfigs say of each context, where it locks: `twigo.readOnly`, and `twigo.environment` where it is Production or Staging. */
+export interface Kubeconfigs {
+  readonly readOnly: ReadonlySet<string>;
+  readonly types: Readonly<Record<string, Environment>>;
+}
+
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
   readonly #watchers = new Set<(contexts: Context[]) => void>();
-  readonly #modes = new Map<string, Mode>();
-  readonly #environments = new Map<string, Environment | null>();
+  readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
+  readonly #environments = new Map<string, Environment | null>(
+    Object.entries(MARKED),
+  );
   readonly #unlocks = new Map<string, number>();
+  /** How many times a choice or an unlock changed what a context lets through, as `Policy::changes_of` counts. */
+  readonly #changed = new Map<string, number>();
   /** Contexts a policy file turned read-only after the app started. */
   readonly #filed = new Set<string>();
 
-  constructor(private readonly policyFile: boolean) {}
+  constructor(
+    private readonly policyFile: boolean,
+    private readonly kubeconfigs: Kubeconfigs = {
+      readOnly: KUBECONFIG_READ_ONLY,
+      types: KUBECONFIG_TYPES,
+    },
+  ) {}
 
   watch(onMessage: (contexts: Context[]) => void): Context[] {
     this.#watchers.add(onMessage);
@@ -36,11 +79,11 @@ export class MockAccess {
   }
 
   setMode(name: string, mode: Mode | null): void {
-    fixture(name);
-    this.#refusePolicyFile(name);
+    this.refuse(name);
     this.#unlocks.delete(name);
     if (mode === null) this.#modes.delete(name);
     else this.#modes.set(name, mode);
+    this.#changes(name);
     this.#emit();
   }
 
@@ -48,13 +91,13 @@ export class MockAccess {
     fixture(name);
     this.#unlocks.delete(name);
     this.#environments.set(name, environment);
+    this.#changes(name);
     this.#emit();
   }
 
   unlock(name: string): void {
-    const context = fixture(name);
-    this.#refusePolicyFile(name);
-    const { mode, unlockedUntil } = this.#access(context);
+    this.refuse(name);
+    const { mode, unlockedUntil } = this.of(name);
     if (mode !== "read-only" && unlockedUntil === null) {
       throw new IpcError(
         "invalidInput",
@@ -62,6 +105,7 @@ export class MockAccess {
       );
     }
     this.#unlocks.set(name, Date.now() + UNLOCK_MS);
+    this.#changes(name);
     setTimeout(() => {
       this.#emit();
     }, UNLOCK_MS + 1);
@@ -91,6 +135,59 @@ export class MockAccess {
     return this.#access(fixture(name));
   }
 
+  /** What a context would let through once `change` is made, an unlock it does not make ended. */
+  would(name: string, change: Change): ContextAccess {
+    return this.#access(fixture(name), change);
+  }
+
+  /**
+   * What a context would let through with the locks `gone` taken away, now
+   * or once `change` is made, the person's own mode and type kept.
+   */
+  without(
+    name: string,
+    gone: readonly Outlived[],
+    change?: Change,
+  ): ContextAccess {
+    return this.#access(fixture(name), change, gone);
+  }
+
+  /** How many times a choice or an unlock changed what a context lets through: a plan holds only while this stays. */
+  changes(name: string): number {
+    return this.#changed.get(name) ?? 0;
+  }
+
+  /** The locks that hold a context and can go: the policy file, its kubeconfig's `readOnly`, then its kubeconfig's type. The mock has no provider's lock. */
+  locks(name: string): Outlived[] {
+    fixture(name);
+    return [
+      ...(this.#policyFileSets(name)
+        ? [{ kind: "policyFile" as const, file: POLICY_FILE }]
+        : []),
+      ...(this.kubeconfigs.readOnly.has(name)
+        ? [{ kind: "kubeconfig" as const }]
+        : []),
+      ...(this.kubeconfigs.types[name] !== undefined
+        ? [{ kind: "type" as const }]
+        : []),
+    ];
+  }
+
+  /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
+  refuse(name: string): void {
+    fixture(name);
+    if (this.#policyFileSets(name)) {
+      throw new IpcError(
+        "permissions",
+        `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
+      );
+    }
+  }
+
+  #changes(name: string): void {
+    this.#changed.set(name, (this.#changed.get(name) ?? 0) + 1);
+  }
+
   #list(): Context[] {
     return CONTEXTS.map((context) => ({
       ...context,
@@ -103,12 +200,33 @@ export class MockAccess {
     for (const watcher of this.#watchers) watcher(contexts);
   }
 
-  #access(context: Context): ContextAccess {
-    const marked = this.#environments.get(context.name);
+  #access(
+    context: Context,
+    change?: Change,
+    gone: readonly Outlived[] = [],
+  ): ContextAccess {
+    const { name } = context;
+    const marked =
+      change && "environment" in change
+        ? change.environment
+        : this.#environments.get(name);
     const environment =
-      marked === undefined ? context.access.environment : marked;
-    const { mode, source } = this.#resolve(context.name, environment);
-    const until = this.#unlocks.get(context.name);
+      marked === undefined
+        ? gone.some(({ kind }) => kind === "type")
+          ? null
+          : (this.kubeconfigs.types[name] ?? null)
+        : marked;
+    const chosen =
+      change && "mode" in change
+        ? (change.mode ?? undefined)
+        : this.#modes.get(name);
+    const { mode, source } = this.#resolve(name, environment, chosen, gone);
+    const until =
+      change === undefined
+        ? this.#unlocks.get(name)
+        : "unlock" in change
+          ? Date.now() + UNLOCK_MS
+          : undefined;
     const unlocked =
       until !== undefined &&
       until > Date.now() &&
@@ -122,11 +240,16 @@ export class MockAccess {
     };
   }
 
+  /** As ARCHITECTURE 6.4 orders them: the policy file, the person's choice over the strictest lock, the strictest lock, else unmarked. */
   #resolve(
     name: string,
     environment: Environment | null,
+    chosen: Mode | undefined,
+    gone: readonly Outlived[],
   ): { mode: Mode; source: ModeSource } {
-    if (this.#policyFileSets(name)) {
+    const lacks = (lock: Outlived["kind"]) =>
+      gone.some(({ kind }) => kind === lock);
+    if (!lacks("policyFile") && this.#policyFileSets(name)) {
       return {
         mode: "read-only",
         source: {
@@ -136,15 +259,17 @@ export class MockAccess {
         },
       };
     }
-    const chosen = this.#modes.get(name);
-    if (chosen) return { mode: chosen, source: { kind: "user" } };
-    if (environment) {
-      return {
-        mode: DEFAULT_MODE[environment],
-        source: { kind: "environment", environment },
-      };
+    const lock = strictest(
+      environment,
+      !lacks("kubeconfig") && this.kubeconfigs.readOnly.has(name),
+    );
+    if (chosen) {
+      const overrides =
+        lock && STRICTNESS[lock.mode] > STRICTNESS[chosen] ? lock : null;
+      return { mode: chosen, source: { kind: "user", overrides } };
     }
-    return { mode: "read-write", source: { kind: "default" } };
+    if (lock) return { mode: lock.mode, source: lock.source };
+    return { mode: "guarded", source: { kind: "unmarked" } };
   }
 
   #policyFileSets(name: string): boolean {
@@ -153,18 +278,41 @@ export class MockAccess {
     );
   }
 
-  #refusePolicyFile(name: string): void {
-    if (this.#policyFileSets(name)) {
-      throw new IpcError(
-        "permissions",
-        `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
-      );
-    }
-  }
-
   #pattern(name: string): string {
     return this.#filed.has(name) ? name : POLICY_PATTERN;
   }
+}
+
+/** The strictest of a context's locks, the kubeconfig's `readOnly` before the type's where they tie. */
+function strictest(
+  environment: Environment | null,
+  readOnly: boolean,
+): Lock | undefined {
+  const locks: Lock[] = [
+    ...(readOnly
+      ? [
+          {
+            mode: "read-only" as const,
+            source: { kind: "kubeconfig" } as const,
+          },
+        ]
+      : []),
+    ...(environment
+      ? [
+          {
+            mode: DEFAULT_MODE[environment],
+            source: { kind: "environment", environment } as LockSource,
+          },
+        ]
+      : []),
+  ];
+  return locks.reduce<Lock | undefined>(
+    (best, lock) =>
+      best === undefined || STRICTNESS[lock.mode] > STRICTNESS[best.mode]
+        ? lock
+        : best,
+    undefined,
+  );
 }
 
 function fixture(name: string): Context {

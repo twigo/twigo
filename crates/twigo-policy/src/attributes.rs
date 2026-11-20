@@ -8,6 +8,9 @@ use http::{HeaderMap, Method, Request};
 use percent_encoding::percent_decode_str;
 use twigo_ipc::RequestClass;
 
+use crate::Server;
+use crate::served::built_in;
+
 /// The POSTs that only ask a question, by group and resource.
 const REVIEWS: [(&str, &str); 3] = [
     ("authorization.k8s.io", "selfsubjectaccessreviews"),
@@ -40,8 +43,21 @@ pub struct Attributes {
 }
 
 impl Attributes {
-    /// A request about to be sent, by its path from the API server's root.
+    /// A request about to be sent, by its path from the API server's root,
+    /// where nothing says who serves its group-version: a dry run outside
+    /// kube-apiserver's own groups is a write.
     pub fn of<B>(request: &Request<B>) -> Self {
+        Self::served(request, |_, _| None)
+    }
+
+    /// [`Attributes::of`], where `served` says who serves a group-version,
+    /// asked only of a dry run outside kube-apiserver's own groups: it is one
+    /// only where kube-apiserver serves it itself, as an aggregated server
+    /// may ignore `dryRun` and perform the write.
+    pub fn served<B>(
+        request: &Request<B>,
+        served: impl FnOnce(&str, &str) -> Option<Server>,
+    ) -> Self {
         let uri = request.uri();
         let path = percent_decode_str(uri.path())
             .decode_utf8_lossy()
@@ -49,7 +65,7 @@ impl Attributes {
         let query = Query(uri.query().unwrap_or_default());
         let parts = Parts::of(&path);
         let verb = parts.verb(request.method(), &query);
-        let class = parts.class(request.method(), request.headers(), &query);
+        let class = parts.class(request.method(), request.headers(), &query, served);
         let deletes = *request.method() == Method::DELETE || parts.evicts();
         Self {
             verb,
@@ -61,6 +77,17 @@ impl Attributes {
             class,
             deletes,
         }
+    }
+
+    /// The group and version whose server decides the class of `request`:
+    /// those of a dry run outside kube-apiserver's own groups.
+    pub fn dry_run_group<B>(request: &Request<B>) -> Option<(String, String)> {
+        let mut asked = None;
+        Self::served(request, |group, version| {
+            asked = Some((group.to_owned(), version.to_owned()));
+            None
+        });
+        asked
     }
 
     /// What a command is about to do, by what RBAC calls it. It names no
@@ -179,6 +206,7 @@ struct Parts<'a> {
     proxy_prefix: bool,
     watch_prefix: bool,
     group: Option<&'a str>,
+    version: Option<&'a str>,
     namespace: Option<&'a str>,
     resource: Option<&'a str>,
     name: Option<&'a str>,
@@ -202,7 +230,7 @@ impl<'a> Parts<'a> {
             ["apis", group, rest @ ..] if rest.len() >= 2 => (*group, rest),
             _ => return not_a_resource,
         };
-        // Past the version.
+        let version = rest[0];
         let mut rest = &rest[1..];
         let special = rest.first().copied();
         let (proxy_prefix, watch_prefix) = (special == Some("proxy"), special == Some("watch"));
@@ -222,6 +250,7 @@ impl<'a> Parts<'a> {
             proxy_prefix,
             watch_prefix,
             group: Some(group),
+            version: Some(version),
             namespace,
             resource: rest.first().copied(),
             name,
@@ -258,7 +287,13 @@ impl<'a> Parts<'a> {
         .to_owned()
     }
 
-    fn class(&self, method: &Method, headers: &HeaderMap, query: &Query<'_>) -> RequestClass {
+    fn class(
+        &self,
+        method: &Method,
+        headers: &HeaderMap,
+        query: &Query<'_>,
+        served: impl FnOnce(&str, &str) -> Option<Server>,
+    ) -> RequestClass {
         let upgrade = headers.contains_key(UPGRADE);
         let plain_get = *method == Method::GET && !upgrade;
         if self.unclear || self.proxy_prefix || *method == Method::CONNECT {
@@ -280,7 +315,7 @@ impl<'a> Parts<'a> {
         if *method == Method::POST && self.is_review() {
             return RequestClass::Read;
         }
-        if self.is_dry_run(method, query) {
+        if self.is_dry_run(method, query) && self.served_itself(served) {
             // Answered with what it would store, a Secret's values included.
             return if self.resource == Some("secrets") {
                 RequestClass::SecretRead
@@ -316,6 +351,16 @@ impl<'a> Parts<'a> {
             && self.subresource.is_none()
             && !self.group.is_some_and(|group| ANSWERS.contains(&group))
             && query.dry_run()
+    }
+
+    /// Whether kube-apiserver serves the group-version itself: one of its own
+    /// groups always, any other as `served` says.
+    fn served_itself(&self, served: impl FnOnce(&str, &str) -> Option<Server>) -> bool {
+        match (self.group, self.version) {
+            (Some(group), _) if built_in(group) => true,
+            (Some(group), Some(version)) => served(group, version) == Some(Server::Itself),
+            _ => false,
+        }
     }
 
     fn evicts(&self) -> bool {

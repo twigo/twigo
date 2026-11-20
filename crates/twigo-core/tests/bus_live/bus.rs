@@ -13,10 +13,12 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use twigo_ipc::{
     ErrorKind, Friction, Gvr, Mode, ObjectParts, ObjectQuery, OpenObject, OperationEvent,
-    PlanRequest, SetContextMode,
+    PlanRequest,
 };
 
-use super::{Cluster, WAIT, audit, core, kubectl, plan_delete, reference, run, target};
+use super::{
+    Cluster, WAIT, audit, core, kubectl, line, plan_delete, protect, reference, run, target,
+};
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
@@ -117,7 +119,7 @@ async fn each_friction_holds_its_plan_and_each_kubectl_line_does_the_same() {
     assert_eq!(plan.friction, Friction::Confirm);
     assert_eq!(plan.confirm, "Delete config map");
     assert_eq!(
-        plan.kubectl,
+        line(&plan),
         format!("kubectl --context {context} delete configmaps by-twigo -n {namespace}")
     );
     let told = run(&core, &plan, None).await.unwrap();
@@ -210,13 +212,13 @@ async fn guarded_asks_for_the_context_s_name_and_read_only_sends_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let (core, _) = core(dir.path(), &cluster).await;
     let config_maps = Api::<ConfigMap>::namespaced(cluster.admin.clone(), &namespace);
-    let set = |mode| SetContextMode {
+    let set = |mode| PlanRequest::SetMode {
         context: cluster.context.clone(),
         mode: Some(mode),
     };
 
     cluster.config_map(&namespace, "guarded").await;
-    core.set_context_mode(set(Mode::Guarded)).await.unwrap();
+    protect(&core, set(Mode::Guarded)).await.unwrap();
     let plan = plan_delete(
         &core,
         &cluster,
@@ -235,7 +237,7 @@ async fn guarded_asks_for_the_context_s_name_and_read_only_sends_nothing() {
     assert_eq!(Cluster::uid(&config_maps, "guarded").await, None);
 
     let uid = cluster.config_map(&namespace, "locked").await;
-    core.set_context_mode(set(Mode::ReadOnly)).await.unwrap();
+    protect(&core, set(Mode::ReadOnly)).await.unwrap();
     let blocked = plan_delete(
         &core,
         &cluster,
@@ -344,12 +346,9 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
     let sent = serde_json::to_string(&shown).unwrap();
     assert!(!sent.contains("hunter2"), "{sent}");
 
-    core.set_context_mode(SetContextMode {
-        context: cluster.context.clone(),
-        mode: Some(Mode::Guarded),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::Guarded))
+        .unwrap();
     for (key, expected, binary) in [
         ("password", "hunter2-live", false),
         ("key.der", "MIIBCgKCAQEA/w==", true),
@@ -360,7 +359,7 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
         };
         let plan = core.command_plan("main", request).await.unwrap();
         assert_eq!(plan.friction, Friction::Confirm);
-        assert!(!plan.kubectl.contains(expected), "{}", plan.kubectl);
+        assert!(!line(&plan).contains(expected), "{}", line(&plan));
         let told = run(&core, &plan, None).await.unwrap();
         assert_eq!(
             told,
@@ -369,7 +368,7 @@ async fn a_reveal_asks_in_guarded_and_kubectl_reads_the_same_value() {
                 binary
             }]
         );
-        assert_eq!(kubectl(&plan, &kubeconfig), expected, "{}", plan.kubectl);
+        assert_eq!(kubectl(&plan, &kubeconfig), expected, "{}", line(&plan));
     }
 
     let closed = core
@@ -560,7 +559,7 @@ async fn a_delete_lists_what_goes_with_it_and_several_ask_for_the_context_s_name
             format!("kubectl --context {context} delete configmaps {names} -n {namespace}")
         })
         .collect();
-    assert_eq!(plan.kubectl, lines.join("; "));
+    assert_eq!(line(&plan), lines.join("; "));
     let refused = run(&core, &plan, Some("3")).await.unwrap_err();
     assert_eq!(refused.kind, ErrorKind::InvalidInput);
     let plan = core.command_plan("main", several(&three)).await.unwrap();

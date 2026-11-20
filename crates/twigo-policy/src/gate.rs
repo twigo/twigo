@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 use http::Request;
 use tower::{BoxError, Layer, Service};
 
-use crate::{Actor, Approval, Attributes, Policy};
+use crate::{Actor, Approval, Attributes, Policy, Server};
 
 /// An actor's way through the policy on one context.
 #[derive(Clone)]
@@ -70,9 +70,28 @@ impl Gate {
         RecheckLayer(self.clone())
     }
 
+    /// What it reads of `request`, with what its clients' context is known
+    /// to serve itself.
+    pub fn attributes<B>(&self, request: &Request<B>) -> Attributes {
+        Attributes::served(request, |group, version| self.served(group, version))
+    }
+
+    /// Who serves `group/version` for its clients, as last read in the
+    /// last 5 minutes.
+    pub fn served(&self, group: &str, version: &str) -> Option<Server> {
+        let served = self.policy.served();
+        served.get(&self.context, self.connection, group, version)
+    }
+
+    /// Keeps who serves `group/version` for its clients, as read.
+    pub fn keep(&self, group: &str, version: &str, server: Server) {
+        let served = self.policy.served();
+        served.keep(&self.context, self.connection, group, version, server);
+    }
+
     /// Whether the request may go on with the approval it carries;
-    /// `sending` where it goes out next, which the audit log notes of a write
-    /// it lets through.
+    /// `sending` where it goes out next, where the audit log notes what it
+    /// lets through.
     fn check(&self, read: &Read, sending: bool) -> Result<(), BoxError> {
         let attributes = &read.attributes;
         let decided = self.policy.authorize_built(
@@ -154,7 +173,7 @@ where
 
     fn call(&mut self, mut request: Request<B>) -> Self::Future {
         let read = Read {
-            attributes: Arc::new(Attributes::of(&request)),
+            attributes: Arc::new(self.gate.attributes(&request)),
             approval: request.extensions().get::<Approval>().cloned(),
         };
         if let Err(blocked) = self.gate.check(&read, false) {

@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use twigo_env::{Failure, Reason, ShellEnv, Status};
 
 use super::*;
-use twigo_ipc::{Environment, Mode, ModeSource};
+use twigo_ipc::{BlockReason, Environment, Mode, ModeSource};
 
 fn env(kubeconfig: &Path) -> Arc<ShellEnv> {
     Arc::new(ShellEnv::from_iter([(
@@ -221,6 +221,28 @@ async fn an_untrusted_plugin_never_runs_and_a_changed_one_asks_again() {
     let review = core.review().await;
     assert!(review.reviewed);
     assert_eq!(review.plugins.len(), 1);
+}
+
+#[tokio::test]
+async fn the_audit_log_names_each_plugin_trusted_by_its_digest_and_program_alone() {
+    let plugins = Plugins::new(1, false);
+    plugins.write(1, &["--token", "s3cret"]);
+    let (core, data) = plugins.core().await;
+    let digest = core.review().await.plugins[0].plugin.digest.clone();
+    core.trust_plugins(vec![digest.clone()]).unwrap();
+    core.trust_plugins(vec![digest.clone()]).unwrap();
+
+    let text = std::fs::read_to_string(data.path().join("audit.jsonl")).unwrap();
+    assert!(!text.contains("s3cret"), "{text}");
+    let lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 1, "trusted once: {lines:?}");
+    assert_eq!(lines[0]["event"], "trusted");
+    assert_eq!(lines[0]["digest"], digest);
+    let program = plugins.dir.path().join("plugin");
+    assert_eq!(lines[0]["program"], program.display().to_string());
 }
 
 #[tokio::test]
@@ -695,7 +717,12 @@ const UNREACHABLE: &str = "
 clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
 users: [{ name: u, user: {} }]
 contexts:
-- name: kind-plain
+- name: kind-local
+  context:
+    cluster: c
+    user: u
+    extensions: [{ name: twigo, extension: { environment: local } }]
+- name: kind-unmarked
   context: { cluster: c, user: u }
 - name: kind-locked
   context:
@@ -718,10 +745,31 @@ async fn create_a_configmap(core: &Core, context: &str) -> IpcError {
     twigo_kube::errors::request(&error)
 }
 
+async fn protect(core: &Core, request: PlanRequest) -> Result<(), IpcError> {
+    let plan = core.command_plan("main", request).await?;
+    let typed = match plan.friction {
+        Friction::Typed { text } => Some(text),
+        _ => None,
+    };
+    let execute = Execute {
+        plan: plan.id,
+        typed,
+    };
+    core.command_execute("main", execute, |_| true).await
+}
+
 fn access(core: &Core, context: &str) -> twigo_ipc::ContextAccess {
     let contexts = core.contexts().unwrap();
     let found = contexts.into_iter().find(|c| c.name == context);
     found.unwrap().access
+}
+
+/// Marks kind-local Local, as a person would: its kubeconfig's `local` is
+/// no mark.
+fn mark_local(core: &Core) {
+    core.policy
+        .set_environment("kind-local", Some(Environment::Local))
+        .unwrap();
 }
 
 #[tokio::test]
@@ -730,19 +778,86 @@ async fn a_context_s_mode_comes_from_its_kubeconfig_and_reaches_its_clients() {
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
 
-    assert_eq!(access(&core, "kind-plain").mode, Mode::ReadWrite);
     assert_eq!(access(&core, "kind-locked").mode, Mode::ReadOnly);
     assert_eq!(access(&core, "kind-locked").source, ModeSource::Kubeconfig);
     let prod = access(&core, "kind-prod");
     assert_eq!(prod.mode, Mode::ReadOnly);
     assert_eq!(prod.environment, Some(Environment::Production));
 
-    let open = create_a_configmap(&core, "kind-plain").await;
-    assert_eq!(open.kind, ErrorKind::Unavailable, "it reached the network");
+    for context in ["kind-unmarked", "kind-local"] {
+        let unmarked = access(&core, context);
+        assert_eq!(unmarked.mode, Mode::Guarded, "{context}");
+        assert_eq!(unmarked.source, ModeSource::Unmarked, "{context}");
+        assert_eq!(unmarked.environment, None, "{context}");
+        let blocked = create_a_configmap(&core, context).await;
+        assert_eq!(blocked.blocked.unwrap().reason, BlockReason::Unmarked);
+    }
     for context in ["kind-locked", "kind-prod"] {
         let blocked = create_a_configmap(&core, context).await;
         assert_eq!(blocked.kind, ErrorKind::Permissions, "{context}");
     }
+
+    mark_local(&core);
+    let open = create_a_configmap(&core, "kind-local").await;
+    assert_eq!(open.kind, ErrorKind::Unavailable, "it reached the network");
+}
+
+#[tokio::test]
+async fn an_edit_of_a_kubeconfig_only_tightens_and_the_log_records_what_it_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let mut contexts = core.catalog.subscribe();
+    contexts.borrow_and_update();
+    let edited = UNREACHABLE
+        .replace("environment: production", "environment: development")
+        .replace(
+            "- name: kind-unmarked\n  context: { cluster: c, user: u }",
+            "- name: kind-unmarked\n  context: { cluster: c, user: u, extensions: [{ name: twigo, extension: { environment: development } }] }",
+        );
+    assert_eq!(edited.matches("environment: development").count(), 2);
+    std::fs::write(dir.path().join("config"), edited).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), contexts.changed())
+        .await
+        .expect("the catalog reads the edit")
+        .unwrap();
+
+    for context in ["kind-prod", "kind-unmarked"] {
+        let unmarked = access(&core, context);
+        assert_eq!(unmarked.mode, Mode::Guarded, "{context}");
+        assert_eq!(unmarked.source, ModeSource::Unmarked, "{context}");
+        assert_eq!(unmarked.environment, None, "{context}");
+        let blocked = create_a_configmap(&core, context).await;
+        assert_eq!(blocked.blocked.unwrap().reason, BlockReason::Unmarked);
+    }
+    protect(
+        &core,
+        PlanRequest::SetMode {
+            context: "kind-prod".to_owned(),
+            mode: Some(Mode::ReadOnly),
+        },
+    )
+    .await
+    .unwrap();
+
+    let logged = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines: Vec<serde_json::Value> = logged
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|line: &serde_json::Value| line["event"] != "request")
+        .collect();
+    assert_eq!(lines.len(), 2, "{logged}");
+    let edit = &lines[0];
+    assert_eq!(edit["event"], "catalog");
+    assert_eq!(edit["context"], "kind-prod");
+    assert_eq!(edit["before"]["mode"], "read-only");
+    assert_eq!(
+        edit["before"]["source"],
+        serde_json::json!({ "kind": "environment", "environment": "production" })
+    );
+    assert_eq!(edit["after"]["mode"], "guarded");
+    assert_eq!(edit["after"]["source"]["kind"], "unmarked");
+    assert_eq!(lines[1]["event"], "protection");
 }
 
 #[tokio::test]
@@ -750,27 +865,35 @@ async fn a_person_s_choice_changes_clients_already_built_and_survives_a_restart(
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
+    mark_local(&core);
     let mut changes = core.policy.changes();
 
-    let open = create_a_configmap(&core, "kind-plain").await;
+    let open = create_a_configmap(&core, "kind-local").await;
     assert_eq!(open.kind, ErrorKind::Unavailable);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
+    protect(
+        &core,
+        PlanRequest::SetMode {
+            context: "kind-local".to_owned(),
+            mode: Some(Mode::ReadOnly),
+        },
+    )
     .await
     .unwrap();
     assert!(changes.has_changed().unwrap());
     changes.borrow_and_update();
-    let blocked = create_a_configmap(&core, "kind-plain").await;
+    let blocked = create_a_configmap(&core, "kind-local").await;
     assert_eq!(blocked.kind, ErrorKind::Permissions);
-    assert_eq!(blocked.blocked.unwrap().source, ModeSource::User);
+    let user = ModeSource::User { overrides: None };
+    assert_eq!(blocked.blocked.unwrap().source, user);
 
-    core.set_context_environment(SetContextEnvironment {
-        context: "kind-locked".to_owned(),
-        environment: Some(Environment::Staging),
-    })
+    protect(
+        &core,
+        PlanRequest::SetEnvironment {
+            context: "kind-locked".to_owned(),
+            environment: Some(Environment::Staging),
+        },
+    )
     .await
     .unwrap();
     assert!(changes.has_changed().unwrap());
@@ -778,8 +901,8 @@ async fn a_person_s_choice_changes_clients_already_built_and_survives_a_restart(
     core.state.flush().unwrap();
     let reopened = running(dir.path(), UNREACHABLE);
     reopened.catalog.contexts().await;
-    assert_eq!(access(&reopened, "kind-plain").mode, Mode::ReadOnly);
-    assert_eq!(access(&reopened, "kind-plain").source, ModeSource::User);
+    assert_eq!(access(&reopened, "kind-local").mode, Mode::ReadOnly);
+    assert_eq!(access(&reopened, "kind-local").source, user);
     assert_eq!(
         access(&reopened, "kind-locked").environment,
         Some(Environment::Staging)
@@ -791,7 +914,14 @@ async fn an_unlock_does_not_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
-    core.unlock_context("kind-locked").await.unwrap();
+    protect(
+        &core,
+        PlanRequest::Unlock {
+            context: "kind-locked".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(access(&core, "kind-locked").mode, Mode::Guarded);
     let through = create_a_configmap(&core, "kind-locked").await;
     assert_eq!(through.kind, ErrorKind::Unavailable);
@@ -803,52 +933,185 @@ async fn an_unlock_does_not_survive_a_restart() {
 }
 
 #[tokio::test]
-async fn a_policy_file_entry_cannot_be_changed_from_the_ui() {
+async fn a_policy_file_entry_refuses_a_mode_and_an_unlock_and_holds_its_mode_under_a_type() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("policy.json"),
-        r#"{"contexts": {"kind-plain": "read-only"}}"#,
+        r#"{"contexts": {"kind-local": "read-only"}}"#,
     )
     .unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
 
-    let refused = core
-        .set_context_mode(SetContextMode {
-            context: "kind-plain".to_owned(),
+    let context = || "kind-local".to_owned();
+    for request in [
+        PlanRequest::SetMode {
+            context: context(),
             mode: Some(Mode::ReadWrite),
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::Permissions);
-    let refused = core.unlock_context("kind-plain").await.unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::Permissions);
+        },
+        PlanRequest::Unlock { context: context() },
+    ] {
+        let refused = core.command_plan("main", request).await.unwrap_err();
+        assert_eq!(refused.kind, ErrorKind::Permissions);
+    }
+    let development = PlanRequest::SetEnvironment {
+        context: context(),
+        environment: Some(Environment::Development),
+    };
+    protect(&core, development).await.unwrap();
+    let named = access(&core, "kind-local");
+    assert_eq!(named.environment, Some(Environment::Development));
+    assert_eq!(named.mode, Mode::ReadOnly);
 
     assert!(matches!(
-        access(&core, "kind-plain").source,
+        access(&core, "kind-local").source,
         ModeSource::PolicyFile {
             pattern: Some(_),
             ..
         }
     ));
-    let blocked = create_a_configmap(&core, "kind-plain").await;
+    let blocked = create_a_configmap(&core, "kind-local").await;
     assert_eq!(blocked.kind, ErrorKind::Permissions);
+}
+
+#[tokio::test]
+async fn under_a_policy_file_a_type_asks_for_the_name_where_a_set_of_locks_gone_shows_it_lowering_and_names_that_set()
+ {
+    let read_write = Some(", it will be read-write");
+    let unlocked = Some(" and its kubeconfig's lock goes, it will be read-write");
+    let guarded = Some(", it will be guarded");
+    let files = [
+        (
+            r#"{"contexts": {"kind-*": "read-only"}}"#,
+            vec![
+                ("kind-local", Environment::Staging, false, guarded),
+                ("kind-local", Environment::Development, true, read_write),
+                ("kind-prod", Environment::Development, true, read_write),
+                ("kind-locked", Environment::Development, true, unlocked),
+                ("kind-unmarked", Environment::Production, false, None),
+            ],
+        ),
+        (
+            r#"{"contexts": {"kind-prod": "guarded", "kind-unmarked": "read-write", "kind-locked": "read-write"}}"#,
+            vec![
+                ("kind-prod", Environment::Staging, true, guarded),
+                ("kind-unmarked", Environment::Development, true, read_write),
+                ("kind-locked", Environment::Development, true, unlocked),
+            ],
+        ),
+    ];
+    for (entries, cases) in files {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("policy.json");
+        std::fs::write(&path, entries).unwrap();
+        let core = running(dir.path(), UNREACHABLE);
+        core.catalog.contexts().await;
+        let file = path.display().to_string();
+        for (context, environment, typed, then) in cases {
+            let request = PlanRequest::SetEnvironment {
+                context: context.to_owned(),
+                environment: Some(environment),
+            };
+            let plan = core.command_plan("main", request).await.unwrap();
+            let friction = if typed {
+                Friction::Typed {
+                    text: context.to_owned(),
+                }
+            } else {
+                Friction::AtOnce
+            };
+            assert_eq!(plan.friction, friction, "{context} as {environment:?}");
+            let then = then.map(|then| format!("When {file} no longer sets its mode{then}."));
+            assert_eq!(plan.consequences.get(1), then.as_ref(), "{context}");
+            let held = access(&core, context).mode;
+            let typed = match plan.friction {
+                Friction::Typed { text } => Some(text),
+                _ => None,
+            };
+            let execute = Execute {
+                plan: plan.id,
+                typed,
+            };
+            core.command_execute("main", execute, |_| true)
+                .await
+                .unwrap();
+            let named = access(&core, context);
+            assert_eq!(named.environment, Some(environment), "{context}");
+            assert_eq!(named.mode, held, "{context}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn clearing_a_choice_beneath_a_lock_asks_for_the_name_and_says_what_it_gives_once_the_lock_goes()
+ {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("policy.json");
+    std::fs::write(&policy, r#"{"contexts": {"kind-unmarked": "guarded"}}"#).unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let file = policy.display().to_string();
+    let cases = [
+        (
+            PlanRequest::SetMode {
+                context: "kind-prod".to_owned(),
+                mode: Some(Mode::Guarded),
+            },
+            PlanRequest::SetMode {
+                context: "kind-prod".to_owned(),
+                mode: None,
+            },
+            [
+                "Every write, exec and shell is refused; reads, dry runs and port-forwards go on."
+                    .to_owned(),
+                "When its kubeconfig's type goes, its first write or exec asks what kind-prod is."
+                    .to_owned(),
+            ],
+        ),
+        (
+            PlanRequest::SetEnvironment {
+                context: "kind-unmarked".to_owned(),
+                environment: Some(Environment::Staging),
+            },
+            PlanRequest::SetEnvironment {
+                context: "kind-unmarked".to_owned(),
+                environment: None,
+            },
+            [
+                format!("It stays guarded by kind-unmarked in {file}."),
+                format!(
+                    "When {file} no longer sets its mode, its first write or exec asks what kind-unmarked is."
+                ),
+            ],
+        ),
+    ];
+    for (chosen, cleared, said) in cases {
+        protect(&core, chosen).await.unwrap();
+        let plan = core.command_plan("main", cleared).await.unwrap();
+        let typed = Friction::Typed {
+            text: plan.context.clone(),
+        };
+        assert_eq!(plan.friction, typed);
+        assert_eq!(plan.consequences, said);
+    }
 }
 
 #[tokio::test]
 async fn commands_refuse_a_context_no_source_lists() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
-    let absent = core
-        .set_context_mode(SetContextMode {
+    for request in [
+        PlanRequest::SetMode {
             context: "kind-absent".to_owned(),
             mode: Some(Mode::ReadOnly),
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(absent.kind, ErrorKind::NotFound);
-    let absent = core.unlock_context("kind-absent").await.unwrap_err();
-    assert_eq!(absent.kind, ErrorKind::NotFound);
+        },
+        PlanRequest::Unlock {
+            context: "kind-absent".to_owned(),
+        },
+    ] {
+        let absent = core.command_plan("main", request).await.unwrap_err();
+        assert_eq!(absent.kind, ErrorKind::NotFound);
+    }
 }
 
 #[tokio::test]
@@ -856,7 +1119,8 @@ async fn clients_already_built_stop_writing_once_no_source_lists_their_context()
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
-    let clients = core.clients("kind-plain").await.unwrap();
+    mark_local(&core);
+    let clients = core.clients("kind-local").await.unwrap();
     let write = || {
         http::Request::post("/api/v1/namespaces/a/configmaps")
             .body(Vec::new())
@@ -890,7 +1154,7 @@ async fn a_wake_retires_the_connections_and_a_network_change_that_moved_no_route
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
-    let clients = core.clients("kind-plain").await.unwrap();
+    let clients = core.clients("kind-local").await.unwrap();
     let (retired, network) = (
         clients.connections().retired(),
         clients.connections().network(),
@@ -910,7 +1174,14 @@ async fn an_unlock_holds_only_for_the_cluster_it_was_given_on() {
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
-    core.unlock_context("kind-locked").await.unwrap();
+    protect(
+        &core,
+        PlanRequest::Unlock {
+            context: "kind-locked".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(access(&core, "kind-locked").mode, Mode::Guarded);
 
     let mut contexts = core.catalog.subscribe();
@@ -934,7 +1205,8 @@ async fn clients_built_for_one_cluster_write_nothing_once_their_name_means_anoth
     let dir = tempfile::tempdir().unwrap();
     let core = running(dir.path(), UNREACHABLE);
     core.catalog.contexts().await;
-    let clients = core.clients("kind-plain").await.unwrap();
+    mark_local(&core);
+    let clients = core.clients("kind-local").await.unwrap();
     let write = || {
         http::Request::post("/api/v1/namespaces/a/configmaps")
             .body(Vec::new())
@@ -963,7 +1235,7 @@ async fn clients_built_for_one_cluster_write_nothing_once_their_name_means_anoth
     assert_eq!(held.kind, ErrorKind::Permissions);
     assert_eq!(held.blocked.unwrap().source, ModeSource::Moved);
 
-    let rebuilt = create_a_configmap(&core, "kind-plain").await;
+    let rebuilt = create_a_configmap(&core, "kind-local").await;
     assert_eq!(
         rebuilt.kind,
         ErrorKind::Unavailable,

@@ -23,7 +23,7 @@ use super::{
     ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 use twigo_kube::client::Clients;
 
 pub(crate) async fn scale(
@@ -34,7 +34,13 @@ pub(crate) async fn scale(
 ) -> Result<Planned, IpcError> {
     let target = Target::of(core, space, target)?;
     let attributes = target.attributes(Method::PATCH, Some("scale"));
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    core.authorize(
+        &target.context,
+        "scale",
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -97,16 +103,16 @@ pub(crate) async fn scale(
         doing: format!("Scaling {what} to {replicas}"),
         consequences,
         affected,
-        kubectl,
+        kubectl: Some(kubectl),
         command: "scale",
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,
         space: Some(space.to_owned()),
         risk,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

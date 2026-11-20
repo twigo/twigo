@@ -21,7 +21,7 @@ use super::{
     ATTEMPTS, MERGE_PATCH, Target, clients_for, get, kind_words, lost, patch_as_of, same, sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 pub(crate) async fn suspend(
     core: &Core,
@@ -37,7 +37,14 @@ pub(crate) async fn suspend(
         ));
     }
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    let command = if suspend { "suspend" } else { "resume" };
+    core.authorize(
+        &target.context,
+        command,
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -96,16 +103,16 @@ pub(crate) async fn suspend(
         doing: format!("{} {what}", words.doing),
         consequences,
         affected,
-        kubectl,
-        command: if suspend { "suspend" } else { "resume" },
-        target: attributes.target(),
+        kubectl: Some(kubectl),
+        command,
+        target: named,
         writes: vec![attributes],
         context,
         connection,
         space: Some(space.to_owned()),
         risk,
         previewed: None,
-        run: Box::new(move |_| Box::pin(run.run())),
+        run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
     })
 }
 

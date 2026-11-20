@@ -1,6 +1,7 @@
-import { CircleCheck, type LucideIcon } from "lucide-react";
+import { CircleCheck, LockOpen, Tag, type LucideIcon } from "lucide-react";
 import type {
   Backend,
+  Environment,
   OperationEvent,
   Plan,
   PlanId,
@@ -40,6 +41,13 @@ export interface Asking {
   readonly cancel: () => void;
 }
 
+/** The question what a context nobody marked is, which a dialog asks. */
+export interface Marking {
+  readonly context: string;
+  readonly choose: (environment: Environment) => void;
+  readonly cancel: () => void;
+}
+
 /** A run under way that said it waits, for the status bar. */
 export interface Running {
   readonly id: number;
@@ -48,7 +56,7 @@ export interface Running {
   readonly stop: () => void;
 }
 
-/** The space a request is for; a Reveal and a shell name none. */
+/** The space a request is for; a Reveal, a shell and a change of protection name none. */
 function spaceOf(request: PlanRequest): string | undefined {
   return "space" in request ? request.space : undefined;
 }
@@ -94,6 +102,9 @@ export type Outcome =
 export class Operations {
   readonly changes = new Changes();
   #asking: Asking | undefined;
+  #marking: Marking | undefined;
+  /** How many commands wait on the question what a context nobody marked is: from its asking until the command opens its own confirmation, or ends without one. */
+  #questions = 0;
   readonly #running = new Map<number, Running>();
   /** The countdowns under way, the newest last, by what they plan. */
   readonly #countdowns: {
@@ -132,6 +143,15 @@ export class Operations {
     return this.#asking;
   }
 
+  get marking(): Marking | undefined {
+    return this.#marking;
+  }
+
+  /** Whether a plan's confirmation is open, or the question of what a context is, and the command it asks for has not yet opened its own, which the asks of processes wait behind. */
+  get confirming(): boolean {
+    return this.#asking !== undefined || this.#questions > 0;
+  }
+
   /** The same array until the next change, for `useSyncExternalStore`. */
   get running(): readonly Running[] {
     return this.#all;
@@ -142,6 +162,11 @@ export class Operations {
     return this.#run(request, look, undefined);
   }
 
+  /** Lifts a read-only context's lock for 15 minutes, which asks in a dialog. */
+  unlock(context: string): Promise<Outcome> {
+    return this.run({ action: "unlock", context }, { icon: LockOpen });
+  }
+
   /** As `run`, for the undo it puts back, if it does. */
   async #run(
     request: PlanRequest,
@@ -149,41 +174,49 @@ export class Operations {
     undo: Undo | undefined,
   ): Promise<Outcome> {
     let plan: Plan;
+    let asked: Promise<{ typed: string | undefined } | undefined>;
+    let release: (() => void) | undefined;
     try {
-      plan = await this.backend.invoke("command_plan", request);
-    } catch (error) {
-      this.#fail(
-        error,
-        spaceOf(request),
-        unlockAction(this.backend, error, this.report),
-      );
-      return {
-        state: toIpcError(error).blocked === undefined ? "failed" : "refused",
-      };
-    }
-    if (undo) {
-      if (
-        request.action === "undo" &&
-        this.#undos.get(request.space) !== undo
-      ) {
-        this.backend.invoke("command_cancel", plan.id).catch(this.report);
-        return { state: "cancelled" };
+      for (;;) {
+        try {
+          plan = await this.backend.invoke("command_plan", request);
+          break;
+        } catch (error) {
+          const { blocked } = toIpcError(error);
+          if (blocked?.reason !== "unmarked") {
+            this.#fail(error, spaceOf(request), unlockAction(this, error));
+            return {
+              state:
+                toIpcError(error).blocked === undefined ? "failed" : "refused",
+            };
+          }
+          release ??= this.#hold();
+          const marked = await this.#mark(blocked.context);
+          if (marked.state !== "done") return marked;
+        }
       }
-      undo.plan = plan.id;
+      if (undo) {
+        if (
+          request.action === "undo" &&
+          this.#undos.get(request.space) !== undo
+        ) {
+          this.backend.invoke("command_cancel", plan.id).catch(this.report);
+          return { state: "cancelled" };
+        }
+        undo.plan = plan.id;
+      }
+      asked = this.#ask(plan, look, request);
+    } finally {
+      release?.();
     }
-    const agreed = await this.#ask(plan, look, request);
+    const agreed = await asked;
     if (!agreed) {
       this.backend.invoke("command_cancel", plan.id).catch(this.report);
       return { state: "cancelled" };
     }
     // An undo takes its own and leaves a later one standing, as in Rust; a
     // Reveal and a shell change nothing an undo could put back.
-    const space =
-      request.action === "reveal" ||
-      request.action === "undo" ||
-      request.action === "shell"
-        ? undefined
-        : request.space;
+    const space = request.action === "undo" ? undefined : spaceOf(request);
     // Rust takes the undo as its run starts; a refused one leaves it.
     const taken =
       undo && space === undefined && request.action === "undo"
@@ -201,6 +234,56 @@ export class Operations {
       look,
       taken,
     );
+  }
+
+  /**
+   * Asks what a context nobody marked is, as the first write or exec to it
+   * does, and marks it as the person answers, which a plan of its own does
+   * (ARCHITECTURE 6.4). Anything but `done` leaves the command it came from
+   * unsent.
+   */
+  async #mark(context: string): Promise<Outcome> {
+    const environment = await this.#askEnvironment(context);
+    if (environment === undefined) return { state: "cancelled" };
+    return this.#run(
+      { action: "setEnvironment", context, environment },
+      { icon: Tag },
+      undefined,
+    );
+  }
+
+  /** Counts a question what a context nobody marked is as open until the returned function ends it, so no ask of a process mounts between it and the command's own confirmation. */
+  #hold(): () => void {
+    this.#questions++;
+    this.changes.emit();
+    let open = true;
+    return () => {
+      if (!open) return;
+      open = false;
+      this.#questions--;
+      this.changes.emit();
+    };
+  }
+
+  #askEnvironment(context: string): Promise<Environment | undefined> {
+    return new Promise((resolve) => {
+      this.#marking?.cancel();
+      const done = (environment: Environment | undefined) => {
+        if (this.#marking !== marking) return;
+        this.#marking = undefined;
+        this.changes.emit();
+        resolve(environment);
+      };
+      const marking: Marking = {
+        context,
+        choose: done,
+        cancel: () => {
+          done(undefined);
+        },
+      };
+      this.#marking = marking;
+      this.changes.emit();
+    });
   }
 
   /** Puts back the space's last action while its undo lasts, as ⌘Z does; a second press while it goes does nothing. */

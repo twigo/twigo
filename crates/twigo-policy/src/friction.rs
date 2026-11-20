@@ -2,7 +2,7 @@
 //! friction grows with what the command risks, and the context's mode and
 //! type raise it.
 
-use twigo_ipc::{ContextAccess, Environment, Friction, Mode};
+use twigo_ipc::{ContextAccess, Environment, Friction, Mode, ModeSource};
 
 /// How long a toast counts down before a pod its controller replaces is
 /// deleted, as Headlamp holds it.
@@ -30,6 +30,13 @@ pub enum Risk {
     /// A shell or an attach, which a person opens often, so `guarded` asks
     /// in a dialog rather than for a typed name (6.4).
     Shell,
+    /// A lasting change of the context's own protection: the context's
+    /// access before and after it, as it is first, then under each set of
+    /// the locks that may go taken away, the person's choices kept.
+    Protection(Vec<(ContextAccess, ContextAccess)>),
+    /// An unlock, which ends by itself and leaves every write in `guarded`
+    /// asking for the context's name.
+    Unlock,
 }
 
 /// The friction of `risk` on `context`. A `read-only` context blocks a
@@ -39,6 +46,12 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
         text: context.to_owned(),
     };
     match (risk, access.mode) {
+        (Risk::Unlock, _) => Friction::Confirm,
+        (Risk::Protection(_), _) if access.source == ModeSource::Unmarked => Friction::AtOnce,
+        (Risk::Protection(views), _) if views.iter().all(|(from, to)| keeps(from, to)) => {
+            Friction::AtOnce
+        }
+        (Risk::Protection(_), _) => typed_context(),
         (Risk::Reveal, Mode::ReadWrite) => Friction::AtOnce,
         (Risk::Reveal, Mode::Guarded | Mode::ReadOnly) => Friction::Confirm,
         (Risk::Reviewed, Mode::ReadWrite) => Friction::AtOnce,
@@ -56,6 +69,31 @@ pub fn friction(risk: &Risk, context: &str, access: &ContextAccess) -> Friction 
         }
         (Risk::Replaced | Risk::Lasting, Mode::ReadWrite) => Friction::Confirm,
         (Risk::Wide { name }, Mode::ReadWrite) => Friction::Typed { text: name.clone() },
+    }
+}
+
+/// Whether a change from `from` to `to` leaves the context at least as
+/// strict as the mode it keeps. Leaving it unmarked weighs as `read-write`,
+/// since any change from there runs at once, unless it was unmarked already;
+/// a context unmarked before, which only a lock leaves unasked, counts as
+/// its `guarded`.
+pub fn keeps(from: &ContextAccess, to: &ContextAccess) -> bool {
+    let unmarked = |access: &ContextAccess| access.source == ModeSource::Unmarked;
+    let to = if unmarked(to) && !unmarked(from) {
+        Mode::ReadWrite
+    } else {
+        to.mode
+    };
+    to >= lasting(from)
+}
+
+/// The mode a context keeps: an unlocked one relocks to `read-only`, which
+/// a lasting change is weighed against.
+fn lasting(access: &ContextAccess) -> Mode {
+    if access.unlocked_until.is_some() {
+        Mode::ReadOnly
+    } else {
+        access.mode
     }
 }
 
@@ -83,7 +121,7 @@ mod tests {
     fn access(mode: Mode, environment: Option<Environment>) -> ContextAccess {
         ContextAccess {
             mode,
-            source: ModeSource::Default,
+            source: ModeSource::User { overrides: None },
             environment,
             unlocked_until: None,
         }
@@ -153,6 +191,109 @@ mod tests {
                 "{risk:?} in {mode:?} {environment:?}"
             );
         }
+    }
+
+    #[test]
+    fn lowering_protection_asks_for_the_name_and_an_unlock_in_a_dialog() {
+        let typed = Friction::Typed {
+            text: "kind-a".to_owned(),
+        };
+        let marked = |mode| access(mode, None);
+        let unmarked = ContextAccess {
+            source: ModeSource::Unmarked,
+            ..marked(Mode::Guarded)
+        };
+        let unlocked = ContextAccess {
+            unlocked_until: Some(1),
+            ..access(Mode::Guarded, Some(Environment::Production))
+        };
+        let (read_write, guarded, read_only) = (
+            marked(Mode::ReadWrite),
+            marked(Mode::Guarded),
+            marked(Mode::ReadOnly),
+        );
+        let cases = [
+            (&read_only, &read_write, typed.clone()),
+            (&read_only, &guarded, typed.clone()),
+            (&guarded, &read_write, typed.clone()),
+            (&read_write, &read_only, Friction::AtOnce),
+            (&read_write, &guarded, Friction::AtOnce),
+            (&guarded, &guarded, Friction::AtOnce),
+            (&read_only, &read_only, Friction::AtOnce),
+            (&unmarked, &read_write, Friction::AtOnce),
+            (&unmarked, &read_only, Friction::AtOnce),
+            (&read_only, &unmarked, typed.clone()),
+            (&guarded, &unmarked, typed.clone()),
+            (&unlocked, &unmarked, typed.clone()),
+            (&read_write, &unmarked, Friction::AtOnce),
+            (&unmarked, &unmarked, Friction::AtOnce),
+            (&unlocked, &guarded, typed.clone()),
+            (&unlocked, &read_only, Friction::AtOnce),
+        ];
+        for (before, after, expected) in cases {
+            let risk = Risk::Protection(vec![(before.clone(), after.clone())]);
+            assert_eq!(
+                friction(&risk, "kind-a", before),
+                expected,
+                "from {before:?} to {after:?}"
+            );
+        }
+        for before in [read_only, unlocked] {
+            let unlock = friction(&Risk::Unlock, "kind-a", &before);
+            assert_eq!(unlock, Friction::Confirm, "{before:?}");
+        }
+    }
+
+    #[test]
+    fn a_change_asks_for_the_name_where_it_lowers_the_context_under_any_set_of_locks_gone() {
+        let typed = Friction::Typed {
+            text: "kind-a".to_owned(),
+        };
+        let locked = ContextAccess {
+            source: ModeSource::Kubeconfig,
+            ..access(Mode::ReadOnly, None)
+        };
+        let typed_as = |mode, environment| ContextAccess {
+            source: ModeSource::Environment { environment },
+            ..access(mode, Some(environment))
+        };
+        let unmarked = ContextAccess {
+            source: ModeSource::Unmarked,
+            ..access(Mode::Guarded, None)
+        };
+        let (development, staging, production) = (
+            typed_as(Mode::ReadWrite, Environment::Development),
+            typed_as(Mode::Guarded, Environment::Staging),
+            typed_as(Mode::ReadOnly, Environment::Production),
+        );
+        let held = (locked.clone(), locked.clone());
+        let cases = [
+            (&unmarked, &development, typed.clone()),
+            (&unmarked, &staging, Friction::AtOnce),
+            (&unmarked, &production, Friction::AtOnce),
+            (&unmarked, &unmarked, Friction::AtOnce),
+            (&staging, &production, Friction::AtOnce),
+        ];
+        for (before, after, expected) in cases {
+            let risk = Risk::Protection(vec![held.clone(), (before.clone(), after.clone())]);
+            assert_eq!(
+                friction(&risk, "kind-a", &locked),
+                expected,
+                "from {before:?} to {after:?} beneath the lock"
+            );
+        }
+        let guarded = access(Mode::Guarded, None);
+        let lowered = Risk::Protection(vec![
+            (locked.clone(), guarded.clone()),
+            (unmarked.clone(), guarded),
+        ]);
+        assert_eq!(friction(&lowered, "kind-a", &locked), typed);
+        let between = Risk::Protection(vec![
+            held,
+            (production, staging.clone()),
+            (unmarked, staging),
+        ]);
+        assert_eq!(friction(&between, "kind-a", &locked), typed);
     }
 
     #[test]

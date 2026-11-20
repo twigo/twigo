@@ -4,14 +4,18 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::time::Duration;
+
 use k8s_openapi::api::authorization::v1::SelfSubjectAccessReview;
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod};
+use k8s_openapi::api::flowcontrol::v1::FlowSchema;
+use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding};
 use kube::api::{DeleteParams, ListParams, PatchParams, PostParams, WatchParams};
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
-use twigo_ipc::{BlockReason, ErrorKind, Mode};
-use twigo_kube::client::{Actor, Clients, Gate, Options};
+use twigo_ipc::{BlockReason, ErrorKind, Mode, RequestClass};
+use twigo_kube::client::{Actor, Clients, Gate, Options, Server};
 use twigo_kube::errors;
 use twigo_policy::Policy;
 
@@ -374,5 +378,151 @@ async fn the_api_server_does_not_always_treat_dry_run_as_a_dry_run() {
         BlockReason::NoApproval
     );
 
+    cluster.delete().await;
+}
+
+/// How many of `user`'s requests the API server dispatched through the
+/// FlowSchema named after them. The filter of API Priority and Fairness
+/// runs after impersonation and before authorization, for every request
+/// that is not long-running, the ones the aggregator proxies to another
+/// server included
+/// ([`DefaultBuildHandlerChain`](https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apiserver/pkg/server/config.go#L1036-L1076)),
+/// while `apiserver_request_total` leaves those out: it counts at the
+/// routes of kube-apiserver's own handlers, which a proxied request never
+/// reaches (none for `metrics.k8s.io` on kind 1.37 after a `GET` of it,
+/// 2026-11-19).
+async fn dispatched(admin: &Client, user: &str) -> u64 {
+    let request = http::Request::get("/metrics").body(Vec::new()).unwrap();
+    let metrics = admin.request_text(request).await.unwrap();
+    let schema = format!("flow_schema=\"{user}\"");
+    metrics
+        .lines()
+        .filter(|line| {
+            line.starts_with("apiserver_flowcontrol_dispatched_requests_total{")
+                && line.contains(&schema)
+        })
+        .map(|line| line.rsplit(' ').next().unwrap().parse::<f64>().unwrap() as u64)
+        .sum()
+}
+
+/// A dry run to a group whose APIService names a service is a write, so in
+/// `read-only` it never reaches the API server. metrics-server's group takes
+/// no writes, so its answer cannot tell a refusal by the gate from one by
+/// the server: the test counts what the API server dispatched for a user of
+/// its own, which may read APIServices and nothing more.
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_dry_run_to_an_aggregated_group_never_reaches_the_server_in_read_only() {
+    let cluster = Cluster::new("gate-aggregated").await;
+    let user = cluster.namespace.clone();
+    let named = |more: serde_json::Value| {
+        let mut object = json!({ "metadata": { "name": user } });
+        object
+            .as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
+        object
+    };
+    let subject = json!({ "kind": "User", "name": user, "apiGroup": "rbac.authorization.k8s.io" });
+    let roles: Api<ClusterRole> = Api::all(cluster.admin.clone());
+    let role = named(json!({ "rules": [{
+        "apiGroups": ["apiregistration.k8s.io"], "resources": ["apiservices"], "verbs": ["get"],
+    }] }));
+    roles
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(role).unwrap(),
+        )
+        .await
+        .unwrap();
+    let bindings: Api<ClusterRoleBinding> = Api::all(cluster.admin.clone());
+    let binding = named(json!({
+        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": user },
+        "subjects": [subject],
+    }));
+    bindings
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(binding).unwrap(),
+        )
+        .await
+        .unwrap();
+    let schemas: Api<FlowSchema> = Api::all(cluster.admin.clone());
+    let schema = named(json!({ "spec": {
+        "matchingPrecedence": 450,
+        "priorityLevelConfiguration": { "name": "global-default" },
+        "rules": [{
+            "subjects": [{ "kind": "User", "user": { "name": user } }],
+            "resourceRules": [{
+                "verbs": ["*"], "apiGroups": ["*"], "resources": ["*"],
+                "namespaces": ["*"], "clusterScope": true,
+            }],
+        }],
+    } }));
+    schemas
+        .create(
+            &PostParams::default(),
+            &serde_json::from_value(schema).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let policy = Policy::open();
+    policy.set_mode("c", Some(Mode::ReadWrite)).unwrap();
+    let mut config = cluster.config.clone();
+    config.auth_info.impersonate = Some(user.clone());
+    let clients = Clients::new(&config, policy.gate("c", Actor::Ui), Options::default()).unwrap();
+    let waited = tokio::time::timeout(Duration::from_secs(30), async {
+        while dispatched(&cluster.admin, &user).await == 0 {
+            let read = http::Request::get("/api/v1/namespaces/default/configmaps")
+                .body(Vec::new())
+                .unwrap();
+            let _ = clients.api.request_text(read).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    });
+    waited
+        .await
+        .expect("the API server takes up the FlowSchema within 30 s");
+    assert_eq!(
+        clients.server("metrics.k8s.io", "v1beta1").await,
+        Some(Server::Aggregated)
+    );
+
+    let dry_run = || {
+        http::Request::patch(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{}/pods/p?dryRun=All",
+            cluster.namespace
+        ))
+        .header(http::header::CONTENT_TYPE, "application/merge-patch+json")
+        .body(b"{}".to_vec())
+        .unwrap()
+    };
+    let before = dispatched(&cluster.admin, &user).await;
+    let answered = clients.api.request_text(dry_run()).await.unwrap_err();
+    assert!(errors::gate(&answered).is_none(), "{answered}");
+    assert_eq!(
+        dispatched(&cluster.admin, &user).await,
+        before + 1,
+        "in read-write it reaches the server, which answers it: {answered}"
+    );
+
+    policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
+    let refused = clients.api.request_text(dry_run()).await.unwrap_err();
+    let blocked = errors::gate(&refused).expect("the gate refused it");
+    assert_eq!(blocked.class, RequestClass::Write);
+    assert_eq!(blocked.reason, BlockReason::Mode);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(dispatched(&cluster.admin, &user).await, before + 1);
+
+    schemas
+        .delete(&user, &DeleteParams::default())
+        .await
+        .unwrap();
+    bindings
+        .delete(&user, &DeleteParams::default())
+        .await
+        .unwrap();
+    roles.delete(&user, &DeleteParams::default()).await.unwrap();
     cluster.delete().await;
 }

@@ -50,27 +50,27 @@ use kube::core::{GroupVersionKind, Request, Status};
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    Affected, ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, ErrorKind, IpcError,
-    OpenedEdit, PreviewId, Resource as Served,
+    Affected, ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, BlockReason, ErrorKind,
+    IpcError, OpenedEdit, PreviewId, RequestClass, Resource as Served,
 };
 use twigo_kube::apply::{
     self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, Refusal, comparable,
     comparable_with_owners, merge_patch, still_has, without,
 };
-use twigo_kube::client::Clients;
+use twigo_kube::client::{Clients, Server};
 use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
-use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{for_view, is_mask};
+use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
 use super::{
     ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned, Previewed, Progress};
+use crate::bus::{self, Finished, Planned, Previewed, Progress};
 
 /// What takes the place of a value in a message.
 const HIDDEN: &str = "<hidden>";
@@ -86,6 +86,21 @@ pub(crate) struct Prepared {
     what: String,
     kubectl: String,
     step: Step,
+}
+
+impl Prepared {
+    /// As the audit log names the command that sends it, and its object.
+    fn audited(&self) -> (&'static str, String) {
+        let command = match self.step {
+            Step::Recreate(_) => "recreate",
+            Step::Apply(_) | Step::Patch(_) => "apply",
+        };
+        let target = self
+            .writes
+            .first()
+            .map_or_else(|| self.what.clone(), Attributes::target);
+        (command, target)
+    }
 }
 
 enum Step {
@@ -714,6 +729,7 @@ pub(crate) async fn preview(
         }
         None => manifest_target(context.clone(), &resources, &edited)?,
     };
+    previewable(core, &clients, &target).await?;
     let keep = |prepared: Prepared| core.bus.keep_preview(&ticket, started, prepared);
 
     let secret = target.is("", &["secrets"]);
@@ -848,6 +864,51 @@ pub(crate) async fn preview(
         }
         return Ok(answer);
     }
+}
+
+/// Refuses to preview an object of a group-version that kube-apiserver
+/// does not serve itself, or that Twigo could not read whether it does,
+/// where the UI's writes are refused, in `read-only` or a context nobody
+/// marked: the gate takes its dry runs for writes, since its server may
+/// ignore `dryRun` and perform them.
+async fn previewable(core: &Core, clients: &Clients, target: &Target) -> Result<(), IpcError> {
+    let probe = http::Request::patch(format!("{}?dryRun=All", target.path))
+        .body(())
+        .expect("an object's path makes a request");
+    let attributes = clients.attributes(&probe).await;
+    if attributes.class != RequestClass::Write {
+        return Ok(());
+    }
+    let Err(blocked) = core
+        .policy
+        .authorize(&target.context, &attributes, Actor::Ui)
+    else {
+        return Ok(());
+    };
+    let Resource { group, version, .. } = &target.resource;
+    let why = match clients.server(group, version).await {
+        Some(Server::Aggregated) => format!(
+            "{group}/{version} is served by another server than the cluster's API server, which may not honour a dry run"
+        ),
+        _ => format!(
+            "Twigo could not read whether the cluster's API server serves {group}/{version} itself"
+        ),
+    };
+    let context = &target.context;
+    let message = match blocked.reason {
+        BlockReason::Unmarked => format!(
+            "{why}, so Twigo cannot preview this edit in {context} until someone says what it is"
+        ),
+        _ => format!(
+            "{why}, so Twigo cannot preview this edit in {context}, which is {}",
+            blocked.mode.name()
+        ),
+    };
+    Err(IpcError {
+        kind: ErrorKind::Permissions,
+        message,
+        blocked: Some(blocked),
+    })
 }
 
 /// The object once more, when only what a status write moves has changed
@@ -1314,8 +1375,10 @@ pub(crate) async fn apply(
     preview: PreviewId,
 ) -> Result<Planned, IpcError> {
     let (prepared, started) = core.bus.take_preview(window, preview, |prepared| {
-        core.authorize(&prepared.context, &prepared.writes)
+        let (command, target) = prepared.audited();
+        core.authorize(&prepared.context, command, &target, &prepared.writes)
     })?;
+    let (command, audit_target) = prepared.audited();
     let Prepared {
         context,
         connection,
@@ -1329,10 +1392,6 @@ pub(crate) async fn apply(
     let preview_of = (object, started);
     let this = core.this.clone();
     let place = target.place();
-    let audit_target = writes
-        .first()
-        .map_or_else(|| what.clone(), Attributes::target);
-    let command = "apply";
     Ok(match step {
         Step::Apply(step) => {
             let consequences = if step.removals.is_empty() {
@@ -1361,7 +1420,7 @@ pub(crate) async fn apply(
                 destructive: false,
                 consequences,
                 affected: Vec::new(),
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1371,7 +1430,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Reviewed,
                 previewed: Some(preview_of.clone()),
-                run: Box::new(move |_| Box::pin(run.run())),
+                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
             }
         }
         Step::Patch(step) => {
@@ -1391,7 +1450,7 @@ pub(crate) async fn apply(
                     "An apply cannot express this edit, so it goes as one merge patch under field manager {EDIT_FIELD_MANAGER}, as kubectl edit would."
                 )],
                 affected: Vec::new(),
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Applying {what}"),
                 command,
                 target: audit_target,
@@ -1401,7 +1460,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Reviewed,
                 previewed: Some(preview_of.clone()),
-                run: Box::new(move |_| Box::pin(run.run())),
+                run: bus::Run::Sends(Box::new(move |_| Box::pin(run.run()))),
             }
         }
         Step::Recreate(step) => {
@@ -1449,9 +1508,9 @@ pub(crate) async fn apply(
                 destructive: true,
                 consequences,
                 affected,
-                kubectl,
+                kubectl: Some(kubectl),
                 doing: format!("Recreating {what}"),
-                command: "recreate",
+                command,
                 target: audit_target,
                 writes,
                 context,
@@ -1459,7 +1518,7 @@ pub(crate) async fn apply(
                 space: Some(space),
                 risk: Risk::Lasting,
                 previewed: Some(preview_of),
-                run: Box::new(move |progress| Box::pin(run.run(progress))),
+                run: bus::Run::Sends(Box::new(move |progress| Box::pin(run.run(progress)))),
             }
         }
     })

@@ -73,6 +73,7 @@ test("ctx lists the open spaces, then the other contexts by the file that define
     ["Open spaces", "staging"],
     ["Open spaces", "dev"],
     ["~/.kube/config", "qa"],
+    ["~/.kube/config", "analytics"],
     ["~/.kube/kind.yaml", "kind-local"],
   ]);
   expect(found[0]).toMatchObject({
@@ -122,12 +123,14 @@ test("ctx keeps its sections in order as it filters, best first in each", async 
   const { provider } = await items("ctx ");
   const found = await provider.items("l", NOWHERE);
   expect(found.map((item) => [item.group, item.label])).toEqual([
+    ["~/.kube/config", "analytics"],
     ["~/.kube/kind.yaml", "kind-local"],
   ]);
-  expect(found[0]?.matches).toEqual([{ start: 5, end: 6 }]);
+  expect(found[1]?.matches).toEqual([{ start: 5, end: 6 }]);
   const some = await provider.items("a", NOWHERE);
   expect(some.map((item) => [item.group, item.label])).toEqual([
     ["Open spaces", "staging"],
+    ["~/.kube/config", "analytics"],
     ["~/.kube/config", "qa"],
     ["~/.kube/kind.yaml", "kind-local"],
   ]);

@@ -183,7 +183,7 @@ impl Connect for Pods {
             let blocked = twigo_ipc::Blocked {
                 context: "kind-test".to_owned(),
                 mode: twigo_ipc::Mode::ReadOnly,
-                source: twigo_ipc::ModeSource::User,
+                source: twigo_ipc::ModeSource::User { overrides: None },
                 class: twigo_ipc::RequestClass::Forward,
                 reason: twigo_ipc::BlockReason::Mode,
                 verb: "get".to_owned(),

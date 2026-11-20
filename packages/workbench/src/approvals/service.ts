@@ -62,7 +62,7 @@ export class Approvals {
   #answering: ApprovalId | undefined;
   #failure: string | undefined;
 
-  /** `covered` says whether a plan's confirmation is open, which the asks wait behind. */
+  /** `covered` says whether a plan's confirmation or the question of what a context is is open, which the asks wait behind. */
   constructor(
     private readonly backend: Backend,
     private readonly covered: () => boolean,

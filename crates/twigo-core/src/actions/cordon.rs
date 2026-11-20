@@ -17,7 +17,7 @@ use twigo_policy::friction::Risk;
 use super::undo::{Asks, Revert, Unchanged};
 use super::{ATTEMPTS, STRATEGIC_MERGE_PATCH, Target, clients_for, get, lost, patch_as_of, same};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 pub(crate) fn node(context: String, name: String) -> Result<Target, IpcError> {
     let nodes = Resource {
@@ -88,7 +88,16 @@ pub(crate) async fn cordon(
 ) -> Result<Planned, IpcError> {
     let target = node(core.context(space)?, name)?;
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    let Words {
+        verb, doing, done, ..
+    } = words(unschedulable);
+    core.authorize(
+        &target.context,
+        verb,
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -101,9 +110,6 @@ pub(crate) async fn cordon(
             already(name, unschedulable),
         ));
     }
-    let Words {
-        verb, doing, done, ..
-    } = words(unschedulable);
     let context = target.context.clone();
     let connection = clients.connection();
     let consequence = if unschedulable {
@@ -125,16 +131,16 @@ pub(crate) async fn cordon(
         doing: format!("{doing} node {name}"),
         consequences: vec![consequence.to_owned()],
         affected: Vec::new(),
-        kubectl,
+        kubectl: Some(kubectl),
         command: verb,
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Reversible,
         previewed: None,
-        run: Box::new(move |_| {
+        run: bus::Run::Sends(Box::new(move |_| {
             Box::pin(send(
                 this,
                 connection,
@@ -143,7 +149,7 @@ pub(crate) async fn cordon(
                 unschedulable,
                 format!("{done} node"),
             ))
-        }),
+        })),
     })
 }
 

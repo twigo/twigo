@@ -29,7 +29,7 @@ use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     BusyWhy, ErrorKind, Forward, ForwardId, ForwardStarted, ForwardState, ForwardTarget, Gvr, Mode,
-    ResumeForward, SetContextMode, StartForward,
+    ResumeForward, StartForward,
 };
 use twigo_kube::client::{Actor, ProxyEnv};
 
@@ -911,12 +911,9 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
     .await;
     let before = cluster.started_with(1).await;
 
-    core.set_context_mode(SetContextMode {
-        context: cluster.context.clone(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::ReadOnly))
+        .unwrap();
     state(&core, started.id, "the forward fails", |state| {
         matches!(state, ForwardState::Failed { error } if error.kind == ErrorKind::Permissions)
     })
@@ -960,12 +957,9 @@ async fn a_mode_that_refuses_forwards_ends_them_and_sends_nothing() {
         "since the mode turned no request reached the API server's route"
     );
 
-    core.set_context_mode(SetContextMode {
-        context: cluster.context.clone(),
-        mode: Some(Mode::ReadWrite),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode(&cluster.context, Some(Mode::ReadWrite))
+        .unwrap();
     state(
         &core,
         started.id,

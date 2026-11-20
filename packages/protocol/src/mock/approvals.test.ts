@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { IpcError } from "../error";
 import type { Backend } from "../backend";
-import type { ApprovalAsk, ApprovalEvent } from "../generated";
+import type { ApprovalAnswer, ApprovalAsk, ApprovalEvent } from "../generated";
 import {
   createMockBackend,
   FIRST_ASK_MS,
   NEXT_ASK_MS,
+  protect,
   WITHDRAWN_AFTER_MS,
   type MockScenario,
 } from "./index";
@@ -45,10 +46,13 @@ function nth(events: ApprovalEvent[], index: number): ApprovalAsk {
   return ask;
 }
 
+const last = (events: ApprovalEvent[]): ApprovalAsk =>
+  nth(events, asks(events).length - 1);
+
 async function answer(
   backend: Backend,
   ask: ApprovalAsk,
-  answer: "deny" | "once" | "lasting" = "once",
+  answer: ApprovalAnswer = { kind: "once" },
   typed: string | null = null,
 ) {
   const sent = backend.invoke("approval_answer", {
@@ -84,7 +88,7 @@ test("the sequence raises its asks one after another as each is answered", async
   expect(asks(events)[1]?.detail).toMatchObject({ kind: "diff", live: null });
 
   for (let step = 1; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   expect(
@@ -112,7 +116,7 @@ async function raised(): Promise<ApprovalAsk[]> {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   for (let step = 0; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   return asks(events);
@@ -187,7 +191,7 @@ test("a diff's sides are recorded objects with a change made in code, as Rust's 
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   for (let step = 0; step < 10; step++) {
-    await answer(backend, nth(events, step), "deny", "prod-eu");
+    await answer(backend, nth(events, step), { kind: "deny" }, "prod-eu");
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   }
   const diffs = asks(events).flatMap(({ detail }) =>
@@ -247,16 +251,18 @@ test("a delete refuses a context name typed wrong, an ask that is gone, and allo
   });
 
   for (const typed of [null, "prod", "Prod-eu"]) {
-    const error = await answer(backend, remove, "once", typed);
+    const error = await answer(backend, remove, { kind: "once" }, typed);
     expect(error).toBeInstanceOf(IpcError);
     expect((error as IpcError).kind).toBe("invalidInput");
   }
-  expect(await answer(backend, remove, "lasting", "prod")).toBeInstanceOf(
-    IpcError,
-  );
-  expect(await answer(backend, remove, "once", "prod-eu")).toBeUndefined();
+  expect(
+    await answer(backend, remove, { kind: "lasting" }, "prod"),
+  ).toBeInstanceOf(IpcError);
+  expect(
+    await answer(backend, remove, { kind: "once" }, "prod-eu"),
+  ).toBeUndefined();
 
-  const gone = await answer(backend, remove, "once", "prod-eu");
+  const gone = await answer(backend, remove, { kind: "once" }, "prod-eu");
   expect((gone as IpcError).kind).toBe("notFound");
 });
 
@@ -271,7 +277,7 @@ async function throughSequence(
     await answer(
       backend,
       ask,
-      step === lastingAt ? "lasting" : "once",
+      step === lastingAt ? { kind: "lasting" } : { kind: "once" },
       ask.context,
     );
     await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
@@ -326,17 +332,18 @@ test("a lasting answer spares the writes of its process and context, and a delet
   ]);
 });
 
-test("a lasting answer ends after the minutes the ask offered", async () => {
+test("a lasting answer ends after the minutes the ask offered, and the delete in prod-eu, relocked by then, is refused with no ask", async () => {
   const { backend, events } = await followed("approval");
   await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
   const patch = nth(events, 0);
-  await answer(backend, patch, "lasting");
+  await answer(backend, patch, { kind: "lasting" });
   await vi.advanceTimersByTimeAsync((patch.lastingMinutes ?? 0) * 60_000);
   await answer(backend, nth(events, 1));
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  await answer(backend, nth(events, 2), "deny");
-  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
-  expect(nth(events, 3).command).toBe("kubectl exec");
+  expect(nth(events, 2)).toMatchObject({
+    command: "kubectl exec",
+    context: "staging",
+  });
 });
 
 test("a lasting answer allows the asks of its process and context that already wait, and withdraws them", async () => {
@@ -353,7 +360,7 @@ test("a lasting answer allows the asks of its process and context that already w
     "Terminal 2",
   ]);
 
-  expect(await answer(backend, patch, "lasting")).toBeUndefined();
+  expect(await answer(backend, patch, { kind: "lasting" })).toBeUndefined();
   expect(events.slice(3)).toEqual([{ event: "withdrawn", id: exec.id }]);
   const gone = await answer(backend, exec);
   expect((gone as IpcError).kind).toBe("notFound");
@@ -370,9 +377,11 @@ test("a lasting answer is refused for an ask that offers none, and the ask stays
   const remove = nth(events, 2);
   expect(remove.lastingMinutes).toBeNull();
 
-  const refused = await answer(backend, remove, "lasting", "prod-eu");
+  const refused = await answer(backend, remove, { kind: "lasting" }, "prod-eu");
   expect((refused as IpcError).kind).toBe("invalidInput");
-  expect(await answer(backend, remove, "once", "prod-eu")).toBeUndefined();
+  expect(
+    await answer(backend, remove, { kind: "once" }, "prod-eu"),
+  ).toBeUndefined();
 });
 
 test("a deny needs no name typed", async () => {
@@ -383,7 +392,132 @@ test("a deny needs no name typed", async () => {
   await answer(backend, nth(events, 1));
   await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
   expect(nth(events, 2).typed).toBe(true);
-  expect(await answer(backend, nth(events, 2), "deny")).toBeUndefined();
+  expect(
+    await answer(backend, nth(events, 2), { kind: "deny" }),
+  ).toBeUndefined();
+});
+
+const MARK: ApprovalAnswer = { kind: "mark", environment: "staging" };
+
+const typeOf = async (backend: Backend, context: string) => {
+  const watch = backend.subscribe("contexts_watch", null, () => undefined);
+  await vi.advanceTimersByTimeAsync(0);
+  const contexts = await watch;
+  return contexts.find(({ name }) => name === context)?.access.environment;
+};
+
+test("an ask of a context nobody marked takes its type or a denial alone, and its type answers no ordinary ask", async () => {
+  const { backend, events } = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const unmarked = nth(events, 0);
+  expect(unmarked).toMatchObject({ context: "qa", unmarked: true });
+  for (const given of [{ kind: "once" }, { kind: "lasting" }] as const) {
+    const error = await answer(backend, unmarked, given);
+    expect((error as IpcError).kind).toBe("invalidInput");
+  }
+  expect(await typeOf(backend, "qa")).toBeNull();
+  expect(await answer(backend, unmarked, { kind: "deny" })).toBeUndefined();
+  expect(await typeOf(backend, "qa")).toBeNull();
+
+  const ordinary = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const patch = nth(ordinary.events, 0);
+  const refused = await answer(ordinary.backend, patch, MARK);
+  expect((refused as IpcError).kind).toBe("invalidInput");
+  expect(await answer(ordinary.backend, patch)).toBeUndefined();
+});
+
+test("a type that answers an unmarked ask marks its context, and Staging raises the request again as an ordinary ask", async () => {
+  const staging = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const unmarked = nth(staging.events, 0);
+  expect(await answer(staging.backend, unmarked, MARK)).toBeUndefined();
+  expect(await typeOf(staging.backend, "qa")).toBe("staging");
+  const again = nth(staging.events, 1);
+  expect(again).toMatchObject({
+    context: "qa",
+    process: unmarked.process,
+    target: unmarked.target,
+    unmarked: false,
+    lastingMinutes: 15,
+  });
+  expect(again.id).not.toBe(unmarked.id);
+
+  const production = await followed("approvalUnmarked");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(production.backend, nth(production.events, 0), {
+    kind: "mark",
+    environment: "production",
+  });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(await typeOf(production.backend, "qa")).toBe("production");
+  expect(asks(production.events)).toHaveLength(1);
+});
+
+const choose = (backend: Backend, request: Parameters<typeof protect>[1]) =>
+  protect(backend, request, () => vi.advanceTimersByTimeAsync(1));
+
+test("a delete's unmarked ask asks for no name and offers no 15 minutes, and the ordinary ask Staging raises for it asks for the name and offers none", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, nth(events, 1));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = nth(events, 2);
+  expect(remove).toMatchObject({ context: "prod-eu", verb: "delete" });
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "prod-eu",
+    environment: null,
+  });
+  const unmarked = nth(events, 3);
+  expect(unmarked).toMatchObject({
+    context: "prod-eu",
+    target: remove.target,
+    unmarked: true,
+    typed: false,
+    lastingMinutes: null,
+  });
+  expect(await answer(backend, unmarked, MARK)).toBeUndefined();
+  expect(nth(events, 4)).toMatchObject({
+    context: "prod-eu",
+    target: remove.target,
+    unmarked: false,
+    typed: true,
+    lastingMinutes: null,
+  });
+});
+
+test("an ordinary ask whose context is made read-only is withdrawn and its request refused, and one whose type is cleared asks what the context is", async () => {
+  const refused = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const patch = nth(refused.events, 0);
+  await choose(refused.backend, {
+    action: "setMode",
+    context: "staging",
+    mode: "read-only",
+  });
+  expect(refused.events.slice(1)).toEqual([
+    { event: "withdrawn", id: patch.id },
+  ]);
+
+  const cleared = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  const create = nth(cleared.events, 0);
+  await choose(cleared.backend, {
+    action: "setEnvironment",
+    context: "staging",
+    environment: null,
+  });
+  expect(cleared.events[1]).toEqual({ event: "withdrawn", id: create.id });
+  expect(asks(cleared.events)[1]).toMatchObject({
+    context: "staging",
+    unmarked: true,
+    lastingMinutes: null,
+    process: create.process,
+    target: create.target,
+  });
 });
 
 test("a window that follows again is sent the asks that wait", async () => {
@@ -437,4 +571,59 @@ test("another scenario raises nothing", async () => {
   const { events } = await followed("ready");
   await vi.advanceTimersByTimeAsync(60_000);
   expect(events).toEqual([]);
+});
+
+test("a lasting answer ends once its context goes read-only and back", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), { kind: "lasting" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, last(events));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = last(events);
+  await choose(backend, {
+    action: "setMode",
+    context: "staging",
+    mode: "read-only",
+  });
+  await choose(backend, { action: "setMode", context: "staging", mode: null });
+  await answer(backend, remove, { kind: "deny" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  expect(last(events)).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    command: "kubectl exec",
+  });
+});
+
+test("an unmarked ask answered Staging asks to allow the request, whatever the process was allowed before the type was cleared", async () => {
+  const { backend, events } = await followed("approval");
+  await vi.advanceTimersByTimeAsync(FIRST_ASK_MS);
+  await answer(backend, nth(events, 0), { kind: "lasting" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  await answer(backend, last(events));
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const remove = last(events);
+  await choose(backend, {
+    action: "setEnvironment",
+    context: "staging",
+    environment: null,
+  });
+  await answer(backend, remove, { kind: "deny" });
+  await vi.advanceTimersByTimeAsync(NEXT_ASK_MS);
+  const exec = last(events);
+  expect(exec).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    unmarked: true,
+  });
+  expect(
+    await answer(backend, exec, { kind: "mark", environment: "staging" }),
+  ).toBeUndefined();
+  expect(last(events)).toMatchObject({
+    process: "Terminal 2",
+    context: "staging",
+    unmarked: false,
+    lastingMinutes: 15,
+  });
 });

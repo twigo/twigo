@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use twigo_env::ShellEnv;
-use twigo_ipc::{Gvr, Mode, SetContextMode};
+use twigo_ipc::{Gvr, Mode};
 
 use super::*;
 use crate::state::State;
@@ -574,12 +574,9 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
     core.catalog.contexts().await;
     assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-plain", Some(Mode::ReadOnly))
+        .unwrap();
     let failed = until("the mode fails the forward", || {
         let now = listed(&core)[0].state.clone();
         matches!(now, ForwardState::Failed { .. }).then_some(now)
@@ -619,12 +616,9 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
         .unwrap_err();
     assert_eq!(refused.kind, ErrorKind::Permissions);
 
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(Mode::ReadWrite),
-    })
-    .await
-    .unwrap();
+    core.policy
+        .set_mode("kind-plain", Some(Mode::ReadWrite))
+        .unwrap();
     until("the mode lets it go back to waiting", || {
         let now = listed(&core)[0].state.clone();
         (now == ForwardState::Restored).then_some(now)
@@ -636,6 +630,62 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
         ForwardState::Restored,
         "it asked no cluster"
     );
+}
+
+#[tokio::test]
+async fn a_start_and_a_resume_the_mode_refuses_leave_a_refused_line_each() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("policy.json"), REFUSING).unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+    set_the_mode(&core, Mode::ReadOnly).await;
+
+    core.forward_start(StartForward {
+        target: target("kind-plain", "other"),
+        port: 8080,
+        local: Some(free()),
+    })
+    .await
+    .unwrap_err();
+    core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: None,
+    })
+    .await
+    .unwrap_err();
+
+    let refused = |name: &str| {
+        serde_json::json!({
+            "event": "refused",
+            "context": "kind-plain",
+            "command": "forward",
+            "target": format!("pods/{name} in shop"),
+            "mode": "read-only",
+            "source": { "kind": "user", "overrides": null },
+            "why": { "kind": "gate", "reason": "mode" },
+        })
+    };
+    assert_eq!(audit(dir.path()), [refused("other"), refused("api")]);
+}
+
+fn audit(dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("audit.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let mut line: Value = serde_json::from_str(line).unwrap();
+            line.as_object_mut().unwrap().remove("at");
+            line
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -1623,12 +1673,7 @@ fn other_target(mut saved: SavedForward, name: &str) -> SavedForward {
 const REFUSING: &str = r#"{"readOnly": {"allowPortForward": false}}"#;
 
 async fn set_the_mode(core: &Core, mode: Mode) {
-    core.set_context_mode(SetContextMode {
-        context: "kind-plain".to_owned(),
-        mode: Some(mode),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode("kind-plain", Some(mode)).unwrap();
 }
 
 async fn refused_while_restored(dir: &Path, api: &Api) -> Arc<Core> {
@@ -2162,6 +2207,11 @@ async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lack
     assert_eq!(listed(&core)[0].local, local);
     assert!(!core.state.forwards("kind-plain").forwards[0].runs);
     assert!(std::net::TcpListener::bind(("127.0.0.1", moved)).is_ok());
+    assert!(
+        audit(dir.path())
+            .iter()
+            .all(|line| line["event"] != "refused")
+    );
 }
 
 #[tokio::test]

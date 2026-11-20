@@ -20,7 +20,7 @@ use super::{
     sentence,
 };
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 const RESTARTED_AT: &str = "kubectl.kubernetes.io/restartedAt";
 
@@ -37,7 +37,13 @@ pub(crate) async fn restart(
         ));
     }
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    core.authorize(
+        &target.context,
+        "restart",
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -94,16 +100,18 @@ pub(crate) async fn restart(
         doing: format!("Restarting {what}"),
         consequences,
         affected,
-        kubectl,
+        kubectl: Some(kubectl),
         command: "restart",
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,
         space: Some(space.to_owned()),
         risk: Risk::Lasting,
         previewed: None,
-        run: Box::new(move |_| Box::pin(send(this, connection, run, uid, what, done))),
+        run: bus::Run::Sends(Box::new(move |_| {
+            Box::pin(send(this, connection, run, uid, what, done))
+        })),
     })
 }
 

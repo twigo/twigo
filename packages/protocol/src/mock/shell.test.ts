@@ -69,11 +69,11 @@ interface Opened {
   readonly type: (text: string) => Promise<void>;
 }
 
-/** Plans and runs a shell in `qa`, read-write, then opens its session at `cols` by `rows`. */
+/** Plans and runs a shell in `kind-local`, read-write, then opens its session at `cols` by `rows`. */
 async function openShell(
   scenario: MockScenario = "live",
   kind: ShellKind = "shell",
-  space = "qa",
+  space = "kind-local",
 ): Promise<Opened> {
   const backend = createMockBackend(scenario);
   await answered(backend.invoke("space_open", space));
@@ -136,21 +136,21 @@ const states = (messages: readonly ShellMessage[]) =>
 
 test("a pod's running containers come in order with the first the default, the second where the scenario says, and one container where it says so", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const { namespace, pod } = targetOf("qa");
-  const request = { space: "qa", namespace, pod };
+  await answered(backend.invoke("space_open", "kind-local"));
+  const { namespace, pod } = targetOf("kind-local");
+  const request = { space: "kind-local", namespace, pod };
   const many = await answered(backend.invoke("shell_containers", request));
   expect(many.containers.length).toBeGreaterThanOrEqual(2);
   expect(many.default).toBe(many.containers[0]);
 
   const annotated = createMockBackend("shellDefaultSecond");
-  await answered(annotated.invoke("space_open", "qa"));
+  await answered(annotated.invoke("space_open", "kind-local"));
   expect(await answered(annotated.invoke("shell_containers", request))).toEqual(
     { containers: many.containers, default: many.containers[1] },
   );
 
   const one = createMockBackend("shellOneContainer");
-  await answered(one.invoke("space_open", "qa"));
+  await answered(one.invoke("space_open", "kind-local"));
   expect(
     (await answered(one.invoke("shell_containers", request))).containers,
   ).toHaveLength(1);
@@ -158,14 +158,16 @@ test("a pod's running containers come in order with the first the default, the s
 
 test("a pod that runs nothing is refused in words, and one that is not there is not found", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
-  const pending = new Cluster("qa", POD_COUNT.qa ?? 0, 0).pods.find(
-    (candidate) => candidate.status !== "Running",
-  );
-  if (!pending) throw new Error("qa has no pod that is not running");
+  await answered(backend.invoke("space_open", "kind-local"));
+  const pending = new Cluster(
+    "kind-local",
+    POD_COUNT["kind-local"] ?? 0,
+    0,
+  ).pods.find((candidate) => candidate.status !== "Running");
+  if (!pending) throw new Error("kind-local has no pod that is not running");
   const error = await refused(
     backend.invoke("shell_containers", {
-      space: "qa",
+      space: "kind-local",
       namespace: pending.namespace,
       pod: pending.name,
     }),
@@ -176,7 +178,7 @@ test("a pod that runs nothing is refused in words, and one that is not there is 
   );
   const missing = await refused(
     backend.invoke("shell_containers", {
-      space: "qa",
+      space: "kind-local",
       namespace: "default",
       pod: "nothing-here",
     }),
@@ -186,14 +188,16 @@ test("a pod that runs nothing is refused in words, and one that is not there is 
 
 test("a shell asks as exec does: at once in read-write, to confirm in guarded, refused in read-only", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const plan = (space: string) =>
     backend.invoke("command_plan", {
       action: "shell",
       target: targetOf(space),
       kind: "shell",
     });
-  expect((await answered(plan("qa"))).friction).toEqual({ kind: "atOnce" });
+  expect((await answered(plan("kind-local"))).friction).toEqual({
+    kind: "atOnce",
+  });
   const guarded = await answered(plan("staging"));
   expect(guarded.friction).toEqual({ kind: "confirm" });
   const { namespace, pod, container } = targetOf("staging");
@@ -211,38 +215,38 @@ test("a shell asks as exec does: at once in read-write, to confirm in guarded, r
 
 test("an attach is planned apart from a shell, and a container that does not run is refused", async () => {
   const backend = createMockBackend("live");
-  await answered(backend.invoke("space_open", "qa"));
+  await answered(backend.invoke("space_open", "kind-local"));
   const attach = await answered(
     backend.invoke("command_plan", {
       action: "shell",
-      target: targetOf("qa"),
+      target: targetOf("kind-local"),
       kind: "attach",
     }),
   );
   expect(attach.confirm).toBe("Attach");
-  const { namespace, pod, container } = targetOf("qa");
+  const { namespace, pod, container } = targetOf("kind-local");
   expect(attach.kubectl).toBe(
-    `kubectl --context qa attach ${pod} -n ${namespace} -c ${container}`,
+    `kubectl --context kind-local attach ${pod} -n ${namespace} -c ${container}`,
   );
   expect(attach.consequences).toEqual([
     "It keeps no stdin, so this attach only shows its output.",
   ]);
   const interactive = createMockBackend("shellAttachInteractive");
-  await answered(interactive.invoke("space_open", "qa"));
+  await answered(interactive.invoke("space_open", "kind-local"));
   const joined = await answered(
     interactive.invoke("command_plan", {
       action: "shell",
-      target: targetOf("qa"),
+      target: targetOf("kind-local"),
       kind: "attach",
     }),
   );
   expect(joined.kubectl).toBe(
-    `kubectl --context qa attach -it ${pod} -n ${namespace} -c ${container}`,
+    `kubectl --context kind-local attach -it ${pod} -n ${namespace} -c ${container}`,
   );
   const error = await refused(
     backend.invoke("command_plan", {
       action: "shell",
-      target: targetOf("qa", "nothing"),
+      target: targetOf("kind-local", "nothing"),
       kind: "shell",
     }),
   );
@@ -277,7 +281,7 @@ test("it connects, runs and shows a prompt with the pod and the container", asyn
     "connecting",
     "running",
   ]);
-  const { pod, container } = targetOf("qa");
+  const { pod, container } = targetOf("kind-local");
   expect(shell.text()).toContain(`root@${pod}`);
   expect(shell.text()).toContain(`[${container}]`);
 });
@@ -473,7 +477,7 @@ test("a lost connection ends it 8 s in, and a relock does too with the context r
   const plan = await refused(
     relocked.backend.invoke("command_plan", {
       action: "shell",
-      target: targetOf("qa"),
+      target: targetOf("kind-local"),
       kind: "shell",
     }),
   );

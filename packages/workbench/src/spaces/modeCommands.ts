@@ -3,6 +3,7 @@ import type { Environment, Mode, Space } from "@twigo/protocol";
 import type { QuickPickItem } from "../quickaccess/registry";
 import type { Workbench } from "../services";
 import {
+  currentMode,
   ENVIRONMENTS,
   environmentLabel,
   MODES,
@@ -28,11 +29,14 @@ function isSetArgs<T>(args: unknown): args is SetArgs<T> {
 }
 
 /**
- * A context's mode and type (ARCHITECTURE 6.4). Rust owns them: these send
- * what the person chose, and the catalog's watch says what follows.
+ * A context's mode and type (ARCHITECTURE 6.4). Rust owns them: a change that
+ * lowers protection is a plan of the command bus, which draws the friction
+ * Rust names and is in the audit log, and the catalog's watch says what
+ * follows. A relock only tightens, so it goes as it is.
  */
 export function registerContextModes(workbench: Workbench): void {
-  const { commands, menus, spaces, catalog, quickAccess, backend } = workbench;
+  const { commands, menus, spaces, catalog, quickAccess, backend, operations } =
+    workbench;
 
   /** The context of the space the rail's menu names, or of the active one. */
   const contextOf = (args: unknown): string | undefined => {
@@ -52,10 +56,10 @@ export function registerContextModes(workbench: Workbench): void {
     enablement: "context.mode",
     run: async (args) => {
       if (isSetArgs<Mode>(args)) {
-        await backend.invoke("context_mode_set", {
-          context: args.context,
-          mode: args.value,
-        });
+        await operations.run(
+          { action: "setMode", context: args.context, mode: args.value },
+          { icon: Shield },
+        );
         return;
       }
       const context = contextOf(args);
@@ -65,7 +69,8 @@ export function registerContextModes(workbench: Workbench): void {
         ...MODES.map((mode) => ({
           id: mode,
           label: modeLabel(mode),
-          description: mode === access.mode ? "Current" : modeHelp(mode),
+          description:
+            mode === currentMode(access) ? "Current" : modeHelp(mode),
         })),
         {
           id: NONE,
@@ -77,11 +82,16 @@ export function registerContextModes(workbench: Workbench): void {
       // The current one changes nothing: picking the guarded of an unlock
       // would end its relock for good. Current as of the pick, which may
       // have outlived the unlock.
-      if (!picked || picked.id === catalog.find(context)?.access.mode) return;
-      await backend.invoke("context_mode_set", {
-        context,
-        mode: picked.id === NONE ? null : (picked.id as Mode),
-      });
+      const now = catalog.find(context)?.access;
+      if (!picked || (now && picked.id === currentMode(now))) return;
+      await operations.run(
+        {
+          action: "setMode",
+          context,
+          mode: picked.id === NONE ? null : (picked.id as Mode),
+        },
+        { icon: Shield },
+      );
     },
   });
 
@@ -93,10 +103,14 @@ export function registerContextModes(workbench: Workbench): void {
     enablement: "context.mode",
     run: async (args) => {
       if (isSetArgs<Environment>(args)) {
-        await backend.invoke("context_environment_set", {
-          context: args.context,
-          environment: args.value,
-        });
+        await operations.run(
+          {
+            action: "setEnvironment",
+            context: args.context,
+            environment: args.value,
+          },
+          { icon: Tag },
+        );
         return;
       }
       const context = contextOf(args);
@@ -123,10 +137,14 @@ export function registerContextModes(workbench: Workbench): void {
       ) {
         return;
       }
-      await backend.invoke("context_environment_set", {
-        context,
-        environment: picked.id === NONE ? null : (picked.id as Environment),
-      });
+      await operations.run(
+        {
+          action: "setEnvironment",
+          context,
+          environment: picked.id === NONE ? null : (picked.id as Environment),
+        },
+        { icon: Tag },
+      );
     },
   });
 
@@ -138,7 +156,7 @@ export function registerContextModes(workbench: Workbench): void {
     enablement: "context.readOnly",
     run: async (args) => {
       const context = contextOf(args);
-      if (context) await backend.invoke("context_unlock", context);
+      if (context) await operations.unlock(context);
     },
   });
 

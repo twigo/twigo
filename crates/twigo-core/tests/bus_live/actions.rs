@@ -16,13 +16,13 @@ use kube::config::{AuthInfo, Kubeconfig, NamedAuthInfo};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use twigo_ipc::{
-    Access, AccessQuery, ErrorKind, Execute, Friction, Mode, OperationEvent, Plan, PlanRequest,
-    SetContextMode,
+    Access, AccessQuery, BlockReason, ErrorKind, Execute, Friction, Mode, OperationEvent, Plan,
+    PlanRequest, ShellKind, ShellTarget,
 };
 
 use twigo_core::Core;
 
-use super::{Cluster, WAIT, core, core_over, eventually, kubectl, plan, reference, run};
+use super::{Cluster, WAIT, core, core_over, eventually, kubectl, line, plan, reference, run};
 
 async fn create<K>(api: &Api<K>, value: Value) -> K
 where
@@ -184,7 +184,7 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     let up = plan(&core, scale(3)).await.unwrap();
     assert_eq!(up.friction, Friction::AtOnce);
     assert_eq!(
-        up.kubectl,
+        line(&up),
         format!(
             "kubectl --context {context} scale deployments.apps web --current-replicas 1 --replicas 3 -n {namespace}"
         )
@@ -199,7 +199,7 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     let back = plan(&core, undo(&cluster)).await.unwrap();
     assert_eq!(back.friction, Friction::AtOnce);
     assert_eq!(
-        back.kubectl,
+        line(&back),
         format!(
             "kubectl --context {context} scale deployments.apps web --current-replicas 3 --replicas 1 -n {namespace}"
         )
@@ -268,12 +268,7 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     let same = plan(&core, scale(0)).await.unwrap_err();
     assert_eq!(same.kind, ErrorKind::InvalidInput);
 
-    core.set_context_mode(SetContextMode {
-        context: context.clone(),
-        mode: Some(Mode::Guarded),
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode(context, Some(Mode::Guarded)).unwrap();
     let guarded = plan(&core, scale(1)).await.unwrap();
     assert_eq!(
         guarded.friction,
@@ -292,12 +287,7 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     run(&core, &back, Some(context)).await.unwrap();
     assert_eq!(replicas().await, Some(0));
 
-    core.set_context_mode(SetContextMode {
-        context: context.clone(),
-        mode: None,
-    })
-    .await
-    .unwrap();
+    core.policy.set_mode(context, None).unwrap();
     create(&deployments, deployment("again", 1, "kwok-node-0")).await;
     pods_of(&pods, "again", 1).await;
     let sets = Api::<ReplicaSet>::namespaced(cluster.admin.clone(), &namespace);
@@ -383,7 +373,7 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
     let plan_cordon = plan(&core, cordon(true)).await.unwrap();
     assert_eq!(plan_cordon.friction, Friction::AtOnce);
     assert_eq!(
-        plan_cordon.kubectl,
+        line(&plan_cordon),
         format!("kubectl --context {context} cordon {name}")
     );
     let told = run(&core, &plan_cordon, None).await.unwrap();
@@ -392,7 +382,7 @@ async fn cordon_and_uncordon_run_at_once_and_their_undo_holds_to_the_field() {
     tokio::time::sleep(Duration::from_secs(2)).await;
     let back = plan(&core, undo(&cluster)).await.unwrap();
     assert_eq!(
-        back.kubectl,
+        line(&back),
         format!("kubectl --context {context} uncordon {name}")
     );
     run(&core, &back, None).await.unwrap();
@@ -512,7 +502,7 @@ async fn a_restart_stamps_the_template_and_lists_the_pods_it_replaces() {
     let planned = plan(&core, restart()).await.unwrap();
     assert_eq!(planned.friction, Friction::Confirm);
     assert_eq!(
-        planned.kubectl,
+        line(&planned),
         format!("kubectl --context {context} rollout restart deployments.apps/web -n {namespace}")
     );
     let mut replaced = names(&planned, "Replaces");
@@ -681,7 +671,7 @@ async fn a_trigger_makes_a_job_of_the_cron_job_s_template_as_kubectl_does() {
     let job = job_of(&planned);
     assert!(job.starts_with("backup-manual-"), "{job}");
     assert_eq!(
-        planned.kubectl,
+        line(&planned),
         format!(
             "kubectl --context {context} create job {job} --from cronjob/backup -n {namespace}"
         )
@@ -738,7 +728,7 @@ async fn suspend_runs_at_once_a_cron_jobs_resume_asks_and_each_undo_holds_to_the
         .unwrap();
     assert_eq!(planned.friction, Friction::AtOnce);
     assert_eq!(
-        planned.kubectl,
+        line(&planned),
         format!(
             r#"kubectl --context {context} patch cronjobs.batch nightly --type merge -p '{{"spec":{{"suspend":true}}}}' -n {namespace}"#
         )
@@ -1178,7 +1168,7 @@ async fn a_drain_waits_on_a_budget_then_finishes_and_leaves_daemon_set_pods() {
     .unwrap();
     assert_eq!(planned.friction, Friction::Confirm);
     assert_eq!(
-        planned.kubectl,
+        line(&planned),
         format!("kubectl --context {context} drain {node} --ignore-daemonsets")
     );
     let evicts = names_in(&planned, "Evicts", &namespace);
@@ -1330,7 +1320,7 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
     );
     assert_eq!(planned.confirm, "Drain node with force");
     assert_eq!(
-        planned.kubectl,
+        line(&planned),
         format!(
             "kubectl --context {context} drain {forced} --ignore-daemonsets --delete-emptydir-data --force"
         )
@@ -1459,7 +1449,7 @@ async fn a_drain_that_meets_pods_kubectl_refuses_asks_for_the_node_s_name_and_ta
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn a_read_only_context_sends_none_of_the_actions() {
+async fn neither_a_read_only_context_nor_one_nobody_marked_sends_any_of_the_actions() {
     let cluster = Cluster::connect().await;
     let namespace = cluster.namespace("locked").await;
     let dir = tempfile::tempdir().unwrap();
@@ -1477,12 +1467,6 @@ async fn a_read_only_context_sends_none_of_the_actions() {
         .await
         .metadata
         .resource_version;
-    core.set_context_mode(SetContextMode {
-        context: context.clone(),
-        mode: Some(Mode::ReadOnly),
-    })
-    .await
-    .unwrap();
 
     let web = || reference("apps", "v1", "deployments", Some(&namespace), "web");
     let backup = || reference("batch", "v1", "cronjobs", Some(&namespace), "backup");
@@ -1524,7 +1508,24 @@ async fn a_read_only_context_sends_none_of_the_actions() {
             ],
         },
     ];
-    for request in requests {
+    let shells = [ShellKind::Shell, ShellKind::Attach].map(|kind| PlanRequest::Shell {
+        target: ShellTarget {
+            space: space(),
+            namespace: namespace.clone(),
+            pod: "web-0".to_owned(),
+            container: "app".to_owned(),
+        },
+        kind,
+    });
+    core.policy.set_environment(context, None).unwrap();
+    for request in requests.iter().chain(&shells) {
+        let blocked = plan(&core, request.clone()).await.unwrap_err();
+        assert_eq!(blocked.kind, ErrorKind::Permissions, "{request:?}");
+        let blocked = blocked.blocked.unwrap();
+        assert_eq!(blocked.reason, BlockReason::Unmarked, "{request:?}");
+    }
+    core.policy.set_mode(context, Some(Mode::ReadOnly)).unwrap();
+    for request in requests.iter().chain(&shells) {
         let blocked = plan(&core, request.clone()).await.unwrap_err();
         assert_eq!(blocked.kind, ErrorKind::Permissions, "{request:?}");
         assert_eq!(blocked.blocked.unwrap().mode, Mode::ReadOnly, "{request:?}");

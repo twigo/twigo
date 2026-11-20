@@ -15,10 +15,12 @@ Decided 2026-11-07 with the command bus (ARCHITECTURE 5.1, 6.4).
 - Scale, cordon and suspend end with what reverts them: for 30 s the space's last action can be put back, from its toast or ⌘Z, refused once anyone else changed the object (decided 2026-11-08).
 - The mock backend's bus (`packages/protocol/src/mock/bus.ts`) mirrors each action and the friction table.
 - An action's writes add their rows to the gate's table ([decision](policy-gate.md)).
+- A change of a context's protection, the person's mode, its type or an unlock, is a plan too, with no writes and no kubectl command: Rust names its friction from the access before and after, and the audit log records it (decided 2026-11-19, D16; the rule is in "Changes of protection", [ARCHITECTURE 6.4](../ARCHITECTURE.md#64-read-only-enforcement-twigo-policy)).
 
 ## Why
 
 A confirmation drawn only by the webview is a promise: a stale page, a second window or a bug runs a plan nobody confirmed, on whatever cluster the name means by then.
+A change of protection guards every other command, so a single unconfirmed call that turned Production `read-write` would undo all of their friction ([review](../reviews/2026-11-fable-strategic-review.md), 2.1.2).
 Rust already holds the mode, the context's fingerprint and the objects, so it can name the friction and hold the plan to it.
 A kubectl line that only looks like the command teaches people the wrong thing; running it in a test keeps the two the same.
 

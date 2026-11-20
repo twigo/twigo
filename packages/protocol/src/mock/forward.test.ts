@@ -431,7 +431,7 @@ test("forwardBlocked forbids forwards by a policy file 8 s after a forward is re
   const forward = started(await start(SERVICE, 80));
   await vi.advanceTimersByTimeAsync(READY_AFTER_MS + BLOCKED_AFTER_MS - 1);
   expect(latest(forward.id)?.state).toEqual({ state: "ready" });
-  expect(access()?.mode).toBe("read-write");
+  expect(access()?.mode).toBe("guarded");
   await vi.advanceTimersByTimeAsync(1);
   const state = latest(forward.id)?.state;
   expect(state).toMatchObject({
@@ -534,8 +534,8 @@ test("forwardBlocked lifts the lock 15 s later: what was refused waits, restored
     local: 8080,
   });
   expect(access()).toMatchObject({
-    mode: "read-write",
-    source: { kind: "default" },
+    mode: "guarded",
+    source: { kind: "unmarked" },
   });
 
   await vi.advanceTimersByTimeAsync(FIRST_CONNECTION_AFTER_MS - 1);

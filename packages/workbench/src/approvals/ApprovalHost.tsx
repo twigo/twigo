@@ -1,4 +1,4 @@
-import type { ApprovalAnswer, ApprovalAsk } from "@twigo/protocol";
+import type { ApprovalAnswer, ApprovalAsk, Environment } from "@twigo/protocol";
 import {
   ConfirmDialog,
   PropertyList,
@@ -6,6 +6,10 @@ import {
   type Property,
 } from "@twigo/ui";
 import { ContextBadge } from "../operations/ContextBadge";
+import {
+  environmentChoices,
+  environmentLines,
+} from "../operations/environmentChoices";
 import { contextAccent } from "../spaces/colors";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { ASK_GUARD_MS, describeAsk } from "./service";
@@ -17,8 +21,11 @@ const MONO = "font-mono text-2xs wrap-anywhere select-text";
  * in the order they came and saying how many wait, in its context's colour
  * as a plan's dialog has it. Deny is what Escape does, and focus starts on
  * it, or on the typed name, so a stray Enter allows nothing. An ask waits
- * while a plan's confirmation is open, so it takes neither that dialog's
- * focus nor its Escape, and it shows once that dialog is gone. It comes
+ * while a plan's confirmation or the question of what a context is, which a
+ * command of the person's asks, is open, so it takes neither that dialog's
+ * focus nor its Escape, and it shows once that dialog is gone. An ask of a
+ * context nobody marked asks what it is, with the process and what it asked
+ * to do, and answers its type, or Deny. It comes
  * unbidden, so a click outside it, meant for what lies behind, answers
  * nothing; a plan's confirmation, which the person opened, still cancels on
  * one.
@@ -27,7 +34,7 @@ export function ApprovalHost() {
   const { approvals, operations } = useWorkbench();
   useChanges(approvals.changes);
   useChanges(operations.changes);
-  const ask = operations.asking === undefined ? approvals.current : undefined;
+  const ask = operations.confirming ? undefined : approvals.current;
   const returnFocus = useReturnFocus(ask !== undefined);
   if (!ask) return null;
   return (
@@ -61,19 +68,23 @@ function AskDialog({
     void approvals.answer(ask.id, given, typed);
   };
 
+  const mark = (environment: Environment) => {
+    answer({ kind: "mark", environment })(undefined);
+  };
+
   const minutes = ask.lastingMinutes;
   const choices: ConfirmChoice[] = [
     {
       label: ask.typed ? `Allow ${ask.verb}` : "Allow once",
       destructive: ask.typed,
-      onSelect: answer("once"),
+      onSelect: answer({ kind: "once" }),
     },
     ...(minutes === null
       ? []
       : [
           {
             label: `Allow for ${String(minutes)} ${minutes === 1 ? "minute" : "minutes"}`,
-            onSelect: answer("lasting"),
+            onSelect: answer({ kind: "lasting" }),
           },
         ]),
   ];
@@ -107,6 +118,7 @@ function AskDialog({
             context={ask.context}
             environment={environment}
             mode={access?.mode ?? "read-write"}
+            unmarked={ask.unmarked}
           />
           {waiting > 1 && (
             <span className="ml-auto text-support tabular-nums">
@@ -118,8 +130,19 @@ function AskDialog({
       {...(environment === "production" && {
         accent: contextAccent(colors.of(ask.context)),
       })}
-      question={`Allow ${ask.process} to ${describeAsk(ask)}?`}
-      consequences={[]}
+      question={
+        ask.unmarked
+          ? `What is ${ask.context}?`
+          : `Allow ${ask.process} to ${describeAsk(ask)}?`
+      }
+      consequences={
+        ask.unmarked
+          ? [
+              `${ask.process} asks to ${describeAsk(ask)}, and nobody has said what ${ask.context} is. Its type sets how Twigo asks.`,
+              ...environmentLines(),
+            ]
+          : []
+      }
       {...(ask.typed && { typed: ask.context })}
       {...(failure !== undefined && { error: failure })}
       wide={details?.wide(ask.detail) ?? false}
@@ -127,9 +150,9 @@ function AskDialog({
       guardMs={ASK_GUARD_MS}
       outsideCancels={false}
       cancel="Deny"
-      choices={choices}
+      choices={ask.unmarked ? environmentChoices(mark) : choices}
       onCancel={() => {
-        answer("deny")(undefined);
+        answer({ kind: "deny" })(undefined);
       }}
       onCloseAutoFocus={onCloseAutoFocus}
     >

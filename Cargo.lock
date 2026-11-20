@@ -6114,6 +6114,7 @@ dependencies = [
  "tokio",
  "tower",
  "twigo-ipc",
+ "twigo-policy",
 ]
 
 [[package]]

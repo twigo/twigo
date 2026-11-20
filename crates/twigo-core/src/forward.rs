@@ -402,12 +402,26 @@ impl Forwards {
     /// refuses it, no source lists its context, or Twigo is quitting. A
     /// command asks once the catalog has loaded, before it reads or binds,
     /// and again with the lock it holds while it puts the forward in, so
-    /// nothing lands in between.
+    /// nothing lands in between. A mode's refusal leaves a `refused` line in
+    /// the audit log.
     fn admit(&self, table: &Table, context: &str, target: &ForwardTarget) -> Result<(), IpcError> {
         if table.closed {
             return Err(quitting());
         }
-        self.checks.refusal(context, target).map_or(Ok(()), Err)
+        let Some(error) = self.checks.refusal(context, target) else {
+            return Ok(());
+        };
+        if let Some(blocked) = &error.blocked {
+            let target = format!(
+                "{}/{} in {}",
+                target.gvr.resource, target.name, target.namespace
+            );
+            self.checks
+                .policy
+                .audit()
+                .gate_refused(context, "forward", &target, blocked);
+        }
+        Err(error)
     }
 
     /// Gives `entry`, which a command admitted under the table's lock, a

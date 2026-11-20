@@ -71,6 +71,7 @@ test("the window follows the approval broker from startup", async () => {
     detail: { kind: "delete", propagation: null },
     typed: false,
     lastingMinutes: 15,
+    unmarked: false,
   };
   const workbench = await act(() => createWorkbench(backend, "mac"));
   send({ event: "asked", ask });

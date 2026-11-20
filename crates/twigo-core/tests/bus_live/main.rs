@@ -25,7 +25,9 @@ use serde_json::json;
 use tokio::sync::{mpsc, watch};
 use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::{Execute, Gvr, IpcError, OperationEvent, Plan, PlanRequest, ResourceRef};
+use twigo_ipc::{
+    Environment, Execute, Friction, Gvr, IpcError, OperationEvent, Plan, PlanRequest, ResourceRef,
+};
 
 pub const WAIT: Duration = Duration::from_secs(60);
 
@@ -147,6 +149,9 @@ pub async fn core_over(dir: &Path, kubeconfig: &Path, context: &str) -> Arc<Core
         }
     });
     core.catalog.contexts().await;
+    core.policy
+        .set_environment(context, Some(Environment::Local))
+        .unwrap();
     core
 }
 
@@ -233,6 +238,23 @@ pub async fn run(
     Ok(told)
 }
 
+pub async fn protect(core: &Core, request: PlanRequest) -> Result<Vec<OperationEvent>, IpcError> {
+    let plan = plan(core, request).await?;
+    let typed = match &plan.friction {
+        Friction::Typed { text } => Some(text.clone()),
+        _ => None,
+    };
+    run(core, &plan, typed.as_deref()).await
+}
+
+/// The plan's kubectl line, which every plan of a command to the cluster
+/// has.
+pub fn line(plan: &Plan) -> &str {
+    plan.kubectl
+        .as_deref()
+        .expect("a plan of a command to the cluster has its kubectl line")
+}
+
 /// The plan's kubectl line, run by a shell over `kubeconfig` only.
 pub fn kubectl(plan: &Plan, kubeconfig: &Path) -> String {
     kubectl_fed(plan, kubeconfig, "")
@@ -241,7 +263,7 @@ pub fn kubectl(plan: &Plan, kubeconfig: &Path) -> String {
 pub fn kubectl_fed(plan: &Plan, kubeconfig: &Path, input: &str) -> String {
     let mut child = Command::new("sh")
         .arg("-c")
-        .arg(&plan.kubectl)
+        .arg(line(plan))
         .env("KUBECONFIG", kubeconfig)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -258,7 +280,7 @@ pub fn kubectl_fed(plan: &Plan, kubeconfig: &Path, input: &str) -> String {
     assert!(
         output.status.success(),
         "{}: {}",
-        plan.kubectl,
+        line(plan),
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).unwrap()

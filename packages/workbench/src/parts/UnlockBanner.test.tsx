@@ -6,7 +6,8 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { inWorkbench, testWorkbench } from "../testing";
+import { protect } from "@twigo/protocol/mock";
+import { confirmAsking, inWorkbench, testWorkbench } from "../testing";
 import { UNLOCK_CONTEXT } from "../spaces/modeCommands";
 import { UnlockBanner } from "./UnlockBanner";
 
@@ -27,10 +28,13 @@ async function mounted() {
 }
 
 test("it shows only while the context is unlocked, counts down and relocks by itself", async () => {
-  const { commands, keys, catalog } = await mounted();
+  const workbench = await mounted();
+  const { commands, keys, catalog } = workbench;
   expect(screen.queryByText(/is unlocked/)).toBeNull();
 
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const unlock = commands.execute(UNLOCK_CONTEXT, keys.lookup(null));
+  await confirmAsking(workbench);
+  await act(() => unlock);
   expect(screen.getByText("prod-eu is unlocked.")).toBeTruthy();
   expect(screen.getByText("15:00")).toBeTruthy();
 
@@ -43,8 +47,10 @@ test("it shows only while the context is unlocked, counts down and relocks by it
 });
 
 test("it belongs to the active space, and a new unlock starts its count again", async () => {
-  const { backend, commands, keys, spaces } = await mounted();
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const { backend, spaces } = await mounted();
+  const unlock = () =>
+    protect(backend, { action: "unlock", context: "prod-eu" });
+  await act(unlock);
   await act(() => vi.advanceTimersByTimeAsync(60_000));
   expect(screen.getByText("14:00")).toBeTruthy();
 
@@ -57,13 +63,13 @@ test("it belongs to the active space, and a new unlock starts its count again", 
   });
   expect(screen.getByText("14:00")).toBeTruthy();
 
-  await act(() => backend.invoke("context_unlock", "prod-eu"));
+  await act(unlock);
   expect(screen.getByText("15:00")).toBeTruthy();
 });
 
 test("Lock now ends it", async () => {
-  const { commands, keys, catalog } = await mounted();
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const { backend, catalog } = await mounted();
+  await act(() => protect(backend, { action: "unlock", context: "prod-eu" }));
   fireEvent.click(screen.getByRole("button", { name: "Lock now" }));
   await act(() => vi.advanceTimersByTimeAsync(0));
   expect(screen.queryByText(/is unlocked/)).toBeNull();
@@ -71,8 +77,8 @@ test("Lock now ends it", async () => {
 });
 
 test("it leads with the tile of the space it speaks about", async () => {
-  const { commands, keys } = await mounted();
-  await act(() => commands.execute(UNLOCK_CONTEXT, keys.lookup(null)));
+  const { backend } = await mounted();
+  await act(() => protect(backend, { action: "unlock", context: "prod-eu" }));
   expect(
     screen.getByText("prod-eu is unlocked.").parentElement?.parentElement
       ?.textContent,

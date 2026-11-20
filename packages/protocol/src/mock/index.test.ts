@@ -22,7 +22,7 @@ import {
   type Pod,
 } from "./cluster";
 import { POD_COUNT } from "./fixtures";
-import { createMockBackend, type MockScenario } from "./index";
+import { createMockBackend, protect, type MockScenario } from "./index";
 import { deployments, KINDS, uid } from "./kinds";
 import { finishedInit, MockObject } from "./objects";
 import { natural } from "./query";
@@ -111,7 +111,7 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
   ]);
 });
 
-test("a context's mode follows its type, a choice over it, and an unlock that ends by itself", async () => {
+test("a context's mode follows the strictest of its locks, a choice over them, and an unlock that ends by itself, and a context nothing marks is unmarked", async () => {
   const backend = createMockBackend();
   const seen: Context[][] = [];
   const first = backend.subscribe("contexts_watch", null, (next) =>
@@ -121,17 +121,30 @@ test("a context's mode follows its type, a choice over it, and an unlock that en
   const access = (contexts: Context[] | undefined, name: string) =>
     contexts?.find((context) => context.name === name)?.access;
   const latest = () => seen[seen.length - 1];
-  const send = async <T>(answer: Promise<T>) => {
-    await vi.advanceTimersByTimeAsync(0);
-    return answer;
+  const change = async (request: Parameters<typeof protect>[1]) => {
+    return protect(backend, request, () => vi.advanceTimersByTimeAsync(1));
   };
 
   expect(access(await first, "prod-eu")?.mode).toBe("read-only");
   expect(access(await first, "staging")?.mode).toBe("guarded");
   expect(access(await first, "dev")?.mode).toBe("read-write");
-  expect(access(await first, "qa")?.source).toEqual({ kind: "default" });
+  expect(access(await first, "qa")).toEqual({
+    mode: "guarded",
+    source: { kind: "unmarked" },
+    environment: null,
+    unlockedUntil: null,
+  });
+  expect(access(await first, "analytics")).toEqual({
+    mode: "read-write",
+    source: {
+      kind: "user",
+      overrides: { mode: "read-only", source: { kind: "kubeconfig" } },
+    },
+    environment: null,
+    unlockedUntil: null,
+  });
 
-  await send(backend.invoke("context_unlock", "prod-eu"));
+  await change({ action: "unlock", context: "prod-eu" });
   const unlocked = access(latest(), "prod-eu");
   expect(unlocked?.mode).toBe("guarded");
   expect(unlocked?.source).toEqual({
@@ -144,46 +157,62 @@ test("a context's mode follows its type, a choice over it, and an unlock that en
   expect(access(latest(), "prod-eu")?.mode).toBe("read-only");
   expect(access(latest(), "prod-eu")?.unlockedUntil).toBeNull();
 
-  await send(
-    backend.invoke("context_mode_set", { context: "qa", mode: "read-only" }),
-  );
-  expect(access(latest(), "qa")?.source).toEqual({ kind: "user" });
-  await send(
-    backend.invoke("context_environment_set", {
-      context: "dev",
-      environment: "production",
-    }),
-  );
+  await change({ action: "setMode", context: "qa", mode: "read-only" });
+  expect(access(latest(), "qa")?.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
+  await change({
+    action: "setEnvironment",
+    context: "dev",
+    environment: "production",
+  });
   expect(access(latest(), "dev")?.mode).toBe("read-only");
-  await send(
-    backend.invoke("context_environment_set", {
-      context: "dev",
-      environment: null,
-    }),
-  );
-  expect(access(latest(), "dev")?.environment).toBeNull();
+  await change({ action: "setEnvironment", context: "dev", environment: null });
+  expect(access(latest(), "dev")).toMatchObject({
+    mode: "guarded",
+    source: { kind: "unmarked" },
+    environment: null,
+  });
 
-  await send(backend.invoke("context_unlock", "prod-eu"));
-  await send(
-    backend.invoke("context_environment_set", {
-      context: "prod-eu",
-      environment: "local",
-    }),
-  );
-  await send(
-    backend.invoke("context_environment_set", {
-      context: "prod-eu",
-      environment: "production",
-    }),
-  );
+  await change({
+    action: "setMode",
+    context: "analytics",
+    mode: "read-only",
+  });
+  expect(access(latest(), "analytics")?.source).toEqual({
+    kind: "user",
+    overrides: null,
+  });
+  await change({ action: "setMode", context: "analytics", mode: null });
+  expect(access(latest(), "analytics")).toMatchObject({
+    mode: "read-only",
+    source: { kind: "kubeconfig" },
+  });
+
+  await change({ action: "unlock", context: "prod-eu" });
+  await change({
+    action: "setEnvironment",
+    context: "prod-eu",
+    environment: "local",
+  });
+  await change({
+    action: "setEnvironment",
+    context: "prod-eu",
+    environment: "production",
+  });
   expect(access(latest(), "prod-eu")?.mode).toBe("read-only");
   expect(access(latest(), "prod-eu")?.unlockedUntil).toBeNull();
 
   const refused = expect(
-    backend.invoke("context_unlock", "staging"),
+    backend.invoke("command_plan", { action: "unlock", context: "staging" }),
   ).rejects.toMatchObject({ kind: "invalidInput" });
   const unlisted = expect(
-    backend.invoke("context_mode_set", { context: "ghost", mode: "guarded" }),
+    backend.invoke("command_plan", {
+      action: "setMode",
+      context: "ghost",
+      mode: "guarded",
+    }),
   ).rejects.toMatchObject({ kind: "notFound" });
   await vi.advanceTimersByTimeAsync(0);
   await refused;
@@ -198,11 +227,12 @@ test("an admin's policy file holds its contexts and leaves the others", async ()
   expect(prod?.access.source.kind).toBe("policyFile");
 
   const refused = [
-    backend.invoke("context_mode_set", {
+    backend.invoke("command_plan", {
+      action: "setMode",
       context: "prod-eu",
       mode: "read-write",
     }),
-    backend.invoke("context_unlock", "prod-eu"),
+    backend.invoke("command_plan", { action: "unlock", context: "prod-eu" }),
   ];
   const settled = Promise.allSettled(refused);
   await vi.advanceTimersByTimeAsync(0);
@@ -212,12 +242,11 @@ test("an admin's policy file holds its contexts and leaves the others", async ()
       reason: { kind: "permissions" },
     });
   }
-  const dev = backend.invoke("context_mode_set", {
-    context: "dev",
-    mode: "guarded",
-  });
-  await vi.advanceTimersByTimeAsync(0);
-  await dev;
+  await protect(
+    backend,
+    { action: "setMode", context: "dev", mode: "guarded" },
+    () => vi.advanceTimersByTimeAsync(1),
+  );
 });
 
 test("answers with the chosen keyboard layout, US by default, and never changes it", async () => {

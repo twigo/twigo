@@ -18,8 +18,8 @@ use twigo_ipc::{
     Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
     PreviewId, SubscriptionId,
 };
-use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
+use twigo_policy::{Attributes, PlannedChange};
 
 use crate::actions::Prepared;
 use crate::actions::undo::Revert;
@@ -59,7 +59,8 @@ pub(crate) struct Planned {
     pub destructive: bool,
     pub consequences: Vec<String>,
     pub affected: Vec<Affected>,
-    pub kubectl: String,
+    /// None for what only Twigo does, such as a change of a context's mode.
+    pub kubectl: Option<String>,
     pub doing: String,
     /// The object of the preview it was made from, with what `start_preview`
     /// answered that preview: a newer preview of it drops the plan, or
@@ -68,9 +69,20 @@ pub(crate) struct Planned {
     pub run: Run,
 }
 
-pub(crate) type Run = Box<
+pub(crate) type Sends = Box<
     dyn FnOnce(Progress) -> Pin<Box<dyn Future<Output = Result<Finished, IpcError>> + Send>> + Send,
 >;
+
+pub(crate) enum Run {
+    /// Sends its requests in a task of its own, telling how it goes.
+    Sends(Sends),
+    /// Changes the context's protection at once, while the context stands
+    /// as planned, and says `done`.
+    Protects {
+        change: Box<PlannedChange>,
+        done: String,
+    },
+}
 
 /// How a run ended.
 pub(crate) enum Finished {

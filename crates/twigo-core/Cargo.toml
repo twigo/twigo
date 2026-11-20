@@ -55,6 +55,7 @@ hyper = { workspace = true, features = ["client", "http1", "server"] }
 twigo-core = { workspace = true, features = ["test-util"] }
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-policy = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "process", "rt", "rt-multi-thread", "test-util", "time"] }
 tower.workspace = true

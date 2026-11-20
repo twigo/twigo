@@ -1,5 +1,5 @@
 //! What a request meets at the proxy, in order (ARCHITECTURE 6.4): where it
-//! comes from, its token, its path, its context's cluster, its identity,
+//! comes from, its token, its path, its identity, its context's cluster,
 //! its body, and the gate's decision, which in `guarded` may go to the
 //! approval broker; then it goes on, as an ordinary request or an upgrade.
 
@@ -15,7 +15,7 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
 use ring::digest::SHA256;
-use twigo_ipc::BlockReason;
+use twigo_ipc::{BlockReason, Mode};
 use twigo_kube::client::ActorClients;
 use twigo_policy::{Approval, Attributes};
 
@@ -51,9 +51,6 @@ async fn serve(
     from_here(&request, address)?;
     let holder = holder(core, request.headers())?;
     let path = path(request.uri(), &holder)?;
-    if core.policy.connection(&holder.context) != Some(holder.connection) {
-        return Err(Refusal::moved(&holder.context));
-    }
     one_identity(core, &holder, request.headers()).await?;
     let upgrading = request.headers().contains_key(UPGRADE);
     // Before the request's parts move on.
@@ -65,10 +62,13 @@ async fn serve(
     parts.headers = headers::request(&parts.headers, upgrading);
     parts.extensions = http::Extensions::new();
     let request = Request::from_parts(parts, ());
-    let attributes = Attributes::of(&request);
-    let (parts, ()) = request.into_parts();
+    if core.policy.connection(&holder.context) != Some(holder.connection) {
+        return Err(moved(core, &holder, &Attributes::of(&request)));
+    }
     let reach = upgrading
-        .then(|| Reach::of(&parts.method, &attributes).ok_or_else(Refusal::no_upgrade))
+        .then(|| {
+            Reach::of(request.method(), &Attributes::of(&request)).ok_or_else(Refusal::no_upgrade)
+        })
         .transpose()?;
     let body = if upgrading {
         Bytes::new()
@@ -77,6 +77,12 @@ async fn serve(
     };
 
     let (clients, actor) = core.proxy.clients(core, &holder).await?;
+    let attributes = tokio::select! {
+        biased;
+        () = holder.ended.cancelled() => return Err(Refusal::revoked()),
+        attributes = actor.attributes(&request) => attributes,
+    };
+    let (parts, ()) = request.into_parts();
     // Before anything is sent, so a relock meanwhile reaches what it opens.
     let changes = Changes::new(&core.policy, &core.catalog.subscribe());
     let decided = decide(core, &holder, &actor, &attributes, &parts, &body, reach).await?;
@@ -239,7 +245,9 @@ struct Decided<'a> {
 /// ask the person: the request still meets the gate with whatever approval
 /// the broker gives it. Only what an exact approval would let through is
 /// asked about: no answer lets through an agent's read of a Secret, nor its
-/// write to one.
+/// write to one. On a context nobody marked the person is asked what it is,
+/// and the request meets the gate anew with that answer, as it does when the
+/// context's access changes while it waits.
 async fn decide<'a>(
     core: &'a Core,
     holder: &Holder,
@@ -249,46 +257,70 @@ async fn decide<'a>(
     body: &Bytes,
     reach: Option<Reach>,
 ) -> Result<Decided<'a>, Refusal> {
-    let blocked = match core
-        .policy
-        .authorize(&holder.context, attributes, holder.actor)
-    {
-        Ok(()) => return Ok(Decided::default()),
-        Err(blocked)
-            if blocked.reason == BlockReason::NoApproval
-                && core
-                    .policy
-                    .approvable(&holder.context, attributes, holder.actor) =>
+    loop {
+        let blocked = match core
+            .policy
+            .authorize(&holder.context, attributes, holder.actor)
         {
-            blocked
-        }
-        Err(blocked) => return Err(Refusal::blocked(&blocked)),
-    };
-    let command = parts
-        .headers
-        .get("kubectl-command")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let asking = Asking {
-        holder,
-        attributes,
-        blocked,
-        repeat: repeat(holder, parts, reach, body),
-        command,
-        impersonate: impersonate(&parts.headers),
-    };
-    let detail = detail::of(&core.approvals, &actor.api, holder, attributes, parts, body);
-    match core.approvals.decide(asking, detail).await {
-        Outcome::Approved { approval, once } => Ok(Decided {
-            approval: Some(approval),
-            once,
-        }),
-        Outcome::Denied(message) => Err(Refusal::forbidden(message)),
-        Outcome::Decided(Ok(())) => Ok(Decided::default()),
-        Outcome::Decided(Err(blocked)) => Err(Refusal::blocked(&blocked)),
-        Outcome::Moved => Err(Refusal::moved(&holder.context)),
-        Outcome::Ended => Err(Refusal::revoked()),
+            Ok(()) => return Ok(Decided::default()),
+            Err(blocked) if blocked.reason == BlockReason::Unmarked => blocked,
+            Err(blocked)
+                if blocked.reason == BlockReason::NoApproval
+                    && core
+                        .policy
+                        .approvable(&holder.context, attributes, holder.actor) =>
+            {
+                blocked
+            }
+            Err(blocked) => {
+                stopped(core, holder, attributes, blocked.mode, blocked.reason);
+                return Err(Refusal::blocked(&blocked));
+            }
+        };
+        let (mode, reason) = (blocked.mode, blocked.reason);
+        let command = parts
+            .headers
+            .get("kubectl-command")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let asking = Asking {
+            holder,
+            attributes,
+            blocked,
+            repeat: repeat(holder, parts, reach, body),
+            command,
+            impersonate: impersonate(&parts.headers),
+        };
+        let detail = detail::of(actor, attributes, parts, body);
+        return match core.approvals.decide(asking, detail).await {
+            Outcome::Approved { approval, once } => Ok(Decided {
+                approval: Some(approval),
+                once,
+            }),
+            Outcome::Denied(message) => {
+                stopped(core, holder, attributes, mode, reason);
+                Err(Refusal::forbidden(message))
+            }
+            Outcome::Again => continue,
+            Outcome::Moved => Err(moved(core, holder, attributes)),
+            Outcome::Ended => Err(Refusal::revoked()),
+        };
     }
+}
+
+/// Notes a request the proxy stops on the policy's word in the audit log,
+/// as the gate notes one it stops.
+fn stopped(core: &Core, holder: &Holder, attributes: &Attributes, mode: Mode, why: BlockReason) {
+    let audit = core.policy.audit();
+    audit.request(&holder.context, holder.actor, attributes, mode, Some(why));
+}
+
+/// The refusal of a request whose context names another cluster now than
+/// when its token was given, noted as the gate notes a write of clients
+/// built for the old one: stopped by `read-only`.
+fn moved(core: &Core, holder: &Holder, attributes: &Attributes) -> Refusal {
+    stopped(core, holder, attributes, Mode::ReadOnly, BlockReason::Mode);
+    Refusal::moved(&holder.context)
 }
 
 /// Whom the request acts as, in one line: the user, then the groups, the uid

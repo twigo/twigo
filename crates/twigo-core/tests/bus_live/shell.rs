@@ -10,7 +10,7 @@ use kube::api::PostParams;
 use serde_json::{Value, json};
 use twigo_ipc::{Friction, PlanRequest, ShellKind, ShellTarget};
 
-use super::{Cluster, WAIT, core, kubectl, kubectl_fed, plan};
+use super::{Cluster, WAIT, core, kubectl, kubectl_fed, line, plan};
 
 fn helper(node: &Node) -> String {
     node.status
@@ -118,11 +118,7 @@ async fn a_shell_and_an_attach_each_run_as_their_kubectl_line_says() {
     .await
     .unwrap();
     assert_eq!(shell.friction, Friction::AtOnce);
-    assert!(
-        shell.kubectl.contains("exec -it shell"),
-        "{}",
-        shell.kubectl
-    );
+    assert!(line(&shell).contains("exec -it shell"), "{}", line(&shell));
     core.command_cancel("main", shell.id);
     let printed = kubectl_fed(&shell, &kubeconfig, "echo PICKED-$0-$TERM\n");
     assert!(printed.contains("PICKED-bash-xterm-256color"), "{printed}");
@@ -137,9 +133,9 @@ async fn a_shell_and_an_attach_each_run_as_their_kubectl_line_says() {
     .await
     .unwrap();
     assert!(
-        attach.kubectl.contains("attach attach"),
+        line(&attach).contains("attach attach"),
         "the container keeps no stdin and no tty: {}",
-        attach.kubectl
+        line(&attach)
     );
     core.command_cancel("main", attach.id);
     let printed = kubectl(&attach, &kubeconfig);

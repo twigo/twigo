@@ -36,9 +36,8 @@ use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
     Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
-    PlanRequest, SchemaQuery, SetContextEnvironment, SetContextMode, SetLogSource, SetLogView,
-    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod,
-    ShellResize, SubscriptionId, ViewState,
+    PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -47,14 +46,14 @@ use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
 use twigo_policy::friction::{covers, friction};
-use twigo_policy::{Audit, Entry, Policy};
+use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
 pub use twigo_sessions::shell::Frame as ShellFrame;
 
 use actions::undo::Undos;
 use approvals::Approvals;
 pub use auth::AuthFollower;
-use bus::{Bus, Finished, Progress, Waiting};
+use bus::{Bus, Finished, Progress, Run, Waiting};
 use catalog::Catalog;
 use connections::Connections;
 use forward::Forwards;
@@ -79,8 +78,8 @@ pub struct Core {
     pub policy: Arc<Policy>,
     proxy: Arc<Proxy>,
     approvals: Arc<Approvals>,
-    /// Held while a change of the person's choices is stored, so an earlier
-    /// copy of them never lands after a later one.
+    /// Held while a change of the person's choices is made and stored, so an
+    /// earlier copy of them never lands after a later one.
     choosing: Mutex<()>,
     lists: Subscriptions<Batcher>,
     objects: Subscriptions<Opened>,
@@ -132,6 +131,7 @@ impl Core {
             state.choices(),
             Audit::open(&data.join("audit.jsonl")),
         );
+        let catalog = catalog.audited_by(Arc::clone(&policy));
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         let discovery = Arc::new(Cache::new(cache.join("discovery")));
         Arc::new_cyclic(|core| {
@@ -320,39 +320,6 @@ impl Core {
         listed.map(|listed| listed.ipc(&self.policy))
     }
 
-    /// The person's mode for a context, kept in the state.
-    pub async fn set_context_mode(&self, request: SetContextMode) -> Result<(), IpcError> {
-        self.listed(&request.context).await?;
-        let _choosing = self.choosing.lock().expect("choosing lock");
-        let choices = self
-            .policy
-            .set_mode(&request.context, request.mode)
-            .map_err(|error| errors::refused(&error))?;
-        self.state.set_choices(&choices);
-        Ok(())
-    }
-
-    /// What the person marks a context as, kept in the state.
-    pub async fn set_context_environment(
-        &self,
-        request: SetContextEnvironment,
-    ) -> Result<(), IpcError> {
-        self.listed(&request.context).await?;
-        let _choosing = self.choosing.lock().expect("choosing lock");
-        let choices = self
-            .policy
-            .set_environment(&request.context, request.environment);
-        self.state.set_choices(&choices);
-        Ok(())
-    }
-
-    pub async fn unlock_context(&self, context: &str) -> Result<(), IpcError> {
-        self.listed(context).await?;
-        self.policy
-            .unlock(context)
-            .map_err(|error| errors::refused(&error))
-    }
-
     async fn listed(&self, context: &str) -> Result<(), IpcError> {
         match self.catalog.contexts().await.find(context) {
             Some(_) => Ok(()),
@@ -400,8 +367,23 @@ impl Core {
             PlanRequest::Shell { target, kind } => {
                 actions::shell(self, window, target, kind).await?
             }
+            PlanRequest::SetMode { context, mode } => {
+                actions::protection(self, context, Change::Mode { mode }).await?
+            }
+            PlanRequest::SetEnvironment {
+                context,
+                environment,
+            } => actions::protection(self, context, Change::Type { environment }).await?,
+            PlanRequest::Unlock { context } => {
+                actions::protection(self, context, Change::Unlock).await?
+            }
         };
-        self.authorize(&planned.context, &planned.writes)?;
+        self.authorize(
+            &planned.context,
+            planned.command,
+            &planned.target,
+            &planned.writes,
+        )?;
         let access = self.policy.access(&planned.context);
         self.bus.keep(ticket, planned, &access)
     }
@@ -431,10 +413,19 @@ impl Core {
             ));
         }
         let access = self.policy.access(&context);
-        if !covers(
-            &planned_friction,
-            &friction(&planned.risk, &context, &access),
-        ) {
+        let asked = friction(&planned.risk, &context, &access);
+        if !covers(&planned_friction, &asked) {
+            self.policy.audit().record(&Entry::Refused {
+                context: &context,
+                command: planned.command,
+                target: &planned.target,
+                mode: access.mode,
+                source: &access.source,
+                why: Why::Friction {
+                    planned: &planned_friction,
+                    now: &asked,
+                },
+            });
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 format!(
@@ -460,7 +451,19 @@ impl Core {
             }
             _ => {}
         }
-        self.authorize(&context, &planned.writes)?;
+        self.authorize(&context, planned.command, &planned.target, &planned.writes)?;
+        let run = match planned.run {
+            Run::Sends(run) => run,
+            Run::Protects { change, done } => {
+                self.protect(&context, &change, &planned_friction)?;
+                let mut send = send;
+                send(OperationEvent::Done {
+                    text: done,
+                    undo_until: None,
+                });
+                return Ok(());
+            }
+        };
 
         let (progress, stop) = Progress::new(send);
         self.bus.run(ticket, request.plan, stop)?;
@@ -478,12 +481,11 @@ impl Core {
             Arc::clone(&self.policy),
             window.to_owned(),
         );
-        let (command, target, space, connection, run) = (
+        let (command, target, space, connection) = (
             planned.command,
             planned.target,
             planned.space,
             planned.connection,
-            planned.run,
         );
         let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
@@ -509,6 +511,25 @@ impl Core {
             progress.tell(event);
             bus.ended(&window, request.plan);
         });
+        Ok(())
+    }
+
+    /// Makes a change of protection a person confirmed through `friction`,
+    /// while the context stands as it was planned, and keeps the choices it
+    /// leaves; the policy records it in the audit log, in place of the
+    /// bus's lines.
+    fn protect(
+        &self,
+        context: &str,
+        change: &PlannedChange,
+        friction: &Friction,
+    ) -> Result<(), IpcError> {
+        let _choosing = self.choosing.lock().expect("choosing lock");
+        let choices = self
+            .policy
+            .change(context, change, friction)
+            .map_err(|error| actions::refused(self, context, change.change, &error))?;
+        self.state.set_choices(&choices);
         Ok(())
     }
 
@@ -543,16 +564,25 @@ impl Core {
         self.bus.cancel(window, id);
     }
 
-    /// Whether the UI may send `writes` on `context` now.
+    /// Whether the UI may send `writes` on `context` now. A command the gate
+    /// refuses leaves one `refused` line in the audit log, not one per write.
     pub(crate) fn authorize(
         &self,
         context: &str,
+        command: &str,
+        target: &str,
         writes: &[twigo_policy::Attributes],
     ) -> Result<(), IpcError> {
         for write in writes {
-            self.policy
-                .authorize(context, write, twigo_kube::client::Actor::Ui)
-                .map_err(|blocked| IpcError::from(*blocked))?;
+            if let Err(blocked) =
+                self.policy
+                    .authorize(context, write, twigo_kube::client::Actor::Ui)
+            {
+                self.policy
+                    .audit()
+                    .gate_refused(context, command, target, &blocked);
+                return Err(IpcError::from(*blocked));
+            }
         }
         Ok(())
     }
@@ -923,10 +953,15 @@ impl Core {
     }
 
     /// The person's answer to an ask of `window`'s, refused for one that is
-    /// gone or another window's, and for a delete's without the context's
-    /// name typed.
+    /// gone or another window's, for a delete's without the context's name
+    /// typed, and for one that does not fit the ask; a type given to an
+    /// unmarked context's ask is kept with the person's choices.
     pub fn answer_approval(&self, window: &str, answer: AnswerApproval) -> Result<(), IpcError> {
-        self.approvals.answer(window, answer)
+        let _choosing = self.choosing.lock().expect("choosing lock");
+        if let Some(choices) = self.approvals.answer(window, answer)? {
+            self.state.set_choices(&choices);
+        }
+        Ok(())
     }
 
     /// Ends the lists, open objects, logs sessions, shells and terminals,

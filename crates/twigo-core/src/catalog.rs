@@ -5,7 +5,7 @@
 mod tests;
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{self, AtomicU64};
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
-use twigo_policy::{Metadata, Policy};
+use twigo_policy::{Metadata, Policy, TypeLock};
 
 /// The contexts, ordered by their `order`, those without one last, then by
 /// name.
@@ -75,6 +75,20 @@ impl Contexts {
         Some(metadata(found, self.revisions[name]))
     }
 
+    /// Tells `policy` of each context whose metadata differs from what
+    /// `before` said of it, one listed in only one of them included.
+    fn tell(&self, before: &Self, policy: &Policy) {
+        let names: BTreeSet<&str> = (before.listed.iter().chain(&self.listed))
+            .map(|context| context.name.as_str())
+            .collect();
+        for name in names {
+            let (was, is) = (before.metadata(name), self.metadata(name));
+            if was != is {
+                policy.catalog_changed(name, was, is);
+            }
+        }
+    }
+
     pub fn ipc(&self, policy: &Policy) -> Vec<twigo_ipc::Context> {
         self.listed
             .iter()
@@ -94,7 +108,7 @@ fn metadata(context: &kubeconfig::Context, revision: u64) -> Metadata {
     Metadata {
         read_only: context.read_only,
         provider: None,
-        environment: context.environment,
+        environment: context.environment.and_then(TypeLock::of),
         connection: context.fingerprint.value(),
         revision,
     }
@@ -135,6 +149,9 @@ pub struct Catalog {
     /// Counts [`Catalog::follow`] calls, so that a watch it replaced cannot
     /// publish after its successor.
     generation: Arc<AtomicU64>,
+    /// Told of what each read after the first changes of a context, for its
+    /// audit log.
+    policy: Option<Arc<Policy>>,
 }
 
 impl Default for Catalog {
@@ -145,11 +162,22 @@ impl Default for Catalog {
             sources: Mutex::new(None),
             followed: Mutex::new(None),
             generation: Arc::new(AtomicU64::new(0)),
+            policy: None,
         }
     }
 }
 
 impl Catalog {
+    /// The catalog, whose changes after its first read `policy` is told of
+    /// as each is published, before anything reads it: a lock an edit takes
+    /// away leaves a line in the audit log.
+    pub fn audited_by(self, policy: Arc<Policy>) -> Self {
+        Self {
+            policy: Some(policy),
+            ..self
+        }
+    }
+
     /// Reads `sources` and follows their changes, in place of what it
     /// followed before.
     pub fn follow(&self, sources: Sources) {
@@ -160,6 +188,7 @@ impl Catalog {
         let publish = {
             let contexts = self.contexts.clone();
             let current = Arc::clone(&self.generation);
+            let policy = self.policy.clone();
             move |catalog: kubeconfig::Catalog| {
                 let listed = sorted(catalog);
                 // Under the channel's write lock, which the successor's
@@ -170,7 +199,11 @@ impl Catalog {
                     {
                         return false;
                     }
-                    *now = Some(Arc::new(Contexts::new(listed, now.as_deref())));
+                    let next = Contexts::new(listed, now.as_deref());
+                    if let (Some(policy), Some(before)) = (&policy, now.as_deref()) {
+                        next.tell(before, policy);
+                    }
+                    *now = Some(Arc::new(next));
                     true
                 });
             }

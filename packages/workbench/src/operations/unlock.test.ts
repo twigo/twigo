@@ -1,10 +1,5 @@
 import { expect, test, vi } from "vitest";
-import {
-  IpcError,
-  type Backend,
-  type Blocked,
-  type ModeSource,
-} from "@twigo/protocol";
+import { IpcError, type Blocked, type ModeSource } from "@twigo/protocol";
 import { canUnlock, unlockAction } from "./unlock";
 
 function refusal(source: ModeSource, more: Partial<Blocked> = {}): IpcError {
@@ -21,25 +16,24 @@ function refusal(source: ModeSource, more: Partial<Blocked> = {}): IpcError {
   return new IpcError("permissions", "prod-eu is read-only", blocked);
 }
 
-function backendOf(invoke: () => Promise<null>): Backend {
-  return { invoke, subscribe: () => Promise.reject(new Error("no")) } as never;
+function operationsOf(unlock: (context: string) => Promise<never>) {
+  return { unlock };
 }
 
 test.each<ModeSource>([
   { kind: "environment", environment: "production" },
-  { kind: "user" },
+  { kind: "user", overrides: null },
   { kind: "kubeconfig" },
   { kind: "provider" },
-  { kind: "default" },
 ])(
-  "a lock set by %o may be lifted, and the button unlocks that context",
+  "a lock set by %o may be lifted, and the button plans the unlock of that context",
   (source) => {
-    const invoke = vi.fn(() => Promise.resolve(null));
-    const action = unlockAction(backendOf(invoke), refusal(source), vi.fn());
+    const unlock = vi.fn(() => new Promise<never>(() => undefined));
+    const action = unlockAction(operationsOf(unlock), refusal(source));
     expect(action?.label).toBe("Unlock for 15 minutes");
-    expect(invoke).not.toHaveBeenCalled();
+    expect(unlock).not.toHaveBeenCalled();
     action?.run();
-    expect(invoke).toHaveBeenCalledWith("context_unlock", "prod-eu");
+    expect(unlock).toHaveBeenCalledWith("prod-eu");
   },
 );
 
@@ -47,24 +41,22 @@ test.each<ModeSource>([
   { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: "prod-*" },
   { kind: "unlisted" },
 ])("a lock set by %o offers nothing", (source) => {
-  expect(unlockAction(backendOf(vi.fn()), refusal(source), vi.fn())).toBe(
-    undefined,
-  );
+  expect(unlockAction(operationsOf(vi.fn()), refusal(source))).toBe(undefined);
 });
 
 test("a refusal that is not the mode of a read-only context, and any other error, offers nothing", () => {
-  const source: ModeSource = { kind: "user" };
-  const none = (error: unknown) =>
-    unlockAction(backendOf(vi.fn()), error, vi.fn());
+  const source: ModeSource = { kind: "user", overrides: null };
+  const none = (error: unknown) => unlockAction(operationsOf(vi.fn()), error);
   expect(none(refusal(source, { mode: "guarded" }))).toBeUndefined();
   expect(none(refusal(source, { reason: "noApproval" }))).toBeUndefined();
   expect(none(refusal(source, { reason: "noGrant" }))).toBeUndefined();
+  expect(none(refusal(source, { reason: "unmarked" }))).toBeUndefined();
   expect(none(new IpcError("notFound", "no forward 41"))).toBeUndefined();
   expect(none(new Error("boom"))).toBeUndefined();
 });
 
 test.each<[ModeSource, boolean]>([
-  [{ kind: "user" }, true],
+  [{ kind: "user", overrides: null }, true],
   [{ kind: "kubeconfig" }, true],
   [
     { kind: "policyFile", file: "/etc/twigo/policy.json", pattern: null },
@@ -77,17 +69,4 @@ test.each<[ModeSource, boolean]>([
   expect(canUnlock(blocked)).toBe(lifted);
   expect(canUnlock({ ...blocked, mode: "guarded" })).toBe(false);
   expect(canUnlock({ ...blocked, reason: "noGrant" })).toBe(false);
-});
-
-test("an unlock that fails is reported", async () => {
-  const failed = new IpcError("internal", "nothing to unlock");
-  const report = vi.fn();
-  unlockAction(
-    backendOf(() => Promise.reject(failed)),
-    refusal({ kind: "user" }),
-    report,
-  )?.run();
-  await vi.waitFor(() => {
-    expect(report).toHaveBeenCalledWith(failed);
-  });
 });

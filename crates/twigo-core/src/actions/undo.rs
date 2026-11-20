@@ -20,7 +20,7 @@ use twigo_policy::friction::Risk;
 
 use super::{ATTEMPTS, Target, clients_for, get, lost, patch_as_of, sentence};
 use crate::Core;
-use crate::bus::{Finished, Planned};
+use crate::bus::{self, Finished, Planned};
 
 /// How long an action's undo lasts after it ends.
 pub(crate) const UNDO_FOR: Duration = Duration::from_secs(30);
@@ -200,7 +200,12 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         Asks::Resume => (Risk::Lasting, revert.said.clone(), Vec::new()),
         asks => {
             let target = &revert.target;
-            core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+            core.authorize(
+                &target.context,
+                "undo",
+                &attributes.target(),
+                std::slice::from_ref(&attributes),
+            )?;
             let clients = core
                 .clients(&target.context)
                 .await
@@ -244,10 +249,12 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         destructive,
         consequences,
         affected,
-        kubectl: revert.kubectl.clone(),
+        kubectl: Some(revert.kubectl.clone()),
         doing: revert.doing.clone(),
         previewed: None,
-        run: Box::new(move |_| Box::pin(run(this, space, id, connection, revert))),
+        run: bus::Run::Sends(Box::new(move |_| {
+            Box::pin(run(this, space, id, connection, revert))
+        })),
     })
 }
 

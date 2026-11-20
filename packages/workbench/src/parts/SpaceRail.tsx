@@ -117,7 +117,10 @@ function RailTile({
   onSelect: () => void;
 }) {
   const lock = lockOf(access);
-  const words = lock && access && chipLabel(access);
+  const words =
+    access && (lock || access.source.kind === "unmarked")
+      ? chipLabel(access)
+      : undefined;
   return (
     <Tooltip>
       <TooltipTrigger asChild>

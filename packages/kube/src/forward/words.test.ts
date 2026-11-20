@@ -262,7 +262,7 @@ test.each<
   ],
   [
     "refused by a lock the person may lift",
-    { state: REFUSED({ kind: "user" }) },
+    { state: REFUSED({ kind: "user", overrides: null }) },
     { running: true, startable: true, movable: true, web: false },
   ],
   [

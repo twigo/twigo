@@ -12,11 +12,16 @@ pub mod friction;
 mod gate;
 mod policy;
 pub mod redact;
+mod served;
 
 pub use actor::Actor;
 pub use approval::Approval;
 pub use attributes::Attributes;
-pub use audit::{Audit, Entry};
+pub use audit::{Audit, By, Entry, Why};
 pub use file::PolicyFile;
 pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
-pub use policy::{Choices, Metadata, Policy, Refused, UNLOCK};
+pub use policy::{
+    Beneath, Change, Choices, Metadata, Outlived, PlannedChange, Policy, ProviderLock, Refused,
+    TypeLock, UNLOCK,
+};
+pub use served::{Served, Server, api_service};

@@ -92,7 +92,7 @@ async fn a_write_in_a_read_only_context_never_reaches_the_server() {
     assert_eq!(error.kind, ErrorKind::Permissions);
     let blocked = error.blocked.unwrap();
     assert_eq!(blocked.mode, Mode::ReadOnly);
-    assert_eq!(blocked.source, ModeSource::User);
+    assert_eq!(blocked.source, ModeSource::User { overrides: None });
     assert_eq!(blocked.class, RequestClass::Write);
     assert_eq!(blocked.reason, BlockReason::Mode);
     assert_eq!(blocked.verb, "create");
@@ -175,6 +175,7 @@ async fn a_relock_reaches_a_request_already_waiting() {
     let lines: Vec<serde_json::Value> = logged
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
+        .filter(|line: &serde_json::Value| line["event"] == "request")
         .collect();
     assert_eq!(lines.len(), 1, "logged once, where it stopped: {logged}");
     assert_eq!(lines[0]["blocked"], "mode");
@@ -293,22 +294,43 @@ async fn the_sessions_budget_is_shared_by_every_actor() {
 }
 
 #[tokio::test]
-async fn the_audit_log_has_each_write_sent_or_stopped_and_no_read_or_body() {
+async fn the_audit_log_has_what_the_gate_sent_or_stopped_but_reads_and_the_ui_s_other_classes() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.jsonl");
     let policy = audited(Mode::ReadWrite, Audit::open(&path));
     let server = Server::default();
-    let clients = server.clients(Budgets::default(), policy.gate("c", Actor::Ui));
-
-    send(&clients.api, "GET", CONFIGMAPS).await.unwrap();
-    let body = Request::post(CONFIGMAPS)
-        .body(br#"{"data":{"password":"hunter2"}}"#.to_vec())
-        .unwrap();
-    clients.api.request_text(body).await.unwrap();
+    let ui = server.clients(Budgets::default(), policy.gate("c", Actor::Ui));
+    let terminal = ui.actor(Actor::Terminal).unwrap();
+    let each_class = [
+        ("GET", CONFIGMAPS),
+        ("POST", "/api/v1/namespaces/a/configmaps?dryRun=All"),
+        ("GET", "/api/v1/namespaces/a/secrets"),
+        ("POST", "/api/v1/namespaces/a/pods/p/portforward"),
+        ("POST", "/api/v1/namespaces/a/pods/p/exec"),
+    ];
+    for (api, sessions) in [(&ui.api, &ui.sessions), (&terminal.api, &terminal.sessions)] {
+        for (method, uri) in each_class {
+            let client = if uri.ends_with("/portforward") || uri.ends_with("/exec") {
+                sessions
+            } else {
+                api
+            };
+            send(client, method, uri).await.unwrap();
+        }
+        let body = Request::post(CONFIGMAPS)
+            .body(br#"{"data":{"password":"hunter2"}}"#.to_vec())
+            .unwrap();
+        api.request_text(body).await.unwrap();
+    }
     policy.set_mode("c", Some(Mode::ReadOnly)).unwrap();
-    send(&clients.api, "DELETE", "/api/v1/namespaces/a/configmaps/m")
-        .await
-        .unwrap_err();
+    for (api, sessions) in [(&ui.api, &ui.sessions), (&terminal.api, &terminal.sessions)] {
+        send(api, "DELETE", "/api/v1/namespaces/a/configmaps/m")
+            .await
+            .unwrap_err();
+        send(sessions, "POST", "/api/v1/namespaces/a/pods/p/exec")
+            .await
+            .unwrap_err();
+    }
 
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(!text.contains("hunter2"), "{text}");
@@ -322,17 +344,88 @@ async fn the_audit_log_has_each_write_sent_or_stopped_and_no_read_or_body() {
         line.as_object_mut().unwrap().remove("at");
         line
     };
+    let line = |actor: &str, verb: &str, target: &str, class: &str, mode: &str, blocked| {
+        serde_json::json!({
+            "event": "request", "context": "c", "actor": actor, "verb": verb,
+            "target": target, "class": class, "mode": mode, "blocked": blocked,
+        })
+    };
+    let null = serde_json::Value::Null;
     assert_eq!(
         lines.iter().map(without_time).collect::<Vec<_>>(),
         [
-            serde_json::json!({
-                "event": "request", "context": "c", "actor": "ui", "verb": "create",
-                "target": "configmaps in a", "mode": "read-write", "blocked": null,
-            }),
-            serde_json::json!({
-                "event": "request", "context": "c", "actor": "ui", "verb": "delete",
-                "target": "configmaps/m in a", "mode": "read-only", "blocked": "mode",
-            }),
+            line(
+                "ui",
+                "create",
+                "configmaps in a",
+                "write",
+                "read-write",
+                null.clone()
+            ),
+            line(
+                "terminal",
+                "create",
+                "configmaps in a",
+                "dryRun",
+                "read-write",
+                null.clone()
+            ),
+            line(
+                "terminal",
+                "list",
+                "secrets in a",
+                "secretRead",
+                "read-write",
+                null.clone()
+            ),
+            line(
+                "terminal",
+                "create",
+                "pods/p/portforward in a",
+                "forward",
+                "read-write",
+                null.clone()
+            ),
+            line(
+                "terminal",
+                "create",
+                "pods/p/exec in a",
+                "exec",
+                "read-write",
+                null.clone()
+            ),
+            line(
+                "terminal",
+                "create",
+                "configmaps in a",
+                "write",
+                "read-write",
+                null
+            ),
+            line(
+                "ui",
+                "delete",
+                "configmaps/m in a",
+                "write",
+                "read-only",
+                "mode".into()
+            ),
+            line(
+                "terminal",
+                "delete",
+                "configmaps/m in a",
+                "write",
+                "read-only",
+                "mode".into()
+            ),
+            line(
+                "terminal",
+                "create",
+                "pods/p/exec in a",
+                "exec",
+                "read-only",
+                "mode".into()
+            ),
         ]
     );
     #[cfg(unix)]

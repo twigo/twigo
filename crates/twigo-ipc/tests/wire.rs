@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use twigo_ipc::{
     BlockReason, Blocked, Cell, ColumnValues, ContextAccess, Environment, ErrorKind, Grouping, Gvr,
-    IpcError, ListQuery, Mode, ModeSource, RequestClass, RowId, Sort, SubscriptionId, ViewState,
+    IpcError, ListQuery, Lock, LockSource, Mode, ModeSource, RequestClass, RowId, Sort,
+    SubscriptionId, ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -136,7 +137,19 @@ fn a_context_s_access_says_where_its_mode_comes_from() {
         }),
         json!({"kind": "environment", "environment": "staging"})
     );
-    assert_eq!(wire(&ModeSource::Default), json!({"kind": "default"}));
+    assert_eq!(wire(&ModeSource::Unmarked), json!({"kind": "unmarked"}));
+    assert_eq!(
+        wire(&ModeSource::User {
+            overrides: Some(Lock {
+                mode: Mode::ReadOnly,
+                source: LockSource::Kubeconfig,
+            }),
+        }),
+        json!({
+            "kind": "user",
+            "overrides": {"mode": "read-only", "source": {"kind": "kubeconfig"}},
+        })
+    );
 }
 
 #[test]
@@ -148,7 +161,7 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
     let blocked = Blocked {
         context: "prod-eu".to_owned(),
         mode: Mode::ReadOnly,
-        source: ModeSource::User,
+        source: ModeSource::User { overrides: None },
         class: RequestClass::DryRun,
         reason: BlockReason::Mode,
         verb: "create".to_owned(),
@@ -163,7 +176,7 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
             "blocked": {
                 "context": "prod-eu",
                 "mode": "read-only",
-                "source": {"kind": "user"},
+                "source": {"kind": "user", "overrides": null},
                 "class": "dryRun",
                 "reason": "mode",
                 "verb": "create",

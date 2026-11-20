@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AccessQuery, ResourceRef } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, protect } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import type { Lookup, Workbench } from "@twigo/workbench";
 import { tabsIn } from "@twigo/workbench/testing";
@@ -306,7 +306,8 @@ test("a list asks for its capability keys again when the catalog lists the conte
   const reviews = () =>
     invoke.mock.calls.filter(([command]) => command === "access_review").length;
   const before = reviews();
-  const marked = workbench.backend.invoke("context_environment_set", {
+  const marked = protect(workbench.backend, {
+    action: "setEnvironment",
     context: "staging",
     environment: "development",
   });

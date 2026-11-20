@@ -87,3 +87,26 @@ export function click(element: Element): void {
   fireEvent.mouseUp(element, { button: 0 });
   fireEvent.click(element, { button: 0 });
 }
+
+/**
+ * Answers the plan the operations ask about as a press of its button does,
+ * the name typed where it wants one. It waits for the plan, which comes from
+ * the backend.
+ */
+export async function confirmAsking(workbench: Workbench): Promise<void> {
+  let asking = workbench.operations.asking;
+  for (let attempt = 0; asking === undefined; attempt++) {
+    if (attempt === 200) throw new Error("no plan asks to be confirmed");
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        }),
+    );
+    asking = workbench.operations.asking;
+  }
+  const { plan, confirm } = asking;
+  act(() => {
+    confirm(plan.friction.kind === "typed" ? plan.friction.text : undefined);
+  });
+}

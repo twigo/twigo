@@ -6,23 +6,26 @@ import type {
   ApprovalEvent,
   ApprovalId,
 } from "../generated";
+import type { MockAccess } from "./access";
 import { side } from "./edits";
 import { recordedManifest } from "./objects";
 
 /**
  * Pins the asks a process makes of the window (ARCHITECTURE 6.4), which
  * nothing in the app raises before step 7: `approval` raises a sequence, the
- * next one after each answer, `approvalQueue` raises three at once and
- * `approvalWithdrawn` one that is withdrawn a while after it shows. Any
- * other scenario raises none.
+ * next one after each answer, `approvalQueue` raises three at once,
+ * `approvalWithdrawn` one that is withdrawn a while after it shows and
+ * `approvalUnmarked` one on a context nobody marked, which asks what it is.
+ * Any other scenario raises none.
  */
 export type ApprovalScenario =
-  "approval" | "approvalQueue" | "approvalWithdrawn";
+  "approval" | "approvalQueue" | "approvalWithdrawn" | "approvalUnmarked";
 
 export const APPROVAL_SCENARIOS: readonly ApprovalScenario[] = [
   "approval",
   "approvalQueue",
   "approvalWithdrawn",
+  "approvalUnmarked",
 ];
 
 export function isApprovalScenario(
@@ -43,6 +46,7 @@ type Draft = Omit<ApprovalAsk, "id">;
 
 const STAGING = "staging";
 const PRODUCTION = "prod-eu";
+const UNMARKED = "qa";
 const POD = "web-54454cf656-dvb7s";
 const NEW_UID = "0b8f6a3e-52c1-4d7e-9a14-6f3d2c9e7a58";
 
@@ -124,6 +128,7 @@ function drafts(): Record<string, Draft> {
     impersonate: null,
     typed: false,
     lastingMinutes: 15,
+    unmarked: false,
   } as const;
   return {
     patch: {
@@ -247,6 +252,21 @@ function drafts(): Record<string, Draft> {
         [],
       ),
     },
+    unmarked: {
+      ...common,
+      context: UNMARKED,
+      process: "Terminal 1",
+      command: "kubectl scale",
+      verb: "patch",
+      target: "deployments/web/scale in default",
+      detail: {
+        kind: "unknown",
+        reason: { reason: "subresource" },
+        body: JSON.stringify({ spec: { replicas: 5 } }),
+      },
+      lastingMinutes: null,
+      unmarked: true,
+    },
     deleteFlags: {
       ...common,
       context: STAGING,
@@ -287,18 +307,38 @@ function sequence(scenario: ApprovalScenario): Draft[] {
       return pick("patch", "create", "exec");
     case "approvalWithdrawn":
       return pick("patch");
+    case "approvalUnmarked":
+      return pick("unmarked");
   }
 }
 
 const grantOf = ({ process, context }: Draft) => `${process}\0${context}`;
+
+/** The ask the same request raises, of a context nobody marked or of one that is marked, as Rust's `decide` makes it. */
+function asked(ask: Draft, unmarked: boolean): Draft {
+  const deletes = ask.detail.kind === "delete";
+  return {
+    ...ask,
+    unmarked,
+    typed: deletes && !unmarked,
+    lastingMinutes: !deletes && !unmarked ? 15 : null,
+  };
+}
 
 /**
  * The approval broker as a window sees it: it sends the asks waiting and
  * every new one to the window that follows, takes the answers and refuses
  * one for an ask that is gone, a name typed wrong or a lasting answer that
  * was not offered. A lasting answer allows what its process asks on its
- * context for the minutes the ask offered, deletes excepted: an ask that
- * waits then is withdrawn, and one that comes is not raised.
+ * context for the minutes the ask offered, deletes excepted, while what
+ * `#holds` names stays as it was: an ask that waits then is withdrawn, and
+ * one that comes is not raised. An ask of a context nobody marked takes
+ * `mark` or `deny` alone; `mark` sets the context's type, and the request
+ * then meets the mode that type gives: Staging asks again, Production
+ * refuses it and Development and Local let it through. Whenever a context's
+ * access changes, each ask waiting on it that its block no longer fits is
+ * withdrawn and its request meets the gate anew. Rust's `decide`, `holds`
+ * and `wait` decide the same.
  */
 export class MockApprovals {
   readonly #waiting = new Map<ApprovalId, ApprovalAsk>();
@@ -306,10 +346,20 @@ export class MockApprovals {
   #coming: Draft[] = [];
   #started = false;
   #next = 1;
-  /** When each process's lasting answer on a context ends, in milliseconds. */
-  readonly #lasting = new Map<string, number>();
+  /** Each process's lasting answer on a context: when it ends, in milliseconds, and the context's access it holds to. */
+  readonly #lasting = new Map<string, { until: number; holds: string }>();
 
-  constructor(private readonly scenario: ApprovalScenario | undefined) {}
+  constructor(
+    private readonly scenario: ApprovalScenario | undefined,
+    private readonly access: Pick<
+      MockAccess,
+      "of" | "setEnvironment" | "watch" | "changes"
+    >,
+  ) {
+    access.watch(() => {
+      this.#changed();
+    });
+  }
 
   watch(onMessage: (event: ApprovalEvent) => void): null {
     this.#follower = onMessage;
@@ -329,14 +379,25 @@ export class MockApprovals {
     if (ask === undefined) {
       throw new IpcError("notFound", `the ask ${String(id)} is gone`);
     }
-    if (answer !== "deny" && ask.typed && typed !== ask.context) {
+    if (answer.kind !== "deny" && (answer.kind === "mark") !== ask.unmarked) {
+      throw new IpcError(
+        "invalidInput",
+        ask.unmarked
+          ? "this ask takes the context's type or a denial"
+          : "this ask does not ask what the context is",
+      );
+    }
+    if (answer.kind !== "deny" && ask.typed && typed !== ask.context) {
       throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
     }
-    if (answer === "lasting") {
+    if (answer.kind === "lasting") {
       if (ask.lastingMinutes === null) {
         throw new IpcError("invalidInput", "this ask offers no lasting answer");
       }
-      this.#lasting.set(grantOf(ask), Date.now() + ask.lastingMinutes * 60_000);
+      this.#lasting.set(grantOf(ask), {
+        until: Date.now() + ask.lastingMinutes * 60_000,
+        holds: this.#holds(ask.context),
+      });
     }
     this.#waiting.delete(id);
     for (const other of [...this.#waiting.values()]) {
@@ -345,13 +406,59 @@ export class MockApprovals {
         this.#follower?.({ event: "withdrawn", id: other.id });
       }
     }
+    if (answer.kind === "mark") {
+      this.access.setEnvironment(ask.context, answer.environment);
+      this.#decide(ask);
+    }
     if (this.scenario === "approval") this.#later(NEXT_ASK_MS);
     return null;
   }
 
+  /** Whether a request the gate stopped for `ask`'s reason is stopped for it still: a write or an exec of an unmarked context, else of a guarded one. */
+  #blocked(ask: ApprovalAsk): boolean {
+    const { mode, source } = this.access.of(ask.context);
+    return ask.unmarked
+      ? source.kind === "unmarked"
+      : source.kind !== "unmarked" && mode === "guarded";
+  }
+
+  /** The request of an ask meets its context's access: it goes, it is refused, or the person is asked what the context is, or to allow it unless a lasting answer allows it. Says whether it asks. */
+  #decide(ask: Draft): boolean {
+    const { mode, source } = this.access.of(ask.context);
+    const raised =
+      source.kind === "unmarked"
+        ? asked(ask, true)
+        : mode === "guarded"
+          ? asked(ask, false)
+          : null;
+    if (raised === null || this.#allowed(raised)) return false;
+    this.#raise(raised);
+    return true;
+  }
+
+  #changed(): void {
+    for (const ask of [...this.#waiting.values()]) {
+      if (this.#blocked(ask)) continue;
+      this.#waiting.delete(ask.id);
+      this.#follower?.({ event: "withdrawn", id: ask.id });
+      this.#decide(ask);
+    }
+  }
+
   #allowed(draft: Draft): boolean {
-    const until = this.#lasting.get(grantOf(draft));
-    return until !== undefined && Date.now() < until && !draft.typed;
+    const lasting = this.#lasting.get(grantOf(draft));
+    return (
+      lasting !== undefined &&
+      Date.now() < lasting.until &&
+      lasting.holds === this.#holds(draft.context) &&
+      !draft.typed
+    );
+  }
+
+  /** What a lasting answer holds to: the context's mode, its source and how many times a choice or an unlock changed it. */
+  #holds(context: string): string {
+    const { mode, source } = this.access.of(context);
+    return JSON.stringify([mode, source, this.access.changes(context)]);
   }
 
   #later(ms: number): void {
@@ -362,8 +469,7 @@ export class MockApprovals {
         draft !== undefined;
         draft = this.#coming.shift()
       ) {
-        if (this.#allowed(draft)) continue;
-        this.#raise(draft);
+        if (!this.#decide(draft)) continue;
         if (!several) return;
       }
     }, ms);

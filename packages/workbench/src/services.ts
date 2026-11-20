@@ -136,7 +136,7 @@ export class Workbench {
     );
     this.approvals = new Approvals(
       backend,
-      () => this.operations.asking !== undefined,
+      () => this.operations.confirming,
       this.spaces,
     );
   }

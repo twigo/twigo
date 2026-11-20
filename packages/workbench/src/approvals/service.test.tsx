@@ -16,7 +16,7 @@ import {
   type Plan,
   type PlanRequest,
 } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { ConfirmHost } from "../operations/ConfirmHost";
 import { inWorkbench, testWorkbench } from "../testing";
@@ -55,6 +55,7 @@ function ask(id: number, over: Partial<ApprovalAsk> = {}): ApprovalAsk {
     detail: { kind: "diff", live: {}, result: {}, warnings: [] },
     typed: false,
     lastingMinutes: 15,
+    unmarked: false,
     ...over,
   };
 }
@@ -96,8 +97,8 @@ const DELETE = ask(9, {
   lastingMinutes: null,
 });
 
-async function broker() {
-  const mock = createMockBackend("ready");
+async function broker(scenario: MockScenario = "ready") {
+  const mock = createMockBackend(scenario);
   const answers: unknown[] = [];
   const control: {
     emit: (event: ApprovalEvent) => void;
@@ -106,7 +107,7 @@ async function broker() {
   } = { emit: () => undefined, refuse: undefined, hold: undefined };
   const backend: Backend = {
     async invoke(command, request) {
-      if (command === "command_plan") return PLAN;
+      if (command === "command_plan" && scenario === "ready") return PLAN;
       if (command === "command_cancel") return null;
       if (command !== "approval_answer") return mock.invoke(command, request);
       answers.push(request);
@@ -122,7 +123,7 @@ async function broker() {
       return Promise.resolve(null);
     },
   };
-  const workbench = await testWorkbench("ready", backend);
+  const workbench = await testWorkbench(scenario, backend);
   workbench.approvals.registerDetails({
     component: ({ detail }) => <p>Detail of a {detail.kind}</p>,
     wide: ({ kind }) => kind === "diff",
@@ -183,9 +184,9 @@ test("asks come one at a time in the order they came, saying how many wait", asy
     expect(screen.queryByRole("dialog")).toBeNull();
   });
   expect(answers).toEqual([
-    { id: 1, answer: "once", typed: null },
-    { id: 2, answer: "deny", typed: null },
-    { id: 3, answer: "once", typed: null },
+    { id: 1, answer: { kind: "once" }, typed: null },
+    { id: 2, answer: { kind: "deny" }, typed: null },
+    { id: 3, answer: { kind: "once" }, typed: null },
   ]);
 });
 
@@ -247,7 +248,9 @@ test("the typed field holds the delete's button back, takes the focus, and sends
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
-  expect(answers).toEqual([{ id: 9, answer: "once", typed: "prod-eu" }]);
+  expect(answers).toEqual([
+    { id: 9, answer: { kind: "once" }, typed: "prod-eu" },
+  ]);
 });
 
 test("a deny sends no name, though one was typed", async () => {
@@ -260,7 +263,7 @@ test("a deny sends no name, though one was typed", async () => {
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
-  expect(answers).toEqual([{ id: 9, answer: "deny", typed: null }]);
+  expect(answers).toEqual([{ id: 9, answer: { kind: "deny" }, typed: null }]);
 });
 
 test("each button sends its answer, and a typed name goes with the allowing ones", async () => {
@@ -284,9 +287,9 @@ test("each button sends its answer, and a typed name goes with the allowing ones
     expect(screen.queryByRole("dialog")).toBeNull();
   });
   expect(answers).toEqual([
-    { id: 1, answer: "lasting", typed: null },
-    { id: 2, answer: "deny", typed: null },
-    { id: 3, answer: "lasting", typed: "staging" },
+    { id: 1, answer: { kind: "lasting" }, typed: null },
+    { id: 2, answer: { kind: "deny" }, typed: null },
+    { id: 3, answer: { kind: "lasting" }, typed: "staging" },
   ]);
 });
 
@@ -312,7 +315,7 @@ test("Escape denies, and focus starts on Deny, so a stray Enter allows nothing",
   await waitFor(() => {
     expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
   });
-  expect(answers).toEqual([{ id: 1, answer: "deny", typed: null }]);
+  expect(answers).toEqual([{ id: 1, answer: { kind: "deny" }, typed: null }]);
   expect(document.activeElement).toBe(button(/^Deny/));
 });
 
@@ -579,6 +582,80 @@ test("an ask on screen that a plan's confirmation then covers is withdrawn witho
   await expect(outcome).resolves.toEqual({ state: "cancelled" });
 });
 
+test("an ask that arrives while the question of what a context is is open waits behind it, and one withdrawn there leaves without a word", async () => {
+  const { workbench, raise, withdraw } = await broker("protection");
+  const info = vi.spyOn(notify, "info");
+  const outcome = workbench.operations.run(
+    { action: "cordon", space: "qa", node: "qa-node-1", unschedulable: true },
+    { icon: Trash2 },
+  );
+  await waitFor(() => {
+    expect(titles()).toEqual(["What is qa?"]);
+  });
+
+  raise(ask(1), ask(2));
+  expect(titles()).toEqual(["What is qa?"]);
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(dialog("What is qa?"), { key: "Escape" });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
+    expect(titles()).toEqual([
+      "Allow Terminal 2 to patch deployments/web in default on staging?",
+    ]);
+  });
+  withdraw(2);
+  expect(info).toHaveBeenCalledExactlyOnceWith(
+    "Terminal 2 no longer asks to patch deployments/web in default on staging",
+    expect.anything(),
+  );
+});
+
+test("an ask withdrawn between the answer to the question what a context is and the command's own confirmation leaves without a word, and the asks wait behind it", async () => {
+  const { workbench, raise, withdraw } = await broker("protection");
+  const info = vi.spyOn(notify, "info");
+  raise(ask(1), ask(2));
+  const outcome = workbench.operations.run(
+    {
+      action: "cordon",
+      space: "qa",
+      node: "qa-node-1",
+      unschedulable: true,
+    },
+    { icon: Trash2 },
+  );
+  await waitFor(() => {
+    expect(workbench.operations.marking).toBeDefined();
+  });
+  expect(titles()).toEqual(["What is qa?"]);
+
+  await act(async () => {
+    workbench.operations.marking?.choose("staging");
+    await Promise.resolve();
+  });
+  expect(workbench.operations.asking).toBeUndefined();
+  withdraw(1);
+  expect(info).not.toHaveBeenCalled();
+  expect(titles()).toEqual([]);
+
+  await waitFor(() => {
+    expect(workbench.operations.asking).toBeDefined();
+  });
+  expect(titles()).toEqual([workbench.operations.asking?.plan.question]);
+
+  act(() => {
+    workbench.operations.asking?.cancel();
+  });
+  await expect(outcome).resolves.toEqual({ state: "cancelled" });
+  await waitFor(() => {
+    expect(titles()).toEqual([
+      "Allow Terminal 2 to patch deployments/web in default on staging?",
+    ]);
+  });
+  expect(info).not.toHaveBeenCalled();
+});
+
 async function clickOutside() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -646,7 +723,7 @@ test("the second click of a double click lands on the next ask and allows nothin
 
   fireEvent.click(button("Allow once"));
   fireEvent.click(button("Allow for 15 minutes"));
-  expect(answers).toEqual([{ id: 1, answer: "once", typed: null }]);
+  expect(answers).toEqual([{ id: 1, answer: { kind: "once" }, typed: null }]);
   act(() => {
     vi.advanceTimersByTime(ASK_GUARD_MS - 100);
   });
@@ -657,7 +734,7 @@ test("the second click of a double click lands on the next ask and allows nothin
   await waitFor(() => {
     expect(dialog(/^Allow Terminal 3 /)).toBeTruthy();
   });
-  expect(answers[1]).toEqual({ id: 2, answer: "deny", typed: null });
+  expect(answers[1]).toEqual({ id: 2, answer: { kind: "deny" }, typed: null });
 
   fireEvent.click(button("Allow once"));
   expect(answers).toHaveLength(2);
@@ -665,7 +742,7 @@ test("the second click of a double click lands on the next ask and allows nothin
   await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
-  expect(answers[2]).toEqual({ id: 3, answer: "once", typed: null });
+  expect(answers[2]).toEqual({ id: 3, answer: { kind: "once" }, typed: null });
 });
 
 test("an answer goes to the ask the dialog showed, and to none when that ask has gone", async () => {
@@ -673,12 +750,14 @@ test("an answer goes to the ask the dialog showed, and to none when that ask has
   raise(ask(1), ask(2));
   withdraw(1);
 
-  await act(() => workbench.approvals.answer(1, "once"));
+  await act(() => workbench.approvals.answer(1, { kind: "once" }));
   expect(answers).toEqual([]);
   expect(dialog(/^Allow Terminal 2 /)).toBeTruthy();
 
-  await act(() => workbench.approvals.answer(2, "lasting"));
-  expect(answers).toEqual([{ id: 2, answer: "lasting", typed: null }]);
+  await act(() => workbench.approvals.answer(2, { kind: "lasting" }));
+  expect(answers).toEqual([
+    { id: 2, answer: { kind: "lasting" }, typed: null },
+  ]);
 });
 
 test("an ask's dialog leads with the tile of its context's space, and keeps it when the person goes to another space", async () => {
@@ -691,4 +770,49 @@ test("an ask's dialog leads with the tile of its context's space, and keeps it w
     workbench.spaces.select("dev");
   });
   expect(dialog(/^Allow Terminal 1 /).textContent).toMatch(/^STStaging/);
+});
+
+const UNMARKED_ASK = ask(5, {
+  context: "qa",
+  command: "kubectl scale",
+  target: "deployments/web/scale in default",
+  lastingMinutes: null,
+  unmarked: true,
+});
+
+test("an ask of a context nobody marked asks what it is, naming the process and what it wants to do, and answers its type", async () => {
+  const { raise, answers } = await broker();
+  raise(UNMARKED_ASK);
+  const asked = dialog("What is qa?");
+  expect(asked.textContent).toContain(
+    "Terminal 5 asks to patch deployments/web/scale in default on qa",
+  );
+  expect(asked.textContent).toContain("Not marked");
+  expect(asked.textContent).toContain(
+    "Production: Twigo sends no change until you unlock it.Staging: Every change and exec asks first.",
+  );
+  expect(screen.queryByRole("button", { name: /^Allow/ })).toBeNull();
+
+  choose("Staging");
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  expect(answers).toEqual([
+    {
+      id: 5,
+      answer: { kind: "mark", environment: "staging" },
+      typed: null,
+    },
+  ]);
+});
+
+test("Escape denies an unmarked ask, and the ask behind it is an ordinary question of its own", async () => {
+  const { raise, answers } = await broker();
+  raise(UNMARKED_ASK, ask(6, { context: "qa" }));
+  fireEvent.keyDown(dialog("What is qa?"), { key: "Escape" });
+  await waitFor(() => {
+    expect(dialog(/^Allow Terminal 6 /)).toBeTruthy();
+  });
+  expect(answers).toEqual([{ id: 5, answer: { kind: "deny" }, typed: null }]);
+  expect(screen.queryByText("What is qa?")).toBeNull();
 });

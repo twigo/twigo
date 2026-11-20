@@ -3,21 +3,24 @@ import { Lock, ShieldAlert } from "lucide-react";
 import type { Environment, Mode } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { contextAccent } from "../spaces/colors";
-import { environmentLabel, modeLabel } from "../spaces/modes";
+import { environmentLabel, modeLabel, NOT_MARKED } from "../spaces/modes";
 import { spaceMark } from "../parts/spaceMark";
 
 /**
  * Where a dialog acts: the tile of the context's space, which stays on the
- * dialog whichever space is shown, then the context's type or mode and its name.
+ * dialog whichever space is shown, then the context's type or mode, or that
+ * nobody marked it, and its name.
  */
 export function ContextBadge({
   context,
   environment,
   mode,
+  unmarked = false,
 }: {
   context: string;
   environment: Environment | null;
   mode: Mode;
+  unmarked?: boolean;
 }) {
   const { colors, spaces } = useWorkbench();
   useChanges(colors.changes);
@@ -25,7 +28,9 @@ export function ContextBadge({
   const color = colors.of(context);
   const space = spaces.ofContext(context);
   const type = environment === null ? undefined : environmentLabel(environment);
-  const label = type ?? (mode === "read-write" ? undefined : modeLabel(mode));
+  const label = unmarked
+    ? NOT_MARKED
+    : (type ?? (mode === "read-write" ? undefined : modeLabel(mode)));
   const Icon = mode === "guarded" ? ShieldAlert : Lock;
   return (
     <>

@@ -21,6 +21,8 @@ pub(crate) fn refused(error: &Refused) -> IpcError {
     let kind = match error {
         Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => ErrorKind::Permissions,
         Refused::NotLocked(..) => ErrorKind::InvalidInput,
+        Refused::Unlisted(_) => ErrorKind::NotFound,
+        Refused::Changed(_) => ErrorKind::Conflict,
     };
     IpcError::new(kind, error.to_string())
 }

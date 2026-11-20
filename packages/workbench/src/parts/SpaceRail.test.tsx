@@ -6,10 +6,10 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
+import { protect } from "@twigo/protocol/mock";
 import { Changes } from "../changes";
 import { QuickAccessWidget } from "../quickaccess/QuickAccessWidget";
 import type { SpaceConnection } from "../spaces/status";
-import { UNLOCK_CONTEXT } from "../spaces/modeCommands";
 import { inWorkbench, testWorkbench } from "../testing";
 import { initials } from "./spaceBadge";
 import { SpaceRail } from "./SpaceRail";
@@ -86,7 +86,7 @@ test("a tile carries a shut lock while its mode holds writes back, an open one w
   expect(tile.querySelector("span.rounded-full")).not.toBeNull();
 
   await act(() =>
-    workbench.commands.execute(UNLOCK_CONTEXT, workbench.keys.lookup(null)),
+    protect(workbench.backend, { action: "unlock", context: "prod-eu" }),
   );
   expect(lockOf("prod-eu")).toBe("open");
   expect(tile.querySelector("span.rounded-full")).not.toBeNull();
@@ -94,6 +94,15 @@ test("a tile carries a shut lock while its mode holds writes back, an open one w
   expect(screen.getByRole("tooltip").textContent).toContain(
     "Production · unlocked",
   );
+});
+
+test("a tile of a context nobody marked has no lock and says in its tooltip that it is not marked", async () => {
+  const workbench = await testWorkbench();
+  await act(() => workbench.spaces.open("qa"));
+  render(<SpaceRail />, { wrapper: inWorkbench(workbench) });
+  expect(lockOf("qa")).toBeUndefined();
+  fireEvent.focus(screen.getByRole("button", { name: "qa" }));
+  expect(screen.getByRole("tooltip").textContent).toContain("Not marked");
 });
 
 test("a tile's menu picks the colour of its own space, in a picker that has the focus", async () => {

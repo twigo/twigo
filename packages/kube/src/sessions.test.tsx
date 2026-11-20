@@ -8,7 +8,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { LogBatch, LogPod, StreamState, ViewState } from "@twigo/protocol";
-import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import {
+  createMockBackend,
+  protect,
+  type MockScenario,
+} from "@twigo/protocol/mock";
 import { WorkbenchView } from "@twigo/workbench";
 import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { bareTabPaths, settle, withScreenSize } from "../test/workbench";
@@ -54,6 +58,13 @@ async function mounted(scenario: MockScenario = "shellOneContainer") {
   registerExec(workbench, shells, paths);
   registerTerminals(workbench, terminals, paths);
   registerSessions(workbench, { logs, shells, terminals });
+  await act(() =>
+    protect(backend, {
+      action: "setEnvironment",
+      context: SPACE,
+      environment: "development",
+    }),
+  );
   await act(() => workbench.spaces.open(SPACE));
   act(() => {
     workbench.spaces.select(SPACE);
