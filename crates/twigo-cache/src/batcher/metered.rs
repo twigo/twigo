@@ -15,7 +15,7 @@ use twigo_kube::kubeconfig::Fingerprint;
 use super::*;
 use crate::discovery::{Followed, Followers};
 use crate::fake::{Fake, fingerprint};
-use crate::hub::{Hub, Query, Resource, RowFormat};
+use crate::hub::{Hub, LINGER, Query, Resource, RowFormat};
 use crate::metrics::{FIRST_ANSWER, Kind, Poller};
 
 fn polls(fake: &Fake, namespace: &str) -> usize {
@@ -376,6 +376,58 @@ async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
     let (_, joined) = batches.recv().await.expect("a first batch");
     assert_eq!(joined.metrics, Some(MetricsState::Forbidden));
     assert_eq!(polls(&list.fake, "a"), asked, "no request in between");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cold_list_after_a_refusal_says_it_with_the_first_batch_that_shows_rows() {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, 6, true);
+    let refused = list.watch(Duration::from_secs(3)).await;
+    assert_eq!(
+        refused.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Forbidden)
+    );
+
+    list.fake.state().forbidden.clear();
+    list.fake.state().metrics_takes = Duration::from_secs(3);
+    list.fake.state().hold_initial = true;
+    list.reopen(None, 2 * LINGER).await;
+    list.batcher().set_window(0, 6, true);
+    let waiting = first(&mut list).await;
+    assert_eq!((waiting.total, waiting.metrics), (0, None));
+
+    list.fake.stream_initial();
+    let syncing = list.watch(Duration::from_secs(1)).await;
+    assert!(
+        syncing
+            .iter()
+            .any(|batch| batch.status == ViewState::Syncing { loaded: 6 }),
+        "{:?}",
+        syncing
+            .iter()
+            .map(|batch| &batch.status)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        syncing
+            .iter()
+            .all(|batch| batch.total == 0 && batch.metrics.is_none()),
+        "no rows yet, so no mark to qualify"
+    );
+
+    list.fake.release_initial();
+    let released = list.watch(Duration::from_secs(1)).await;
+    let [shown] = &released[..] else {
+        panic!("one batch shows the rows: {released:?}");
+    };
+    assert_eq!((shown.status.clone(), shown.total), (ViewState::Ready, 6));
+    assert_eq!(shown.metrics, Some(MetricsState::Forbidden));
 }
 
 #[tokio::test(start_paused = true)]
