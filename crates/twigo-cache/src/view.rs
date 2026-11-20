@@ -30,9 +30,10 @@ use crate::printed;
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 
+use labels::Selector;
+use sort::{SortKey, natural};
+
 pub use filter::TextFilter;
-pub use labels::Selector;
-pub use sort::{SortKey, natural};
 
 /// The column a list without a sort of its own is sorted by, and which
 /// the text filter always reads.
