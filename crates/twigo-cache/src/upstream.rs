@@ -43,9 +43,10 @@ pub(crate) const IDLE: Duration = Duration::from_secs(120);
 /// asked whether it answers at all. The server sends its initial events back
 /// to back, flushing whenever its queue is empty.
 pub(crate) const INITIAL_IDLE: Duration = Duration::from_secs(30);
-/// How long the probe has, response headers and body, to count as an
+/// How long the probe's body has, from its headers on, to count as an
 /// answer; client-go's ping timeout. A connection whose window unread streams
-/// fill still gives headers and never a body.
+/// fill still gives headers and never a body. The headers are timed by the
+/// client stack, which starts once a request slot admits the probe.
 const PROBE: Duration = Duration::from_secs(15);
 /// The longest an upstream waits after a failure before it tries again.
 pub const RETRY_WITHIN: Duration = Duration::from_secs(5);
@@ -825,13 +826,15 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
 async fn probe(clients: &Clients) -> bool {
     let mut version = Request::new(Vec::new());
     *version.uri_mut() = http::Uri::from_static("/version");
-    let answered = async {
-        let response = clients.api.send(version.map(Body::from)).await?;
-        let mut body = response.into_body();
+    let Ok(response) = clients.api.send(version.map(Body::from)).await else {
+        return false;
+    };
+    let mut body = response.into_body();
+    let drained = async {
         while body.frame().await.transpose()?.is_some() {}
         Ok::<_, kube::Error>(())
     };
-    matches!(tokio::time::timeout(PROBE, answered).await, Ok(Ok(())))
+    matches!(tokio::time::timeout(PROBE, drained).await, Ok(Ok(())))
 }
 
 enum Failure {

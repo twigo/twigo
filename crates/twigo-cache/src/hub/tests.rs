@@ -3,7 +3,7 @@ use std::time::Duration;
 use http::StatusCode;
 use tokio::time::{Instant, sleep};
 use twigo_ipc::ViewState;
-use twigo_kube::client::Budgets;
+use twigo_kube::client::{Actor, Budgets, Class};
 
 use super::*;
 use crate::decode::{DecodeError, Event, Page};
@@ -634,6 +634,34 @@ async fn a_probe_whose_body_never_comes_is_no_answer_at_15_s() {
     assert_eq!(*retired.borrow(), 0, "the body may still come");
     sleep(Duration::from_secs(2)).await;
     assert_eq!(*retired.borrow(), 1, "no answer: the connection is retired");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_probe_that_waits_for_a_request_slot_is_not_timed_by_its_15_s() {
+    let fake = Fake::default();
+    let (hub, clients) = fake.hub(Budgets {
+        requests: 1,
+        ..Budgets::default()
+    });
+    let retired = clients.connections().retired();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let slot = clients
+        .try_admit(Class::Request, Actor::Ui)
+        .expect("the only request slot is free");
+
+    sleep(IDLE + Duration::from_secs(40)).await;
+    assert_eq!(fake.count("/version"), 0, "the probe waits for the slot");
+    assert_eq!(
+        *retired.borrow(),
+        0,
+        "the wait for a slot does not retire the connection"
+    );
+
+    drop(slot);
+    settle().await;
+    assert_eq!(fake.count("/version"), 1, "the probe went out");
+    assert_eq!(*retired.borrow(), 0, "and was answered");
 }
 
 #[tokio::test(start_paused = true)]

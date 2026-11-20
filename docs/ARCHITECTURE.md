@@ -360,7 +360,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     When it fires, a probe, `GET /version`, goes over the shared connection first.
     If the probe gets any answer, only that upstream re-watches.
     If it gets none, the connection is retired and every upstream re-watches, as on wake; idle upstreams whose probes fail together retire it once.
-    The probe has 15 s, client-go's ping timeout, over its response headers and its body: the request timeout above covers headers only, and a connection whose flow-control window is full still delivers headers, since only DATA frames are flow-controlled ([RFC 9113, 5.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.2.1)), but never the body.
+    The probe's body has 15 s from its headers, client-go's ping timeout: the request timeout above covers headers only, and a connection whose flow-control window is full still delivers headers, since only DATA frames are flow-controlled ([RFC 9113, 5.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-5.2.1)), but never the body.
+    The headers keep the request timeout, which starts once the stream counter admits the probe, so a probe that waits for a request slot is no answer only when the connection is.
     A probe that times out is no answer, and the body is read and dropped.
   - On wake from sleep, every connection is retired and every upstream re-watches.
     `twigo-netmon` hears of it from IOKit's system power notifications on macOS, as Chromium's and Firefox's power monitors do, and from logind's `PrepareForSleep(false)` on Linux.
