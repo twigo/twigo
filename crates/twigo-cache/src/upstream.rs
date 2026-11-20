@@ -30,7 +30,7 @@ use crate::store::{Item, Items, RowKey, Store};
 
 /// Items per list page.
 const LIMIT: u32 = 500;
-/// kube's default for watches (`kube-core` 4.2, `params.rs`).
+/// kube's default for watches (`kube-core` 5.1, `params.rs`).
 const TIMEOUT_SECONDS: u32 = 290;
 /// The API server's watch cache sends a bookmark roughly every minute
 /// (`cacheWatcher.nextBookmarkTime`, Kubernetes v1.37.0), so two missing
