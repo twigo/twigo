@@ -390,3 +390,20 @@ async fn a_cluster_wide_part_whose_rewatch_waits_keeps_its_rows_and_is_stale() {
         }]
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_list_whose_only_part_waits_for_a_stream_says_queued() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a", "x"]);
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut other = hub.rows(query(&["x"])).await.unwrap();
+    ready(&mut other).await;
+    let mut list = hub.rows(query(&["a"])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready() == [namespace_part("a", ViewState::Queued, false)]
+    })
+    .await;
+    assert_eq!(mirror.names(), Vec::<&str>::new());
+    assert_eq!(mirror.status, Some(ViewState::Queued));
+}
