@@ -791,16 +791,12 @@ async fn open(
     let response = clients.api.send(request.map(Body::from)).await?;
     let (parts, body) = response.into_parts();
     if !parts.status.is_success() {
-        return Err(refusal(&parts, body).await);
+        return Err(match whole(&parts.headers, body).await {
+            Ok(body) => twigo_kube::errors::refused(parts.status, &body),
+            Err(error) => error,
+        });
     }
     Ok((parts, body))
-}
-
-async fn refusal(parts: &Parts, body: Body) -> kube::Error {
-    match whole(&parts.headers, body).await {
-        Ok(body) => twigo_kube::errors::refused(parts.status, &body),
-        Err(error) => error,
-    }
 }
 
 async fn whole(headers: &HeaderMap, body: Body) -> Result<Bytes, kube::Error> {
@@ -812,25 +808,23 @@ async fn whole(headers: &HeaderMap, body: Body) -> Result<Bytes, kube::Error> {
 /// watch on a live one opens again alone, and one on a dead one is retired
 /// for every upstream.
 async fn answers(clients: &Clients, seen: u64) -> bool {
-    let answered = probe(clients).await;
+    let mut version = Request::new(Vec::new());
+    *version.uri_mut() = http::Uri::from_static("/version");
+    let answered = match clients.api.send(version.map(Body::from)).await {
+        Ok(response) => {
+            let mut body = response.into_body();
+            let drained = async {
+                while body.frame().await.transpose()?.is_some() {}
+                Ok::<_, kube::Error>(())
+            };
+            matches!(tokio::time::timeout(PROBE, drained).await, Ok(Ok(())))
+        }
+        Err(_) => false,
+    };
     if !answered {
         clients.connections().retire_after(seen);
     }
     answered
-}
-
-async fn probe(clients: &Clients) -> bool {
-    let mut version = Request::new(Vec::new());
-    *version.uri_mut() = http::Uri::from_static("/version");
-    let Ok(response) = clients.api.send(version.map(Body::from)).await else {
-        return false;
-    };
-    let mut body = response.into_body();
-    let drained = async {
-        while body.frame().await.transpose()?.is_some() {}
-        Ok::<_, kube::Error>(())
-    };
-    matches!(tokio::time::timeout(PROBE, drained).await, Ok(Ok(())))
 }
 
 enum Failure {
