@@ -401,33 +401,21 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     let mut six = five.clone();
     six.push(&refused);
     let mut partly = hub.rows(live.query(&six)).await.unwrap();
-    let named = loop {
-        let shown = partly.drain_shown();
-        let refused = shown
-            .parts
-            .unready
-            .iter()
-            .all(|part| part.state == forbidden);
-        if refused && shown.parts.unready.len() == 1 && shown.status == ViewState::Ready {
-            break shown.parts;
-        }
-        tokio::time::timeout(Duration::from_secs(60), partly.changed())
-            .await
-            .expect("the list changes within a minute");
+    let named = Parts {
+        count: 6,
+        unready: vec![PartState {
+            part: Part::Namespace {
+                name: refused.clone(),
+            },
+            state: forbidden.clone(),
+            shown: false,
+        }],
     };
-    assert_eq!(
-        named,
-        Parts {
-            count: 6,
-            unready: vec![PartState {
-                part: Part::Namespace {
-                    name: refused.clone()
-                },
-                state: forbidden.clone(),
-                shown: false,
-            }],
-        }
-    );
+    until(&mut partly, |partly| {
+        let shown = partly.drain_shown();
+        shown.status == ViewState::Ready && shown.parts == named
+    })
+    .await;
     assert_eq!(partly.items().len(), 5);
     drop(partly);
     live.delete_namespace(&refused).await;
