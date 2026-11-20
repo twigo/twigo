@@ -850,7 +850,9 @@ upserts: Array<Row>,
  * The state of the rows the list shows: the least ready of the parts
  * whose rows it holds, a part that has listed and waits for a watch
  * counting as `stale`. While it holds no part's rows, the least ready
- * of all its parts.
+ * of the parts still on their way, one whose first list broke off
+ * counting as `connecting`, and once none is, the worst refusal. So
+ * `ready`, `relisting` and `stale` say that some part's rows are shown.
  */
 status: ViewState, 
 /**
@@ -874,7 +876,7 @@ groups: Array<RowGroup> | null,
  * present once a scope has answered or failed, and whenever it
  * changes. Before a scope has answered, a list says the failure its
  * last request ended in, if the core remembers one, so its first batch
- * with the columns has it, and the first answers correct it; with none
+ * that shows rows has it, and the first answers correct it; with none
  * remembered it says none, but for a stale API, which says
  * `unavailable` with the columns. It keeps the state it said while its
  * scopes are asked again.
