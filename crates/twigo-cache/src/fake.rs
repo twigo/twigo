@@ -115,6 +115,9 @@ pub enum Streams {
     /// As a server that knows neither parameter: every object as `ADDED`, a
     /// bookmark without the annotation, and the changes after.
     PlainWatch,
+    /// Every object as `ADDED`, then a bookmark with neither the annotation
+    /// nor a `resourceVersion`, which no decoder reads.
+    BlankBookmark,
     /// 200, then nothing, ever.
     Silent,
     /// 200, then the end of the response.
@@ -671,6 +674,13 @@ impl Fake {
                 Streams::PlainWatch => {
                     items.iter().for_each(|item| send(&added(item)));
                     send(&bookmark(&version, false));
+                }
+                Streams::BlankBookmark => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&json!({
+                        "type": "BOOKMARK",
+                        "object": { "kind": "Pod", "apiVersion": "v1", "metadata": {} }
+                    }));
                 }
                 Streams::Deleted => {
                     items.iter().for_each(|item| send(&added(item)));

@@ -944,6 +944,7 @@ async fn every_refusal_of_a_streaming_list_pages_that_group_version_alone() {
         Streams::Status(StatusCode::UNPROCESSABLE_ENTITY),
         Streams::Plain,
         Streams::PlainWatch,
+        Streams::BlankBookmark,
         Streams::Silent,
         Streams::EndsAtOnce,
         Streams::ErrorThenEnd,
