@@ -1023,6 +1023,23 @@ async fn a_silent_stream_retires_a_dead_connection_and_pages_over_a_live_one() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_held_streaming_list_gets_no_bookmark_before_its_end() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.state().hold_initial = true;
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    sleep(Duration::from_secs(5)).await;
+    fake.bookmark();
+    sleep(Duration::from_secs(5)).await;
+    assert_eq!(pods.state(), ViewState::Connecting);
+    fake.release_initial();
+    ready(&mut pods).await;
+    assert_eq!(names(&pods), ["p1"]);
+    assert_eq!(paged(&fake, PODS_A), 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_list_that_trickles_in_never_falls_back_however_long_it_takes() {
     let fake = Fake::default();
     fake.streams("", Streams::Trickle(INITIAL_IDLE - Duration::from_secs(5)));

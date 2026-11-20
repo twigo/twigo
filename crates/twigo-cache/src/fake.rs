@@ -350,13 +350,14 @@ impl Fake {
         self.state().streams.insert(group.to_owned(), answer);
     }
 
-    /// Sends every watch a bookmark.
+    /// Sends every watch a bookmark, but a held streaming list, which a real
+    /// server sends none before its end.
     pub fn bookmark(&self) {
         let mut state = self.state();
         let version = state.version.to_string();
         state
             .watches
-            .retain(|watch| watch.send(line(&bookmark(&version, false))));
+            .retain(|watch| watch.held || watch.send(line(&bookmark(&version, false))));
     }
 
     /// Sends the held streaming lists their initial events.
