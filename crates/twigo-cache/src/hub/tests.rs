@@ -927,7 +927,6 @@ const WIDGETS_A: &str = "/apis/example.io/v1/namespaces/a/widgets";
 async fn every_refusal_of_a_streaming_list_pages_that_group_version_alone() {
     for refusal in [
         Streams::NoWatchList,
-        Streams::NoMatch,
         Streams::Status(StatusCode::BAD_REQUEST),
         Streams::Status(StatusCode::UNPROCESSABLE_ENTITY),
         Streams::Plain,

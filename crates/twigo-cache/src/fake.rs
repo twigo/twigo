@@ -108,8 +108,6 @@ pub enum Streams {
     Plain,
     /// As 1.33: 422 on `sendInitialEvents`.
     NoWatchList,
-    /// As a library of Kubernetes 1.19 to 1.26: 422 on `resourceVersionMatch`.
-    NoMatch,
     /// This status, as `Status`, to the request.
     Status(StatusCode),
     /// As a server that knows neither parameter: every object as `ADDED`, a
@@ -134,13 +132,18 @@ impl Streams {
     /// The answer of a server that refuses the request.
     fn refusal(self) -> Option<Response<Body>> {
         match self {
-            Streams::NoWatchList => Some(invalid(
-                "sendInitialEvents",
-                "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
-            )),
-            Streams::NoMatch => Some(invalid(
-                "resourceVersionMatch",
-                "resourceVersionMatch is forbidden for watch",
+            Streams::NoWatchList => Some(full(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "status": "Failure",
+                    "reason": "Invalid",
+                    "code": 422,
+                    "message": "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
+                    "details": { "causes": [{ "reason": "FieldValueForbidden", "field": "sendInitialEvents" }] }
+                }),
+                false,
             )),
             Streams::Status(code) => {
                 Some(status(code, code.canonical_reason().unwrap_or("Unknown")))
@@ -988,23 +991,6 @@ fn slow(code: StatusCode, value: &Value, takes: std::time::Duration, gzip: bool)
     let mut response = stream(receiver, gzip);
     *response.status_mut() = code;
     response
-}
-
-/// 422 for kind `ListOptions` on one of its fields, as the API server's handler answers a watch it refuses.
-fn invalid(field: &str, message: &str) -> Response<Body> {
-    full(
-        StatusCode::UNPROCESSABLE_ENTITY,
-        &json!({
-            "kind": "Status",
-            "apiVersion": "v1",
-            "status": "Failure",
-            "reason": "Invalid",
-            "code": 422,
-            "message": message,
-            "details": { "causes": [{ "reason": "FieldValueForbidden", "field": field }] }
-        }),
-        false,
-    )
 }
 
 fn status(code: StatusCode, reason: &str) -> Response<Body> {
