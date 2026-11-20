@@ -5,10 +5,9 @@
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example metrics_cost [runs]
 
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::time::{Duration, Instant};
 
-use flate2::read::MultiGzDecoder;
+use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream;
 use http::Request;
@@ -18,36 +17,24 @@ use kube::Config;
 use kube::client::Body;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use serde_json::Value;
+use twigo_cache::encoding;
 use twigo_cache::metrics::IN_FLIGHT;
 use twigo_kube::client::{Clients, Gate, Options};
 
 const API: &str = "/apis/metrics.k8s.io/v1beta1";
 
-async fn list(clients: &Clients, path: &str) -> (usize, Vec<u8>) {
+async fn list(clients: &Clients, path: &str) -> (usize, Bytes) {
     let request = Request::get(path)
         .header(ACCEPT, "application/json")
-        .header(ACCEPT_ENCODING, "gzip")
+        .header(ACCEPT_ENCODING, encoding::GZIP)
         .body(Body::from(Vec::new()))
         .unwrap();
     let response = clients.api.send(request).await.unwrap();
-    assert!(
-        response.status().is_success(),
-        "{path}: {}",
-        response.status()
-    );
-    let gzipped = response
-        .headers()
-        .contains_key(http::header::CONTENT_ENCODING);
-    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let (parts, body) = response.into_parts();
+    assert!(parts.status.is_success(), "{path}: {}", parts.status);
+    let body = body.collect().await.unwrap().to_bytes();
     let wire = body.len();
-    if !gzipped {
-        return (wire, body.to_vec());
-    }
-    let mut plain = Vec::new();
-    MultiGzDecoder::new(&body[..])
-        .read_to_end(&mut plain)
-        .unwrap();
-    (wire, plain)
+    (wire, encoding::page(&parts.headers, body).unwrap())
 }
 
 async fn together(clients: &Clients, paths: &[String]) -> (Duration, usize, usize) {

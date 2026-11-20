@@ -6,8 +6,8 @@ use http::{Request, header::HeaderValue};
 
 /// The plain JSON fallback lets a server that does not implement Table
 /// answer with raw objects instead of 406.
-pub const ACCEPT_TABLE: &str = "application/json;as=Table;v=v1;g=meta.k8s.io, application/json";
-/// kube's own (`kube-core` 4.2, `request.rs`), with the same fallback: a
+const ACCEPT_TABLE: &str = "application/json;as=Table;v=v1;g=meta.k8s.io, application/json";
+/// kube's own (`kube-core` 5.1, `request.rs`), with the same fallback: a
 /// server without metadata answers with the full objects.
 const ACCEPT_METADATA_LIST: &str =
     "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1, application/json";
@@ -22,6 +22,23 @@ pub enum Format {
     Metadata,
     /// Rows with the server's columns and the whole object.
     Object,
+}
+
+/// What a request reads: a list's whole answer, or a watch's events.
+#[derive(Clone, Copy)]
+enum Answer {
+    List,
+    Watch,
+}
+
+impl Format {
+    fn accept(self, answer: Answer) -> &'static str {
+        match (self, answer) {
+            (Format::Table | Format::Object, _) => ACCEPT_TABLE,
+            (Format::Metadata, Answer::List) => ACCEPT_METADATA_LIST,
+            (Format::Metadata, Answer::Watch) => ACCEPT_METADATA,
+        }
+    }
 }
 
 /// A collection as an upstream watches it.
@@ -91,11 +108,11 @@ pub fn list(
     if let Some(token) = continue_token {
         query.append_pair("continue", token);
     }
-    let accept = match collection.format {
-        Format::Table | Format::Object => ACCEPT_TABLE,
-        Format::Metadata => ACCEPT_METADATA_LIST,
-    };
-    get(collection.path, query.finish(), accept)
+    get(
+        collection.path,
+        query.finish(),
+        collection.format.accept(Answer::List),
+    )
 }
 
 pub fn watch(
@@ -116,11 +133,11 @@ pub fn watch(
             query.append_pair("resourceVersionMatch", "NotOlderThan");
         }
     }
-    let accept = match collection.format {
-        Format::Table | Format::Object => ACCEPT_TABLE,
-        Format::Metadata => ACCEPT_METADATA,
-    };
-    get(collection.path, query.finish(), accept)
+    get(
+        collection.path,
+        query.finish(),
+        collection.format.accept(Answer::Watch),
+    )
 }
 
 fn get(path: &str, query: String, accept: &'static str) -> Request<Vec<u8>> {

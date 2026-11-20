@@ -209,7 +209,7 @@ fn names(subscription: &Subscription<Row>) -> Vec<String> {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn lists_stream_from_1_34_and_come_in_pages_on_1_33() {
+async fn lists_stream_on_1_37_and_come_in_pages_before() {
     let live = live().await;
     let namespace = live.namespace("hub-list").await;
     for name in ["p1", "p2", "p3"] {
@@ -226,8 +226,8 @@ async fn lists_stream_from_1_34_and_come_in_pages_on_1_33() {
         .map(|column| column.name.to_string())
         .collect();
     assert_eq!(columns, POD_COLUMNS);
-    let streaming = hub.inner.cluster(&live.context).streaming(&clients);
-    assert_eq!(streaming, Some(live.minor().await >= 34));
+    let streams = hub.inner.cluster(&live.context).streams(&clients, "", "v1");
+    assert_eq!(streams, live.minor().await >= 37);
 
     live.pod(&namespace, "p4").await;
     until(&mut pods, |pods| names(pods).len() == 4).await;
@@ -382,8 +382,9 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), scopes, "one upstream per namespace");
     assert_eq!(pods.items().len(), 5);
 
-    // 1.33 lists in pages, so its list is what the server refuses.
-    let verb = if live.minor().await >= 34 {
+    // Lists stream from 1.37 on; before it, the list in pages is what the
+    // server refuses.
+    let verb = if live.minor().await >= 37 {
         "watch"
     } else {
         "list"

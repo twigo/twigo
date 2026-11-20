@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{AsyncBufRead, AsyncBufReadExt};
+use http::header::ACCEPT_ENCODING;
+use http_body_util::BodyExt;
 use k8s_openapi::api::core::v1::{Namespace, Pod};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
 use kube::api::{
@@ -12,6 +14,7 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Client, Config};
 use serde_json::json;
 use twigo_cache::decode::{Decode, Event};
+use twigo_cache::encoding;
 use twigo_cache::request::{self, Collection, WatchFrom};
 use twigo_cache::table::{Cell, ColumnKind, Row, TableDecoder};
 use twigo_kube::client::{Clients, Gate, Options};
@@ -109,6 +112,28 @@ impl Lines {
                 .unwrap();
         (read > 0).then_some(line)
     }
+}
+
+async fn asking_gzip(client: &Client, mut request: http::Request<Vec<u8>>) -> (bool, Lines) {
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, encoding::GZIP);
+    let response = client
+        .send(request.map(kube::client::Body::from))
+        .await
+        .unwrap();
+    let (parts, body) = response.into_parts();
+    assert!(parts.status.is_success(), "{}", parts.status);
+    let gzipped = encoding::gzipped(&parts.headers);
+    (
+        gzipped,
+        Lines(Box::pin(encoding::lines(&parts.headers, body))),
+    )
+}
+
+fn event_type(line: &[u8]) -> String {
+    let event: serde_json::Value = serde_json::from_slice(line).unwrap();
+    event["type"].as_str().unwrap().to_owned()
 }
 
 fn has_columns(line: &[u8]) -> bool {
@@ -239,9 +264,11 @@ async fn streaming_lists_depend_on_the_release() {
         return;
     }
 
-    let mut watch = Lines::open(&client, request).await;
+    let (gzipped, mut watch) = asking_gzip(&client, request).await;
+    assert_eq!(gzipped, minor >= 37, "WatchListCompression is on from 1.37");
     let mut decoder = TableDecoder::new("pods");
     let first = watch.next().await.unwrap();
+    assert_eq!(event_type(&first), "ADDED");
     let row = upsert(decoder.decode_event(&first, RECEIVED).unwrap());
     assert_eq!(&*row.meta.name, "p1");
     assert!(has_columns(&first));
@@ -254,14 +281,76 @@ async fn streaming_lists_depend_on_the_release() {
     assert_eq!(names, POD_COLUMNS);
     loop {
         let line = watch.next().await.expect("the initial-events-end bookmark");
-        if let Event::Bookmark {
-            initial_events_end, ..
-        } = decoder.decode_event(&line, RECEIVED).unwrap()
-            && initial_events_end
-        {
-            break;
+        match decoder.decode_event(&line, RECEIVED).unwrap() {
+            Event::Bookmark {
+                initial_events_end: true,
+                ..
+            } => break,
+            Event::Upsert(_) => assert_eq!(event_type(&line), "ADDED"),
+            other => panic!("before the end of the initial events: {other:?}"),
         }
     }
+
+    let empty = namespace(&client, "stream-empty").await;
+    let path = format!("/api/v1/namespaces/{empty}/pods");
+    let request = request::watch(&Collection::table(&path), WatchFrom::InitialEvents, 60);
+    let (gzipped, mut watch) = asking_gzip(&client, request).await;
+    assert_eq!(
+        gzipped,
+        minor >= 37,
+        "the header comes with an empty list too"
+    );
+    let end = watch.next().await.expect("the initial-events-end bookmark");
+    assert!(matches!(
+        TableDecoder::new("pods")
+            .decode_event(&end, RECEIVED)
+            .unwrap(),
+        Event::Bookmark {
+            initial_events_end: true,
+            ..
+        }
+    ));
+    delete_namespace(&client, &empty).await;
+    delete_namespace(&client, &ns).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_page_over_128_kib_comes_gzipped_and_decodes_to_its_rows() {
+    let client = client().await;
+    let ns = namespace(&client, "gzip").await;
+    let pods = Api::<Pod>::namespaced(client.clone(), &ns);
+    for index in 0..120 {
+        create_pod(&pods, &format!("p{index:03}")).await;
+    }
+    let path = format!("/api/v1/namespaces/{ns}/pods");
+    let mut request = request::list(&Collection::table(&path), 500, None);
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, encoding::GZIP);
+    let response = client
+        .send(request.map(kube::client::Body::from))
+        .await
+        .unwrap();
+    let (parts, body) = response.into_parts();
+    assert!(encoding::gzipped(&parts.headers), "{:?}", parts.headers);
+    let wire = body.collect().await.unwrap().to_bytes();
+    let body = encoding::page(&parts.headers, wire.clone()).unwrap();
+    assert!(
+        body.len() > 128 * 1024,
+        "{} bytes, which the server leaves plain below 128 KiB",
+        body.len()
+    );
+    assert!(
+        wire.len() * 4 < body.len(),
+        "{} of {}",
+        wire.len(),
+        body.len()
+    );
+    let page = TableDecoder::new("pods")
+        .decode_list(&body, RECEIVED)
+        .unwrap();
+    assert_eq!(page.items.len(), 120);
 
     delete_namespace(&client, &ns).await;
 }

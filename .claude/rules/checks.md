@@ -74,6 +74,8 @@
   With a `HOME` of its own the app also keeps its state and window position apart, since Tauri finds the app-data directory through `HOME`.
 - The hub's unit tests run on paused time against `crates/twigo-cache/src/fake.rs`, over `Clients::over` (the `test-util` feature of twigo-kube): a wait without a bound loops forever there, as time jumps to the next idle timer, so every wait goes through `until`, which gives up after ten virtual minutes.
   A state the fake passes through at once cannot be awaited: hold it there, as `hold_initial` holds every streaming list and `hold_paths` those of single paths, whose items `stream_initial` lets out ahead of their end.
+  The hub streams a list only where the server answers it gzipped, as 1.37 does (3.2): a fake that streams plain gets its lists in pages, which a test that fills the watch budget with a streaming list notices.
+  `twigo_cache::fake` gzips what asks for it, and `Fake::streams` makes a group answer as another release or server does.
 - Kubernetes clients come only from `twigo_kube::client::Clients`: `api` speaks HTTP/2, `sessions` HTTP/1.1 for exec, attach and port-forward.
   `api` counts its streams, 24 watches at most by default, so a test or tool that opens more raises `Options::budgets`, or its watches wait.
   Never `Config::infer()`, `~/.kube/config` or the current context: tests and examples read `TWIGO_TEST_KUBECONFIG` and refuse contexts other than `kind-*` and `kwok-*`.

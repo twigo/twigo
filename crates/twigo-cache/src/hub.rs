@@ -48,7 +48,7 @@ use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Clock, Env, Spec, Upstream};
 
-pub use crate::upstream::{Connect, RETRY_WITHIN};
+pub use crate::upstream::{Connect, RETRY_WITHIN, backoff};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
@@ -187,6 +187,8 @@ impl Key {
     fn spec(&self) -> Spec {
         Spec {
             context: self.context.clone(),
+            group: self.resource.group.clone(),
+            version: self.resource.version.clone(),
             path: self.resource.path(&self.scope),
             format: self.format,
             field_selector: self.field_selector.clone(),

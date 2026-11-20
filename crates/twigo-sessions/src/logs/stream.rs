@@ -15,14 +15,13 @@ mod resume;
 mod status;
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
+use backon::ExponentialBackoff;
 use futures::AsyncBufReadExt;
 use kube::api::LogParams;
 use serde_json::Value;
 use tokio::sync::watch;
-use twigo_cache::hub::Hub;
+use twigo_cache::hub::{Hub, backoff};
 use twigo_ipc::{ErrorKind, IpcError, LogSource, Since, StreamState};
 use twigo_kube::client::{Clients, Waiting};
 
@@ -238,16 +237,6 @@ pub async fn run(stream: Stream, mut pod: watch::Receiver<Arc<Value>>, send: imp
     } else {
         reader.follow(&mut pod, &send).await;
     }
-}
-
-fn backoff() -> ExponentialBackoff {
-    // Jitter adds up to the delay again: 0.5–5 s, the hub's (ARCHITECTURE 3.2).
-    ExponentialBuilder::new()
-        .with_min_delay(Duration::from_millis(500))
-        .with_max_delay(Duration::from_millis(2_500))
-        .with_jitter()
-        .without_max_times()
-        .build()
 }
 
 struct Reader {
@@ -763,6 +752,7 @@ async fn moved_off(pod: &mut watch::Receiver<Arc<Value>>, container: &str, id: &
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::time::Duration;
 
     use serde_json::json;
     use tokio::task::JoinHandle;
