@@ -553,9 +553,6 @@ where
             None => WatchFrom::ResourceVersion(&from),
         };
         let mut request = request::watch(&self.collection(), start, TIMEOUT_SECONDS);
-        request
-            .headers_mut()
-            .insert(ACCEPT_ENCODING, encoding::GZIP);
         request.extensions_mut().insert(self.watch_waiting.clone());
         let (parts, body) = tokio::select! {
             opened = open(clients, request) => match opened {
@@ -774,24 +771,23 @@ fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
 /// printing to writing the first bytes, and the network's for them.
 async fn fetch(
     clients: &Clients,
-    mut request: Request<Vec<u8>>,
+    request: Request<Vec<u8>>,
     clock: &Clock,
 ) -> Result<(Bytes, Timestamp), kube::Error> {
-    request
-        .headers_mut()
-        .insert(ACCEPT_ENCODING, encoding::GZIP);
-    let response = clients.api.send(request.map(Body::from)).await?;
+    let (parts, body) = open(clients, request).await?;
     let started = clock();
-    let (parts, body) = response.into_parts();
-    if !parts.status.is_success() {
-        return Err(refusal(&parts, body).await);
-    }
     Ok((whole(&parts.headers, body).await?, started))
 }
 
-/// A watch's status and headers with its body, or the refusal in place of
-/// them.
-async fn open(clients: &Clients, request: Request<Vec<u8>>) -> Result<(Parts, Body), kube::Error> {
+/// A response's status and headers with its body, or the refusal in place
+/// of them, to a request that asks for gzip.
+async fn open(
+    clients: &Clients,
+    mut request: Request<Vec<u8>>,
+) -> Result<(Parts, Body), kube::Error> {
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, encoding::GZIP);
     let response = clients.api.send(request.map(Body::from)).await?;
     let (parts, body) = response.into_parts();
     if !parts.status.is_success() {
