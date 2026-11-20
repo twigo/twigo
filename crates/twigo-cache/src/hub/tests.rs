@@ -11,7 +11,7 @@ use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::IDLE;
 
-fn pods() -> Resource {
+pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
         version: "v1".to_owned(),
@@ -20,7 +20,7 @@ fn pods() -> Resource {
     }
 }
 
-fn query(namespaces: &[&str]) -> Query {
+pub(super) fn query(namespaces: &[&str]) -> Query {
     Query {
         context: "kind-test".to_owned(),
         resource: pods(),
@@ -33,18 +33,21 @@ fn query(namespaces: &[&str]) -> Query {
     }
 }
 
-fn namespace(name: &str) -> Scope {
+pub(super) fn namespace(name: &str) -> Scope {
     Scope::Namespace(name.to_owned())
 }
 
-fn budget(watches: usize) -> Budgets {
+pub(super) fn budget(watches: usize) -> Budgets {
     Budgets {
         watches,
         ..Budgets::default()
     }
 }
 
-async fn until<T: Item>(subscription: &mut Subscription<T>, wanted: impl Fn(&ViewState) -> bool) {
+pub(super) async fn until<T: Item>(
+    subscription: &mut Subscription<T>,
+    wanted: impl Fn(&ViewState) -> bool,
+) {
     let reached = async {
         while !wanted(&subscription.state()) {
             subscription.changed().await;
@@ -55,11 +58,11 @@ async fn until<T: Item>(subscription: &mut Subscription<T>, wanted: impl Fn(&Vie
         .expect("the state within ten minutes");
 }
 
-async fn ready<T: Item>(subscription: &mut Subscription<T>) {
+pub(super) async fn ready<T: Item>(subscription: &mut Subscription<T>) {
     until(subscription, |state| *state == ViewState::Ready).await;
 }
 
-async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
+pub(super) async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
     let reached = async {
         while names(subscription) != wanted {
             subscription.changed().await;
@@ -70,7 +73,7 @@ async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
         .expect("the rows within ten minutes");
 }
 
-fn names(subscription: &Subscription<Row>) -> Vec<String> {
+pub(super) fn names(subscription: &Subscription<Row>) -> Vec<String> {
     let mut names: Vec<String> = subscription
         .items()
         .iter()
@@ -81,7 +84,7 @@ fn names(subscription: &Subscription<Row>) -> Vec<String> {
 }
 
 /// Lets every task that can run, run.
-async fn settle() {
+pub(super) async fn settle() {
     sleep(Duration::from_millis(1)).await;
 }
 

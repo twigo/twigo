@@ -20,7 +20,7 @@ use std::sync::Arc;
 use indexset::BTreeSet;
 use jiff::Timestamp;
 use twigo_ipc::{
-    self as ipc, IpcError, ListBatch, ListQuery, MetricsState, RowGroup, RowId, ValueCount,
+    self as ipc, IpcError, ListBatch, ListQuery, MetricsState, Parts, RowGroup, RowId, ValueCount,
     ViewState,
 };
 
@@ -30,9 +30,10 @@ use crate::printed;
 use crate::store::RowKey;
 use crate::table::{Cell, Column, ColumnKind, Row};
 
+use labels::Selector;
+use sort::{SortKey, natural};
+
 pub use filter::TextFilter;
-pub use labels::Selector;
-pub use sort::{SortKey, natural};
 
 /// The column a list without a sort of its own is sorted by, and which
 /// the text filter always reads.
@@ -148,12 +149,7 @@ impl Layout {
                 (CPU, ipc::ColumnKind::Cpu, Metric::Cpu),
                 (MEMORY, ipc::ColumnKind::Memory, Metric::Memory),
             ] {
-                wire.push(ipc::Column {
-                    name: name.to_owned(),
-                    kind,
-                    priority: 0,
-                    prints_duration: false,
-                });
+                wire.push(added(name, kind));
                 sources.push(Source::Metric(metric));
             }
         };
@@ -171,12 +167,7 @@ impl Layout {
             });
             sources.push(Source::Cell(at));
             if at == 0 && spec.namespace_column {
-                wire.push(ipc::Column {
-                    name: NAMESPACE.to_owned(),
-                    kind: ipc::ColumnKind::String,
-                    priority: 0,
-                    prints_duration: false,
-                });
+                wire.push(added(NAMESPACE, ipc::ColumnKind::String));
                 sources.push(Source::Namespace);
             }
         }
@@ -308,6 +299,16 @@ impl Layout {
     }
 }
 
+/// A column Rust adds to the server's: always shown, printing no duration.
+fn added(name: &str, kind: ipc::ColumnKind) -> ipc::Column {
+    ipc::Column {
+        name: name.to_owned(),
+        kind,
+        priority: 0,
+        prints_duration: false,
+    }
+}
+
 fn kind(kind: ColumnKind) -> ipc::ColumnKind {
     match kind {
         ColumnKind::String => ipc::ColumnKind::String,
@@ -412,6 +413,7 @@ struct Sent {
     rows: HashMap<Arc<str>, (Arc<Row>, Option<Usage>)>,
     total: u32,
     status: Option<ViewState>,
+    parts: Option<Parts>,
     counts: Option<Vec<ValueCount>>,
     groups: Option<Vec<RowGroup>>,
     metrics: Option<MetricsState>,
@@ -474,9 +476,7 @@ impl QueryView {
                     .drain()
                     .filter_map(|(key, tracked)| Some((key, tracked.sample?)))
                     .collect();
-                self.index.clear();
-                self.counts.clear();
-                self.groups.clear();
+                self.clear();
                 if let Some(metrics) = &mut self.metrics {
                     metrics.names.clear();
                 }
@@ -523,15 +523,19 @@ impl QueryView {
         }
     }
 
+    fn clear(&mut self) {
+        self.index.clear();
+        self.counts.clear();
+        self.groups.clear();
+    }
+
     fn rebuild(&mut self) {
         let tracked: Vec<_> = self
             .rows
             .drain()
             .map(|(_, tracked)| (tracked.row, tracked.sample))
             .collect();
-        self.index.clear();
-        self.counts.clear();
-        self.groups.clear();
+        self.clear();
         self.layout = Layout::new(
             &self.spec,
             Arc::clone(&self.layout.server),
@@ -807,25 +811,20 @@ impl QueryView {
         tracked.sample
     }
 
-    /// The matching rows per value of the count column, largest first;
-    /// none while the list has no rows to show.
-    fn counts(&self, shows: bool) -> Option<Vec<ValueCount>> {
+    /// The matching rows per value of the count column, largest first.
+    fn counts(&self) -> Option<Vec<ValueCount>> {
         self.spec.count_by.as_ref()?;
-        Some(if shows {
-            sorted(&self.counts)
-        } else {
-            Vec::new()
-        })
+        Some(sorted(&self.counts))
     }
 
     /// The groups that hold matching rows, in group order; none without a
-    /// group column, and empty while the list has no rows to show.
-    fn groups(&self, shows: bool) -> Option<Vec<RowGroup>> {
+    /// group column.
+    fn groups(&self) -> Option<Vec<RowGroup>> {
         self.layout.group.as_ref()?;
         Some(
             self.groups
                 .iter()
-                .filter(|(_, group)| shows && group.rows > 0)
+                .filter(|(_, group)| group.rows > 0)
                 .map(|(value, group)| RowGroup {
                     value: value.0.to_string(),
                     rows: group.rows,
@@ -874,16 +873,11 @@ impl QueryView {
 
     /// What changed for the webview since the last batch, if anything did:
     /// the window when its rows or their order changed, the rows that
-    /// entered it or changed, and the total, the status, the columns and
-    /// the counts and the groups when they changed. Only a list that is
-    /// ready, relisting or stale has rows to show; the others show their
-    /// state.
-    pub fn batch(&mut self, status: ViewState) -> Option<ListBatch> {
+    /// entered it or changed, and the total, the status, the parts, the
+    /// columns and the counts and the groups when they changed. The view
+    /// holds the rows of the parts that show, so what it sends is theirs.
+    pub fn batch(&mut self, status: ViewState, parts: Parts) -> Option<ListBatch> {
         let first = self.seq == 0;
-        let shows = matches!(
-            status,
-            ViewState::Ready | ViewState::Relisting | ViewState::Stale
-        );
         let columns_changed = self
             .sent
             .columns
@@ -892,8 +886,8 @@ impl QueryView {
         if columns_changed {
             self.sent.rows.clear();
         }
-        let total = if shows { self.index.len() } else { 0 };
-        let shown = if shows { self.shown() } else { Vec::new() };
+        let total = self.index.len();
+        let shown = self.shown();
         let ids: Vec<Arc<str>> = shown.iter().map(|entry| Arc::clone(&entry.id)).collect();
         let window_changed = first || self.window.0 != self.sent.start || ids != self.sent.ids;
         let mut rows = HashMap::with_capacity(shown.len());
@@ -921,16 +915,18 @@ impl QueryView {
             rows.insert(Arc::clone(&entry.id), (Arc::clone(&tracked.row), usage));
         }
         let total = u32::try_from(total).unwrap_or(u32::MAX);
-        let counts = self.counts(shows);
+        let counts = self.counts();
         let counts_changed = first || counts != self.sent.counts;
-        let groups = self.groups(shows);
+        let groups = self.groups();
         let groups_changed = groups != self.sent.groups;
+        let parts_changed = self.sent.parts.as_ref() != Some(&parts);
         let metrics = self.metrics_state();
         let metrics_changed = metrics != self.sent.metrics;
         if !window_changed
             && !columns_changed
             && !counts_changed
             && !groups_changed
+            && !parts_changed
             && !metrics_changed
             && upserts.is_empty()
             && total == self.sent.total
@@ -949,7 +945,7 @@ impl QueryView {
             }),
             upserts,
             status: status.clone(),
-            parts: None,
+            parts: parts_changed.then(|| parts.clone()),
             counts: if counts_changed { counts.clone() } else { None },
             groups: groups_changed.then(|| groups.clone().unwrap_or_default()),
             metrics: metrics.filter(|_| metrics_changed),
@@ -961,6 +957,7 @@ impl QueryView {
             rows,
             total,
             status: Some(status),
+            parts: Some(parts),
             counts,
             groups,
             metrics,

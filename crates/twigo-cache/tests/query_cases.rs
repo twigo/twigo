@@ -13,7 +13,7 @@ use twigo_cache::metrics::{Api, Change, Sample, Update};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{
-    ColumnValues, ErrorKind, Grouping, Gvr, ListQuery, RowGroup, Sort, ValueCount, ViewState,
+    ColumnValues, ErrorKind, Grouping, Gvr, ListQuery, Parts, RowGroup, Sort, ValueCount, ViewState,
 };
 
 const CASES: &str = include_str!("../../../packages/protocol/src/query-cases.json");
@@ -260,7 +260,11 @@ fn the_query_cases_pass() {
                 changes: samples,
                 ..Update::default()
             });
-            let batch = view.batch(ViewState::Ready).unwrap();
+            let whole = Parts {
+                count: 1,
+                unready: Vec::new(),
+            };
+            let batch = view.batch(ViewState::Ready, whole).unwrap();
             let ids: Vec<&str> = batch
                 .window
                 .as_ref()

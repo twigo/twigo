@@ -12,6 +12,7 @@ use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{AuthInfo, KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
 use serde_json::json;
+use twigo_ipc::{Part, PartState, Parts};
 use twigo_kube::client::{Clients, Gate, Options};
 
 use super::*;
@@ -381,7 +382,6 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), scopes, "one upstream per namespace");
     assert_eq!(pods.items().len(), 5);
 
-    let mut all = hub.rows(live.query(&[])).await.unwrap();
     // 1.33 lists in pages, so its list is what the server refuses.
     let verb = if live.minor().await >= 34 {
         "watch"
@@ -392,6 +392,46 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         verb: verb.to_owned(),
         resource: "pods".to_owned(),
     };
+
+    // A sixth namespace the account has no role in is the one part refused:
+    // the list shows the other five, ready, and names it.
+    let refused = live.namespace("hub-sa").await;
+    live.pod(&refused, "p").await;
+    let mut six = five.clone();
+    six.push(&refused);
+    let mut partly = hub.rows(live.query(&six)).await.unwrap();
+    let named = loop {
+        let shown = partly.drain_shown();
+        let refused = shown
+            .parts
+            .unready
+            .iter()
+            .all(|part| part.state == forbidden);
+        if refused && shown.parts.unready.len() == 1 && shown.status == ViewState::Ready {
+            break shown.parts;
+        }
+        tokio::time::timeout(Duration::from_secs(60), partly.changed())
+            .await
+            .expect("the list changes within a minute");
+    };
+    assert_eq!(
+        named,
+        Parts {
+            count: 6,
+            unready: vec![PartState {
+                part: Part::Namespace {
+                    name: refused.clone()
+                },
+                state: forbidden.clone(),
+                shown: false,
+            }],
+        }
+    );
+    assert_eq!(partly.items().len(), 5);
+    drop(partly);
+    live.delete_namespace(&refused).await;
+
+    let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| all.state() == forbidden).await;
 
     // One that may list pods everywhere shares one cluster-wide upstream.

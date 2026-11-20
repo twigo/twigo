@@ -49,6 +49,8 @@ pub struct State {
     pub compacted: u64,
     /// Streaming lists send their initial events only once released.
     pub hold_initial: bool,
+    /// The paths whose streaming lists are held as `hold_initial` holds all.
+    pub hold_paths: HashSet<String>,
     /// The cluster refuses streaming lists, as 1.33 does.
     pub no_streaming: bool,
     /// Requests get `503` while this many remain.
@@ -118,8 +120,10 @@ struct Watch {
     resource: String,
     namespace: Option<String>,
     sender: mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>,
-    /// A held streaming list, which has sent nothing yet.
+    /// A held streaming list, which has not sent its end yet.
     held: bool,
+    /// Its initial events went out, but for the end.
+    streamed: bool,
 }
 
 /// What a request's path names.
@@ -285,22 +289,26 @@ impl Fake {
         });
     }
 
-    /// Sends the held streaming lists their initial events.
+    /// Sends the held streaming lists their initial events, but not the
+    /// bookmark that ends them.
+    pub fn stream_initial(&self) {
+        let mut state = self.state();
+        let mut watches = std::mem::take(&mut state.watches);
+        for watch in watches.iter_mut().filter(|watch| watch.held) {
+            state.send_initial(watch);
+        }
+        state.watches = watches;
+    }
+
+    /// Sends the held streaming lists their initial events, and ends them.
     pub fn release_initial(&self) {
         let mut state = self.state();
         state.hold_initial = false;
+        state.hold_paths.clear();
         let version = state.version.to_string();
         let mut watches = std::mem::take(&mut state.watches);
         for watch in watches.iter_mut().filter(|watch| watch.held) {
-            let target = Target {
-                group: watch.group.clone(),
-                resource: watch.resource.clone(),
-                namespace: watch.namespace.clone(),
-            };
-            for item in state.items(&target) {
-                let event = line(&json!({ "type": "ADDED", "object": item }));
-                let _ = watch.sender.unbounded_send(Ok(Frame::data(event)));
-            }
+            state.send_initial(watch);
             let end = line(&bookmark(&version, true));
             let _ = watch.sender.unbounded_send(Ok(Frame::data(end)));
             watch.held = false;
@@ -545,13 +553,14 @@ impl Fake {
                     }),
                 );
             }
-            if state.hold_initial {
+            if state.hold_initial || state.hold_paths.contains(&path) {
                 state.watches.push(Watch {
                     group: target.group,
                     resource: target.resource,
                     namespace: target.namespace,
                     sender,
                     held: true,
+                    streamed: false,
                 });
                 return stream(receiver);
             }
@@ -592,6 +601,7 @@ impl Fake {
             namespace: target.namespace,
             sender,
             held: false,
+            streamed: false,
         });
         stream(receiver)
     }
@@ -729,6 +739,22 @@ impl State {
             http::HeaderValue::from_static("application/json"),
         );
         response
+    }
+
+    /// Sends a held streaming list its items, once.
+    fn send_initial(&self, watch: &mut Watch) {
+        if std::mem::replace(&mut watch.streamed, true) {
+            return;
+        }
+        let target = Target {
+            group: watch.group.clone(),
+            resource: watch.resource.clone(),
+            namespace: watch.namespace.clone(),
+        };
+        for item in self.items(&target) {
+            let event = line(&json!({ "type": "ADDED", "object": item }));
+            let _ = watch.sender.unbounded_send(Ok(Frame::data(event)));
+        }
     }
 
     fn items(&self, target: &Target) -> Vec<Value> {
