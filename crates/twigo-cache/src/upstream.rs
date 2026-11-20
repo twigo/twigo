@@ -111,6 +111,11 @@ impl<T: Item> Upstream<T> {
         self.state.subscribe()
     }
 
+    /// The state it says now.
+    pub fn current(&self) -> ViewState {
+        self.state.borrow().clone()
+    }
+
     /// The store has held a whole list since the upstream started.
     pub fn listed(&self) -> bool {
         self.status().listed

@@ -988,11 +988,7 @@ impl<T: Item> Subscription<T> {
     /// The state of the subscription: its least ready part's.
     pub fn state(&self) -> ViewState {
         let parts = self.inner.parts();
-        combine(
-            parts
-                .iter()
-                .map(|part| part.upstream.state().borrow().clone()),
-        )
+        combine(parts.iter().map(|part| part.upstream.current()))
     }
 
     /// Every part has held a whole list since it started, so the rows are
