@@ -997,11 +997,8 @@ impl<T: Item> Subscription<T> {
     /// failed for two of the longest backoffs.
     pub async fn whole(&mut self) -> Result<Vec<Arc<T>>, ViewState> {
         loop {
-            let state = self.state();
-            match state {
-                ViewState::Forbidden { .. } | ViewState::Unauthorized | ViewState::Error { .. } => {
-                    return Err(state);
-                }
+            match self.state() {
+                state if failed(&state) => return Err(state),
                 _ if self.listed() => return Ok(self.items()),
                 ViewState::Stale => {
                     let tried = tokio::time::timeout(2 * RETRY_WITHIN, async {
@@ -1013,11 +1010,7 @@ impl<T: Item> Subscription<T> {
                         return Err(ViewState::Stale);
                     }
                 }
-                ViewState::Ready
-                | ViewState::Relisting
-                | ViewState::Queued
-                | ViewState::Connecting
-                | ViewState::Syncing { .. } => self.changed().await,
+                _ => self.changed().await,
             }
         }
     }
