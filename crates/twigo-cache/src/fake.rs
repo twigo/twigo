@@ -52,6 +52,8 @@ pub struct State {
     pub hold_initial: bool,
     /// How each group answers a streaming list, the core group as `""`.
     streams: HashMap<String, Streams>,
+    /// The streaming lists that said nothing, which stay open.
+    silent: Vec<mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>>,
     /// Requests get `503` while this many remain.
     pub unavailable: usize,
     /// Paths that answer `403`.
@@ -87,7 +89,8 @@ pub struct State {
     metrics_waiting: usize,
 }
 
-/// How a group answers a streaming list.
+/// How a group answers a streaming list. Every answer that streams is gzipped
+/// when gzip was asked, except [`Streams::Plain`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Streams {
     /// As 1.37: the initial events as `ADDED`, then the annotated bookmark,
@@ -98,6 +101,43 @@ pub enum Streams {
     Plain,
     /// As 1.33: 422 on `sendInitialEvents`.
     NoWatchList,
+    /// As a library of Kubernetes 1.19 to 1.26: 422 on `resourceVersionMatch`.
+    NoMatch,
+    /// This status, as `Status`, to the request.
+    Status(StatusCode),
+    /// As a server that knows neither parameter: every object as `ADDED`, a
+    /// bookmark without the annotation, and the changes after.
+    PlainWatch,
+    /// 200, then nothing, ever.
+    Silent,
+    /// 200, then the end of the response.
+    EndsAtOnce,
+    /// 200, one `ERROR` event of 500, then the end of the response.
+    ErrorThenEnd,
+    /// Every object as `ADDED`, then a `DELETED` of the first, and no end.
+    Deleted,
+    /// One object as `ADDED` each interval, then the annotated bookmark.
+    Trickle(std::time::Duration),
+}
+
+impl Streams {
+    /// The answer of a server that refuses the request.
+    fn refusal(self) -> Option<Response<Body>> {
+        match self {
+            Streams::NoWatchList => Some(invalid(
+                "sendInitialEvents",
+                "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
+            )),
+            Streams::NoMatch => Some(invalid(
+                "resourceVersionMatch",
+                "resourceVersionMatch is forbidden for watch",
+            )),
+            Streams::Status(code) => {
+                Some(status(code, code.canonical_reason().unwrap_or("Unknown")))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -569,21 +609,10 @@ impl Fake {
             .get(&target.group)
             .copied()
             .unwrap_or_default();
-        if streaming && answer == Streams::NoWatchList {
-            return full(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                json!({
-                    "kind": "Status",
-                    "apiVersion": "v1",
-                    "status": "Failure",
-                    "reason": "Invalid",
-                    "code": 422,
-                    "message": "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
-                    "details": { "causes": [{ "reason": "FieldValueForbidden", "field": "sendInitialEvents" }] }
-                }),
-            );
+        if streaming && let Some(refusal) = answer.refusal() {
+            return refusal;
         }
-        let gzip = streaming && answer == Streams::Compressed && gzip;
+        let gzip = streaming && answer != Streams::Plain && gzip;
         if gzip {
             state.gzipped.push(uri.to_string());
         }
@@ -605,10 +634,55 @@ impl Fake {
                 });
                 return stream(receiver, gzip);
             }
-            for item in state.items(&target) {
-                send(&json!({ "type": "ADDED", "object": item }));
+            let items = state.items(&target);
+            let version = state.version.to_string();
+            let added = |item: &Value| json!({ "type": "ADDED", "object": item });
+            match answer {
+                Streams::Silent => {
+                    state.silent.push(sender);
+                    return stream(receiver, gzip);
+                }
+                Streams::EndsAtOnce => return stream(receiver, gzip),
+                Streams::ErrorThenEnd => {
+                    send(&json!({
+                        "type": "ERROR",
+                        "object": {
+                            "kind": "Status",
+                            "apiVersion": "v1",
+                            "status": "Failure",
+                            "reason": "InternalError",
+                            "code": 500,
+                            "message": "etcd does not support watch progress",
+                        }
+                    }));
+                    return stream(receiver, gzip);
+                }
+                Streams::PlainWatch => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&bookmark(&version, false));
+                }
+                Streams::Deleted => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&json!({ "type": "DELETED", "object": items[0] }));
+                }
+                Streams::Trickle(every) => {
+                    let sender = sender.clone();
+                    tokio::spawn(async move {
+                        for item in items {
+                            tokio::time::sleep(every).await;
+                            let event = line(&added(&item));
+                            let _ = sender.unbounded_send(Ok(Frame::data(frame(event, gzip))));
+                        }
+                        tokio::time::sleep(every).await;
+                        let end = line(&bookmark(&version, true));
+                        let _ = sender.unbounded_send(Ok(Frame::data(frame(end, gzip))));
+                    });
+                }
+                _ => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&bookmark(&version, true));
+                }
             }
-            send(&bookmark(&state.version.to_string(), true));
         } else {
             let from: u64 = param("resourceVersion")
                 .and_then(|version| version.parse().ok())
@@ -864,6 +938,22 @@ fn slow(code: StatusCode, value: &Value, takes: std::time::Duration, gzip: bool)
     response
 }
 
+/// 422 for kind `ListOptions` on one of its fields, as the API server's handler answers a watch it refuses.
+fn invalid(field: &str, message: &str) -> Response<Body> {
+    full(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        json!({
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "reason": "Invalid",
+            "code": 422,
+            "message": message,
+            "details": { "causes": [{ "reason": "FieldValueForbidden", "field": field }] }
+        }),
+    )
+}
+
 fn status(code: StatusCode, reason: &str) -> Response<Body> {
     full(
         code,
@@ -915,7 +1005,7 @@ fn encoded(response: &mut Response<Body>, gzip: bool) {
 }
 
 /// A gzip member of its own, or the bytes as they are.
-fn frame(bytes: Bytes, gzip: bool) -> Bytes {
+pub fn frame(bytes: Bytes, gzip: bool) -> Bytes {
     if !gzip {
         return bytes;
     }

@@ -182,6 +182,8 @@ impl Key {
     fn spec(&self) -> Spec {
         Spec {
             context: self.context.clone(),
+            group: self.resource.group.clone(),
+            version: self.resource.version.clone(),
             path: self.resource.path(&self.scope),
             format: self.format,
             field_selector: self.field_selector.clone(),
