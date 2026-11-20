@@ -2,6 +2,7 @@
 
 use http::StatusCode;
 use kube::core::Status;
+use tower::timeout::error::Elapsed;
 use twigo_ipc::{Blocked, ErrorKind, IpcError};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
@@ -25,12 +26,16 @@ pub fn request(error: &kube::Error) -> IpcError {
             _ => ErrorKind::Internal,
         },
         kube::Error::Auth(_) => ErrorKind::Unauthorized,
-        kube::Error::Service(error) if let Some(error) = credential(&**error) => match error {
-            CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
-            _ => ErrorKind::Unauthorized,
-        },
-        kube::Error::Service(error) if oidc(&**error) => ErrorKind::Unauthorized,
-        kube::Error::Service(error) if elapsed(&**error) => ErrorKind::Timeout,
+        kube::Error::Service(error) if let Some(error) = find::<CredentialError>(&**error) => {
+            match error {
+                CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
+                _ => ErrorKind::Unauthorized,
+            }
+        }
+        kube::Error::Service(error) if find::<OidcError>(&**error).is_some() => {
+            ErrorKind::Unauthorized
+        }
+        kube::Error::Service(error) if find::<Elapsed>(&**error).is_some() => ErrorKind::Timeout,
         kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorKind::Unavailable,
         _ => ErrorKind::Internal,
     };
@@ -72,24 +77,11 @@ pub fn over_budget(error: &kube::Error) -> bool {
 pub fn no_credential(error: &kube::Error) -> bool {
     match error {
         kube::Error::Auth(_) => true,
-        kube::Error::Service(error) => credential(&**error).is_some() || oidc(&**error),
+        kube::Error::Service(error) => {
+            find::<CredentialError>(&**error).is_some() || find::<OidcError>(&**error).is_some()
+        }
         _ => false,
     }
-}
-
-/// Why the context's plugin gave no credential, when that ended it.
-fn credential<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a CredentialError> {
-    find(error)
-}
-
-/// Whether the oidc refresh failed.
-fn oidc(error: &(dyn std::error::Error + 'static)) -> bool {
-    find::<OidcError>(error).is_some()
-}
-
-/// Whether the client's request timeout ended it.
-fn elapsed(error: &(dyn std::error::Error + 'static)) -> bool {
-    find::<tower::timeout::error::Elapsed>(error).is_some()
 }
 
 /// The first `T` in the chain of `error` and its causes.
