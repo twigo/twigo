@@ -36,6 +36,8 @@ use hyper_util::client::legacy::connect::{
 use tokio::sync::{OwnedMutexGuard, watch};
 use tower::{BoxError, Layer, Service, ServiceExt};
 
+use crate::errors::find;
+
 #[derive(Clone)]
 pub struct Connections(Arc<Inner>);
 
@@ -320,14 +322,7 @@ fn poison(capture: &CaptureConnection) {
 /// Whether the server said it is going away, so the connection takes no new
 /// streams.
 fn going_away(error: &(dyn std::error::Error + 'static)) -> bool {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if let Some(h2) = error.downcast_ref::<h2::Error>() {
-            return h2.is_go_away() && h2.is_remote();
-        }
-        source = error.source();
-    }
-    false
+    find::<h2::Error>(error).is_some_and(|h2| h2.is_go_away() && h2.is_remote())
 }
 
 /// The connector, tagging each connection with its id.
