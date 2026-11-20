@@ -31,20 +31,23 @@ export type Pin = (
  * lack is refused alone.
  */
 export function pinOf(scenario: string, resource: string): Pin | undefined {
+  const refused = {
+    state: { state: "forbidden", verb: "watch", resource },
+    shown: false,
+  } as const;
   if (scenario === "rbacNamespaces") {
     return (part) =>
       part.kind === "namespace" && part.name === "default"
         ? undefined
-        : {
-            state: { state: "forbidden", verb: "watch", resource },
-            shown: false,
-          };
+        : refused;
   }
   if (scenario === "partsQueued") {
-    return (_, at, of) =>
-      of > 3 && at >= of - 2
+    return (part, at, of) => {
+      if (part.kind === "cluster") return refused;
+      return of > 3 && at >= of - 2
         ? { state: { state: "queued" }, shown: at === of - 2 }
         : undefined;
+    };
   }
   return undefined;
 }
