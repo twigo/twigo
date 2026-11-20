@@ -475,9 +475,7 @@ impl QueryView {
                     .drain()
                     .filter_map(|(key, tracked)| Some((key, tracked.sample?)))
                     .collect();
-                self.index.clear();
-                self.counts.clear();
-                self.groups.clear();
+                self.clear();
                 if let Some(metrics) = &mut self.metrics {
                     metrics.names.clear();
                 }
@@ -524,15 +522,19 @@ impl QueryView {
         }
     }
 
+    fn clear(&mut self) {
+        self.index.clear();
+        self.counts.clear();
+        self.groups.clear();
+    }
+
     fn rebuild(&mut self) {
         let tracked: Vec<_> = self
             .rows
             .drain()
             .map(|(_, tracked)| (tracked.row, tracked.sample))
             .collect();
-        self.index.clear();
-        self.counts.clear();
-        self.groups.clear();
+        self.clear();
         self.layout = Layout::new(
             &self.spec,
             Arc::clone(&self.layout.server),
