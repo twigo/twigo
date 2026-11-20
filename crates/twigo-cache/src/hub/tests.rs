@@ -1115,27 +1115,33 @@ async fn a_relist_that_falls_back_keeps_its_rows_until_its_pages_end() {
     assert_eq!(names(&pods), ["p2", "p3"]);
 }
 
+fn switching(fake: &Fake) -> (Hub, Arc<Clients>, impl Fn()) {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, switched) = (Arc::clone(&first), Arc::clone(&switched));
+        Arc::new(move |_context| {
+            let clients = Arc::clone(if switched.load(Relaxed) {
+                &second
+            } else {
+                &first
+            });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    (Hub::new(connect), first, move || {
+        switched.store(true, Relaxed)
+    })
+}
+
 #[tokio::test(start_paused = true)]
 async fn rebuilt_clients_forget_a_refusal_and_a_retirement_keeps_it() {
     let fake = Fake::default();
     fake.streams("", Streams::NoWatchList);
     fake.add("pods", Some("a"), "p1");
-    let first = fake.clients(Budgets::default());
-    let second = fake.clients(Budgets::default());
-    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let connect: Connect = {
-        let (first, second, switched) = (
-            Arc::clone(&first),
-            Arc::clone(&second),
-            Arc::clone(&switched),
-        );
-        Arc::new(move |_context| {
-            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
-            let clients = Arc::clone(if now { &second } else { &first });
-            Box::pin(async move { Ok(clients) })
-        })
-    };
-    let hub = Hub::new(connect);
+    let (hub, first, switch) = switching(&fake);
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     assert_eq!(streamed(&fake, PODS_A), 1);
@@ -1152,7 +1158,7 @@ async fn rebuilt_clients_forget_a_refusal_and_a_retirement_keeps_it() {
         "and did not ask for a stream after a retirement"
     );
 
-    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    switch();
     first.connections().abandon();
     sleep(Duration::from_secs(10)).await;
     assert_eq!(streamed(&fake, PODS_A), 2, "new clients ask again");
@@ -1388,26 +1394,11 @@ async fn a_name_that_can_be_no_path_segment_is_refused() {
 async fn a_poll_leaves_clients_abandoned_meanwhile() {
     let fake = Fake::default();
     fake.state().unwatchable.insert("pods".to_owned());
-    let first = fake.clients(Budgets::default());
-    let second = fake.clients(Budgets::default());
-    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let connect: Connect = {
-        let (first, second, switched) = (
-            Arc::clone(&first),
-            Arc::clone(&second),
-            Arc::clone(&switched),
-        );
-        Arc::new(move |_context| {
-            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
-            let clients = Arc::clone(if now { &second } else { &first });
-            Box::pin(async move { Ok(clients) })
-        })
-    };
-    let hub = Hub::new(connect);
+    let (hub, first, switch) = switching(&fake);
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     let lists = fake.count("limit=500");
-    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    switch();
     first.connections().abandon();
     sleep(Duration::from_secs(1)).await;
     assert_eq!(
