@@ -320,6 +320,23 @@ async fn the_first_batch_has_the_columns_and_so_has_one_of_a_list_opened_again_a
     );
 }
 
+async fn refused_list(window: u32, watched: Duration) -> Metered {
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.state().forbidden.insert(format!(
+            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
+        ));
+    }
+    let mut list = Metered::start(fake, None).await;
+    list.batcher().set_window(0, window, true);
+    let batches = list.watch(watched).await;
+    assert_eq!(
+        batches.last().and_then(|batch| batch.metrics),
+        Some(MetricsState::Forbidden)
+    );
+    list
+}
+
 fn cells_of(batch: &ListBatch, column: &str) -> Vec<Cell> {
     let at = batch
         .columns
@@ -356,19 +373,7 @@ async fn a_list_that_joins_a_scope_another_reads_has_its_values_and_state_in_its
 
 #[tokio::test(start_paused = true)]
 async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
-    let fake = cluster(true).await;
-    for namespace in ["a", "b"] {
-        fake.state().forbidden.insert(format!(
-            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
-        ));
-    }
-    let mut list = Metered::start(fake, None).await;
-    list.batcher().set_window(0, 3, true);
-    let opened = list.watch(Duration::from_secs(1)).await;
-    assert_eq!(
-        opened.last().and_then(|batch| batch.metrics),
-        Some(MetricsState::Forbidden)
-    );
+    let list = refused_list(3, Duration::from_secs(1)).await;
     let asked = polls(&list.fake, "a");
 
     let (second, mut batches) = open(&list.hub, &list.poller, &list.followers, &list.query).await;
@@ -380,20 +385,7 @@ async fn a_list_that_joins_a_scope_that_refused_says_so_in_its_first_batch() {
 
 #[tokio::test(start_paused = true)]
 async fn a_cold_list_after_a_refusal_says_it_with_the_first_batch_that_shows_rows() {
-    let fake = cluster(true).await;
-    for namespace in ["a", "b"] {
-        fake.state().forbidden.insert(format!(
-            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
-        ));
-    }
-    let mut list = Metered::start(fake, None).await;
-    list.batcher().set_window(0, 6, true);
-    let refused = list.watch(Duration::from_secs(3)).await;
-    assert_eq!(
-        refused.iter().filter_map(|batch| batch.metrics).next_back(),
-        Some(MetricsState::Forbidden)
-    );
-
+    let mut list = refused_list(6, Duration::from_secs(3)).await;
     list.fake.state().forbidden.clear();
     list.fake.state().metrics_takes = Duration::from_secs(3);
     list.fake.state().hold_initial = true;
@@ -433,20 +425,7 @@ async fn a_cold_list_after_a_refusal_says_it_with_the_first_batch_that_shows_row
 #[tokio::test(start_paused = true)]
 async fn a_list_opened_after_a_refusal_says_it_in_its_first_batch_with_columns_and_the_answer_corrects_it()
  {
-    let fake = cluster(true).await;
-    for namespace in ["a", "b"] {
-        fake.state().forbidden.insert(format!(
-            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
-        ));
-    }
-    let mut list = Metered::start(fake, None).await;
-    list.batcher().set_window(0, 6, true);
-    let refused = list.watch(Duration::from_secs(3)).await;
-    assert_eq!(
-        refused.iter().filter_map(|batch| batch.metrics).next_back(),
-        Some(MetricsState::Forbidden)
-    );
-
+    let mut list = refused_list(6, Duration::from_secs(3)).await;
     list.fake.state().forbidden.clear();
     list.fake.state().metrics_takes = Duration::from_secs(3);
     list.reopen(None, Duration::from_secs(1)).await;
@@ -1159,20 +1138,7 @@ async fn a_list_says_ready_with_its_first_answer_and_not_before() {
 
 #[tokio::test(start_paused = true)]
 async fn a_list_that_stops_reading_and_reads_again_under_a_refusal_never_says_ready_between() {
-    let fake = cluster(true).await;
-    for namespace in ["a", "b"] {
-        fake.state().forbidden.insert(format!(
-            "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods"
-        ));
-    }
-    let mut list = Metered::start(fake, None).await;
-    list.batcher().set_window(0, 6, true);
-    let first = list.watch(Duration::from_secs(3)).await;
-    assert_eq!(
-        first.iter().filter_map(|batch| batch.metrics).next_back(),
-        Some(MetricsState::Forbidden)
-    );
-
+    let mut list = refused_list(6, Duration::from_secs(3)).await;
     list.batcher().set_window(0, 6, false);
     let paused = list.watch(Duration::from_secs(30)).await;
     list.fake.state().metrics_takes = Duration::from_secs(3);
