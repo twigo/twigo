@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ListView,
   lowerAscii,
+  REFUSED,
   SHOWS_ROWS,
   toIpcError,
   type Backend,
@@ -24,7 +25,6 @@ import { kindIcon, PODS, pluralTitle } from "./kinds";
 import { settled } from "./list/listStatus";
 import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
-import { isProblem } from "./viewProblem";
 
 /** A `:` query in k9s's grammar: `po payments /api app=web @prod-eu`. */
 export interface K9sQuery {
@@ -263,7 +263,7 @@ export function firstRows(view: ListView): Promise<ListSnapshot> {
         (SHOWS_ROWS.has(snapshot.status.state) &&
           snapshot.columns.length > 0 &&
           settled(snapshot.parts)) ||
-        isProblem(snapshot.status)
+        REFUSED.has(snapshot.status.state)
       ) {
         done(snapshot);
       }

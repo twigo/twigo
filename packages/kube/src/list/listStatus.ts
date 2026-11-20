@@ -1,6 +1,11 @@
-import type { Column, Parts, ValueCount, ViewState } from "@twigo/protocol";
+import {
+  REFUSED,
+  type Column,
+  type Parts,
+  type ValueCount,
+  type ViewState,
+} from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
-import { isProblem } from "../viewProblem";
 
 export interface ListStatus {
   readonly title: string;
@@ -32,7 +37,7 @@ export class ListStatuses {
 
 /** Whether every part has listed or been refused, so nothing more is on its way. */
 export function settled({ unready }: Parts): boolean {
-  return unready.every(({ shown, state }) => shown || isProblem(state));
+  return unready.every(({ shown, state }) => shown || REFUSED.has(state.state));
 }
 
 export function leavesOut({ unready }: Parts): boolean {

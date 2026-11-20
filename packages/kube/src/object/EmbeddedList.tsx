@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  REFUSED,
   SHOWS_ROWS,
   type EmbeddedList as Spec,
   type ListQuery,
@@ -39,7 +40,6 @@ import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
-import { isProblem } from "../viewProblem";
 import type { OverviewStates } from "./overviewStates";
 
 /**
@@ -178,7 +178,7 @@ export function EmbeddedList({
       name,
     });
   };
-  if (isProblem(snapshot.status))
+  if (REFUSED.has(snapshot.status.state))
     return <ViewStatus status={snapshot.status} what={gvr.resource} inline />;
   const Icon = kindIcon(gvr);
   const loading = !SHOWS_ROWS.has(snapshot.status.state);

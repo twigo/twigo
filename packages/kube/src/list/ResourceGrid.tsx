@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Columns3 } from "lucide-react";
 import {
+  REFUSED,
   SHOWS_ROWS,
   type ListQuery,
   type Resource,
@@ -48,7 +49,6 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
-import { isProblem } from "../viewProblem";
 import { leavesOut } from "./listStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
@@ -378,7 +378,7 @@ function Grid({
     },
     [register, grids, uri],
   );
-  const problem = isProblem(snapshot.status);
+  const problem = REFUSED.has(snapshot.status.state);
   // The problem takes the grid's place, and with it the focus it held, which
   // falls to the page.
   useLayoutEffect(() => {

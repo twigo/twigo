@@ -30,11 +30,6 @@ export function viewProblem(status: ViewState, what: string) {
   }
 }
 
-/** Whether `viewProblem` has words for a state. */
-export function isProblem(status: ViewState): boolean {
-  return viewProblem(status, "") !== undefined;
-}
-
 /**
  * Why an open object has nothing to show, in words: the view's problem, or
  * that the object does not exist; none while it is there or still coming.
