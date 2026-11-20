@@ -5,7 +5,7 @@ use tokio::time::sleep;
 use twigo_ipc::{Part, PartState, Parts, ViewState};
 use twigo_kube::client::Budgets;
 
-use super::tests::{budget, pods, query, ready, until};
+use super::tests::{budget, pods, query, ready, settle, until};
 use super::*;
 use crate::fake::Fake;
 
@@ -39,6 +39,7 @@ struct Mirror {
     rows: HashMap<RowKey, String>,
     status: Option<ViewState>,
     parts: Option<Parts>,
+    columns: Option<Arc<[Column]>>,
 }
 
 impl Mirror {
@@ -46,7 +47,10 @@ impl Mirror {
         let named = |row: &Arc<Row>| (RowKey::of(&row.meta), row.meta.name.to_string());
         let shown = subscription.drain_shown();
         match shown.delta {
-            Delta::Reset { rows, .. } => self.rows = rows.iter().map(named).collect(),
+            Delta::Reset { rows, columns } => {
+                self.rows = rows.iter().map(named).collect();
+                self.columns = columns.or(self.columns.take());
+            }
             Delta::Changed { upserted, removed } => {
                 self.rows.extend(upserted.iter().map(named));
                 for key in removed {
@@ -239,6 +243,7 @@ async fn a_fast_refusal_beside_a_part_still_on_its_way_does_not_name_the_list() 
     assert_eq!(mirror.names(), Vec::<&str>::new());
     assert_eq!(mirror.status, Some(ViewState::Connecting));
 
+    settle().await;
     fake.stream_initial();
     until_shown(&mut list, &mut mirror, |m| {
         m.status == Some(ViewState::Syncing { loaded: 1 })
@@ -292,6 +297,63 @@ async fn a_first_list_that_broke_off_on_a_transient_error_says_connecting() {
 
     until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
     assert_eq!(mirror.status, Some(ViewState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_shown_part_that_turns_forbidden_takes_its_rows_out() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a", "b", "c"]);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&["a", "b", "c"])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/c/pods".to_owned());
+    fake.end_watches();
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready() == [namespace_part("c", forbidden(), false)]
+    })
+    .await;
+    assert_eq!(mirror.names(), ["p-a", "p-b"], "c's rows left with it");
+    assert_eq!(mirror.status, Some(ViewState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_has_the_columns_of_a_part_that_has_not_listed_yet() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a"]);
+    fake.state()
+        .hold_paths
+        .insert("/api/v1/namespaces/a/pods".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub
+        .rows(Query {
+            format: RowFormat::Table,
+            ..query(&["a"])
+        })
+        .await
+        .unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready() == [namespace_part("a", ViewState::Connecting, false)]
+    })
+    .await;
+    assert_eq!(mirror.columns, None);
+
+    settle().await;
+    fake.stream_initial();
+    until_shown(&mut list, &mut mirror, |m| m.columns.is_some()).await;
+    assert_eq!(mirror.names(), Vec::<&str>::new(), "its rows are held");
+    let columns = mirror.columns.as_deref().unwrap();
+    assert_eq!(
+        columns
+            .iter()
+            .map(|column| &*column.name)
+            .collect::<Vec<_>>(),
+        ["Name", "Age"]
+    );
 }
 
 #[tokio::test(start_paused = true)]
