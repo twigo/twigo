@@ -5,7 +5,7 @@ use tokio::time::sleep;
 use twigo_ipc::{Part, PartState, Parts, ViewState};
 use twigo_kube::client::Budgets;
 
-use super::tests::{budget, pods, query, ready, settle, until};
+use super::tests::{budget, pods, query, reach, ready, settle, until};
 use super::*;
 use crate::fake::Fake;
 
@@ -78,18 +78,11 @@ async fn until_shown(
     mirror: &mut Mirror,
     wanted: impl Fn(&Mirror) -> bool,
 ) {
-    let reached = async {
-        loop {
-            mirror.read(subscription);
-            if wanted(mirror) {
-                return;
-            }
-            subscription.changed().await;
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(600), reached)
-        .await
-        .expect("the list within ten minutes");
+    reach(subscription, |subscription| {
+        mirror.read(subscription);
+        wanted(mirror)
+    })
+    .await;
 }
 
 #[tokio::test(start_paused = true)]

@@ -54,9 +54,9 @@ pub(super) fn budget(watches: usize) -> Budgets {
     }
 }
 
-async fn reach<T: Item>(
+pub(super) async fn reach<T: Item>(
     subscription: &mut Subscription<T>,
-    wanted: impl Fn(&Subscription<T>) -> bool,
+    mut wanted: impl FnMut(&Subscription<T>) -> bool,
 ) {
     let reached = async {
         while !wanted(subscription) {
