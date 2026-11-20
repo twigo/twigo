@@ -13,6 +13,10 @@
 //! - Hysteresis: a cluster-wide upstream serves narrower subscriptions too,
 //!   without holding it. Once it has lingered, they move to upstreams per
 //!   namespace, keeping its rows until theirs are listed.
+//! - A list shows the rows of each part that has listed and is not refused,
+//!   whatever the others are ([`Subscription::drain_shown`]); what needs
+//!   every part, such as a whole list of pods, reads their least ready
+//!   state ([`combine`]).
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -32,7 +36,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use twigo_ipc::{Access, ErrorKind, IpcError, ViewState};
+use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::cluster::Cluster;
@@ -526,6 +530,7 @@ impl Hub {
                 hub: Arc::downgrade(&self.inner),
                 key: key.clone(),
             },
+            showing: true,
         }
     }
 
@@ -565,6 +570,7 @@ impl Hub {
                 key: key.clone(),
                 id,
             },
+            showing: true,
         })
     }
 
@@ -871,6 +877,14 @@ enum Guard {
     Borrow { hub: Weak<Inner>, key: Key, id: u64 },
 }
 
+impl Guard {
+    fn key(&self) -> &Key {
+        match self {
+            Guard::Hold { key, .. } | Guard::Borrow { key, .. } => key,
+        }
+    }
+}
+
 impl Drop for Guard {
     fn drop(&mut self) {
         match self {
@@ -895,11 +909,21 @@ struct Part<T> {
     /// What changed in the upstream's store since [`Subscription::drain`].
     feed: Feed,
     guard: Guard,
+    /// Its rows are in what the subscription drains, as of its last read.
+    showing: bool,
 }
 
 impl<T> Part<T> {
     fn borrowed_from(&self, key: &Key) -> bool {
         matches!(&self.guard, Guard::Borrow { key: borrowed, .. } if borrowed == key)
+    }
+
+    /// What the part reads, as a list names it.
+    fn scope(&self) -> ipc::Part {
+        match &self.guard.key().scope {
+            Scope::Cluster => ipc::Part::Cluster,
+            Scope::Namespace(name) => ipc::Part::Namespace { name: name.clone() },
+        }
     }
 }
 
@@ -924,7 +948,7 @@ impl<T: Item> Part<T> {
 pub enum Delta<T> {
     /// Every row, which replaces what the reader holds, and the columns of
     /// a Table upstream: the first drain, and the one after a relist, new
-    /// columns or new parts.
+    /// columns, new parts, or a part that starts or stops showing.
     Reset {
         rows: Vec<Arc<T>>,
         columns: Option<Arc<[Column]>>,
@@ -935,6 +959,16 @@ pub enum Delta<T> {
         /// show, which it never held.
         removed: Vec<RowKey>,
     },
+}
+
+/// What a list reads of its subscription at one moment.
+pub struct Shown<T> {
+    pub delta: Delta<T>,
+    /// The state of the rows shown: the least ready of the parts whose rows
+    /// they are, one that waits for a watch after its whole list counting as
+    /// `stale`. While no part shows, the least ready of all.
+    pub status: ViewState,
+    pub parts: Parts,
 }
 
 /// A view's subscription: the upstreams its namespaces need, whose rows
@@ -1038,43 +1072,56 @@ impl<T: Item> Subscription<T> {
     /// together with its feed, so the feed holds what the reader holds: a
     /// second read of the items would see changes the feed then drops.
     pub fn drain(&self) -> Delta<T> {
-        let parts = self.inner.parts();
-        let drained: Vec<_> = parts
+        drain_parts(&self.inner.parts(), false)
+    }
+
+    /// What a list reads: [`drain`](Self::drain) over the parts whose rows
+    /// show, and the state and parts that say which these are. It looks at
+    /// each part once, so what it returns agrees: a part's rows show once
+    /// it has listed and while it is not refused, whatever the others are,
+    /// and a part that starts or stops showing resets the drain.
+    pub fn drain_shown(&self) -> Shown<T> {
+        let mut parts = self.inner.parts();
+        let looks: Vec<(ViewState, bool)> = parts
             .iter()
-            .map(|part| part.upstream.store.drain(&part.feed))
+            .map(|part| {
+                let (state, listed) = part.upstream.standing();
+                let shown = listed && !failed(&state);
+                (state, shown)
+            })
             .collect();
-        if drained.iter().any(|d| matches!(d, Drained::Reset { .. })) {
-            let (mut rows, mut columns) = (Vec::new(), None);
-            for (part, drained) in parts.iter().zip(drained) {
-                let drained = match drained {
-                    Drained::Changed(_) => part.upstream.store.reread(&part.feed),
-                    reset => reset,
-                };
-                let Drained::Reset {
-                    items,
-                    columns: read,
-                } = drained
-                else {
-                    unreachable!("a reread resets");
-                };
-                columns = columns.or(read);
-                rows.extend(items.into_iter().filter(|item| part.serves(item)));
-            }
-            return Delta::Reset { rows, columns };
+        let mut flipped = false;
+        for (part, (_, shown)) in parts.iter_mut().zip(&looks) {
+            flipped |= part.showing != *shown;
+            part.showing = *shown;
         }
-        let (mut upserted, mut removed) = (Vec::new(), Vec::new());
-        for (part, drained) in parts.iter().zip(drained) {
-            let Drained::Changed(changes) = drained else {
-                unreachable!("no part was reset");
-            };
-            for (key, item) in changes {
-                match item {
-                    Some(item) if part.serves(&item) => upserted.push(item),
-                    _ => removed.push(key),
-                }
-            }
+        let delta = drain_parts(&parts, flipped);
+        let rows: Vec<ViewState> = looks
+            .iter()
+            .filter(|(_, shown)| *shown)
+            .map(|(state, _)| rows_state(state))
+            .collect();
+        let status = if rows.is_empty() {
+            combine(looks.iter().map(|(state, _)| state.clone()))
+        } else {
+            combine(rows.into_iter())
+        };
+        let count = u32::try_from(parts.len()).unwrap_or(u32::MAX);
+        let unready = parts
+            .iter()
+            .zip(looks)
+            .filter(|(_, (state, _))| *state != ViewState::Ready)
+            .map(|(part, (state, shown))| PartState {
+                part: part.scope(),
+                state,
+                shown,
+            })
+            .collect();
+        Shown {
+            delta,
+            status,
+            parts: Parts { count, unready },
         }
-        Delta::Changed { upserted, removed }
     }
 
     /// Waits for a change of its rows, its columns or its state.
@@ -1142,6 +1189,63 @@ impl<T> SubscriptionInner<T> {
     }
 }
 
+/// What changed in the rows of the parts that show, or every one of their
+/// rows if one was reset or `reset` says the parts changed.
+fn drain_parts<T: Item>(parts: &[Part<T>], reset: bool) -> Delta<T> {
+    let drained: Vec<_> = parts
+        .iter()
+        .map(|part| part.upstream.store.drain(&part.feed))
+        .collect();
+    if reset || drained.iter().any(|d| matches!(d, Drained::Reset { .. })) {
+        let (mut rows, mut columns) = (Vec::new(), None);
+        for (part, drained) in parts.iter().zip(drained) {
+            if !part.showing {
+                columns = columns.or_else(|| part.upstream.store.columns());
+                continue;
+            }
+            let drained = match drained {
+                Drained::Changed(_) => part.upstream.store.reread(&part.feed),
+                reset => reset,
+            };
+            let Drained::Reset {
+                items,
+                columns: read,
+            } = drained
+            else {
+                unreachable!("a reread resets");
+            };
+            columns = columns.or(read);
+            rows.extend(items.into_iter().filter(|item| part.serves(item)));
+        }
+        return Delta::Reset { rows, columns };
+    }
+    let (mut upserted, mut removed) = (Vec::new(), Vec::new());
+    for (part, drained) in parts.iter().zip(drained) {
+        let Drained::Changed(changes) = drained else {
+            unreachable!("no part was reset");
+        };
+        if !part.showing {
+            continue;
+        }
+        for (key, item) in changes {
+            match item {
+                Some(item) if part.serves(&item) => upserted.push(item),
+                _ => removed.push(key),
+            }
+        }
+    }
+    Delta::Changed { upserted, removed }
+}
+
+/// What a part says of the rows it shows: waiting for a watch after a
+/// whole list is a stale one.
+fn rows_state(state: &ViewState) -> ViewState {
+    match state {
+        ViewState::Queued => ViewState::Stale,
+        state => state.clone(),
+    }
+}
+
 /// Moves off the cluster-wide upstream of `from` to upstreams per
 /// namespace, once those are listed; nothing if the subscription ends
 /// first.
@@ -1195,8 +1299,10 @@ where
     drop(replaced);
 }
 
-/// The least ready of the states of a view's parts, or of the
-/// subscriptions a view reads together; syncing ones add up.
+/// The least ready of `states`, the counts of syncing ones added up: of a
+/// subscription's parts when it needs all of them, or of the subscriptions
+/// an object reads together. A list says each part's state apart
+/// ([`Subscription::drain_shown`]).
 pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
     let rank = |state: &ViewState| match state {
         ViewState::Ready => 0,

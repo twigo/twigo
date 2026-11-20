@@ -116,6 +116,13 @@ impl<T: Item> Upstream<T> {
         self.state.borrow().clone()
     }
 
+    /// Its state and whether it has listed, read together: `update` sets
+    /// both under the lock.
+    pub fn standing(&self) -> (ViewState, bool) {
+        let status = self.status();
+        (self.current(), status.listed)
+    }
+
     /// The store has held a whole list since the upstream started.
     pub fn listed(&self) -> bool {
         self.status().listed

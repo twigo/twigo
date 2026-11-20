@@ -11,7 +11,7 @@ use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::IDLE;
 
-fn pods() -> Resource {
+pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
         version: "v1".to_owned(),
