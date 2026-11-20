@@ -1099,16 +1099,7 @@ impl<T: Item> Subscription<T> {
             part.showing = *shown;
         }
         let delta = drain_parts(&parts, flipped);
-        let rows: Vec<ViewState> = looks
-            .iter()
-            .filter(|(_, shown)| *shown)
-            .map(|(state, _)| rows_state(state))
-            .collect();
-        let status = if rows.is_empty() {
-            unshown_state(looks.iter().map(|(state, _)| state.clone()))
-        } else {
-            combine(rows.into_iter())
-        };
+        let status = status(&looks);
         let count = u32::try_from(parts.len()).unwrap_or(u32::MAX);
         let unready = parts
             .iter()
@@ -1240,30 +1231,6 @@ fn drain_parts<T: Item>(parts: &[Part<T>], reset: bool) -> Delta<T> {
     Delta::Changed { upserted, removed }
 }
 
-/// What a part says of the rows it shows: waiting for a watch after a
-/// whole list is a stale one.
-fn rows_state(state: &ViewState) -> ViewState {
-    match state {
-        ViewState::Queued => ViewState::Stale,
-        state => state.clone(),
-    }
-}
-
-/// The state of a list that shows no rows, from its parts' own: the least
-/// ready of those still on their way, a part whose first list broke off
-/// counting as `connecting`, and once none is, the worst refusal. So `ready`,
-/// `relisting` and `stale` never come without a part's rows.
-fn unshown_state(states: impl Iterator<Item = ViewState>) -> ViewState {
-    let (refused, on_their_way): (Vec<_>, Vec<_>) = states.partition(failed);
-    if on_their_way.is_empty() {
-        return combine(refused.into_iter());
-    }
-    combine(on_their_way.into_iter().map(|state| match state {
-        ViewState::Stale => ViewState::Connecting,
-        state => state,
-    }))
-}
-
 /// Moves off the cluster-wide upstream of `from` to upstreams per
 /// namespace, once those are listed; nothing if the subscription ends
 /// first.
@@ -1315,6 +1282,29 @@ where
     };
     subscription.swapped.send_modify(|swaps| *swaps += 1);
     drop(replaced);
+}
+
+/// The state of a list from its parts' states and whether each one's rows
+/// show, as [`ListBatch::status`](ipc::ListBatch::status) says.
+fn status(looks: &[(ViewState, bool)]) -> ViewState {
+    let (shown, unshown): (Vec<_>, Vec<_>) = looks.iter().partition(|(_, shown)| *shown);
+    if !shown.is_empty() {
+        return combine(shown.into_iter().map(|(state, _)| match state {
+            ViewState::Queued => ViewState::Stale,
+            state => state.clone(),
+        }));
+    }
+    let (refused, on_their_way): (Vec<_>, Vec<_>) = unshown
+        .into_iter()
+        .map(|(state, _)| state.clone())
+        .partition(failed);
+    if on_their_way.is_empty() {
+        return combine(refused.into_iter());
+    }
+    combine(on_their_way.into_iter().map(|state| match state {
+        ViewState::Stale => ViewState::Connecting,
+        state => state,
+    }))
 }
 
 /// The least ready of `states`, the counts of syncing ones added up: of a

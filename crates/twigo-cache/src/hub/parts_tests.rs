@@ -216,71 +216,6 @@ async fn a_part_still_syncing_adds_no_rows_until_it_has_listed() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_fast_refusal_beside_a_part_still_on_its_way_does_not_name_the_list() {
-    let fake = Fake::default();
-    pods_in(&fake, &["a", "b"]);
-    {
-        let mut state = fake.state();
-        state
-            .forbidden
-            .insert("/api/v1/namespaces/a/pods".to_owned());
-        state
-            .hold_paths
-            .insert("/api/v1/namespaces/b/pods".to_owned());
-    }
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&["a", "b"])).await.unwrap();
-    let mut mirror = Mirror::default();
-
-    until_shown(&mut list, &mut mirror, |m| {
-        m.unready()
-            == [
-                namespace_part("a", forbidden(), false),
-                namespace_part("b", ViewState::Connecting, false),
-            ]
-    })
-    .await;
-    assert_eq!(mirror.names(), Vec::<&str>::new());
-    assert_eq!(mirror.status, Some(ViewState::Connecting));
-
-    settle().await;
-    fake.stream_initial();
-    until_shown(&mut list, &mut mirror, |m| {
-        m.status == Some(ViewState::Syncing { loaded: 1 })
-    })
-    .await;
-    assert_eq!(mirror.names(), Vec::<&str>::new());
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_list_whose_parts_are_all_refused_says_the_worst_refusal() {
-    let fake = Fake::default();
-    pods_in(&fake, &["a", "b"]);
-    {
-        let mut state = fake.state();
-        state
-            .forbidden
-            .insert("/api/v1/namespaces/a/pods".to_owned());
-        state
-            .unauthorized
-            .insert("/api/v1/namespaces/b/pods".to_owned());
-    }
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&["a", "b"])).await.unwrap();
-    let mut mirror = Mirror::default();
-
-    until_shown(&mut list, &mut mirror, |m| {
-        m.unready()
-            == [
-                namespace_part("a", forbidden(), false),
-                namespace_part("b", ViewState::Unauthorized, false),
-            ]
-    })
-    .await;
-    assert_eq!(mirror.status, Some(ViewState::Unauthorized));
-}
-
-#[tokio::test(start_paused = true)]
 async fn a_first_list_that_broke_off_on_a_transient_error_says_connecting() {
     let fake = Fake::default();
     pods_in(&fake, &["a"]);
@@ -391,19 +326,29 @@ async fn a_cluster_wide_part_whose_rewatch_waits_keeps_its_rows_and_is_stale() {
     );
 }
 
-#[tokio::test(start_paused = true)]
-async fn a_list_whose_only_part_waits_for_a_stream_says_queued() {
-    let fake = Fake::default();
-    pods_in(&fake, &["a", "x"]);
-    let (hub, _clients) = fake.hub(budget(1));
-    let mut other = hub.rows(query(&["x"])).await.unwrap();
-    ready(&mut other).await;
-    let mut list = hub.rows(query(&["a"])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut list, &mut mirror, |m| {
-        m.unready() == [namespace_part("a", ViewState::Queued, false)]
-    })
-    .await;
-    assert_eq!(mirror.names(), Vec::<&str>::new());
-    assert_eq!(mirror.status, Some(ViewState::Queued));
+#[test]
+fn a_list_says_the_state_of_its_rows_or_else_of_the_parts_still_on_their_way() {
+    let syncing = ViewState::Syncing { loaded: 1 };
+    for (looks, says) in [
+        (
+            [(forbidden(), false), (ViewState::Connecting, false)],
+            ViewState::Connecting,
+        ),
+        (
+            [(forbidden(), false), (syncing.clone(), false)],
+            syncing.clone(),
+        ),
+        (
+            [(forbidden(), false), (ViewState::Unauthorized, false)],
+            ViewState::Unauthorized,
+        ),
+        (
+            [(ViewState::Ready, true), (ViewState::Queued, true)],
+            ViewState::Stale,
+        ),
+    ] {
+        assert_eq!(status(&looks), says, "{looks:?}");
+    }
+    assert_eq!(status(&[(ViewState::Queued, false)]), ViewState::Queued);
+    assert_eq!(status(&[(ViewState::Stale, false)]), ViewState::Connecting);
 }
