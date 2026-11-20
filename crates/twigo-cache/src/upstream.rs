@@ -616,7 +616,6 @@ where
                 Ok(Ok(_)) => {}
             }
             quiet = false;
-            self.backoff = backoff();
             let received = (self.env.clock)();
             let event = match self.decoder.decode_event(&line, received) {
                 Ok(event) => event,
@@ -625,6 +624,9 @@ where
                 Err(error) => return Outcome::Undecodable(error),
             };
             self.upstream.store.set_columns(self.decoder.columns());
+            if !matches!(event, Event::Error(_)) {
+                self.backoff = backoff();
+            }
             match event {
                 Event::Upsert(item) => {
                     advance(&mut from, item.meta());

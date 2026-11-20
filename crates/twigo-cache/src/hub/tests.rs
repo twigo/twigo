@@ -566,6 +566,27 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_error_event_does_not_reset_the_backoff() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    fake.state().watch_fails = true;
+    fake.state().requests.clear();
+    fake.end_watches();
+    sleep(Duration::from_secs(60)).await;
+    let state = fake.state();
+    let times: Vec<Instant> = state.requests.iter().map(|(at, _)| *at).collect();
+    assert!(times.len() < 30, "{} requests in a minute", times.len());
+    let last = times[times.len() - 1] - times[times.len() - 2];
+    assert!(
+        last >= Duration::from_millis(2500),
+        "{last:?} between the last two"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_quiet_watch_probes_the_connection_before_it_watches_again() {
     let fake = Fake::default();
     let (hub, clients) = fake.hub(Budgets::default());

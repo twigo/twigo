@@ -56,6 +56,8 @@ pub struct State {
     silent: Vec<mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>>,
     /// Requests get `503` while this many remain.
     pub unavailable: usize,
+    /// A watch from a version answers one `ERROR` event of 500, then ends.
+    pub watch_fails: bool,
     /// Paths that answer `403`.
     pub forbidden: HashSet<String>,
     /// Paths that answer `401`.
@@ -652,17 +654,7 @@ impl Fake {
                 }
                 Streams::EndsAtOnce => return stream(receiver, gzip),
                 Streams::ErrorThenEnd => {
-                    send(&json!({
-                        "type": "ERROR",
-                        "object": {
-                            "kind": "Status",
-                            "apiVersion": "v1",
-                            "status": "Failure",
-                            "reason": "InternalError",
-                            "code": 500,
-                            "message": "etcd does not support watch progress",
-                        }
-                    }));
+                    send(&internal_error());
                     return stream(receiver, gzip);
                 }
                 Streams::PlainWatch => {
@@ -695,6 +687,10 @@ impl Fake {
             let from: u64 = param("resourceVersion")
                 .and_then(|version| version.parse().ok())
                 .expect("a watch from a version");
+            if state.watch_fails {
+                send(&internal_error());
+                return stream(receiver, gzip);
+            }
             if from < state.compacted {
                 send(&json!({
                     "type": "ERROR",
@@ -893,6 +889,20 @@ impl State {
             watch.held || !target.matches(group, resource, namespace) || watch.send(event.clone())
         });
     }
+}
+
+fn internal_error() -> Value {
+    json!({
+        "type": "ERROR",
+        "object": {
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "reason": "InternalError",
+            "code": 500,
+            "message": "etcd does not support watch progress",
+        }
+    })
 }
 
 fn bookmark(version: &str, initial_events_end: bool) -> Value {
