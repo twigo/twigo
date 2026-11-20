@@ -6,7 +6,7 @@ use http::{Request, header::HeaderValue};
 
 /// The plain JSON fallback lets a server that does not implement Table
 /// answer with raw objects instead of 406.
-pub const ACCEPT_TABLE: &str = "application/json;as=Table;v=v1;g=meta.k8s.io, application/json";
+const ACCEPT_TABLE: &str = "application/json;as=Table;v=v1;g=meta.k8s.io, application/json";
 /// kube's own (`kube-core` 5.1, `request.rs`), with the same fallback: a
 /// server without metadata answers with the full objects.
 const ACCEPT_METADATA_LIST: &str =
