@@ -52,7 +52,7 @@ pub struct State {
     pub hold_initial: bool,
     /// How each group answers a streaming list, the core group as `""`.
     streams: HashMap<String, Streams>,
-    /// The streaming lists that said nothing, which stay open.
+    /// The responses that sent their headers and nothing more, which stay open.
     silent: Vec<mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>>,
     /// Requests get `503` while this many remain.
     pub unavailable: usize,
@@ -68,6 +68,9 @@ pub struct State {
     pub may_list: bool,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
+    /// `/version` sends its headers and never its body, as over a connection
+    /// whose window is full.
+    pub version_body_hangs: bool,
     /// Every other request fails as when the credential plugin timed out.
     pub plugin_timed_out: bool,
     /// Discovery requests never answer.
@@ -532,6 +535,11 @@ impl Fake {
         let mut state = self.state();
         state.requests.push((Instant::now(), uri.to_string()));
         if path == "/version" {
+            if state.version_body_hangs {
+                let (sender, receiver) = mpsc::unbounded();
+                state.silent.push(sender);
+                return stream(receiver, false);
+            }
             return full(StatusCode::OK, json!({ "gitVersion": "v1.37.0" }));
         }
         if path.ends_with("selfsubjectaccessreviews") {

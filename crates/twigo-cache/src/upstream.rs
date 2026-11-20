@@ -43,6 +43,10 @@ pub(crate) const IDLE: Duration = Duration::from_secs(120);
 /// asked whether it answers at all. The server sends its initial events back
 /// to back, flushing whenever its queue is empty.
 pub(crate) const INITIAL_IDLE: Duration = Duration::from_secs(30);
+/// How long the probe has, response headers and body, to count as an
+/// answer; client-go's ping timeout. A connection whose window unread streams
+/// fill still gives headers and never a body.
+const PROBE: Duration = Duration::from_secs(15);
 /// The longest an upstream waits after a failure before it tries again.
 pub const RETRY_WITHIN: Duration = Duration::from_secs(5);
 /// How often a resource the server cannot watch is listed again.
@@ -810,10 +814,13 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
 async fn probe(clients: &Clients) -> bool {
     let mut version = Request::new(Vec::new());
     *version.uri_mut() = http::Uri::from_static("/version");
-    match clients.api.request_text(version).await {
-        Ok(_) | Err(kube::Error::Api(_)) => true,
-        Err(_) => false,
-    }
+    let answered = async {
+        let response = clients.api.send(version.map(Body::from)).await?;
+        let mut body = response.into_body();
+        while body.frame().await.transpose()?.is_some() {}
+        Ok::<_, kube::Error>(())
+    };
+    matches!(tokio::time::timeout(PROBE, answered).await, Ok(Ok(())))
 }
 
 enum Failure {

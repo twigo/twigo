@@ -598,6 +598,21 @@ async fn a_quiet_watch_probes_the_connection_before_it_watches_again() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_probe_whose_body_never_comes_is_no_answer_at_15_s() {
+    let fake = Fake::default();
+    let (hub, clients) = fake.hub(Budgets::default());
+    let retired = clients.connections().retired();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    fake.state().version_body_hangs = true;
+    sleep(IDLE + Duration::from_secs(14)).await;
+    assert_eq!(fake.count("/version"), 1, "it went quiet and probed");
+    assert_eq!(*retired.borrow(), 0, "the body may still come");
+    sleep(Duration::from_secs(2)).await;
+    assert_eq!(*retired.borrow(), 1, "no answer: the connection is retired");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_watch_resumed_from_a_compacted_version_relists_with_its_rows() {
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
