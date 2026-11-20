@@ -890,14 +890,12 @@ async fn a_streaming_list_and_the_changes_after_it_come_gzipped_in_members() {
     assert_eq!(fake.count_gzipped("sendInitialEvents"), 1);
 }
 
-/// How many streaming lists the server got for the collection at `path`.
 fn streamed(fake: &Fake, path: &str) -> usize {
     fake.count(&format!(
         "{path}?watch=true&allowWatchBookmarks=true&timeoutSeconds=290&sendInitialEvents=true"
     ))
 }
 
-/// How many first pages of a list the server got for the collection at `path`.
 fn paged(fake: &Fake, path: &str) -> usize {
     fake.count(&format!("{path}?limit=500"))
 }

@@ -788,7 +788,6 @@ async fn open(clients: &Clients, request: Request<Vec<u8>>) -> Result<(Parts, Bo
     Ok((parts, body))
 }
 
-/// What the server answered with other than success, in its own words.
 async fn refusal(parts: &Parts, body: Body) -> kube::Error {
     match whole(&parts.headers, body).await {
         Ok(body) => twigo_kube::errors::refused(parts.status, &body),
@@ -796,7 +795,6 @@ async fn refusal(parts: &Parts, body: Body) -> kube::Error {
     }
 }
 
-/// A response's whole body, decoded.
 async fn whole(headers: &HeaderMap, body: Body) -> Result<Bytes, kube::Error> {
     let body = body.collect().await?.to_bytes();
     encoding::page(headers, body).map_err(|error| kube::Error::Service(Box::new(error)))

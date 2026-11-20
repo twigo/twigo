@@ -114,8 +114,6 @@ impl Lines {
     }
 }
 
-/// What the server answers with when gzip is asked: whether it gzipped the
-/// answer, and the answer as a reader of lines.
 async fn asking_gzip(client: &Client, mut request: http::Request<Vec<u8>>) -> (bool, Lines) {
     request
         .headers_mut()

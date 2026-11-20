@@ -20,7 +20,6 @@ use kube::client::Body;
 /// The `Accept-Encoding` of a request that decodes what it gets.
 pub const GZIP: HeaderValue = HeaderValue::from_static("gzip");
 
-/// Whether the response is gzipped.
 pub fn gzipped(headers: &HeaderMap) -> bool {
     headers
         .get(CONTENT_ENCODING)
