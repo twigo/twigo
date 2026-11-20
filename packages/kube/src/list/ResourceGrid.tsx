@@ -54,7 +54,7 @@ import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
 import { readsMetrics, sameBesidesMetrics } from "./metrics";
-import { namespacesOf, shownWords } from "./scope";
+import { namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -431,7 +431,9 @@ function Grid({
   const filtered = text !== "" || picked !== undefined;
   const scope = resource.namespaced ? query.namespaces : [];
   const narrowed = scope.length > 0;
-  const where = shownWords(spaces, input.space, scope, snapshot.parts);
+  const where = leavesOut(snapshot.parts)
+    ? "the namespaces shown"
+    : whereWords(spaces, input.space, scope);
   return (
     <DataGrid<Row, RowGroup>
       label={title}
