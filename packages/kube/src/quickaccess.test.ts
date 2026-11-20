@@ -1,13 +1,14 @@
 import { act } from "@testing-library/react";
-import { describe, expect, test, vi } from "vitest";
-import type { Resource } from "@twigo/protocol";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { ListView, type ListQuery, type Resource } from "@twigo/protocol";
+import { createMockBackend } from "@twigo/protocol/mock";
 import type { QuickAccessContext } from "@twigo/workbench";
 import { testWorkbench } from "@twigo/workbench/testing";
 import RESOURCES from "../../protocol/src/mock/resources.json";
 import { cellTone } from "./columns";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
-import { parseK9s, resolveResource } from "./quickaccess";
+import { firstRows, parseK9s, resolveResource } from "./quickaccess";
 import { listUri, objectUri } from "./uri";
 
 const NOWHERE: QuickAccessContext = { lookup: () => undefined };
@@ -318,4 +319,39 @@ test("a space's connection carries its Kubernetes version once connected", async
     tone: "idle",
     label: "Not connected yet",
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const PODS_OF = (namespaces: string[]): ListQuery => ({
+  space: "prod-eu",
+  gvr: PODS,
+  namespaced: true,
+  namespaces,
+  labelSelector: null,
+  fieldSelector: null,
+  owners: null,
+  text: null,
+  columns: null,
+  sort: null,
+  countBy: null,
+  groupBy: null,
+  values: null,
+});
+
+test("the first rows wait for a part that has not listed, and come with the rows of the others when the wait ends", async () => {
+  vi.useFakeTimers();
+  const total = async (scenario: "ready" | "partsQueued", names: string[]) => {
+    const rows = firstRows(
+      new ListView(createMockBackend(scenario), PODS_OF(names)),
+    );
+    await vi.advanceTimersByTimeAsync(3500);
+    return (await rows).total;
+  };
+  const four = ["auth", "default", "ledger", "payments"];
+  const whole = await total("ready", four);
+  expect(whole).toBeGreaterThan(0);
+  expect(await total("partsQueued", [...four, "search"])).toBe(whole);
 });

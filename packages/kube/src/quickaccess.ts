@@ -21,9 +21,9 @@ import {
 import { cellTone, IN_FLIGHT, statusColumn } from "./columns";
 import { sameGvr, type Discovery } from "./discovery";
 import { kindIcon, PODS, pluralTitle } from "./kinds";
+import { failed, settled } from "./list/listStatus";
 import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
-import { isProblem } from "./viewProblem";
 
 /** A `:` query in k9s's grammar: `po payments /api app=web @prod-eu`. */
 export interface K9sQuery {
@@ -260,8 +260,9 @@ export function firstRows(view: ListView): Promise<ListSnapshot> {
       const snapshot = view.getSnapshot();
       if (
         (SHOWS_ROWS.has(snapshot.status.state) &&
-          snapshot.columns.length > 0) ||
-        isProblem(snapshot.status)
+          snapshot.columns.length > 0 &&
+          settled(snapshot.parts)) ||
+        failed(snapshot)
       ) {
         done(snapshot);
       }

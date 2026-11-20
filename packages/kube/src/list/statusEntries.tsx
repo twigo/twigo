@@ -1,4 +1,11 @@
-import { SHOWS_ROWS, type ViewState } from "@twigo/protocol";
+import {
+  leastReady,
+  readiness,
+  SHOWS_ROWS,
+  type Parts,
+  type PartState,
+  type ViewState,
+} from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
 import { useClusterVersion, type Discovery } from "../discovery";
@@ -14,7 +21,7 @@ import { parseListUri } from "../uri";
 import { stateLabel, type ListStatuses } from "./listStatus";
 
 const CONNECTION: Readonly<
-  Partial<Record<ViewState["state"], { tone: Tone; text: string }>>
+  Record<ViewState["state"], { tone: Tone; text: string }>
 > = {
   ready: { tone: "ok", text: "Connected" },
   relisting: { tone: "ok", text: "Connected" },
@@ -26,6 +33,98 @@ const CONNECTION: Readonly<
   unauthorized: { tone: "error", text: "Unauthorized" },
   error: { tone: "error", text: "Unreachable" },
 };
+
+/** Names listed in a tooltip before the rest are counted. */
+const NAMES = 6;
+
+export interface PartsLine {
+  readonly text: string;
+  readonly tone: Tone;
+  readonly tooltip: string;
+}
+
+/** The unready parts that are in one state, with whether their rows are shown. */
+interface Kind {
+  readonly state: ViewState;
+  readonly shown: boolean;
+  readonly parts: PartState[];
+}
+
+/**
+ * The words of the least ready part and how many of the parts are in that
+ * state, with each kind of trouble in the tooltip, the worst first; none
+ * for a list of one part, which its own state says.
+ */
+export function partsLine({ count, unready }: Parts): PartsLine | undefined {
+  if (count < 2 || unready.length === 0) return undefined;
+  const worst = leastReady(unready.map(({ state }) => state));
+  const kinds = new Map<string, Kind>();
+  for (const part of unready) {
+    const key = JSON.stringify([
+      part.state.state === "syncing" ? "syncing" : part.state,
+      part.shown,
+    ]);
+    const kind = kinds.get(key) ?? {
+      state: part.state,
+      shown: part.shown,
+      parts: [],
+    };
+    kind.parts.push(part);
+    kinds.set(key, kind);
+  }
+  const alike = unready.filter(({ state }) => state.state === worst.state);
+  const { text, tone } = CONNECTION[worst.state];
+  return {
+    text: `${stateLabel(worst) ?? text} · ${alike.length} of ${count} namespaces`,
+    tone,
+    tooltip: [...kinds.values()]
+      .sort((a, b) => readiness(b.state) - readiness(a.state))
+      .map(describe)
+      .join("\n"),
+  };
+}
+
+function describe({ state, shown, parts }: Kind): string {
+  const where = namesOf(parts, state.state === "syncing");
+  switch (state.state) {
+    case "forbidden":
+      return `May not ${state.verb} ${state.resource} in ${where}`;
+    case "unauthorized":
+      return `${where}: the cluster rejected the credentials`;
+    case "error":
+      return `${where}: ${state.error.message}`;
+    case "queued":
+      return `${where}: ${shown ? "rows as last listed" : "no rows yet"}`;
+    case "connecting":
+      return `${where}: connecting`;
+    case "syncing":
+      return `${where}: loading`;
+    case "stale":
+      return `${where}: no updates, reconnecting`;
+    case "relisting":
+      return `${where}: relisting`;
+    case "ready":
+      return where;
+  }
+}
+
+/** Parts by name, the first few; a part of a kind this webview does not know is counted and not named. */
+function namesOf(parts: readonly PartState[], loaded: boolean): string {
+  const named = parts.flatMap(({ part, state }) =>
+    part.kind !== "namespace"
+      ? []
+      : [
+          loaded && state.state === "syncing"
+            ? `${part.name} (${state.loaded.toLocaleString("en")})`
+            : part.name,
+        ],
+  );
+  const head = named.slice(0, NAMES).join(", ");
+  const rest = parts.length - Math.min(named.length, NAMES);
+  if (rest === 0) return head;
+  if (head !== "") return `${head} and ${rest} more`;
+  return `${rest} ${rest === 1 ? "part" : "parts"}`;
+}
 
 /**
  * The active space's cluster after the space's own entry: its connection
@@ -50,6 +149,19 @@ export function clusterEntries(
 
     const active = editors.active;
     const list = active === undefined ? undefined : statuses.get(active);
+    const line = list && partsLine(list.parts);
+    if (line) {
+      return [
+        {
+          id: "cluster",
+          text: line.text,
+          tone: line.tone,
+          tooltip: [line.tooltip, known && `Kubernetes ${known}`]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      ];
+    }
     const connection = list && CONNECTION[list.status.state];
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";

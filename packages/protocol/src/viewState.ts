@@ -19,15 +19,18 @@ const READINESS: readonly ViewState["state"][] = [
   "error",
 ];
 
+/** How far a state is from ready: 0 for ready, more for each that is worse. */
+export function readiness(state: ViewState): number {
+  return READINESS.indexOf(state.state);
+}
+
 /** The least ready of some states, as Rust's `combine` has it: syncing ones add up. */
 export function leastReady(states: Iterable<ViewState>): ViewState {
   let worst: ViewState = { state: "ready" };
   let loaded = 0;
   for (const state of states) {
     if (state.state === "syncing") loaded += state.loaded;
-    if (READINESS.indexOf(state.state) > READINESS.indexOf(worst.state)) {
-      worst = state;
-    }
+    if (readiness(state) > readiness(worst)) worst = state;
   }
   return worst.state === "syncing" ? { state: "syncing", loaded } : worst;
 }

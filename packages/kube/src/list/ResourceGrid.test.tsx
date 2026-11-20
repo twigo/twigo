@@ -148,6 +148,33 @@ test("an empty list names its space, then the namespaces it is narrowed to", asy
   expect(screen.getByText("No nodes in dev")).toBeTruthy();
 });
 
+test("an empty list that leaves namespaces out speaks of the ones shown, not of where it looks", async () => {
+  const workbench = await mountKube(createMockBackend("partsQueued"));
+  act(() => {
+    workbench.spaces.select("dev");
+    workbench.spaces.update("dev", (state) => ({
+      ...state,
+      namespaces: ["a", "b", "c", "d", "e"],
+    }));
+    workbench.editors.open("k8s-list://dev/v1/pods");
+  });
+  await settle(30);
+  expect(screen.getByText("No pods in the namespaces shown")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "The namespaces that are not ready are left out; the status bar says which.",
+    ),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?q=api");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("No matching pods in the namespaces shown"),
+  ).toBeTruthy();
+});
+
 test.each([
   ["forbidden", "Access denied"],
   ["unauthorized", "Sign-in needed"],

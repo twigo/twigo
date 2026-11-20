@@ -8,6 +8,7 @@ import {
 } from "@twigo/protocol";
 import { useWorkbench } from "@twigo/workbench";
 import type { Loaded } from "../discovery";
+import { settled } from "../list/listStatus";
 import { useListView } from "../list/useListView";
 import { viewProblem } from "../viewProblem";
 
@@ -76,7 +77,9 @@ export function useTally(
       total: snapshot.total,
       counts: snapshot.counts,
     };
-  const problem = viewProblem(snapshot.status, what);
+  const problem = settled(snapshot.parts)
+    ? viewProblem(snapshot.status, what)
+    : undefined;
   return problem
     ? { state: "missing", why: problem.body }
     : { state: "loading" };
