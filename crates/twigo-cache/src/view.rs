@@ -949,6 +949,7 @@ impl QueryView {
             }),
             upserts,
             status: status.clone(),
+            parts: None,
             counts: if counts_changed { counts.clone() } else { None },
             groups: groups_changed.then(|| groups.clone().unwrap_or_default()),
             metrics: metrics.filter(|_| metrics_changed),

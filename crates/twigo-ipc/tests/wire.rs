@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use twigo_ipc::{
     BlockReason, Blocked, Cell, ColumnValues, ContextAccess, Environment, ErrorKind, Grouping, Gvr,
-    IpcError, ListQuery, Lock, LockSource, Mode, ModeSource, RequestClass, RowId, Sort,
-    SubscriptionId, ViewState,
+    IpcError, ListQuery, Lock, LockSource, Mode, ModeSource, Part, PartState, Parts, RequestClass,
+    RowId, Sort, SubscriptionId, ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -24,6 +24,32 @@ fn view_states_are_tagged_by_state() {
         json!({"state": "error", "error": {"kind": "unavailable", "message": "refused"}})
     );
     assert_eq!(wire(&ViewState::Ready), json!({"state": "ready"}));
+}
+
+#[test]
+fn parts_are_tagged_by_kind() {
+    let parts = Parts {
+        count: 22,
+        unready: vec![PartState {
+            part: Part::Namespace {
+                name: "team-b".into(),
+            },
+            state: ViewState::Forbidden {
+                verb: "watch".into(),
+                resource: "pods".into(),
+            },
+            shown: false,
+        }],
+    };
+    assert_eq!(
+        wire(&parts),
+        json!({"count": 22, "unready": [{
+            "part": {"kind": "namespace", "name": "team-b"},
+            "state": {"state": "forbidden", "verb": "watch", "resource": "pods"},
+            "shown": false,
+        }]})
+    );
+    assert_eq!(wire(&Part::Cluster), json!({"kind": "cluster"}));
 }
 
 #[test]
