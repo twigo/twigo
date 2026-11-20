@@ -6,6 +6,13 @@ export const SHOWS_ROWS: ReadonlySet<ViewState["state"]> = new Set([
   "stale",
 ]);
 
+/** The states of a part or a view that stays down until the person or the server acts. */
+export const REFUSED: ReadonlySet<ViewState["state"]> = new Set([
+  "forbidden",
+  "unauthorized",
+  "error",
+]);
+
 const READINESS: readonly ViewState["state"][] = [
   "ready",
   "stale",
