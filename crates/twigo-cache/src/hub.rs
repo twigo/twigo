@@ -481,6 +481,8 @@ impl Hub {
     {
         let upstream = {
             let mut registry = self.inner.registry();
+            registry.next_run += 1;
+            let run = registry.next_run;
             match registry.entries.get_mut(key) {
                 Some(entry) => {
                     entry.subscribers += 1;
@@ -489,11 +491,6 @@ impl Hub {
                     let upstream = entry.upstream::<T>();
                     if upstream.ended() {
                         upstream.restart();
-                        registry.next_run += 1;
-                        let run = registry.next_run;
-                        let Some(entry) = registry.entries.get_mut(key) else {
-                            unreachable!("found under the same lock");
-                        };
                         entry.run = run;
                         let task = self.spawn(key, Arc::clone(&upstream), run);
                         let ended = std::mem::replace(&mut entry.task, task);
@@ -503,8 +500,6 @@ impl Hub {
                 }
                 None => {
                     let upstream = Arc::new(Upstream::<T>::new());
-                    registry.next_run += 1;
-                    let run = registry.next_run;
                     let entry = Entry {
                         upstream: Arc::clone(&upstream) as Arc<dyn Running>,
                         state: upstream.state(),
@@ -757,6 +752,8 @@ impl Inner {
 
     fn release(self: &Arc<Self>, key: &Key) {
         let mut registry = self.registry();
+        registry.next_linger += 1;
+        let linger = registry.next_linger;
         let Some(entry) = registry.entries.get_mut(key) else {
             return;
         };
@@ -771,11 +768,7 @@ impl Inner {
             return;
         }
         entry.idle_since = Some(Instant::now());
-        registry.next_linger += 1;
-        let linger = registry.next_linger;
-        if let Some(entry) = registry.entries.get_mut(key) {
-            entry.linger = linger;
-        }
+        entry.linger = linger;
         let hub = Arc::downgrade(self);
         let expiring = key.clone();
         tokio::spawn(async move {
