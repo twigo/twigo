@@ -20,7 +20,6 @@
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -219,46 +218,13 @@ struct Registry {
     /// Numbers every run, so what an aborted one says when it goes is not
     /// taken for its successor's.
     next_run: u64,
-    /// The tasks of the entries taken out, which are aborted once the lock
-    /// is let go.
-    doomed: Vec<JoinHandle<()>>,
 }
 
 impl Registry {
-    /// Removes the entry of `key` and dooms its task.
+    /// Removes the entry of `key` and aborts its task.
     fn take(&mut self, key: &Key) {
         if let Some(entry) = self.entries.remove(key) {
-            self.doomed.push(entry.task);
-        }
-    }
-}
-
-/// The registry's lock, which aborts the doomed tasks as it is let go.
-struct Locked<'a>(Option<MutexGuard<'a, Registry>>);
-
-impl Deref for Locked<'_> {
-    type Target = Registry;
-
-    fn deref(&self) -> &Registry {
-        self.0.as_deref().expect("held until dropped")
-    }
-}
-
-impl DerefMut for Locked<'_> {
-    fn deref_mut(&mut self) -> &mut Registry {
-        self.0.as_deref_mut().expect("held until dropped")
-    }
-}
-
-impl Drop for Locked<'_> {
-    fn drop(&mut self) {
-        let Some(mut registry) = self.0.take() else {
-            return;
-        };
-        let doomed = std::mem::take(&mut registry.doomed);
-        drop(registry);
-        for task in doomed {
-            task.abort();
+            entry.task.abort();
         }
     }
 }
@@ -499,8 +465,7 @@ impl Hub {
                         upstream.restart();
                         entry.run = run;
                         let task = self.spawn(key, Arc::clone(&upstream), run);
-                        let ended = std::mem::replace(&mut entry.task, task);
-                        registry.doomed.push(ended);
+                        std::mem::replace(&mut entry.task, task).abort();
                     }
                     upstream
                 }
@@ -719,8 +684,8 @@ impl Drop for Inner {
 }
 
 impl Inner {
-    fn registry(&self) -> Locked<'_> {
-        Locked(Some(self.registry.lock().expect("hub lock")))
+    fn registry(&self) -> MutexGuard<'_, Registry> {
+        self.registry.lock().expect("hub lock")
     }
 
     fn cluster(&self, context: &str) -> Arc<Cluster> {
