@@ -343,10 +343,7 @@ where
             self.clients = Some(Arc::clone(&clients));
             let outcome = match next {
                 Next::List => self.list(&clients).await,
-                Next::Watch(from) => {
-                    let start = WatchFrom::ResourceVersion(&from);
-                    self.stream(&clients, start, None, from.clone()).await
-                }
+                Next::Watch(from) => self.stream(&clients, None, from).await,
             };
             next = match outcome {
                 Outcome::Ended { next, quiet } => {
@@ -434,14 +431,7 @@ where
             loaded: 0,
         };
         if !self.unwatchable && self.env.cluster.streaming(clients) != Some(false) {
-            let outcome = self
-                .stream(
-                    clients,
-                    WatchFrom::InitialEvents,
-                    Some(listing()),
-                    "".into(),
-                )
-                .await;
+            let outcome = self.stream(clients, Some(listing()), "".into()).await;
             match outcome {
                 Outcome::Failed {
                     error: kube::Error::Api(status),
@@ -490,8 +480,7 @@ where
         if self.unwatchable {
             return Outcome::Polled;
         }
-        let start = WatchFrom::ResourceVersion(&from);
-        self.stream(clients, start, None, from.clone()).await
+        self.stream(clients, None, from).await
     }
 
     /// Reads a watch until it ends: the initial events of a streaming list
@@ -499,7 +488,6 @@ where
     async fn stream(
         &mut self,
         clients: &Arc<Clients>,
-        start: WatchFrom<'_>,
         mut listing: Option<Listing<D::Item>>,
         mut from: Box<str>,
     ) -> Outcome {
@@ -516,6 +504,10 @@ where
                 std::future::pending::<()>().await;
             }
         });
+        let start = match listing {
+            Some(_) => WatchFrom::InitialEvents,
+            None => WatchFrom::ResourceVersion(&from),
+        };
         let mut request = request::watch(&self.collection(), start, TIMEOUT_SECONDS);
         request.extensions_mut().insert(self.watch_waiting.clone());
         let mut lines: Lines = tokio::select! {
