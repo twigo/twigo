@@ -159,7 +159,7 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
-export { leastReady, readiness, SHOWS_ROWS } from "./viewState";
+export { leastReady, readiness, REFUSED, SHOWS_ROWS } from "./viewState";
 export type { ServedMetrics, ShownUsage } from "./metrics";
 export {
   CLUSTER_STREAMS,

@@ -214,6 +214,13 @@ test.each([
     "team-c: no updates, reconnecting",
   ],
   [
+    "a part whose first list broke off",
+    of22(part("team-c", { state: "stale" })),
+    "Connecting… · 1 of 22 namespaces",
+    "warn",
+    "team-c: connecting",
+  ],
+  [
     "a part that relists",
     of22(part("team-c", { state: "relisting" }, true)),
     "Relisting… · 1 of 22 namespaces",

@@ -1,5 +1,5 @@
 import type { ListQuery, Part, Parts, ViewState } from "../generated";
-import { leastReady, SHOWS_ROWS } from "../viewState";
+import { leastReady, REFUSED, SHOWS_ROWS } from "../viewState";
 
 /** States in which Rust knows the server's columns: from a list's first page on. */
 const KNOWS_COLUMNS = new Set<ViewState["state"]>([
@@ -7,12 +7,6 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
   "ready",
   "relisting",
   "stale",
-]);
-
-const REFUSED = new Set<ViewState["state"]>([
-  "forbidden",
-  "unauthorized",
-  "error",
 ]);
 
 /** More namespaces than the hub's `NAMESPACES` are read cluster-wide, by a person who may list the kind there. */

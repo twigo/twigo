@@ -5,7 +5,7 @@ import {
   type LogsSnapshot,
   type LogTarget,
   type LogView,
-  type ViewState,
+  REFUSED,
 } from "@twigo/protocol";
 import type { LinePlace } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
@@ -77,13 +77,6 @@ const INITIAL: LogsTab = {
   fields: false,
 };
 
-/** The states of a target that stays down until the person acts; the others run, or will by themselves. */
-const DOWN: ReadonlySet<ViewState["state"]> = new Set([
-  "error",
-  "forbidden",
-  "unauthorized",
-]);
-
 /**
  * How a tab says a logs session stands: failed while its target is down,
  * connecting until the first pods come and while their streams queue or
@@ -92,7 +85,7 @@ const DOWN: ReadonlySet<ViewState["state"]> = new Set([
  * if a stream ended in an error.
  */
 export function logsState({ status, pods }: LogsSnapshot): SessionState {
-  if (DOWN.has(status.state)) return "failed";
+  if (REFUSED.has(status.state)) return "failed";
   if (pods === undefined) return "connecting";
   if (pods.length === 0) return "running";
   const streams = pods.flatMap((pod) =>

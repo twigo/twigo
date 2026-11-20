@@ -59,8 +59,12 @@ interface Kind {
  * of trouble in the tooltip, the worst first; none for a list of one part,
  * which its own state says.
  */
-export function partsLine({ count, unready }: Parts): PartsLine | undefined {
-  if (count < 2 || unready.length === 0) return undefined;
+export function partsLine({
+  count,
+  unready: sent,
+}: Parts): PartsLine | undefined {
+  if (count < 2 || sent.length === 0) return undefined;
+  const unready = sent.map(asSeen);
   const worst = leastReady(unready.map(({ state }) => state));
   const kinds = new Map<string, Kind>();
   for (const part of unready) {
@@ -93,6 +97,13 @@ export function partsLine({ count, unready }: Parts): PartsLine | undefined {
       .map(describe)
       .join("\n"),
   };
+}
+
+/** A part whose first list broke off holds no rows: it is connecting again, as Rust says of a list that shows none. */
+function asSeen(part: PartState): PartState {
+  return part.state.state === "stale" && !part.shown
+    ? { ...part, state: { state: "connecting" } }
+    : part;
 }
 
 function describe({ state, shown, parts }: Kind): string {
