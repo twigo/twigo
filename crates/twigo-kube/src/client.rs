@@ -54,6 +54,21 @@ const PING_TIMEOUT: Duration = Duration::from_secs(15);
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(70);
 
+/// hyper 1.12's default, set so that [`connection_window`] depends on no
+/// default.
+const STREAM_WINDOW: u32 = 2 * 1024 * 1024;
+
+/// The most a window can be (RFC 9113 6.9.1); h2 asserts it.
+const MAX_WINDOW: u32 = i32::MAX as u32;
+
+/// A stream whose body nobody reads keeps its whole window of the
+/// connection's, so a connection window of every stream the counter admits at
+/// the stream window leaves one stalled body nothing to take from the rest.
+fn connection_window(budgets: &Budgets) -> u32 {
+    let window = budgets.api_streams().saturating_mul(STREAM_WINDOW as usize);
+    window.min(MAX_WINDOW as usize) as u32
+}
+
 pub struct Clients {
     /// The UI's requests, watches and followed logs, on one HTTP/2 connection
     /// when the server negotiates it.
@@ -189,6 +204,7 @@ impl Clients {
         let config = &without_plugins(config, options.provider.is_some())?;
         let proxy = options.proxy.as_ref();
         let counter = Counter::new(options.budgets);
+        let window = connection_window(&options.budgets);
         let connections = Connections::default();
         let identity = Arc::new(Identity::new(connections.clone()));
         let offered = matches!(options.provider, Some(Provider::Exec(_))).then_some(&identity);
@@ -199,6 +215,8 @@ impl Clients {
             // request for the idle timeout, even while its streams run, and
             // opens another.
             .pool_idle_timeout(None)
+            .http2_initial_stream_window_size(STREAM_WINDOW)
+            .http2_initial_connection_window_size(window)
             .timer(TokioTimer::new())
             .http2_keep_alive_interval(PING_INTERVAL)
             .http2_keep_alive_timeout(PING_TIMEOUT)
@@ -481,6 +499,24 @@ mod gate_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_connection_window_holds_the_stream_window_of_every_stream_of_the_api_client() {
+        const MIB: u32 = 1024 * 1024;
+        assert_eq!(connection_window(&Budgets::default()), 200 * MIB);
+        let raised = Budgets {
+            watches: 100,
+            sessions: 1,
+            ..Budgets::default()
+        };
+        assert_eq!(connection_window(&raised), 352 * MIB);
+        let enormous = Budgets {
+            watches: 2000,
+            logs: 2000,
+            ..Budgets::default()
+        };
+        assert_eq!(connection_window(&enormous), i32::MAX as u32);
+    }
 
     #[test]
     fn a_cluster_is_its_url_and_what_it_is_trusted_with() {
