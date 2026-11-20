@@ -291,6 +291,13 @@ impl Entry {
     fn evictable(&self) -> bool {
         self.idle() && self.upstream.watching()
     }
+
+    fn upstream<T: Item>(&self) -> Arc<Upstream<T>> {
+        Arc::clone(&self.upstream)
+            .into_any()
+            .downcast::<Upstream<T>>()
+            .expect("a key's form fixes its upstream's items")
+    }
 }
 
 /// What the registry asks of an upstream, whatever its items.
@@ -479,10 +486,7 @@ impl Hub {
                     entry.subscribers += 1;
                     entry.idle_since = None;
                     entry.expired = false;
-                    let upstream = Arc::clone(&entry.upstream)
-                        .into_any()
-                        .downcast::<Upstream<T>>()
-                        .expect("a key's form fixes its upstream's items");
+                    let upstream = entry.upstream::<T>();
                     if upstream.ended() {
                         upstream.restart();
                         registry.next_run += 1;
@@ -542,10 +546,7 @@ impl Hub {
             .entries
             .get_mut(key)
             .filter(|entry| !entry.failed() && !entry.expired)?;
-        let upstream = Arc::clone(&entry.upstream)
-            .into_any()
-            .downcast::<Upstream<T>>()
-            .expect("a key's form fixes its upstream's items");
+        let upstream = entry.upstream::<T>();
         let moving = Arc::downgrade(&subscription.inner);
         let hub = Arc::downgrade(&self.inner);
         let from = key.clone();
