@@ -50,7 +50,6 @@ import {
 } from "./edits";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
-import { SHOWS_ROWS } from "../viewState";
 import { MockLogs } from "./logs";
 import {
   isMetricsScenario,
@@ -63,6 +62,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
+import { MockParts, pinOf, type PartsView } from "./parts";
 import { printedColumns } from "./printed";
 import {
   isShellScenario,
@@ -141,7 +141,11 @@ type ListScenario = "live" | ViewState["state"];
  * (`serverChange`, `statusChange`), or one that an apply leaves late
  * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
  * RoleBindings reach only the namespace `default`, so a cluster-wide list
- * and one of any other namespace are forbidden, or live lists for a shell
+ * is forbidden and one of several namespaces has the rows of `default` and
+ * every other namespace refused, or `partsQueued`: live lists of a person
+ * who has no cluster-wide list, whose last two of more than three selected
+ * namespaces wait for a stream, the first of them with the rows it listed,
+ * or live lists for a shell
  * that waits, finds no shell, loses its connection or its write mode, or
  * runs one container (`shellQueued` and the like), or live lists while
  * processes ask the window to allow what they do (`approval` and the like),
@@ -157,6 +161,7 @@ export type MockScenario =
   | "policyFile"
   | "viewer"
   | "rbacNamespaces"
+  | "partsQueued"
   | "protection"
   | AuthScenario
   | EditScenario
@@ -172,6 +177,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "policyFile",
   "viewer",
   "rbacNamespaces",
+  "partsQueued",
   "protection",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
@@ -245,6 +251,7 @@ export function createMockBackend(
     scenario === "policyFile" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
+    scenario === "partsQueued" ||
     scenario === "protection" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
@@ -751,13 +758,7 @@ export function createMockBackend(
               error: { kind: "invalidInput", message: selected },
             }
           : lists === "forbidden" ||
-              (lists === "live" && FORBIDDEN[context]?.includes(resource)) ||
-              (scenario === "rbacNamespaces" &&
-                !(
-                  query.namespaced &&
-                  query.namespaces.length > 0 &&
-                  query.namespaces.every((name) => name === "default")
-                ))
+              (lists === "live" && FORBIDDEN[context]?.includes(resource))
             ? forbidden
             : lists;
       subscriptions.set(
@@ -769,6 +770,7 @@ export function createMockBackend(
           kind,
           cluster(context),
           state,
+          new MockParts(query, pinOf(scenario, resource)),
           onMessage,
           join,
         ),
@@ -966,14 +968,6 @@ const PINNED: Readonly<
   },
 };
 
-/** States in which Rust knows the server's columns: from a list's first page on. */
-const KNOWS_COLUMNS = new Set<ViewState["state"]>([
-  "syncing",
-  "ready",
-  "relisting",
-  "stale",
-]);
-
 const NO_COLUMNS: readonly Column[] = [];
 
 /** The batcher of one subscription: one unacknowledged batch at a time, the latest state wins. */
@@ -988,7 +982,9 @@ class Subscription {
   #join: MetricsJoin | undefined;
   readonly #onMessage: (batch: ListBatch) => void;
   readonly #timers: ReturnType<typeof setTimeout>[] = [];
-  #status: ViewState;
+  /** The state of every part a scenario does not pin. */
+  #timeline: ViewState;
+  readonly #parts: MockParts;
   /** Undefined until the webview sets one: nothing goes before it, as in Rust. */
   #window: [number, number] | undefined;
   /** The window moved since the last flush. */
@@ -998,7 +994,14 @@ class Subscription {
   #dirty = true;
   #base: { version: number; rows: MockRow[] } | undefined;
   #cache:
-    { base: object; samples: number; result: QueryResult<MockRow> } | undefined;
+    | {
+        base: object;
+        samples: number;
+        /** The namespaces whose rows the result holds, as JSON. */
+        shown: string;
+        result: QueryResult<MockRow>;
+      }
+    | undefined;
   #scrape = -1;
   #sentRows = false;
   #sent: {
@@ -1008,6 +1011,7 @@ class Subscription {
     /** What each row of the window was sent as. */
     rows: ReadonlyMap<RowId, string>;
     status: string;
+    parts: string;
     counts: string;
     groups: string;
     layout: readonly Column[];
@@ -1018,6 +1022,7 @@ class Subscription {
     ids: [],
     rows: new Map(),
     status: "",
+    parts: "",
     counts: "",
     groups: "null",
     layout: NO_COLUMNS,
@@ -1031,9 +1036,11 @@ class Subscription {
     kind: MockKind,
     cluster: Cluster,
     scenario: Exclude<ListScenario, "forbidden"> | ViewState,
+    parts: MockParts,
     onMessage: (batch: ListBatch) => void,
     join?: MetricsJoin,
   ) {
+    this.#parts = parts;
     this.#join = join;
     join?.listen(() => {
       this.touch();
@@ -1051,14 +1058,14 @@ class Subscription {
     this.#columns = columns;
     this.#onMessage = onMessage;
     if (typeof scenario !== "string") {
-      this.#status = scenario;
+      this.#timeline = scenario;
     } else if (
       scenario === "live" &&
       (cluster.synced.has(gvr) || cluster.synced.has(this.#listed))
     ) {
-      this.#status = { state: "ready" };
+      this.#timeline = { state: "ready" };
     } else if (scenario === "live") {
-      this.#status = { state: "connecting" };
+      this.#timeline = { state: "connecting" };
       const total = kind.rows(cluster, false).length;
       [0.25, 0.6, 0.9].forEach((share, step) => {
         this.#later(300 + step * 250, {
@@ -1070,7 +1077,7 @@ class Subscription {
         cluster.synced.add(this.#listed);
       });
     } else {
-      this.#status = PINNED[scenario];
+      this.#timeline = PINNED[scenario];
     }
     this.#timers.push(
       setInterval(() => {
@@ -1122,16 +1129,15 @@ class Subscription {
   #later(ms: number, status: ViewState, then?: () => void): void {
     this.#timers.push(
       setTimeout(() => {
-        this.#status = status;
+        this.#timeline = status;
         this.touch();
         then?.();
       }, ms),
     );
   }
 
-  #rows(): QueryResult<MockRow> {
-    if (!SHOWS_ROWS.has(this.#status.state)) {
-      const knows = KNOWS_COLUMNS.has(this.#status.state);
+  #rows({ namespaces, knows }: PartsView): QueryResult<MockRow> {
+    if (namespaces?.length === 0) {
       return {
         rows: [],
         readable: [],
@@ -1143,13 +1149,24 @@ class Subscription {
     const join = this.#query.sort?.metric ? this.#join : undefined;
     join?.poll(rows, true);
     const samples = join?.version ?? 0;
-    if (this.#cache?.base !== rows || this.#cache.samples !== samples) {
+    const shown = JSON.stringify(namespaces);
+    if (
+      this.#cache?.base !== rows ||
+      this.#cache.samples !== samples ||
+      this.#cache.shown !== shown
+    ) {
       this.#cache = {
         base: rows,
         samples,
+        shown,
         result: runQuery(
           join ? rows.map((row) => join.fill(row)) : rows,
-          this.#query,
+          namespaces === null
+            ? this.#query
+            : {
+                ...this.#query,
+                query: { ...this.#query.query, namespaces: [...namespaces] },
+              },
         ),
       };
     }
@@ -1203,7 +1220,8 @@ class Subscription {
     if (!this.#window || !this.#dirty || this.#seq !== this.#acked) return;
     this.#dirty = false;
     this.#moved = false;
-    const { rows, readable, counts, groups } = this.#rows();
+    const view = this.#parts.at(this.#timeline);
+    const { rows, readable, counts, groups } = this.#rows(view);
     const join = this.#join;
     // Rust holds the first rows of a list sorted by a metric until the
     // scopes it reads have answered, so the order is the values' order.
@@ -1213,11 +1231,7 @@ class Subscription {
     }
     const total = rows.length;
     const [start, end] = this.#window;
-    if (
-      join &&
-      KNOWS_COLUMNS.has(this.#status.state) &&
-      !SHOWS_ROWS.has(this.#status.state)
-    ) {
+    if (join && view.knows && view.namespaces?.length === 0) {
       join.recall(this.#held(start, end));
     }
     let visible = readable.slice(start, end);
@@ -1229,13 +1243,15 @@ class Subscription {
     const sent = new Map(
       visible.map((row) => [row.id, JSON.stringify(wireRow(row))]),
     );
-    const status = JSON.stringify(this.#status);
+    const status = JSON.stringify(view.status);
+    const partsJson = JSON.stringify(view.parts);
+    const partsChanged = partsJson !== this.#sent.parts;
     const countsJson = JSON.stringify(counts);
     const countsChanged = countsJson !== this.#sent.counts;
     const groupsJson = JSON.stringify(groups);
     const groupsChanged = groupsJson !== this.#sent.groups;
     const first = this.#seq === 0;
-    const knows = KNOWS_COLUMNS.has(this.#status.state);
+    const { knows } = view;
     const layout = knows ? this.#columns : NO_COLUMNS;
     const columnsChanged = first || layout !== this.#sent.layout;
     const metrics = knows ? (join?.state ?? null) : null;
@@ -1252,6 +1268,7 @@ class Subscription {
       !windowChanged &&
       upserts.length === 0 &&
       status === this.#sent.status &&
+      !partsChanged &&
       !countsChanged &&
       !groupsChanged &&
       !columnsChanged &&
@@ -1266,6 +1283,7 @@ class Subscription {
       ids,
       rows: sent,
       status,
+      parts: partsJson,
       counts: countsJson,
       groups: groupsJson,
       layout,
@@ -1279,7 +1297,8 @@ class Subscription {
       columns: columnsChanged ? [...layout] : null,
       window: windowChanged ? { start, ids } : null,
       upserts: upserts.map(wireRow),
-      status: this.#status,
+      status: view.status,
+      ...(partsChanged && { parts: view.parts }),
       counts: counts && (first || countsChanged) ? counts : null,
       groups: groupsChanged ? (groups ?? []) : null,
       metrics: metricsChanged ? metrics : null,

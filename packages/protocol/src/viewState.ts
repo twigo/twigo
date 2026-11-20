@@ -6,3 +6,28 @@ export const SHOWS_ROWS: ReadonlySet<ViewState["state"]> = new Set([
   "relisting",
   "stale",
 ]);
+
+const READINESS: readonly ViewState["state"][] = [
+  "ready",
+  "stale",
+  "relisting",
+  "syncing",
+  "connecting",
+  "queued",
+  "forbidden",
+  "unauthorized",
+  "error",
+];
+
+/** The least ready of some states, as Rust's `combine` has it: syncing ones add up. */
+export function leastReady(states: Iterable<ViewState>): ViewState {
+  let worst: ViewState = { state: "ready" };
+  let loaded = 0;
+  for (const state of states) {
+    if (state.state === "syncing") loaded += state.loaded;
+    if (READINESS.indexOf(state.state) > READINESS.indexOf(worst.state)) {
+      worst = state;
+    }
+  }
+  return worst.state === "syncing" ? { state: "syncing", loaded } : worst;
+}
