@@ -9,7 +9,8 @@
 //!
 //! It also records each change of a context's protection, a command's, the
 //! type an unmarked ask's answer gave, or the catalog's, each unlock's end,
-//! and each credential plugin a person trusted.
+//! each credential plugin a person trusted, and each command of a person's
+//! that the policy refused before anything was sent.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -18,9 +19,9 @@ use std::sync::Mutex;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode, RequestClass};
+use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode, ModeSource, RequestClass};
 
-use crate::{Actor, Attributes, Change};
+use crate::{Actor, Attributes, Change, Refused};
 
 /// The size past which the log moves aside.
 const LIMIT: u64 = 8 << 20;
@@ -121,6 +122,48 @@ pub enum Entry<'a> {
         digest: &'a str,
         program: Option<&'a str>,
     },
+    /// The policy refused a command of a person's before anything was sent,
+    /// named as `confirmed` names one. `mode` and `source` are what the
+    /// policy read of the context.
+    Refused {
+        context: &'a str,
+        command: &'a str,
+        target: &'a str,
+        mode: Mode,
+        source: &'a ModeSource,
+        why: Why,
+    },
+}
+
+/// Why the policy refused a command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Why {
+    /// The gate stopped one of the command's writes.
+    Gate { reason: BlockReason },
+    /// The admin's policy file sets the context's mode.
+    PolicyFile,
+    /// An unlock of a context that is not locked.
+    NotLocked,
+    /// No source lists the context.
+    Unlisted,
+    /// What the context lets through changed since the plan.
+    Changed,
+}
+
+impl From<&Refused> for Why {
+    fn from(refused: &Refused) -> Self {
+        match refused {
+            Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => Self::PolicyFile,
+            Refused::NotLocked(..) => Self::NotLocked,
+            Refused::Unlisted(_) => Self::Unlisted,
+            Refused::Changed(_) => Self::Changed,
+        }
+    }
 }
 
 /// Who changed a context's protection.

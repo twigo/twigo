@@ -60,7 +60,13 @@ struct Flags {
 pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Planned, IpcError> {
     let target = node(core.context(space)?, name)?;
     let cordon = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&cordon))?;
+    let named = format!("nodes/{}", target.name);
+    core.authorize(
+        &target.context,
+        "drain",
+        &named,
+        std::slice::from_ref(&cordon),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -197,7 +203,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         affected,
         kubectl: Some(kubectl),
         command: "drain",
-        target: format!("nodes/{name}"),
+        target: named,
         writes,
         context,
         connection,

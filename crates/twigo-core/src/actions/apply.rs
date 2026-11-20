@@ -88,6 +88,21 @@ pub(crate) struct Prepared {
     step: Step,
 }
 
+impl Prepared {
+    /// As the audit log names the command that sends it, and its object.
+    fn audited(&self) -> (&'static str, String) {
+        let command = match self.step {
+            Step::Recreate(_) => "recreate",
+            Step::Apply(_) | Step::Patch(_) => "apply",
+        };
+        let target = self
+            .writes
+            .first()
+            .map_or_else(|| self.what.clone(), Attributes::target);
+        (command, target)
+    }
+}
+
 enum Step {
     Apply(Box<ApplyStep>),
     Patch(Box<PatchStep>),
@@ -1360,8 +1375,10 @@ pub(crate) async fn apply(
     preview: PreviewId,
 ) -> Result<Planned, IpcError> {
     let (prepared, started) = core.bus.take_preview(window, preview, |prepared| {
-        core.authorize(&prepared.context, &prepared.writes)
+        let (command, target) = prepared.audited();
+        core.authorize(&prepared.context, command, &target, &prepared.writes)
     })?;
+    let (command, audit_target) = prepared.audited();
     let Prepared {
         context,
         connection,
@@ -1375,10 +1392,6 @@ pub(crate) async fn apply(
     let preview_of = (object, started);
     let this = core.this.clone();
     let place = target.place();
-    let audit_target = writes
-        .first()
-        .map_or_else(|| what.clone(), Attributes::target);
-    let command = "apply";
     Ok(match step {
         Step::Apply(step) => {
             let consequences = if step.removals.is_empty() {
@@ -1497,7 +1510,7 @@ pub(crate) async fn apply(
                 affected,
                 kubectl: Some(kubectl),
                 doing: format!("Recreating {what}"),
-                command: "recreate",
+                command,
                 target: audit_target,
                 writes,
                 context,

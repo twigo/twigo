@@ -139,7 +139,12 @@ pub(crate) async fn shell(
         Some(&spec.namespace),
         Some(&spec.pod),
     )];
-    core.authorize(&context, &writes)?;
+    let command = match kind {
+        ShellKind::Shell => "shell",
+        ShellKind::Attach => "attach",
+    };
+    let named = format!("{}, container {}", writes[0].target(), spec.container);
+    core.authorize(&context, command, &named, &writes)?;
     if kind == ShellKind::Attach {
         let clients = core
             .clients(&context)
@@ -157,12 +162,9 @@ pub(crate) async fn shell(
     let (tty, stdin) = (spec.tty, spec.stdin);
     let exec = writes[0].clone();
     Ok(Planned {
-        target: format!("{}, container {}", writes[0].target(), spec.container),
+        target: named,
         writes,
-        command: match kind {
-            ShellKind::Shell => "shell",
-            ShellKind::Attach => "attach",
-        },
+        command,
         question: read.question,
         confirm: read.confirm.to_owned(),
         destructive: false,

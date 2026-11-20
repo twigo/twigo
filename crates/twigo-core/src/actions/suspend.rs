@@ -37,7 +37,14 @@ pub(crate) async fn suspend(
         ));
     }
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    let command = if suspend { "suspend" } else { "resume" };
+    core.authorize(
+        &target.context,
+        command,
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -97,8 +104,8 @@ pub(crate) async fn suspend(
         consequences,
         affected,
         kubectl: Some(kubectl),
-        command: if suspend { "suspend" } else { "resume" },
-        target: attributes.target(),
+        command,
+        target: named,
         writes: vec![attributes],
         context,
         connection,

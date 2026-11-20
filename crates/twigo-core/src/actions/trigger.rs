@@ -38,7 +38,14 @@ pub(crate) async fn trigger(
     let namespace = target.namespace.clone().expect("a CronJob is namespaced");
     let jobs = format!("/apis/batch/v1/namespaces/{namespace}/jobs");
     let create = attributes(Method::POST, &jobs);
-    core.authorize(&target.context, std::slice::from_ref(&create))?;
+    let job = job_name(&target.name);
+    let named = format!("cronjobs/{} in {namespace}, job {job}", target.name);
+    core.authorize(
+        &target.context,
+        "trigger",
+        &named,
+        std::slice::from_ref(&create),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -48,7 +55,6 @@ pub(crate) async fn trigger(
         .as_str()
         .unwrap_or_default()
         .to_owned();
-    let job = job_name(&target.name);
     let from = format!("cronjob/{}", target.name);
     let kubectl = target.kubectl(&["create", "job", &job, "--from", &from])?;
     let (cronjob_name, context) = (target.name.clone(), target.context.clone());
@@ -72,7 +78,7 @@ pub(crate) async fn trigger(
         affected: Vec::new(),
         kubectl: Some(kubectl),
         command: "trigger",
-        target: format!("cronjobs/{cronjob_name} in {namespace}, job {job}"),
+        target: named,
         writes: vec![create],
         context,
         connection,

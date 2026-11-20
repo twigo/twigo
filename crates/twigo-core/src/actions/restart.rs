@@ -37,7 +37,13 @@ pub(crate) async fn restart(
         ));
     }
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    core.authorize(
+        &target.context,
+        "restart",
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -96,7 +102,7 @@ pub(crate) async fn restart(
         affected,
         kubectl: Some(kubectl),
         command: "restart",
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,

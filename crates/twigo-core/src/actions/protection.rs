@@ -5,7 +5,7 @@
 
 use twigo_ipc::{ContextAccess, Environment, Friction, IpcError, LockSource, Mode, ModeSource};
 use twigo_policy::friction::{friction, keeps};
-use twigo_policy::{Change, Outlived, PlannedChange, UNLOCK};
+use twigo_policy::{Change, Entry, Outlived, PlannedChange, Refused, UNLOCK, Why};
 
 use crate::bus::{self, Planned};
 use crate::{Core, errors};
@@ -19,7 +19,7 @@ pub(crate) async fn protection(
     let planned = core
         .policy
         .plan(&context, change)
-        .map_err(|error| errors::refused(&error))?;
+        .map_err(|error| refused(core, &context, change, &error))?;
     let Words {
         question,
         confirm,
@@ -31,11 +31,7 @@ pub(crate) async fn protection(
         space: None,
         risk: planned.risk(),
         writes: Vec::new(),
-        command: match change {
-            Change::Mode { .. } => "mode",
-            Change::Type { .. } => "type",
-            Change::Unlock => "unlock",
-        },
+        command: command(change),
         target: context.clone(),
         question,
         confirm,
@@ -51,6 +47,29 @@ pub(crate) async fn protection(
         },
         context,
     })
+}
+
+fn command(change: Change) -> &'static str {
+    match change {
+        Change::Mode { .. } => "mode",
+        Change::Type { .. } => "type",
+        Change::Unlock => "unlock",
+    }
+}
+
+/// What the webview is told of a change the policy refused, once the audit
+/// log has it.
+pub(crate) fn refused(core: &Core, context: &str, change: Change, error: &Refused) -> IpcError {
+    let access = core.policy.access(context);
+    core.policy.audit().record(&Entry::Refused {
+        context,
+        command: command(change),
+        target: context,
+        mode: access.mode,
+        source: &access.source,
+        why: Why::from(error),
+    });
+    errors::refused(error)
 }
 
 struct Words {

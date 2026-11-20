@@ -46,7 +46,7 @@ use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
 use twigo_policy::friction::{covers, friction};
-use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy};
+use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
 pub use twigo_sessions::shell::Frame as ShellFrame;
 
@@ -378,7 +378,12 @@ impl Core {
                 actions::protection(self, context, Change::Unlock).await?
             }
         };
-        self.authorize(&planned.context, &planned.writes)?;
+        self.authorize(
+            &planned.context,
+            planned.command,
+            &planned.target,
+            &planned.writes,
+        )?;
         let access = self.policy.access(&planned.context);
         self.bus.keep(ticket, planned, &access)
     }
@@ -437,7 +442,7 @@ impl Core {
             }
             _ => {}
         }
-        self.authorize(&context, &planned.writes)?;
+        self.authorize(&context, planned.command, &planned.target, &planned.writes)?;
         let run = match planned.run {
             Run::Sends(run) => run,
             Run::Protects { change, done } => {
@@ -514,7 +519,7 @@ impl Core {
         let choices = self
             .policy
             .change(context, change, friction)
-            .map_err(|error| errors::refused(&error))?;
+            .map_err(|error| actions::refused(self, context, change.change, &error))?;
         self.state.set_choices(&choices);
         Ok(())
     }
@@ -550,16 +555,32 @@ impl Core {
         self.bus.cancel(window, id);
     }
 
-    /// Whether the UI may send `writes` on `context` now.
+    /// Whether the UI may send `writes` on `context` now. A command the gate
+    /// refuses leaves one `refused` line in the audit log, not one per write.
     pub(crate) fn authorize(
         &self,
         context: &str,
+        command: &str,
+        target: &str,
         writes: &[twigo_policy::Attributes],
     ) -> Result<(), IpcError> {
         for write in writes {
-            self.policy
-                .authorize(context, write, twigo_kube::client::Actor::Ui)
-                .map_err(|blocked| IpcError::from(*blocked))?;
+            if let Err(blocked) =
+                self.policy
+                    .authorize(context, write, twigo_kube::client::Actor::Ui)
+            {
+                self.policy.audit().record(&Entry::Refused {
+                    context,
+                    command,
+                    target,
+                    mode: blocked.mode,
+                    source: &blocked.source,
+                    why: Why::Gate {
+                        reason: blocked.reason,
+                    },
+                });
+                return Err(IpcError::from(*blocked));
+            }
         }
         Ok(())
     }

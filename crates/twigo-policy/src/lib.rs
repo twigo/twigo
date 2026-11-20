@@ -17,7 +17,7 @@ mod served;
 pub use actor::Actor;
 pub use approval::Approval;
 pub use attributes::Attributes;
-pub use audit::{Audit, By, Entry};
+pub use audit::{Audit, By, Entry, Why};
 pub use file::PolicyFile;
 pub use gate::{Gate, GateLayer, Gated, RecheckLayer, Rechecked};
 pub use policy::{

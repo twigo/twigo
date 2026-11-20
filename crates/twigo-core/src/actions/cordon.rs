@@ -88,7 +88,16 @@ pub(crate) async fn cordon(
 ) -> Result<Planned, IpcError> {
     let target = node(core.context(space)?, name)?;
     let attributes = target.attributes(Method::PATCH, None);
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    let Words {
+        verb, doing, done, ..
+    } = words(unschedulable);
+    core.authorize(
+        &target.context,
+        verb,
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -101,9 +110,6 @@ pub(crate) async fn cordon(
             already(name, unschedulable),
         ));
     }
-    let Words {
-        verb, doing, done, ..
-    } = words(unschedulable);
     let context = target.context.clone();
     let connection = clients.connection();
     let consequence = if unschedulable {
@@ -127,7 +133,7 @@ pub(crate) async fn cordon(
         affected: Vec::new(),
         kubectl: Some(kubectl),
         command: verb,
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,

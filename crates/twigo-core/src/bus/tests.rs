@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    Environment, ErrorKind, Execute, Friction, Mode, ModeSource, OperationEvent, PlanId,
-    PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
+    BlockReason, Environment, ErrorKind, Execute, Friction, Mode, ModeSource, OperationEvent,
+    PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
@@ -1305,6 +1305,170 @@ async fn a_protection_plan_runs_only_while_the_context_stands_as_it_was_planned(
     );
     assert_eq!(core.policy.access("kind-prod"), unlocked);
     assert!(core.state.choices().modes.is_empty());
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "refused",
+            "context": "kind-prod",
+            "command": "mode",
+            "target": "kind-prod",
+            "mode": "guarded",
+            "source": { "kind": "environment", "environment": "production" },
+            "why": { "kind": "changed" },
+        })]
+    );
+}
+
+fn audit(dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("audit.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let mut line: Value = serde_json::from_str(line).unwrap();
+            line.as_object_mut().unwrap().remove("at");
+            line
+        })
+        .collect()
+}
+
+fn configmap(name: &str) -> twigo_ipc::ResourceRef {
+    twigo_ipc::ResourceRef {
+        gvr: twigo_ipc::Gvr {
+            group: String::new(),
+            version: "v1".to_owned(),
+            resource: "configmaps".to_owned(),
+        },
+        namespaced: true,
+        namespace: Some("a".to_owned()),
+        name: name.to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn a_delete_in_read_only_leaves_a_refused_line_and_sends_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    in_mode(&core, Mode::ReadOnly).await;
+    let space = core.state.open_space("kind-a").id;
+    let request = PlanRequest::Delete {
+        space,
+        targets: vec![configmap("m")],
+    };
+    let refused = core.command_plan("main", request).await.unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions);
+    assert_eq!(server.seen(), Vec::<String>::new());
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "refused",
+            "context": "kind-a",
+            "command": "delete",
+            "target": "configmaps/m in a",
+            "mode": "read-only",
+            "source": { "kind": "user", "overrides": null },
+            "why": { "kind": "gate", "reason": "mode" },
+        })]
+    );
+}
+
+#[tokio::test]
+async fn a_command_on_a_context_nobody_marked_leaves_one_refused_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    core.catalog.contexts().await;
+    let space = core.state.open_space("kind-a").id;
+    let several = PlanRequest::Delete {
+        space: space.clone(),
+        targets: vec![configmap("m"), configmap("n")],
+    };
+    let cordon = PlanRequest::Cordon {
+        space,
+        node: "n1".to_owned(),
+        unschedulable: true,
+    };
+    for request in [several, cordon] {
+        let refused = core.command_plan("main", request).await.unwrap_err();
+        assert_eq!(refused.blocked.unwrap().reason, BlockReason::Unmarked);
+    }
+    assert_eq!(server.seen(), Vec::<String>::new());
+    let (mode, source) = ("guarded", json!({ "kind": "unmarked" }));
+    let why = json!({ "kind": "gate", "reason": "unmarked" });
+    assert_eq!(
+        audit(dir.path()),
+        [
+            json!({
+                "event": "refused", "context": "kind-a", "command": "delete",
+                "target": "2 configmaps in a", "mode": mode, "source": source, "why": why,
+            }),
+            json!({
+                "event": "refused", "context": "kind-a", "command": "cordon",
+                "target": "nodes/n1", "mode": mode, "source": source, "why": why,
+            }),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_mode_the_policy_file_sets_leaves_a_refused_line() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("policy.json"),
+        r#"{"contexts": {"kind-prod": "read-only"}}"#,
+    )
+    .unwrap();
+    let core = running_with(dir.path(), PRODUCTION);
+    let refused = core
+        .command_plan("main", set_mode(Mode::ReadWrite))
+        .await
+        .unwrap_err();
+    assert_eq!(refused.kind, ErrorKind::Permissions);
+    let lines = audit(dir.path());
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0]["event"], "refused");
+    assert_eq!(lines[0]["command"], "mode");
+    assert_eq!(lines[0]["target"], "kind-prod");
+    assert_eq!(lines[0]["mode"], "read-only");
+    assert_eq!(lines[0]["source"]["kind"], "policyFile");
+    assert_eq!(lines[0]["why"], json!({ "kind": "policyFile" }));
+}
+
+#[tokio::test]
+async fn a_plan_the_gate_refuses_as_it_starts_leaves_a_line_and_a_wrong_name_leaves_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+
+    let wrong = new_plan(&core, "main", Risk::Lasting, &runs).await;
+    assert_eq!(
+        execute(&core, "main", wrong.id, Some("kind-b")).await,
+        Err(ErrorKind::InvalidInput)
+    );
+    assert_eq!(audit(dir.path()), Vec::<Value>::new());
+
+    let locked = new_plan(&core, "main", Risk::Lasting, &runs).await;
+    core.policy
+        .set_mode("kind-a", Some(Mode::ReadOnly))
+        .unwrap();
+    assert_eq!(
+        execute(&core, "main", locked.id, Some("kind-a")).await,
+        Err(ErrorKind::Permissions)
+    );
+    assert_eq!(*runs.lock().unwrap(), 0);
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "refused",
+            "context": "kind-a",
+            "command": "delete",
+            "target": "configmaps/m in a",
+            "mode": "read-only",
+            "source": { "kind": "user", "overrides": null },
+            "why": { "kind": "gate", "reason": "mode" },
+        })]
+    );
 }
 
 #[tokio::test]

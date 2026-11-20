@@ -200,7 +200,12 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
         Asks::Resume => (Risk::Lasting, revert.said.clone(), Vec::new()),
         asks => {
             let target = &revert.target;
-            core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+            core.authorize(
+                &target.context,
+                "undo",
+                &attributes.target(),
+                std::slice::from_ref(&attributes),
+            )?;
             let clients = core
                 .clients(&target.context)
                 .await

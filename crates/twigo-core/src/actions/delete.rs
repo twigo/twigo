@@ -66,7 +66,13 @@ pub(crate) async fn delete(
         .map(|target| target.attributes(Method::DELETE, None))
         .collect();
     // Before anything goes out: a read-only context says so at once.
-    core.authorize(&context, &writes)?;
+    let named = if targets.len() > 1 {
+        let count = counted(targets.len(), &resource.resource);
+        format!("{count}{}", place(&targets))
+    } else {
+        writes[0].target()
+    };
+    core.authorize(&context, "delete", &named, &writes)?;
     let clients = core
         .clients(&context)
         .await

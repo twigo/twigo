@@ -34,7 +34,13 @@ pub(crate) async fn scale(
 ) -> Result<Planned, IpcError> {
     let target = Target::of(core, space, target)?;
     let attributes = target.attributes(Method::PATCH, Some("scale"));
-    core.authorize(&target.context, std::slice::from_ref(&attributes))?;
+    let named = attributes.target();
+    core.authorize(
+        &target.context,
+        "scale",
+        &named,
+        std::slice::from_ref(&attributes),
+    )?;
     let clients = core
         .clients(&target.context)
         .await
@@ -99,7 +105,7 @@ pub(crate) async fn scale(
         affected,
         kubectl: Some(kubectl),
         command: "scale",
-        target: attributes.target(),
+        target: named,
         writes: vec![attributes],
         context,
         connection,

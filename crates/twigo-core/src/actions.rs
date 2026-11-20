@@ -24,7 +24,7 @@ pub(crate) use delete::delete;
 pub(crate) use drain::drain;
 use http::Method;
 use http::header::CONTENT_TYPE;
-pub(crate) use protection::protection;
+pub(crate) use protection::{protection, refused};
 pub(crate) use restart::restart;
 pub(crate) use reveal::reveal;
 pub(crate) use scale::scale;
