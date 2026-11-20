@@ -221,7 +221,6 @@ struct Registry {
 }
 
 impl Registry {
-    /// Removes the entry of `key` and aborts its task.
     fn take(&mut self, key: &Key) {
         if let Some(entry) = self.entries.remove(key) {
             entry.task.abort();
@@ -924,10 +923,7 @@ pub enum Delta<T> {
 /// What a list reads of its subscription at one moment.
 pub struct Shown<T> {
     pub delta: Delta<T>,
-    /// The state of the rows shown: the least ready of the parts whose rows
-    /// they are, one that waits for a watch after its whole list counting as
-    /// `stale`. While no part shows, the least ready of those still on their
-    /// way, and once none is, the worst refusal.
+    /// As [`ListBatch::status`](ipc::ListBatch::status) says.
     pub status: ViewState,
     pub parts: Parts,
 }

@@ -355,7 +355,6 @@ impl Fake {
         state.change(group, resource, namespace, "DELETED", object);
     }
 
-    /// Has `group` answer streaming lists as `answer`.
     pub fn streams(&self, group: &str, answer: Streams) {
         self.state().streams.insert(group.to_owned(), answer);
     }
@@ -486,7 +485,6 @@ impl Fake {
             .count()
     }
 
-    /// How many of the requests holding `needle` it answered gzipped.
     pub fn count_gzipped(&self, needle: &str) -> usize {
         self.state()
             .gzipped

@@ -382,8 +382,6 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), scopes, "one upstream per namespace");
     assert_eq!(pods.items().len(), 5);
 
-    // Lists stream from 1.37 on; before it, the list in pages is what the
-    // server refuses.
     let verb = if live.minor().await >= 37 {
         "watch"
     } else {
@@ -394,8 +392,6 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         resource: "pods".to_owned(),
     };
 
-    // A sixth namespace the account has no role in is the one part refused:
-    // the list shows the other five, ready, and names it.
     let refused = live.namespace("hub-sa").await;
     live.pod(&refused, "p").await;
     let mut six = five.clone();

@@ -25,7 +25,6 @@ const READINESS: readonly ViewState["state"][] = [
   "error",
 ];
 
-/** How far a state is from ready: 0 for ready, more for each that is worse. */
 export function readiness(state: ViewState): number {
   return READINESS.indexOf(state.state);
 }

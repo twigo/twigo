@@ -126,7 +126,6 @@ impl<T: Item> Upstream<T> {
         self.state.subscribe()
     }
 
-    /// The state it says now.
     pub fn current(&self) -> ViewState {
         self.state.borrow().clone()
     }

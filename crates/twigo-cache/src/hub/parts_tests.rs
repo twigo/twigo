@@ -26,14 +26,12 @@ fn namespace_part(name: &str, state: ViewState, shown: bool) -> PartState {
     }
 }
 
-/// A pod `p-<namespace>` in each namespace.
 fn pods_in(fake: &Fake, namespaces: &[&str]) {
     for namespace in namespaces {
         fake.add("pods", Some(namespace), &format!("p-{namespace}"));
     }
 }
 
-/// What a list holds of what its subscription drained.
 #[derive(Default)]
 struct Mirror {
     rows: HashMap<RowKey, String>,
