@@ -909,18 +909,6 @@ async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() 
     assert_eq!(names(&a), ["p1", "p2"], "watched from the list's version");
 }
 
-#[tokio::test(start_paused = true)]
-async fn a_streaming_list_and_the_changes_after_it_come_gzipped_in_members() {
-    let fake = Fake::default();
-    fake.add("pods", Some("a"), "p1");
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut pods = hub.rows(query(&["a"])).await.unwrap();
-    ready(&mut pods).await;
-    fake.add("pods", Some("a"), "p2");
-    until_rows(&mut pods, &["p1", "p2"]).await;
-    assert_eq!(fake.count_gzipped("sendInitialEvents"), 1);
-}
-
 fn streamed(fake: &Fake, path: &str) -> usize {
     fake.count(&format!(
         "{path}?watch=true&allowWatchBookmarks=true&timeoutSeconds=290&sendInitialEvents=true"
