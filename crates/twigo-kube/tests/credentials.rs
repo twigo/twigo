@@ -535,6 +535,8 @@ async fn an_empty_token_leaves_the_token_file_to_be_read() {
     config.auth_info.token_file = Some(file.display().to_string());
     let clients = Clients::new(&config, Gate::unrestricted(), Options::default()).unwrap();
     assert_eq!(get(&clients).await.unwrap(), "ok");
+    let request = Request::get("/version").body(Vec::new()).unwrap();
+    assert_eq!(clients.sessions.request_text(request).await.unwrap(), "ok");
 }
 
 #[tokio::test]

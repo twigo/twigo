@@ -155,33 +155,27 @@ where
 {
     fn actor(&self, gate: &Gate) -> Result<ActorClients, Error> {
         let config = &self.config;
-        let auth = || {
-            self.provider
-                .as_ref()
-                .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&self.identity)))
-        };
-        let api = ServiceBuilder::new()
+        let auth = config.auth_layer()?;
+        let outer = ServiceBuilder::new()
             .layer(gate.layer())
             .layer(config.base_uri_layer())
-            .option_layer(config.auth_layer()?)
-            .option_layer(auth())
+            .option_layer(auth.as_ref())
+            .option_layer(
+                self.provider
+                    .as_ref()
+                    .map(|provider| AuthLayer::new(provider.clone(), Arc::clone(&self.identity))),
+            )
             .layer(config.extra_headers_layer()?)
-            .layer(UserAgentLayer::of(gate.actor()))
+            .layer(UserAgentLayer::of(gate.actor()));
+        let api = outer
+            .clone()
             .layer(CounterLayer(self.counter.clone(), party(gate.actor())))
             .layer(TimeoutLayer::new(REQUEST_TIMEOUT))
             .layer(RetryLayer)
             .layer(ConnectionsLayer(self.connections.clone()))
             .layer(gate.recheck())
             .service(self.api.clone());
-        let sessions = ServiceBuilder::new()
-            .layer(gate.layer())
-            .layer(config.base_uri_layer())
-            .option_layer(config.auth_layer()?)
-            .option_layer(auth())
-            .layer(config.extra_headers_layer()?)
-            .layer(UserAgentLayer::of(gate.actor()))
-            .layer(gate.recheck())
-            .service(self.sessions.clone());
+        let sessions = outer.layer(gate.recheck()).service(self.sessions.clone());
         Ok(ActorClients {
             api: Client::new(api, config.default_namespace.clone()),
             sessions: Client::new(sessions, config.default_namespace.clone()),
