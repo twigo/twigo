@@ -16,6 +16,7 @@
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -212,6 +213,48 @@ struct Registry {
     /// Numbers every run, so what an aborted one says when it goes is not
     /// taken for its successor's.
     next_run: u64,
+    /// The tasks of the entries taken out, which are aborted once the lock
+    /// is let go.
+    doomed: Vec<JoinHandle<()>>,
+}
+
+impl Registry {
+    /// Removes the entry of `key` and dooms its task.
+    fn take(&mut self, key: &Key) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.doomed.push(entry.task);
+        }
+    }
+}
+
+/// The registry's lock, which aborts the doomed tasks as it is let go.
+struct Locked<'a>(Option<MutexGuard<'a, Registry>>);
+
+impl Deref for Locked<'_> {
+    type Target = Registry;
+
+    fn deref(&self) -> &Registry {
+        self.0.as_deref().expect("held until dropped")
+    }
+}
+
+impl DerefMut for Locked<'_> {
+    fn deref_mut(&mut self) -> &mut Registry {
+        self.0.as_deref_mut().expect("held until dropped")
+    }
+}
+
+impl Drop for Locked<'_> {
+    fn drop(&mut self) {
+        let Some(mut registry) = self.0.take() else {
+            return;
+        };
+        let doomed = std::mem::take(&mut registry.doomed);
+        drop(registry);
+        for task in doomed {
+            task.abort();
+        }
+    }
 }
 
 struct Entry {
@@ -429,7 +472,6 @@ impl Hub {
     where
         Self: Spawn<T>,
     {
-        let mut abort = None;
         let upstream = {
             let mut registry = self.inner.registry();
             match registry.entries.get_mut(key) {
@@ -450,7 +492,8 @@ impl Hub {
                         };
                         entry.run = run;
                         let task = self.spawn(key, Arc::clone(&upstream), run);
-                        abort = Some(std::mem::replace(&mut entry.task, task));
+                        let ended = std::mem::replace(&mut entry.task, task);
+                        registry.doomed.push(ended);
                     }
                     upstream
                 }
@@ -476,9 +519,6 @@ impl Hub {
                 }
             }
         };
-        if let Some(task) = abort {
-            task.abort();
-        }
         Part {
             feed: upstream.store.feed(),
             upstream,
@@ -675,8 +715,8 @@ impl Drop for Inner {
 }
 
 impl Inner {
-    fn registry(&self) -> MutexGuard<'_, Registry> {
-        self.registry.lock().expect("hub lock")
+    fn registry(&self) -> Locked<'_> {
+        Locked(Some(self.registry.lock().expect("hub lock")))
     }
 
     fn cluster(&self, context: &str) -> Arc<Cluster> {
@@ -708,17 +748,9 @@ impl Inner {
         }
         if entry.idle() {
             // Nobody shows it: it would take a watch from one that is shown.
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
-            return;
-        }
-        let evicted = evict(&mut registry, &key.context);
-        drop(registry);
-        if let Some(task) = evicted {
-            task.abort();
+            registry.take(key);
+        } else {
+            evict(&mut registry, &key.context);
         }
     }
 
@@ -734,11 +766,7 @@ impl Inner {
         if entry.borrowers.is_empty() && entry.queued.is_some() {
             // Nobody shows it, and it would take the next free watch from
             // one that is shown.
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
+            registry.take(key);
             return;
         }
         entry.idle_since = Some(Instant::now());
@@ -755,11 +783,7 @@ impl Inner {
                 hub.expire(&expiring, linger);
             }
         });
-        let evicted = make_way(&mut registry, key);
-        drop(registry);
-        if let Some(task) = evicted {
-            task.abort();
-        }
+        make_way(&mut registry, key);
     }
 
     fn expire(&self, key: &Key, linger: u64) {
@@ -771,11 +795,7 @@ impl Inner {
             return;
         }
         if entry.borrowers.is_empty() {
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
+            registry.take(key);
             return;
         }
         entry.expired = true;
@@ -792,41 +812,37 @@ impl Inner {
             return;
         };
         entry.borrowers.remove(&id);
-        let task = if entry.idle() && (entry.expired || entry.queued.is_some()) {
+        if entry.idle() && (entry.expired || entry.queued.is_some()) {
             serve(&mut registry, &key.context, key);
-            registry.entries.remove(key).map(|entry| entry.task)
+            registry.take(key);
         } else {
-            make_way(&mut registry, key)
-        };
-        drop(registry);
-        if let Some(task) = task {
-            task.abort();
+            make_way(&mut registry, key);
         }
     }
 }
 
 /// For a watch of `context` that waits for the budget, removes the least
-/// recently used idle upstream that holds a watch there, and gives its
-/// task to abort once the lock is let go.
-fn evict(registry: &mut Registry, context: &str) -> Option<JoinHandle<()>> {
+/// recently used idle upstream that holds a watch there.
+fn evict(registry: &mut Registry, context: &str) {
     let victim = registry
         .entries
         .iter()
         .filter(|(key, entry)| key.context == context && entry.evictable())
         .min_by_key(|(_, entry)| entry.idle_since)
-        .map(|(key, _)| key.clone())?;
-    serve(registry, context, &victim);
-    registry.entries.remove(&victim).map(|entry| entry.task)
+        .map(|(key, _)| key.clone());
+    if let Some(victim) = victim {
+        serve(registry, context, &victim);
+        registry.take(&victim);
+    }
 }
 
 /// An upstream that just went idle makes way for a watch of its context
 /// that waits for the budget.
-fn make_way(registry: &mut Registry, key: &Key) -> Option<JoinHandle<()>> {
+fn make_way(registry: &mut Registry, key: &Key) {
     let evictable = registry.entries.get(key).is_some_and(Entry::evictable);
-    if !(evictable && serve(registry, &key.context, key)) {
-        return None;
+    if evictable && serve(registry, &key.context, key) {
+        registry.take(key);
     }
-    registry.entries.remove(key).map(|entry| entry.task)
 }
 
 /// Marks the watch of `context` that has waited longest, and no eviction
