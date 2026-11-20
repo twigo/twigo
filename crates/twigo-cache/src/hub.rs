@@ -7,9 +7,9 @@
 //!   idle upstream of the context is evicted; with none, the watch stays
 //!   `queued`.
 //! - A subscription to a few namespaces gets an upstream per namespace;
-//!   to every namespace, or more than [`NAMESPACES`], one cluster-wide
-//!   upstream when the person may list the resource cluster-wide, filtered
-//!   by namespace in Rust.
+//!   to every namespace, or more than four, one cluster-wide upstream when
+//!   the person may list the resource cluster-wide, filtered by namespace
+//!   in Rust.
 //! - Hysteresis: a cluster-wide upstream serves narrower subscriptions too,
 //!   without holding it. Once it has lingered, they move to upstreams per
 //!   namespace, keeping its rows until theirs are listed.
@@ -49,7 +49,7 @@ pub use crate::upstream::{Connect, RETRY_WITHIN};
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
 /// More namespaces than this share one cluster-wide upstream.
-pub const NAMESPACES: usize = 4;
+const NAMESPACES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Resource {
