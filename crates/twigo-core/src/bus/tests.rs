@@ -1308,6 +1308,25 @@ async fn a_protection_plan_runs_only_while_the_context_stands_as_it_was_planned(
 }
 
 #[tokio::test]
+async fn a_shell_on_a_context_nobody_marked_is_refused_before_anything_is_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (server, port) = Server::start();
+    let core = over_server(dir.path(), port);
+    core.catalog.contexts().await;
+    core.state.open_space("kind-a");
+    for kind in [ShellKind::Shell, ShellKind::Attach] {
+        let refused = core.command_plan("main", shell_of(kind)).await.unwrap_err();
+        assert_eq!(
+            refused.blocked.unwrap().reason,
+            twigo_ipc::BlockReason::Unmarked,
+            "{kind:?}"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(server.seen(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn read_only_refuses_a_shell_before_anything_is_asked_and_nothing_reaches_the_server() {
     let dir = tempfile::tempdir().unwrap();
     let (server, port) = Server::start();
