@@ -1026,16 +1026,16 @@ fn accepts_gzip(headers: &http::HeaderMap) -> bool {
         .is_some_and(|value| value.contains("gzip"))
 }
 
-fn stream(
-    receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, Infallible>>,
+pub fn stream<E: Send + 'static>(
+    receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, E>>,
     gzip: bool,
-) -> Response<Body> {
+) -> Response<UnsyncBoxBody<Bytes, E>> {
     let mut response = Response::new(StreamBody::new(receiver).boxed_unsync());
     encoded(&mut response, gzip);
     response
 }
 
-fn encoded(response: &mut Response<Body>, gzip: bool) {
+fn encoded<B>(response: &mut Response<B>, gzip: bool) {
     if gzip {
         response.headers_mut().insert(
             http::header::CONTENT_ENCODING,

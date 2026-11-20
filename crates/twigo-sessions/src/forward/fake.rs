@@ -14,10 +14,10 @@ use futures::channel::mpsc;
 use http::{Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
-use http_body_util::{BodyExt, Full, StreamBody};
+use http_body_util::{BodyExt, Full};
 use serde_json::{Value, json};
 use tower::BoxError;
-use twigo_cache::fake::frame;
+use twigo_cache::fake::{frame, stream};
 use twigo_cache::hub::{Connect, Hub};
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
@@ -372,14 +372,7 @@ impl State {
             sender,
             gzip,
         });
-        let mut response = Response::new(StreamBody::new(receiver).boxed_unsync());
-        if gzip {
-            response.headers_mut().insert(
-                http::header::CONTENT_ENCODING,
-                http::HeaderValue::from_static("gzip"),
-            );
-        }
-        response
+        stream(receiver, gzip)
     }
 }
 
