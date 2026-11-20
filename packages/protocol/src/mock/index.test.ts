@@ -607,8 +607,10 @@ test("a person of one namespace has its rows and the others refused, each part o
   expect(ids.every((id) => id.includes("/default/"))).toBe(true);
 
   const first = batches[0];
-  expect(first?.status).toEqual(forbidden);
+  expect(first?.status).toEqual({ state: "connecting" });
   expect(first?.total).toBe(0);
+  expect(first?.parts?.unready).toHaveLength(3);
+  expect(batches.map(({ status }) => status.state)).not.toContain("forbidden");
 });
 
 test("a person of one namespace has nothing cluster-wide, and nothing of a namespace but its own", async () => {

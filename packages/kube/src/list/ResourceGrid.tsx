@@ -48,7 +48,8 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
-import { failed, leavesOut } from "./listStatus";
+import { isProblem } from "../viewProblem";
+import { leavesOut } from "./listStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
@@ -377,7 +378,7 @@ function Grid({
     },
     [register, grids, uri],
   );
-  const problem = failed(snapshot);
+  const problem = isProblem(snapshot.status);
   // The problem takes the grid's place, and with it the focus it held, which
   // falls to the page.
   useLayoutEffect(() => {
