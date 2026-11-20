@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  EmbeddedList as Spec,
-  ListQuery,
-  ObjectRef,
-  Row,
+import {
+  SHOWS_ROWS,
+  type EmbeddedList as Spec,
+  type ListQuery,
+  type ObjectRef,
+  type Row,
 } from "@twigo/protocol";
 import {
   ACTIONS_WIDTH,
@@ -32,7 +33,6 @@ import { kindIcon } from "../kinds";
 import { decideRows } from "../list/alarm";
 import { CellView } from "../list/cells";
 import { fitGrid } from "../list/fit";
-import { SHOWS_ROWS } from "../list/listStatus";
 import { readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";

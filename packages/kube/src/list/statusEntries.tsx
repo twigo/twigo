@@ -1,4 +1,4 @@
-import type { ViewState } from "@twigo/protocol";
+import { SHOWS_ROWS, type ViewState } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
 import { useClusterVersion, type Discovery } from "../discovery";
@@ -11,7 +11,7 @@ import {
 } from "../columns";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
-import { SHOWS_ROWS, stateLabel, type ListStatuses } from "./listStatus";
+import { stateLabel, type ListStatuses } from "./listStatus";
 
 const CONNECTION: Readonly<
   Partial<Record<ViewState["state"], { tone: Tone; text: string }>>

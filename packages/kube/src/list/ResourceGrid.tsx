@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Columns3 } from "lucide-react";
 import {
+  SHOWS_ROWS,
   type ListQuery,
   type Resource,
   type Row,
@@ -50,7 +51,6 @@ import { ViewStatus } from "../ViewStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
-import { SHOWS_ROWS } from "./listStatus";
 import { readsMetrics, sameBesidesMetrics } from "./metrics";
 import { namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";

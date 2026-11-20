@@ -28,12 +28,6 @@ export class ListStatuses {
   }
 }
 
-export const SHOWS_ROWS = new Set<ViewState["state"]>([
-  "ready",
-  "relisting",
-  "stale",
-]);
-
 export function stateLabel(status: ViewState): string | undefined {
   switch (status.state) {
     case "queued":

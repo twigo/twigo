@@ -50,6 +50,7 @@ import {
 } from "./edits";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
+import { SHOWS_ROWS } from "../viewState";
 import { MockLogs } from "./logs";
 import {
   isMetricsScenario,
@@ -964,9 +965,6 @@ const PINNED: Readonly<
     },
   },
 };
-
-/** States in which a view shows rows. */
-const SHOWS_ROWS = new Set<ViewState["state"]>(["ready", "relisting", "stale"]);
 
 /** States in which Rust knows the server's columns: from a list's first page on. */
 const KNOWS_COLUMNS = new Set<ViewState["state"]>([
