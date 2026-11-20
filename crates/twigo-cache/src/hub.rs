@@ -844,14 +844,6 @@ enum Guard {
     Borrow { hub: Weak<Inner>, key: Key, id: u64 },
 }
 
-impl Guard {
-    fn key(&self) -> &Key {
-        match self {
-            Guard::Hold { key, .. } | Guard::Borrow { key, .. } => key,
-        }
-    }
-}
-
 impl Drop for Guard {
     fn drop(&mut self) {
         match self {
@@ -887,7 +879,8 @@ impl<T> Part<T> {
 
     /// What the part reads, as a list names it.
     fn scope(&self) -> ipc::Part {
-        match &self.guard.key().scope {
+        let (Guard::Hold { key, .. } | Guard::Borrow { key, .. }) = &self.guard;
+        match &key.scope {
             Scope::Cluster => ipc::Part::Cluster,
             Scope::Namespace(name) => ipc::Part::Namespace { name: name.clone() },
         }
