@@ -633,6 +633,62 @@ async fn a_mode_that_refuses_forwards_refuses_a_start_before_it_binds_and_fails_
 }
 
 #[tokio::test]
+async fn a_start_and_a_resume_the_mode_refuses_leave_a_refused_line_each() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("policy.json"), REFUSING).unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), false)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    core.catalog.contexts().await;
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Stopped);
+    set_the_mode(&core, Mode::ReadOnly).await;
+
+    core.forward_start(StartForward {
+        target: target("kind-plain", "other"),
+        port: 8080,
+        local: Some(free()),
+    })
+    .await
+    .unwrap_err();
+    core.forward_resume(ResumeForward {
+        id: ForwardId(1),
+        local: None,
+    })
+    .await
+    .unwrap_err();
+
+    let refused = |name: &str| {
+        serde_json::json!({
+            "event": "refused",
+            "context": "kind-plain",
+            "command": "forward",
+            "target": format!("pods/{name} in shop"),
+            "mode": "read-only",
+            "source": { "kind": "user", "overrides": null },
+            "why": { "kind": "gate", "reason": "mode" },
+        })
+    };
+    assert_eq!(audit(dir.path()), [refused("other"), refused("api")]);
+}
+
+fn audit(dir: &Path) -> Vec<Value> {
+    std::fs::read_to_string(dir.join("audit.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let mut line: Value = serde_json::from_str(line).unwrap();
+            line.as_object_mut().unwrap().remove("at");
+            line
+        })
+        .collect()
+}
+
+#[tokio::test]
 async fn a_stop_keeps_a_forward_a_remove_forgets_it_and_a_quit_changes_what_ran_in_neither() {
     let dir = tempfile::tempdir().unwrap();
     let (first, second) = (free(), free());
@@ -2151,6 +2207,11 @@ async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lack
     assert_eq!(listed(&core)[0].local, local);
     assert!(!core.state.forwards("kind-plain").forwards[0].runs);
     assert!(std::net::TcpListener::bind(("127.0.0.1", moved)).is_ok());
+    assert!(
+        audit(dir.path())
+            .iter()
+            .all(|line| line["event"] != "refused")
+    );
 }
 
 #[tokio::test]

@@ -413,10 +413,19 @@ impl Core {
             ));
         }
         let access = self.policy.access(&context);
-        if !covers(
-            &planned_friction,
-            &friction(&planned.risk, &context, &access),
-        ) {
+        let asked = friction(&planned.risk, &context, &access);
+        if !covers(&planned_friction, &asked) {
+            self.policy.audit().record(&Entry::Refused {
+                context: &context,
+                command: planned.command,
+                target: &planned.target,
+                mode: access.mode,
+                source: &access.source,
+                why: Why::Friction {
+                    planned: &planned_friction,
+                    now: &asked,
+                },
+            });
             return Err(IpcError::new(
                 ErrorKind::Conflict,
                 format!(
@@ -569,16 +578,9 @@ impl Core {
                 self.policy
                     .authorize(context, write, twigo_kube::client::Actor::Ui)
             {
-                self.policy.audit().record(&Entry::Refused {
-                    context,
-                    command,
-                    target,
-                    mode: blocked.mode,
-                    source: &blocked.source,
-                    why: Why::Gate {
-                        reason: blocked.reason,
-                    },
-                });
+                self.policy
+                    .audit()
+                    .gate_refused(context, command, target, &blocked);
                 return Err(IpcError::from(*blocked));
             }
         }

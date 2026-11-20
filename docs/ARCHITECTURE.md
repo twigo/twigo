@@ -1382,6 +1382,7 @@ Extensions add commands, not prefixes.
     A forward changes nothing in the cluster, so it does not go through the command bus: the gate decides each connection's upgrade, and the manager asks the policy and the catalog again for each running forward's context, reading both under the table's lock, whenever either changes, when a start, a resume or a move puts a forward in, and when the context's clients are built.
     When the mode comes to refuse forwards (`read-only` with `readOnly.allowPortForward: false`), or the catalog loses the context, its connections end and it is `Failed` with the gate's words or the missing context's, still listening, until that passes.
     A start, a resume or a move that the mode refuses, or whose context no source lists, answers that error and changes nothing: no forward is made and no id is taken, no port is bound, a stopped forward stays stopped and a moved one stays on its port.
+    A refusal by the mode leaves one `refused` line in the audit log (6.4), and one by a missing context none.
     It asks once the catalog has loaded, before it reads the target or binds, and again under the table's lock as it puts the forward in, so a refusal that comes while a start reads its target refuses that start too.
     Only a forward that exists and runs is refused in place; the refusal's words are those of its cause now, a missing context or the mode, as that changes.
     Once the refusal passes the forward waits, `Restored`, whatever it was before, and asks nothing by itself, also in a space that is connected.
@@ -2317,11 +2318,13 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     A request whose unmarked ask a type answered meets the gate anew: the gate notes it as it goes, the proxy as the new mode refuses it, and an ask that `guarded` raises for it ends as any other.
     A request the proxy lets on meets the gate, which notes it, and one it refuses for another reason, a token, a `Host`, a path or a body's size, is no request the policy stopped and has no line.
   - `confirmed` and `ended`: a command a person confirmed through the command bus, through which friction, and how it ended.
-  - `refused`: a command of a person's that the policy refused before anything was sent, at `command_plan` or at `command_execute`: its context, the command and target as `confirmed` names them, the mode and source the policy read, and why.
+  - `refused`: a command of a person's that the policy refused before anything was sent, at `command_plan` or at `command_execute`, or a port-forward's start or resume: its context, the command and target as `confirmed` names them, the mode and source the policy read, and why.
     That is the gate's reason for one of the command's writes, or the reason a change of protection was refused: the admin's policy file sets the mode, there is nothing to unlock, no source lists it, or it changed since the plan.
+    A plan whose context asks for more friction now than the person went through is refused too, and its line carries both frictions, the plan's and the context's now.
+    A port-forward's start or resume that the gate refuses, as `readOnly.allowPortForward: false` does, is the command `forward` on the target the person chose, with the gate's reason; a forward that the mode ends while it runs is no command refused, and has no line.
     One line per command, not per write.
     A refusal before the command read anything names its target from the request: a delete of three config maps is `3 configmaps in a`.
-    A name typed wrong, a countdown not ended, a context that names another cluster than when planned, a plan that is gone, and a mode that asks for more than the plan's friction leave no line.
+    A name typed wrong, a countdown not ended, a context that names another cluster than when planned, and a plan that is gone leave no line.
   - `approval`: how a process's ask through the policy proxy ended (above).
   - `protection`: a change of protection a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; that line alone, in place of the bus's `confirmed` and `ended`.
   - `catalog`: a change of a context's mode, source or type that no command made, with its access before and after, as the catalog publishes the read that made it, before anything reads that read: a kubeconfig edited, a provider's lock that came or went, a source that listed the context or stopped listing it.

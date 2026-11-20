@@ -234,6 +234,22 @@ async fn a_mode_that_asks_for_more_than_the_plan_did_refuses_it() {
         execute(&core, "main", plan.id, None).await,
         Err(ErrorKind::Conflict)
     );
+    assert_eq!(
+        audit(dir.path()),
+        [json!({
+            "event": "refused",
+            "context": "kind-a",
+            "command": "delete",
+            "target": "configmaps/m in a",
+            "mode": "guarded",
+            "source": { "kind": "user", "overrides": null },
+            "why": {
+                "kind": "friction",
+                "planned": { "kind": "confirm" },
+                "now": { "kind": "typed", "text": "kind-a" },
+            },
+        })]
+    );
 
     let typed = new_plan(&core, "main", Risk::Lasting, &runs).await;
     assert_eq!(

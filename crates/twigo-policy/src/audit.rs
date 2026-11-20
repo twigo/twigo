@@ -19,7 +19,7 @@ use std::sync::Mutex;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, ContextAccess, Friction, Mode, ModeSource, RequestClass};
+use twigo_ipc::{BlockReason, Blocked, ContextAccess, Friction, Mode, ModeSource, RequestClass};
 
 use crate::{Actor, Attributes, Change, Refused};
 
@@ -131,7 +131,7 @@ pub enum Entry<'a> {
         target: &'a str,
         mode: Mode,
         source: &'a ModeSource,
-        why: Why,
+        why: Why<'a>,
     },
 }
 
@@ -142,7 +142,7 @@ pub enum Entry<'a> {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-pub enum Why {
+pub enum Why<'a> {
     /// The gate stopped one of the command's writes.
     Gate { reason: BlockReason },
     /// The admin's policy file sets the context's mode.
@@ -153,9 +153,14 @@ pub enum Why {
     Unlisted,
     /// What the context lets through changed since the plan.
     Changed,
+    /// The context now asks for more friction than the plan went through.
+    Friction {
+        planned: &'a Friction,
+        now: &'a Friction,
+    },
 }
 
-impl From<&Refused> for Why {
+impl From<&Refused> for Why<'_> {
     fn from(refused: &Refused) -> Self {
         match refused {
             Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => Self::PolicyFile,
@@ -277,6 +282,20 @@ impl Audit {
             class: attributes.class,
             mode,
             blocked,
+        });
+    }
+
+    /// The gate refused a command of a person's before it sent anything.
+    pub fn gate_refused(&self, context: &str, command: &str, target: &str, blocked: &Blocked) {
+        self.record(&Entry::Refused {
+            context,
+            command,
+            target,
+            mode: blocked.mode,
+            source: &blocked.source,
+            why: Why::Gate {
+                reason: blocked.reason,
+            },
         });
     }
 }
