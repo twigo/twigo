@@ -39,6 +39,7 @@ import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { isProblem } from "../viewProblem";
 import type { OverviewStates } from "./overviewStates";
 
 /**
@@ -177,11 +178,10 @@ export function EmbeddedList({
       name,
     });
   };
-  const state = snapshot.status.state;
-  if (state === "forbidden" || state === "unauthorized" || state === "error")
+  if (isProblem(snapshot.status))
     return <ViewStatus status={snapshot.status} what={gvr.resource} inline />;
   const Icon = kindIcon(gvr);
-  const loading = !SHOWS_ROWS.has(state);
+  const loading = !SHOWS_ROWS.has(snapshot.status.state);
   if (!loading && snapshot.total === 0)
     return (
       <EmptyState icon={Icon} density="inline" className="px-0">

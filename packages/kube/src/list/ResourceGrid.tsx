@@ -48,6 +48,7 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
+import { isProblem } from "../viewProblem";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
@@ -375,7 +376,7 @@ function Grid({
     },
     [register, grids, uri],
   );
-  const problem = isProblem(snapshot.status.state);
+  const problem = isProblem(snapshot.status);
   // The problem takes the grid's place, and with it the focus it held, which
   // falls to the page.
   useLayoutEffect(() => {
@@ -581,10 +582,6 @@ function Grid({
       register={registerGrid}
     />
   );
-}
-
-function isProblem(state: string): boolean {
-  return state === "forbidden" || state === "unauthorized" || state === "error";
 }
 
 /** A group's value, its rows, and how many fail or wait (ARCHITECTURE 4.4). */

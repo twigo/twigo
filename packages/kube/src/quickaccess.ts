@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   ListView,
   lowerAscii,
+  SHOWS_ROWS,
   toIpcError,
   type Backend,
   type Column,
@@ -22,6 +23,7 @@ import { sameGvr, type Discovery } from "./discovery";
 import { kindIcon, PODS, pluralTitle } from "./kinds";
 import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
+import { isProblem } from "./viewProblem";
 
 /** A `:` query in k9s's grammar: `po payments /api app=web @prod-eu`. */
 export interface K9sQuery {
@@ -256,13 +258,11 @@ export function firstRows(view: ListView): Promise<ListSnapshot> {
     }, WAIT_MS);
     const stop = view.subscribe(() => {
       const snapshot = view.getSnapshot();
-      const { state } = snapshot.status;
       if (
-        ["ready", "relisting", "stale"].includes(state) &&
-        snapshot.columns.length > 0
+        (SHOWS_ROWS.has(snapshot.status.state) &&
+          snapshot.columns.length > 0) ||
+        isProblem(snapshot.status)
       ) {
-        done(snapshot);
-      } else if (["forbidden", "unauthorized", "error"].includes(state)) {
         done(snapshot);
       }
     });

@@ -7,7 +7,7 @@ import type {
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
 import { ViewStatus } from "../ViewStatus";
-import { objectProblem } from "../viewProblem";
+import { isProblem, objectProblem } from "../viewProblem";
 import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import type { PageStates } from "./pageStates";
@@ -159,11 +159,7 @@ function Shown({
   const { status } = snapshot;
   const found = objectProblem(snapshot);
   if (found && kept) return kept(found);
-  if (
-    status.state === "error" ||
-    status.state === "forbidden" ||
-    status.state === "unauthorized"
-  )
+  if (isProblem(status))
     return <ViewStatus status={status} what="the object" />;
   if (found) return <EmptyState title="The object does not exist" />;
   if (!has)
