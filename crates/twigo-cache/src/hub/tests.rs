@@ -44,15 +44,27 @@ fn budget(watches: usize) -> Budgets {
     }
 }
 
-async fn until<T: Item>(subscription: &mut Subscription<T>, wanted: impl Fn(&ViewState) -> bool) {
+async fn reach<T: Item>(
+    subscription: &mut Subscription<T>,
+    wanted: impl Fn(&Subscription<T>) -> bool,
+) {
     let reached = async {
-        while !wanted(&subscription.state()) {
+        while !wanted(subscription) {
             subscription.changed().await;
         }
     };
     tokio::time::timeout(Duration::from_secs(600), reached)
         .await
-        .expect("the state within ten minutes");
+        .unwrap_or_else(|_| {
+            panic!(
+                "not within ten minutes; the state is {:?}",
+                subscription.state()
+            )
+        });
+}
+
+async fn until<T: Item>(subscription: &mut Subscription<T>, wanted: impl Fn(&ViewState) -> bool) {
+    reach(subscription, |subscription| wanted(&subscription.state())).await;
 }
 
 async fn ready<T: Item>(subscription: &mut Subscription<T>) {
@@ -60,14 +72,7 @@ async fn ready<T: Item>(subscription: &mut Subscription<T>) {
 }
 
 async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
-    let reached = async {
-        while names(subscription) != wanted {
-            subscription.changed().await;
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(600), reached)
-        .await
-        .expect("the rows within ten minutes");
+    reach(subscription, |subscription| names(subscription) == wanted).await;
 }
 
 fn names(subscription: &Subscription<Row>) -> Vec<String> {
