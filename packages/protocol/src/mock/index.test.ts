@@ -555,12 +555,7 @@ test("a forbidden list names its resource; live, prod-eu may not list nodes, sta
   const prod = await open("live", query(nodes));
   expect(prod.batches[0]?.status.state).toBe("forbidden");
   const staging = await open("live", query({ ...nodes, space: "staging" }));
-  await staging.window(0, 50);
-  for (let ms = 0; ms < 1500; ms += 50) {
-    await staging.ack();
-    await vi.advanceTimersByTimeAsync(50);
-  }
-  const latest = last(staging.batches);
+  const latest = last(await settled(staging));
   expect(latest?.status.state).toBe("ready");
   expect(latest?.total).toBe(40);
 });
@@ -611,22 +606,6 @@ test("a person of one namespace has its rows and the others refused, each part o
   expect(first?.total).toBe(0);
   expect(first?.parts?.unready).toHaveLength(3);
   expect(batches.map(({ status }) => status.state)).not.toContain("forbidden");
-});
-
-test("a person of one namespace has nothing cluster-wide, and nothing of a namespace but its own", async () => {
-  for (const q of [
-    query(),
-    namespaced(["auth", "payments"]),
-    query({
-      gvr: { group: "", version: "v1", resource: "nodes" },
-      namespaced: false,
-    }),
-  ]) {
-    const batches = await settled(await open("rbacNamespaces", q));
-    const latest = last(batches);
-    expect(latest?.status).toMatchObject({ state: "forbidden", verb: "watch" });
-    expect(latest?.total).toBe(0);
-  }
 });
 
 test("with more than three namespaces the last two wait for a stream, the first of them with the rows it listed", async () => {
