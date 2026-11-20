@@ -326,6 +326,14 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Timeouts start when the counter admits a stream.
     A per-request timeout, a tower layer rather than a socket read timeout, backs the counter up against a server with a lower limit.
     It gives the response's headers 70 s, more than the 60 s the API server allows a request that is not long-running, so it cuts nothing the server still works on.
+  - The connection's flow-control window covers every stream the counter admits.
+    h2 takes a DATA frame from the connection's window when it arrives and gives it back only as the stream's body is read ([`recv.rs`](https://github.com/hyperium/h2/blob/v0.4.20/src/proto/streams/recv.rs#L465-L497), [`incoming.rs`](https://github.com/hyperium/hyper/blob/v1.12.0/src/body/incoming.rs#L185-L190)), so a body nobody reads keeps up to a stream window of the connection's, and hyper's defaults are 2 MiB a stream and 5 MiB a connection ([`client.rs`](https://github.com/hyperium/hyper/blob/v1.12.0/src/proto/h2/client.rs#L48-L49)).
+    The third unread stream freezes the others: their headers come, which no window limits, and their bodies never do, so a request waits without failing (`streams_nobody_reads_do_not_hold_up_a_request_on_the_connection` in `crates/twigo-kube/tests/clients_live.rs`: on kind 1.36.4, 2026-11-20, two unread lists of 3 MiB left `/version` its body and three kept it for more than 5 s).
+    So the `api` client sets the stream window to 2 MiB, hyper's default, and the connection window to that times every stream its counter admits: watches, logs, requests and the proxy's, 100 by default, 200 MiB, capped at 2^31-1, the most a window can be.
+    The context's budgets decide it, so a raised budget raises the window.
+    Sessions are not counted, since each has a connection of its own on the HTTP/1.1 client.
+    The streams the counter admits then cannot fill the connection's window between them.
+    The price is memory: a stalled stream holds up to its 2 MiB of body until it ends, which the proxy's 16 streams can reach together, 32 MiB; the resident size measured in a scratch client was about 4 MB a stream, so about 64 MB (a debug build against kind 1.36.4, 2026-11-20, not repeated with the shipped window).
   - Sessions, meaning exec, attach and port-forward connections, have their own budget (default 64), counted in the same place below every actor.
     A session's permit outlives the `101` response, which `hyper::upgrade::on` drops: the task of the session holds it, a shell's or a forward's connection's, not the upgraded stream, and so does the policy proxy's splice.
     A proxied upgrade takes its session from this budget, not the proxy's 16, and over it gets the proxy's `429` instead of waiting (6.4).
