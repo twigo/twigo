@@ -695,7 +695,8 @@ A list reads its upstreams as parts, one per namespace or one for the cluster (`
 - A part's rows are in the list once it has listed and while it is not refused (not `forbidden`, `unauthorized` or `error`), whatever the other parts are.
   So a part that is `syncing`, `queued` before its first list, `connecting` or refused adds none, and one that has listed and waits for a watch, or is `stale` or `relisting`, keeps its rows.
 - `status` is the state of the rows shown: the least ready of the parts shown, one that waits for a watch after its whole list counting as `stale`.
-  While no part shows, it is the least ready of all the parts, as a view of one upstream says it.
+  While no part shows, it is the least ready of the parts still on their way, one whose first list broke off counting as `connecting`, and once none is, the worst refusal.
+  So `ready`, `relisting` and `stale` come only with some part's rows.
 - `parts` has `count`, the parts the list reads, and `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`).
   It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
 - A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.

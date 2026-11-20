@@ -968,7 +968,8 @@ pub struct Shown<T> {
     pub delta: Delta<T>,
     /// The state of the rows shown: the least ready of the parts whose rows
     /// they are, one that waits for a watch after its whole list counting as
-    /// `stale`. While no part shows, the least ready of all.
+    /// `stale`. While no part shows, the least ready of those still on their
+    /// way, and once none is, the worst refusal.
     pub status: ViewState,
     pub parts: Parts,
 }
@@ -1104,7 +1105,7 @@ impl<T: Item> Subscription<T> {
             .map(|(state, _)| rows_state(state))
             .collect();
         let status = if rows.is_empty() {
-            combine(looks.iter().map(|(state, _)| state.clone()))
+            unshown_state(looks.iter().map(|(state, _)| state.clone()))
         } else {
             combine(rows.into_iter())
         };
@@ -1246,6 +1247,21 @@ fn rows_state(state: &ViewState) -> ViewState {
         ViewState::Queued => ViewState::Stale,
         state => state.clone(),
     }
+}
+
+/// The state of a list that shows no rows, from its parts' own: the least
+/// ready of those still on their way, a part whose first list broke off
+/// counting as `connecting`, and once none is, the worst refusal. So `ready`,
+/// `relisting` and `stale` never come without a part's rows.
+fn unshown_state(states: impl Iterator<Item = ViewState>) -> ViewState {
+    let (refused, on_their_way): (Vec<_>, Vec<_>) = states.partition(failed);
+    if on_their_way.is_empty() {
+        return combine(refused.into_iter());
+    }
+    combine(on_their_way.into_iter().map(|state| match state {
+        ViewState::Stale => ViewState::Connecting,
+        state => state,
+    }))
 }
 
 /// Moves off the cluster-wide upstream of `from` to upstreams per

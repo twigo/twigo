@@ -212,7 +212,7 @@ async fn a_part_still_syncing_adds_no_rows_until_it_has_listed() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn while_no_part_shows_the_status_is_the_least_ready_of_all() {
+async fn a_fast_refusal_beside_a_part_still_on_its_way_does_not_name_the_list() {
     let fake = Fake::default();
     pods_in(&fake, &["a", "b"]);
     {
@@ -228,15 +228,70 @@ async fn while_no_part_shows_the_status_is_the_least_ready_of_all() {
     let mut list = hub.rows(query(&["a", "b"])).await.unwrap();
     let mut mirror = Mirror::default();
 
-    until_shown(&mut list, &mut mirror, |m| m.status == Some(forbidden())).await;
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready()
+            == [
+                namespace_part("a", forbidden(), false),
+                namespace_part("b", ViewState::Connecting, false),
+            ]
+    })
+    .await;
     assert_eq!(mirror.names(), Vec::<&str>::new());
-    assert_eq!(
-        mirror.unready(),
-        [
-            namespace_part("a", forbidden(), false),
-            namespace_part("b", ViewState::Connecting, false)
-        ]
-    );
+    assert_eq!(mirror.status, Some(ViewState::Connecting));
+
+    fake.stream_initial();
+    until_shown(&mut list, &mut mirror, |m| {
+        m.status == Some(ViewState::Syncing { loaded: 1 })
+    })
+    .await;
+    assert_eq!(mirror.names(), Vec::<&str>::new());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_whose_parts_are_all_refused_says_the_worst_refusal() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a", "b"]);
+    {
+        let mut state = fake.state();
+        state
+            .forbidden
+            .insert("/api/v1/namespaces/a/pods".to_owned());
+        state
+            .unauthorized
+            .insert("/api/v1/namespaces/b/pods".to_owned());
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&["a", "b"])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready()
+            == [
+                namespace_part("a", forbidden(), false),
+                namespace_part("b", ViewState::Unauthorized, false),
+            ]
+    })
+    .await;
+    assert_eq!(mirror.status, Some(ViewState::Unauthorized));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_first_list_that_broke_off_on_a_transient_error_says_connecting() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a"]);
+    fake.state().unavailable = 1;
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&["a"])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| {
+        m.unready() == [namespace_part("a", ViewState::Stale, false)]
+    })
+    .await;
+    assert_eq!(mirror.status, Some(ViewState::Connecting));
+
+    until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
+    assert_eq!(mirror.status, Some(ViewState::Ready));
 }
 
 #[tokio::test(start_paused = true)]
