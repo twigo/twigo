@@ -148,9 +148,8 @@ impl<T: Item> Upstream<T> {
         let mut status = self.status();
         change(&mut status);
         let view = match (&status.phase, status.queued) {
-            (Phase::Failed(view), _) => view.clone(),
+            (Phase::Failed(view) | Phase::Refused(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
-            (Phase::Refused(view), _) => view.clone(),
             (Phase::Connecting, _) => ViewState::Connecting,
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,

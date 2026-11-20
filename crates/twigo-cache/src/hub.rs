@@ -1222,4 +1222,6 @@ pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
 #[cfg(test)]
 pub(crate) mod live;
 #[cfg(test)]
+mod parts_tests;
+#[cfg(test)]
 mod tests;
