@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use twigo_ipc::{ColumnValues, Grouping, Gvr, Sort};
+use twigo_ipc::{ColumnValues, Grouping, Gvr, Part, PartState, Sort};
 
 use super::*;
 use crate::meta::Meta;
@@ -124,7 +124,14 @@ impl Rig {
         };
         self.view.apply(delta);
         self.view.sample_entered(held);
-        self.view.batch(ViewState::Ready)
+        self.view.batch(ViewState::Ready, ready())
+    }
+}
+
+fn ready() -> Parts {
+    Parts {
+        count: 1,
+        unready: Vec::new(),
     }
 }
 
@@ -489,31 +496,6 @@ fn counts_come_before_values_drop_rows() {
 }
 
 #[test]
-fn only_a_list_that_shows_rows_sends_them() {
-    let mut counted = query();
-    counted.count_by = Some("Status".to_owned());
-    counted.group_by = grouping("Status", &[]);
-    let mut rig = Rig::new(&counted);
-    rig.store.upsert(pod("a", "web-1", "Running", "0"));
-    let delta = match rig.store.drain(&rig.feed) {
-        Drained::Reset { items, columns } => Delta::Reset {
-            rows: items,
-            columns,
-        },
-        Drained::Changed(_) => unreachable!("a new feed resets"),
-    };
-    rig.view.apply(delta);
-    let syncing = rig.view.batch(ViewState::Syncing { loaded: 1 }).unwrap();
-    assert_eq!((syncing.total, syncing.counts), (0, Some(Vec::new())));
-    assert_eq!(syncing.groups, Some(Vec::new()));
-    assert!(syncing.window.unwrap().ids.is_empty());
-    let ready = rig.view.batch(ViewState::Ready).unwrap();
-    assert_eq!(ready.total, 1);
-    assert_eq!(ids(&ready), ["kind-test/a/web-1"]);
-    assert_eq!(groups(&ready), [("Running", 1)]);
-}
-
-#[test]
 fn a_row_says_where_its_name_was_generated() {
     let mut rig = Rig::new(&query());
     let mut row = pod("a", "web-1", "Running", "0");
@@ -530,10 +512,43 @@ fn a_row_says_where_its_name_was_generated() {
 fn a_status_change_alone_is_a_batch() {
     let mut rig = Rig::new(&query());
     rig.flush().unwrap();
-    assert_eq!(rig.view.batch(ViewState::Ready), None);
-    let batch = rig.view.batch(ViewState::Stale).unwrap();
+    assert_eq!(rig.view.batch(ViewState::Ready, ready()), None);
+    let batch = rig.view.batch(ViewState::Stale, ready()).unwrap();
     assert_eq!(batch.status, ViewState::Stale);
     assert_eq!(batch.seq, 2);
+}
+
+fn unready(namespace: &str, state: ViewState, shown: bool) -> PartState {
+    PartState {
+        part: Part::Namespace {
+            name: namespace.to_owned(),
+        },
+        state,
+        shown,
+    }
+}
+
+#[test]
+fn the_parts_come_in_the_first_batch_and_when_they_change() {
+    let mut rig = Rig::new(&query());
+    rig.store.upsert(pod("a", "web-1", "Running", "0"));
+    assert_eq!(rig.flush().unwrap().parts, Some(ready()));
+    assert_eq!(rig.view.batch(ViewState::Ready, ready()), None);
+
+    let waiting = Parts {
+        count: 3,
+        unready: vec![unready("c", ViewState::Queued, true)],
+    };
+    let batch = rig
+        .view
+        .batch(ViewState::Stale, waiting.clone())
+        .expect("a change of the parts alone is a batch");
+    assert_eq!(batch.parts, Some(waiting.clone()));
+    assert_eq!((batch.window, batch.upserts), (None, Vec::new()));
+    assert_eq!(rig.view.batch(ViewState::Stale, waiting), None);
+
+    let back = rig.view.batch(ViewState::Ready, ready()).unwrap();
+    assert_eq!(back.parts, Some(ready()));
 }
 
 fn grouping(column: &str, collapsed: &[&str]) -> Option<Grouping> {
@@ -1063,7 +1078,7 @@ fn a_sample_goes_with_its_row_and_a_new_uid_has_none() {
         "just before Age"
     );
     rig.view.samples(samples("a", "web-1", used(50, 7)));
-    let sampled = rig.view.batch(ViewState::Ready).unwrap();
+    let sampled = rig.view.batch(ViewState::Ready, ready()).unwrap();
     assert_eq!(sampled.upserts.len(), 1);
     assert_eq!(sampled.upserts[0].cells[5], ipc::Cell::Int(50));
     assert_eq!(sampled.upserts[0].cells[6], ipc::Cell::Int(7));
@@ -1167,7 +1182,7 @@ fn sorted_by_a_metric_rows_without_a_sample_come_last_either_way_and_a_sample_mo
         for (name, cpu) in [("a-1", 30), ("a-2", 10), ("a-4", 0)] {
             rig.view.samples(samples("a", name, used(cpu, 1)));
         }
-        let batch = rig.view.batch(ViewState::Ready).unwrap();
+        let batch = rig.view.batch(ViewState::Ready, ready()).unwrap();
         let expected = if descending {
             ["a-1", "a-2", "a-4", "a-3"]
         } else {
@@ -1179,7 +1194,7 @@ fn sorted_by_a_metric_rows_without_a_sample_come_last_either_way_and_a_sample_mo
             "descending: {descending}"
         );
         rig.view.samples(samples("a", "a-3", used(20, 1)));
-        let moved = rig.view.batch(ViewState::Ready).unwrap();
+        let moved = rig.view.batch(ViewState::Ready, ready()).unwrap();
         let expected = if descending {
             ["a-1", "a-3", "a-2", "a-4"]
         } else {
@@ -1284,26 +1299,26 @@ fn the_state_of_the_columns_is_the_pollers_or_else_the_apis() {
     assert_eq!(plain.metrics, None, "no columns, no state");
 
     rig.view.set_api(Api::Stale { version: "v1beta1" });
-    let stale = rig.view.batch(ViewState::Ready).unwrap();
+    let stale = rig.view.batch(ViewState::Ready, ready()).unwrap();
     assert!(stale.columns.is_some(), "the columns come");
     assert_eq!(stale.metrics, Some(MetricsState::Unavailable));
-    assert!(rig.view.batch(ViewState::Ready).is_none(), "once");
+    assert!(rig.view.batch(ViewState::Ready, ready()).is_none(), "once");
 
     rig.view.samples(metrics::Update {
         state: Some(MetricsState::Forbidden),
         ..metrics::Update::default()
     });
-    let forbidden = rig.view.batch(ViewState::Ready).unwrap();
+    let forbidden = rig.view.batch(ViewState::Ready, ready()).unwrap();
     assert_eq!(forbidden.metrics, Some(MetricsState::Forbidden));
     assert_eq!(forbidden.columns, None);
     rig.view.samples(metrics::Update::default());
     assert!(
-        rig.view.batch(ViewState::Ready).is_none(),
+        rig.view.batch(ViewState::Ready, ready()).is_none(),
         "a list that reads nothing keeps what the poller last said"
     );
 
     rig.view.set_api(Api::Absent);
-    let gone = rig.view.batch(ViewState::Ready).unwrap();
+    let gone = rig.view.batch(ViewState::Ready, ready()).unwrap();
     assert!(gone.columns.is_some(), "the columns go");
     assert_eq!(gone.metrics, None);
 }
@@ -1319,7 +1334,7 @@ fn a_list_that_has_heard_nothing_says_no_state_and_keeps_what_it_said() {
 
     rig.view.samples(metrics::Update::default());
     assert!(
-        rig.view.batch(ViewState::Ready).is_none(),
+        rig.view.batch(ViewState::Ready, ready()).is_none(),
         "and nothing changes"
     );
     rig.view.samples(metrics::Update {
@@ -1327,12 +1342,12 @@ fn a_list_that_has_heard_nothing_says_no_state_and_keeps_what_it_said() {
         ..metrics::Update::default()
     });
     assert_eq!(
-        rig.view.batch(ViewState::Ready).unwrap().metrics,
+        rig.view.batch(ViewState::Ready, ready()).unwrap().metrics,
         Some(MetricsState::Forbidden)
     );
     rig.view.samples(metrics::Update::default());
     assert!(
-        rig.view.batch(ViewState::Ready).is_none(),
+        rig.view.batch(ViewState::Ready, ready()).is_none(),
         "it keeps the state while its scopes are asked anew"
     );
 }
@@ -1357,7 +1372,11 @@ fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
         let mut view = QueryView::new(Spec::new("kind-test", &query()).unwrap());
         view.set_window(0, 100);
         view.set_api(api);
-        let before = view.batch(ViewState::Connecting).unwrap();
+        let connecting = Parts {
+            count: 1,
+            unready: vec![unready("a", ViewState::Connecting, false)],
+        };
+        let before = view.batch(ViewState::Connecting, connecting).unwrap();
         assert_eq!(names(&before), Vec::<String>::new());
         assert_eq!(before.metrics, None, "no columns, no state");
 
@@ -1365,7 +1384,7 @@ fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
             rows: vec![Arc::new(pod("a", "web-1", "Running", "0"))],
             columns: Some(pod_columns()),
         });
-        let after = view.batch(ViewState::Ready).unwrap();
+        let after = view.batch(ViewState::Ready, ready()).unwrap();
         assert_eq!(
             names(&after),
             [

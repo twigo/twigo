@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_ipc::ListBatch;
 
-use crate::hub::Subscription;
+use crate::hub::{Shown, Subscription};
 use crate::metrics::{FIRST_ANSWER, INTERVAL, Opening, Reader};
 use crate::table::Row;
 use crate::view::{QueryView, Spec};
@@ -172,10 +172,12 @@ async fn run(
             metrics = Some(reader);
             opening = None;
         }
-        // The state first: a list that ends between the two then shows
-        // its rows on the next tick, rather than ready with some of them.
-        let state = subscription.state();
-        view.apply(subscription.drain());
+        let Shown {
+            delta,
+            status,
+            parts,
+        } = subscription.drain_shown();
+        view.apply(delta);
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
             view.set_api(metrics.api());
@@ -188,7 +190,7 @@ async fn run(
         if first_order.holds(&view, settled) {
             continue;
         }
-        if let Some(batch) = view.batch(state) {
+        if let Some(batch) = view.batch(status, parts) {
             first_order.shown |= batch.total > 0;
             unacked = Some(batch.seq);
             unanswered = metrics
@@ -212,7 +214,7 @@ mod tests {
 
     use tokio::sync::mpsc;
     use tokio::time::{Instant, sleep};
-    use twigo_ipc::{Gvr, ListQuery, ViewState};
+    use twigo_ipc::{Gvr, ListQuery, Part, PartState, Parts, ViewState};
     use twigo_kube::client::{Budgets, Clients};
 
     use super::*;
@@ -236,6 +238,14 @@ mod tests {
     async fn subscribed() -> (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec) {
         let fake = Fake::default();
         fake.add("pods", Some("a"), "p1");
+        subscribed_to(fake, &["a"]).await
+    }
+
+    async fn subscribed_to(
+        fake: Fake,
+        namespaces: &[&str],
+    ) -> (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec) {
+        let namespaces: Vec<String> = namespaces.iter().map(|&name| name.to_owned()).collect();
         let (hub, clients) = fake.hub(Budgets::default());
         let subscription = hub
             .rows(Query {
@@ -247,7 +257,7 @@ mod tests {
                     namespaced: true,
                 },
                 format: RowFormat::Metadata,
-                namespaces: vec!["a".to_owned()],
+                namespaces: namespaces.clone(),
                 field_selector: None,
             })
             .await
@@ -260,7 +270,7 @@ mod tests {
                 resource: "pods".to_owned(),
             },
             namespaced: true,
-            namespaces: vec!["a".to_owned()],
+            namespaces,
             label_selector: None,
             field_selector: None,
             owners: None,
@@ -276,7 +286,12 @@ mod tests {
     }
 
     async fn unwindowed() -> Rig {
-        let (fake, hub, subscription, spec) = subscribed().await;
+        unwindowed_over(subscribed().await)
+    }
+
+    fn unwindowed_over(
+        (fake, hub, subscription, spec): (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec),
+    ) -> Rig {
         let (sender, batches) = mpsc::unbounded_channel();
         let batcher = Batcher::spawn(subscription, spec, None, move |batch| {
             sender.send((Instant::now(), batch)).is_ok()
@@ -463,5 +478,40 @@ mod tests {
         let (at, batch) = rig.next().await;
         assert_eq!(at, acked, "at once, not on the next tick");
         assert_eq!(batch.window.unwrap().start, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_list_over_a_forbidden_namespace_shows_the_others_and_says_which_it_lacks() {
+        let fake = Fake::default();
+        for namespace in ["a", "b", "c"] {
+            fake.add("pods", Some(namespace), &format!("p-{namespace}"));
+        }
+        fake.state()
+            .forbidden
+            .insert("/api/v1/namespaces/c/pods".to_owned());
+        let mut rig = unwindowed_over(subscribed_to(fake, &["a", "b", "c"]).await);
+        rig.batcher.set_window(0, 100, false);
+
+        let (_, first) = rig.until_total(2).await;
+        assert_eq!(first.status, ViewState::Ready, "the rows shown are ready");
+        assert_eq!(
+            first.parts,
+            Some(Parts {
+                count: 3,
+                unready: vec![PartState {
+                    part: Part::Namespace { name: "c".into() },
+                    state: ViewState::Forbidden {
+                        verb: "watch".into(),
+                        resource: "pods".into(),
+                    },
+                    shown: false,
+                }],
+            })
+        );
+
+        rig.fake.add("pods", Some("a"), "p-a2");
+        let (_, next) = rig.next().await;
+        assert_eq!(next.total, 3);
+        assert_eq!(next.parts, None, "the parts are sent when they change");
     }
 }

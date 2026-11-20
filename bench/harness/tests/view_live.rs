@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Connect, Delta, Hub, Query, Resource, RowFormat};
 use twigo_cache::view::{QueryView, Spec};
-use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Row, RowId, Sort, ViewState};
+use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Parts, Row, RowId, Sort, ViewState};
 use twigo_kube::client::{Clients, Gate, Options};
 
 const PODS: u32 = 5_000;
@@ -160,7 +160,11 @@ async fn fresh(clients: &Arc<Clients>, context: &str) -> Vec<(String, Cell)> {
         columns: rows.columns(),
     });
     let mut mirror = Mirror::default();
-    mirror.apply(view.batch(ViewState::Ready).unwrap());
+    let whole = Parts {
+        count: 1,
+        unready: Vec::new(),
+    };
+    mirror.apply(view.batch(ViewState::Ready, whole).unwrap());
     mirror.shown()
 }
 
