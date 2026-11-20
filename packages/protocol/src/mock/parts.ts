@@ -43,7 +43,6 @@ export function pinOf(scenario: string, resource: string): Pin | undefined {
   return undefined;
 }
 
-/** What a list says of its parts at one moment. */
 export interface PartsView {
   readonly status: ViewState;
   readonly parts: Parts;

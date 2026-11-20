@@ -34,8 +34,7 @@ const CONNECTION: Readonly<
   error: { tone: "error", text: "Unreachable" },
 };
 
-/** Names listed in a tooltip before the rest are counted. */
-const NAMES = 6;
+const TOOLTIP_NAMES = 6;
 
 export interface PartsLine {
   readonly text: string;
@@ -43,7 +42,6 @@ export interface PartsLine {
   readonly tooltip: string;
 }
 
-/** The unready parts that are in one state, with whether their rows are shown. */
 interface Kind {
   readonly state: ViewState;
   readonly shown: boolean;
@@ -119,8 +117,8 @@ function namesOf(parts: readonly PartState[], loaded: boolean): string {
             : part.name,
         ],
   );
-  const head = named.slice(0, NAMES).join(", ");
-  const rest = parts.length - Math.min(named.length, NAMES);
+  const head = named.slice(0, TOOLTIP_NAMES).join(", ");
+  const rest = parts.length - Math.min(named.length, TOOLTIP_NAMES);
   if (rest === 0) return head;
   if (head !== "") return `${head} and ${rest} more`;
   return `${rest} ${rest === 1 ? "part" : "parts"}`;

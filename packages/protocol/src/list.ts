@@ -24,7 +24,6 @@ export interface ListSnapshot {
   readonly start: number;
   readonly ids: readonly RowId[];
   readonly rows: ReadonlyMap<RowId, Row>;
-  /** The state of the rows shown (`ListBatch.status`). */
   readonly status: ViewState;
   /** The upstreams the list reads and those not ready, as the latest batch that said so has them. */
   readonly parts: Parts;
@@ -38,7 +37,7 @@ export interface ListSnapshot {
   readonly metrics: ServedMetrics | null;
 }
 
-/** A list of one part that is ready, which is what a list says nothing else of. */
+/** What a list says of its parts until a batch names them, and once it has failed. */
 const ONE_PART: Parts = { count: 1, unready: [] };
 
 /** Before the first batch. */
