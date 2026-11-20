@@ -128,7 +128,17 @@ pub struct ListBatch {
     pub window: Option<Window>,
     /// Rows that entered the window or changed.
     pub upserts: Vec<Row>,
+    /// The state of the rows the list shows: the least ready of the parts
+    /// whose rows it holds, a part that has listed and waits for a watch
+    /// counting as `stale`. While it holds no part's rows, the least ready
+    /// of the parts still on their way, one whose first list broke off
+    /// counting as `connecting`, and once none is, the worst refusal. So
+    /// `ready`, `relisting` and `stale` say that some part's rows are shown.
     pub status: ViewState,
+    /// Present in the first batch and whenever a part's state changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parts: Option<Parts>,
     /// With `count_by`: the matching rows per value of that column, present
     /// in the first batch and whenever a count changes.
     pub counts: Option<Vec<ValueCount>>,
@@ -141,11 +151,38 @@ pub struct ListBatch {
     /// present once a scope has answered or failed, and whenever it
     /// changes. Before a scope has answered, a list says the failure its
     /// last request ended in, if the core remembers one, so its first batch
-    /// with the columns has it, and the first answers correct it; with none
+    /// that shows rows has it, and the first answers correct it; with none
     /// remembered it says none, but for a stale API, which says
     /// `unavailable` with the columns. It keeps the state it said while its
     /// scopes are asked again.
     pub metrics: Option<MetricsState>,
+}
+
+/// The upstreams a list reads: one for the cluster, or one per namespace
+/// (ARCHITECTURE 3.7). A part's rows are in the list once it has listed and
+/// while it is not refused, whatever the other parts are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Parts {
+    pub count: u32,
+    /// The parts that are not ready, each with its own state.
+    pub unready: Vec<PartState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PartState {
+    pub part: Part,
+    pub state: ViewState,
+    /// Its rows are in the list: it has listed and is not refused.
+    pub shown: bool,
+}
+
+/// What one part reads. A webview that meets a kind it does not know
+/// counts the part without naming it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Part {
+    Cluster,
+    Namespace { name: String },
 }
 
 /// What the Metrics API of a context answers. A context that does not
@@ -258,7 +295,7 @@ pub enum ColumnKind {
     Other,
 }
 
-/// The state of the upstream behind a subscription (ARCHITECTURE 3.7).
+/// The state of a subscription, or of one part of a list (ARCHITECTURE 3.7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum ViewState {

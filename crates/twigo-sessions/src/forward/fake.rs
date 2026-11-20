@@ -14,9 +14,10 @@ use futures::channel::mpsc;
 use http::{Request, Response, StatusCode};
 use http_body::Frame;
 use http_body_util::combinators::UnsyncBoxBody;
-use http_body_util::{BodyExt, Full, StreamBody};
+use http_body_util::{BodyExt, Full};
 use serde_json::{Value, json};
 use tower::BoxError;
+use twigo_cache::fake::{frame, stream};
 use twigo_cache::hub::{Connect, Hub};
 use twigo_ipc::{ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
@@ -52,6 +53,8 @@ struct Watch {
     /// The name its field selector picks.
     name: Option<String>,
     sender: Sender,
+    /// A streaming list is gzipped, a member to a frame, as 1.37 sends it.
+    gzip: bool,
 }
 
 /// The clients a hub gets, which are replaced as the core replaces a
@@ -319,7 +322,7 @@ impl State {
                 || !picks(watch.name.as_deref(), &object)
                 || watch
                     .sender
-                    .unbounded_send(Ok(Frame::data(event.clone())))
+                    .unbounded_send(Ok(Frame::data(frame(event.clone(), watch.gzip))))
                     .is_ok()
         });
     }
@@ -334,12 +337,13 @@ impl State {
         initial: Option<&str>,
     ) -> Response<Body> {
         let (sender, receiver) = mpsc::unbounded();
+        let gzip = initial == Some("true");
         let send = |value: &Value| {
             sender
-                .unbounded_send(Ok(Frame::data(line(value))))
+                .unbounded_send(Ok(Frame::data(frame(line(value), gzip))))
                 .expect("the receiver is ours");
         };
-        if initial == Some("true") {
+        if gzip {
             for object in self.items(&resource, name.as_deref()) {
                 send(&json!({ "type": "ADDED", "object": object }));
             }
@@ -366,8 +370,9 @@ impl State {
             resource,
             name,
             sender,
+            gzip,
         });
-        Response::new(StreamBody::new(receiver).boxed_unsync())
+        stream(receiver, gzip)
     }
 }
 

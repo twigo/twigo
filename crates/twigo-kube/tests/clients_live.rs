@@ -2,6 +2,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::{AsyncBufReadExt, StreamExt};
 use http::{Request, Version};
+use http_body_util::BodyExt;
 use k8s_openapi::api::core::v1::{ConfigMap, Namespace, Pod};
 use kube::api::{
     AttachParams, DeleteParams, ListParams, LogParams, PostParams, WatchEvent, WatchParams,
@@ -314,5 +315,55 @@ async fn the_25th_watch_waits_for_one_of_24_while_a_get_answers() {
     );
 
     drop(watches);
+    delete_namespace(&clients.api, &ns).await;
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn streams_nobody_reads_do_not_hold_up_a_request_on_the_connection() {
+    const WINDOW: usize = 2 * 1024 * 1024;
+    let clients = cluster().await.clients;
+    let ns = namespace(&clients.api, "window").await;
+    let configmaps = Api::<ConfigMap>::namespaced(clients.api.clone(), &ns);
+    for name in ["a", "b", "c", "d"] {
+        let configmap: ConfigMap = serde_json::from_value(json!({
+            "metadata": { "name": name },
+            "data": { "filler": "x".repeat(768 * 1024) }
+        }))
+        .unwrap();
+        configmaps
+            .create(&PostParams::default(), &configmap)
+            .await
+            .unwrap();
+    }
+
+    let get = |path: String| {
+        let request = Request::get(path).body(Vec::new()).unwrap();
+        clients.api.send(request.map(Into::into))
+    };
+    let mut unread = Vec::new();
+    for _ in 0..16 {
+        let list = get(format!("/api/v1/namespaces/{ns}/configmaps"));
+        unread.push(list.await.unwrap());
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let answered = tokio::time::timeout(Duration::from_secs(5), async {
+        get("/version".to_owned())
+            .await
+            .unwrap()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+    })
+    .await;
+    let body = answered.expect("/version's body within 5 s while 16 lists are unread");
+    assert!(body.to_bytes().starts_with(b"{"));
+
+    for list in unread {
+        let list = list.into_body().collect().await.unwrap().to_bytes();
+        assert!(list.len() > WINDOW, "{} bytes", list.len());
+    }
     delete_namespace(&clients.api, &ns).await;
 }

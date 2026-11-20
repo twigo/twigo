@@ -69,6 +69,14 @@ pub struct Budgets {
     pub proxied: usize,
 }
 
+impl Budgets {
+    /// The streams the counter admits on the `api` client: every class but
+    /// sessions, which upgrade on the `sessions` client's own connections.
+    pub(super) fn api_streams(&self) -> usize {
+        self.watches + self.logs + self.requests + self.proxied
+    }
+}
+
 impl Default for Budgets {
     fn default() -> Self {
         Self {

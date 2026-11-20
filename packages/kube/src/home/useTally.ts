@@ -1,8 +1,13 @@
 import { useEffect } from "react";
-import type { Gvr, ListQuery, Resource, ValueCount } from "@twigo/protocol";
+import {
+  SHOWS_ROWS,
+  type Gvr,
+  type ListQuery,
+  type Resource,
+  type ValueCount,
+} from "@twigo/protocol";
 import { useWorkbench } from "@twigo/workbench";
 import type { Loaded } from "../discovery";
-import { SHOWS_ROWS } from "../list/listStatus";
 import { useListView } from "../list/useListView";
 import { viewProblem } from "../viewProblem";
 

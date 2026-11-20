@@ -175,7 +175,10 @@ A cold `api` client opens one TCP and TLS connection per concurrent first reques
     - Retiring a live connection would cost a new handshake, and the old connection would linger until its streams end.
 - **Flow control.**
   hyper releases window as a stream's body is read.
-  Its defaults are 2 MiB per stream and 5 MiB per connection, so one unread stream cannot stall the others, but three could.
+  Its defaults are 2 MiB per stream and 5 MiB per connection, so one unread stream cannot stall the others, but three can: the third freezes them, whose headers come and whose bodies do not.
+  Measured on kind 1.36.4, 2026-11-20, with `streams_nobody_reads_do_not_hold_up_a_request_on_the_connection` (`cargo test -p twigo-kube --test clients_live streams_nobody_reads -- --ignored`) run with local edits, not committed, of `crates/twigo-kube/src/client.rs`, built without its two window settings so that hyper's defaults stand, and of the test's loop, opening 1, 2, 3, 4 and 16 unread lists of 3 MiB in place of its sixteen: with one or two `/version` answered with its body, with three, four or sixteen it got none within 5 s.
+  The committed test, with the window of 3.2 set, gets `/version`'s body with sixteen unread lists.
+  So 3.2 sets the connection window to every stream the counter admits at the stream window.
   The hub reads every stream as it arrives and coalesces in memory, so backpressure never reaches the socket.
 - **Proxies that terminate TLS** may negotiate HTTP/1.1.
   ALPN then falls back, and every stream becomes a connection again.

@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
-import type {
-  ObjectRef,
-  ObjectSnapshot,
-  Related,
-  RelatedObject,
+import {
+  REFUSED,
+  type ObjectRef,
+  type ObjectSnapshot,
+  type Related,
+  type RelatedObject,
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
 import { ViewStatus } from "../ViewStatus";
@@ -159,11 +160,7 @@ function Shown({
   const { status } = snapshot;
   const found = objectProblem(snapshot);
   if (found && kept) return kept(found);
-  if (
-    status.state === "error" ||
-    status.state === "forbidden" ||
-    status.state === "unauthorized"
-  )
+  if (REFUSED.has(status.state))
     return <ViewStatus status={status} what="the object" />;
   if (found) return <EmptyState title="The object does not exist" />;
   if (!has)

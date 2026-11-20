@@ -1,8 +1,9 @@
-//! What the hub learns about a context's cluster over its clients: whether
-//! it streams lists, and what RBAC lets the person do. A rebuild of the clients may point them at another
-//! server, so the facts go with the clients they were learnt over.
+//! What the hub learns about a context's cluster over its clients: which
+//! group-versions page their lists, and what RBAC lets the person do. A
+//! rebuild of the clients may point them at another server, so the facts go
+//! with the clients they were learnt over.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -23,21 +24,29 @@ pub(crate) struct Cluster {
 #[derive(Default)]
 struct Facts {
     clients: Weak<Clients>,
-    streaming: Option<bool>,
+    /// The group-versions, each by its group and version, whose streaming
+    /// lists were refused or came uncompressed; an APIService serves one.
+    paged: HashSet<(String, String)>,
     /// By namespace, none for all of them, and what is asked: the answer,
     /// and when it came.
     may: HashMap<(Option<String>, Access), (bool, Instant)>,
 }
 
 impl Cluster {
-    /// Whether streaming lists work, once a list has tried one (ARCHITECTURE
-    /// 3.2, "Initial list").
-    pub fn streaming(&self, clients: &Arc<Clients>) -> Option<bool> {
-        self.facts(clients).streaming
+    /// Whether a list of the group-version asks for a stream: until one
+    /// failed to give it (ARCHITECTURE 3.2, "Initial list").
+    pub fn streams(&self, clients: &Arc<Clients>, group: &str, version: &str) -> bool {
+        !self
+            .facts(clients)
+            .paged
+            .contains(&(group.to_owned(), version.to_owned()))
     }
 
-    pub fn set_streaming(&self, clients: &Arc<Clients>, streaming: bool) {
-        self.facts(clients).streaming = Some(streaming);
+    /// The group-version's lists come in pages from now on.
+    pub fn page(&self, clients: &Arc<Clients>, group: &str, version: &str) {
+        self.facts(clients)
+            .paged
+            .insert((group.to_owned(), version.to_owned()));
     }
 
     pub fn may(

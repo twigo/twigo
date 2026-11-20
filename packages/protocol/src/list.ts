@@ -6,6 +6,7 @@ import type {
   Column,
   ListBatch,
   ListQuery,
+  Parts,
   Row,
   RowGroup,
   RowId,
@@ -24,6 +25,8 @@ export interface ListSnapshot {
   readonly ids: readonly RowId[];
   readonly rows: ReadonlyMap<RowId, Row>;
   readonly status: ViewState;
+  /** The upstreams the list reads and those not ready, as the latest batch that said so has them. */
+  readonly parts: Parts;
   /** The matching rows per value of the query's `countBy` column. */
   readonly counts: readonly ValueCount[];
   /** The query's `groupBy` groups, in group order. */
@@ -34,6 +37,9 @@ export interface ListSnapshot {
   readonly metrics: ServedMetrics | null;
 }
 
+/** What a list says of its parts until a batch names them, and once it has failed. */
+const ONE_PART: Parts = { count: 1, unready: [] };
+
 /** Before the first batch. */
 export const INITIAL_SNAPSHOT: ListSnapshot = {
   seq: 0,
@@ -43,6 +49,7 @@ export const INITIAL_SNAPSHOT: ListSnapshot = {
   ids: [],
   rows: new Map(),
   status: { state: "connecting" },
+  parts: ONE_PART,
   counts: [],
   groups: [],
   changed: new Map(),
@@ -189,6 +196,7 @@ export class ListView {
       ids,
       rows,
       status: batch.status,
+      parts: batch.parts ?? previous.parts,
       counts: batch.counts ?? previous.counts,
       groups: batch.groups ?? previous.groups,
       changed,
@@ -202,6 +210,7 @@ export class ListView {
     this.#publish({
       ...this.#snapshot,
       status: { state: "error", error: toIpcError(error) },
+      parts: ONE_PART,
     });
   }
 

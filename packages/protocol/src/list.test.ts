@@ -137,6 +137,33 @@ test("a batch without groups keeps the previous ones", async () => {
   expect(view.getSnapshot().groups).toEqual([]);
 });
 
+test("a batch without parts keeps the previous ones, and a failed list has none", async () => {
+  const fake = fakeBackend();
+  const view = new ListView(fake.backend, QUERY);
+  fake.resolve(7);
+  await vi.runAllTimersAsync();
+  const parts = {
+    count: 3,
+    unready: [
+      {
+        part: { kind: "namespace" as const, name: "team-b" },
+        state: { state: "queued" as const },
+        shown: false,
+      },
+    ],
+  };
+  fake.send(batch(1, { window: { start: 0, ids: [] }, parts }));
+  fake.send(batch(2, { total: 3 }));
+  expect(view.getSnapshot().parts).toEqual(parts);
+  fake.send(batch(3, { parts: { count: 3, unready: [] } }));
+  expect(view.getSnapshot().parts.unready).toEqual([]);
+
+  fake.send(batch(4, { parts }));
+  fake.send(batch(5, { metrics: "absent" }));
+  expect(view.getSnapshot().status.state).toBe("error");
+  expect(view.getSnapshot().parts).toEqual({ count: 1, unready: [] });
+});
+
 test("every seq is acknowledged once, after the next frame", async () => {
   const fake = fakeBackend();
   new ListView(fake.backend, QUERY);

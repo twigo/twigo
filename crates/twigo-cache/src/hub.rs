@@ -7,12 +7,16 @@
 //!   idle upstream of the context is evicted; with none, the watch stays
 //!   `queued`.
 //! - A subscription to a few namespaces gets an upstream per namespace;
-//!   to every namespace, or more than [`NAMESPACES`], one cluster-wide
-//!   upstream when the person may list the resource cluster-wide, filtered
-//!   by namespace in Rust.
+//!   to every namespace, or more than four, one cluster-wide upstream when
+//!   the person may list the resource cluster-wide, filtered by namespace
+//!   in Rust.
 //! - Hysteresis: a cluster-wide upstream serves narrower subscriptions too,
 //!   without holding it. Once it has lingered, they move to upstreams per
 //!   namespace, keeping its rows until theirs are listed.
+//! - A list shows the rows of each part that has listed and is not refused,
+//!   whatever the others are ([`Subscription::drain_shown`]); what needs
+//!   every part, such as an object's page, reads their least ready state
+//!   ([`combine`]).
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -31,7 +35,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use twigo_ipc::{Access, ErrorKind, IpcError, ViewState};
+use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::cluster::Cluster;
@@ -43,12 +47,12 @@ use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Clock, Env, Spec, Upstream};
 
-pub use crate::upstream::{Connect, RETRY_WITHIN};
+pub use crate::upstream::{Connect, RETRY_WITHIN, backoff};
 
 /// How long an upstream outlives its last subscription.
 pub const LINGER: Duration = Duration::from_secs(60);
 /// More namespaces than this share one cluster-wide upstream.
-pub const NAMESPACES: usize = 4;
+const NAMESPACES: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Resource {
@@ -182,6 +186,8 @@ impl Key {
     fn spec(&self) -> Spec {
         Spec {
             context: self.context.clone(),
+            group: self.resource.group.clone(),
+            version: self.resource.version.clone(),
             path: self.resource.path(&self.scope),
             format: self.format,
             field_selector: self.field_selector.clone(),
@@ -212,6 +218,14 @@ struct Registry {
     /// Numbers every run, so what an aborted one says when it goes is not
     /// taken for its successor's.
     next_run: u64,
+}
+
+impl Registry {
+    fn take(&mut self, key: &Key) {
+        if let Some(entry) = self.entries.remove(key) {
+            entry.task.abort();
+        }
+    }
 }
 
 struct Entry {
@@ -247,6 +261,13 @@ impl Entry {
     /// Evicting it frees a watch.
     fn evictable(&self) -> bool {
         self.idle() && self.upstream.watching()
+    }
+
+    fn upstream<T: Item>(&self) -> Arc<Upstream<T>> {
+        Arc::clone(&self.upstream)
+            .into_any()
+            .downcast::<Upstream<T>>()
+            .expect("a key's form fixes its upstream's items")
     }
 }
 
@@ -429,35 +450,26 @@ impl Hub {
     where
         Self: Spawn<T>,
     {
-        let mut abort = None;
         let upstream = {
             let mut registry = self.inner.registry();
+            registry.next_run += 1;
+            let run = registry.next_run;
             match registry.entries.get_mut(key) {
                 Some(entry) => {
                     entry.subscribers += 1;
                     entry.idle_since = None;
                     entry.expired = false;
-                    let upstream = Arc::clone(&entry.upstream)
-                        .into_any()
-                        .downcast::<Upstream<T>>()
-                        .expect("a key's form fixes its upstream's items");
+                    let upstream = entry.upstream::<T>();
                     if upstream.ended() {
                         upstream.restart();
-                        registry.next_run += 1;
-                        let run = registry.next_run;
-                        let Some(entry) = registry.entries.get_mut(key) else {
-                            unreachable!("found under the same lock");
-                        };
                         entry.run = run;
                         let task = self.spawn(key, Arc::clone(&upstream), run);
-                        abort = Some(std::mem::replace(&mut entry.task, task));
+                        std::mem::replace(&mut entry.task, task).abort();
                     }
                     upstream
                 }
                 None => {
                     let upstream = Arc::new(Upstream::<T>::new());
-                    registry.next_run += 1;
-                    let run = registry.next_run;
                     let entry = Entry {
                         upstream: Arc::clone(&upstream) as Arc<dyn Running>,
                         state: upstream.state(),
@@ -476,9 +488,6 @@ impl Hub {
                 }
             }
         };
-        if let Some(task) = abort {
-            task.abort();
-        }
         Part {
             feed: upstream.store.feed(),
             upstream,
@@ -487,6 +496,7 @@ impl Hub {
                 hub: Arc::downgrade(&self.inner),
                 key: key.clone(),
             },
+            showing: true,
         }
     }
 
@@ -502,10 +512,7 @@ impl Hub {
             .entries
             .get_mut(key)
             .filter(|entry| !entry.failed() && !entry.expired)?;
-        let upstream = Arc::clone(&entry.upstream)
-            .into_any()
-            .downcast::<Upstream<T>>()
-            .expect("a key's form fixes its upstream's items");
+        let upstream = entry.upstream::<T>();
         let moving = Arc::downgrade(&subscription.inner);
         let hub = Arc::downgrade(&self.inner);
         let from = key.clone();
@@ -529,6 +536,7 @@ impl Hub {
                 key: key.clone(),
                 id,
             },
+            showing: true,
         })
     }
 
@@ -708,22 +716,16 @@ impl Inner {
         }
         if entry.idle() {
             // Nobody shows it: it would take a watch from one that is shown.
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
-            return;
-        }
-        let evicted = evict(&mut registry, &key.context);
-        drop(registry);
-        if let Some(task) = evicted {
-            task.abort();
+            registry.take(key);
+        } else {
+            evict(&mut registry, &key.context);
         }
     }
 
     fn release(self: &Arc<Self>, key: &Key) {
         let mut registry = self.registry();
+        registry.next_linger += 1;
+        let linger = registry.next_linger;
         let Some(entry) = registry.entries.get_mut(key) else {
             return;
         };
@@ -734,19 +736,11 @@ impl Inner {
         if entry.borrowers.is_empty() && entry.queued.is_some() {
             // Nobody shows it, and it would take the next free watch from
             // one that is shown.
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
+            registry.take(key);
             return;
         }
         entry.idle_since = Some(Instant::now());
-        registry.next_linger += 1;
-        let linger = registry.next_linger;
-        if let Some(entry) = registry.entries.get_mut(key) {
-            entry.linger = linger;
-        }
+        entry.linger = linger;
         let hub = Arc::downgrade(self);
         let expiring = key.clone();
         tokio::spawn(async move {
@@ -755,11 +749,7 @@ impl Inner {
                 hub.expire(&expiring, linger);
             }
         });
-        let evicted = make_way(&mut registry, key);
-        drop(registry);
-        if let Some(task) = evicted {
-            task.abort();
-        }
+        make_way(&mut registry, key);
     }
 
     fn expire(&self, key: &Key, linger: u64) {
@@ -771,11 +761,7 @@ impl Inner {
             return;
         }
         if entry.borrowers.is_empty() {
-            let task = registry.entries.remove(key).map(|entry| entry.task);
-            drop(registry);
-            if let Some(task) = task {
-                task.abort();
-            }
+            registry.take(key);
             return;
         }
         entry.expired = true;
@@ -792,41 +778,37 @@ impl Inner {
             return;
         };
         entry.borrowers.remove(&id);
-        let task = if entry.idle() && (entry.expired || entry.queued.is_some()) {
+        if entry.idle() && (entry.expired || entry.queued.is_some()) {
             serve(&mut registry, &key.context, key);
-            registry.entries.remove(key).map(|entry| entry.task)
+            registry.take(key);
         } else {
-            make_way(&mut registry, key)
-        };
-        drop(registry);
-        if let Some(task) = task {
-            task.abort();
+            make_way(&mut registry, key);
         }
     }
 }
 
 /// For a watch of `context` that waits for the budget, removes the least
-/// recently used idle upstream that holds a watch there, and gives its
-/// task to abort once the lock is let go.
-fn evict(registry: &mut Registry, context: &str) -> Option<JoinHandle<()>> {
+/// recently used idle upstream that holds a watch there.
+fn evict(registry: &mut Registry, context: &str) {
     let victim = registry
         .entries
         .iter()
         .filter(|(key, entry)| key.context == context && entry.evictable())
         .min_by_key(|(_, entry)| entry.idle_since)
-        .map(|(key, _)| key.clone())?;
-    serve(registry, context, &victim);
-    registry.entries.remove(&victim).map(|entry| entry.task)
+        .map(|(key, _)| key.clone());
+    if let Some(victim) = victim {
+        serve(registry, context, &victim);
+        registry.take(&victim);
+    }
 }
 
 /// An upstream that just went idle makes way for a watch of its context
 /// that waits for the budget.
-fn make_way(registry: &mut Registry, key: &Key) -> Option<JoinHandle<()>> {
+fn make_way(registry: &mut Registry, key: &Key) {
     let evictable = registry.entries.get(key).is_some_and(Entry::evictable);
-    if !(evictable && serve(registry, &key.context, key)) {
-        return None;
+    if evictable && serve(registry, &key.context, key) {
+        registry.take(key);
     }
-    registry.entries.remove(key).map(|entry| entry.task)
 }
 
 /// Marks the watch of `context` that has waited longest, and no eviction
@@ -885,11 +867,22 @@ struct Part<T> {
     /// What changed in the upstream's store since [`Subscription::drain`].
     feed: Feed,
     guard: Guard,
+    /// Its rows are in what the subscription drains, as of its last read.
+    showing: bool,
 }
 
 impl<T> Part<T> {
     fn borrowed_from(&self, key: &Key) -> bool {
         matches!(&self.guard, Guard::Borrow { key: borrowed, .. } if borrowed == key)
+    }
+
+    /// What the part reads, as a list names it.
+    fn scope(&self) -> ipc::Part {
+        let (Guard::Hold { key, .. } | Guard::Borrow { key, .. }) = &self.guard;
+        match &key.scope {
+            Scope::Cluster => ipc::Part::Cluster,
+            Scope::Namespace(name) => ipc::Part::Namespace { name: name.clone() },
+        }
     }
 }
 
@@ -914,7 +907,7 @@ impl<T: Item> Part<T> {
 pub enum Delta<T> {
     /// Every row, which replaces what the reader holds, and the columns of
     /// a Table upstream: the first drain, and the one after a relist, new
-    /// columns or new parts.
+    /// columns, new parts, or a part that starts or stops showing.
     Reset {
         rows: Vec<Arc<T>>,
         columns: Option<Arc<[Column]>>,
@@ -925,6 +918,14 @@ pub enum Delta<T> {
         /// show, which it never held.
         removed: Vec<RowKey>,
     },
+}
+
+/// What a list reads of its subscription at one moment.
+pub struct Shown<T> {
+    pub delta: Delta<T>,
+    /// As [`ListBatch::status`](ipc::ListBatch::status) says.
+    pub status: ViewState,
+    pub parts: Parts,
 }
 
 /// A view's subscription: the upstreams its namespaces need, whose rows
@@ -978,11 +979,7 @@ impl<T: Item> Subscription<T> {
     /// The state of the subscription: its least ready part's.
     pub fn state(&self) -> ViewState {
         let parts = self.inner.parts();
-        combine(
-            parts
-                .iter()
-                .map(|part| part.upstream.state().borrow().clone()),
-        )
+        combine(parts.iter().map(|part| part.upstream.current()))
     }
 
     /// Every part has held a whole list since it started, so the rows are
@@ -996,11 +993,8 @@ impl<T: Item> Subscription<T> {
     /// failed for two of the longest backoffs.
     pub async fn whole(&mut self) -> Result<Vec<Arc<T>>, ViewState> {
         loop {
-            let state = self.state();
-            match state {
-                ViewState::Forbidden { .. } | ViewState::Unauthorized | ViewState::Error { .. } => {
-                    return Err(state);
-                }
+            match self.state() {
+                state if failed(&state) => return Err(state),
                 _ if self.listed() => return Ok(self.items()),
                 ViewState::Stale => {
                     let tried = tokio::time::timeout(2 * RETRY_WITHIN, async {
@@ -1012,11 +1006,7 @@ impl<T: Item> Subscription<T> {
                         return Err(ViewState::Stale);
                     }
                 }
-                ViewState::Ready
-                | ViewState::Relisting
-                | ViewState::Queued
-                | ViewState::Connecting
-                | ViewState::Syncing { .. } => self.changed().await,
+                _ => self.changed().await,
             }
         }
     }
@@ -1032,43 +1022,47 @@ impl<T: Item> Subscription<T> {
     /// together with its feed, so the feed holds what the reader holds: a
     /// second read of the items would see changes the feed then drops.
     pub fn drain(&self) -> Delta<T> {
-        let parts = self.inner.parts();
-        let drained: Vec<_> = parts
+        drain_parts(&self.inner.parts(), false)
+    }
+
+    /// What a list reads: [`drain`](Self::drain) over the parts whose rows
+    /// show, and the state and parts that say which these are. It looks at
+    /// each part once, so what it returns agrees: a part's rows show once
+    /// it has listed and while it is not refused, whatever the others are,
+    /// and a part that starts or stops showing resets the drain.
+    pub fn drain_shown(&self) -> Shown<T> {
+        let mut parts = self.inner.parts();
+        let looks: Vec<(ViewState, bool)> = parts
             .iter()
-            .map(|part| part.upstream.store.drain(&part.feed))
+            .map(|part| {
+                let (state, listed) = part.upstream.standing();
+                let shown = listed && !failed(&state);
+                (state, shown)
+            })
             .collect();
-        if drained.iter().any(|d| matches!(d, Drained::Reset { .. })) {
-            let (mut rows, mut columns) = (Vec::new(), None);
-            for (part, drained) in parts.iter().zip(drained) {
-                let drained = match drained {
-                    Drained::Changed(_) => part.upstream.store.reread(&part.feed),
-                    reset => reset,
-                };
-                let Drained::Reset {
-                    items,
-                    columns: read,
-                } = drained
-                else {
-                    unreachable!("a reread resets");
-                };
-                columns = columns.or(read);
-                rows.extend(items.into_iter().filter(|item| part.serves(item)));
-            }
-            return Delta::Reset { rows, columns };
+        let mut flipped = false;
+        for (part, (_, shown)) in parts.iter_mut().zip(&looks) {
+            flipped |= part.showing != *shown;
+            part.showing = *shown;
         }
-        let (mut upserted, mut removed) = (Vec::new(), Vec::new());
-        for (part, drained) in parts.iter().zip(drained) {
-            let Drained::Changed(changes) = drained else {
-                unreachable!("no part was reset");
-            };
-            for (key, item) in changes {
-                match item {
-                    Some(item) if part.serves(&item) => upserted.push(item),
-                    _ => removed.push(key),
-                }
-            }
+        let delta = drain_parts(&parts, flipped);
+        let status = status(&looks);
+        let count = u32::try_from(parts.len()).unwrap_or(u32::MAX);
+        let unready = parts
+            .iter()
+            .zip(looks)
+            .filter(|(_, (state, _))| *state != ViewState::Ready)
+            .map(|(part, (state, shown))| PartState {
+                part: part.scope(),
+                state,
+                shown,
+            })
+            .collect();
+        Shown {
+            delta,
+            status,
+            parts: Parts { count, unready },
         }
-        Delta::Changed { upserted, removed }
     }
 
     /// Waits for a change of its rows, its columns or its state.
@@ -1136,6 +1130,54 @@ impl<T> SubscriptionInner<T> {
     }
 }
 
+/// What changed in the rows of the parts that show, or every one of their
+/// rows if one was reset or `reset` says the parts changed.
+fn drain_parts<T: Item>(parts: &[Part<T>], reset: bool) -> Delta<T> {
+    let drained: Vec<_> = parts
+        .iter()
+        .map(|part| part.upstream.store.drain(&part.feed))
+        .collect();
+    if reset || drained.iter().any(|d| matches!(d, Drained::Reset { .. })) {
+        let (mut rows, mut columns) = (Vec::new(), None);
+        for (part, drained) in parts.iter().zip(drained) {
+            if !part.showing {
+                columns = columns.or_else(|| part.upstream.store.columns());
+                continue;
+            }
+            let drained = match drained {
+                Drained::Changed(_) => part.upstream.store.reread(&part.feed),
+                reset => reset,
+            };
+            let Drained::Reset {
+                items,
+                columns: read,
+            } = drained
+            else {
+                unreachable!("a reread resets");
+            };
+            columns = columns.or(read);
+            rows.extend(items.into_iter().filter(|item| part.serves(item)));
+        }
+        return Delta::Reset { rows, columns };
+    }
+    let (mut upserted, mut removed) = (Vec::new(), Vec::new());
+    for (part, drained) in parts.iter().zip(drained) {
+        let Drained::Changed(changes) = drained else {
+            unreachable!("no part was reset");
+        };
+        if !part.showing {
+            continue;
+        }
+        for (key, item) in changes {
+            match item {
+                Some(item) if part.serves(&item) => upserted.push(item),
+                _ => removed.push(key),
+            }
+        }
+    }
+    Delta::Changed { upserted, removed }
+}
+
 /// Moves off the cluster-wide upstream of `from` to upstreams per
 /// namespace, once those are listed; nothing if the subscription ends
 /// first.
@@ -1189,8 +1231,33 @@ where
     drop(replaced);
 }
 
-/// The least ready of the states of a view's parts, or of the
-/// subscriptions a view reads together; syncing ones add up.
+/// The state of a list from its parts' states and whether each one's rows
+/// show, as [`ListBatch::status`](ipc::ListBatch::status) says.
+fn status(looks: &[(ViewState, bool)]) -> ViewState {
+    let (shown, unshown): (Vec<_>, Vec<_>) = looks.iter().partition(|(_, shown)| *shown);
+    if !shown.is_empty() {
+        return combine(shown.into_iter().map(|(state, _)| match state {
+            ViewState::Queued => ViewState::Stale,
+            state => state.clone(),
+        }));
+    }
+    let (refused, on_their_way): (Vec<_>, Vec<_>) = unshown
+        .into_iter()
+        .map(|(state, _)| state.clone())
+        .partition(failed);
+    if on_their_way.is_empty() {
+        return combine(refused.into_iter());
+    }
+    combine(on_their_way.into_iter().map(|state| match state {
+        ViewState::Stale => ViewState::Connecting,
+        state => state,
+    }))
+}
+
+/// The least ready of `states`, the counts of syncing ones added up: of a
+/// subscription's parts when it needs all of them, or of the subscriptions
+/// an object reads together. A list says each part's state apart
+/// ([`Subscription::drain_shown`]).
 pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
     let rank = |state: &ViewState| match state {
         ViewState::Ready => 0,
@@ -1221,5 +1288,7 @@ pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
 
 #[cfg(test)]
 pub(crate) mod live;
+#[cfg(test)]
+mod parts_tests;
 #[cfg(test)]
 mod tests;

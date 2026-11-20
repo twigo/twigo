@@ -46,7 +46,8 @@ pub use forward::{
 pub use keyboard::{KeyMapping, KeyboardLayout};
 pub use list::{
     Ack, Cell, Column, ColumnKind, ColumnValues, Grouping, Gvr, ListBatch, ListQuery, MetricsState,
-    Row, RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount, ViewState, Window,
+    Part, PartState, Parts, Row, RowGroup, RowId, SetWindow, Sort, SubscriptionId, ValueCount,
+    ViewState, Window,
 };
 pub use logs::{
     AnsiColor, Bucket, Containers, DownloadLogs, Histogram, Level, LevelFilter, LogAround,

@@ -1,8 +1,8 @@
 //! One upstream's list and watch (ARCHITECTURE 3.2, 3.7): the initial list,
-//! streamed where the cluster can, then a watch resumed from its last
-//! `resourceVersion`, a relist on `410 Gone`, a probe when it goes quiet,
-//! and a backoff after failures, refusals included; only rejected
-//! credentials stop it.
+//! streamed where the server compresses streaming lists and in pages
+//! elsewhere, then a watch resumed from its last `resourceVersion`, a relist
+//! on `410 Gone`, a probe when it goes quiet, and a backoff after failures,
+//! refusals included; only rejected credentials stop it.
 //!
 //! Each line of a watch is decoded and stored as it arrives, so a slow
 //! reader never holds the connection back.
@@ -15,7 +15,9 @@ use std::time::Duration;
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use bytes::Bytes;
 use futures::{AsyncBufRead, AsyncBufReadExt};
-use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::response::Parts;
+use http::{HeaderMap, Request};
 use http_body_util::BodyExt;
 use jiff::Timestamp;
 use kube::client::Body;
@@ -25,17 +27,27 @@ use twigo_kube::client::{Clients, Waiting};
 
 use crate::cluster::Cluster;
 use crate::decode::{Decode, DecodeError, Event};
+use crate::encoding;
 use crate::request::{self, Collection, Format, WatchFrom};
-use crate::store::{Item, Items, RowKey, Store};
+use crate::store::{Item, Items, Store};
 
 /// Items per list page.
 const LIMIT: u32 = 500;
-/// kube's default for watches (`kube-core` 4.2, `params.rs`).
+/// kube's default for watches (`kube-core` 5.1, `params.rs`).
 const TIMEOUT_SECONDS: u32 = 290;
 /// The API server's watch cache sends a bookmark roughly every minute
 /// (`cacheWatcher.nextBookmarkTime`, Kubernetes v1.37.0), so two missing
 /// mean the watch has stalled.
 pub(crate) const IDLE: Duration = Duration::from_secs(120);
+/// The longest a streaming list goes without a line before its server is
+/// asked whether it answers at all. The server sends its initial events back
+/// to back, flushing whenever its queue is empty.
+pub(crate) const INITIAL_IDLE: Duration = Duration::from_secs(30);
+/// How long the probe's body has, from its headers on, to count as an
+/// answer; client-go's ping timeout. A connection whose window unread streams
+/// fill still gives headers and never a body. The headers are timed by the
+/// client stack, which starts once a request slot admits the probe.
+const PROBE: Duration = Duration::from_secs(15);
 /// The longest an upstream waits after a failure before it tries again.
 pub const RETRY_WITHIN: Duration = Duration::from_secs(5);
 /// How often a resource the server cannot watch is listed again.
@@ -55,6 +67,9 @@ pub(crate) type Clock = Arc<dyn Fn() -> Timestamp + Send + Sync>;
 #[derive(Debug, Clone)]
 pub(crate) struct Spec {
     pub context: String,
+    /// The group-version, which the cluster keeps what it learnt of lists by.
+    pub group: String,
+    pub version: String,
     pub path: String,
     pub format: Format,
     pub field_selector: Option<String>,
@@ -111,6 +126,17 @@ impl<T: Item> Upstream<T> {
         self.state.subscribe()
     }
 
+    pub fn current(&self) -> ViewState {
+        self.state.borrow().clone()
+    }
+
+    /// Its state and whether it has listed, read together: `update` sets
+    /// both under the lock.
+    pub fn standing(&self) -> (ViewState, bool) {
+        let status = self.status();
+        (self.current(), status.listed)
+    }
+
     /// The store has held a whole list since the upstream started.
     pub fn listed(&self) -> bool {
         self.status().listed
@@ -148,9 +174,8 @@ impl<T: Item> Upstream<T> {
         let mut status = self.status();
         change(&mut status);
         let view = match (&status.phase, status.queued) {
-            (Phase::Failed(view), _) => view.clone(),
+            (Phase::Failed(view) | Phase::Refused(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
-            (Phase::Refused(view), _) => view.clone(),
             (Phase::Connecting, _) => ViewState::Connecting,
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,
@@ -236,8 +261,10 @@ async fn start<D: Decode>(
     }
 }
 
-fn backoff() -> ExponentialBackoff {
-    // Jitter adds up to the delay again: 0.5–5 s in all (ARCHITECTURE 3.2).
+/// The pause between a failure and the next try: 0.5–5 s in all, as the
+/// upstreams, log streams and forwards wait.
+pub fn backoff() -> ExponentialBackoff {
+    // Jitter adds up to the delay again (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))
         .with_max_delay(RETRY_WITHIN / 2)
@@ -290,6 +317,10 @@ enum Outcome {
     Undecodable(DecodeError),
     /// A list of a resource the server cannot watch ended.
     Polled,
+    /// The server does not stream a list: it refused, or answered
+    /// without compression, or without the end the stream must have, or
+    /// not at all.
+    NotStreamed,
 }
 
 struct Run<D: Decode> {
@@ -343,10 +374,7 @@ where
             self.clients = Some(Arc::clone(&clients));
             let outcome = match next {
                 Next::List => self.list(&clients).await,
-                Next::Watch(from) => {
-                    let start = WatchFrom::ResourceVersion(&from);
-                    self.stream(&clients, start, None, from.clone()).await
-                }
+                Next::Watch(from) => self.stream(&clients, None, from).await,
             };
             next = match outcome {
                 Outcome::Ended { next, quiet } => {
@@ -364,11 +392,10 @@ where
                 }
                 Outcome::Idle { next, seen } => {
                     self.interrupted();
-                    if !probe(&clients).await {
-                        clients.connections().retire_after(seen);
-                    }
+                    answers(&clients, seen).await;
                     next
                 }
+                Outcome::NotStreamed => unreachable!("a streaming list is only asked for by list"),
                 Outcome::Gone => Next::List,
                 Outcome::NoColumns(next) => {
                     self.interrupted();
@@ -418,13 +445,12 @@ where
         }
     }
 
-    /// Lists the collection, by a streaming list where the cluster has
-    /// them, and goes on watching.
+    /// Lists the collection, by a streaming list where the server
+    /// compresses them, and goes on watching.
     async fn list(&mut self, clients: &Arc<Clients>) -> Outcome {
         let listed = self.upstream.status().listed;
-        if !listed && !self.upstream.store.is_empty() {
-            // What an interrupted first list stored.
-            self.upstream.store.replace(Items::new());
+        if !listed {
+            self.forget_partial();
         }
         if listed && !self.unwatchable {
             self.set_phase(Phase::Relisting);
@@ -433,26 +459,32 @@ where
             collected: listed.then(Items::new),
             loaded: 0,
         };
-        if !self.unwatchable && self.env.cluster.streaming(clients) != Some(false) {
-            let outcome = self
-                .stream(
-                    clients,
-                    WatchFrom::InitialEvents,
-                    Some(listing()),
-                    "".into(),
-                )
-                .await;
-            match outcome {
-                Outcome::Failed {
-                    error: kube::Error::Api(status),
-                    ..
-                } if refuses_streaming(&status) => {
-                    self.env.cluster.set_streaming(clients, false);
+        let streams = self
+            .env
+            .cluster
+            .streams(clients, &self.spec.group, &self.spec.version);
+        if streams && !self.unwatchable {
+            match self.stream(clients, Some(listing()), "".into()).await {
+                Outcome::NotStreamed => {
+                    self.env
+                        .cluster
+                        .page(clients, &self.spec.group, &self.spec.version);
+                    if !listed {
+                        self.forget_partial();
+                        self.set_phase(Phase::Connecting);
+                    }
                 }
                 outcome => return outcome,
             }
         }
         self.paginate(clients, listing()).await
+    }
+
+    /// What an interrupted or refused first list stored.
+    fn forget_partial(&self) {
+        if !self.upstream.store.is_empty() {
+            self.upstream.store.replace(Items::new());
+        }
     }
 
     /// A list in pages, then a watch from its `resourceVersion`.
@@ -490,16 +522,15 @@ where
         if self.unwatchable {
             return Outcome::Polled;
         }
-        let start = WatchFrom::ResourceVersion(&from);
-        self.stream(clients, start, None, from.clone()).await
+        self.stream(clients, None, from).await
     }
 
     /// Reads a watch until it ends: the initial events of a streaming list
-    /// first, given `listing`, then the changes after `from`.
+    /// first, given `listing`, then the changes after `from`. A streaming
+    /// list the server does not stream ends as [`Outcome::NotStreamed`].
     async fn stream(
         &mut self,
         clients: &Arc<Clients>,
-        start: WatchFrom<'_>,
         mut listing: Option<Listing<D::Item>>,
         mut from: Box<str>,
     ) -> Outcome {
@@ -516,11 +547,20 @@ where
                 std::future::pending::<()>().await;
             }
         });
+        let start = match listing {
+            Some(_) => WatchFrom::InitialEvents,
+            None => WatchFrom::ResourceVersion(&from),
+        };
         let mut request = request::watch(&self.collection(), start, TIMEOUT_SECONDS);
         request.extensions_mut().insert(self.watch_waiting.clone());
-        let mut lines: Lines = tokio::select! {
-            opened = clients.api.request_stream(request) => match opened {
-                Ok(lines) => Box::pin(lines),
+        let (parts, body) = tokio::select! {
+            opened = open(clients, request) => match opened {
+                Ok(opened) => opened,
+                Err(kube::Error::Api(status))
+                    if listing.is_some() && matches!(status.code, 400 | 422) =>
+                {
+                    return Outcome::NotStreamed;
+                }
                 Err(error) => {
                     let next = again(&from, &listing);
                     return Outcome::Failed { error, verb: "watch", next };
@@ -529,26 +569,45 @@ where
             _ = retired.changed() => return Outcome::Retired(again(&from, &listing)),
             () = &mut abandoned => return Outcome::Retired(again(&from, &listing)),
         };
+        // A server that streams without compression, as 1.34 to 1.36 do, is
+        // paged instead, since its pages come gzipped.
+        if listing.is_some() && !encoding::gzipped(&parts.headers) {
+            return Outcome::NotStreamed;
+        }
+        let mut lines: Lines = Box::pin(encoding::lines(&parts.headers, body));
         let _watching = Watching::new(&self.upstream.watching);
-        match &listing {
-            Some(_) => self.env.cluster.set_streaming(clients, true),
+        if listing.is_none() {
             // The server watches from `from`, so nothing was missed.
-            None => self.set_phase(Phase::Ready),
+            self.set_phase(Phase::Ready);
         }
         let mut quiet = true;
         let mut line = Vec::new();
         loop {
             line.clear();
+            let idle = if listing.is_some() {
+                INITIAL_IDLE
+            } else {
+                IDLE
+            };
             let read = tokio::select! {
-                read = tokio::time::timeout(IDLE, lines.read_until(b'\n', &mut line)) => read,
+                read = tokio::time::timeout(idle, lines.read_until(b'\n', &mut line)) => read,
                 _ = retired.changed() => return Outcome::Retired(again(&from, &listing)),
                 () = &mut abandoned => return Outcome::Retired(again(&from, &listing)),
             };
             match read {
+                Err(_) if listing.is_some() => {
+                    // A server that answers and sends nothing does not stream.
+                    return if answers(clients, seen).await {
+                        Outcome::NotStreamed
+                    } else {
+                        Outcome::Retired(Next::List)
+                    };
+                }
                 Err(_) => {
                     let next = again(&from, &listing);
                     return Outcome::Idle { next, seen };
                 }
+                Ok(Ok(0)) if listing.is_some() => return Outcome::NotStreamed,
                 Ok(Ok(0)) => {
                     let next = again(&from, &listing);
                     return Outcome::Ended { next, quiet };
@@ -565,14 +624,17 @@ where
                 Ok(Ok(_)) => {}
             }
             quiet = false;
-            self.backoff = backoff();
             let received = (self.env.clock)();
             let event = match self.decoder.decode_event(&line, received) {
                 Ok(event) => event,
                 Err(DecodeError::NoColumns) => return Outcome::NoColumns(again(&from, &listing)),
+                Err(_) if listing.is_some() => return Outcome::NotStreamed,
                 Err(error) => return Outcome::Undecodable(error),
             };
             self.upstream.store.set_columns(self.decoder.columns());
+            if !matches!(event, Event::Error(_)) {
+                self.backoff = backoff();
+            }
             match event {
                 Event::Upsert(item) => {
                     advance(&mut from, item.meta());
@@ -581,27 +643,24 @@ where
                         None => self.upstream.store.upsert(item),
                     }
                 }
+                Event::Delete(_) if listing.is_some() => return Outcome::NotStreamed,
                 Event::Delete(item) => {
                     advance(&mut from, item.meta());
-                    match &mut listing {
-                        Some(Listing {
-                            collected: Some(items),
-                            ..
-                        }) => {
-                            items.remove(&RowKey::of(item.meta()));
-                        }
-                        _ => self.upstream.store.delete(&item),
-                    }
+                    self.upstream.store.delete(&item);
                 }
                 Event::Bookmark {
                     resource_version,
                     initial_events_end,
                 } => {
+                    if listing.is_some() && !initial_events_end {
+                        return Outcome::NotStreamed;
+                    }
                     from = resource_version;
-                    if initial_events_end && let Some(done) = listing.take() {
+                    if let Some(done) = listing.take() {
                         self.listed(done);
                     }
                 }
+                Event::Error(_) if listing.is_some() => return Outcome::NotStreamed,
                 Event::Error(status) if status.code == 410 => return Outcome::Gone,
                 Event::Error(status) => {
                     let next = again(&from, &listing);
@@ -714,38 +773,57 @@ async fn fetch(
     request: Request<Vec<u8>>,
     clock: &Clock,
 ) -> Result<(Bytes, Timestamp), kube::Error> {
-    let response = clients.api.send(request.map(Body::from)).await?;
+    let (parts, body) = open(clients, request).await?;
     let started = clock();
+    Ok((whole(&parts.headers, body).await?, started))
+}
+
+/// A response's status and headers with its body, or the refusal in place
+/// of them, to a request that asks for gzip.
+async fn open(
+    clients: &Clients,
+    mut request: Request<Vec<u8>>,
+) -> Result<(Parts, Body), kube::Error> {
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, encoding::GZIP);
+    let response = clients.api.send(request.map(Body::from)).await?;
     let (parts, body) = response.into_parts();
-    let body = body.collect().await?.to_bytes();
     if !parts.status.is_success() {
-        return Err(twigo_kube::errors::refused(parts.status, &body));
+        return Err(match whole(&parts.headers, body).await {
+            Ok(body) => twigo_kube::errors::refused(parts.status, &body),
+            Err(error) => error,
+        });
     }
-    Ok((body, started))
+    Ok((parts, body))
+}
+
+async fn whole(headers: &HeaderMap, body: Body) -> Result<Bytes, kube::Error> {
+    let body = body.collect().await?.to_bytes();
+    encoding::page(headers, body).map_err(|error| kube::Error::Service(Box::new(error)))
 }
 
 /// Whether the connection still answers, any status included: a quiet
-/// watch on a live one opens again alone, and one on a dead one retires it
+/// watch on a live one opens again alone, and one on a dead one is retired
 /// for every upstream.
-async fn probe(clients: &Clients) -> bool {
+async fn answers(clients: &Clients, seen: u64) -> bool {
     let mut version = Request::new(Vec::new());
     *version.uri_mut() = http::Uri::from_static("/version");
-    match clients.api.request_text(version).await {
-        Ok(_) | Err(kube::Error::Api(_)) => true,
+    let answered = match clients.api.send(version.map(Body::from)).await {
+        Ok(response) => {
+            let mut body = response.into_body();
+            let drained = async {
+                while body.frame().await.transpose()?.is_some() {}
+                Ok::<_, kube::Error>(())
+            };
+            matches!(tokio::time::timeout(PROBE, drained).await, Ok(Ok(())))
+        }
         Err(_) => false,
+    };
+    if !answered {
+        clients.connections().retire_after(seen);
     }
-}
-
-/// 1.33 rejects `sendInitialEvents` with 422 on the field (apimachinery's
-/// `validateWatchOptions`, v1.33.12).
-fn refuses_streaming(status: &kube::core::Status) -> bool {
-    status.code == 422
-        && status.details.as_ref().is_some_and(|details| {
-            details
-                .causes
-                .iter()
-                .any(|cause| cause.field == "sendInitialEvents")
-        })
+    answered
 }
 
 enum Failure {

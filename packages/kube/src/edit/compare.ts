@@ -17,9 +17,9 @@ import { objectUri, parseObjectUri } from "../uri";
  * text, which Rust filters as the live upstream serves them, so an object past
  * the first rows is found by typing its name, then the objects the space
  * opened lately, of any kind. Someone who may not list the kind cluster-wide
- * gets the selected namespaces and the object's own instead, and is told so;
- * if one of them is refused too, the object's own namespace alone; not there
- * either, and the picker says that.
+ * gets the rows of the selected namespaces and the object's own that they may
+ * list instead, and is told which they may not; of none, and the picker says
+ * that.
  */
 export function comparisons(
   workbench: Workbench,
@@ -53,27 +53,38 @@ export function comparisons(
     let notice: string | undefined;
     if (snapshot.status.state === "forbidden") {
       const own = namespaced ? object.namespace : undefined;
-      if (own !== undefined) {
-        const together = [
-          ...new Set([...spaces.state(object.space).namespaces, own]),
-        ];
-        snapshot = await rows(together);
-        notice = `You may not list ${object.gvr.resource} in this cluster: these are from the namespaces selected and the object's own.`;
-        // A view reads all its namespaces or none (twigo-cache's `combine`), so
-        // one the person may not list refuses the others with it.
-        if (snapshot.status.state === "forbidden" && together.length > 1) {
-          snapshot = await rows([own]);
-          notice = `You may not list ${object.gvr.resource} in this cluster, nor in the namespaces selected and the object's own: these are from the object's own namespace.`;
-        }
-      }
-      if (own === undefined || snapshot.status.state === "forbidden") {
+      const none = `You may not list ${object.gvr.resource} in this cluster`;
+      if (own === undefined) throw new IpcError("forbidden", `${none}.`);
+      const together = [
+        ...new Set([...spaces.state(object.space).namespaces, own]),
+      ];
+      snapshot = await rows(together);
+      if (snapshot.status.state === "forbidden") {
         throw new IpcError(
           "forbidden",
-          own === undefined
-            ? `You may not list ${object.gvr.resource} in this cluster.`
-            : `You may not list ${object.gvr.resource} in this cluster, nor in the object's own namespace (${own}).`,
+          together.length > 1
+            ? `${none}, nor in the namespaces selected and the object's own.`
+            : `${none}, nor in the object's own namespace (${own}).`,
         );
       }
+      const { unready } = snapshot.parts;
+      const refused = unready.flatMap(({ part, state }) =>
+        part.kind === "namespace" && state.state === "forbidden"
+          ? [part.name]
+          : [],
+      );
+      const left = new Set(
+        unready.flatMap(({ part, shown }) =>
+          part.kind === "namespace" && !shown ? [part.name] : [],
+        ),
+      );
+      const shown = together.filter((name) => !left.has(name));
+      const from = !shown.includes(own)
+        ? "the other namespaces selected"
+        : shown.length === 1
+          ? "the object's own namespace"
+          : "the other namespaces selected and the object's own";
+      notice = `${none}${refused.length === 0 ? "" : `, nor in ${refused.join(", ")}`}: these are from ${from}.`;
     }
     const sameKind = snapshot.ids.flatMap((id) => {
       const { namespace, name } = objectOfRow(id, namespaced);

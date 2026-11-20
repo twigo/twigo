@@ -1,11 +1,12 @@
 //! A fake API server for the hub's tests on paused time: objects by group,
 //! resource, namespace and name, as metadata unless a test puts whole ones,
 //! list pages, watches resumed from a `resourceVersion` or streaming their
-//! initial events, `410 Gone` below a compacted version, refusals, probes,
-//! access reviews, aggregated discovery with its ETags, and the Metrics
-//! API, which lists whole and cannot be watched.
+//! initial events as each group answers them, gzip for what asks for it,
+//! `410 Gone` below a compacted version, refusals, probes, access reviews,
+//! aggregated discovery with its ETags, and the Metrics API, which lists
+//! whole and cannot be watched.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
 use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -49,10 +50,16 @@ pub struct State {
     pub compacted: u64,
     /// Streaming lists send their initial events only once released.
     pub hold_initial: bool,
-    /// The cluster refuses streaming lists, as 1.33 does.
-    pub no_streaming: bool,
+    /// The paths whose streaming lists are held as `hold_initial` holds all.
+    pub hold_paths: HashSet<String>,
+    /// How each group answers a streaming list, the core group as `""`.
+    streams: HashMap<String, Streams>,
+    /// The responses that sent their headers and nothing more, which stay open.
+    silent: Vec<mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>>,
     /// Requests get `503` while this many remain.
     pub unavailable: usize,
+    /// A watch from a version answers one `ERROR` event of 500, then ends.
+    pub watch_fails: bool,
     /// Paths that answer `403`.
     pub forbidden: HashSet<String>,
     /// Paths that answer `401`.
@@ -65,12 +72,17 @@ pub struct State {
     pub may_list: bool,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
+    /// `/version` sends its headers and never its body, as over a connection
+    /// whose window is full.
+    pub version_body_hangs: bool,
     /// Every other request fails as when the credential plugin timed out.
     pub plugin_timed_out: bool,
     /// Discovery requests never answer.
     pub discovery_hangs: bool,
     /// When each request came, with its path and query.
     pub requests: Vec<(Instant, String)>,
+    /// The path and query of each list and watch it answered gzipped.
+    gzipped: Vec<String>,
     /// What discovery serves, by group, the core group as `""`.
     pub served: BTreeMap<String, Group>,
     /// How many discovery requests got 304.
@@ -82,6 +94,63 @@ pub struct State {
     /// The most Metrics API requests that waited at once.
     pub metrics_overlap: usize,
     metrics_waiting: usize,
+}
+
+/// How a group answers a streaming list. Every answer that streams is gzipped
+/// when gzip was asked, except [`Streams::Plain`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Streams {
+    /// As 1.37: the initial events as `ADDED`, then the annotated bookmark,
+    /// gzipped a member at each flush.
+    #[default]
+    Compressed,
+    /// As 1.34 to 1.36: the same, plain although gzip was asked.
+    Plain,
+    /// As 1.33: 422 on `sendInitialEvents`.
+    NoWatchList,
+    /// This status, as `Status`, to the request.
+    Status(StatusCode),
+    /// As a server that knows neither parameter: every object as `ADDED`, a
+    /// bookmark without the annotation, and the changes after.
+    PlainWatch,
+    /// Every object as `ADDED`, then a bookmark with neither the annotation
+    /// nor a `resourceVersion`, which no decoder reads.
+    BlankBookmark,
+    /// 200, then nothing, ever.
+    Silent,
+    /// 200, then the end of the response.
+    EndsAtOnce,
+    /// 200, one `ERROR` event of 500, then the end of the response.
+    ErrorThenEnd,
+    /// Every object as `ADDED`, then a `DELETED` of the first, and no end.
+    Deleted,
+    /// One object as `ADDED` each interval, then the annotated bookmark.
+    Trickle(std::time::Duration),
+}
+
+impl Streams {
+    /// The answer of a server that refuses the request.
+    fn refusal(self) -> Option<Response<Body>> {
+        match self {
+            Streams::NoWatchList => Some(full(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                &json!({
+                    "kind": "Status",
+                    "apiVersion": "v1",
+                    "status": "Failure",
+                    "reason": "Invalid",
+                    "code": 422,
+                    "message": "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
+                    "details": { "causes": [{ "reason": "FieldValueForbidden", "field": "sendInitialEvents" }] }
+                }),
+                false,
+            )),
+            Streams::Status(code) => {
+                Some(status(code, code.canonical_reason().unwrap_or("Unknown")))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +187,21 @@ struct Watch {
     resource: String,
     namespace: Option<String>,
     sender: mpsc::UnboundedSender<Result<Frame<Bytes>, Infallible>>,
-    /// A held streaming list, which has sent nothing yet.
+    /// A held streaming list, which has not sent its end yet.
     held: bool,
+    /// Its initial events went out, but for the end.
+    streamed: bool,
+    /// Each frame is a gzip member of its own, as the server flushes at each.
+    gzip: bool,
+}
+
+impl Watch {
+    /// Whether the receiver is still there.
+    fn send(&self, line: Bytes) -> bool {
+        self.sender
+            .unbounded_send(Ok(Frame::data(frame(line, self.gzip))))
+            .is_ok()
+    }
 }
 
 /// What a request's path names.
@@ -273,36 +355,41 @@ impl Fake {
         state.change(group, resource, namespace, "DELETED", object);
     }
 
-    /// Sends every watch a bookmark.
+    pub fn streams(&self, group: &str, answer: Streams) {
+        self.state().streams.insert(group.to_owned(), answer);
+    }
+
+    /// Sends every watch a bookmark, but a held streaming list, which a real
+    /// server sends none before its end.
     pub fn bookmark(&self) {
         let mut state = self.state();
         let version = state.version.to_string();
-        state.watches.retain(|watch| {
-            watch
-                .sender
-                .unbounded_send(Ok(Frame::data(line(&bookmark(&version, false)))))
-                .is_ok()
-        });
+        state
+            .watches
+            .retain(|watch| watch.held || watch.send(line(&bookmark(&version, false))));
     }
 
-    /// Sends the held streaming lists their initial events.
+    /// Sends the held streaming lists their initial events, but not the
+    /// bookmark that ends them.
+    pub fn stream_initial(&self) {
+        let mut state = self.state();
+        let mut watches = std::mem::take(&mut state.watches);
+        for watch in watches.iter_mut().filter(|watch| watch.held) {
+            state.send_initial(watch);
+        }
+        state.watches = watches;
+    }
+
+    /// Sends the held streaming lists their initial events, and ends them.
     pub fn release_initial(&self) {
         let mut state = self.state();
         state.hold_initial = false;
+        state.hold_paths.clear();
         let version = state.version.to_string();
         let mut watches = std::mem::take(&mut state.watches);
         for watch in watches.iter_mut().filter(|watch| watch.held) {
-            let target = Target {
-                group: watch.group.clone(),
-                resource: watch.resource.clone(),
-                namespace: watch.namespace.clone(),
-            };
-            for item in state.items(&target) {
-                let event = line(&json!({ "type": "ADDED", "object": item }));
-                let _ = watch.sender.unbounded_send(Ok(Frame::data(event)));
-            }
-            let end = line(&bookmark(&version, true));
-            let _ = watch.sender.unbounded_send(Ok(Frame::data(end)));
+            state.send_initial(watch);
+            watch.send(line(&bookmark(&version, true)));
             watch.held = false;
         }
         state.watches = watches;
@@ -398,6 +485,14 @@ impl Fake {
             .count()
     }
 
+    pub fn count_gzipped(&self, needle: &str) -> usize {
+        self.state()
+            .gzipped
+            .iter()
+            .filter(|request| request.contains(needle))
+            .count()
+    }
+
     async fn answer(
         &self,
         request: Request<kube::client::Body>,
@@ -456,18 +551,24 @@ impl Fake {
         let mut state = self.state();
         state.requests.push((Instant::now(), uri.to_string()));
         if path == "/version" {
-            return full(StatusCode::OK, json!({ "gitVersion": "v1.37.0" }));
+            if state.version_body_hangs {
+                let (sender, receiver) = mpsc::unbounded();
+                state.silent.push(sender);
+                return stream(receiver, false);
+            }
+            return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }), false);
         }
         if path.ends_with("selfsubjectaccessreviews") {
             let allowed = state.may_list;
             return full(
                 StatusCode::CREATED,
-                json!({
+                &json!({
                     "apiVersion": "authorization.k8s.io/v1",
                     "kind": "SelfSubjectAccessReview",
                     "spec": {},
                     "status": { "allowed": allowed }
                 }),
+                false,
             );
         }
         if state.unavailable > 0 {
@@ -487,8 +588,8 @@ impl Fake {
             return state.discovery(path == "/api", if_none_match.as_deref());
         }
         let target = target(&path);
+        let gzip = accepts_gzip(&request_headers);
         if target.group == crate::metrics::GROUP {
-            let gzip = accepts_gzip(&request_headers);
             return state.metrics(
                 &target,
                 param("watch") == Some("true"),
@@ -516,53 +617,103 @@ impl Fake {
                 "metadata": metadata,
                 "items": items[start..end],
             });
-            if state.body_takes.is_zero() {
-                return full(StatusCode::OK, page);
+            if gzip {
+                state.gzipped.push(uri.to_string());
             }
-            return slow(StatusCode::OK, &page, state.body_takes);
+            if state.body_takes.is_zero() {
+                return full(StatusCode::OK, &page, gzip);
+            }
+            return slow(StatusCode::OK, &page, state.body_takes, gzip);
         }
         if state.unwatchable.contains(&target.resource) {
             return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
         }
+        let streaming = param("sendInitialEvents") == Some("true");
+        let answer = state
+            .streams
+            .get(&target.group)
+            .copied()
+            .unwrap_or_default();
+        if streaming && let Some(refusal) = answer.refusal() {
+            return refusal;
+        }
+        let gzip = streaming && answer != Streams::Plain && gzip;
+        if gzip {
+            state.gzipped.push(uri.to_string());
+        }
         let (sender, receiver) = mpsc::unbounded();
         let send = |value: &Value| {
             sender
-                .unbounded_send(Ok(Frame::data(line(value))))
+                .unbounded_send(Ok(Frame::data(frame(line(value), gzip))))
                 .expect("the receiver is ours");
         };
-        if param("sendInitialEvents") == Some("true") {
-            if state.no_streaming {
-                return full(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    json!({
-                        "kind": "Status",
-                        "apiVersion": "v1",
-                        "status": "Failure",
-                        "reason": "Invalid",
-                        "code": 422,
-                        "message": "sendInitialEvents is forbidden for watch unless the WatchList feature gate is enabled",
-                        "details": { "causes": [{ "reason": "FieldValueForbidden", "field": "sendInitialEvents" }] }
-                    }),
-                );
-            }
-            if state.hold_initial {
+        if streaming {
+            if state.hold_initial || state.hold_paths.contains(&path) {
                 state.watches.push(Watch {
                     group: target.group,
                     resource: target.resource,
                     namespace: target.namespace,
                     sender,
                     held: true,
+                    streamed: false,
+                    gzip,
                 });
-                return stream(receiver);
+                return stream(receiver, gzip);
             }
-            for item in state.items(&target) {
-                send(&json!({ "type": "ADDED", "object": item }));
+            let items = state.items(&target);
+            let version = state.version.to_string();
+            let added = |item: &Value| json!({ "type": "ADDED", "object": item });
+            match answer {
+                Streams::Silent => {
+                    state.silent.push(sender);
+                    return stream(receiver, gzip);
+                }
+                Streams::EndsAtOnce => return stream(receiver, gzip),
+                Streams::ErrorThenEnd => {
+                    send(&internal_error());
+                    return stream(receiver, gzip);
+                }
+                Streams::PlainWatch => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&bookmark(&version, false));
+                }
+                Streams::BlankBookmark => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&json!({
+                        "type": "BOOKMARK",
+                        "object": { "kind": "Pod", "apiVersion": "v1", "metadata": {} }
+                    }));
+                }
+                Streams::Deleted => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&json!({ "type": "DELETED", "object": items[0] }));
+                }
+                Streams::Trickle(every) => {
+                    let sender = sender.clone();
+                    tokio::spawn(async move {
+                        for item in items {
+                            tokio::time::sleep(every).await;
+                            let event = line(&added(&item));
+                            let _ = sender.unbounded_send(Ok(Frame::data(frame(event, gzip))));
+                        }
+                        tokio::time::sleep(every).await;
+                        let end = line(&bookmark(&version, true));
+                        let _ = sender.unbounded_send(Ok(Frame::data(frame(end, gzip))));
+                    });
+                }
+                _ => {
+                    items.iter().for_each(|item| send(&added(item)));
+                    send(&bookmark(&version, true));
+                }
             }
-            send(&bookmark(&state.version.to_string(), true));
         } else {
             let from: u64 = param("resourceVersion")
                 .and_then(|version| version.parse().ok())
                 .expect("a watch from a version");
+            if state.watch_fails {
+                send(&internal_error());
+                return stream(receiver, gzip);
+            }
             if from < state.compacted {
                 send(&json!({
                     "type": "ERROR",
@@ -576,7 +727,7 @@ impl Fake {
                     }
                 }));
                 drop(sender);
-                return stream(receiver);
+                return stream(receiver, gzip);
             }
             for change in &state.log {
                 if change.version > from
@@ -592,8 +743,10 @@ impl Fake {
             namespace: target.namespace,
             sender,
             held: false,
+            streamed: false,
+            gzip,
         });
-        stream(receiver)
+        stream(receiver, gzip)
     }
 }
 
@@ -705,30 +858,36 @@ impl State {
         } else {
             "PodMetricsList"
         };
-        let body = serde_json::to_vec(&json!({
-            "kind": kind,
-            "apiVersion": "metrics.k8s.io/v1beta1",
-            "metadata": {},
-            "items": items,
-        }))
-        .unwrap();
-        let mut response = Response::new(Full::new(Bytes::new()).boxed_unsync());
-        if gzip {
-            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-            encoder.write_all(&body).unwrap();
-            *response.body_mut() = Full::new(Bytes::from(encoder.finish().unwrap())).boxed_unsync();
-            response.headers_mut().insert(
-                http::header::CONTENT_ENCODING,
-                http::HeaderValue::from_static("gzip"),
-            );
-        } else {
-            *response.body_mut() = Full::new(Bytes::from(body)).boxed_unsync();
-        }
+        let mut response = full(
+            StatusCode::OK,
+            &json!({
+                "kind": kind,
+                "apiVersion": "metrics.k8s.io/v1beta1",
+                "metadata": {},
+                "items": items,
+            }),
+            gzip,
+        );
         response.headers_mut().insert(
             http::header::CONTENT_TYPE,
             http::HeaderValue::from_static("application/json"),
         );
         response
+    }
+
+    /// Sends a held streaming list its items, once.
+    fn send_initial(&self, watch: &mut Watch) {
+        if std::mem::replace(&mut watch.streamed, true) {
+            return;
+        }
+        let target = Target {
+            group: watch.group.clone(),
+            resource: watch.resource.clone(),
+            namespace: watch.namespace.clone(),
+        };
+        for item in self.items(&target) {
+            watch.send(line(&json!({ "type": "ADDED", "object": item })));
+        }
     }
 
     fn items(&self, target: &Target) -> Vec<Value> {
@@ -766,14 +925,23 @@ impl State {
             };
             // A held list sends what it holds once released, changes
             // after.
-            watch.held
-                || !target.matches(group, resource, namespace)
-                || watch
-                    .sender
-                    .unbounded_send(Ok(Frame::data(event.clone())))
-                    .is_ok()
+            watch.held || !target.matches(group, resource, namespace) || watch.send(event.clone())
         });
     }
+}
+
+fn internal_error() -> Value {
+    json!({
+        "type": "ERROR",
+        "object": {
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "reason": "InternalError",
+            "code": 500,
+            "message": "etcd does not support watch progress",
+        }
+    })
 }
 
 fn bookmark(version: &str, initial_events_end: bool) -> Value {
@@ -798,22 +966,27 @@ fn line(value: &Value) -> Bytes {
     line.into()
 }
 
-fn full(code: StatusCode, value: Value) -> Response<Body> {
-    let mut response =
-        Response::new(Full::new(Bytes::from(serde_json::to_vec(&value).unwrap())).boxed_unsync());
+fn json_body(value: &Value, gzip: bool) -> Bytes {
+    frame(Bytes::from(serde_json::to_vec(value).unwrap()), gzip)
+}
+
+fn full(code: StatusCode, value: &Value, gzip: bool) -> Response<Body> {
+    let body = json_body(value, gzip);
+    let mut response = Response::new(Full::new(body).boxed_unsync());
     *response.status_mut() = code;
+    encoded(&mut response, gzip);
     response
 }
 
 /// A response whose status and headers come at once and whose body comes after `takes`.
-fn slow(code: StatusCode, value: &Value, takes: std::time::Duration) -> Response<Body> {
+fn slow(code: StatusCode, value: &Value, takes: std::time::Duration, gzip: bool) -> Response<Body> {
     let (sender, receiver) = mpsc::unbounded();
-    let body = Bytes::from(serde_json::to_vec(value).unwrap());
+    let body = json_body(value, gzip);
     tokio::spawn(async move {
         tokio::time::sleep(takes).await;
         let _ = sender.unbounded_send(Ok(Frame::data(body)));
     });
-    let mut response = stream(receiver);
+    let mut response = stream(receiver, gzip);
     *response.status_mut() = code;
     response
 }
@@ -821,7 +994,7 @@ fn slow(code: StatusCode, value: &Value, takes: std::time::Duration) -> Response
 fn status(code: StatusCode, reason: &str) -> Response<Body> {
     full(
         code,
-        json!({
+        &json!({
             "kind": "Status",
             "apiVersion": "v1",
             "status": "Failure",
@@ -829,6 +1002,7 @@ fn status(code: StatusCode, reason: &str) -> Response<Body> {
             "code": code.as_u16(),
             "message": reason,
         }),
+        false,
     )
 }
 
@@ -850,8 +1024,32 @@ fn accepts_gzip(headers: &http::HeaderMap) -> bool {
         .is_some_and(|value| value.contains("gzip"))
 }
 
-fn stream(receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, Infallible>>) -> Response<Body> {
-    Response::new(StreamBody::new(receiver).boxed_unsync())
+pub fn stream<E: Send + 'static>(
+    receiver: mpsc::UnboundedReceiver<Result<Frame<Bytes>, E>>,
+    gzip: bool,
+) -> Response<UnsyncBoxBody<Bytes, E>> {
+    let mut response = Response::new(StreamBody::new(receiver).boxed_unsync());
+    encoded(&mut response, gzip);
+    response
+}
+
+fn encoded<B>(response: &mut Response<B>, gzip: bool) {
+    if gzip {
+        response.headers_mut().insert(
+            http::header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("gzip"),
+        );
+    }
+}
+
+/// A gzip member of its own, or the bytes as they are.
+pub fn frame(bytes: Bytes, gzip: bool) -> Bytes {
+    if !gzip {
+        return bytes;
+    }
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&bytes).unwrap();
+    encoder.finish().unwrap().into()
 }
 
 /// The fingerprint of a context that reaches `server`, as the catalog makes it.

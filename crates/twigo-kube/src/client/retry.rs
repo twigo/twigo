@@ -12,6 +12,8 @@ use http::{Request, Response};
 use kube::client::Body;
 use tower::{BoxError, Layer, Service, ServiceExt};
 
+use crate::errors::find;
+
 #[derive(Clone, Copy)]
 pub struct RetryLayer;
 
@@ -72,15 +74,9 @@ pub(super) fn copy(request: &Request<Body>) -> Option<Request<Body>> {
 /// h2 gives the GOAWAY as their error only to the streams above its last
 /// stream id, whatever its code, and to those opened after it; the streams
 /// below run on until they end or the connection closes under them.
-pub(super) fn unprocessed(error: &(dyn std::error::Error + 'static)) -> bool {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if let Some(h2) = error.downcast_ref::<h2::Error>() {
-            return h2.is_remote()
-                && (h2.is_go_away()
-                    || (h2.is_reset() && h2.reason() == Some(Reason::REFUSED_STREAM)));
-        }
-        source = error.source();
-    }
-    false
+fn unprocessed(error: &(dyn std::error::Error + 'static)) -> bool {
+    find::<h2::Error>(error).is_some_and(|h2| {
+        h2.is_remote()
+            && (h2.is_go_away() || (h2.is_reset() && h2.reason() == Some(Reason::REFUSED_STREAM)))
+    })
 }

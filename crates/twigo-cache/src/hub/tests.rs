@@ -1,17 +1,18 @@
 use std::time::Duration;
 
+use http::StatusCode;
 use tokio::time::{Instant, sleep};
 use twigo_ipc::ViewState;
-use twigo_kube::client::Budgets;
+use twigo_kube::client::{Actor, Budgets, Class};
 
 use super::*;
 use crate::decode::{DecodeError, Event, Page};
-use crate::fake::Fake;
+use crate::fake::{Fake, Streams};
 use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
-use crate::upstream::IDLE;
+use crate::upstream::{IDLE, INITIAL_IDLE};
 
-fn pods() -> Resource {
+pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
         version: "v1".to_owned(),
@@ -20,7 +21,16 @@ fn pods() -> Resource {
     }
 }
 
-fn query(namespaces: &[&str]) -> Query {
+fn widgets() -> Resource {
+    Resource {
+        group: "example.io".to_owned(),
+        version: "v1".to_owned(),
+        resource: "widgets".to_owned(),
+        namespaced: true,
+    }
+}
+
+pub(super) fn query(namespaces: &[&str]) -> Query {
     Query {
         context: "kind-test".to_owned(),
         resource: pods(),
@@ -33,44 +43,52 @@ fn query(namespaces: &[&str]) -> Query {
     }
 }
 
-fn namespace(name: &str) -> Scope {
+pub(super) fn namespace(name: &str) -> Scope {
     Scope::Namespace(name.to_owned())
 }
 
-fn budget(watches: usize) -> Budgets {
+pub(super) fn budget(watches: usize) -> Budgets {
     Budgets {
         watches,
         ..Budgets::default()
     }
 }
 
-async fn until<T: Item>(subscription: &mut Subscription<T>, wanted: impl Fn(&ViewState) -> bool) {
+pub(super) async fn reach<T: Item>(
+    subscription: &mut Subscription<T>,
+    mut wanted: impl FnMut(&Subscription<T>) -> bool,
+) {
     let reached = async {
-        while !wanted(&subscription.state()) {
+        while !wanted(subscription) {
             subscription.changed().await;
         }
     };
     tokio::time::timeout(Duration::from_secs(600), reached)
         .await
-        .expect("the state within ten minutes");
+        .unwrap_or_else(|_| {
+            panic!(
+                "not within ten minutes; the state is {:?}",
+                subscription.state()
+            )
+        });
 }
 
-async fn ready<T: Item>(subscription: &mut Subscription<T>) {
+pub(super) async fn until<T: Item>(
+    subscription: &mut Subscription<T>,
+    wanted: impl Fn(&ViewState) -> bool,
+) {
+    reach(subscription, |subscription| wanted(&subscription.state())).await;
+}
+
+pub(super) async fn ready<T: Item>(subscription: &mut Subscription<T>) {
     until(subscription, |state| *state == ViewState::Ready).await;
 }
 
-async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
-    let reached = async {
-        while names(subscription) != wanted {
-            subscription.changed().await;
-        }
-    };
-    tokio::time::timeout(Duration::from_secs(600), reached)
-        .await
-        .expect("the rows within ten minutes");
+pub(super) async fn until_rows(subscription: &mut Subscription<Row>, wanted: &[&str]) {
+    reach(subscription, |subscription| names(subscription) == wanted).await;
 }
 
-fn names(subscription: &Subscription<Row>) -> Vec<String> {
+pub(super) fn names(subscription: &Subscription<Row>) -> Vec<String> {
     let mut names: Vec<String> = subscription
         .items()
         .iter()
@@ -81,7 +99,7 @@ fn names(subscription: &Subscription<Row>) -> Vec<String> {
 }
 
 /// Lets every task that can run, run.
-async fn settle() {
+pub(super) async fn settle() {
     sleep(Duration::from_millis(1)).await;
 }
 
@@ -551,6 +569,27 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_error_event_does_not_reset_the_backoff() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    fake.state().watch_fails = true;
+    fake.state().requests.clear();
+    fake.end_watches();
+    sleep(Duration::from_secs(60)).await;
+    let state = fake.state();
+    let times: Vec<Instant> = state.requests.iter().map(|(at, _)| *at).collect();
+    assert!(times.len() < 30, "{} requests in a minute", times.len());
+    let last = times[times.len() - 1] - times[times.len() - 2];
+    assert!(
+        last >= Duration::from_millis(2500),
+        "{last:?} between the last two"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_quiet_watch_probes_the_connection_before_it_watches_again() {
     let fake = Fake::default();
     let (hub, clients) = fake.hub(Budgets::default());
@@ -580,6 +619,49 @@ async fn a_quiet_watch_probes_the_connection_before_it_watches_again() {
         (2, 1),
         "every upstream watches again"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_probe_whose_body_never_comes_is_no_answer_at_15_s() {
+    let fake = Fake::default();
+    let (hub, clients) = fake.hub(Budgets::default());
+    let retired = clients.connections().retired();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    fake.state().version_body_hangs = true;
+    sleep(IDLE + Duration::from_secs(14)).await;
+    assert_eq!(fake.count("/version"), 1, "it went quiet and probed");
+    assert_eq!(*retired.borrow(), 0, "the body may still come");
+    sleep(Duration::from_secs(2)).await;
+    assert_eq!(*retired.borrow(), 1, "no answer: the connection is retired");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_probe_that_waits_for_a_request_slot_is_not_timed_by_its_15_s() {
+    let fake = Fake::default();
+    let (hub, clients) = fake.hub(Budgets {
+        requests: 1,
+        ..Budgets::default()
+    });
+    let retired = clients.connections().retired();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let slot = clients
+        .try_admit(Class::Request, Actor::Ui)
+        .expect("the only request slot is free");
+
+    sleep(IDLE + Duration::from_secs(40)).await;
+    assert_eq!(fake.count("/version"), 0, "the probe waits for the slot");
+    assert_eq!(
+        *retired.borrow(),
+        0,
+        "the wait for a slot does not retire the connection"
+    );
+
+    drop(slot);
+    settle().await;
+    assert_eq!(fake.count("/version"), 1, "the probe went out");
+    assert_eq!(*retired.borrow(), 0, "and was answered");
 }
 
 #[tokio::test(start_paused = true)]
@@ -705,7 +787,9 @@ async fn a_row_is_stamped_when_its_page_or_its_event_arrives_and_a_relist_keeps_
 
 async fn stamped_as_it_arrives(streaming: bool) {
     let fake = Fake::default();
-    fake.state().no_streaming = !streaming;
+    if !streaming {
+        fake.streams("", Streams::NoWatchList);
+    }
     for name in ["p1", "p2", "p3"] {
         fake.add("pods", Some("a"), name);
     }
@@ -810,7 +894,7 @@ async fn stamped_as_it_arrives(streaming: bool) {
 #[tokio::test(start_paused = true)]
 async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut a = hub.rows(query(&["a"])).await.unwrap();
@@ -825,10 +909,254 @@ async fn a_cluster_without_streaming_lists_is_listed_in_pages_once_it_said_so() 
     assert_eq!(names(&a), ["p1", "p2"], "watched from the list's version");
 }
 
+fn streamed(fake: &Fake, path: &str) -> usize {
+    fake.count(&format!(
+        "{path}?watch=true&allowWatchBookmarks=true&timeoutSeconds=290&sendInitialEvents=true"
+    ))
+}
+
+fn paged(fake: &Fake, path: &str) -> usize {
+    fake.count(&format!("{path}?limit=500"))
+}
+
+const PODS_A: &str = "/api/v1/namespaces/a/pods";
+const PODS_B: &str = "/api/v1/namespaces/b/pods";
+const WIDGETS_A: &str = "/apis/example.io/v1/namespaces/a/widgets";
+
+#[tokio::test(start_paused = true)]
+async fn every_refusal_of_a_streaming_list_pages_that_group_version_alone() {
+    for refusal in [
+        Streams::NoWatchList,
+        Streams::Status(StatusCode::BAD_REQUEST),
+        Streams::Status(StatusCode::UNPROCESSABLE_ENTITY),
+        Streams::Plain,
+        Streams::PlainWatch,
+        Streams::BlankBookmark,
+        Streams::Silent,
+        Streams::EndsAtOnce,
+        Streams::ErrorThenEnd,
+        Streams::Deleted,
+    ] {
+        refused_stream(refusal).await;
+    }
+}
+
+async fn refused_stream(refusal: Streams) {
+    let fake = Fake::default();
+    fake.streams("", refusal);
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("a"), "p2");
+    fake.add("pods", Some("b"), "p3");
+    fake.add_to("example.io", "widgets", Some("a"), "w1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let started = Instant::now();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    let allowed = match refusal {
+        Streams::Silent => INITIAL_IDLE + Duration::from_secs(1),
+        _ => Duration::from_secs(1),
+    };
+    assert!(
+        started.elapsed() < allowed,
+        "{refusal:?}: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(names(&pods), ["p1", "p2"], "{refusal:?}");
+    assert_eq!(streamed(&fake, PODS_A), 1, "{refusal:?}");
+    assert_eq!(paged(&fake, PODS_A), 1, "{refusal:?}: listed in pages");
+
+    let widgets = Query {
+        resource: widgets(),
+        ..query(&["a"])
+    };
+    let mut widgets = hub.rows(widgets).await.unwrap();
+    ready(&mut widgets).await;
+    assert_eq!(names(&widgets), ["w1"]);
+    assert_eq!(streamed(&fake, WIDGETS_A), 1, "{refusal:?}");
+    assert_eq!(
+        paged(&fake, WIDGETS_A),
+        0,
+        "{refusal:?}: another group streams"
+    );
+
+    let mut other = hub.rows(query(&["b"])).await.unwrap();
+    ready(&mut other).await;
+    assert_eq!(names(&other), ["p3"]);
+    assert_eq!(
+        streamed(&fake, PODS_B),
+        0,
+        "{refusal:?}: nothing asks again"
+    );
+    assert_eq!(paged(&fake, PODS_B), 1, "{refusal:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failure_that_says_nothing_of_streaming_is_retried_by_streaming() {
+    for code in [
+        StatusCode::FORBIDDEN,
+        StatusCode::NOT_FOUND,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ] {
+        let fake = Fake::default();
+        fake.streams("", Streams::Status(code));
+        fake.add("pods", Some("a"), "p1");
+        let (hub, _clients) = fake.hub(Budgets::default());
+        let mut pods = hub.rows(query(&["a"])).await.unwrap();
+        sleep(Duration::from_secs(30)).await;
+        assert!(streamed(&fake, PODS_A) > 1, "{code}: tried again");
+        assert_eq!(paged(&fake, PODS_A), 0, "{code}: no page");
+
+        fake.streams("", Streams::Compressed);
+        ready(&mut pods).await;
+        assert_eq!(names(&pods), ["p1"], "{code}");
+        assert_eq!(paged(&fake, PODS_A), 0, "{code}: it streams once it can");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_silent_stream_retires_a_dead_connection_and_pages_over_a_live_one() {
+    let fake = Fake::default();
+    fake.streams("", Streams::Silent);
+    fake.state().dead = true;
+    fake.add("pods", Some("a"), "p1");
+    let (hub, clients) = fake.hub(Budgets::default());
+    let retired = clients.connections().retired();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    sleep(INITIAL_IDLE + Duration::from_secs(1)).await;
+    assert_eq!(*retired.borrow(), 1, "the probe got no answer");
+    assert_eq!(
+        streamed(&fake, PODS_A),
+        2,
+        "it streams again, over a new one"
+    );
+    assert_eq!(paged(&fake, PODS_A), 0);
+
+    fake.state().dead = false;
+    ready(&mut pods).await;
+    assert_eq!(*retired.borrow(), 1, "an answer retires nothing");
+    assert_eq!(names(&pods), ["p1"]);
+    assert_eq!(paged(&fake, PODS_A), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_trickles_in_never_falls_back_however_long_it_takes() {
+    let fake = Fake::default();
+    fake.streams("", Streams::Trickle(INITIAL_IDLE - Duration::from_secs(5)));
+    for name in ["p1", "p2", "p3", "p4", "p5"] {
+        fake.add("pods", Some("a"), name);
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let started = Instant::now();
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    assert!(started.elapsed() > INITIAL_IDLE * 4);
+    assert_eq!(pods.items().len(), 5);
+    assert_eq!(streamed(&fake, PODS_A), 1);
+    assert_eq!(paged(&fake, PODS_A), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_first_list_that_falls_back_lists_from_scratch() {
+    let fake = Fake::default();
+    fake.streams("", Streams::Trickle(Duration::from_secs(1)));
+    for name in ["p1", "p2", "p3"] {
+        fake.add("pods", Some("a"), name);
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    sleep(Duration::from_millis(2500)).await;
+    assert_eq!(pods.state(), ViewState::Syncing { loaded: 2 });
+    fake.delete("pods", Some("a"), "p2");
+    ready(&mut pods).await;
+    assert_eq!(
+        names(&pods),
+        ["p1", "p3"],
+        "what the stream stored is gone with it"
+    );
+    assert_eq!(paged(&fake, PODS_A), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_relist_that_falls_back_keeps_its_rows_until_its_pages_end() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("a"), "p2");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+
+    fake.streams("", Streams::NoWatchList);
+    fake.state().body_takes = Duration::from_secs(5);
+    fake.end_watches();
+    fake.delete("pods", Some("a"), "p1");
+    fake.add("pods", Some("a"), "p3");
+    fake.compact();
+    until(&mut pods, |state| *state == ViewState::Relisting).await;
+    sleep(Duration::from_secs(2)).await;
+    assert_eq!(pods.state(), ViewState::Relisting);
+    assert_eq!(names(&pods), ["p1", "p2"], "the old rows meanwhile");
+    assert_eq!(paged(&fake, PODS_A), 1);
+
+    ready(&mut pods).await;
+    assert_eq!(names(&pods), ["p2", "p3"]);
+}
+
+fn switching(fake: &Fake) -> (Hub, Arc<Clients>, impl Fn()) {
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+    let first = fake.clients(Budgets::default());
+    let second = fake.clients(Budgets::default());
+    let switched = Arc::new(AtomicBool::new(false));
+    let connect: Connect = {
+        let (first, switched) = (Arc::clone(&first), Arc::clone(&switched));
+        Arc::new(move |_context| {
+            let clients = Arc::clone(if switched.load(Relaxed) {
+                &second
+            } else {
+                &first
+            });
+            Box::pin(async move { Ok(clients) })
+        })
+    };
+    (Hub::new(connect), first, move || {
+        switched.store(true, Relaxed)
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn rebuilt_clients_forget_a_refusal_and_a_retirement_keeps_it() {
+    let fake = Fake::default();
+    fake.streams("", Streams::NoWatchList);
+    fake.add("pods", Some("a"), "p1");
+    let (hub, first, switch) = switching(&fake);
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut pods).await;
+    assert_eq!(streamed(&fake, PODS_A), 1);
+
+    first.connections().retire();
+    fake.end_watches();
+    fake.add("pods", Some("a"), "p2");
+    fake.compact();
+    sleep(Duration::from_secs(10)).await;
+    assert_eq!(paged(&fake, PODS_A), 2, "it listed again");
+    assert_eq!(
+        streamed(&fake, PODS_A),
+        1,
+        "and did not ask for a stream after a retirement"
+    );
+
+    switch();
+    first.connections().abandon();
+    sleep(Duration::from_secs(10)).await;
+    assert_eq!(streamed(&fake, PODS_A), 2, "new clients ask again");
+    assert_eq!(paged(&fake, PODS_A), 3);
+    ready(&mut pods).await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_list_in_pages_follows_its_continue_tokens() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     for index in 0..1200 {
         fake.add("pods", Some("a"), &format!("p{index:04}"));
     }
@@ -837,6 +1165,11 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
     ready(&mut pods).await;
     assert_eq!(pods.items().len(), 1200);
     assert_eq!(fake.count("limit=500"), 3);
+    assert_eq!(
+        fake.count_gzipped("limit=500"),
+        3,
+        "every page came gzipped"
+    );
     assert_eq!(fake.count("continue=1200%3A500"), 1);
     assert_eq!(fake.count("continue=1200%3A1000"), 1);
     assert_eq!(
@@ -849,7 +1182,7 @@ async fn a_list_in_pages_follows_its_continue_tokens() {
 #[tokio::test(start_paused = true)]
 async fn a_page_is_stamped_when_its_response_starts_whatever_its_body_takes() {
     let fake = Fake::default();
-    fake.state().no_streaming = true;
+    fake.streams("", Streams::NoWatchList);
     fake.state().body_takes = Duration::from_secs(4);
     for index in 0..1200 {
         fake.add("pods", Some("a"), &format!("p{index:04}"));
@@ -963,7 +1296,7 @@ async fn whole_rows_wait_for_a_whole_list() {
 
     fake.state().hold_initial = true;
     let mut partial = hub.rows(query(&["b"])).await.unwrap();
-    let asked = tokio::time::timeout(Duration::from_secs(30), partial.whole());
+    let asked = tokio::time::timeout(Duration::from_secs(20), partial.whole());
     assert!(asked.await.is_err(), "no answer before the list ends");
     fake.release_initial();
     assert!(partial.whole().await.unwrap().is_empty());
@@ -994,7 +1327,9 @@ async fn clients_abandoned_before_their_first_list_are_left_at_once() {
 
 async fn clients_abandoned_before_listing(streaming: bool) {
     let fake = Fake::default();
-    fake.state().no_streaming = !streaming;
+    if !streaming {
+        fake.streams("", Streams::NoWatchList);
+    }
     fake.add("pods", Some("a"), "p1");
     let abandoned = fake.clients(Budgets::default());
     abandoned.connections().abandon();
@@ -1046,26 +1381,11 @@ async fn a_name_that_can_be_no_path_segment_is_refused() {
 async fn a_poll_leaves_clients_abandoned_meanwhile() {
     let fake = Fake::default();
     fake.state().unwatchable.insert("pods".to_owned());
-    let first = fake.clients(Budgets::default());
-    let second = fake.clients(Budgets::default());
-    let switched = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let connect: Connect = {
-        let (first, second, switched) = (
-            Arc::clone(&first),
-            Arc::clone(&second),
-            Arc::clone(&switched),
-        );
-        Arc::new(move |_context| {
-            let now = switched.load(std::sync::atomic::Ordering::Relaxed);
-            let clients = Arc::clone(if now { &second } else { &first });
-            Box::pin(async move { Ok(clients) })
-        })
-    };
-    let hub = Hub::new(connect);
+    let (hub, first, switch) = switching(&fake);
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
     ready(&mut pods).await;
     let lists = fake.count("limit=500");
-    switched.store(true, std::sync::atomic::Ordering::Relaxed);
+    switch();
     first.connections().abandon();
     sleep(Duration::from_secs(1)).await;
     assert_eq!(

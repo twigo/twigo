@@ -2,6 +2,7 @@
 
 use http::StatusCode;
 use kube::core::Status;
+use tower::timeout::error::Elapsed;
 use twigo_ipc::{Blocked, ErrorKind, IpcError};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
@@ -25,12 +26,16 @@ pub fn request(error: &kube::Error) -> IpcError {
             _ => ErrorKind::Internal,
         },
         kube::Error::Auth(_) => ErrorKind::Unauthorized,
-        kube::Error::Service(error) if let Some(error) = credential(&**error) => match error {
-            CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
-            _ => ErrorKind::Unauthorized,
-        },
-        kube::Error::Service(error) if oidc(&**error) => ErrorKind::Unauthorized,
-        kube::Error::Service(error) if elapsed(&**error) => ErrorKind::Timeout,
+        kube::Error::Service(error) if let Some(error) = find::<CredentialError>(&**error) => {
+            match error {
+                CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
+                _ => ErrorKind::Unauthorized,
+            }
+        }
+        kube::Error::Service(error) if find::<OidcError>(&**error).is_some() => {
+            ErrorKind::Unauthorized
+        }
+        kube::Error::Service(error) if find::<Elapsed>(&**error).is_some() => ErrorKind::Timeout,
         kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorKind::Unavailable,
         _ => ErrorKind::Internal,
     };
@@ -54,7 +59,7 @@ pub fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
 /// What the gate said, when it stopped the request.
 pub fn gate(error: &kube::Error) -> Option<&Blocked> {
     match error {
-        kube::Error::Service(service) => blocked(&**service),
+        kube::Error::Service(service) => find(&**service),
         _ => None,
     }
 }
@@ -64,25 +69,7 @@ pub fn over_budget(error: &kube::Error) -> bool {
     let kube::Error::Service(service) = error else {
         return false;
     };
-    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&**service);
-    while let Some(error) = source {
-        if error.is::<crate::client::OverBudget>() {
-            return true;
-        }
-        source = error.source();
-    }
-    false
-}
-
-fn blocked<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Blocked> {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if let Some(blocked) = error.downcast_ref::<Blocked>() {
-            return Some(blocked);
-        }
-        source = error.source();
-    }
-    None
+    find::<crate::client::OverBudget>(&**service).is_some()
 }
 
 /// Whether the context's plugin or oidc provider gave the request no
@@ -90,45 +77,19 @@ fn blocked<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Block
 pub fn no_credential(error: &kube::Error) -> bool {
     match error {
         kube::Error::Auth(_) => true,
-        kube::Error::Service(error) => credential(&**error).is_some() || oidc(&**error),
+        kube::Error::Service(error) => {
+            find::<CredentialError>(&**error).is_some() || find::<OidcError>(&**error).is_some()
+        }
         _ => false,
     }
 }
 
-/// Why the context's plugin gave no credential, when that ended it.
-fn credential<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a CredentialError> {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if let Some(credential) = error.downcast_ref::<CredentialError>() {
-            return Some(credential);
-        }
-        source = error.source();
-    }
-    None
-}
-
-/// Whether the oidc refresh failed.
-fn oidc(error: &(dyn std::error::Error + 'static)) -> bool {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if error.is::<OidcError>() {
-            return true;
-        }
-        source = error.source();
-    }
-    false
-}
-
-/// Whether the client's request timeout ended it.
-fn elapsed(error: &(dyn std::error::Error + 'static)) -> bool {
-    let mut source = Some(error);
-    while let Some(error) = source {
-        if error.is::<tower::timeout::error::Elapsed>() {
-            return true;
-        }
-        source = error.source();
-    }
-    false
+/// The first `T` in the chain of `error` and its causes.
+pub(crate) fn find<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    std::iter::successors(Some(error), |error| error.source())
+        .find_map(|error| error.downcast_ref())
 }
 
 #[cfg(test)]

@@ -1,10 +1,17 @@
-import type { Column, ValueCount, ViewState } from "@twigo/protocol";
+import {
+  REFUSED,
+  type Column,
+  type Parts,
+  type ValueCount,
+  type ViewState,
+} from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface ListStatus {
   readonly title: string;
   readonly total: number;
   readonly status: ViewState;
+  readonly parts: Parts;
   readonly columns: readonly Column[];
   /** Rows per value of the list's status column, when it has one. */
   readonly counts: readonly ValueCount[];
@@ -28,11 +35,14 @@ export class ListStatuses {
   }
 }
 
-export const SHOWS_ROWS = new Set<ViewState["state"]>([
-  "ready",
-  "relisting",
-  "stale",
-]);
+/** Whether every part has listed or been refused, so nothing more is on its way. */
+export function settled({ unready }: Parts): boolean {
+  return unready.every(({ shown, state }) => shown || REFUSED.has(state.state));
+}
+
+export function leavesOut({ unready }: Parts): boolean {
+  return unready.some(({ shown }) => !shown);
+}
 
 export function stateLabel(status: ViewState): string | undefined {
   switch (status.state) {
@@ -58,6 +68,7 @@ function same(a: ListStatus, b: ListStatus): boolean {
     a.total === b.total &&
     a.columns === b.columns &&
     a.counts === b.counts &&
+    a.parts === b.parts &&
     JSON.stringify(a.status) === JSON.stringify(b.status)
   );
 }

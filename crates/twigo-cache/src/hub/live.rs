@@ -12,6 +12,7 @@ use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::config::{AuthInfo, KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
 use serde_json::json;
+use twigo_ipc::{Part, PartState, Parts};
 use twigo_kube::client::{Clients, Gate, Options};
 
 use super::*;
@@ -208,7 +209,7 @@ fn names(subscription: &Subscription<Row>) -> Vec<String> {
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
-async fn lists_stream_from_1_34_and_come_in_pages_on_1_33() {
+async fn lists_stream_on_1_37_and_come_in_pages_before() {
     let live = live().await;
     let namespace = live.namespace("hub-list").await;
     for name in ["p1", "p2", "p3"] {
@@ -225,8 +226,8 @@ async fn lists_stream_from_1_34_and_come_in_pages_on_1_33() {
         .map(|column| column.name.to_string())
         .collect();
     assert_eq!(columns, POD_COLUMNS);
-    let streaming = hub.inner.cluster(&live.context).streaming(&clients);
-    assert_eq!(streaming, Some(live.minor().await >= 34));
+    let streams = hub.inner.cluster(&live.context).streams(&clients, "", "v1");
+    assert_eq!(streams, live.minor().await >= 37);
 
     live.pod(&namespace, "p4").await;
     until(&mut pods, |pods| names(pods).len() == 4).await;
@@ -381,9 +382,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), scopes, "one upstream per namespace");
     assert_eq!(pods.items().len(), 5);
 
-    let mut all = hub.rows(live.query(&[])).await.unwrap();
-    // 1.33 lists in pages, so its list is what the server refuses.
-    let verb = if live.minor().await >= 34 {
+    let verb = if live.minor().await >= 37 {
         "watch"
     } else {
         "list"
@@ -392,6 +391,32 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         verb: verb.to_owned(),
         resource: "pods".to_owned(),
     };
+
+    let refused = live.namespace("hub-sa").await;
+    live.pod(&refused, "p").await;
+    let mut six = five.clone();
+    six.push(&refused);
+    let mut partly = hub.rows(live.query(&six)).await.unwrap();
+    let named = Parts {
+        count: 6,
+        unready: vec![PartState {
+            part: Part::Namespace {
+                name: refused.clone(),
+            },
+            state: forbidden.clone(),
+            shown: false,
+        }],
+    };
+    until(&mut partly, |partly| {
+        let shown = partly.drain_shown();
+        shown.status == ViewState::Ready && shown.parts == named
+    })
+    .await;
+    assert_eq!(partly.items().len(), 5);
+    drop(partly);
+    live.delete_namespace(&refused).await;
+
+    let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| all.state() == forbidden).await;
 
     // One that may list pods everywhere shares one cluster-wide upstream.

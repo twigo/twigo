@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, ListFilter, ListTree, Pin, PinOff } from "lucide-react";
+import { SHOWS_ROWS } from "@twigo/protocol";
 import {
   ActionDropdown,
   cn,
@@ -35,7 +36,6 @@ import { kindIcon, NAMESPACES } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri, type ListInput } from "../uri";
 import { pinOf } from "./pin";
-import { SHOWS_ROWS } from "./listStatus";
 import { namespacesOf } from "./scope";
 import { chipFor, stageFor, WHOLE, type Chip } from "./stages";
 

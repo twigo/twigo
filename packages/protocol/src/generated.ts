@@ -845,7 +845,20 @@ window: Window | null,
 /**
  * Rows that entered the window or changed.
  */
-upserts: Array<Row>, status: ViewState, 
+upserts: Array<Row>, 
+/**
+ * The state of the rows the list shows: the least ready of the parts
+ * whose rows it holds, a part that has listed and waits for a watch
+ * counting as `stale`. While it holds no part's rows, the least ready
+ * of the parts still on their way, one whose first list broke off
+ * counting as `connecting`, and once none is, the worst refusal. So
+ * `ready`, `relisting` and `stale` say that some part's rows are shown.
+ */
+status: ViewState, 
+/**
+ * Present in the first batch and whenever a part's state changes.
+ */
+parts?: Parts, 
 /**
  * With `count_by`: the matching rows per value of that column, present
  * in the first batch and whenever a count changes.
@@ -863,7 +876,7 @@ groups: Array<RowGroup> | null,
  * present once a scope has answered or failed, and whenever it
  * changes. Before a scope has answered, a list says the failure its
  * last request ended in, if the core remembers one, so its first batch
- * with the columns has it, and the first answers correct it; with none
+ * that shows rows has it, and the first answers correct it; with none
  * remembered it says none, but for a stale API, which says
  * `unavailable` with the columns. It keeps the state it said while its
  * scopes are asked again.
@@ -1376,6 +1389,29 @@ stdin: boolean, } | { "state": "failed", error: IpcError, };
 export type Overview = { header: Header, sections: Array<Section>, };
 
 /**
+ * What one part reads. A webview that meets a kind it does not know
+ * counts the part without naming it.
+ */
+export type Part = { "kind": "cluster" } | { "kind": "namespace", name: string, };
+
+export type PartState = { part: Part, state: ViewState, 
+/**
+ * Its rows are in the list: it has listed and is not refused.
+ */
+shown: boolean, };
+
+/**
+ * The upstreams a list reads: one for the cluster, or one per namespace
+ * (ARCHITECTURE 3.7). A part's rows are in the list once it has listed and
+ * while it is not refused, whatever the other parts are.
+ */
+export type Parts = { count: number, 
+/**
+ * The parts that are not ready, each with its own state.
+ */
+unready: Array<PartState>, };
+
+/**
  * What a command will do, for the person to confirm. It runs only by its
  * id, once, on the cluster it was planned for.
  */
@@ -1827,7 +1863,7 @@ export type Value = { "type": "text", text: string, } | { "type": "time", at: st
 export type ValueCount = { value: string, count: number, };
 
 /**
- * The state of the upstream behind a subscription (ARCHITECTURE 3.7).
+ * The state of a subscription, or of one part of a list (ARCHITECTURE 3.7).
  */
 export type ViewState = { "state": "queued" } | { "state": "connecting" } | { "state": "syncing", loaded: number, } | { "state": "ready" } | { "state": "relisting" } | { "state": "stale" } | { "state": "forbidden", verb: string, resource: string, } | { "state": "unauthorized" } | { "state": "error", error: IpcError, };
 

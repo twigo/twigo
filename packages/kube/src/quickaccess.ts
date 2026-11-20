@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react";
 import {
   ListView,
   lowerAscii,
+  REFUSED,
+  SHOWS_ROWS,
   toIpcError,
   type Backend,
   type Column,
@@ -20,6 +22,7 @@ import {
 import { cellTone, IN_FLIGHT, statusColumn } from "./columns";
 import { sameGvr, type Discovery } from "./discovery";
 import { kindIcon, PODS, pluralTitle } from "./kinds";
+import { settled } from "./list/listStatus";
 import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
 
@@ -256,13 +259,12 @@ export function firstRows(view: ListView): Promise<ListSnapshot> {
     }, WAIT_MS);
     const stop = view.subscribe(() => {
       const snapshot = view.getSnapshot();
-      const { state } = snapshot.status;
       if (
-        ["ready", "relisting", "stale"].includes(state) &&
-        snapshot.columns.length > 0
+        (SHOWS_ROWS.has(snapshot.status.state) &&
+          snapshot.columns.length > 0 &&
+          settled(snapshot.parts)) ||
+        REFUSED.has(snapshot.status.state)
       ) {
-        done(snapshot);
-      } else if (["forbidden", "unauthorized", "error"].includes(state)) {
         done(snapshot);
       }
     });

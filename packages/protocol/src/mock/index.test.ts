@@ -555,14 +555,115 @@ test("a forbidden list names its resource; live, prod-eu may not list nodes, sta
   const prod = await open("live", query(nodes));
   expect(prod.batches[0]?.status.state).toBe("forbidden");
   const staging = await open("live", query({ ...nodes, space: "staging" }));
-  await staging.window(0, 50);
-  for (let ms = 0; ms < 1500; ms += 50) {
-    await staging.ack();
-    await vi.advanceTimersByTimeAsync(50);
-  }
-  const latest = last(staging.batches);
+  const latest = last(await settled(staging));
   expect(latest?.status.state).toBe("ready");
   expect(latest?.total).toBe(40);
+});
+
+async function settled(sub: Awaited<ReturnType<typeof open>>) {
+  await sub.window(0, 5000);
+  for (let ms = 0; ms < 1500; ms += 50) {
+    await sub.ack();
+    await vi.advanceTimersByTimeAsync(50);
+  }
+  return sub.batches;
+}
+
+const namespaced = (namespaces: string[]) => query({ namespaces });
+
+const lastParts = (batches: readonly ListBatch[]) =>
+  last(batches.flatMap(({ parts }) => (parts ? [parts] : [])));
+
+test("a person of one namespace has its rows and the others refused, each part on its own", async () => {
+  const batches = await settled(
+    await open("rbacNamespaces", namespaced(["payments", "default", "auth"])),
+  );
+  const forbidden = { state: "forbidden", verb: "watch", resource: "pods" };
+  const latest = last(batches);
+  expect(latest?.status).toEqual({ state: "ready" });
+  expect(lastParts(batches)).toEqual({
+    count: 3,
+    unready: [
+      {
+        part: { kind: "namespace", name: "auth" },
+        state: forbidden,
+        shown: false,
+      },
+      {
+        part: { kind: "namespace", name: "payments" },
+        state: forbidden,
+        shown: false,
+      },
+    ],
+  });
+  expect(latest?.total).toBeGreaterThan(0);
+  const ids = batches.flatMap(({ window }) => window?.ids ?? []);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(ids.every((id) => id.includes("/default/"))).toBe(true);
+
+  const first = batches[0];
+  expect(first?.status).toEqual({ state: "connecting" });
+  expect(first?.total).toBe(0);
+  expect(first?.parts?.unready).toHaveLength(3);
+  expect(batches.map(({ status }) => status.state)).not.toContain("forbidden");
+});
+
+test("with more than three namespaces the last two wait for a stream, the first of them with the rows it listed", async () => {
+  const names = ["auth", "default", "ledger", "payments", "search"];
+  const batches = await settled(
+    await open("partsQueued", namespaced([...names].reverse())),
+  );
+  const latest = last(batches);
+  expect(latest?.status).toEqual({ state: "stale" });
+  expect(lastParts(batches)).toEqual({
+    count: 5,
+    unready: [
+      {
+        part: { kind: "namespace", name: "payments" },
+        state: { state: "queued" },
+        shown: true,
+      },
+      {
+        part: { kind: "namespace", name: "search" },
+        state: { state: "queued" },
+        shown: false,
+      },
+    ],
+  });
+  const ids = batches.flatMap(({ window }) => window?.ids ?? []);
+  const shownIn = (name: string) => ids.some((id) => id.includes(`/${name}/`));
+  expect(names.map(shownIn)).toEqual([true, true, true, true, false]);
+
+  const few = await settled(
+    await open("partsQueued", namespaced(names.slice(0, 3))),
+  );
+  expect(last(few)?.status).toEqual({ state: "ready" });
+  expect(lastParts(few)?.unready).toEqual([]);
+});
+
+test("a person with no cluster-wide list has none, whatever waits for a stream", async () => {
+  const batches = await settled(await open("partsQueued", query()));
+  expect(last(batches)?.status).toMatchObject({
+    state: "forbidden",
+    verb: "watch",
+  });
+  expect(last(batches)?.total).toBe(0);
+});
+
+test("a list says its parts in its first batch and again only when one changed", async () => {
+  const batches = await settled(
+    await open(
+      "partsQueued",
+      namespaced(["auth", "default", "ledger", "payments", "search"]),
+    ),
+  );
+  expect(batches[0]?.parts).toMatchObject({ count: 5 });
+  let known: string | undefined;
+  for (const { parts } of batches) {
+    if (parts) expect(JSON.stringify(parts)).not.toBe(known);
+    known = parts ? JSON.stringify(parts) : known;
+  }
+  expect(batches.some(({ parts }) => parts === undefined)).toBe(true);
 });
 
 test("nodes, deployments and events come behind the same query view as pods", async () => {

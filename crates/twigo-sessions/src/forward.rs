@@ -29,13 +29,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
+use backon::ExponentialBackoff;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
-use twigo_cache::hub::{Hub, Resource};
+use twigo_cache::hub::{Hub, Resource, backoff};
 use twigo_ipc::{ErrorKind, ForwardState, Gvr, IpcError};
 
 use crate::pods::Reach;
@@ -535,7 +535,7 @@ impl Proof {
             probe: None,
             received_at_probe: 0,
             retry: None,
-            retries: retries(),
+            retries: backoff(),
             no_pod_by: None,
         }
     }
@@ -546,17 +546,6 @@ impl Proof {
             (a, b) => a.or(b),
         }
     }
-}
-
-/// A pause between tries to prove a forward: 0.5–5 s with jitter, as the
-/// hub's (ARCHITECTURE 3.2).
-fn retries() -> ExponentialBackoff {
-    ExponentialBuilder::new()
-        .with_min_delay(Duration::from_millis(500))
-        .with_max_delay(Duration::from_millis(2_500))
-        .with_jitter()
-        .without_max_times()
-        .build()
 }
 
 struct Supervisor {
