@@ -319,10 +319,11 @@ test("a list of one part says what its part waits for, not that its updates stop
     invoke: (command, request) => real.invoke(command, request),
     subscribe: (command, request, onMessage) =>
       real.subscribe(command, request, (message) => {
+        const batch = message as ListBatch;
         onMessage(
           command === "list_subscribe"
-            ? ({
-                ...(message as ListBatch),
+            ? {
+                ...batch,
                 status: { state: "stale" },
                 parts: {
                   count: 1,
@@ -334,7 +335,7 @@ test("a list of one part says what its part waits for, not that its updates stop
                     },
                   ],
                 },
-              } as typeof message)
+              }
             : message,
         );
       }),
