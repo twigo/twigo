@@ -186,6 +186,27 @@ test.each([
     "team-a (1,000), team-b (600), team-c (250): loading",
   ],
   [
+    "parts that connect and parts that sync",
+    of22(
+      part("team-a", { state: "connecting" }),
+      part("team-b", { state: "syncing", loaded: 1200 }),
+      part("team-c", { state: "syncing", loaded: 650 }),
+    ),
+    "Loading · 1,850 · 3 of 22 namespaces",
+    "warn",
+    "team-a: connecting\nteam-b (1,200), team-c (650): loading",
+  ],
+  [
+    "parts that all connect",
+    of22(
+      part("team-a", { state: "connecting" }),
+      part("team-b", { state: "connecting" }),
+    ),
+    "Connecting… · 2 of 22 namespaces",
+    "warn",
+    "team-a, team-b: connecting",
+  ],
+  [
     "a part without updates",
     of22(part("team-c", { state: "stale" }, true)),
     "No updates · reconnecting · 1 of 22 namespaces",
