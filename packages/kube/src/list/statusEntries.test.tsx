@@ -6,7 +6,13 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Parts, PartState, ViewState } from "@twigo/protocol";
+import type {
+  Backend,
+  ListBatch,
+  Parts,
+  PartState,
+  ViewState,
+} from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { StateStore, Workbench, WorkbenchView } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
@@ -284,4 +290,37 @@ test("a list whose last namespaces wait for a stream shows the rows it has and s
     "payments: rows as last listed\nsearch: no rows yet\nKubernetes v1.33.4",
   );
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
+});
+
+test("a list of one part says what its part waits for, not that its updates stopped", async () => {
+  const real = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => real.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      real.subscribe(command, request, (message) => {
+        onMessage(
+          command === "list_subscribe"
+            ? ({
+                ...(message as ListBatch),
+                status: { state: "stale" },
+                parts: {
+                  count: 1,
+                  unready: [
+                    {
+                      part: { kind: "cluster" },
+                      state: { state: "queued" },
+                      shown: true,
+                    },
+                  ],
+                },
+              } as typeof message)
+            : message,
+        );
+      }),
+  };
+  await openList(backend);
+  expect(entry("Waiting for a stream slot")?.getAttribute("title")).toBe(
+    "Waiting · Kubernetes v1.33.4",
+  );
+  expect(screen.queryByText("No updates · reconnecting")).toBeNull();
 });

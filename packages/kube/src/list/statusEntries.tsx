@@ -18,7 +18,7 @@ import {
 } from "../columns";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
-import { stateLabel, type ListStatuses } from "./listStatus";
+import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
 
 const CONNECTION: Readonly<
   Record<ViewState["state"], { tone: Tone; text: string }>
@@ -125,6 +125,16 @@ function namesOf(parts: readonly PartState[], loaded: boolean): string {
 }
 
 /**
+ * What the cluster entry says of a list: its status, but for a list of one
+ * part whose rows are shown, that part's own state, as the status calls a part
+ * that waits for a stream slot after its list `stale`.
+ */
+function spoken({ status, parts }: ListStatus): ViewState {
+  const [only] = parts.unready;
+  return parts.count === 1 && only?.shown ? only.state : status;
+}
+
+/**
  * The active space's cluster after the space's own entry: its connection
  * as the active list sees it, and its Kubernetes version when the space
  * has one context. While connected only the version shows; otherwise the
@@ -160,7 +170,8 @@ export function clusterEntries(
         },
       ];
     }
-    const connection = list && CONNECTION[list.status.state];
+    const state = list && spoken(list);
+    const connection = state && CONNECTION[state.state];
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";
     return [
@@ -169,7 +180,7 @@ export function clusterEntries(
         text:
           healthy && known
             ? known
-            : ((list && stateLabel(list.status)) ?? connection?.text ?? ""),
+            : ((state && stateLabel(state)) ?? connection?.text ?? ""),
         ...(connection && { tone: connection.tone }),
         tooltip: [connection?.text, known && `Kubernetes ${known}`]
           .filter(Boolean)
