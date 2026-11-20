@@ -236,8 +236,10 @@ async fn start<D: Decode>(
     }
 }
 
-fn backoff() -> ExponentialBackoff {
-    // Jitter adds up to the delay again: 0.5–5 s in all (ARCHITECTURE 3.2).
+/// The pause between a failure and the next try: 0.5–5 s in all, as the
+/// upstreams, log streams and forwards wait.
+pub fn backoff() -> ExponentialBackoff {
+    // Jitter adds up to the delay again (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
         .with_min_delay(Duration::from_millis(500))
         .with_max_delay(RETRY_WITHIN / 2)
