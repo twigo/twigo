@@ -1188,17 +1188,6 @@ class Subscription {
     return this.#base.rows;
   }
 
-  /**
-   * The rows Rust's view holds while the list syncs, which it has from the
-   * first page on though it sends none: those of the window, or all of them
-   * while it sorts by a metric.
-   */
-  #held(start: number, end: number): readonly MockRow[] {
-    const rows = this.#all();
-    if (this.#query.sort?.metric) return rows;
-    return runQuery(rows, this.#query).readable.slice(start, end);
-  }
-
   /** The context stopped serving the API: the columns go with it, as Rust's layout is built anew. */
   #withdrawMetrics(): void {
     this.#join?.close();
@@ -1231,9 +1220,6 @@ class Subscription {
     }
     const total = rows.length;
     const [start, end] = this.#window;
-    if (join && view.knows && view.namespaces?.length === 0) {
-      join.recall(this.#held(start, end));
-    }
     let visible = readable.slice(start, end);
     if (join && !this.#query.sort?.metric) {
       join.poll(visible, false);

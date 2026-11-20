@@ -1,10 +1,4 @@
-import type {
-  Column,
-  ListSnapshot,
-  Parts,
-  ValueCount,
-  ViewState,
-} from "@twigo/protocol";
+import type { Column, Parts, ValueCount, ViewState } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 import { isProblem } from "../viewProblem";
 
@@ -39,14 +33,6 @@ export class ListStatuses {
 /** Whether every part has listed or been refused, so nothing more is on its way. */
 export function settled({ unready }: Parts): boolean {
   return unready.every(({ shown, state }) => shown || isProblem(state));
-}
-
-/** Whether a list can say no more than why it has no rows: its state is a problem and no part is still on its way. */
-export function failed({
-  status,
-  parts,
-}: Pick<ListSnapshot, "status" | "parts">): boolean {
-  return isProblem(status) && settled(parts);
 }
 
 export function leavesOut({ unready }: Parts): boolean {

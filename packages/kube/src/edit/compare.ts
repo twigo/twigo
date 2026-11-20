@@ -67,15 +67,24 @@ export function comparisons(
             : `${none}, nor in the object's own namespace (${own}).`,
         );
       }
-      const refused = snapshot.parts.unready.flatMap(({ part, state }) =>
+      const { unready } = snapshot.parts;
+      const refused = unready.flatMap(({ part, state }) =>
         part.kind === "namespace" && state.state === "forbidden"
           ? [part.name]
           : [],
       );
-      notice =
-        refused.length === 0
-          ? `${none}: these are from the namespaces selected and the object's own.`
-          : `${none}, nor in ${refused.join(", ")}: these are from the other namespaces selected and the object's own.`;
+      const left = new Set(
+        unready.flatMap(({ part, shown }) =>
+          part.kind === "namespace" && !shown ? [part.name] : [],
+        ),
+      );
+      const shown = together.filter((name) => !left.has(name));
+      const from = !shown.includes(own)
+        ? "the other namespaces selected"
+        : shown.length === 1
+          ? "the object's own namespace"
+          : "the other namespaces selected and the object's own";
+      notice = `${none}${refused.length === 0 ? "" : `, nor in ${refused.join(", ")}`}: these are from ${from}.`;
     }
     const sameKind = snapshot.ids.flatMap((id) => {
       const { namespace, name } = objectOfRow(id, namespaced);

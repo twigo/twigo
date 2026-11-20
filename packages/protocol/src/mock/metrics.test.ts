@@ -668,7 +668,7 @@ test("a list's first batch with columns says the refusal remembered for the scop
   expect((await first(NODES))?.metrics).toBeNull();
 });
 
-test("a cold list says the refusal remembered for its namespace with the first batch that has its columns, syncing ones included", async () => {
+test("a cold list says the refusal remembered for its namespace with the first batch that shows rows, not with the columns it has while it syncs", async () => {
   const backend = createMockBackend("metricsForbidden");
   const pod = sampled();
   const opened = await openOn(backend, PODS, pod.namespace, pod.name);
@@ -692,10 +692,13 @@ test("a cold list says the refusal remembered for its namespace with the first b
     }
     acked = batches.length;
   }
-  const first = batches.find((batch) =>
+  const columns = batches.find((batch) =>
     batch.columns?.some((column) => column.name === "CPU"),
   );
-  expect(first?.status.state).toBe("syncing");
+  expect(columns?.status.state).toBe("syncing");
+  expect(columns?.metrics).toBeNull();
+  const first = batches.find((batch) => batch.total > 0);
+  expect(first?.status.state).toBe("ready");
   expect(first?.metrics).toBe("forbidden");
   expect(batches.flatMap((batch) => batch.metrics ?? [])).toEqual([
     "forbidden",

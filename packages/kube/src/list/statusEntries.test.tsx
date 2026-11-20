@@ -6,7 +6,13 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Parts, PartState, ViewState } from "@twigo/protocol";
+import type {
+  Backend,
+  ListBatch,
+  Parts,
+  PartState,
+  ViewState,
+} from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { StateStore, Workbench, WorkbenchView } from "@twigo/workbench";
 import { openList, settle, withScreenSize } from "../../test/workbench";
@@ -180,6 +186,27 @@ test.each([
     "team-a (1,000), team-b (600), team-c (250): loading",
   ],
   [
+    "parts that connect and parts that sync",
+    of22(
+      part("team-a", { state: "connecting" }),
+      part("team-b", { state: "syncing", loaded: 1200 }),
+      part("team-c", { state: "syncing", loaded: 650 }),
+    ),
+    "Loading · 1,850 · 3 of 22 namespaces",
+    "warn",
+    "team-a: connecting\nteam-b (1,200), team-c (650): loading",
+  ],
+  [
+    "parts that all connect",
+    of22(
+      part("team-a", { state: "connecting" }),
+      part("team-b", { state: "connecting" }),
+    ),
+    "Connecting… · 2 of 22 namespaces",
+    "warn",
+    "team-a, team-b: connecting",
+  ],
+  [
     "a part without updates",
     of22(part("team-c", { state: "stale" }, true)),
     "No updates · reconnecting · 1 of 22 namespaces",
@@ -284,4 +311,38 @@ test("a list whose last namespaces wait for a stream shows the rows it has and s
     "payments: rows as last listed\nsearch: no rows yet\nKubernetes v1.33.4",
   );
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
+});
+
+test("a list of one part says what its part waits for, not that its updates stopped", async () => {
+  const real = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => real.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      real.subscribe(command, request, (message) => {
+        const batch = message as ListBatch;
+        onMessage(
+          command === "list_subscribe"
+            ? {
+                ...batch,
+                status: { state: "stale" },
+                parts: {
+                  count: 1,
+                  unready: [
+                    {
+                      part: { kind: "cluster" },
+                      state: { state: "queued" },
+                      shown: true,
+                    },
+                  ],
+                },
+              }
+            : message,
+        );
+      }),
+  };
+  await openList(backend);
+  expect(entry("Waiting for a stream slot")?.getAttribute("title")).toBe(
+    "Waiting · Kubernetes v1.33.4",
+  );
+  expect(screen.queryByText("No updates · reconnecting")).toBeNull();
 });

@@ -9,6 +9,12 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
   "stale",
 ]);
 
+const REFUSED = new Set<ViewState["state"]>([
+  "forbidden",
+  "unauthorized",
+  "error",
+]);
+
 /** More namespaces than the hub's `NAMESPACES` are read cluster-wide, by a person who may list the kind there. */
 const NAMESPACES = 4;
 
@@ -25,20 +31,23 @@ export type Pin = (
  * lack is refused alone.
  */
 export function pinOf(scenario: string, resource: string): Pin | undefined {
+  const refused = {
+    state: { state: "forbidden", verb: "watch", resource },
+    shown: false,
+  } as const;
   if (scenario === "rbacNamespaces") {
     return (part) =>
       part.kind === "namespace" && part.name === "default"
         ? undefined
-        : {
-            state: { state: "forbidden", verb: "watch", resource },
-            shown: false,
-          };
+        : refused;
   }
   if (scenario === "partsQueued") {
-    return (_, at, of) =>
-      of > 3 && at >= of - 2
+    return (part, at, of) => {
+      if (part.kind === "cluster") return refused;
+      return of > 3 && at >= of - 2
         ? { state: { state: "queued" }, shown: at === of - 2 }
         : undefined;
+    };
   }
   return undefined;
 }
@@ -85,6 +94,7 @@ export class MockParts {
       }),
     }));
     const shown = placed.filter((part) => part.shown);
+    const onTheirWay = placed.filter(({ state }) => !REFUSED.has(state.state));
     return {
       status:
         shown.length > 0
@@ -93,7 +103,11 @@ export class MockParts {
                 state.state === "queued" ? { state: "stale" } : state,
               ),
             )
-          : leastReady(placed.map(({ state }) => state)),
+          : leastReady(
+              (onTheirWay.length > 0 ? onTheirWay : placed).map(
+                ({ state }) => state,
+              ),
+            ),
       parts: {
         count: of,
         unready: placed.filter(({ state }) => state.state !== "ready"),
