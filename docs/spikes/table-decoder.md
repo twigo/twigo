@@ -49,8 +49,8 @@ Checked against the apiserver source at v1.37.0 unless a release is named, and a
    - **1.32**, no longer supported (D12): a streaming list that also asks for bookmarks is refused the Table transform ([get.go](https://github.com/kubernetes/kubernetes/blob/v1.32.11/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/get.go#L332-L341)), and the JSON fallback serves raw full objects.
    - **1.33:** the gate is off, and the server rejects `sendInitialEvents` with 422.
    - **1.34 to 1.37:** the initial objects arrive as Table ADDED events, then the annotated bookmark.
-   - So a Table upstream streams on 1.34 and later.
-     On 1.33 it lists in pages and watches from the exact `resourceVersion` of the list.
+   - So a Table upstream can stream on 1.34 and later.
+     The hub streams only where the answer comes gzipped, from 1.37 (ARCHITECTURE 3.2), and lists in pages and watches from the exact `resourceVersion` of the list before, on 1.33 too.
 10. **Every `k8s.io/apiserver` server implements Table.**
     Its installer refuses a lister without a TableConvertor ([installer.go](https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/installer.go#L483-L487)), and metrics-server implements one ([pod.go](https://github.com/kubernetes-sigs/metrics-server/blob/v0.9.1/pkg/api/pod.go#L141-L158)).
     A server built otherwise may ignore `as=Table`; the Accept header's `application/json` fallback then brings raw lists and objects, which get the metadata columns, Name and Age (fixtures `raw-list.json`, `raw-watch.jsonl`).
