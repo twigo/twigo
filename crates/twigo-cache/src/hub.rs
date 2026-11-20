@@ -15,8 +15,8 @@
 //!   namespace, keeping its rows until theirs are listed.
 //! - A list shows the rows of each part that has listed and is not refused,
 //!   whatever the others are ([`Subscription::drain_shown`]); what needs
-//!   every part, such as a whole list of pods, reads their least ready
-//!   state ([`combine`]).
+//!   every part, such as an object's page, reads their least ready state
+//!   ([`combine`]).
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
