@@ -14,31 +14,31 @@ use tokio::time::Instant;
 use twigo_ipc::Access;
 use twigo_kube::client::Clients;
 
+use crate::upstream::Failure;
+
 /// How long RBAC's no holds before it is asked again, so a RoleBinding
 /// granted since counts; a yes holds, as the server still decides.
 pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 
 /// How long the namespaces a person may list a resource in hold once they
 /// are resolved, so each list of all namespaces opened meanwhile reads them
-/// and asks nothing. The first list after that reads them anyway, and they
-/// are resolved again for the lists after it.
+/// and asks nothing.
 pub(crate) const RESOLVED_FOR: Duration = Duration::from_secs(300);
 
-/// What "all namespaces" of a resource came to for a person who may not list
-/// it cluster-wide.
+/// What "all namespaces" of a resource came to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Resolved {
-    /// The namespaces they may list it in, sorted.
+    /// The namespaces they may list it in, sorted; none when the cluster part
+    /// reads it, for a cluster-wide yes as for a refusal.
     pub allowed: Vec<String>,
     /// How many of the cluster's namespaces that leaves out.
     pub omitted: u32,
 }
 
-/// What [`Cluster::resolved`] finds.
 pub(crate) struct Kept {
     pub resolved: Resolved,
-    /// It is due, as a set is past [`RESOLVED_FOR`] and a guess at once, and
-    /// the asker is the one to resolve it again.
+    /// It is due, past [`RESOLVED_FOR`], and the asker is the one to resolve
+    /// it again.
     pub renew: bool,
 }
 
@@ -55,20 +55,8 @@ struct Memo {
 /// What a review asks: the namespace, none for every namespace, and the access.
 type Asked = (Option<String>, Access);
 
-/// Why a review has no answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Unanswered {
-    /// The server rejects the credentials, or their plugin fails: asking again
-    /// by itself would run the plugin again.
-    Unauthorized,
-    /// The server refuses the review itself, as it will every time.
-    Refused,
-    /// A 429, a 5xx, a timeout or a connection that broke: it may answer later.
-    Failed,
-}
-
 /// A review under way, whose answer every asker of it takes.
-type Review = Shared<BoxFuture<'static, Result<bool, Unanswered>>>;
+type Review = Shared<BoxFuture<'static, Result<bool, Failure>>>;
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -118,8 +106,8 @@ impl Cluster {
         clients: &Arc<Clients>,
         namespace: Option<&str>,
         access: &Access,
-        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Unanswered>>,
-    ) -> Result<bool, Unanswered> {
+        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Failure>>,
+    ) -> Result<bool, Failure> {
         let asked: Asked = (namespace.map(str::to_owned), access.clone());
         let review = {
             let mut facts = self.facts(clients);
@@ -152,10 +140,10 @@ impl Cluster {
     }
 
     /// What all namespaces of the resource `access` names came to, if it is
-    /// kept. A set of namespaces stays past its time, which a guess has at
-    /// once, and is read by every asker, the first of whom resolves it again;
-    /// a refusal, which no namespace is allowed, lasts [`REFUSED_FOR`], as a
-    /// review's no.
+    /// kept. A set of namespaces stays past its time and is read by every
+    /// asker, the first of whom resolves it again; a set with no namespace,
+    /// which the cluster-wide yes and a refusal come to, lasts
+    /// [`REFUSED_FOR`], as a review's no.
     pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Kept> {
         let mut facts = self.facts(clients);
         let memo = facts
@@ -193,33 +181,15 @@ impl Cluster {
     }
 
     /// A resolution that did not answer every question leaves the set it
-    /// renews as it is, for the next list to resolve again. With none, its
-    /// guess, which counts what did not answer as allowed, is kept, due at
-    /// once.
-    pub fn set_unsettled(&self, clients: &Arc<Clients>, access: &Access, guess: Option<Resolved>) {
-        let mut facts = self.facts(clients);
-        let key = (access.group.clone(), access.resource.clone());
-        match facts.resolved.get_mut(&key) {
-            Some(memo) if !memo.resolved.allowed.is_empty() => memo.renewing = false,
-            _ => {
-                if let Some(resolved) = guess {
-                    facts.resolved.insert(
-                        key,
-                        Memo {
-                            resolved,
-                            due: Instant::now(),
-                            renewing: false,
-                        },
-                    );
-                }
-            }
-        }
-    }
-
-    pub fn forget_resolved(&self, clients: &Arc<Clients>, access: &Access) {
-        self.facts(clients)
+    /// renews as it is, for the next list to resolve again.
+    pub fn set_unsettled(&self, clients: &Arc<Clients>, access: &Access) {
+        if let Some(memo) = self
+            .facts(clients)
             .resolved
-            .remove(&(access.group.clone(), access.resource.clone()));
+            .get_mut(&(access.group.clone(), access.resource.clone()))
+        {
+            memo.renewing = false;
+        }
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

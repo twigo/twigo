@@ -116,8 +116,15 @@ impl Live {
         (Hub::new(connect), clients)
     }
 
-    /// The config of `live`'s cluster over the token of a service account.
-    async fn as_account(&self, accounts: &Api<ServiceAccount>, name: &str) -> Config {
+    /// The config of `live`'s cluster over the token of a new service account.
+    async fn as_account(&self, home: &str, name: &str) -> Config {
+        let accounts = Api::<ServiceAccount>::namespaced(self.admin.clone(), home);
+        let account: ServiceAccount =
+            serde_json::from_value(json!({ "metadata": { "name": name } })).unwrap();
+        accounts
+            .create(&PostParams::default(), &account)
+            .await
+            .unwrap();
         let request: TokenRequest =
             serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
         let token = accounts
@@ -134,6 +141,68 @@ impl Live {
             ..AuthInfo::default()
         };
         config
+    }
+
+    async fn allow_pods_in(&self, namespace: &str, home: &str, account: &str) {
+        let role: Role = serde_json::from_value(json!({
+            "metadata": { "name": "pods" },
+            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
+        }))
+        .unwrap();
+        Api::<Role>::namespaced(self.admin.clone(), namespace)
+            .create(&PostParams::default(), &role)
+            .await
+            .unwrap();
+        let binding: RoleBinding = serde_json::from_value(json!({
+            "metadata": { "name": format!("{account}-pods") },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pods" },
+            "subjects": [{ "kind": "ServiceAccount", "name": account, "namespace": home }]
+        }))
+        .unwrap();
+        Api::<RoleBinding>::namespaced(self.admin.clone(), namespace)
+            .create(&PostParams::default(), &binding)
+            .await
+            .unwrap();
+    }
+
+    async fn allow_everywhere(
+        &self,
+        name: &str,
+        resource: &str,
+        verbs: &[&str],
+        home: &str,
+        account: &str,
+    ) {
+        let role: ClusterRole = serde_json::from_value(json!({
+            "metadata": { "name": name },
+            "rules": [{ "apiGroups": [""], "resources": [resource], "verbs": verbs }]
+        }))
+        .unwrap();
+        Api::<ClusterRole>::all(self.admin.clone())
+            .create(&PostParams::default(), &role)
+            .await
+            .unwrap();
+        let binding: ClusterRoleBinding = serde_json::from_value(json!({
+            "metadata": { "name": name },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": name },
+            "subjects": [{ "kind": "ServiceAccount", "name": account, "namespace": home }]
+        }))
+        .unwrap();
+        Api::<ClusterRoleBinding>::all(self.admin.clone())
+            .create(&PostParams::default(), &binding)
+            .await
+            .unwrap();
+    }
+
+    async fn revoke_everywhere(&self, name: &str) {
+        Api::<ClusterRoleBinding>::all(self.admin.clone())
+            .delete(name, &DeleteParams::default())
+            .await
+            .unwrap();
+        Api::<ClusterRole>::all(self.admin.clone())
+            .delete(name, &DeleteParams::default())
+            .await
+            .unwrap();
     }
 
     async fn minor(&self) -> u32 {
@@ -345,36 +414,11 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         namespaces.push(live.namespace("hub-sa").await);
     }
     let home = &namespaces[0];
-    let accounts = Api::<ServiceAccount>::namespaced(live.admin.clone(), home);
-    let account: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "viewer" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &account)
-        .await
-        .unwrap();
     for namespace in &namespaces {
-        let role: Role = serde_json::from_value(json!({
-            "metadata": { "name": "pods" },
-            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
-        }))
-        .unwrap();
-        Api::<Role>::namespaced(live.admin.clone(), namespace)
-            .create(&PostParams::default(), &role)
-            .await
-            .unwrap();
-        let binding: RoleBinding = serde_json::from_value(json!({
-            "metadata": { "name": "viewer-pods" },
-            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pods" },
-            "subjects": [{ "kind": "ServiceAccount", "name": "viewer", "namespace": home }]
-        }))
-        .unwrap();
-        Api::<RoleBinding>::namespaced(live.admin.clone(), namespace)
-            .create(&PostParams::default(), &binding)
-            .await
-            .unwrap();
+        live.allow_pods_in(namespace, home, "viewer").await;
         live.pod(namespace, "p").await;
     }
-    let config = live.as_account(&accounts, "viewer").await;
+    let config = live.as_account(home, "viewer").await;
 
     let (hub, _clients) = live.hub(Some(&config));
     let five: Vec<&str> = namespaces.iter().map(String::as_str).collect();
@@ -427,32 +471,10 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     until(&mut all, |all| all.state() == forbidden).await;
 
     // One that may list pods everywhere shares one cluster-wide upstream.
-    let lister: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "lister" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &lister)
-        .await
-        .unwrap();
     let everywhere = format!("{home}-pods");
-    let role: ClusterRole = serde_json::from_value(json!({
-        "metadata": { "name": everywhere },
-        "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
-    }))
-    .unwrap();
-    let roles = Api::<ClusterRole>::all(live.admin.clone());
-    roles.create(&PostParams::default(), &role).await.unwrap();
-    let binding: ClusterRoleBinding = serde_json::from_value(json!({
-        "metadata": { "name": everywhere },
-        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": everywhere },
-        "subjects": [{ "kind": "ServiceAccount", "name": "lister", "namespace": home }]
-    }))
-    .unwrap();
-    let bindings = Api::<ClusterRoleBinding>::all(live.admin.clone());
-    bindings
-        .create(&PostParams::default(), &binding)
-        .await
-        .unwrap();
-    let config = live.as_account(&accounts, "lister").await;
+    live.allow_everywhere(&everywhere, "pods", &["list", "watch"], home, "lister")
+        .await;
+    let config = live.as_account(home, "lister").await;
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the binding a moment later.
     let allowed = async {
@@ -473,14 +495,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     assert_eq!(hub.scopes(), [Scope::Cluster], "the review allowed it");
     assert_eq!(wide.items().len(), 5, "filtered to the five");
 
-    bindings
-        .delete(&everywhere, &DeleteParams::default())
-        .await
-        .unwrap();
-    roles
-        .delete(&everywhere, &DeleteParams::default())
-        .await
-        .unwrap();
+    live.revoke_everywhere(&everywhere).await;
     for namespace in &namespaces {
         live.delete_namespace(namespace).await;
     }
@@ -496,63 +511,29 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         live.namespace("hub-all").await,
     ];
     let (home, others) = (&namespaces[0], &namespaces[1..]);
-    let accounts = Api::<ServiceAccount>::namespaced(live.admin.clone(), home);
-    let account: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "namer" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &account)
-        .await
-        .unwrap();
     for namespace in &namespaces {
         live.pod(namespace, "p").await;
     }
-    for namespace in [home, &others[0]] {
-        let role: Role = serde_json::from_value(json!({
-            "metadata": { "name": "pods" },
-            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
-        }))
-        .unwrap();
-        Api::<Role>::namespaced(live.admin.clone(), namespace)
-            .create(&PostParams::default(), &role)
-            .await
-            .unwrap();
-        let binding: RoleBinding = serde_json::from_value(json!({
-            "metadata": { "name": "namer-pods" },
-            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pods" },
-            "subjects": [{ "kind": "ServiceAccount", "name": "namer", "namespace": home }]
-        }))
-        .unwrap();
-        Api::<RoleBinding>::namespaced(live.admin.clone(), namespace)
-            .create(&PostParams::default(), &binding)
-            .await
-            .unwrap();
+    let read = [home, &others[0]];
+    for namespace in read {
+        live.allow_pods_in(namespace, home, "namer").await;
     }
     let name = format!("{home}-namespaces");
-    let role: ClusterRole = serde_json::from_value(json!({
-        "metadata": { "name": name },
-        "rules": [{ "apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"] }]
-    }))
-    .unwrap();
-    let roles = Api::<ClusterRole>::all(live.admin.clone());
-    roles.create(&PostParams::default(), &role).await.unwrap();
-    let binding: ClusterRoleBinding = serde_json::from_value(json!({
-        "metadata": { "name": name },
-        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": name },
-        "subjects": [{ "kind": "ServiceAccount", "name": "namer", "namespace": home }]
-    }))
-    .unwrap();
-    let bindings = Api::<ClusterRoleBinding>::all(live.admin.clone());
-    bindings
-        .create(&PostParams::default(), &binding)
-        .await
-        .unwrap();
-    let config = live.as_account(&accounts, "namer").await;
+    live.allow_everywhere(
+        &name,
+        "namespaces",
+        &["get", "list", "watch"],
+        home,
+        "namer",
+    )
+    .await;
+    let config = live.as_account(home, "namer").await;
 
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the bindings a moment later.
     let allowed = async {
         let one = kube::api::ListParams::default().limit(1);
-        for namespace in [home, &others[0]] {
+        for namespace in read {
             let pods = Api::<Pod>::namespaced(clients.api.clone(), namespace);
             while pods.list(&one).await.is_err() {
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -576,14 +557,10 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     })
     .await;
     let after = namespace_api.list(&every).await.unwrap().items.len();
-    let read: Vec<&String> = [home, &others[0]].into();
-    let mut scopes: Vec<Scope> = read
-        .iter()
-        .map(|namespace| Scope::Namespace((*namespace).clone()))
-        .collect();
-    scopes.sort_by_key(|scope| format!("{scope:?}"));
+    let scopes = hub.scopes();
     assert!(
-        scopes.iter().all(|scope| hub.scopes().contains(scope)),
+        read.iter()
+            .all(|namespace| scopes.contains(&Scope::Namespace((*namespace).clone()))),
         "an upstream for each of the two"
     );
     assert_eq!(all.items().len(), 2, "their pods");
@@ -594,11 +571,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         "the namespaces of the cluster less the two read: {left_out}, counted {before} then {after}"
     );
 
-    bindings
-        .delete(&name, &DeleteParams::default())
-        .await
-        .unwrap();
-    roles.delete(&name, &DeleteParams::default()).await.unwrap();
+    live.revoke_everywhere(&name).await;
     for namespace in &namespaces {
         live.delete_namespace(namespace).await;
     }

@@ -42,7 +42,7 @@ use tokio::time::Instant;
 use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
-use crate::cluster::{Cluster, Resolved, Unanswered};
+use crate::cluster::{Cluster, Resolved};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
@@ -447,8 +447,8 @@ impl Hub {
     /// may not list it cluster-wide, as kept with the context's clients or
     /// asked anew: the namespaces where a review allows listing it. No
     /// namespace when they may list it cluster-wide, or may list it nowhere,
-    /// or the namespaces are refused, which the cluster's own refusal then
-    /// says.
+    /// or the namespaces are refused, which the cluster part then answers,
+    /// with its rows or its own refusal.
     ///
     /// A set kept past its time is read at once, and resolved again in the
     /// background for the lists after it; a resolution that fails or leaves a
@@ -484,46 +484,36 @@ impl Hub {
     ) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
         match self.ask(query, &access).await {
-            Ok(Found::Everywhere) => {
-                cluster.forget_resolved(clients, &access);
-                Ok(Resolved::default())
-            }
-            Ok(Found::Namespaces {
-                resolved,
-                answered: true,
-            }) => {
+            Ok((resolved, true)) => {
                 cluster.set_resolved(clients, &access, resolved.clone());
                 Ok(resolved)
             }
-            Ok(Found::Namespaces {
-                resolved,
-                answered: false,
-            }) => {
-                cluster.set_unsettled(clients, &access, Some(resolved.clone()));
-                Ok(resolved)
-            }
-            Err(waiting) => {
-                cluster.set_unsettled(clients, &access, None);
-                Err(waiting)
+            unsettled => {
+                cluster.set_unsettled(clients, &access);
+                unsettled.map(|(resolved, _)| resolved)
             }
         }
     }
 
-    async fn ask(&self, query: &Query, access: &Access) -> Result<Found, ViewState> {
+    /// The namespaces where the person may list the resource, with whether
+    /// every question answered. A cluster-wide yes, a review the server
+    /// refuses and namespaces it refuses are no namespace, which the cluster
+    /// part then answers as the cluster does.
+    async fn ask(&self, query: &Query, access: &Access) -> Result<(Resolved, bool), ViewState> {
+        let none = (Resolved::default(), true);
         match self.review(&query.context, None, access).await {
-            Ok(true) => return Ok(Found::Everywhere),
+            Ok(true) | Err(Failure::Refused(_)) => return Ok(none),
             Ok(false) => {}
-            Err(Unanswered::Refused) => return Ok(Found::refused()),
-            Err(Unanswered::Unauthorized) => return Err(ViewState::Unauthorized),
-            Err(Unanswered::Failed) => return Err(ViewState::Connecting),
+            Err(Failure::Unauthorized) => return Err(ViewState::Unauthorized),
+            Err(_) => return Err(ViewState::Connecting),
         }
         let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
-            Err(ViewState::Forbidden { .. }) => return Ok(Found::refused()),
+            Err(ViewState::Forbidden { .. }) => return Ok(none),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
-        let reviews: Vec<BoxFuture<'static, Result<bool, Unanswered>>> = names
+        let reviews: Vec<BoxFuture<'static, Result<bool, Failure>>> = names
             .iter()
             .map(|name| {
                 let (hub, context, access, name) = (
@@ -538,7 +528,7 @@ impl Hub {
         let mut asked = futures::stream::iter(reviews).buffered(REVIEWS);
         let mut answers: Vec<Option<bool>> = Vec::with_capacity(names.len());
         while let Some(answer) = asked.next().await {
-            if answer == Err(Unanswered::Unauthorized) {
+            if matches!(answer, Err(Failure::Unauthorized)) {
                 return Err(ViewState::Unauthorized);
             }
             answers.push(answer.ok());
@@ -553,10 +543,7 @@ impl Hub {
             omitted: u32::try_from(names.len() - allowed.len()).unwrap_or(u32::MAX),
             allowed,
         };
-        Ok(Found::Namespaces {
-            resolved,
-            answered: answers.iter().all(Option::is_some),
-        })
+        Ok((resolved, answers.iter().all(Option::is_some)))
     }
 
     /// An object, followed by an Object upstream for its editor, unless its
@@ -760,7 +747,7 @@ impl Hub {
                 name: None,
                 ..access.clone()
             };
-            if self.review(context, namespace, &whole).await == Ok(true) {
+            if matches!(self.review(context, namespace, &whole).await, Ok(true)) {
                 return Some(true);
             }
         }
@@ -772,7 +759,7 @@ impl Hub {
         context: &str,
         namespace: Option<&str>,
         access: &Access,
-    ) -> Result<bool, Unanswered> {
+    ) -> Result<bool, Failure> {
         // kube-apiserver authorizes a request on a namespace in that
         // namespace (apiserver v0.37.1, `endpoints/request/requestinfo.go`).
         let namespace = match (
@@ -787,8 +774,8 @@ impl Hub {
             (self.inner.connect)(context.to_owned())
                 .await
                 .map_err(|error| match error.kind {
-                    ErrorKind::Unauthorized => Unanswered::Unauthorized,
-                    _ => Unanswered::Failed,
+                    ErrorKind::Unauthorized => Failure::Unauthorized,
+                    _ => Failure::Transient,
                 })?;
         let ask = || {
             let review = SelfSubjectAccessReview {
@@ -812,11 +799,7 @@ impl Hub {
                     .create(&PostParams::default(), &review)
                     .await
                     .map_err(|error| {
-                        match upstream::failure(&error, "create", "selfsubjectaccessreviews") {
-                            Failure::Unauthorized => Unanswered::Unauthorized,
-                            Failure::Refused(_) => Unanswered::Refused,
-                            Failure::Gone | Failure::Transient => Unanswered::Failed,
-                        }
+                        upstream::failure(&error, "create", "selfsubjectaccessreviews")
                     })?;
                 Ok(answer.status.is_some_and(|status| status.allowed))
             }
@@ -829,26 +812,6 @@ impl Hub {
     }
 }
 
-/// What a resolution of all namespaces found.
-enum Found {
-    /// The person may list the resource cluster-wide, which needs no set.
-    Everywhere,
-    /// The namespaces where they may list it, and whether every review
-    /// answered.
-    Namespaces { resolved: Resolved, answered: bool },
-}
-
-impl Found {
-    /// No namespace, which the cluster's own refusal then says.
-    fn refused() -> Self {
-        Found::Namespaces {
-            resolved: Resolved::default(),
-            answered: true,
-        }
-    }
-}
-
-/// What listing the resource asks of RBAC, in a namespace or in all of them.
 fn list_access(resource: &Resource) -> Access {
     Access {
         verb: "list".to_owned(),
@@ -1526,10 +1489,7 @@ where
     drop(replaced);
 }
 
-/// Settles what a subscription to all namespaces reads once its context's
-/// clients answer: the cluster-wide upstream for a person who may list the
-/// resource cluster-wide, else an upstream for each namespace they may list
-/// it in, or the cluster's own refusal when there is none; nothing if the
+/// Settles what a subscription to all namespaces reads, and nothing if the
 /// subscription ends first. What does not answer is tried again with the
 /// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {

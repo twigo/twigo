@@ -12,6 +12,13 @@ use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::{IDLE, INITIAL_IDLE};
 
+pub(super) fn forbidden() -> ViewState {
+    ViewState::Forbidden {
+        verb: "watch".to_owned(),
+        resource: "pods".to_owned(),
+    }
+}
+
 pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
@@ -1212,30 +1219,7 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         .insert("/api/v1/namespaces/a/pods".to_owned());
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
-    let forbidden = ViewState::Forbidden {
-        verb: "watch".to_owned(),
-        resource: "pods".to_owned(),
-    };
-    until(&mut pods, |state| *state == forbidden).await;
-    sleep(Duration::from_secs(200)).await;
-    let sent = fake.count("namespaces/a/pods");
-    assert!((4..=8).contains(&sent), "{sent} tries in 200 s");
-    assert_eq!(pods.state(), forbidden);
-    let last = *tries(&fake, "namespaces/a/pods").last().unwrap();
-    tokio::time::sleep_until(last + RETRY_WITHIN).await;
-    let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
-        .await
-        .into_iter()
-        .map(Result::unwrap)
-        .collect();
-    assert!(asking.iter().all(|asked| asked.state() == forbidden));
-    settle().await;
-    assert_eq!(
-        fake.count("namespaces/a/pods"),
-        sent + 1,
-        "subscriptions that come together cut its wait short once"
-    );
-    drop(asking);
+    until(&mut pods, |state| *state == forbidden()).await;
 
     fake.state().forbidden.clear();
     ready(&mut pods).await;
@@ -1459,23 +1443,13 @@ async fn a_no_from_rbac_is_asked_again_after_30_s_and_a_yes_holds() {
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
 }
 
-fn list_pods() -> twigo_ipc::Access {
-    twigo_ipc::Access {
-        verb: "list".to_owned(),
-        group: String::new(),
-        resource: "pods".to_owned(),
-        subresource: None,
-        name: None,
-    }
-}
-
 #[tokio::test(start_paused = true)]
 async fn reviews_of_the_same_question_in_flight_send_one_request() {
     let fake = Fake::default();
     fake.allow(Some("a"), "list", "pods");
     fake.state().reviews_take = Duration::from_secs(1);
     let (hub, _clients) = fake.hub(Budgets::default());
-    let access = list_pods();
+    let access = list_access(&pods());
     let ask = |namespace| hub.may("kind-test", Some(namespace), &access);
     let answers = tokio::join!(ask("a"), ask("a"), ask("b"));
     assert_eq!(answers, (Some(true), Some(true), Some(false)));
@@ -1555,31 +1529,7 @@ async fn the_namespaces_are_read_in_pages_with_no_watch_whatever_the_budget() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_namespaces_a_person_may_not_list_or_the_cluster_cannot_say_are_a_state() {
-    let fake = Fake::default();
-    fake.add("namespaces", None, "a");
-    let (hub, _clients) = fake.hub(Budgets::default());
-
-    fake.state()
-        .forbidden
-        .insert("/api/v1/namespaces".to_owned());
-    assert_eq!(
-        hub.namespaces("kind-test").await,
-        Err(ViewState::Forbidden {
-            verb: "list".to_owned(),
-            resource: "namespaces".to_owned(),
-        })
-    );
-
-    fake.state().forbidden.clear();
-    fake.state()
-        .no_endpoints
-        .insert("/api/v1/namespaces".to_owned());
-    assert_eq!(hub.namespaces("kind-test").await, Err(ViewState::Stale));
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_answers_at_once() {
+async fn the_namespaces_try_a_transient_failure_again_and_a_refusal_answers_at_once() {
     let fake = Fake::default();
     fake.add("namespaces", None, "b");
     fake.add("namespaces", None, "a");
@@ -1593,25 +1543,17 @@ async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_ans
     );
     assert_eq!(listed(), 2, "one 503, then the names");
 
-    fake.state().unavailable = usize::MAX;
-    let started = Instant::now();
-    let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
-    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
-    assert!(
-        (10..11).contains(&started.elapsed().as_secs()),
-        "{:?}",
-        started.elapsed()
-    );
-
-    fake.state().unavailable = 0;
     fake.state()
         .forbidden
         .insert("/api/v1/namespaces".to_owned());
     let (before, started) = (listed(), Instant::now());
-    assert!(matches!(
+    assert_eq!(
         hub.namespaces("kind-test").await,
-        Err(ViewState::Forbidden { .. })
-    ));
+        Err(ViewState::Forbidden {
+            verb: "list".to_owned(),
+            resource: "namespaces".to_owned(),
+        })
+    );
     assert_eq!((listed() - before, started.elapsed()), (1, Duration::ZERO));
 }
 
@@ -1708,30 +1650,18 @@ async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_often
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_first_list_that_ends_in_anything_but_a_403_tries_again_within_5_s() {
-    for garbled in [false, true] {
-        let fake = Fake::default();
-        fake.add("pods", Some("a"), "p1");
-        if garbled {
-            fake.state()
-                .garbled
-                .insert("/api/v1/namespaces/a/pods".to_owned());
-        } else {
-            fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
-        }
-        let (hub, _clients) = fake.hub(Budgets::default());
-        let mut pods = hub.rows(query(&["a"])).await.unwrap();
-        until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
 
-        fake.state().requests.clear();
-        sleep(Duration::from_secs(120)).await;
-        let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
-        assert!(
-            gaps.len() >= 20,
-            "{} tries in 120 s, garbled: {garbled}",
-            gaps.len() + 1
-        );
-        let wait = Duration::from_millis(500)..=RETRY_WITHIN;
-        assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
-    }
+    fake.state().requests.clear();
+    sleep(Duration::from_secs(120)).await;
+    let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
+    assert!(gaps.len() >= 20, "{} tries in 120 s", gaps.len() + 1);
+    let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+    assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
 }

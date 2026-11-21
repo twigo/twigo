@@ -305,14 +305,13 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
       The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
       The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
       A resolution asks again the cluster-wide review, whose no is kept 30 s, and the namespaces that were refused or did not answer, and keeps the ones allowed, since a yes is kept for the clients' life, as the server still decides: a namespace revoked since stays in the set, its part refused and saying so, until the clients are rebuilt.
-      Only a resolution that answers every question replaces the set, with a set, the cluster-wide yes or a refusal: one that fails, or leaves a review unanswered, keeps it, and the next list resolves it again.
-      A set with no namespace allowed, or a refusal to list the namespaces, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
+      Only a resolution that answers every question replaces the set, with a set that may be empty, as the cluster-wide yes and a refusal come to: one that fails, or leaves a review unanswered, keeps the set it renews, and the next list resolves it again.
+      A set with no namespace, which the cluster-wide yes, no namespace allowed and a refusal to list the namespaces come to, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
     - `Parts.omitted` counts the namespaces the cluster lists that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
     - With no namespace allowed, or the list of namespaces refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).
     - What does not answer is no answer.
-      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state.
-      With no answered set to keep, such a set is kept as a guess that the next list reads at once and resolves again.
+      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state, and with no set to renew the next list resolves it again.
       The clients may take long to come, as they do while a credential plugin signs the person in, and they, the cluster-wide review or the list of namespaces may fail without a refusal: a 429, a 5xx, a timeout or a connection that broke.
       The hub settles what "all" reads apart from the list's subscription, which returns at once, and tries again with the backoff below: the subscription has no part and says what it waits on, the clients' error while they fail and else `connecting`, never the cluster's refusal.
       Clients that say `unauthorized`, and a review or the list of namespaces that the cluster answers with a 401 or a failed credential plugin, stay so until a new subscription asks, since a retry would run the plugin by itself.

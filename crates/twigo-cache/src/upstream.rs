@@ -901,6 +901,7 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
     answered
 }
 
+#[derive(Clone)]
 pub(crate) enum Failure {
     Gone,
     Transient,
