@@ -12,6 +12,13 @@ use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::{IDLE, INITIAL_IDLE};
 
+pub(super) fn forbidden() -> ViewState {
+    ViewState::Forbidden {
+        verb: "watch".to_owned(),
+        resource: "pods".to_owned(),
+    }
+}
+
 pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
@@ -1212,11 +1219,7 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         .insert("/api/v1/namespaces/a/pods".to_owned());
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
-    let forbidden = ViewState::Forbidden {
-        verb: "watch".to_owned(),
-        resource: "pods".to_owned(),
-    };
-    until(&mut pods, |state| *state == forbidden).await;
+    until(&mut pods, |state| *state == forbidden()).await;
 
     fake.state().forbidden.clear();
     ready(&mut pods).await;

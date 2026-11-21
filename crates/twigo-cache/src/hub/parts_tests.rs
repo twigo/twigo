@@ -7,17 +7,10 @@ use tokio::time::sleep;
 use twigo_ipc::{Part, PartState, Parts, ViewState};
 use twigo_kube::client::Budgets;
 
-use super::tests::{budget, pods, query, reach, ready, settle, until};
+use super::tests::{budget, forbidden, pods, query, reach, ready, settle, until};
 use super::*;
 use crate::cluster::{REFUSED_FOR, RESOLVED_FOR};
 use crate::fake::Fake;
-
-fn forbidden() -> ViewState {
-    ViewState::Forbidden {
-        verb: "watch".to_owned(),
-        resource: "pods".to_owned(),
-    }
-}
 
 fn namespace_part(name: &str, state: ViewState, shown: bool) -> PartState {
     PartState {
