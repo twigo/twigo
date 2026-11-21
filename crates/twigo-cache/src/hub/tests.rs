@@ -1616,6 +1616,43 @@ async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_ans
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_try_under_way() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "b");
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets {
+        requests: 1,
+        ..Budgets::default()
+    });
+
+    fake.state().body_takes = Duration::from_secs(8);
+    let started = Instant::now();
+    let slow = tokio::spawn({
+        let hub = hub.clone();
+        async move { hub.namespaces("kind-test").await }
+    });
+    settle().await;
+    fake.state().unavailable = usize::MAX;
+    let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
+    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
+    assert!(
+        (18..19).contains(&started.elapsed().as_secs()),
+        "10 s after the slot came free at 8 s, not after the call: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(slow.await.unwrap(), Ok(vec!["a".into(), "b".into()]));
+
+    fake.state().unavailable = 0;
+    fake.state().body_takes = Duration::from_secs(11);
+    let started = Instant::now();
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Ok(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(started.elapsed().as_secs(), 11, "a try that has not failed");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_new_subscription_cuts_short_the_wait_of_a_refused_part_and_an_open_list_keeps_it() {
     for dropped in [false, true] {
         let fake = Fake::default();

@@ -391,22 +391,26 @@ impl Hub {
     /// The names of the context's namespaces, sorted, from one list of their
     /// metadata, which takes a request slot and no watch; or the state that
     /// refuses it. A transient failure is tried again with the backoff for
-    /// two of its longest waits, and says `stale` after.
+    /// two of its longest waits from the first failure, and says `stale`
+    /// after; a try under way is never cut.
     pub async fn namespaces(&self, context: &str) -> Result<Vec<String>, ViewState> {
         let mut backoff = backoff();
-        let tried = tokio::time::timeout(STALE_FOR, async {
-            loop {
-                match self.read_namespaces(context).await {
-                    Err(ViewState::Stale) => {}
-                    answered => return answered,
-                }
-                let pause = backoff
-                    .next()
-                    .expect("the backoff has no maximum of attempts");
-                tokio::time::sleep(pause).await;
+        let mut failed_at = None;
+        loop {
+            match self.read_namespaces(context).await {
+                Err(ViewState::Stale) => {}
+                answered => return answered,
             }
-        });
-        tried.await.unwrap_or(Err(ViewState::Stale))
+            let failed_at = *failed_at.get_or_insert_with(Instant::now);
+            let left = STALE_FOR.saturating_sub(failed_at.elapsed());
+            if left.is_zero() {
+                return Err(ViewState::Stale);
+            }
+            let pause = backoff
+                .next()
+                .expect("the backoff has no maximum of attempts");
+            tokio::time::sleep(pause.min(left)).await;
+        }
     }
 
     /// One try of [`namespaces`](Self::namespaces).
