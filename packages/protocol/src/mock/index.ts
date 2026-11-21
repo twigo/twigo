@@ -6,7 +6,7 @@ import type {
   ResponseOf,
   SubscriptionCommand,
 } from "../backend";
-import { IpcError } from "../error";
+import { IpcError, wireError } from "../error";
 import type {
   Column,
   KeyboardLayout,
@@ -800,12 +800,12 @@ export function createMockBackend(
         typeof selected === "string"
           ? {
               state: "error",
-              error: {
-                code: "server.invalid",
-                kind: "invalidInput",
-                message: selected,
-                server: { reason: "BadRequest", causes: [] },
-              },
+              error: wireError(
+                new IpcError("server.invalid", selected, undefined, {
+                  reason: "BadRequest",
+                  causes: [],
+                }),
+              ),
             }
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
@@ -1017,12 +1017,14 @@ const PINNED: Readonly<
   unauthorized: { state: "unauthorized" },
   error: {
     state: "error",
-    error: {
-      code: "server.invalid",
-      kind: "invalidInput",
-      message: "field label not supported: spec.containers",
-      server: { reason: "BadRequest", causes: [] },
-    },
+    error: wireError(
+      new IpcError(
+        "server.invalid",
+        "field label not supported: spec.containers",
+        undefined,
+        { reason: "BadRequest", causes: [] },
+      ),
+    ),
   },
 };
 
