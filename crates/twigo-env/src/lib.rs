@@ -265,10 +265,10 @@ async fn run(
             if let Some(group) = group
                 && let Err(error) = killpg(group, Signal::SIGKILL)
             {
-                eprintln!("could not stop {}: {error}", shell.display());
+                tracing::warn!(path = %shell.display(), %error, "could not stop the shell's process group");
             }
             if let Err(error) = child.wait().await {
-                eprintln!("could not reap {}: {error}", shell.display());
+                tracing::warn!(path = %shell.display(), %error, "could not reap the shell");
             }
             Reason::Timeout
         }

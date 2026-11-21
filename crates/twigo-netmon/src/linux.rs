@@ -31,15 +31,13 @@ impl Listeners {
                     wakes(&bus, &events).await
                 };
                 if let Err(error) = woke.await {
-                    eprintln!(
-                        "logind's sleep signal is out of reach, so a wake goes unseen: {error}"
-                    );
+                    tracing::warn!(%error, "logind's sleep signal is out of reach, so a wake goes unseen");
                 }
             })
         };
         let network = tokio::spawn(async move {
             if let Err(error) = changes(&events).await {
-                eprintln!("rtnetlink is out of reach, so network changes go unseen: {error}");
+                tracing::warn!(%error, "rtnetlink is out of reach, so network changes go unseen");
             }
         });
         Self {

@@ -255,7 +255,7 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
     match stored {
         Ok(Some(document)) => return Ok(Some(document)),
         Ok(None) => {}
-        Err(error) => eprintln!("could not read the cached OpenAPI document {url}: {error}"),
+        Err(error) => tracing::warn!(url, %error, "could not read a cached OpenAPI document"),
     }
 
     let (status, document) = get(client, uri).await?;
@@ -272,7 +272,7 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
             .expect("writing a file does not panic")
     };
     if let Err(error) = stored {
-        eprintln!("could not cache the OpenAPI document {url}: {error}");
+        tracing::warn!(url, %error, "could not cache an OpenAPI document");
     }
     Ok(Some(document))
 }

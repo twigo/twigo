@@ -103,7 +103,7 @@ impl Watched {
             Ok(events) => touches(events, &self.targets, &self.dirs),
             Err(errors) => {
                 for error in errors {
-                    eprintln!("the kubeconfig watch failed: {error}");
+                    tracing::warn!(%error, "the kubeconfig watch failed");
                 }
                 true
             }
@@ -125,7 +125,7 @@ impl Watched {
         for dir in self.dirs.drain() {
             match self.debouncer.unwatch(&dir) {
                 Err(error) if !matches!(error.kind, ErrorKind::WatchNotFound) => {
-                    eprintln!("could not stop watching {}: {error}", dir.display());
+                    tracing::warn!(path = %dir.display(), %error, "could not stop watching a directory");
                 }
                 _ => {}
             }
@@ -135,7 +135,9 @@ impl Watched {
                 Ok(()) => {
                     self.dirs.insert(dir);
                 }
-                Err(error) => eprintln!("could not watch {}: {error}", dir.display()),
+                Err(error) => {
+                    tracing::warn!(path = %dir.display(), %error, "could not watch a directory");
+                }
             }
         }
         self.targets = targets;

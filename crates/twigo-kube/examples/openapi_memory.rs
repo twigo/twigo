@@ -6,6 +6,7 @@
 //! per process, so that none leaves its memory in the baseline of the next.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-kube --example openapi_memory -- apps/v1 Deployment
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};

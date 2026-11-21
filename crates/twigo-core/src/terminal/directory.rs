@@ -71,7 +71,7 @@ impl Drop for Directory {
         if let Err(error) = fs::remove_dir_all(&self.0)
             && error.kind() != io::ErrorKind::NotFound
         {
-            eprintln!("could not delete {}: {error}", self.0.display());
+            tracing::warn!(path = %self.0.display(), %error, "could not delete");
         }
     }
 }
@@ -81,7 +81,7 @@ pub(super) fn wipe(root: &Path) {
     if let Err(error) = fs::remove_dir_all(root)
         && error.kind() != io::ErrorKind::NotFound
     {
-        eprintln!("could not delete {}: {error}", root.display());
+        tracing::warn!(path = %root.display(), %error, "could not delete");
     }
 }
 

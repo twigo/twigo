@@ -180,7 +180,7 @@ impl State {
             return Choices::default();
         };
         serde_json::from_str(value.get()).unwrap_or_else(|error| {
-            eprintln!("could not read the contexts' modes from the state: {error}");
+            tracing::warn!(%error, "could not read the contexts' modes from the state");
             Choices::default()
         })
     }
@@ -205,7 +205,7 @@ impl State {
         value
             .map(|value| {
                 serde_json::from_str(value.get()).unwrap_or_else(|error| {
-                    eprintln!("could not read the forwards of {space} from the state: {error}");
+                    tracing::warn!(space, %error, "could not read the forwards of a space from the state");
                     Saved::default()
                 })
             })
@@ -358,10 +358,7 @@ impl Inner {
             std::thread::sleep(delay);
             self.scheduled.store(false, Ordering::Release);
             if let Err(error) = self.write() {
-                eprintln!(
-                    "could not save the state to {}: {error}",
-                    self.path.display()
-                );
+                tracing::error!(path = %self.path.display(), %error, "could not save the state");
             }
         }
     }
@@ -415,13 +412,9 @@ fn read(path: &Path) -> File {
 
 fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
     let aside = path.with_extension("json.unreadable");
-    eprintln!(
-        "the state in {} cannot be read ({reason}); it moves to {}",
-        path.display(),
-        aside.display()
-    );
+    tracing::error!(path = %path.display(), %reason, "the state cannot be read, so it moves to a file of its name with .unreadable");
     if let Err(error) = std::fs::rename(path, &aside) {
-        eprintln!("could not move the state aside: {error}");
+        tracing::error!(path = %path.display(), %error, "could not move the state aside");
     }
     File {
         version: VERSION,

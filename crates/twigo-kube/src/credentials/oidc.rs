@@ -269,11 +269,7 @@ impl Oidc {
                 Ok(credential) => return Ok(credential),
                 Err(error) => {
                     self.state().spent = true;
-                    eprintln!(
-                        "kept the rejected oidc token of {}, since its refresh failed: {}",
-                        self.user,
-                        error.loggable()
-                    );
+                    tracing::warn!(user = %self.user, error = %error.loggable(), "kept the rejected oidc token, since its refresh failed");
                 }
             }
         }
@@ -334,11 +330,9 @@ impl Oidc {
                     let refresh = rotated.or_else(|| state.on_disk.1.clone());
                     state.on_disk = (Some(written_id), refresh);
                 }
-                Err((origin, error)) => eprintln!(
-                    "kept the refreshed oidc tokens of {} in memory only: {}: {error}",
-                    self.user,
-                    origin.display()
-                ),
+                Err((origin, error)) => {
+                    tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
+                }
             }
         }
         credential

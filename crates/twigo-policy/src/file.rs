@@ -109,7 +109,7 @@ impl PolicyFile {
                 };
             }
             Err(error) => {
-                eprintln!("could not read {file}, so every context is read-only: {error}");
+                tracing::error!(path = %file, %error, "could not read the policy file, so every context is read-only");
                 return Self {
                     file,
                     state: State::Unreadable,
@@ -119,7 +119,7 @@ impl PolicyFile {
         match Self::parse(&text) {
             Ok(state) => Self { file, state },
             Err(error) => {
-                eprintln!("could not read {file}, so every context is read-only: {error}");
+                tracing::error!(path = %file, %error, "could not read the policy file, so every context is read-only");
                 Self {
                     file,
                     state: State::Unreadable,

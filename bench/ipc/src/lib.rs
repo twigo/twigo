@@ -2,6 +2,11 @@
 //!
 //! `TWIGO_BENCH_IPC` picks what the page runs: `cost` or `frames`.
 //! The page ends with `report`, which prints one JSON line and exits non-zero on a failed check.
+#![expect(
+    clippy::print_stderr,
+    clippy::print_stdout,
+    reason = "the bench's stdout and stderr are its interface"
+)]
 
 use std::collections::HashMap;
 use std::sync::Mutex;

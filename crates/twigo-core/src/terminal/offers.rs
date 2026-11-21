@@ -407,7 +407,7 @@ impl State {
             .written
             .outcome(held.source.sources.files())
             .unwrap_or_else(|error| {
-                eprintln!("could not tell what a move of an offer leaves out: {error}");
+                tracing::warn!(%error, "could not tell what a move of an offer leaves out");
                 Outcome {
                     moves: names.clone(),
                     left_out: Names::default(),

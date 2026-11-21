@@ -2,6 +2,7 @@
 //! Mac, read without selecting them: the input source stays as it is.
 //!
 //! cargo run -p twigo-keyboard --example record
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 #[cfg(target_os = "macos")]
 fn main() {

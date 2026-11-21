@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use twigo_ipc::BusyWhy;
+use twigo_log::Repeats;
 
 use super::connect::Duplex;
 use super::{ACCEPT_PAUSE, LISTENING_PROBE};
@@ -80,6 +81,7 @@ impl Listeners {
 }
 
 async fn accept(held: Arc<Held>, sockets: mpsc::UnboundedSender<Socket>) {
+    let mut failures = Repeats::default();
     loop {
         let accepted = poll_fn(|cx| match held.0.lock().expect("listener lock").as_ref() {
             Some(listener) => listener.poll_accept(cx).map(Some),
@@ -87,20 +89,34 @@ async fn accept(held: Arc<Held>, sockets: mpsc::UnboundedSender<Socket>) {
         })
         .await;
         match accepted {
-            None => return,
+            None => break,
             Some(Ok((socket, _))) => {
+                if let Some(count) = failures.ended() {
+                    tracing::warn!(
+                        count,
+                        "a forward accepts connections again, after more failures"
+                    );
+                }
                 if let Err(error) = socket.set_nodelay(true) {
-                    eprintln!("could not set TCP_NODELAY on a forward's connection: {error}");
+                    tracing::trace!(%error, "could not set TCP_NODELAY on a forward's connection");
                 }
                 if sockets.send(Box::new(socket)).is_err() {
-                    return;
+                    break;
                 }
             }
             Some(Err(error)) => {
-                eprintln!("could not accept a connection to a forward: {error}");
+                if failures.failed() {
+                    tracing::warn!(%error, "could not accept a connection to a forward");
+                }
                 sleep(ACCEPT_PAUSE).await;
             }
         }
+    }
+    if let Some(count) = failures.ended() {
+        tracing::warn!(
+            count,
+            "a forward ended, after more failures to accept a connection"
+        );
     }
 }
 

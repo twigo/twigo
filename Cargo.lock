@@ -5942,10 +5942,12 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "tokio",
+ "tracing",
  "twigo-core",
  "twigo-env",
  "twigo-ipc",
  "twigo-keyboard",
+ "twigo-log",
  "twigo-netmon",
 ]
 
@@ -6022,6 +6024,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tower",
+ "tracing",
  "twigo-ipc",
  "twigo-kube",
  "twigo-quantity",
@@ -6059,12 +6062,14 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower",
+ "tracing",
  "twigo-cache",
  "twigo-core",
  "twigo-describe",
  "twigo-env",
  "twigo-ipc",
  "twigo-kube",
+ "twigo-log",
  "twigo-netmon",
  "twigo-policy",
  "twigo-quantity",
@@ -6095,6 +6100,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
  "twigo-ipc",
 ]
 
@@ -6131,6 +6137,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
  "twigo-ipc",
  "wayland-client",
  "wayland-protocols-misc",
@@ -6178,6 +6185,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower",
+ "tracing",
  "twigo-cache",
  "twigo-env",
  "twigo-ipc",
@@ -6214,6 +6222,7 @@ dependencies = [
  "objc2-io-kit",
  "objc2-system-configuration",
  "tokio",
+ "tracing",
  "zbus",
 ]
 
@@ -6273,10 +6282,12 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
+ "tracing",
  "twigo-cache",
  "twigo-describe",
  "twigo-ipc",
  "twigo-kube",
+ "twigo-log",
 ]
 
 [[package]]

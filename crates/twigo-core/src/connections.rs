@@ -197,7 +197,7 @@ impl Connections {
     pub fn wake(&self) {
         for (name, clients) in self.built() {
             clients.connections().wake();
-            eprintln!("woke from sleep: retired the connections of {name}");
+            tracing::info!(context = %name, "woke from sleep, so the connections were retired");
         }
     }
 
@@ -206,7 +206,7 @@ impl Connections {
     pub fn retire_moved(&self) {
         for (name, clients) in self.built() {
             if clients.connections().retire_moved() {
-                eprintln!("the route to {name} moved: retired its connections");
+                tracing::info!(context = %name, "the route moved, so the connections were retired");
             }
         }
     }

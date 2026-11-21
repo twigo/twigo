@@ -24,6 +24,7 @@
 
 mod facts;
 mod panic;
+mod repeats;
 mod rotating;
 
 use std::io;
@@ -32,6 +33,7 @@ use std::sync::Once;
 
 pub use facts::Facts;
 pub use panic::install_hook;
+pub use repeats::Repeats;
 pub use rotating::{Limits, Rotating};
 pub use tracing::Level;
 use tracing::level_filters::LevelFilter;

@@ -13,6 +13,9 @@ publish.workspace = true
 # protection unplanned and unrecorded, for tests.
 test-util = []
 
+[lints]
+workspace = true
+
 [dependencies]
 base64.workspace = true
 form_urlencoded.workspace = true

@@ -166,7 +166,7 @@ unsafe extern "C" fn keymap(
     KEYBOARD.with_borrow_mut(|keyboard| {
         let Some(keyboard) = keyboard else { return };
         if format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 {
-            eprintln!("keeping the previous keyboard layout: a keymap in format {format}");
+            tracing::warn!(format, "keeping the previous keyboard layout, whose keymap is in a format Twigo does not read");
             return;
         }
         // SAFETY: `fd` and `size` describe the keymap as the event sent it.
@@ -186,9 +186,9 @@ unsafe extern "C" fn keymap(
                 keyboard.publish();
             }
             Ok(None) => {
-                eprintln!("keeping the previous keyboard layout: its keymap does not compile")
+                tracing::warn!("keeping the previous keyboard layout, whose keymap does not compile");
             }
-            Err(error) => eprintln!("keeping the previous keyboard layout: {error}"),
+            Err(error) => tracing::warn!(%error, "keeping the previous keyboard layout"),
         }
     });
 }

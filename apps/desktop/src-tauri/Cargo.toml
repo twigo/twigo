@@ -23,10 +23,12 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tracing.workspace = true
 twigo-core.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-keyboard.workspace = true
+twigo-log.workspace = true
 twigo-netmon.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]

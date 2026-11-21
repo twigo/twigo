@@ -6,6 +6,7 @@
 //! `packages/protocol/src/mock/schemas.json`.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run -p twigo-kube --example record_openapi
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::path::Path;
 

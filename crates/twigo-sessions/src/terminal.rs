@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
+use twigo_log::Repeats;
 
 use crate::flow::{FRAME_MAX, Flow};
 use crate::shell::{Frame, INPUT_QUEUE};
@@ -173,6 +174,24 @@ impl Drop for Terminal {
     }
 }
 
+/// The failures of a session after the first of each kind, said when it ends.
+#[derive(Default)]
+struct Failures {
+    writes: Repeats,
+    resizes: Repeats,
+}
+
+impl Drop for Failures {
+    fn drop(&mut self) {
+        if let Some(count) = self.writes.ended() {
+            tracing::warn!(count, "more writes to a terminal failed");
+        }
+        if let Some(count) = self.resizes.ended() {
+            tracing::warn!(count, "more resizes of a terminal failed");
+        }
+    }
+}
+
 /// Runs the program until it exits: output goes out by [`Flow`], and input
 /// and resizes stay live while output is stopped. Then what the pty still
 /// holds goes out, as flow allows, until a read would block or [`DRAIN`]
@@ -194,6 +213,7 @@ async fn run(
     let mut buffer = vec![0; FRAME_MAX];
     let mut seen_acks = *acks.borrow_and_update();
     let mut writing: Vec<u8> = Vec::new();
+    let mut failures = Failures::default();
     // Twigo holds a slave of its own, so the end of the output is the exit,
     // never a read's end.
     let mut readable = true;
@@ -240,7 +260,9 @@ async fn run(
                 written = writer.write(&writing), if !writing.is_empty() => match written {
                     Ok(n) => { writing.drain(..n); }
                     Err(error) => {
-                        eprintln!("could not write to a terminal: {error}");
+                        if failures.writes.failed() {
+                            tracing::warn!(%error, "could not write to a terminal");
+                        }
                         writing.clear();
                     }
                 },
@@ -249,8 +271,10 @@ async fn run(
                         return;
                     }
                     let (cols, rows) = *size.borrow_and_update();
-                    if let Err(error) = writer.resize(Size::new(rows, cols)) {
-                        eprintln!("could not resize a terminal: {error}");
+                    if let Err(error) = writer.resize(Size::new(rows, cols))
+                        && failures.resizes.failed()
+                    {
+                        tracing::warn!(%error, "could not resize a terminal");
                     }
                 }
             }

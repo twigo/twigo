@@ -4,6 +4,10 @@
 //! commands find goes to files beside the home, so the terminal's own
 //! output only shows when a test fails. zsh and bash must be on `PATH`;
 //! fish and pwsh run where they are.
+#![expect(
+    clippy::print_stderr,
+    reason = "a test without the harness reports on its own streams"
+)]
 
 use std::ffi::{OsStr, OsString};
 use std::fs::File;

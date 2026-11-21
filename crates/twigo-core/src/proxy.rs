@@ -57,7 +57,7 @@ impl Proxy {
     pub(crate) fn new(dir: PathBuf) -> Self {
         match std::fs::remove_dir_all(&dir) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                eprintln!("could not delete {}: {error}", dir.display());
+                tracing::warn!(path = %dir.display(), %error, "could not delete");
             }
             _ => {}
         }
@@ -146,7 +146,7 @@ impl Drop for ProxyProcess {
         if let Err(error) = std::fs::remove_file(&self.kubeconfig)
             && error.kind() != std::io::ErrorKind::NotFound
         {
-            eprintln!("could not delete {}: {error}", self.kubeconfig.display());
+            tracing::warn!(path = %self.kubeconfig.display(), %error, "could not delete");
         }
     }
 }

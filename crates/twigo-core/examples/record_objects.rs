@@ -9,6 +9,7 @@
 //! is in the state it records: a Deployment after a rollout, pods that
 //! crash, cannot pull, cannot be scheduled or are not ready, a finished
 //! Job and a CronJob that has run. Every image is one kind's node holds.
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::path::Path;
 use std::sync::Arc;

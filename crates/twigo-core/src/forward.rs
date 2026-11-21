@@ -928,7 +928,7 @@ impl Core {
             return;
         }
         if let Err(error) = self.state.set_forwards(space, &table.saved(space)) {
-            eprintln!("could not keep the forwards of {space}: {error}");
+            tracing::error!(space, %error, "could not keep the forwards of a space");
         }
     }
 

@@ -109,13 +109,9 @@ fn read(path: &Path) -> Trusted {
 /// Trusts nothing rather than guess, and asks for the review again.
 fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> Trusted {
     let aside = path.with_extension("json.unreadable");
-    eprintln!(
-        "the trusted plugins in {} cannot be read ({reason}); they move to {}",
-        path.display(),
-        aside.display()
-    );
+    tracing::warn!(path = %path.display(), %reason, "the trusted plugins cannot be read, so they move to a file of their name with .unreadable");
     if let Err(error) = std::fs::rename(path, &aside) {
-        eprintln!("could not move the trusted plugins aside: {error}");
+        tracing::error!(path = %path.display(), %error, "could not move the trusted plugins aside");
     }
     Trusted::default()
 }

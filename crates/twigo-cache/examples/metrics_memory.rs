@@ -3,6 +3,7 @@
 //! cluster-wide scope, next to the hub's `hub_memory`.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example metrics_memory
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::collections::HashSet;
 use std::sync::Arc;

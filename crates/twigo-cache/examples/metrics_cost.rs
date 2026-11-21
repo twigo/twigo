@@ -3,6 +3,7 @@
 //! poller sends them, against the cluster-wide list, gzipped as the poller asks.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example metrics_cost [runs]
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

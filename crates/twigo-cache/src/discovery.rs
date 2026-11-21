@@ -339,7 +339,7 @@ impl Follower {
             .await
             .expect("loading does not panic");
         loaded.unwrap_or_else(|error| {
-            eprintln!("could not read the cached discovery of {cluster}: {error}");
+            tracing::warn!(cluster, %error, "could not read the cached discovery");
             None
         })
     }
@@ -352,7 +352,7 @@ impl Follower {
             .await
             .expect("storing does not panic");
         if let Err(error) = stored {
-            eprintln!("could not cache the discovery of {cluster}: {error}");
+            tracing::warn!(cluster, %error, "could not cache the discovery");
         }
     }
 }

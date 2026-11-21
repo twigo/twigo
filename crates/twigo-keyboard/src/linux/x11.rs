@@ -122,7 +122,7 @@ impl Keyboard {
             let event = match self.connection.wait_for_event() {
                 Ok(event) => event,
                 Err(error) => {
-                    eprintln!("stopped following the keyboard layout: {error}");
+                    tracing::warn!(%error, "stopped following the keyboard layout");
                     return;
                 }
             };
@@ -131,7 +131,7 @@ impl Keyboard {
                     match keymap(&self.reader.context, &self.connection, self.device) {
                         Ok(keymap) => self.keymap = keymap,
                         Err(error) => {
-                            eprintln!("keeping the previous keyboard layout: {error}");
+                            tracing::warn!(%error, "keeping the previous keyboard layout");
                             continue;
                         }
                     }

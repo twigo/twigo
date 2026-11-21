@@ -138,10 +138,10 @@ pub(super) async fn run(
                 && let Err(kill) = killpg(group, Signal::SIGKILL)
                 && kill != nix::errno::Errno::ESRCH
             {
-                eprintln!("could not stop {command}: {kill}");
+                tracing::warn!(command, error = %kill, "could not stop the process group");
             }
             if let Err(reap) = child.wait().await {
-                eprintln!("could not reap {command}: {reap}");
+                tracing::warn!(command, error = %reap, "could not reap the process");
             }
             return Err(error);
         }
