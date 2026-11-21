@@ -2,9 +2,9 @@
 //! resource, namespace and name, as metadata unless a test puts whole ones,
 //! list pages, watches resumed from a `resourceVersion` or streaming their
 //! initial events as each group answers them, gzip for what asks for it,
-//! `410 Gone` below a compacted version, refusals, probes, access reviews,
-//! aggregated discovery with its ETags, and the Metrics API, which lists
-//! whole and cannot be watched.
+//! `410 Gone` below a compacted version, refusals, probes, access reviews
+//! answered by what they ask, aggregated discovery with its ETags, and the
+//! Metrics API, which lists whole and cannot be watched.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
@@ -68,8 +68,18 @@ pub struct State {
     pub no_endpoints: HashSet<String>,
     /// Resources the server cannot watch, as ComponentStatus.
     pub unwatchable: HashSet<String>,
-    /// The person may list pods cluster-wide.
-    pub may_list: bool,
+    /// What access reviews are answered yes to, by the namespace (none for
+    /// every namespace), the verb and the resource they ask; any other is
+    /// answered no.
+    allowed: HashSet<(Option<String>, String, String)>,
+    /// The namespaces, none for every namespace, whose access reviews get
+    /// this status instead of an answer.
+    pub reviews_fail: HashMap<Option<String>, StatusCode>,
+    /// Each access review waits this long before it is answered.
+    pub reviews_take: std::time::Duration,
+    /// The most access reviews that waited at once.
+    pub reviews_overlap: usize,
+    reviews_waiting: usize,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
     /// `/version` sends its headers and never its body, as over a connection
@@ -237,20 +247,34 @@ fn target(path: &str) -> Target {
     }
 }
 
-struct Waiting<'a>(&'a Fake);
+/// A request that waits for its answer: a Metrics API one, or an access review.
+struct Waiting<'a> {
+    fake: &'a Fake,
+    review: bool,
+}
 
 impl<'a> Waiting<'a> {
-    fn start(fake: &'a Fake) -> Self {
+    fn start(fake: &'a Fake, review: bool) -> Self {
         let mut state = fake.state();
-        state.metrics_waiting += 1;
-        state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
-        Self(fake)
+        if review {
+            state.reviews_waiting += 1;
+            state.reviews_overlap = state.reviews_overlap.max(state.reviews_waiting);
+        } else {
+            state.metrics_waiting += 1;
+            state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
+        }
+        Self { fake, review }
     }
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
-        self.0.state().metrics_waiting -= 1;
+        let mut state = self.fake.state();
+        if self.review {
+            state.reviews_waiting -= 1;
+        } else {
+            state.metrics_waiting -= 1;
+        }
     }
 }
 
@@ -353,6 +377,33 @@ impl Fake {
         let mut object = state.objects.remove(&key).expect("an object to delete");
         object["metadata"]["resourceVersion"] = json!(state.version.to_string());
         state.change(group, resource, namespace, "DELETED", object);
+    }
+
+    /// Answers the reviews of `verb` on `resource` in `namespace` yes, or in
+    /// every namespace with none.
+    pub fn allow(&self, namespace: Option<&str>, verb: &str, resource: &str) {
+        self.state()
+            .allowed
+            .insert(Self::review_key(namespace, verb, resource));
+    }
+
+    /// Answers them no again.
+    pub fn deny(&self, namespace: Option<&str>, verb: &str, resource: &str) {
+        self.state()
+            .allowed
+            .remove(&Self::review_key(namespace, verb, resource));
+    }
+
+    fn review_key(
+        namespace: Option<&str>,
+        verb: &str,
+        resource: &str,
+    ) -> (Option<String>, String, String) {
+        (
+            namespace.map(str::to_owned),
+            verb.to_owned(),
+            resource.to_owned(),
+        )
     }
 
     pub fn streams(&self, group: &str, answer: Streams) {
@@ -505,7 +556,7 @@ impl Fake {
             return std::future::pending().await;
         }
         if path.starts_with("/apis/metrics.k8s.io/") && !self.state().metrics_takes.is_zero() {
-            let _waiting = Waiting::start(self);
+            let _waiting = Waiting::start(self, false);
             let takes = self.state().metrics_takes;
             tokio::time::sleep(takes).await;
             return Ok(self.respond(request));
@@ -527,7 +578,51 @@ impl Fake {
                 after: std::time::Duration::from_secs(120),
             })));
         }
+        if path.ends_with("selfsubjectaccessreviews") {
+            return Ok(self.review(request).await);
+        }
         Ok(self.respond(request))
+    }
+
+    async fn review(&self, request: Request<kube::client::Body>) -> Response<Body> {
+        let uri = request.uri().to_string();
+        let body = request
+            .into_body()
+            .collect()
+            .await
+            .expect("a review's body")
+            .to_bytes();
+        let review: Value = serde_json::from_slice(&body).expect("a review");
+        let asks = &review["spec"]["resourceAttributes"];
+        let asked = |field: &str| asks[field].as_str().map(str::to_owned);
+        let key = (
+            asked("namespace"),
+            asked("verb").expect("a verb"),
+            asked("resource").expect("a resource"),
+        );
+        let takes = {
+            let mut state = self.state();
+            state.requests.push((Instant::now(), uri));
+            if let Some(&code) = state.reviews_fail.get(&key.0) {
+                return status(code, code.canonical_reason().unwrap_or("Failure"));
+            }
+            state.reviews_take
+        };
+        if !takes.is_zero() {
+            let _waiting = Waiting::start(self, true);
+            tokio::time::sleep(takes).await;
+        }
+        let allowed = self.state().allowed.contains(&key);
+        full(
+            StatusCode::CREATED,
+            &json!({
+                "apiVersion": "authorization.k8s.io/v1",
+                "kind": "SelfSubjectAccessReview",
+                "spec": {},
+                "status": { "allowed": allowed }
+            }),
+            false,
+        )
     }
 
     fn respond(&self, request: Request<kube::client::Body>) -> Response<Body> {
@@ -557,19 +652,6 @@ impl Fake {
                 return stream(receiver, false);
             }
             return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }), false);
-        }
-        if path.ends_with("selfsubjectaccessreviews") {
-            let allowed = state.may_list;
-            return full(
-                StatusCode::CREATED,
-                &json!({
-                    "apiVersion": "authorization.k8s.io/v1",
-                    "kind": "SelfSubjectAccessReview",
-                    "spec": {},
-                    "status": { "allowed": allowed }
-                }),
-                false,
-            );
         }
         if state.unavailable > 0 {
             state.unavailable -= 1;

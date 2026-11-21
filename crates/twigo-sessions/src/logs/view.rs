@@ -363,7 +363,7 @@ const SPANS: &[i64] = &[
 const NANOS: i64 = 1_000_000_000;
 
 /// The view's lines over time, its range aside: [`BUCKETS`] spans of the
-/// shortest of [`SPANS`] that reach back from the span of the buffer's last
+/// shortest of `SPANS` that reach back from the span of the buffer's last
 /// line to its first, so the newest lines sit at the right whatever the
 /// filter keeps; no buckets, and empty times, while it holds no line.
 pub fn histogram(buffer: &Buffer) -> Histogram {

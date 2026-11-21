@@ -58,18 +58,6 @@ function CommandList({
   );
 }
 
-function CommandEmpty(
-  props: React.ComponentProps<typeof CommandPrimitive.Empty>,
-) {
-  return (
-    <CommandPrimitive.Empty
-      data-slot="command-empty"
-      className="py-4 text-center text-xs text-support"
-      {...props}
-    />
-  );
-}
-
 function CommandGroup({
   className,
   ...props
@@ -106,11 +94,4 @@ function CommandItem({
   );
 }
 
-export {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-};
+export { Command, CommandInput, CommandList, CommandGroup, CommandItem };

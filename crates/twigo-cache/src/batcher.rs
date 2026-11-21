@@ -181,6 +181,9 @@ async fn run(
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
             view.set_api(metrics.api());
+            if subscription.resolved() {
+                view.resolved();
+            }
             metrics.want(view.wants(reading));
             let (answered, update) = metrics.read();
             settled = answered;
@@ -498,6 +501,7 @@ mod tests {
             first.parts,
             Some(Parts {
                 count: 3,
+                omitted: 0,
                 unready: vec![PartState {
                     part: Part::Namespace { name: "c".into() },
                     state: ViewState::Forbidden {

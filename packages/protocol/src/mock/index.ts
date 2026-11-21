@@ -62,7 +62,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
-import { MockParts, pinOf, type PartsView } from "./parts";
+import { MockParts, type PartsView } from "./parts";
 import { printedColumns } from "./printed";
 import {
   isShellScenario,
@@ -140,9 +140,14 @@ type ListScenario = "live" | ViewState["state"];
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
  * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
- * RoleBindings reach only the namespace `default`, so a cluster-wide list
- * is forbidden and one of several namespaces has the rows of `default` and
- * every other namespace refused, or `partsQueued`: live lists of a person
+ * RoleBindings reach only the namespace `default` and who may list
+ * namespaces, so "All namespaces" has the rows of `default` with the other
+ * namespaces left out and counted, and one of several namespaces has the
+ * rows of `default` and every other namespace refused, or
+ * `rbacTypedNamespaces`: live lists for a person bound in `default` and
+ * `payments` who may not list namespaces, so the picker takes names typed,
+ * "All namespaces" is refused, and a selection has the rows of those two
+ * and every other namespace refused, or `partsQueued`: live lists of a person
  * who has no cluster-wide list, whose last two of more than three selected
  * namespaces wait for a stream, the first of them with the rows it listed,
  * or live lists for a shell
@@ -161,6 +166,7 @@ export type MockScenario =
   | "policyFile"
   | "viewer"
   | "rbacNamespaces"
+  | "rbacTypedNamespaces"
   | "partsQueued"
   | "protection"
   | AuthScenario
@@ -177,6 +183,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "policyFile",
   "viewer",
   "rbacNamespaces",
+  "rbacTypedNamespaces",
   "partsQueued",
   "protection",
   ...AUTH_SCENARIOS,
@@ -251,6 +258,7 @@ export function createMockBackend(
     scenario === "policyFile" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
+    scenario === "rbacTypedNamespaces" ||
     scenario === "partsQueued" ||
     scenario === "protection" ||
     isAuthScenario(scenario) ||
@@ -527,7 +535,7 @@ export function createMockBackend(
     },
     namespaces_list: (id) => {
       space(id);
-      if (lists === "forbidden") {
+      if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {
         throw new IpcError("forbidden", "you may not list namespaces");
       }
       return [...NAMESPACES].sort();
@@ -770,7 +778,7 @@ export function createMockBackend(
           kind,
           cluster(context),
           state,
-          new MockParts(query, pinOf(scenario, resource)),
+          new MockParts(query, scenario, cluster(context).resolved),
           onMessage,
           join,
         ),
@@ -1289,6 +1297,10 @@ class Subscription {
       groups: groupsChanged ? (groups ?? []) : null,
       metrics: metricsChanged ? metrics : null,
     });
+    if (view.resolving) {
+      this.#parts.resolved();
+      this.#dirty = true;
+    }
   }
 }
 

@@ -99,7 +99,7 @@ const CLOSED_LIMIT = 20;
  * stays where it is.
  */
 const LAYERS =
-  "[cmdk-root], [role=dialog]:not(.dv-resize-container), [role=alertdialog], [role=menu], [data-sonner-toaster]";
+  "[data-slot=quick-input], [role=dialog]:not(.dv-resize-container), [role=alertdialog], [role=menu], [data-sonner-toaster]";
 
 /** An editor the person closed, as {@link Editors.dismiss} remembers it. */
 interface Closed {

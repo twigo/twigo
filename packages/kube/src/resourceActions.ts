@@ -32,6 +32,7 @@ import type {
   MenuId,
   Workbench,
 } from "@twigo/workbench";
+import { singularTitle } from "./kinds";
 import type { ListServices } from "./services";
 import {
   cellsOf,
@@ -74,11 +75,6 @@ const PATCH = (reason: string) => ({
   when: "resource.capability.patch",
   reason,
 });
-
-/** A kind as a sentence names it: `StatefulSet` → `stateful set`. */
-function kindWords(kind: string): string {
-  return kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
-}
 
 /**
  * The replicas a row says its object wants: a ReplicaSet's Desired, or what
@@ -427,7 +423,7 @@ export function registerResourceActions(
         const subject = subjectOf(lookup, args);
         if (!subject) return;
         const { name, replicas: now } = subject;
-        const what = `${kindWords(subject.kind)} ${name}`;
+        const what = `${singularTitle(subject.kind)} ${name}`;
         const typed = await workbench.quickAccess.input({
           placeholder: "Replicas",
           prompt:

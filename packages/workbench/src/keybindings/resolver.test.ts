@@ -230,6 +230,31 @@ describe("bare keys", () => {
     );
   });
 
+  test("Space fires from quick access's input only where its rows take ticks", () => {
+    const quick = resolver({
+      weight: "core",
+      rules: [
+        {
+          key: "space",
+          command: "toggle",
+          when: "inQuickOpen",
+        },
+      ],
+    });
+    const space = [press("Space")];
+    const input = { inQuickOpen: true, inputFocus: true };
+    expect(
+      resolve(quick, [...space], { ...input, quickOpenCanPickMany: true }),
+    ).toBe("toggle");
+    expect(resolve(quick, [...space], input)).toBe("none");
+    expect(
+      resolve(quick, [...space], {
+        inputFocus: true,
+        quickOpenCanPickMany: true,
+      }),
+    ).toBe("none");
+  });
+
   test("fire in a page that takes them, and never in an input there", () => {
     expect(resolve(target, [press("KeyL")], { pageFocus: true })).toBe("logs");
     expect(

@@ -30,6 +30,7 @@ fn view_states_are_tagged_by_state() {
 fn parts_are_tagged_by_kind() {
     let parts = Parts {
         count: 22,
+        omitted: 0,
         unready: vec![PartState {
             part: Part::Namespace {
                 name: "team-b".into(),
@@ -43,7 +44,7 @@ fn parts_are_tagged_by_kind() {
     };
     assert_eq!(
         wire(&parts),
-        json!({"count": 22, "unready": [{
+        json!({"count": 22, "omitted": 0, "unready": [{
             "part": {"kind": "namespace", "name": "team-b"},
             "state": {"state": "forbidden", "verb": "watch", "resource": "pods"},
             "shown": false,
@@ -215,4 +216,25 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
     let plain: IpcError =
         serde_json::from_value(json!({"kind": "timeout", "message": "late"})).unwrap();
     assert_eq!(plain.blocked, None);
+}
+
+#[test]
+fn a_refused_state_says_its_words_as_an_error_and_the_others_say_none() {
+    let forbidden = ViewState::Forbidden {
+        verb: "watch".into(),
+        resource: "pods".into(),
+    };
+    let refused = forbidden.refusal().unwrap();
+    assert_eq!(refused.kind, ErrorKind::Forbidden);
+    assert_eq!(refused.message, "you may not watch pods");
+    assert_eq!(
+        ViewState::Unauthorized.refusal().unwrap().kind,
+        ErrorKind::Unauthorized
+    );
+    let failed = IpcError::new(ErrorKind::Internal, "broken");
+    let error = ViewState::Error {
+        error: failed.clone(),
+    };
+    assert_eq!(error.refusal(), Some(failed));
+    assert_eq!(ViewState::Stale.refusal(), None);
 }

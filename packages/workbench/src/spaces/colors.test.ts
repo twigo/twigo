@@ -126,6 +126,7 @@ test("the colour command does nothing for a space the rail no longer shows", asy
     color: null,
     source: "~/.kube/config",
     server: null,
+    namespace: null,
     access: UNMARKED,
   }));
   const backend = createMockBackend("ready");

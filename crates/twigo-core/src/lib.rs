@@ -37,7 +37,7 @@ use twigo_ipc::{
     Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -653,46 +653,15 @@ impl Core {
             .await
     }
 
-    /// The namespaces of a space's context, from its namespace index
-    /// (ARCHITECTURE 3.3), which lingers a while after each answer.
+    /// The namespaces of a space's context, as the cluster lists them each
+    /// time (ARCHITECTURE 3.2).
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
-        let mut index = self
-            .hub
-            .rows(Query {
-                context,
-                resource: Resource {
-                    group: String::new(),
-                    version: "v1".to_owned(),
-                    resource: "namespaces".to_owned(),
-                    namespaced: false,
-                },
-                format: RowFormat::Metadata,
-                namespaces: Vec::new(),
-                field_selector: None,
+        self.hub.namespaces(&context).await.map_err(|state| {
+            state.refusal().unwrap_or_else(|| {
+                IpcError::new(ErrorKind::Unavailable, "the cluster is unavailable")
             })
-            .await?;
-        match index.whole().await {
-            Ok(rows) => {
-                let mut names: Vec<String> =
-                    rows.iter().map(|row| row.meta.name.to_string()).collect();
-                names.sort();
-                Ok(names)
-            }
-            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError::new(
-                ErrorKind::Forbidden,
-                format!("you may not {verb} {resource}"),
-            )),
-            Err(ViewState::Unauthorized) => Err(IpcError::new(
-                ErrorKind::Unauthorized,
-                "no credentials for this context that the cluster accepts".to_owned(),
-            )),
-            Err(ViewState::Error { error }) => Err(error),
-            Err(_) => Err(IpcError::new(
-                ErrorKind::Unavailable,
-                "the cluster is unavailable".to_owned(),
-            )),
-        }
+        })
     }
 
     /// A list of a space's resource for a window, filtered, sorted and

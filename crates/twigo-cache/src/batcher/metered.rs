@@ -846,7 +846,9 @@ async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_na
         column: "CPU".to_owned(),
         descending: true,
     };
-    let mut allowed = Metered::start_all(cluster(true).await, Some(sort())).await;
+    let fake = cluster(true).await;
+    fake.allow(None, "list", "pods");
+    let mut allowed = Metered::start_all(fake, Some(sort())).await;
     allowed.batcher().set_window(0, 6, true);
     let batches = allowed.watch(Duration::from_secs(40)).await;
     assert_eq!(allowed.fake.count("/apis/metrics.k8s.io/v1beta1/pods"), 3);
@@ -861,6 +863,7 @@ async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_na
     );
 
     let fake = cluster(true).await;
+    fake.allow(None, "list", "pods");
     fake.state()
         .forbidden
         .insert("/apis/metrics.k8s.io/v1beta1/pods".to_owned());
@@ -879,6 +882,58 @@ async fn a_list_of_all_namespaces_sorted_by_a_metric_asks_the_cluster_and_its_na
         Some(&Cell::Int(9_000_000)),
         "and give it its values"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_that_a_person_may_list_in_two_never_asks_the_cluster_for_metrics()
+{
+    let fake = cluster(true).await;
+    for namespace in ["a", "b"] {
+        fake.add("namespaces", None, namespace);
+        fake.allow(Some(namespace), "list", "pods");
+    }
+    let sort = Sort {
+        column: "CPU".to_owned(),
+        descending: true,
+    };
+    let mut list = Metered::start_all(fake, Some(sort)).await;
+    list.batcher().set_window(0, 6, true);
+    let batches = list.watch(Duration::from_secs(40)).await;
+    assert_eq!(list.fake.count("/apis/metrics.k8s.io/v1beta1/pods"), 0);
+    assert!(polls(&list.fake, "a") >= 2 && polls(&list.fake, "b") >= 2);
+    assert_eq!(
+        batches.iter().filter_map(|batch| batch.metrics).next_back(),
+        Some(MetricsState::Ready)
+    );
+    assert_eq!(
+        list.cpus(&batches, "kind-test/b/q3").last(),
+        Some(&Cell::Int(9_000_000))
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_that_the_cluster_refuses_asks_nobody_for_metrics() {
+    let fake = cluster(true).await;
+    fake.state().forbidden.insert("/api/v1/pods".to_owned());
+    let sort = Sort {
+        column: "CPU".to_owned(),
+        descending: true,
+    };
+    let mut list = Metered::start_all(fake, Some(sort)).await;
+    list.batcher().set_window(0, 6, true);
+    let batches = list.watch(Duration::from_secs(40)).await;
+    assert!(
+        batches
+            .iter()
+            .any(|batch| matches!(batch.status, ViewState::Forbidden { .. })),
+        "refused: {:?}",
+        batches
+            .iter()
+            .map(|batch| &batch.status)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(list.fake.count("/apis/metrics.k8s.io/"), 0);
+    assert_eq!(polls(&list.fake, "a") + polls(&list.fake, "b"), 0);
 }
 
 #[tokio::test(start_paused = true)]

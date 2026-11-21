@@ -58,7 +58,9 @@ pub struct Spec {
     group_by: Option<(String, HashSet<String>)>,
     values: Option<(String, HashSet<String>)>,
     metrics: Option<Kind>,
-    all_namespaces: bool,
+    /// The list reads all namespaces from the cluster-wide upstream, so the
+    /// cluster's metrics may be asked for them too.
+    cluster_wide: bool,
 }
 
 impl Spec {
@@ -97,7 +99,7 @@ impl Spec {
                 )
             }),
             metrics: Kind::of(&query.gvr.group, &query.gvr.version, &query.gvr.resource),
-            all_namespaces: query.namespaced && query.namespaces.is_empty(),
+            cluster_wide: query.namespaced && query.namespaces.is_empty(),
         })
     }
 
@@ -546,6 +548,12 @@ impl QueryView {
         }
     }
 
+    /// The hub settled the list's all namespaces on the namespaces the person
+    /// may list, so the cluster's metrics are never asked for it.
+    pub fn resolved(&mut self) {
+        self.spec.cluster_wide = false;
+    }
+
     /// The namespaces of the window's rows, or every one of the list when it is sorted by a
     /// metric, which for a list of all namespaces adds the cluster: one request, with the
     /// namespaces to fall back on when it is refused (decision 69).
@@ -567,7 +575,7 @@ impl QueryView {
                 .filter_map(|entry| self.rows[&entry.row].row.meta.namespace.as_deref())
                 .collect()
         };
-        let cluster = self.layout.sort_metric && self.spec.all_namespaces;
+        let cluster = self.layout.sort_metric && self.spec.cluster_wide;
         namespaces
             .into_iter()
             .map(|namespace| Scope::Namespace(namespace.into()))

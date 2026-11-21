@@ -262,6 +262,7 @@ fn the_query_cases_pass() {
             });
             let whole = Parts {
                 count: 1,
+                omitted: 0,
                 unready: Vec::new(),
             };
             let batch = view.batch(ViewState::Ready, whole).unwrap();

@@ -1,5 +1,5 @@
 import type { Forward, Gvr } from "@twigo/protocol";
-import type { Workbench } from "@twigo/workbench";
+import { scopeWords, type Workbench } from "@twigo/workbench";
 import type { Discovery } from "./discovery";
 import { portWords } from "./forward/words";
 import { PODS } from "./kinds";
@@ -74,8 +74,7 @@ export function tabPaths(
       const input = parseListUri(uri);
       if (!input) return undefined;
       const { space, gvr, namespaces = spaces.state(space).namespaces } = input;
-      const scope =
-        namespaces.length === 0 ? "All namespaces" : namespaces.join(", ");
+      const scope = scopeWords(namespaces).all;
       return path(
         space,
         resourceOf(space, gvr)?.namespaced === false ? undefined : scope,

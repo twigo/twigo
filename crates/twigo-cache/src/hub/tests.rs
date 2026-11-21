@@ -12,6 +12,13 @@ use crate::printed::Printed;
 use crate::table::{Cell, ColumnKind};
 use crate::upstream::{IDLE, INITIAL_IDLE};
 
+pub(super) fn forbidden() -> ViewState {
+    ViewState::Forbidden {
+        verb: "watch".to_owned(),
+        resource: "pods".to_owned(),
+    }
+}
+
 pub(super) fn pods() -> Resource {
     Resource {
         group: String::new(),
@@ -279,6 +286,7 @@ async fn a_watch_that_queues_once_nobody_shows_it_gives_up_its_place() {
 #[tokio::test(start_paused = true)]
 async fn a_borrowed_upstream_that_waits_goes_with_its_last_borrower() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(budget(1));
     let mut all = hub.rows(query(&[])).await.unwrap();
@@ -385,6 +393,7 @@ async fn a_resource_the_server_cannot_watch_is_listed_again() {
 #[tokio::test(start_paused = true)]
 async fn a_lingering_cluster_wide_upstream_serves_narrower_subscriptions() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("b"), "p2");
     let (hub, _clients) = fake.hub(Budgets::default());
@@ -449,6 +458,7 @@ fn drained(delta: Delta<Row>) -> (bool, Vec<String>, usize) {
 #[tokio::test(start_paused = true)]
 async fn a_drain_takes_what_changed_since_the_last_and_every_row_after_a_move() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("b"), "p2");
     let (hub, _clients) = fake.hub(Budgets::default());
@@ -498,7 +508,7 @@ async fn more_than_four_namespaces_watch_cluster_wide_only_if_the_person_may_lis
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("f"), "p2");
-    fake.state().may_list = true;
+    fake.allow(None, "list", "pods");
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut wide = hub.rows(query(&five)).await.unwrap();
     ready(&mut wide).await;
@@ -1003,7 +1013,7 @@ async fn a_failure_that_says_nothing_of_streaming_is_retried_by_streaming() {
         fake.add("pods", Some("a"), "p1");
         let (hub, _clients) = fake.hub(Budgets::default());
         let mut pods = hub.rows(query(&["a"])).await.unwrap();
-        sleep(Duration::from_secs(30)).await;
+        sleep(Duration::from_secs(90)).await;
         assert!(streamed(&fake, PODS_A) > 1, "{code}: tried again");
         assert_eq!(paged(&fake, PODS_A), 0, "{code}: no page");
 
@@ -1209,28 +1219,7 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         .insert("/api/v1/namespaces/a/pods".to_owned());
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut pods = hub.rows(query(&["a"])).await.unwrap();
-    let forbidden = ViewState::Forbidden {
-        verb: "watch".to_owned(),
-        resource: "pods".to_owned(),
-    };
-    until(&mut pods, |state| *state == forbidden).await;
-    sleep(Duration::from_secs(30)).await;
-    let tries = fake.count("namespaces/a/pods");
-    assert!((6..=60).contains(&tries), "{tries} tries in 30 s");
-    assert_eq!(pods.state(), forbidden);
-    let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
-        .await
-        .into_iter()
-        .map(Result::unwrap)
-        .collect();
-    assert!(asking.iter().all(|asked| asked.state() == forbidden));
-    settle().await;
-    assert_eq!(
-        fake.count("namespaces/a/pods"),
-        tries,
-        "subscriptions leave its backoff alone"
-    );
-    drop(asking);
+    until(&mut pods, |state| *state == forbidden()).await;
 
     fake.state().forbidden.clear();
     ready(&mut pods).await;
@@ -1444,12 +1433,237 @@ async fn a_no_from_rbac_is_asked_again_after_30_s_and_a_yes_holds() {
     sleep(crate::cluster::REFUSED_FOR - Duration::from_secs(1)).await;
     assert_eq!(may().await, Some(false));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
-    fake.state().may_list = true;
+    fake.allow(Some("a"), "delete", "pods");
     sleep(Duration::from_secs(2)).await;
     assert_eq!(may().await, Some(true));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
-    fake.state().may_list = false;
+    fake.deny(Some("a"), "delete", "pods");
     sleep(crate::cluster::REFUSED_FOR * 2).await;
     assert_eq!(may().await, Some(true));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reviews_of_the_same_question_in_flight_send_one_request() {
+    let fake = Fake::default();
+    fake.allow(Some("a"), "list", "pods");
+    fake.state().reviews_take = Duration::from_secs(1);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let access = list_access(&pods());
+    let ask = |namespace| hub.may("kind-test", Some(namespace), &access);
+    let answers = tokio::join!(ask("a"), ask("a"), ask("b"));
+    assert_eq!(answers, (Some(true), Some(true), Some(false)));
+    assert_eq!(
+        fake.count("selfsubjectaccessreviews"),
+        2,
+        "one for a, one for b"
+    );
+    assert_eq!(ask("a").await, Some(true));
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 2, "a yes is kept");
+}
+
+/// When each list or watch of `path` was sent.
+fn tries(fake: &Fake, path: &str) -> Vec<Instant> {
+    let state = fake.state();
+    state
+        .requests
+        .iter()
+        .filter(|(_, request)| request.contains(path))
+        .map(|(at, _)| *at)
+        .collect()
+}
+
+fn gaps(tries: &[Instant]) -> Vec<Duration> {
+    tries.windows(2).map(|pair| pair[1] - pair[0]).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_part_refused_before_it_listed_tries_again_after_30_s_and_one_that_listed_within_5() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("b"), "p2");
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/a/pods".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut never = hub.rows(query(&["a"])).await.unwrap();
+    let mut once = hub.rows(query(&["b"])).await.unwrap();
+    ready(&mut once).await;
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/b/pods".to_owned());
+    fake.end_watches();
+    let refused = |state: &ViewState| matches!(state, ViewState::Forbidden { .. });
+    until(&mut never, refused).await;
+    until(&mut once, refused).await;
+
+    fake.state().requests.clear();
+    sleep(Duration::from_secs(200)).await;
+    let never = gaps(&tries(&fake, "/namespaces/a/pods"));
+    assert!(never.len() >= 2, "{never:?}");
+    let wait = crate::cluster::REFUSED_FOR..=2 * crate::cluster::REFUSED_FOR;
+    assert!(never.iter().all(|gap| wait.contains(gap)), "{never:?}");
+    let once = gaps(&tries(&fake, "/namespaces/b/pods"));
+    assert!(once.len() >= 40, "{} tries in 200 s", once.len() + 1);
+    let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+    assert!(once.iter().all(|gap| wait.contains(gap)), "{once:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_are_read_in_pages_with_no_watch_whatever_the_budget() {
+    let fake = Fake::default();
+    for n in 0..1100 {
+        fake.add("namespaces", None, &format!("ns-{n:04}"));
+    }
+    fake.add("pods", Some("ns-0000"), "p1");
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut shown = hub.rows(query(&["ns-0000"])).await.unwrap();
+    ready(&mut shown).await;
+
+    let read = tokio::time::timeout(Duration::from_secs(10), hub.namespaces("kind-test"));
+    let names = read.await.expect("no watch to wait for").unwrap();
+    assert_eq!(names.len(), 1100);
+    assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(fake.count("/api/v1/namespaces?"), 3, "pages of 500");
+    assert_eq!(fake.count("watch=true"), 1, "the pods' alone");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_try_a_transient_failure_again_and_a_refusal_answers_at_once() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "b");
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let listed = || fake.count("/api/v1/namespaces?");
+
+    fake.state().unavailable = 1;
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Ok(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(listed(), 2, "one 503, then the names");
+
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces".to_owned());
+    let (before, started) = (listed(), Instant::now());
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Err(ViewState::Forbidden {
+            verb: "list".to_owned(),
+            resource: "namespaces".to_owned(),
+        })
+    );
+    assert_eq!((listed() - before, started.elapsed()), (1, Duration::ZERO));
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_try_under_way() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "b");
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets {
+        requests: 1,
+        ..Budgets::default()
+    });
+
+    fake.state().body_takes = Duration::from_secs(8);
+    let started = Instant::now();
+    let slow = tokio::spawn({
+        let hub = hub.clone();
+        async move { hub.namespaces("kind-test").await }
+    });
+    settle().await;
+    fake.state()
+        .no_endpoints
+        .insert("/api/v1/namespaces".into());
+    let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
+    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
+    assert!(
+        (18..19).contains(&started.elapsed().as_secs()),
+        "10 s after the slot came free at 8 s, not after the call: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(slow.await.unwrap(), Ok(vec!["a".into(), "b".into()]));
+
+    fake.state().no_endpoints.clear();
+    fake.state().body_takes = Duration::from_secs(11);
+    let started = Instant::now();
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Ok(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(started.elapsed().as_secs(), 11, "a try that has not failed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_subscription_cuts_short_the_wait_of_a_refused_part_and_an_open_list_keeps_it() {
+    for dropped in [false, true] {
+        let fake = Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        fake.state()
+            .forbidden
+            .insert("/api/v1/namespaces/a/pods".to_owned());
+        let (hub, _clients) = fake.hub(Budgets::default());
+        let mut first = hub.rows(query(&["a"])).await.unwrap();
+        let refused = |state: &ViewState| matches!(state, ViewState::Forbidden { .. });
+        until(&mut first, refused).await;
+        sleep(Duration::from_secs(2)).await;
+
+        fake.state().forbidden.clear();
+        sleep(Duration::from_secs(20)).await;
+        assert!(refused(&first.state()), "the open list keeps its 30 s");
+        if dropped {
+            drop(first);
+        }
+        let mut again = hub.rows(query(&["a"])).await.unwrap();
+        let tried = tokio::time::timeout(Duration::from_secs(1), ready(&mut again));
+        tried
+            .await
+            .expect("a list opened anew tries at once, the wait having run 5 s");
+        assert_eq!(names(&again), ["p1"]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_oftener() {
+    let fake = Fake::default();
+    let namespaces = ["a", "b", "c"];
+    for namespace in namespaces {
+        fake.state()
+            .forbidden
+            .insert(format!("/api/v1/namespaces/{namespace}/pods"));
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut typed = Vec::new();
+    for _ in 0..30 {
+        typed.push(hub.rows(query(&namespaces)).await.unwrap());
+        sleep(Duration::from_secs(1)).await;
+    }
+    for namespace in namespaces {
+        let gaps = gaps(&tries(&fake, &format!("/namespaces/{namespace}/pods")));
+        assert!(gaps.len() >= 4, "{namespace}: {gaps:?}");
+        let wait = RETRY_WITHIN..=RETRY_WITHIN + Duration::from_secs(1);
+        assert!(
+            gaps.iter().all(|gap| wait.contains(gap)),
+            "{namespace}: {gaps:?}"
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+
+    fake.state().requests.clear();
+    sleep(Duration::from_secs(120)).await;
+    let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
+    assert!(gaps.len() >= 20, "{} tries in 120 s", gaps.len() + 1);
+    let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+    assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
 }

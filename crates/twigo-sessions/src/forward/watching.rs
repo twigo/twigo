@@ -11,7 +11,7 @@ use futures::future::{BoxFuture, select_all};
 use serde::{Deserialize, Deserializer};
 use twigo_cache::hub::{Hub, Resource, Subscription};
 use twigo_cache::object::Object;
-use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_ipc::{IpcError, ViewState};
 
 use super::cause::Cause;
 use super::pick::Known;
@@ -205,22 +205,14 @@ fn counted(states: &[ViewState], found: bool) -> &[ViewState] {
 /// restarts (ARCHITECTURE 3.2).
 fn refusal(states: &[ViewState]) -> Option<Known> {
     if states.contains(&ViewState::Unauthorized) {
-        return Some(Known::Fault(
-            IpcError::new(
-                ErrorKind::Unauthorized,
-                "no credentials for this context that the cluster accepts",
-            )
-            .into(),
-        ));
+        return ViewState::Unauthorized
+            .refusal()
+            .map(|error| Known::Fault(error.into()));
     }
-    states.iter().find_map(|state| match state {
-        ViewState::Forbidden { verb, resource } => Some(Known::Refused(IpcError::new(
-            ErrorKind::Forbidden,
-            format!("you may not {verb} {resource}"),
-        ))),
-        ViewState::Error { error } => Some(Known::Refused(error.clone())),
-        _ => None,
-    })
+    states
+        .iter()
+        .find_map(ViewState::refusal)
+        .map(Known::Refused)
 }
 
 /// Why nothing is listed yet, when it is known: a subscription is queued for

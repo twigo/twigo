@@ -21,11 +21,12 @@ use http::{HeaderMap, Request};
 use http_body_util::BodyExt;
 use jiff::Timestamp;
 use kube::client::Body;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
+use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, REFUSED_FOR};
 use crate::decode::{Decode, DecodeError, Event};
 use crate::encoding;
 use crate::request::{self, Collection, Format, WatchFrom};
@@ -84,6 +85,8 @@ pub(crate) struct Upstream<T> {
     state: watch::Sender<ViewState>,
     /// It holds a watch open, so evicting it frees one.
     watching: AtomicBool,
+    /// A new subscription cuts short the wait of a part that RBAC refused.
+    retry: Notify,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +122,7 @@ impl<T: Item> Upstream<T> {
             }),
             state: watch::Sender::new(ViewState::Connecting),
             watching: AtomicBool::new(false),
+            retry: Notify::new(),
         }
     }
 
@@ -149,6 +153,13 @@ impl<T: Item> Upstream<T> {
 
     pub fn watching(&self) -> bool {
         self.watching.load(Ordering::Relaxed)
+    }
+
+    /// Ends the wait of a part whose first list RBAC refused once it has run
+    /// [`RETRY_WITHIN`], so the one who subscribes anew finds out within that
+    /// whether the refusal still holds.
+    pub fn retry(&self) {
+        self.retry.notify_waiters();
     }
 
     /// The state of a run about to start, set before it does, so nobody
@@ -264,10 +275,22 @@ async fn start<D: Decode>(
 /// The pause between a failure and the next try: 0.5–5 s in all, as the
 /// upstreams, log streams and forwards wait.
 pub fn backoff() -> ExponentialBackoff {
+    paced(Duration::from_millis(500), RETRY_WITHIN / 2)
+}
+
+/// The pause before a part whose first list RBAC refused tries again: the
+/// hub's own lifetime of RBAC's no, `REFUSED_FOR`.
+fn refusal_pause() -> Duration {
+    paced(REFUSED_FOR, REFUSED_FOR)
+        .next()
+        .expect("the backoff has no maximum of attempts")
+}
+
+fn paced(min: Duration, max: Duration) -> ExponentialBackoff {
     // Jitter adds up to the delay again (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
-        .with_min_delay(Duration::from_millis(500))
-        .with_max_delay(RETRY_WITHIN / 2)
+        .with_min_delay(min)
+        .with_max_delay(max)
         .with_jitter()
         .without_max_times()
         .build()
@@ -419,11 +442,7 @@ where
                     Next::List
                 }
                 Outcome::Undecodable(error) => {
-                    let error = IpcError::new(
-                        ErrorKind::Internal,
-                        format!("could not decode the server's answer: {error}"),
-                    );
-                    self.refused(ViewState::Error { error }).await;
+                    self.refused(undecodable(&error)).await;
                     Next::List
                 }
                 Outcome::Failed { error, verb, next } => {
@@ -715,10 +734,25 @@ where
     }
 
     /// Shows why the server refused, then waits to try again: an API server
-    /// that just restarted refuses for a while what it allows.
+    /// that just restarted refuses for a while what it allows, so a part
+    /// that has listed tries soon, while one that never did, whose RBAC said
+    /// no, waits for the no to pass, or for a new subscription, which ends the
+    /// wait once it has run [`RETRY_WITHIN`], so a filter typed over many
+    /// refused parts asks each at most that often.
     async fn refused(&mut self, view: ViewState) {
-        self.set_phase(Phase::Refused(view));
-        self.pause().await;
+        if matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed {
+            // Before the state shows, so a subscription that sees it wakes the wait.
+            let retry = self.upstream.retry.notified();
+            let refused = Instant::now();
+            self.set_phase(Phase::Refused(view));
+            tokio::select! {
+                () = tokio::time::sleep(refusal_pause()) => {}
+                () = retry => tokio::time::sleep_until(refused + RETRY_WITHIN).await,
+            }
+        } else {
+            self.set_phase(Phase::Refused(view));
+            self.pause().await;
+        }
     }
 
     async fn pause(&mut self) {
@@ -760,6 +794,47 @@ fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
     if !meta.resource_version.is_empty() {
         from.clone_from(&meta.resource_version);
     }
+}
+
+/// Every item of a collection, listed once in pages as an upstream lists it,
+/// for a reader that needs the names and no watch: the list takes a request
+/// slot, where a watch waits for one of the budget's watches.
+pub(crate) async fn read<D: Decode>(
+    clients: &Clients,
+    clock: &Clock,
+    collection: &Collection<'_>,
+    resource: &str,
+    mut decoder: D,
+) -> Result<Vec<D::Item>, ViewState> {
+    let mut items = Vec::new();
+    let mut token: Option<Box<str>> = None;
+    loop {
+        let request = request::list(collection, LIMIT, token.as_deref());
+        let (body, received) =
+            fetch(clients, request, clock).await.map_err(|error| {
+                match failure(&error, "list", resource) {
+                    Failure::Refused(view) => view,
+                    Failure::Unauthorized => ViewState::Unauthorized,
+                    Failure::Gone | Failure::Transient => ViewState::Stale,
+                }
+            })?;
+        let page = decoder
+            .decode_list(&body, received)
+            .map_err(|error| undecodable(&error))?;
+        items.extend(page.items);
+        match page.continue_token {
+            Some(next) => token = Some(next),
+            None => return Ok(items),
+        }
+    }
+}
+
+fn undecodable(error: &DecodeError) -> ViewState {
+    let error = IpcError::new(
+        ErrorKind::Internal,
+        format!("could not decode the server's answer: {error}"),
+    );
+    ViewState::Error { error }
 }
 
 /// A list page, and when its response started: its status and headers have
@@ -826,14 +901,15 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
     answered
 }
 
-enum Failure {
+#[derive(Clone)]
+pub(crate) enum Failure {
     Gone,
     Transient,
     Refused(ViewState),
     Unauthorized,
 }
 
-fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
+pub(crate) fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     if twigo_kube::errors::no_credential(error) {
         return Failure::Unauthorized;
     }

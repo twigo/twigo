@@ -5,7 +5,7 @@
 //! Its state comes first, as the owner chose on 2026-11-03: what is wrong
 //! with it when anything is, then what a triage of its kind reads, down to
 //! how it is configured and what it is. The order, and which sections open
-//! of themselves, is data of the kind's [`layout`]; a kind without one
+//! of themselves, is data of the kind's `layout`; a kind without one
 //! shows its first section, its conditions, its other sections, then
 //! events and metadata. The describer is looked up by group and kind; any
 //! other kind gets the server's printer columns and its spec and status as

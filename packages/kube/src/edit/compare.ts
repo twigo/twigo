@@ -16,10 +16,10 @@ import { objectUri, parseObjectUri } from "../uri";
  * namespace and not the ones selected for the lists, whose name holds the
  * text, which Rust filters as the live upstream serves them, so an object past
  * the first rows is found by typing its name, then the objects the space
- * opened lately, of any kind. Someone who may not list the kind cluster-wide
- * gets the rows of the selected namespaces and the object's own that they may
- * list instead, and is told which they may not; of none, and the picker says
- * that.
+ * opened lately, of any kind. Someone whose list of all namespaces the cluster
+ * refuses, who may not list namespaces or may list the kind in none, gets the
+ * rows of the selected namespaces and the object's own that they may list
+ * instead, and is told which they may not; of none, and the picker says that.
  */
 export function comparisons(
   workbench: Workbench,

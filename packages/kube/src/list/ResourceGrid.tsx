@@ -54,7 +54,7 @@ import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
 import { readsMetrics, sameBesidesMetrics } from "./metrics";
-import { namespacesOf, whereWords } from "./scope";
+import { mayListWords, namespacesOf, whereWords } from "./scope";
 import { sequence } from "./sequence";
 import { useListView } from "./useListView";
 
@@ -111,8 +111,16 @@ function Grid({
   onRetry: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, spaces, menus, keys, commands, catalog, editors } =
-    workbench;
+  const {
+    backend,
+    spaces,
+    menus,
+    keys,
+    commands,
+    catalog,
+    editors,
+    quickAccess,
+  } = workbench;
   const {
     presets,
     states,
@@ -424,6 +432,12 @@ function Grid({
         status={snapshot.status}
         what={title.toLowerCase()}
         onRetry={onRetry}
+        {...(resource.namespaced &&
+          query.namespaces.length === 0 && {
+            onChoose: () => {
+              quickAccess.show("ns ");
+            },
+          })}
       />
     );
 
@@ -433,7 +447,7 @@ function Grid({
   const narrowed = scope.length > 0;
   const where = leavesOut(snapshot.parts)
     ? "the namespaces shown"
-    : whereWords(spaces, input.space, scope);
+    : (mayListWords(snapshot.parts) ?? whereWords(spaces, input.space, scope));
   return (
     <DataGrid<Row, RowGroup>
       label={title}
@@ -574,9 +588,11 @@ function Grid({
             <p>
               {leavesOut(snapshot.parts)
                 ? "The namespaces that are not ready are left out; the status bar says which."
-                : narrowed
-                  ? "Nothing of this kind exists in these namespaces."
-                  : "Nothing of this kind exists in the space."}
+                : snapshot.parts.omitted > 0
+                  ? `Nothing of this kind exists in them, and these credentials may not list ${title.toLowerCase()} in the other ${String(snapshot.parts.omitted)}.`
+                  : narrowed
+                    ? "Nothing of this kind exists in these namespaces."
+                    : "Nothing of this kind exists in the space."}
             </p>
           </EmptyState>
         )

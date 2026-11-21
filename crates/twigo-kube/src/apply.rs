@@ -173,7 +173,7 @@ pub enum Refusal {
 /// Builds what an edit sends. A null where the schema types the field leaves
 /// first, so nothing downstream reads one as a value: a null a person left
 /// there means no value, and the server's own (`creationTimestamp: null` in
-/// a template) is not a field of the object ([`normalized`]). What Twigo
+/// a template) is not a field of the object (`normalized`). What Twigo
 /// owns comes from the live object as it stands, nulls included.
 pub fn build(edit: Edit<'_>) -> Result<Built, Refusal> {
     let Edit {

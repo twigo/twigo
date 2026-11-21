@@ -153,7 +153,7 @@ impl Command for ClusterVersionGet {
     type Message = ();
 }
 
-/// The namespaces of a space, by its id, from the namespace index (D7).
+/// The namespaces of a space, by its id, as the cluster lists them.
 pub struct NamespacesList;
 
 impl Command for NamespacesList {

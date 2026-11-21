@@ -162,6 +162,7 @@ async fn fresh(clients: &Arc<Clients>, context: &str) -> Vec<(String, Cell)> {
     let mut mirror = Mirror::default();
     let whole = Parts {
         count: 1,
+        omitted: 0,
         unready: Vec::new(),
     };
     mirror.apply(view.batch(ViewState::Ready, whole).unwrap());

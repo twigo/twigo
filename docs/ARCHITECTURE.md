@@ -20,7 +20,7 @@ This document fixes the architecture; the M0 spikes in `docs/spikes/` correct it
 | D4  | Extension logic runs as WASM components inside the Rust core (wasmtime + WIT). The core renders declarative UI. Sandboxed iframes cover views that cannot be declared.                                                                                       | Credentials never leave Rust. Extensions keep running when the webview reloads. Section 5.3.                                                 |
 | D5  | The core is an MCP server first (MVP). An agent panel over ACP that runs existing agents (Claude Code, Codex, Gemini CLI) comes later. Twigo has no LLM client of its own and needs no model keys.                                                           | One policy layer covers the UI, extensions and agents. Section 6.6.                                                                          |
 | D6  | One space per cluster. A rail of space tiles at the left, as Lens's hotbar, each holds one context, or a group of contexts for multi-cluster tables, with their own explorer, editors and layout. Comparing across spaces takes an explicit Compare command. | The title bar's breadcrumb always says which cluster and namespace you are in. Section 4.2.                                                  |
-| D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (namespaces, owners, CRDs). The full object is fetched when it is opened.                                                     | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
+| D7  | Lists come from server-side Table watches (`as=Table`, `includeObject=Metadata`). Metadata-only watchers serve only as indexes (owners, CRDs). The full object is fetched when it is opened.                                                                 | **This replaces the brief's "metadata-only watchers for lists"**: `PartialObjectMetadata` has no Ready, Status, Restarts or Node. Section 3. |
 | D8  | Good design is a requirement. The legacy design language (tokens, density, restraint) carries over.                                                                                                                                                          | Section 4.9.                                                                                                                                 |
 | D9  | Licence: Apache-2.0.                                                                                                                                                                                                                                         | A patent grant for contributors and extension authors, and the CNCF default. `LICENSE` sits at the repository root.                          |
 | D10 | Bundle identifier `io.twigo.ide`. The repository and its releases live at github.com/twigo/twigo, which replaced the legacy repository.                                                                                                                      | A new updater key; the endpoint stays that repository's `latest.json`. Section 1.                                                            |
@@ -294,12 +294,34 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
-  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, kept with the context's clients).
+  - More than a few selected namespaces (default 4) switch to one cluster-wide upstream, if the person may list the kind cluster-wide.
     Rust then filters by namespace.
+  - **"All namespaces" lists the namespaces where the person may list the kind.**
+    - One SelfSubjectAccessReview asks whether they may list it cluster-wide, and the clients keep its answer: a yes for their life, a no for 30 s.
+      A yes keeps one cluster-wide upstream, as for any selection of more than four.
+    - A no resolves the set: the names of the namespaces, a review of each, at most 8 at a time, and an upstream per namespace that a review allows.
+      The names come from one list request of the namespaces' metadata, in pages as the hub lists, which takes a request slot and never waits for a watch; the picker's `namespaces_list` reads them the same way, once per opening, and tries a transient failure again with the backoff for 10 s before it answers `stale`, while a refusal answers at once.
+      A review that another asker has under way is not sent again, so lists opened together ask each question once.
+      The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
+      The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
+      A resolution asks again the cluster-wide review, whose no is kept 30 s, and the namespaces that were refused or did not answer, and keeps the ones allowed, since a yes is kept for the clients' life, as the server still decides: a namespace revoked since stays in the set, its part refused and saying so, until the clients are rebuilt.
+      Only a resolution that answers every question replaces the set, with a set that may be empty, as the cluster-wide yes and a refusal come to: one that fails, or leaves a review unanswered, keeps the set it renews, and the next list resolves it again.
+      A set with no namespace, which the cluster-wide yes, no namespace allowed and a refusal to list the namespaces come to, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
+    - `Parts.omitted` counts the namespaces the cluster lists that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
+    - With no namespace allowed, or the list of namespaces refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
+      Such a person types the namespaces they read in (4.5).
+    - What does not answer is no answer.
+      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state, and with no set to renew the next list resolves it again.
+      The clients may take long to come, as they do while a credential plugin signs the person in, and they, the cluster-wide review or the list of namespaces may fail without a refusal: a 429, a 5xx, a timeout or a connection that broke.
+      The hub settles what "all" reads apart from the list's subscription, which returns at once, and tries again with the backoff below: the subscription has no part and says what it waits on, the clients' error while they fail and else `connecting`, never the cluster's refusal.
+      Clients that say `unauthorized`, and a review or the list of namespaces that the cluster answers with a 401 or a failed credential plugin, stay so until a new subscription asks, since a retry would run the plugin by itself.
+      A review that the server refuses itself, which waiting does not change, leaves all namespaces to the cluster part, which says the server's own answer; it is kept 30 s, as a review's no.
+    - On kind 1.37.0 (2026-11-21, a scratch probe that opens the list through the hub, with a delay added before each request as an assumed round trip, not a remote cluster's), a person allowed 3 of 46 namespaces had rows 32–34 ms after the list opened and 517–524 ms with 50 ms added; allowed 3 of 206, 71–162 and 1670–1718 ms; a cluster admin's first rows come 52–67 ms later than they did with 50 ms added, for the review that asks first (three runs each at 46 and at 206 namespaces, 58 and 60 ms on average), and on loopback within the runs' spread (21–23 ms before and 23–27 ms after at 46, 35–56 and 32–40 at 206).
+    - The 8 reviews at a time leave the context's request slots (28) to the rest of the UI: at 206 namespaces and 50 ms added, the home page's three namespaced kinds, 621 reviews, had rows at 1779 ms with 8, 1521–1571 ms with 16 and 1462–1520 ms with 28, and an unrelated request took 55, 81 and 219 ms meanwhile.
   - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
     Once it has lingered out, those selections move to upstreams per namespace, and keep its rows until theirs are listed.
-  - Users who may not list namespaces type them in.
-    The context's default namespace is preselected.
+    A person refused cluster-wide never has one.
+  - A new space starts on the namespace its kubeconfig context names (`Context.namespace`), else on all namespaces.
 - **Label selectors** are applied in Rust, because labels are in the row metadata.
   Field selectors always go to the server as their own upstream: row metadata does not carry the fields they match.
 - **One HTTP/2 connection per cluster.**
@@ -407,6 +429,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   A watch the server ends without sending anything reopens after the backoff too.
 - **Refusals retry too.**
   A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
+  A part that has never listed, whose first list got a 403, waits 30 s and the backoff's jitter (30–60 s) between tries instead, the time the hub keeps a review's no: a person who may not read a namespace stays refused, and the 37 parts refused of a selection of 40 sent 9.75 requests a second at the backoff, 197 of 200 sent 52.75 (kind 1.37.0, 2026-11-21, a service account bound in 3 namespaces, over a selection of every namespace).
+  A subscription that holds such a part anew ends that wait once it has run 5 s, the ordinary backoff's longest, and tries then, so Retry after a grant and a list opened again try within 5 s of the refusal, and a filter typed over many refused parts asks each at most once per 5 s; an open list keeps its 30 s.
   Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds
@@ -414,7 +438,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 | Kind         | Request                                                                                                                                                                                                                | Used for                                                                                                                                                                                                          |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Table**    | `GET …?watch=true&allowWatchBookmarks=true&includeObject=Metadata` with `Accept: application/json;as=Table;v=v1;g=meta.k8s.io, application/json`, read through `Client::send`, decoded by its `Content-Encoding` (3.2) | Every list, for built-in kinds and CRDs alike. The server computes the columns, the same as `kubectl get -w`.                                                                                                     |
-| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: namespaces (for the picker), CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                  |
+| **Metadata** | List and watch with `Accept: application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1` and `…as=PartialObjectMetadata…`, managedFields skipped at deserialisation                                              | Indexes: CRDs and APIServices (discovery invalidation), and owner references for the "Related" tab.                                                                                                               |
 | **Object**   | List and watch with `fieldSelector=metadata.name=…`, another field selector or none, as a Table with `includeObject=Object`: whole objects with their cells                                                            | An open editor: live YAML, overview, conflict detection; an object's events; what its describer reads while it is open, such as a namespace's ReplicaSets or EndpointSlices, or a node's pods by `spec.nodeName`. |
 
 All three run on the hub's own list and watch rather than kube-runtime's `watcher`, which 5.0 cannot start from a `resourceVersion` once it is recreated, nor tell to re-watch on wake or after a probe: it reopens a quiet watch only after `timeoutSeconds` and 5 s, without a probe ([`next_with_idle_timeout`](https://github.com/kube-rs/kube/blob/5.0.0/kube-runtime/src/watcher.rs#L529-L548)).
@@ -584,7 +608,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The time of one row differed between the runs by up to 1.2 times (the 19 namespaces: 10.3, 10.9 and 11.9 ms), and the namespaces' lists never took as long as the cluster's.
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
     A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
-    A list of chosen namespaces never asks for the cluster.
+    A list of chosen namespaces never asks for the cluster, nor does a list of all namespaces that the hub resolved to the namespaces the person may list (3.2): a person who may not list the pods cluster-wide is taken to be refused their metrics there too, so the request would only repeat every 15 s to be refused.
   - A list's first batch has what the poller already holds.
     A list that joins a scope another reads, as a new query's subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
     A list sorted by CPU or Memory whose first window says it reads metrics holds the first batch that shows its rows until each of its scopes has answered or failed once, so that its first order is the true one, and for 2 s at most, a bound of its own beside the poll's interval.
@@ -701,8 +725,9 @@ A list reads its upstreams as parts, one per namespace or one for the cluster (`
 - `status` is the state of the rows shown: the least ready of the parts shown, one that waits for a watch after its whole list counting as `stale`.
   While no part shows, it is the least ready of the parts still on their way, one whose first list broke off counting as `connecting`, and once none is, the worst refusal.
   So `ready`, `relisting` and `stale` say that some part's rows are shown, and a refusal that no part is on its way.
-- `parts` has `count`, the parts the list reads, and `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`).
+- `parts` has `count`, the parts the list reads, `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`), and `omitted`, for all namespaces settled on parts per namespace, the namespaces of the cluster that those parts leave out because the person may not list the kind there (3.2), and 0 for any other list, the cluster part included.
   It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
+- While the hub settles what all namespaces read (3.2) the list has no part: it says what the hub waits on, `connecting` or the clients' error, with `count` 1 and nothing unready, and the parts come when it has.
 - A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.
 - A part that starts or stops showing sends every row of the parts shown again (3.4).
 
@@ -788,7 +813,9 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 The title bar gives way in a fixed order where it is too narrow, by the widths of hidden copies of its parts at their natural size ([decision](decisions/parts-give-way-by-width.md)).
 First the search field folds to an icon that keeps its key, ⌘P, and still opens quick access; then the search leaves the middle for the bar's right end; then the mode chip folds to its icon, a 20 px square, its words in its tooltip; only then are the crumbs cut.
 Each crumb is cut in the middle, a fixed head and tail around a middle that shrinks to no less than 2em, so that a whole glyph and the ellipsis always show, the scope first and the name only once the scope is at its floor.
-The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, 1 to 12, so `All namespaces` is never cut, and no text as short as its floor is.
+The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail the part after its name's last `-` by the same rule, so `All namespaces` is never cut, and no text as short as its floor is.
+The scope crumb reads as the scope chip does (4.4): `All namespaces`, or the first namespace cut in the middle and `+N` for the others, with every name in its tooltip, so a scope of any length takes no more of the bar than one long name, and the hidden copy that decides the stages measures that form.
+The crumbs' accessible names say what they hold, `Switch space, prod-eu` and `Select namespace, payments and 2 more`.
 A stage counts half a pixel for each rounded width it adds up, so that a part stays whole only where it fits whichever way the widths were rounded.
 The bar stays 36 px high, which the position of the macOS traffic lights in `tauri.conf.json` is tied to.
 The mode chip after the context's name says its type and its lock, `Production · read-only`, and opens what set it and the choices the person has (6.4).
@@ -897,7 +924,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
     The upstreams it leaves behind linger as a list's do, and give way to any watch that waits for the budget (3.2).
 - **Compare with….**
   The picker offers the editor's own kind first, from every namespace and not the ones the lists have selected, and asks Rust for it with the text typed, as the pod search of quick access does, so an object past the first rows is found by its name; the objects the space opened lately, of any kind, follow.
-  Forbidden cluster-wide, it falls back to the selected namespaces and the object's own, which give the rows of those that may be listed, and says so, naming the namespaces that may not.
+  Where the cluster refuses the list of all namespaces (a person who may not list namespaces, or may list the kind in none, 3.2), it falls back to the selected namespaces and the object's own, which give the rows of those that may be listed, and says so, naming the namespaces that may not.
   Forbidden in all of them, it says that.
 - **A URI and its space.**
   Each space has its own docks, and an editor opens in the dock of the space its URI names.
@@ -1130,6 +1157,9 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.8.3 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L839-L888)).
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - An empty list names where it looked, the context, then the namespaces it is narrowed to: `No pods in prod-eu`, `No pods in prod-eu · payments`, and `No matching pods in dev · payments-x, auth-x` under a filter; so do a list inside an Overview and the Port forwards view, as the empty panel names its space (4.1).
+  A list of all namespaces that leaves some out because the credentials may not list the kind there speaks of the ones it reads, `No pods in the 3 namespaces you may list`.
+  The status bar's cluster entry says the same in numbers, `3 of 46 namespaces` in the quiet role, with how many are left out in its tooltip, unless a parts line that names unready parts (3.7) takes its place, and its rows entry says `1 deployment` where it has one row.
+  A list of all namespaces that the cluster refuses says `These credentials may not list pods in every namespace at once.` and offers Choose namespaces, which opens the picker (4.5), where a refused selection or a cluster-scoped kind keeps `These credentials may not watch pods.` and its Retry.
   While parts of the list are not shown it can speak only of the namespaces that are: `No pods in the namespaces shown`, `No matching pods in the namespaces shown`, and the page says that the namespaces that are not ready are left out and the status bar says which (3.7).
 - Single-key verbs work only when a table is focused (context key `listFocus`), or on an object editor's Overview outside a text field (5.1): `l` logs, `s` shell, `f` port-forward, which asks which port, even of one, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   `e` shows the YAML and `⌘↵` opens the object in an editor in a list only, since both need `list.uri`.
@@ -1165,6 +1195,9 @@ Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
+  It draws its own listbox and holds its own cursor: the input is a combobox whose `aria-activedescendant` names the row under the cursor, and a row is an option.
+  A value typed puts the cursor on the first row, whatever the cursor did before, or on none where the provider takes ticked rows and the filter is empty, and Enter before the rows of that value have come waits for them and acts on the cursor's row once they do; typing again withdraws it.
+  Where the person takes one row at a time `aria-selected` is on the cursor's row, selection following focus as the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) describes it.
 - **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   A row that opens something in another space leads with that space's tile, as a `:` list does whose `@` names another space's context (4.2).
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
@@ -1173,6 +1206,18 @@ Extensions add commands, not prefixes.
 - **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
   Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
   On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
+- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) and says with `aria-selected` whether it is ticked, a row without one is an action and says nothing of selection, and the list says `aria-multiselectable`; a polite status says how many are ticked.
+  The cursor is the input's `aria-activedescendant` alone, since the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) keeps focus apart from the selected state and indicates the selection of each option with `aria-selected` or `aria-checked`, never both.
+  No row is under the cursor at the opening, until the person moves or types a value, so Enter at once closes with nothing changed.
+  Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
+  Before the first tick the footer says `Only this` on a row with a box, the provider's own verb (`Select`) on an action row, and `Close` where no row is under the cursor, since Enter then closes.
+  The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
+- **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the cluster lists them, the order fixed for the opening, so a tick moves no row.
+  Once text is typed the namespaces that match come ranked by their score, ticked or not and under no heading, and `All namespaces` goes after them when the text matches it too, so the cursor, which goes to the first row, lands on the best namespace.
+  Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
+  A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
+  The picker asks `namespaces_list` once for each opening, and a scope is written sorted and with no name twice, here, by `:` and in a list's URI, so one set of namespaces is one list URI.
+- **`:` takes several namespaces**: a namespace word splits on commas, each name must be a namespace's (an RFC 1123 label), `all` stands alone, and a word that is no list of namespaces gives no row; the row says `in payments, auth`.
 
 ### 4.6 Logs, terminal and editors
 
@@ -1586,6 +1631,7 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
     The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind, the colours chosen for contexts and the interface zoom (4.1).
     A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
+    Until the person scopes it a space keeps no scope: it follows the namespace its first context names in the kubeconfig, else every namespace.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
     `parts/sizes` holds the side bars' widths, the panel's height and the width of a list's details (4.3), each once the person has resized it; the details' is stored as it was clamped when the drag ended.
   - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes`, `quickaccess/history` or `window/zoom` in the app.
@@ -1815,7 +1861,7 @@ interface CommandDescriptor {
   - `object.uri`: the URI of the editor whose Overview holds the focus, the list editor's for the details, which the page's own commands act on, and unset while another view is shown
   - `object.filtered`: that page's filter holds text
   - `object.subject`: the object an object editor shows, as `resource/details` names it, once discovery has named its resource; the commands of a resource take it as their subject where they are given none, and the details set none, their verbs acting on the list's selected row
-  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
+  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side), `quickOpenCanPickMany` (it takes ticked rows)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
   - `resource.selected`: a command of a resource has an object to act on, the list's selected row, or an object editor's once discovery names its resource, and false in a list inside an Overview
   - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, or an object editor's printed cells (`header.printed`) once its Overview has come, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
@@ -1863,6 +1909,8 @@ interface CommandDescriptor {
 - **Bare keys** fire only in `listFocus` or `pageFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
   Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
+  On macOS ⌃N and ⌃P move the cursor down and up too, as VS Code binds them under the same `inQuickOpen` ([`quickOpenSelectNext` and `quickOpenSelectPrevious`](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/browser/actions/quickAccessActions.ts#L245-L279)); the footer names ↑ and ↓.
+  Space is the same under `inQuickOpen && quickOpenCanPickMany`, where the open provider takes ticked rows: what is picked is never a name that holds a space, so Space ticks the row under the cursor and types nothing, while the space that ends the `ns ` prefix is still typed, since the input resolves to the provider with no prefix until it is.
 - **The keybindings editor** shows conflicts and the source of every binding.
 - **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
 - **macOS native menu accelerators** come from the same table.

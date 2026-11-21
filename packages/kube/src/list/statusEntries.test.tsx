@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
+  Discovered,
   ListBatch,
   Parts,
   PartState,
@@ -90,6 +91,96 @@ test("the status bar counts the active list's rows", async () => {
   expect(screen.getByText("5,000 pods")).toBeTruthy();
 });
 
+test("a list of one row counts it by the resource's singular", async () => {
+  await openList(
+    undefined,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 deployment")).toBeTruthy();
+  expect(screen.queryByText("1 deployments")).toBeNull();
+});
+
+test("a list of one row counts it by the words of the title of the kind discovery serves, whichever version it serves", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, (message) => {
+        const found = message as Discovered;
+        onMessage(
+          command === "resources_watch" && found.state === "ready"
+            ? {
+                ...found,
+                resources: found.resources.map((resource) =>
+                  resource.gvr.resource === "deployments"
+                    ? {
+                        ...resource,
+                        kind: "StatefulSet",
+                        gvr: { ...resource.gvr, version: "v1beta1" },
+                      }
+                    : resource,
+                ),
+              }
+            : message,
+        );
+      }),
+  };
+  await openList(
+    backend,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 stateful set")).toBeTruthy();
+});
+
+test("a list of all namespaces that leaves some out says how many it reads of how many there are, quietly", async () => {
+  await openList(createMockBackend("rbacNamespaces"));
+  await settle(30);
+  const cluster = entry("1 of 12 namespaces");
+  expect(cluster?.getAttribute("title")).toBe(
+    [
+      "Pods in the 1 namespace these credentials may list; 11 others are left out",
+      "Connected · Kubernetes v1.33.4",
+    ].join("\n"),
+  );
+  expect(cluster?.className).toContain("text-quiet");
+  expect(screen.queryByText("v1.33.4")).toBeNull();
+});
+
+test("a list of all namespaces says connecting while the core works out which it reads, with no refusal and no count of one, and then how many it reads", async () => {
+  const mock = createMockBackend("rbacNamespaces");
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const backend: Backend = {
+    ...mock,
+    invoke: (command, request) =>
+      command === "list_ack"
+        ? held.then(() => mock.invoke(command, request))
+        : mock.invoke(command, request),
+  };
+  await openList(backend);
+  await settle(10);
+  expect(screen.getAllByText("Connecting…").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Forbidden|may not list/)).toBeNull();
+  expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
+
+  release?.();
+  await settle(30);
+  expect(entry("1 of 12 namespaces")).toBeTruthy();
+  expect(screen.queryByText("Connecting…")).toBeNull();
+});
+
+test("a selection, which leaves none out, keeps the cluster's version", async () => {
+  await openList(
+    createMockBackend("rbacNamespaces"),
+    "k8s-list://prod-eu/v1/pods?ns=default",
+  );
+  await settle(30);
+  expect(entry("v1.33.4")?.className).not.toContain("text-quiet");
+  expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
+});
+
 const statusOf = (row: HTMLElement) =>
   row.querySelector('[data-column="Status"]')?.textContent ?? "";
 const pressed = () =>
@@ -135,7 +226,11 @@ const part = (name: string, state: ViewState, shown = false): PartState => ({
   shown,
 });
 
-const of22 = (...unready: PartState[]): Parts => ({ count: 22, unready });
+const of22 = (...unready: PartState[]): Parts => ({
+  count: 22,
+  unready,
+  omitted: 0,
+});
 
 test.each([
   [
@@ -269,9 +364,9 @@ test("a part of a kind the webview does not know is counted and not named", () =
 
 test("a list of one part, or with every part ready, says nothing of its parts", () => {
   expect(
-    partsLine({ count: 1, unready: [part("team-b", FORBIDDEN)] }),
+    partsLine({ count: 1, unready: [part("team-b", FORBIDDEN)], omitted: 0 }),
   ).toBeUndefined();
-  expect(partsLine({ count: 22, unready: [] })).toBeUndefined();
+  expect(partsLine({ count: 22, unready: [], omitted: 0 })).toBeUndefined();
 });
 
 const OWN = "k8s-list://prod-eu/v1/pods?ns=auth,default,payments";
@@ -334,6 +429,7 @@ test("a list of one part says what its part waits for, not that its updates stop
                 status: { state: "stale" },
                 parts: {
                   count: 1,
+                  omitted: 0,
                   unready: [
                     {
                       part: { kind: "cluster" },

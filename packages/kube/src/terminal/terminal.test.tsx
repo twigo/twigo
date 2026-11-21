@@ -37,7 +37,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
@@ -797,24 +796,6 @@ test("the chip says the proxy and the mode of a guarded context, and follows the
   await setMode(backend, "staging", "read-only");
   screen.getByText("Proxy · read-only");
   expect(screen.queryByRole("button", { name: "Restart Terminal" })).toBeNull();
-});
-
-test("the kind is the chip and nothing else, whatever the address asks for", async () => {
-  history.replaceState(null, "", "/?variant=kind:line");
-  const { backend, create } = await mounted("ready", "dev");
-  await create();
-  const uri = uriOf(1, "dev");
-  screen.getByText("Your credentials");
-  expect(screen.queryByText("Your credentials.")).toBeNull();
-  expect(tabIcon(uri)).toContain("lucide-terminal");
-
-  history.replaceState(null, "", "/?variant=kind:icon");
-  await setMode(backend, "dev", "guarded");
-  screen.getByText("Your credentials · guarded context");
-  expect(
-    screen.queryByText("Holds your real credentials, and dev is guarded now."),
-  ).toBeNull();
-  expect(tabIcon(uri)).toContain("lucide-terminal");
 });
 
 async function later(ms: number) {

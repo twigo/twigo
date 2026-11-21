@@ -1,15 +1,25 @@
 import { CircleAlert, FileX, KeyRound, ShieldOff } from "lucide-react";
 import type { ObjectSnapshot, ViewState } from "@twigo/protocol";
 
-/** Why a view has no rows or object, in words, for the states that have one. */
-export function viewProblem(status: ViewState, what: string) {
+/**
+ * Why a view has no rows or object, in words, for the states that have one.
+ * A list of every namespace that is refused says it is the whole cluster at
+ * once that these credentials may not list.
+ */
+export function viewProblem(
+  status: ViewState,
+  what: string,
+  everyNamespace = false,
+) {
   switch (status.state) {
     case "forbidden":
       return {
         icon: ShieldOff,
         variant: "muted" as const,
         title: "Access denied",
-        body: `These credentials may not ${status.verb} ${status.resource}.`,
+        body: everyNamespace
+          ? `These credentials may not list ${status.resource} in every namespace at once.`
+          : `These credentials may not ${status.verb} ${status.resource}.`,
       };
     case "unauthorized":
       return {

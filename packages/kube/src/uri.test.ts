@@ -27,11 +27,11 @@ test.each([
     {
       space: "prod-eu",
       gvr: PODS,
-      namespaces: ["payments", "auth"],
+      namespaces: ["auth", "payments"],
       text: "api",
       labels: "app=web",
     },
-    "k8s-list://prod-eu/v1/pods?ns=payments%2Cauth&q=api&l=app%3Dweb",
+    "k8s-list://prod-eu/v1/pods?ns=auth%2Cpayments&q=api&l=app%3Dweb",
   ],
 ])("%o round-trips through %s", (input, uri) => {
   expect(listUri(input)).toBe(uri);

@@ -1,3 +1,4 @@
+import type { Parts } from "@twigo/protocol";
 import type { Workbench } from "@twigo/workbench";
 import type { ListInput } from "../uri";
 
@@ -23,4 +24,12 @@ export function whereWords(
     contexts,
     ...(namespaces.length > 0 ? [namespaces.join(", ")] : []),
   ].join(" · ");
+}
+
+export const namespaceWords = (count: number): string =>
+  `${String(count)} ${count === 1 ? "namespace" : "namespaces"}`;
+
+/** Where a list of every namespace looks when the credentials may list the kind in some only; none when it leaves none out. */
+export function mayListWords({ count, omitted }: Parts): string | undefined {
+  return omitted > 0 ? `the ${namespaceWords(count)} you may list` : undefined;
 }

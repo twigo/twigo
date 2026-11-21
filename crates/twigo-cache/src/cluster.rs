@@ -7,14 +7,56 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use tokio::time::Instant;
 
 use twigo_ipc::Access;
 use twigo_kube::client::Clients;
 
+use crate::upstream::Failure;
+
 /// How long RBAC's no holds before it is asked again, so a RoleBinding
 /// granted since counts; a yes holds, as the server still decides.
 pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
+
+/// How long the namespaces a person may list a resource in hold once they
+/// are resolved, so each list of all namespaces opened meanwhile reads them
+/// and asks nothing.
+pub(crate) const RESOLVED_FOR: Duration = Duration::from_secs(300);
+
+/// What "all namespaces" of a resource came to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    /// The namespaces they may list it in, sorted; none when the cluster part
+    /// reads it, for a cluster-wide yes as for a refusal.
+    pub allowed: Vec<String>,
+    /// How many of the cluster's namespaces that leaves out.
+    pub omitted: u32,
+}
+
+pub(crate) struct Kept {
+    pub resolved: Resolved,
+    /// It is due, past [`RESOLVED_FOR`], and the asker is the one to resolve
+    /// it again.
+    pub renew: bool,
+}
+
+/// What all namespaces of a resource came to, and until when it is read as
+/// it is.
+struct Memo {
+    resolved: Resolved,
+    /// From then on the first list that reads it resolves it again.
+    due: Instant,
+    /// Someone resolves it again.
+    renewing: bool,
+}
+
+/// What a review asks: the namespace, none for every namespace, and the access.
+type Asked = (Option<String>, Access);
+
+/// A review under way, whose answer every asker of it takes.
+type Review = Shared<BoxFuture<'static, Result<bool, Failure>>>;
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -29,7 +71,12 @@ struct Facts {
     paged: HashSet<(String, String)>,
     /// By namespace, none for all of them, and what is asked: the answer,
     /// and when it came.
-    may: HashMap<(Option<String>, Access), (bool, Instant)>,
+    may: HashMap<Asked, (bool, Instant)>,
+    /// The reviews under way, by what they ask, which each asker of the same
+    /// waits for instead of sending its own.
+    reviewing: HashMap<Asked, Review>,
+    /// By group and resource, what its all namespaces came to.
+    resolved: HashMap<(String, String), Memo>,
 }
 
 impl Cluster {
@@ -49,30 +96,100 @@ impl Cluster {
             .insert((group.to_owned(), version.to_owned()));
     }
 
-    pub fn may(
-        &self,
+    /// Whether RBAC lets the person do `access` in `namespace`, or with none
+    /// in every namespace: the answer kept, else the one `ask` sends, which
+    /// every asker of the same review shares while it is under way. Only an
+    /// answer is kept. A review runs to its end whoever waits for it, so an
+    /// asker that leaves never parks it with its request slot held.
+    pub async fn review(
+        self: &Arc<Self>,
         clients: &Arc<Clients>,
         namespace: Option<&str>,
         access: &Access,
-    ) -> Option<bool> {
-        let &(may, at) = self
-            .facts(clients)
-            .may
-            .get(&(namespace.map(str::to_owned), access.clone()))?;
-        (may || at.elapsed() < REFUSED_FOR).then_some(may)
+        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Failure>>,
+    ) -> Result<bool, Failure> {
+        let asked: Asked = (namespace.map(str::to_owned), access.clone());
+        let review = {
+            let mut facts = self.facts(clients);
+            if let Some(&(may, at)) = facts.may.get(&asked)
+                && (may || at.elapsed() < REFUSED_FOR)
+            {
+                return Ok(may);
+            }
+            facts
+                .reviewing
+                .entry(asked.clone())
+                .or_insert_with(|| {
+                    let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
+                    let review = tokio::spawn(async move {
+                        let may = ask.await;
+                        let mut facts = cluster.facts(&clients);
+                        facts.reviewing.remove(&asked);
+                        if let Ok(may) = may {
+                            facts.may.insert(asked, (may, Instant::now()));
+                        }
+                        may
+                    });
+                    async move { review.await.expect("a review ends with an answer") }
+                        .boxed()
+                        .shared()
+                })
+                .clone()
+        };
+        review.await
     }
 
-    pub fn set_may(
-        &self,
-        clients: &Arc<Clients>,
-        namespace: Option<&str>,
-        access: &Access,
-        may: bool,
-    ) {
-        self.facts(clients).may.insert(
-            (namespace.map(str::to_owned), access.clone()),
-            (may, Instant::now()),
+    /// What all namespaces of the resource `access` names came to, if it is
+    /// kept. A set of namespaces stays past its time and is read by every
+    /// asker, the first of whom resolves it again; a set with no namespace,
+    /// which the cluster-wide yes and a refusal come to, lasts
+    /// [`REFUSED_FOR`], as a review's no.
+    pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Kept> {
+        let mut facts = self.facts(clients);
+        let memo = facts
+            .resolved
+            .get_mut(&(access.group.clone(), access.resource.clone()))?;
+        let due = Instant::now() >= memo.due;
+        if memo.resolved.allowed.is_empty() {
+            return (!due).then(|| Kept {
+                resolved: memo.resolved.clone(),
+                renew: false,
+            });
+        }
+        let renew = due && !std::mem::replace(&mut memo.renewing, true);
+        Some(Kept {
+            resolved: memo.resolved.clone(),
+            renew,
+        })
+    }
+
+    /// What every question of a resolution answered replaces what was kept.
+    pub fn set_resolved(&self, clients: &Arc<Clients>, access: &Access, resolved: Resolved) {
+        let kept = if resolved.allowed.is_empty() {
+            REFUSED_FOR
+        } else {
+            RESOLVED_FOR
+        };
+        self.facts(clients).resolved.insert(
+            (access.group.clone(), access.resource.clone()),
+            Memo {
+                resolved,
+                due: Instant::now() + kept,
+                renewing: false,
+            },
         );
+    }
+
+    /// A resolution that did not answer every question leaves the set it
+    /// renews as it is, for the next list to resolve again.
+    pub fn set_unsettled(&self, clients: &Arc<Clients>, access: &Access) {
+        if let Some(memo) = self
+            .facts(clients)
+            .resolved
+            .get_mut(&(access.group.clone(), access.resource.clone()))
+        {
+            memo.renewing = false;
+        }
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

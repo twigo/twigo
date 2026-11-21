@@ -8,19 +8,25 @@ import RESOURCES from "../../protocol/src/mock/resources.json";
 import { cellTone } from "./columns";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
-import { firstRows, parseK9s, resolveResource } from "./quickaccess";
+import {
+  firstRows,
+  namespacesOf,
+  parseK9s,
+  resolveResource,
+} from "./quickaccess";
 import { listUri, objectUri } from "./uri";
 
 const NOWHERE: QuickAccessContext = { lookup: () => undefined };
+const opening = (): QuickAccessContext => ({ lookup: () => undefined });
 const DISCOVERY: readonly Resource[] = RESOURCES;
 
 async function kube() {
   const workbench = await testWorkbench();
   registerKube(workbench);
-  const run = async (value: string) => {
+  const run = async (value: string, context = opening()) => {
     const resolved = workbench.quickAccess.resolve(value);
     if (!resolved) throw new Error(`no provider for ${value}`);
-    const items = await resolved.provider.items(resolved.filter, NOWHERE);
+    const items = await resolved.provider.items(resolved.filter, context);
     return {
       items,
       provider: resolved.provider,
@@ -99,6 +105,55 @@ test(": opens the list that the query names", async () => {
   );
 });
 
+test.each([
+  ["payments", ["payments"]],
+  ["payments,auth", ["payments", "auth"]],
+  ["payments,", ["payments"]],
+  ["all", []],
+  ["payments,all", undefined],
+  ["all,payments", undefined],
+  ["Payments", undefined],
+  ["a/b", undefined],
+  ["-a", undefined],
+  [",", undefined],
+])(": the word %s names the namespaces %j", (word, namespaces) => {
+  expect(namespacesOf(word)).toEqual(namespaces);
+});
+
+test(": several namespaces split on commas, described as typed and opened as one sorted list", async () => {
+  const { workbench, run } = await kube();
+  const open = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  const query = await run(":po payments,auth,payments");
+  expect(query.items).toMatchObject([
+    { label: "Pods", description: "in payments, auth, payments" },
+  ]);
+  await query.accept();
+  expect(open).toHaveBeenCalledWith(
+    "k8s-list://prod-eu/v1/pods?ns=auth%2Cpayments",
+    { side: false },
+  );
+});
+
+test(": all opens every namespace, and a word that is no namespace gives nothing to open", async () => {
+  const { workbench, run } = await kube();
+  const open = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  const all = await run(":po all");
+  expect(all.items).toMatchObject([{ description: "in all" }]);
+  await all.accept();
+  expect(open).toHaveBeenCalledWith("k8s-list://prod-eu/v1/pods", {
+    side: false,
+  });
+
+  for (const word of ["Payments", "a/b", "payments,all"]) {
+    const asked = await run(`:po ${word}`);
+    expect(asked.items).toEqual([]);
+  }
+});
+
 test(": with @context opens that context's space first", async () => {
   const { workbench, run } = await kube();
   const open = vi
@@ -130,36 +185,132 @@ test("an unknown resource gives nothing to open", async () => {
   expect((await run(":gizmos payments")).items).toEqual([]);
 });
 
-test("ns scopes the active space", async () => {
+test("ns lists all namespaces, the current ones ticked under Selected, then the others, and says all namespaces is the current scope when it is", async () => {
   const { workbench, run } = await kube();
-  const all = await run("ns ");
-  expect(all.items[0]).toMatchObject({
-    label: "all namespaces",
+  expect((await run("ns ")).items[0]).toMatchObject({
+    label: "All namespaces",
     description: "current",
   });
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["auth", "payments"],
+  }));
+  const [all, ...rest] = (await run("ns ")).items;
+  expect(all).toMatchObject({
+    id: "all namespaces",
+    label: "All namespaces",
+    description: "new namespaces join",
+  });
+  expect(all?.checked).toBeUndefined();
+  expect(
+    rest
+      .slice(0, 2)
+      .map(({ label, checked, group }) => [label, checked, group]),
+  ).toEqual([
+    ["auth", true, "Selected"],
+    ["payments", true, "Selected"],
+  ]);
+  const others = rest.slice(2);
+  expect(others.length).toBeGreaterThan(8);
+  expect(
+    others.every(
+      ({ checked, group }) => checked === false && group === "Namespaces",
+    ),
+  ).toBe(true);
+  expect(others.map((item) => item.label)).not.toContain("payments");
+});
+
+test("ns ranks every namespace the filter matches by its score, ticked or not, with no heading and All namespaces after them", async () => {
+  const { workbench, run } = await kube();
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["payments", "search"],
+  }));
+  const { items } = await run("ns c");
+  const labels = items.map(({ label }) => label);
+  expect(labels[0]).toBe("checkout");
+  expect(labels.indexOf("batch")).toBeLessThan(labels.indexOf("search"));
+  expect(labels[labels.length - 1]).toBe("All namespaces");
+  expect(items.every(({ group }) => group === undefined)).toBe(true);
+  expect(items.find(({ label }) => label === "search")?.checked).toBe(true);
+});
+
+test("ns takes a row alone, or the ticked set sorted, and none ticked or the All row is every namespace", async () => {
+  const { workbench, run } = await kube();
+  const scope = () => workbench.spaces.state("prod-eu").namespaces;
   const payments = await run("ns paym");
   expect(payments.items.map((item) => item.label)).toEqual(["payments"]);
   await payments.accept();
-  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+  expect(scope()).toEqual(["payments"]);
+
+  const provider = workbench.quickAccess.resolve("ns ")?.provider;
+  if (!provider?.acceptChecked) throw new Error("no ticked set");
+  await act(() => provider.acceptChecked?.(["search", "auth", "search"]));
+  expect(scope()).toEqual(["auth", "search"]);
+
+  await act(() => provider.acceptChecked?.([]));
+  expect(scope()).toEqual([]);
+
+  await payments.accept();
+  const all = await run("ns ");
+  await all.accept(0);
+  expect(scope()).toEqual([]);
 });
 
-test("ns takes a typed name where namespaces may not be listed", async () => {
+test("ns says in words what the ticked set is", async () => {
+  const { workbench } = await kube();
+  const words = workbench.quickAccess.resolve("ns ")?.provider.checkedWords;
+  expect([0, 1, 3].map((count) => words?.(count))).toEqual([
+    "all namespaces",
+    "1 namespace",
+    "3 namespaces",
+  ]);
+});
+
+test("ns asks for the namespaces once an opening, whatever is typed", async () => {
+  const { workbench, run } = await kube();
+  const invoke = vi.spyOn(workbench.backend, "invoke");
+  const context = opening();
+  for (const typed of ["ns ", "ns p", "ns pa", "ns pay"]) {
+    await run(typed, context);
+  }
+  const asked = () =>
+    invoke.mock.calls.filter(([command]) => command === "namespaces_list");
+  expect(asked()).toHaveLength(1);
+  await run("ns ", opening());
+  expect(asked()).toHaveLength(2);
+});
+
+test("ns offers the current namespaces ticked and a typed name where namespaces may not be listed", async () => {
   const workbench = await testWorkbench("forbidden");
   registerKube(workbench);
-  const resolved = workbench.quickAccess.resolve("ns team-a");
-  if (!resolved) throw new Error("no ns provider");
-  const items = await resolved.provider.items(resolved.filter, NOWHERE);
-  expect(items.map((item) => item.label)).toEqual(["all namespaces", "team-a"]);
-  const [, typed] = items;
-  if (!typed) throw new Error("no typed item");
-  await act(() => resolved.provider.accept(typed, resolved.filter, NOWHERE));
-  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["team-a"]);
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["team-a"],
+  }));
+  const rows = async (typed: string) => {
+    const resolved = workbench.quickAccess.resolve(`ns ${typed}`);
+    if (!resolved) throw new Error("no ns provider");
+    const items = await resolved.provider.items(resolved.filter, opening());
+    return items.map(({ label, checked, description }) => [
+      label,
+      checked,
+      description,
+    ]);
+  };
+  expect(await rows("")).toEqual([
+    ["All namespaces", undefined, "new namespaces join"],
+    ["team-a", true, undefined],
+  ]);
+  expect(await rows("team-b")).toEqual([
+    ["team-b", false, "you may not list namespaces"],
+  ]);
+  expect(await rows("team-a")).toEqual([["team-a", true, undefined]]);
 
   for (const invalid of ["Team A", "a/b", "-a"]) {
-    const asked = workbench.quickAccess.resolve(`ns ${invalid}`);
-    if (!asked) throw new Error("no ns provider");
-    const offered = await asked.provider.items(asked.filter, NOWHERE);
-    expect(offered.map((item) => item.label)).not.toContain(invalid);
+    expect((await rows(invalid)).map(([label]) => label)).not.toContain(
+      invalid,
+    );
   }
 });
 

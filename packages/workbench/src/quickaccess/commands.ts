@@ -7,11 +7,16 @@ export const QUICK_INPUT = {
   previous: "quickInput.previous",
   accept: "quickInput.accept",
   acceptToSide: "quickInput.acceptToSide",
+  toggle: "quickInput.toggle",
 } as const;
+
+const CAN_PICK_MANY = "inQuickOpen && quickOpenCanPickMany";
 
 /**
  * Quick access's keys are bindings the user may change. ↑, ↓ and Enter fire
- * in its input although they are bare (ARCHITECTURE 5.2).
+ * in its input although they are bare, and so does Space where the open
+ * provider takes ticked rows, and ⌃N and ⌃P move on macOS too (ARCHITECTURE
+ * 5.2).
  */
 export function registerQuickInputCommands(
   { commands, quickAccess }: Workbench,
@@ -21,19 +26,24 @@ export function registerQuickInputCommands(
     id: string;
     title: string;
     key: string;
+    /** A second key on macOS, bound before `key` so that the footer names `key`. */
+    onMac?: string;
     enablement?: string;
+    when?: string;
     run: () => void;
   }[] = [
     {
       id: QUICK_INPUT.next,
       title: "Select Next",
       key: "down",
+      onMac: "ctrl+n",
       run: () => quickAccess.list?.move(1),
     },
     {
       id: QUICK_INPUT.previous,
       title: "Select Previous",
       key: "up",
+      onMac: "ctrl+p",
       run: () => quickAccess.list?.move(-1),
     },
     {
@@ -49,8 +59,16 @@ export function registerQuickInputCommands(
       enablement: "inQuickOpen && quickOpenToSide",
       run: () => quickAccess.list?.accept({ side: true }),
     },
+    {
+      id: QUICK_INPUT.toggle,
+      title: "Toggle Selection",
+      key: "space",
+      enablement: CAN_PICK_MANY,
+      when: CAN_PICK_MANY,
+      run: () => quickAccess.list?.toggle(),
+    },
   ];
-  for (const { id, title, key, enablement, run } of all) {
+  for (const { id, title, key, onMac, enablement, when, run } of all) {
     commands.register({
       id,
       title,
@@ -58,6 +76,14 @@ export function registerQuickInputCommands(
       enablement: enablement ?? "inQuickOpen",
       run,
     });
-    rules.push({ key, command: id, when: "inQuickOpen" });
+    const holds = when ?? "inQuickOpen";
+    if (onMac) {
+      rules.push({
+        key: onMac,
+        command: id,
+        when: `${holds} && platform == mac`,
+      });
+    }
+    rules.push({ key, command: id, when: holds });
   }
 }

@@ -48,7 +48,7 @@ async fn the_webview_learns_where_a_context_comes_from() {
         &file,
         "
 clusters: [{ name: c, cluster: { server: 'https://user:pass@kind:6443' } }]
-contexts: [{ name: kind-a, context: { cluster: c } }]
+contexts: [{ name: kind-a, context: { cluster: c, namespace: payments } }]
 ",
     )
     .unwrap();
@@ -63,6 +63,7 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
             source: file.display().to_string(),
             server: Some("https://kind:6443".to_owned()),
             access: Policy::open().access("kind-a"),
+            namespace: Some("payments".to_owned()),
         }]
     );
 }

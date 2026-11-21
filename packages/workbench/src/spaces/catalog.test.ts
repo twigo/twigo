@@ -9,6 +9,7 @@ const ONE: Context[] = [
     color: null,
     source: "~/.kube/config",
     server: null,
+    namespace: null,
     access: UNMARKED,
   },
 ];
@@ -18,6 +19,7 @@ const TWO: Context[] = [
     color: "green",
     source: "~/.kube/config",
     server: null,
+    namespace: null,
     access: UNMARKED,
   },
 ];

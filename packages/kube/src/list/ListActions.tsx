@@ -18,6 +18,7 @@ import {
   type SegmentedItem,
 } from "@twigo/ui";
 import {
+  scopeWords,
   STRIP_KEPT,
   useActionRoom,
   useChanges,
@@ -98,21 +99,17 @@ function Scope({
   onOpen?: (() => void) | undefined;
   onClear: () => void;
 }) {
-  const [first = "", ...more] = names;
-  const tooltip =
-    more.length === 0
-      ? `Namespace: ${first}`
-      : `Namespaces: ${names.join(", ")}`;
+  const scope = scopeWords(names);
   return (
     <ScopeChip
       icon={kindIcon(NAMESPACES)}
-      name={first}
-      more={more.length}
-      tooltip={tooltip}
+      name={scope.name}
+      more={scope.more}
+      tooltip={scope.tooltip}
       label={
         own
-          ? `This list shows ${names.join(", ")} whatever the space's scope is`
-          : tooltip
+          ? `This list shows ${scope.all} whatever the space's scope is`
+          : scope.tooltip
       }
       {...(!own && {
         onOpen,

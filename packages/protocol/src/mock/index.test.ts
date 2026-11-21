@@ -47,8 +47,11 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
   };
 }
 
-async function open(scenario: MockScenario, q: ListQuery = query()) {
-  const backend = createMockBackend(scenario);
+async function open(
+  scenario: MockScenario,
+  q: ListQuery = query(),
+  backend = createMockBackend(scenario),
+) {
   const batches: ListBatch[] = [];
   const pending = backend.subscribe("list_subscribe", q, (b) =>
     batches.push(b),
@@ -583,6 +586,7 @@ test("a person of one namespace has its rows and the others refused, each part o
   expect(latest?.status).toEqual({ state: "ready" });
   expect(lastParts(batches)).toEqual({
     count: 3,
+    omitted: 0,
     unready: [
       {
         part: { kind: "namespace", name: "auth" },
@@ -608,6 +612,51 @@ test("a person of one namespace has its rows and the others refused, each part o
   expect(batches.map(({ status }) => status.state)).not.toContain("forbidden");
 });
 
+test("All namespaces of a person who may list namespaces says connecting with no part first, as the core does while it resolves, then has the rows of the one they read and counts the others left out, and the next list of the resource has its parts at once", async () => {
+  const sub = await open("rbacNamespaces", namespaced([]));
+  const first = await settled(sub);
+  expect(first[0]).toMatchObject({
+    status: { state: "connecting" },
+    total: 0,
+    columns: [],
+    parts: { count: 1, unready: [], omitted: 0 },
+  });
+  expect(first[0]?.window?.ids ?? []).toEqual([]);
+  expect(first[1]?.parts).toMatchObject({ count: 1, omitted: 11 });
+  const latest = last(first);
+  expect(latest?.status).toEqual({ state: "ready" });
+  expect(lastParts(first)).toEqual({ count: 1, omitted: 11, unready: [] });
+  expect(latest?.total).toBeGreaterThan(0);
+  const ids = first.flatMap(({ window }) => window?.ids ?? []);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(ids.every((id) => id.includes("/default/"))).toBe(true);
+  expect(
+    first
+      .find((batch) => batch.columns?.length)
+      ?.columns?.map((column) => column.name),
+  ).toContain("Namespace");
+
+  const again = await settled(
+    await open("rbacNamespaces", namespaced([]), sub.backend),
+  );
+  expect(again[0]?.parts).toMatchObject({ count: 1, omitted: 11 });
+
+  const names = sub.backend.invoke("namespaces_list", "prod-eu");
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await names).toContain("default");
+});
+
+test("a typed selection of a person who may not list namespaces reads the namespaces they are bound in", async () => {
+  const bound = await settled(
+    await open("rbacTypedNamespaces", namespaced(["payments", "default"])),
+  );
+  expect(last(bound)?.status).toEqual({ state: "ready" });
+  expect(lastParts(bound)).toEqual({ count: 2, omitted: 0, unready: [] });
+  const ids = bound.flatMap(({ window }) => window?.ids ?? []);
+  expect(ids.some((id) => id.includes("/payments/"))).toBe(true);
+  expect(ids.some((id) => id.includes("/default/"))).toBe(true);
+});
+
 test("with more than three namespaces the last two wait for a stream, the first of them with the rows it listed", async () => {
   const names = ["auth", "default", "ledger", "payments", "search"];
   const batches = await settled(
@@ -617,6 +666,7 @@ test("with more than three namespaces the last two wait for a stream, the first 
   expect(latest?.status).toEqual({ state: "stale" });
   expect(lastParts(batches)).toEqual({
     count: 5,
+    omitted: 0,
     unready: [
       {
         part: { kind: "namespace", name: "payments" },

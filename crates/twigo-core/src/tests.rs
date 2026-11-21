@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use twigo_env::{Failure, Reason, ShellEnv, Status};
 
 use super::*;
-use twigo_ipc::{BlockReason, Environment, Mode, ModeSource};
+use twigo_ipc::{BlockReason, Environment, Mode, ModeSource, ViewState};
 
 fn env(kubeconfig: &Path) -> Arc<ShellEnv> {
     Arc::new(ShellEnv::from_iter([(

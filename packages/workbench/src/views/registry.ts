@@ -57,6 +57,8 @@ export interface StatusEntry {
   readonly spin?: boolean;
   /** A dot before the text. */
   readonly tone?: Tone;
+  /** The text in the quiet role: a fact more than a state. */
+  readonly quiet?: boolean;
   /** The context's colour behind the entry, as the rail's tile has it. */
   readonly accent?: ContextColor;
   readonly tooltip?: string;

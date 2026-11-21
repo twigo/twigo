@@ -127,7 +127,7 @@ process: string,
  */
 command: string | null, 
 /**
- * The word a person reads in "Allow Terminal 2 to <verb> <target>":
+ * The word a person reads in `"Allow Terminal 2 to <verb> <target>"`:
  * `exec` for `pods/exec` and `attach` for `pods/attach`, which RBAC
  * calls `create` or `get`, `evict` for `pods/eviction`, which RBAC calls
  * `create`, and RBAC's verb otherwise: `create`, `patch`, `delete`.
@@ -349,7 +349,12 @@ server: string | null,
 /**
  * Its mode, where the mode comes from and what it is marked as.
  */
-access: ContextAccess, };
+access: ContextAccess, 
+/**
+ * The namespace the kubeconfig context names, which a new space of it
+ * starts on; none when it names none.
+ */
+namespace: string | null, };
 
 /**
  * What a context lets through now, and why.
@@ -891,7 +896,10 @@ export type ListQuery = { space: string, gvr: Gvr,
  */
 namespaced: boolean, 
 /**
- * Empty for every namespace the space covers.
+ * Empty for every namespace where the person may list the resource:
+ * the cluster's when they may list it cluster-wide, else each one a
+ * review allows among the namespaces they may list. A person who may
+ * list neither gets the cluster's refusal.
  */
 namespaces: Array<string>, labelSelector: string | null, 
 /**
@@ -1409,7 +1417,13 @@ export type Parts = { count: number,
 /**
  * The parts that are not ready, each with its own state.
  */
-unready: Array<PartState>, };
+unready: Array<PartState>, 
+/**
+ * For every namespace, the namespaces it leaves out because the person
+ * may not list the resource there; 0 for a selection, or for a
+ * cluster-wide part.
+ */
+omitted: number, };
 
 /**
  * What a command will do, for the person to confirm. It runs only by its

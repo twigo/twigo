@@ -1,5 +1,6 @@
 import type { ListQuery, Part, Parts, ViewState } from "../generated";
 import { leastReady, REFUSED, SHOWS_ROWS } from "../viewState";
+import { NAMESPACES as CLUSTER_NAMESPACES } from "./fixtures";
 
 /** States in which Rust knows the server's columns: from a list's first page on. */
 const KNOWS_COLUMNS = new Set<ViewState["state"]>([
@@ -11,6 +12,12 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
 
 /** More namespaces than the hub's `NAMESPACES` are read cluster-wide, by a person who may list the kind there. */
 const NAMESPACES = 4;
+
+/** The namespaces where a scenario's person may list pods. */
+const BOUND: Readonly<Record<string, readonly string[]>> = {
+  rbacNamespaces: ["default"],
+  rbacTypedNamespaces: ["default", "payments"],
+};
 
 /** What a scenario makes of one part, whatever the list's own state is; none leaves the part to it. */
 export type Pin = (
@@ -29,9 +36,10 @@ export function pinOf(scenario: string, resource: string): Pin | undefined {
     state: { state: "forbidden", verb: "watch", resource },
     shown: false,
   } as const;
-  if (scenario === "rbacNamespaces") {
+  const bound = BOUND[scenario];
+  if (bound) {
     return (part) =>
-      part.kind === "namespace" && part.name === "default"
+      part.kind === "namespace" && bound.includes(part.name)
         ? undefined
         : refused;
   }
@@ -53,26 +61,63 @@ export interface PartsView {
   readonly namespaces: readonly string[] | null;
   /** Some part has its first page, so Rust knows the columns. */
   readonly knows: boolean;
+  /** The list is yet to learn which namespaces it reads: this is not its parts. */
+  readonly resolving: boolean;
 }
+
+/** What a list says while it works out which namespaces "All namespaces" reads: `connecting`, one part that is none yet, nothing left out. */
+const RESOLVING: PartsView = {
+  status: { state: "connecting" },
+  parts: { count: 1, unready: [], omitted: 0 },
+  namespaces: [],
+  knows: false,
+  resolving: true,
+};
 
 /** The parts of one list, which the hub keeps one upstream each for. */
 export class MockParts {
   readonly #parts: readonly Part[];
   readonly #pin: Pin | undefined;
+  /** The namespaces "All namespaces" resolved to, with every other one left out. */
+  readonly #resolved: readonly string[] | undefined;
+  readonly #gvr: string;
+  #resolving: boolean;
 
-  constructor(query: ListQuery, pin: Pin | undefined) {
-    this.#pin = pin;
+  /** `kept` is what a cluster has resolved, by resource: the core keeps the set, so a later list of the resource starts with its parts. */
+  constructor(
+    query: ListQuery,
+    scenario: string,
+    private readonly kept: Set<string>,
+  ) {
+    this.#pin = pinOf(scenario, query.gvr.resource);
     const names = [...new Set(query.namespaces)].sort();
+    // Only a person who may list the namespaces has "All namespaces" resolved
+    // to those they may read; for the other the cluster refuses it.
+    const resolved =
+      query.namespaced && names.length === 0 && scenario === "rbacNamespaces"
+        ? BOUND[scenario]
+        : undefined;
+    this.#resolved = resolved;
+    this.#gvr = JSON.stringify(query.gvr);
+    this.#resolving = resolved !== undefined && !kept.has(this.#gvr);
+    const read = resolved ?? names;
     this.#parts =
       !query.namespaced ||
-      names.length === 0 ||
-      (pin === undefined && names.length > NAMESPACES)
+      read.length === 0 ||
+      (this.#pin === undefined && read.length > NAMESPACES)
         ? [{ kind: "cluster" }]
-        : names.map((name) => ({ kind: "namespace", name }));
+        : read.map((name) => ({ kind: "namespace", name }));
+  }
+
+  /** Called once the list has said it is resolving: from the next view on it reads the namespaces it resolved to. */
+  resolved(): void {
+    this.#resolving = false;
+    this.kept.add(this.#gvr);
   }
 
   /** The list while the parts a scenario leaves alone are in `state`. */
   at(state: ViewState): PartsView {
+    if (this.#resolving) return RESOLVING;
     const of = this.#parts.length;
     const placed = this.#parts.map((part, at) => ({
       part,
@@ -105,9 +150,12 @@ export class MockParts {
       parts: {
         count: of,
         unready: placed.filter(({ state }) => state.state !== "ready"),
+        omitted: this.#resolved
+          ? CLUSTER_NAMESPACES.length - this.#resolved.length
+          : 0,
       },
       namespaces:
-        shown.length === of
+        shown.length === of && !this.#resolved
           ? null
           : shown.flatMap(({ part }) =>
               part.kind === "namespace" ? [part.name] : [],
@@ -115,6 +163,7 @@ export class MockParts {
       knows: placed.some(
         ({ state, shown }) => shown || KNOWS_COLUMNS.has(state.state),
       ),
+      resolving: false,
     };
   }
 }
