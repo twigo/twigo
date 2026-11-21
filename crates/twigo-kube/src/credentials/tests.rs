@@ -943,6 +943,19 @@ fn the_client_s_id_and_secret_are_escaped_as_go_s_query_escape_does() {
     );
 }
 
+#[test]
+fn a_failed_refresh_is_logged_without_the_issuer_s_reply() {
+    let error = oidc::OidcError::Refresh {
+        status: http::StatusCode::BAD_REQUEST,
+        body: "refresh_token=SPENT".to_owned(),
+    };
+    assert!(error.to_string().contains("SPENT"), "the window shows it");
+    assert_eq!(
+        error.loggable(),
+        "oidc: the refresh failed: 400 Bad Request"
+    );
+}
+
 #[tokio::test]
 async fn an_expiry_at_the_start_of_time_neither_panics_nor_is_kept() {
     let plugins = Plugins::new();

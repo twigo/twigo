@@ -62,6 +62,18 @@ pub enum OidcError {
     Invalid(String),
 }
 
+impl OidcError {
+    /// What a log may say of it: the issuer's reply to a failed refresh is
+    /// left out, since it may echo the request's refresh token or client
+    /// secret. The window shows the whole [`Display`](std::fmt::Display).
+    pub(super) fn loggable(&self) -> String {
+        match self {
+            Self::Refresh { status, .. } => format!("oidc: the refresh failed: {status}"),
+            other => other.to_string(),
+        }
+    }
+}
+
 /// The provider's settings, as the user entry holds them.
 #[derive(Clone, PartialEq, Eq)]
 pub struct OidcEntry {
@@ -258,8 +270,9 @@ impl Oidc {
                 Err(error) => {
                     self.state().spent = true;
                     eprintln!(
-                        "kept the rejected oidc token of {}, since its refresh failed: {error}",
-                        self.user
+                        "kept the rejected oidc token of {}, since its refresh failed: {}",
+                        self.user,
+                        error.loggable()
                     );
                 }
             }

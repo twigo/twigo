@@ -44,9 +44,16 @@ const MAX_PRINTED: usize = 4 << 20;
 /// How much of a failed shell's output a failure keeps.
 const OUTPUT_TAIL: usize = 16 << 10;
 
-/// The environment that child processes get.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The environment that child processes get. Its `Debug` prints the names
+/// of the variables only: the values hold the person's credentials.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ShellEnv(Vars);
+
+impl std::fmt::Debug for ShellEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
+}
 
 impl ShellEnv {
     /// Twigo's own environment, for when the login shell's is unknown.
@@ -128,13 +135,24 @@ fn in_utf8(identifier: Option<&str>, exists: impl Fn(&str) -> bool) -> String {
         .unwrap_or_else(|| "en_US.UTF-8".to_owned())
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 #[error("{} {reason}", shell.display())]
 pub struct Failure {
     pub shell: PathBuf,
     pub reason: Reason,
-    /// The end of what the shell printed, without the environment.
+    /// The end of what the shell printed, without the environment. Its
+    /// `Debug` leaves it out: a startup file may print a token.
     pub output: String,
+}
+
+impl std::fmt::Debug for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Failure")
+            .field("shell", &self.shell)
+            .field("reason", &self.reason)
+            .field("output", &format_args!("{} bytes", self.output.len()))
+            .finish()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
