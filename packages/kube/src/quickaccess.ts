@@ -26,6 +26,7 @@ import { cellTone, IN_FLIGHT, statusColumn } from "./columns";
 import { sameGvr, type Discovery } from "./discovery";
 import { kindIcon, PODS, pluralTitle } from "./kinds";
 import { settled } from "./list/listStatus";
+import { namespaceWords } from "./list/scope";
 import type { ListServices } from "./services";
 import { listUri, parseListUri, parseObjectUri } from "./uri";
 
@@ -230,9 +231,7 @@ interface Opening {
 const ALL = "all namespaces";
 
 const namespaceCount = (count: number) =>
-  count === 0
-    ? "all namespaces"
-    : `${String(count)} ${count === 1 ? "namespace" : "namespaces"}`;
+  count === 0 ? "all namespaces" : namespaceWords(count);
 
 /**
  * `ns `: the active space's namespace scope (ARCHITECTURE 4.2): the current

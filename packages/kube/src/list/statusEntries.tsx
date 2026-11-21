@@ -20,6 +20,7 @@ import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
+import { namespaceWords } from "./scope";
 
 const CONNECTION: Readonly<
   Record<ViewState["state"], { tone: Tone; text: string }>
@@ -218,7 +219,7 @@ export function clusterEntries(
         ...(connection && { tone: connection.tone }),
         tooltip: left
           ? [
-              `${left.title} in the ${String(left.count)} ${left.count === 1 ? "namespace" : "namespaces"} these credentials may list; ${String(left.omitted)} ${left.omitted === 1 ? "other is" : "others are"} left out`,
+              `${left.title} in the ${namespaceWords(left.count)} these credentials may list; ${String(left.omitted)} ${left.omitted === 1 ? "other is" : "others are"} left out`,
               tooltip,
             ]
               .filter(Boolean)
