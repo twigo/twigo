@@ -7,6 +7,7 @@ mod bench;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
@@ -37,6 +38,15 @@ use twigo_log::{Facts, Level, Log};
 #[cfg(any(debug_assertions, feature = "bench"))]
 const EXPLICIT_KUBECONFIG: &str = "TWIGO_KUBECONFIG";
 
+/// Whether `result` reached the webview. A reloaded page and a closed window
+/// end their channels in normal use, so a failure is only for `debug`, and
+/// whoever sent stops sending.
+fn sent(channel: &str, result: tauri::Result<()>) -> bool {
+    result
+        .inspect_err(|error| tracing::debug!(channel, %error, "could not send to the webview"))
+        .is_ok()
+}
+
 /// The layout watch and one subscription per webview, which a reload
 /// replaces.
 struct Keyboard {
@@ -51,9 +61,12 @@ fn keyboard_layout_watch(
     channel: Channel<KeyboardLayout>,
 ) -> Result<KeyboardLayout, IpcError> {
     let watch = keyboard.watch.as_ref().map_err(IpcError::from)?;
+    let open = AtomicBool::new(true);
     let (layout, subscription) = watch.subscribe(move |layout| {
-        if let Err(error) = channel.send(layout.clone()) {
-            tracing::debug!(%error, "could not send the keyboard layout");
+        if open.load(Ordering::Relaxed)
+            && !sent("the keyboard layout", channel.send(layout.clone()))
+        {
+            open.store(false, Ordering::Relaxed);
         }
     });
     keyboard
@@ -80,6 +93,12 @@ impl Followers {
             replaced.abort();
         }
     }
+
+    fn remove(&self, window: &str) {
+        if let Some(follower) = self.0.lock().expect("followers lock").remove(window) {
+            follower.abort();
+        }
+    }
 }
 
 /// The login shell's environment and its followers.
@@ -99,8 +118,8 @@ fn shell_environment_watch(
     let follower = tauri::async_runtime::spawn(async move {
         while status.changed().await.is_ok() {
             let next = ShellEnvironment::from(&*status.borrow_and_update());
-            if let Err(error) = channel.send(next) {
-                tracing::debug!(%error, "could not send the shell environment");
+            if !sent("the shell environment", channel.send(next)) {
+                return;
             }
         }
     });
@@ -127,6 +146,14 @@ struct App {
 }
 
 impl App {
+    /// A window is gone: its subscriptions and its followers end with it.
+    fn close(&self, window: &str) {
+        self.core.drop_window(window);
+        for followers in [&self.contexts, &self.auth, &self.resources] {
+            followers.remove(window);
+        }
+    }
+
     fn focus(&self, window: &str, focused: bool) {
         let mut windows = self.focused.lock().expect("focus lock");
         if focused {
@@ -162,9 +189,9 @@ async fn contexts_watch(
                 changed = access.changed() => if changed.is_err() { return },
             }
             if let Some(next) = core.contexts()
-                && let Err(error) = channel.send(next)
+                && !sent("the contexts", channel.send(next))
             {
-                tracing::debug!(%error, "could not send the contexts");
+                return;
             }
         }
     });
@@ -195,13 +222,7 @@ async fn command_execute(
 ) -> Result<(), IpcError> {
     app.core
         .command_execute(webview.label(), request, move |event| {
-            match channel.send(event) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::debug!(%error, "could not send an operation's event");
-                    false
-                }
-            }
+            sent("an operation's event", channel.send(event))
         })
         .await
 }
@@ -279,8 +300,8 @@ async fn context_auth_watch(
     let follower = tauri::async_runtime::spawn(async move {
         loop {
             let next = auth.next().await;
-            if let Err(error) = channel.send(next) {
-                tracing::debug!(%error, "could not send the context's credentials");
+            if !sent("the context's credentials", channel.send(next)) {
+                return;
             }
         }
     });
@@ -299,18 +320,15 @@ fn resources_watch(
     // before its next watch, so the follower is that of the last space.
     let core = Arc::clone(&app.core);
     let follower = tauri::async_runtime::spawn(async move {
-        let send = |next: Discovered| {
-            if let Err(error) = channel.send(next) {
-                tracing::debug!(%error, "could not send the resources");
-            }
-        };
+        let send = |next: Discovered| sent("the resources", channel.send(next));
         let mut resources = match core.follow_resources(&request).await {
             Ok(resources) => resources,
-            Err(error) => return send(Discovered::Failed { error }),
+            Err(error) => {
+                send(Discovered::Failed { error });
+                return;
+            }
         };
-        loop {
-            send(resources.next().await);
-        }
+        while send(resources.next().await) {}
     });
     app.resources.replace(&webview, follower);
 }
@@ -324,13 +342,7 @@ async fn list_subscribe(
 ) -> Result<SubscriptionId, IpcError> {
     app.core
         .list_subscribe(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::debug!(%error, "could not send a list batch");
-                    false
-                }
-            }
+            sent("a list batch", channel.send(batch))
         })
         .await
 }
@@ -367,13 +379,7 @@ async fn object_open(
 ) -> Result<SubscriptionId, IpcError> {
     app.core
         .object_open(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::debug!(%error, "could not send an object batch");
-                    false
-                }
-            }
+            sent("an object batch", channel.send(batch))
         })
         .await
 }
@@ -424,13 +430,7 @@ async fn logs_open(
 ) -> Result<SubscriptionId, IpcError> {
     app.core
         .logs_open(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::debug!(%error, "could not send a logs batch");
-                    false
-                }
-            }
+            sent("a logs batch", channel.send(batch))
         })
         .await
 }
@@ -536,13 +536,7 @@ async fn shell_open(
                 ShellFrame::Output(bytes) => Ok(InvokeResponseBody::Raw(bytes)),
                 ShellFrame::Event(event) => event.body(),
             };
-            match body.and_then(|body| channel.send(body)) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::debug!(%error, "could not send a shell frame");
-                    false
-                }
-            }
+            sent("a shell frame", body.and_then(|body| channel.send(body)))
         })
         .await
 }
@@ -586,12 +580,8 @@ fn kubeconfig_offers_watch(
     channel: Channel<KubeconfigOfferEvent>,
 ) -> Vec<KubeconfigOffer> {
     app.core
-        .follow_kubeconfig_offers(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::debug!(%error, "could not send a kubeconfig offer");
-                false
-            }
+        .follow_kubeconfig_offers(webview.label(), move |event| {
+            sent("a kubeconfig offer", channel.send(event))
         })
 }
 
@@ -637,14 +627,9 @@ fn exec_trust(app: State<'_, App>, request: Vec<String>) -> Result<(), IpcError>
 
 #[tauri::command]
 fn approvals_watch(webview: Webview, app: State<'_, App>, channel: Channel<ApprovalEvent>) {
-    app.core
-        .follow_approvals(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::debug!(%error, "could not send an approval's ask");
-                false
-            }
-        });
+    app.core.follow_approvals(webview.label(), move |event| {
+        sent("an approval's ask", channel.send(event))
+    });
 }
 
 #[tauri::command]
@@ -696,14 +681,9 @@ fn forwards_watch(
     app: State<'_, App>,
     channel: Channel<ForwardEvent>,
 ) -> Vec<Forward> {
-    app.core
-        .follow_forwards(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::debug!(%error, "could not send a forward's change");
-                false
-            }
-        })
+    app.core.follow_forwards(webview.label(), move |event| {
+        sent("a forward's change", channel.send(event))
+    })
 }
 
 #[tauri::command]
@@ -955,7 +935,17 @@ fn main() {
                 app.focus(window.label(), focused);
                 // A webview window's webview has the window's label.
                 if let WindowEvent::Destroyed = event {
-                    app.core.drop_window(window.label());
+                    app.close(window.label());
+                    if let Some(shell) = window.try_state::<Shell>() {
+                        shell.followers.remove(window.label());
+                    }
+                    if let Some(keyboard) = window.try_state::<Keyboard>() {
+                        keyboard
+                            .subscriptions
+                            .lock()
+                            .expect("subscriptions lock")
+                            .remove(window.label());
+                    }
                 }
             }
         })
