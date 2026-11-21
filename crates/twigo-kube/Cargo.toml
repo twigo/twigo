@@ -62,4 +62,5 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 tokio-rustls.workspace = true
 twigo-cache.workspace = true
+twigo-log = { workspace = true, features = ["test-util"] }
 twigo-policy = { workspace = true, features = ["test-util"] }

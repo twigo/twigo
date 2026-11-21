@@ -1,6 +1,7 @@
 //! A file that moves aside past a size and keeps a few of the older ones, as
 //! the audit log and the diagnostics log are written.
 
+use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -19,14 +20,41 @@ pub struct Limits {
     pub kept: usize,
 }
 
+/// What a [`Rotating`] could not do to its file.
+#[derive(Debug)]
+pub struct Failure<'a> {
+    pub path: &'a Path,
+    /// What could not be done and what follows, to read after the file's
+    /// name: `could not be written`.
+    pub what: &'static str,
+    pub error: &'a io::Error,
+}
+
+impl fmt::Display for Failure<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { path, what, error } = self;
+        write!(f, "the log {} {what}: {error}", path.display())
+    }
+}
+
+/// Says a failure on stderr, for the log that has no other place to say it.
+pub(crate) fn to_stderr(failure: &Failure<'_>) {
+    // Not `eprintln!`, which panics when the write fails, as one to a broken
+    // pipe does, and a panic inside the panic hook aborts the process.
+    let _ = writeln!(io::stderr(), "{failure}");
+}
+
+type Failed = Arc<dyn Fn(&Failure<'_>) + Send + Sync>;
+
 /// A file written one append at a time, synchronously, under a lock: lines
 /// of concurrent writers never interleave, and a line is on disk when the
 /// call returns. Past [`Limits::size`] it moves to `<name>.1.<ext>`, each
 /// older one up by one, and the ones past [`Limits::kept`] go.
 ///
-/// A failure, whether to open, move or write, is said once on stderr and
-/// never stops the caller: a log records and guards nothing. It is said
-/// again only after a write succeeded in between.
+/// A failure, whether to open, move or write, goes to the owner's `failed`
+/// once and never stops the caller: a log records and guards nothing. It goes
+/// again only after a write succeeded in between. `failed` runs under the
+/// file's lock, so it must not write to the file.
 ///
 /// Cloning gives another handle to the same file.
 #[derive(Clone)]
@@ -44,6 +72,7 @@ struct Inner {
     /// What it holds, as far as this process knows.
     size: u64,
     limits: Limits,
+    failed: Failed,
     /// Whether the failure under way was said.
     said: bool,
 }
@@ -51,27 +80,36 @@ struct Inner {
 impl Rotating {
     /// Appends to the file at `path`, which is made, with its directory, if
     /// it is not there.
-    pub fn open(path: &Path, limits: Limits) -> io::Result<Self> {
+    pub fn open(
+        path: &Path,
+        limits: Limits,
+        failed: impl Fn(&Failure<'_>) + Send + Sync + 'static,
+    ) -> io::Result<Self> {
         let (file, size) = create(path)?;
-        Ok(Self::of(path, file, size, limits))
+        Ok(Self::of(path, file, size, limits, Arc::new(failed)))
     }
 
     /// Starts a new file at `path`: one that is there and not empty, the
     /// previous run's, moves to `<name>.1.<ext>` first.
-    pub fn open_new(path: &Path, limits: Limits) -> io::Result<Self> {
+    pub fn open_new(
+        path: &Path,
+        limits: Limits,
+        failed: impl Fn(&Failure<'_>) + Send + Sync + 'static,
+    ) -> io::Result<Self> {
         if std::fs::metadata(path).is_ok_and(|file| file.len() > 0)
             && let Err(error) = shift(path, limits.kept)
         {
-            say(&format!(
-                "the log {} could not move aside, so this run appends to it: {error}",
-                path.display()
-            ));
+            failed(&Failure {
+                path,
+                what: "could not move aside, so this run appends to it",
+                error: &error,
+            });
         }
         let (file, size) = create(path)?;
-        Ok(Self::of(path, file, size, limits))
+        Ok(Self::of(path, file, size, limits, Arc::new(failed)))
     }
 
-    fn of(path: &Path, file: File, size: u64, limits: Limits) -> Self {
+    fn of(path: &Path, file: File, size: u64, limits: Limits, failed: Failed) -> Self {
         Self {
             path: path.into(),
             inner: Arc::new(Mutex::new(Inner {
@@ -80,6 +118,7 @@ impl Rotating {
                 in_place: true,
                 size,
                 limits,
+                failed,
                 said: false,
             })),
         }
@@ -159,10 +198,7 @@ impl Inner {
                 true
             }
             Err(error) => {
-                self.fail(&format!(
-                    "the log {} could not be written: {error}",
-                    self.path.display()
-                ));
+                self.fail("could not be written", &error);
                 false
             }
         }
@@ -170,17 +206,14 @@ impl Inner {
 
     /// Moves the file to `<name>.1.<ext>`, each older one up by one, and
     /// opens a new one; a file gone from its place moves none of them. A move
-    /// that fails is said on stderr and the file goes on where it is, to try
-    /// again after another `limit`.
+    /// that fails is said and the file goes on where it is, to try again after
+    /// another `limit`.
     fn rotate(&mut self) {
         self.size = 0;
         if !matches!(std::fs::exists(&self.path), Ok(false))
             && let Err(error) = shift(&self.path, self.limits.kept)
         {
-            self.fail(&format!(
-                "the log {} could not move aside: {error}",
-                self.path.display()
-            ));
+            self.fail("could not move aside", &error);
             return;
         }
         self.in_place = false;
@@ -188,8 +221,8 @@ impl Inner {
     }
 
     /// Opens a new file at `path` for the one that left it. One that cannot
-    /// be opened is said on stderr, and the lines go on to the one that left
-    /// until the next line opens one.
+    /// be opened is said, and the lines go on to the one that left until the
+    /// next line opens one.
     fn reopen(&mut self) {
         match create(&self.path) {
             Ok((file, size)) => {
@@ -197,16 +230,20 @@ impl Inner {
                 self.size = size;
                 self.in_place = true;
             }
-            Err(error) => self.fail(&format!(
-                "the log {} could not be opened anew, so this line goes to the one that left its place: {error}",
-                self.path.display()
-            )),
+            Err(error) => self.fail(
+                "could not be opened anew, so this line goes to the one that left its place",
+                &error,
+            ),
         }
     }
 
-    fn fail(&mut self, what: &str) {
+    fn fail(&mut self, what: &'static str, error: &io::Error) {
         if !std::mem::replace(&mut self.said, true) {
-            say(what);
+            (self.failed)(&Failure {
+                path: &self.path,
+                what,
+                error,
+            });
         }
     }
 }
@@ -251,14 +288,6 @@ fn create(path: &Path) -> io::Result<(File, u64)> {
     Ok((file, size))
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "a log's own failure has no log to go to"
-)]
-fn say(what: &str) {
-    eprintln!("{what}");
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,7 +310,7 @@ mod tests {
     fn opens_a_file_in_a_directory_that_does_not_exist_yet() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("app-data/nested/log.jsonl");
-        put(&Rotating::open(&path, LIMITS).unwrap(), "a");
+        put(&Rotating::open(&path, LIMITS, to_stderr).unwrap(), "a");
         assert_eq!(lines(&path), ["a"]);
     }
 
@@ -289,7 +318,7 @@ mod tests {
     fn past_its_size_the_file_moves_aside_and_the_oldest_past_the_count_goes() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("log.jsonl");
-        let rotating = Rotating::open(&path, LIMITS).unwrap();
+        let rotating = Rotating::open(&path, LIMITS, to_stderr).unwrap();
         for line in ["a", "b", "c", "d"] {
             put(&rotating, line);
         }
@@ -318,7 +347,7 @@ mod tests {
         let taken = home.path().join("log.1.jsonl");
         std::fs::create_dir(&taken).unwrap();
         std::fs::write(taken.join("kept"), "").unwrap();
-        let rotating = Rotating::open(&path, Limits { size: 9, kept: 1 }).unwrap();
+        let rotating = Rotating::open(&path, Limits { size: 9, kept: 1 }, to_stderr).unwrap();
         for line in ["l1", "l2", "l3", "l4"] {
             put(&rotating, line);
         }
@@ -336,7 +365,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("log.jsonl");
         let names = |number: usize| home.path().join(format!("log.{number}.jsonl"));
-        let rotating = Rotating::open(&path, Limits { size: 1, kept: 4 }).unwrap();
+        let rotating = Rotating::open(&path, Limits { size: 1, kept: 4 }, to_stderr).unwrap();
         put(&rotating, "a");
         put(&rotating, "b");
         {
@@ -370,7 +399,7 @@ mod tests {
             kept: 2,
         };
         for run in ["first", "second", "third"] {
-            put(&Rotating::open_new(&path, limits).unwrap(), run);
+            put(&Rotating::open_new(&path, limits, to_stderr).unwrap(), run);
         }
         assert_eq!(lines(&path), ["third"]);
         assert_eq!(lines(&home.path().join("twigo.1.log")), ["second"]);
@@ -385,10 +414,16 @@ mod tests {
             size: 1 << 20,
             kept: 2,
         };
-        put(&Rotating::open_new(&path, limits).unwrap(), "first");
-        Rotating::open_new(&path, limits).unwrap();
-        Rotating::open_new(&path, limits).unwrap();
-        put(&Rotating::open_new(&path, limits).unwrap(), "fourth");
+        put(
+            &Rotating::open_new(&path, limits, to_stderr).unwrap(),
+            "first",
+        );
+        Rotating::open_new(&path, limits, to_stderr).unwrap();
+        Rotating::open_new(&path, limits, to_stderr).unwrap();
+        put(
+            &Rotating::open_new(&path, limits, to_stderr).unwrap(),
+            "fourth",
+        );
         assert_eq!(lines(&path), ["fourth"]);
         assert_eq!(lines(&home.path().join("twigo.1.log")), ["first"]);
     }
@@ -403,6 +438,7 @@ mod tests {
                 size: 1 << 20,
                 kept: 1,
             },
+            to_stderr,
         )
         .unwrap();
         let poisoner = rotating.clone();
@@ -428,6 +464,7 @@ mod tests {
                 size: 1 << 20,
                 kept: 1,
             },
+            to_stderr,
         )
         .unwrap();
         let _held = rotating.state();

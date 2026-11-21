@@ -184,7 +184,8 @@ The only extra processes Twigo needs are the ones it must run anyway: exec plugi
 **Multiple windows.**
 One core process serves every window.
 List subscriptions are keyed by `(window, view)`, so a window reaches only its own, and closing or reloading it drops them: a page that starts to load has none of the lists of the page it replaces.
-The followers of the catalog, the credentials, the resources, the shell and the keyboard are kept one per window, replaced when its next page subscribes, ended by a send that fails, and dropped with the window.
+The followers of the catalog, the credentials, the resources, the shell and the keyboard are kept one per window, replaced when its next page subscribes and dropped with the window.
+A send ends a follower only when it fails, which Tauri 2.12.7 does only once the event loop is gone: a reloaded page and a closed window both take it ([`Channel`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.7/crates/tauri/src/ipc/channel.rs#L428-L438), [`send_user_message`](https://github.com/tauri-apps/tauri/blob/tauri-v2.12.5/crates/tauri-runtime-wry/src/lib.rs#L259-L276)).
 Detached editor windows (VS Code's auxiliary windows) come after the MVP.
 
 ### 2.2 Repository layout
@@ -1815,18 +1816,20 @@ What a person needs when something goes wrong, and what a bug report holds, star
   Every file is mode 0600.
   A second launch hands over to the running app before the log opens, so it never moves the first one's file.
 - **What a line is.**
-  JSON, one line per event: `timestamp`, `level`, `target` (the module path, so `TWIGO_LOG=twigo_kube::credentials=debug` narrows to one module) and `fields`, whose `message` is words.
+  JSON, one line per event: `timestamp`, `level`, `target` (the module path, so `TWIGO_LOG=warn,twigo=info,twigo_kube::credentials=debug` adds the debug lines of one module to the default) and `fields`, whose `message` is words.
   Identifying values travel as fields of fixed names, `context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`, `path` and `url`, never inside the message, so a report can alias a value by the field that carries it.
   The first line of each run holds its facts: Twigo's version, the commit (`local build` for a build that was not given one), the OS and its version, the architecture, the web engine and its version, and the filter in force.
   The `log` records of Tauri and the libraries arrive as events through `tracing-log`, and so do the `tracing` events of kube-client, hyper-util and h2, each once.
 - **Written when it happens.**
   Each line is one append under a lock, so a line is on disk when the call returns, and a panic's record is there before the hook returns.
   A failure to open, move or write the file is said once on stderr, and again only after a write succeeded in between; it never stops the app.
+  The audit log (6.4) is written by the same code, but its failures are logged here at error instead, since a launched app's stderr reaches nobody.
   A process that launchd starts has `/dev/null` for stderr (`lsof` on Finder's pid, macOS 27.2.1, 2026-11-21; not run for Twigo from the Dock), so the file is the record of a run there.
   Twigo logs a change of state, not each repeat: a listener that keeps failing logs its first failure and, when it works again or ends, how many followed, and what happens per event goes to `trace`.
 - **How much.**
   The filter is `warn,twigo=info`: warnings of any library, and Twigo's own crates from info.
-  `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); a value that is not a filter is said in the log and the default applies.
+  `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); it replaces the whole default, so `TWIGO_LOG=warn` is warnings only, Twigo's own crates included, and the first line of the run, which holds its facts, is written whatever it says.
+  A value that is not a filter is said in the log and the default applies.
   **Set Log Level…** raises Twigo's own crates to info, debug or trace while the libraries stay at warn, until Twigo quits; it swaps the filter at run time and logs the change.
   `log_level_set` is its command, and no menu entry calls it yet.
 - **Reveal Log File.**
@@ -2477,8 +2480,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The log names targets, never a value, so the actors of M3 only add their name.
   A file that cannot be opened is logged (4.10) and keeps nothing: the log records, it guards nothing.
   Past 8 MiB the log moves to `audit.1.jsonl`, each older one up by one as far as `audit.5.jsonl`, whose last content goes, and a new `audit.jsonl` opens, each 0600: at most 48 MiB.
-  A move that fails is said on stderr and the log goes on where it is, to try again after another 8 MiB.
-  A new log that cannot be opened after the move is said on stderr, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
+  A move that fails is logged at error (4.10) and the log goes on where it is, to try again after another 8 MiB.
+  A new log that cannot be opened after the move is logged at error, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
+  A write that fails is logged at error too, once until a write succeeds.
   The older logs move only with the log, so a log gone from its place, as when a person deleted it, is opened anew and moves none of them.
 
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:

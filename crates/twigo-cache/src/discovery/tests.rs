@@ -101,6 +101,32 @@ async fn a_second_start_revalidates_the_cached_discovery_with_304() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cache_that_cannot_be_read_or_written_is_logged_by_the_server_it_names() {
+    let fake = fake();
+    let home = tempfile::tempdir().unwrap();
+    let cache = home.path().join("a-file");
+    std::fs::write(&cache, "").unwrap();
+    let events = twigo_log::capture();
+    let mut follower = follower(&fake, &cache).await;
+    let Discovered::Ready { cluster, .. } = next(&mut follower).await else {
+        panic!("discovery answers without its cache");
+    };
+
+    let lines = events.lines();
+    for message in [
+        "could not read the cached discovery",
+        "could not cache the discovery",
+    ] {
+        let line = lines
+            .iter()
+            .find(|line| line["fields"]["message"] == message)
+            .unwrap_or_else(|| panic!("{message} in {lines:?}"));
+        assert_eq!(line["fields"]["server"], cluster.as_str(), "{line}");
+        assert!(line["fields"].get("cluster").is_none(), "{line}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_crd_shows_once_its_changes_settle() {
     let fake = fake();
     let cache = tempfile::tempdir().unwrap();

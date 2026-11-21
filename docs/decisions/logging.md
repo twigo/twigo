@@ -5,8 +5,9 @@ Decided 2026-11-21.
 ## Decision
 
 - Every crate logs through `tracing`, never `eprintln!`; clippy denies `print_stderr` and `print_stdout` for the workspace.
-  What stays is a tool whose output is its interface, and the copy of Twigo that the login shell runs for `--dump-env`, each with an `#[expect]` that says why.
-- The target is the module path, so `TWIGO_LOG=twigo_kube::credentials=debug` narrows to one module.
+  What stays is a tool whose output is its interface, such as the bench tools, the copy of Twigo that the login shell runs for `--dump-env`, and the line for a kubeconfig file the catalog skipped until it reports that in the window (`TODO.md`), each with an `#[expect]` that says why.
+  The log's own failures also go to stderr, since they have no log to go to: they write with `writeln!` and ignore its result, because `eprintln!` panics when stderr is a broken pipe, and a panic inside the panic hook aborts the process.
+- The target is the module path, so `TWIGO_LOG=warn,twigo=info,twigo_kube::credentials=debug` adds the debug lines of one module to the default.
 - Identifying values travel as fields named `context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`, `path` and `url`.
   The message is words.
   A report aliases a value by the field that carries it, and reads no sentence.
@@ -14,7 +15,7 @@ Decided 2026-11-21.
   What happens per event goes to `trace`, which the default filter drops.
 - No event carries a token, a client key, an exec plugin's output, a Secret's data, a terminal's input or output, the login shell's environment, a kubeconfig's text, a frame, a batch, an object's values, or a server's message for a failed request.
   A type that holds such a value prints names or sizes in `Debug`, and an error that quotes input is logged by what it says of itself, as a status or a location.
-- One subscriber, set up by `twigo-log`: an `EnvFilter` behind a reload layer, `warn,twigo=info` by default and `TWIGO_LOG` at start, and a JSON-lines layer into a file that rotates by size.
+- One subscriber, set up by `twigo-log`: an `EnvFilter` behind a reload layer, `warn,twigo=info` by default and `TWIGO_LOG` at start, which replaces the default whole but for the first line of the run, and a JSON-lines layer into a file that rotates by size.
   The `log` records of Tauri and the libraries become events through `tracing-log`.
 - The file is `twigo.log` in Tauri's log directory, a new file at each launch, 4 MiB each, the current one and five more.
   It is written synchronously, one append per line, so a panic's record is on disk when the hook returns.

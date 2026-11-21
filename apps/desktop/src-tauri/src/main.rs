@@ -38,9 +38,10 @@ use twigo_log::{Facts, Level, Log};
 #[cfg(any(debug_assertions, feature = "bench"))]
 const EXPLICIT_KUBECONFIG: &str = "TWIGO_KUBECONFIG";
 
-/// Whether `result` reached the webview. A reloaded page and a closed window
-/// end their channels in normal use, so a failure is only for `debug`, and
-/// whoever sent stops sending.
+/// Whether `result` reached the webview. Tauri's send succeeds for a reloaded
+/// page and a closed window alike, and fails only when the event loop is gone
+/// (tauri 2.12.7), so a failure is for `debug` and whoever sent stops sending.
+/// A follower of a window ends with its replacement or with the window.
 fn sent(channel: &str, result: tauri::Result<()>) -> bool {
     result
         .inspect_err(|error| tracing::debug!(channel, %error, "could not send to the webview"))

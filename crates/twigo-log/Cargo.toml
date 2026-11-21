@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# `capture`, which keeps a test thread's events as lines.
+test-util = []
+
 [lints]
 workspace = true
 

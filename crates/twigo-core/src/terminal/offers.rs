@@ -509,7 +509,9 @@ impl Answering {
         append(target, files, &self.written, &self.left_out).map_err(|error| {
             let code = match error {
                 WriteError::Locked(_) => ErrorCode::OfferLocked,
-                WriteError::Io(_) | WriteError::Parse(_) => ErrorCode::OfferUnmoved,
+                WriteError::Io(_) | WriteError::Parse { .. } | WriteError::NoMapping => {
+                    ErrorCode::OfferUnmoved
+                }
             };
             IpcError::new(
                 code,

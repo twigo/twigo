@@ -5,7 +5,7 @@ use tracing::{Dispatch, debug, info, warn};
 use super::*;
 
 fn open(directory: &Path, spec: &str) -> (Dispatch, Log) {
-    let file = Rotating::open_new(&directory.join(FILE), LIMITS).unwrap();
+    let file = Rotating::open_new(&directory.join(FILE), LIMITS, rotating::to_stderr).unwrap();
     let (dispatch, filter) = subscriber(BoxMakeWriter::new(file.clone()), EnvFilter::new(spec));
     let log = Log {
         path: file.path().to_owned(),

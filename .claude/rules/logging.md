@@ -11,4 +11,5 @@ paths:
 - Log a change of state, not each repeat: the first failure at warn, how many followed when it works again or ends (`twigo_log::Repeats`), the per-event detail at `trace`.
 - No event carries a token, a client key, an exec plugin's output, a Secret's data, a terminal's input or output, the login shell's environment, a kubeconfig's text, a frame, a batch, an object's values or a server's message for a failed request.
   A parse error that quotes its input is logged by its location, and a type that holds such a value prints names or sizes in `Debug`.
-- A tool whose output is its interface, or a process that must not open the log, prints with an `#[expect(clippy::print_stdout, reason = "…")]` or `print_stderr`.
+- A tool whose output is its interface, a process that must not open the log (the `--dump-env` copy) and the catalog's line for a skipped file (until `TODO.md`'s first item is done) print with an `#[expect(clippy::print_stdout, reason = "…")]` or `print_stderr`.
+- The log's own failures go to stderr with `let _ = writeln!(io::stderr(), …)`, never `eprintln!`, which panics on a broken pipe.
