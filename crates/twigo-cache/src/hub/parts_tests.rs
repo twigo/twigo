@@ -656,22 +656,6 @@ async fn a_renewal_that_does_not_settle_keeps_the_set_and_the_next_list_resolves
 }
 
 #[tokio::test(start_paused = true)]
-async fn all_namespaces_asks_for_at_most_eight_reviews_at_a_time() {
-    let fake = Fake::default();
-    forty_namespaces(&fake);
-    fake.state().reviews_take = Duration::from_secs(1);
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut list, &mut mirror, |m| {
-        m.status == Some(ViewState::Ready)
-    })
-    .await;
-    assert_eq!(fake.count("selfsubjectaccessreviews"), 41);
-    assert_eq!(fake.state().reviews_overlap, 8);
-}
-
-#[tokio::test(start_paused = true)]
 async fn all_namespaces_say_connecting_until_their_reviews_are_in() {
     let fake = Fake::default();
     forty_namespaces(&fake);
@@ -697,6 +681,8 @@ async fn all_namespaces_say_connecting_until_their_reviews_are_in() {
     assert_eq!(mirror.status, Some(ViewState::Connecting), "no refusal yet");
     until_shown(&mut list, &mut mirror, |m| m.names().len() == 1).await;
     assert_eq!(mirror.status, Some(ViewState::Ready));
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 41);
+    assert_eq!(fake.state().reviews_overlap, 8, "at most eight at a time");
 }
 
 #[tokio::test(start_paused = true)]
