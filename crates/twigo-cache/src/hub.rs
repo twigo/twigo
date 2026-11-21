@@ -484,21 +484,11 @@ impl Hub {
     ) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
         match self.ask(query, &access).await {
-            Ok(Found::Everywhere) => {
-                cluster.forget_resolved(clients, &access);
-                Ok(Resolved::default())
-            }
-            Ok(Found::Namespaces {
-                resolved,
-                answered: true,
-            }) => {
+            Ok((resolved, true)) => {
                 cluster.set_resolved(clients, &access, resolved.clone());
                 Ok(resolved)
             }
-            Ok(Found::Namespaces {
-                resolved,
-                answered: false,
-            }) => {
+            Ok((resolved, false)) => {
                 cluster.set_unsettled(clients, &access, Some(resolved.clone()));
                 Ok(resolved)
             }
@@ -509,17 +499,21 @@ impl Hub {
         }
     }
 
-    async fn ask(&self, query: &Query, access: &Access) -> Result<Found, ViewState> {
+    /// The namespaces where the person may list the resource, with whether
+    /// every question answered. A cluster-wide yes, a review the server
+    /// refuses and namespaces it refuses are no namespace, which the cluster
+    /// part then answers as the cluster does.
+    async fn ask(&self, query: &Query, access: &Access) -> Result<(Resolved, bool), ViewState> {
+        let none = (Resolved::default(), true);
         match self.review(&query.context, None, access).await {
-            Ok(true) => return Ok(Found::Everywhere),
+            Ok(true) | Err(Failure::Refused(_)) => return Ok(none),
             Ok(false) => {}
-            Err(Failure::Refused(_)) => return Ok(Found::refused()),
             Err(Failure::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         }
         let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
-            Err(ViewState::Forbidden { .. }) => return Ok(Found::refused()),
+            Err(ViewState::Forbidden { .. }) => return Ok(none),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
@@ -553,10 +547,7 @@ impl Hub {
             omitted: u32::try_from(names.len() - allowed.len()).unwrap_or(u32::MAX),
             allowed,
         };
-        Ok(Found::Namespaces {
-            resolved,
-            answered: answers.iter().all(Option::is_some),
-        })
+        Ok((resolved, answers.iter().all(Option::is_some)))
     }
 
     /// An object, followed by an Object upstream for its editor, unless its
@@ -822,25 +813,6 @@ impl Hub {
             .cluster(context)
             .review(&clients, namespace, access, ask)
             .await
-    }
-}
-
-/// What a resolution of all namespaces found.
-enum Found {
-    /// The person may list the resource cluster-wide, which needs no set.
-    Everywhere,
-    /// The namespaces where they may list it, and whether every review
-    /// answered.
-    Namespaces { resolved: Resolved, answered: bool },
-}
-
-impl Found {
-    /// No namespace, which the cluster's own refusal then says.
-    fn refused() -> Self {
-        Found::Namespaces {
-            resolved: Resolved::default(),
-            answered: true,
-        }
     }
 }
 

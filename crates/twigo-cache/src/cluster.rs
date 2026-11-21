@@ -26,11 +26,11 @@ pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 /// are resolved again for the lists after it.
 pub(crate) const RESOLVED_FOR: Duration = Duration::from_secs(300);
 
-/// What "all namespaces" of a resource came to for a person who may not list
-/// it cluster-wide.
+/// What "all namespaces" of a resource came to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Resolved {
-    /// The namespaces they may list it in, sorted.
+    /// The namespaces they may list it in, sorted; none when the cluster part
+    /// reads it, for a cluster-wide yes as for a refusal.
     pub allowed: Vec<String>,
     /// How many of the cluster's namespaces that leaves out.
     pub omitted: u32,
@@ -144,8 +144,8 @@ impl Cluster {
     /// What all namespaces of the resource `access` names came to, if it is
     /// kept. A set of namespaces stays past its time, which a guess has at
     /// once, and is read by every asker, the first of whom resolves it again;
-    /// a refusal, which no namespace is allowed, lasts [`REFUSED_FOR`], as a
-    /// review's no.
+    /// a set with no namespace, which the cluster-wide yes and a refusal come
+    /// to, lasts [`REFUSED_FOR`], as a review's no.
     pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Kept> {
         let mut facts = self.facts(clients);
         let memo = facts
@@ -204,12 +204,6 @@ impl Cluster {
                 }
             }
         }
-    }
-
-    pub fn forget_resolved(&self, clients: &Arc<Clients>, access: &Access) {
-        self.facts(clients)
-            .resolved
-            .remove(&(access.group.clone(), access.resource.clone()));
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {
