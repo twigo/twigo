@@ -108,6 +108,7 @@ function Open({ session }: { session: Session }) {
   const checks = held.prefix === provider?.prefix ? held : noChecks("");
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  const early = useRef<{ value: string; options: AcceptOptions }>(undefined);
 
   // The command a row accepted may pick in the tick the palette closed in, after
   // quick access gave the focus back and before this widget unmounted, so
@@ -249,6 +250,7 @@ function Open({ session }: { session: Session }) {
 
   const apply = (options: AcceptOptions) => {
     if (ask) quickAccess.submit();
+    else if (result.state === "loading") early.current = { value, options };
     else if (!many) {
       if (active) accept(active, options);
     } else if (active?.checked === undefined && active !== undefined) {
@@ -257,6 +259,13 @@ function Open({ session }: { session: Session }) {
     else if (active) accept(active, options);
     else quickAccess.hide();
   };
+
+  // An Enter before the rows of its value have come acts on them once they do.
+  useEffect(() => {
+    const waiting = early.current;
+    early.current = undefined;
+    if (waiting?.value === value) apply(waiting.options);
+  });
 
   useEffect(
     () =>

@@ -128,7 +128,7 @@ test("a pick's notice says what its rows are, and shows with none", async () => 
   expect(screen.getByText("No results")).toBeTruthy();
 });
 
-test("items loaded for another value are neither shown nor accepted", async () => {
+test("items loaded for another value are neither shown nor accepted, and an Enter meanwhile takes the rows of its own value", async () => {
   const workbench = await testWorkbench();
   const pending = new Map<string, (items: QuickPickItem[]) => void>();
   const accept = vi.fn();
@@ -161,7 +161,13 @@ test("items loaded for another value are neither shown nor accepted", async () =
     pending.get("ab")?.([{ id: "ab", label: "alphabet" }]);
     await Promise.resolve();
   });
-  expect(screen.getByText("alphabet")).toBeTruthy();
+  expect(accept).toHaveBeenCalledTimes(1);
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "ab" }),
+    "ab",
+    expect.anything(),
+    { side: false },
+  );
 });
 
 test("a row draws what its provider says: icon or tile, matches, description, state, kind and keys", async () => {
@@ -551,6 +557,68 @@ test("a value typed leaves no row under the cursor when the filter is empty agai
   fireEvent.change(input(), { target: { value: "!" } });
   await act(() => Promise.resolve());
   expect(selected()).toBeUndefined();
+});
+
+function slow() {
+  const pending = new Map<string, (items: readonly QuickPickItem[]) => void>();
+  const items = (filter: string) =>
+    new Promise<readonly QuickPickItem[]>((resolve) => {
+      pending.set(filter, resolve);
+    });
+  const answer = (filter: string, rows: readonly QuickPickItem[]) =>
+    act(async () => {
+      pending.get(filter)?.(rows);
+      await Promise.resolve();
+    });
+  return { items, answer };
+}
+
+test("an Enter before the rows of the value typed have come acts on the cursor's row once they do", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  const { registered, accept } = ticking(undefined, { items });
+  workbench.quickAccess.register(registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await answer("", NAMESPACES);
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session).toBeDefined();
+  expect(accept).not.toHaveBeenCalled();
+
+  await answer(
+    "pay",
+    NAMESPACES.filter((item) => item.id === "payments"),
+  );
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "payments" }),
+    "pay",
+    expect.anything(),
+    { side: false },
+  );
+  expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("a value typed after an Enter that waits for rows withdraws it", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  const { registered, accept } = ticking(undefined, { items });
+  workbench.quickAccess.register(registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await answer("", NAMESPACES);
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  press("Enter");
+  fireEvent.change(input(), { target: { value: "!paym" } });
+  await answer("pay", NAMESPACES);
+  await answer("paym", NAMESPACES);
+  expect(accept).not.toHaveBeenCalled();
+  expect(workbench.quickAccess.session).toBeDefined();
 });
 
 test("a row the filter hides keeps its tick, and is applied", async () => {
