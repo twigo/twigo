@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use tokio::time::sleep;
@@ -574,4 +575,174 @@ async fn a_list_of_all_namespaces_is_whole_only_once_it_has_resolved_and_listed(
 
     let rows = list.whole().await.unwrap();
     assert_eq!(rows.len(), 1);
+}
+
+fn allowed_in_three(fake: &Fake) -> Vec<String> {
+    let names = forty_namespaces(fake);
+    for name in ["ns-05", "ns-18", "ns-31"] {
+        fake.allow(Some(name), "list", "pods");
+    }
+    names
+}
+
+fn three_of_forty() -> Parts {
+    Parts {
+        count: 3,
+        omitted: 37,
+        unready: Vec::new(),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cluster_wide_review_that_does_not_answer_is_waited_for_never_taken_for_a_yes() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    fake.state().reviews_unavailable.insert(None);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    sleep(Duration::from_secs(60)).await;
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Connecting));
+    assert_eq!(mirror.parts.as_ref().unwrap().count, 1);
+    assert_eq!(hub.scopes(), [], "no part, the cluster's included");
+    assert!(
+        fake.count("selfsubjectaccessreviews") > 5,
+        "it asks again, with the backoff"
+    );
+
+    fake.state().reviews_unavailable.clear();
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.parts, Some(three_of_forty()));
+    assert_eq!(fake.count("/api/v1/pods"), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_set_is_not_kept() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    for name in ["ns-05", "ns-31"] {
+        fake.allow(Some(name), "list", "pods");
+    }
+    fake.state()
+        .reviews_unavailable
+        .insert(Some("ns-18".to_owned()));
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/ns-18/pods".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 3,
+            omitted: 37,
+            unready: vec![namespace_part("ns-18", forbidden(), false)],
+        }),
+        "its part says its own state"
+    );
+
+    fake.state().reviews_unavailable.clear();
+    let second = hub.rows(query(&[])).await.unwrap();
+    sleep(Duration::from_secs(5)).await;
+    let mut mirror = Mirror::default();
+    mirror.read(&second);
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 2,
+            omitted: 38,
+            unready: Vec::new(),
+        }),
+        "the guess was not kept"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_index_that_fails_without_refusing_is_waited_for_never_taken_for_a_refusal() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    fake.state()
+        .no_endpoints
+        .insert("/api/v1/namespaces".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    sleep(Duration::from_secs(60)).await;
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Connecting));
+    assert_eq!(fake.count("/api/v1/pods"), 0, "never the cluster part");
+    assert!(fake.count("/api/v1/namespaces?") > 5, "it asks again");
+
+    fake.state().no_endpoints.clear();
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.parts, Some(three_of_forty()));
+}
+
+fn connecting(fake: &Fake, failure: IpcError) -> (Hub, Arc<AtomicBool>, Arc<AtomicUsize>) {
+    let clients = fake.clients(Budgets::default());
+    let down = Arc::new(AtomicBool::new(true));
+    let tries = Arc::new(AtomicUsize::new(0));
+    let connect: Connect = {
+        let (down, tries) = (Arc::clone(&down), Arc::clone(&tries));
+        Arc::new(move |_context| {
+            tries.fetch_add(1, Ordering::Relaxed);
+            let (clients, failure) = (Arc::clone(&clients), failure.clone());
+            let down = down.load(Ordering::Relaxed);
+            Box::pin(async move { if down { Err(failure) } else { Ok(clients) } })
+        })
+    };
+    (Hub::new(connect), down, tries)
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_say_the_clients_error_while_they_fail_and_settle_once_they_connect() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
+    let (hub, down, _tries) = connecting(&fake, error.clone());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    assert_eq!(
+        list.state(),
+        ViewState::Error {
+            error: error.clone()
+        }
+    );
+    sleep(Duration::from_secs(60)).await;
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Error { error }));
+    assert_eq!(hub.scopes(), [], "never the cluster's refusal");
+
+    down.store(false, Ordering::Relaxed);
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.parts, Some(three_of_forty()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_of_clients_that_are_unauthorized_wait_for_a_new_subscription() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    let error = IpcError::new(ErrorKind::Unauthorized, "the plugin failed");
+    let (hub, down, tries) = connecting(&fake, error);
+    let list = hub.rows(query(&[])).await.unwrap();
+
+    sleep(Duration::from_secs(60)).await;
+    assert_eq!(list.state(), ViewState::Unauthorized);
+    assert_eq!(
+        tries.load(Ordering::Relaxed),
+        1,
+        "a retry would run the plugin"
+    );
+
+    down.store(false, Ordering::Relaxed);
+    let mut again = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
 }

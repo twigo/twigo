@@ -413,21 +413,32 @@ impl Hub {
     /// What all namespaces of the query's resource come to for a person who
     /// may not list it cluster-wide: the namespaces of the namespace index
     /// where a review allows listing it, a few at a time, kept with the
-    /// context's clients. None when they may list it cluster-wide or the
-    /// cluster cannot say; none allowed when the index is refused, which the
-    /// cluster's own refusal then says.
-    async fn resolve(&self, query: &Query) -> Option<Resolved> {
+    /// context's clients. No namespace when they may list it cluster-wide, or
+    /// may list it nowhere, or the index is refused, which the cluster's own
+    /// refusal then says. What does not answer is no answer: a namespace
+    /// whose review does not counts as allowed, as an unanswered check does
+    /// for the UI (ARCHITECTURE 5.1), and its part says its own state; when
+    /// the clients, the cluster-wide review or the index fail with anything
+    /// but a refusal, it is the state the subscription waits on that comes.
+    async fn resolve(&self, query: &Query) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
-        let clients = (self.inner.connect)(query.context.clone()).await.ok()?;
+        let clients = (self.inner.connect)(query.context.clone())
+            .await
+            .map_err(unconnected)?;
         let cluster = self.inner.cluster(&query.context);
         if let Some(resolved) = cluster.resolved(&clients, &access) {
-            return Some(resolved);
+            return Ok(resolved);
         }
-        if self.may(&query.context, None, &access).await != Some(false) {
-            return None;
+        match self.may(&query.context, None, &access).await {
+            Some(true) => return Ok(Resolved::default()),
+            Some(false) => {}
+            None => return Err(ViewState::Connecting),
         }
-        let Ok(names) = self.namespaces(&query.context).await else {
-            return Some(Resolved::default());
+        let names = match self.namespaces(&query.context).await {
+            Ok(names) => names,
+            Err(ViewState::Forbidden { .. }) => return Ok(Resolved::default()),
+            Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
+            Err(_) => return Err(ViewState::Connecting),
         };
         let reviews: Vec<BoxFuture<'static, Option<bool>>> = names
             .iter()
@@ -448,7 +459,7 @@ impl Hub {
         let allowed: Vec<String> = names
             .iter()
             .zip(&answers)
-            .filter(|(_, may)| **may == Some(true))
+            .filter(|(_, may)| **may != Some(false))
             .map(|(name, _)| name.clone())
             .collect();
         let resolved = Resolved {
@@ -458,7 +469,7 @@ impl Hub {
         if answers.iter().all(Option::is_some) {
             cluster.set_resolved(&clients, &access, resolved.clone());
         }
-        Some(resolved)
+        Ok(resolved)
     }
 
     /// An object, followed by an Object upstream for its editor, unless its
@@ -723,6 +734,15 @@ fn list_access(resource: &Resource) -> Access {
         resource: resource.resource.clone(),
         subresource: None,
         name: None,
+    }
+}
+
+/// What a subscription waits on while its context's clients fail: their error,
+/// or `unauthorized`, which only a new subscription tries again.
+fn unconnected(error: IpcError) -> ViewState {
+    match error.kind {
+        ErrorKind::Unauthorized => ViewState::Unauthorized,
+        _ => ViewState::Error { error },
     }
 }
 
@@ -1046,6 +1066,9 @@ struct SubscriptionInner<T> {
     /// cluster's namespaces they leave out; none otherwise, the cluster part
     /// included.
     omitted: Mutex<Option<u32>>,
+    /// What the subscription says while it has no part: `connecting`, or the
+    /// error of what its settling waits on.
+    waiting: Mutex<ViewState>,
     parts: Mutex<Vec<Part<T>>>,
     /// Counts the times the parts changed.
     swapped: watch::Sender<u64>,
@@ -1069,6 +1092,7 @@ impl<T: Item> Subscription<T> {
                 key,
                 namespaces: namespaces.to_vec(),
                 omitted: Mutex::new(None),
+                waiting: Mutex::new(ViewState::Connecting),
                 parts: Mutex::default(),
                 swapped,
             }),
@@ -1091,12 +1115,13 @@ impl<T: Item> Subscription<T> {
         self.seen.refresh(&self.inner);
     }
 
-    /// The state of the subscription: its least ready part's, or `connecting`
-    /// while it has none, as all namespaces have until their clients answer.
+    /// The state of the subscription: its least ready part's, or what it
+    /// waits on while it has none, as all namespaces have until what they read
+    /// is settled.
     pub fn state(&self) -> ViewState {
         let parts = self.inner.parts();
         if parts.is_empty() {
-            return ViewState::Connecting;
+            return self.inner.waiting();
         }
         combine(parts.iter().map(|part| part.upstream.current()))
     }
@@ -1167,7 +1192,7 @@ impl<T: Item> Subscription<T> {
         }
         let delta = drain_parts(&parts, flipped);
         let (status, count) = if parts.is_empty() {
-            (ViewState::Connecting, 1)
+            (self.inner.waiting(), 1)
         } else {
             (
                 status(&looks),
@@ -1261,6 +1286,20 @@ impl<T> SubscriptionInner<T> {
 
     fn omitted(&self) -> Option<u32> {
         *self.omitted.lock().expect("subscription lock")
+    }
+
+    fn waiting(&self) -> ViewState {
+        self.waiting.lock().expect("subscription lock").clone()
+    }
+
+    fn wait(&self, state: ViewState) {
+        let changed = {
+            let mut waiting = self.waiting.lock().expect("subscription lock");
+            std::mem::replace(&mut *waiting, state.clone()) != state
+        };
+        if changed {
+            self.swapped.send_modify(|swaps| *swaps += 1);
+        }
     }
 }
 
@@ -1369,9 +1408,29 @@ where
 /// clients answer: the cluster-wide upstream for a person who may list the
 /// resource cluster-wide, else an upstream for each namespace they may list
 /// it in, or the cluster's own refusal when there is none; nothing if the
-/// subscription ends first.
+/// subscription ends first. What does not answer is tried again with the
+/// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
-    let resolved = hub.resolve(&query).await.unwrap_or_default();
+    let mut backoff = backoff();
+    let resolved = loop {
+        let waiting = match hub.resolve(&query).await {
+            Ok(resolved) => break resolved,
+            Err(waiting) => waiting,
+        };
+        {
+            let Some(subscription) = subscription.upgrade() else {
+                return;
+            };
+            subscription.wait(waiting.clone());
+        }
+        if waiting == ViewState::Unauthorized {
+            return;
+        }
+        let pause = backoff
+            .next()
+            .expect("the backoff has no maximum of attempts");
+        tokio::time::sleep(pause).await;
+    };
     let Some(subscription) = subscription.upgrade() else {
         return;
     };

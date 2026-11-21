@@ -305,7 +305,11 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     - `Parts.omitted` counts the namespaces of the index that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
     - With no namespace allowed, or the index refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).
-    - The context's clients may take long to come, as they do while a credential plugin signs the person in, so the hub settles what "all" reads apart from the list's subscription, which returns at once: it has no part and says `connecting` until then, never a refusal.
+    - What does not answer is no answer.
+      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state, and the set is not kept, so the next list asks again.
+      The clients may take long to come, as they do while a credential plugin signs the person in, and they, the cluster-wide review or the namespace index may fail with anything but a refusal.
+      The hub settles what "all" reads apart from the list's subscription, which returns at once, and tries again with the backoff below: the subscription has no part and says what it waits on, the clients' error while they fail and else `connecting`, never the cluster's refusal.
+      Clients that say `unauthorized` stay so until a new subscription asks, since a retry would run the plugin by itself.
     - On kind 1.37.0 (2026-11-21, a scratch probe that opens the list through the hub, with a delay added before each request as an assumed round trip, not a remote cluster's), a person allowed 3 of 46 namespaces had rows 32–34 ms after the list opened and 517–524 ms with 50 ms added; allowed 3 of 206, 71–162 and 1670–1718 ms; a cluster admin's first rows come one round trip later than they did, 2–4 ms on loopback and about 55 ms with 50 ms added, for the review that asks first.
     - The 8 reviews at a time leave the context's request slots (28) to the rest of the UI: at 206 namespaces and 50 ms added, the home page's three namespaced kinds, 621 reviews, had rows at 1779 ms with 8, 1524–1571 ms with 16 and 1462–1520 ms with 28, and an unrelated request took 55, 81 and 219 ms meanwhile.
   - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
@@ -716,7 +720,7 @@ A list reads its upstreams as parts, one per namespace or one for the cluster (`
   So `ready`, `relisting` and `stale` say that some part's rows are shown, and a refusal that no part is on its way.
 - `parts` has `count`, the parts the list reads, `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`), and `omitted`, for all namespaces settled on parts per namespace, the namespaces of the cluster that those parts leave out because the person may not list the kind there (3.2), and 0 for any other list, the cluster part included.
   It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
-- While the hub settles what all namespaces read (3.2) the list has no part: it says `connecting`, with `count` 1 and nothing unready, and the parts come when it has.
+- While the hub settles what all namespaces read (3.2) the list has no part: it says what the hub waits on, `connecting` or the clients' error, with `count` 1 and nothing unready, and the parts come when it has.
 - A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.
 - A part that starts or stops showing sends every row of the parts shown again (3.4).
 
