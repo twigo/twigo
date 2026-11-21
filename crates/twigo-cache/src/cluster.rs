@@ -111,7 +111,8 @@ impl Cluster {
     /// Whether RBAC lets the person do `access` in `namespace`, or with none
     /// in every namespace: the answer kept, else the one `ask` sends, which
     /// every asker of the same review shares while it is under way. Only an
-    /// answer is kept.
+    /// answer is kept. A review runs to its end whoever waits for it, so an
+    /// asker that leaves never parks it with its request slot held.
     pub async fn review(
         self: &Arc<Self>,
         clients: &Arc<Clients>,
@@ -132,7 +133,7 @@ impl Cluster {
                 .entry(asked.clone())
                 .or_insert_with(|| {
                     let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
-                    async move {
+                    let review = tokio::spawn(async move {
                         let may = ask.await;
                         let mut facts = cluster.facts(&clients);
                         facts.reviewing.remove(&asked);
@@ -140,9 +141,10 @@ impl Cluster {
                             facts.may.insert(asked, (may, Instant::now()));
                         }
                         may
-                    }
-                    .boxed()
-                    .shared()
+                    });
+                    async move { review.await.expect("a review ends with an answer") }
+                        .boxed()
+                        .shared()
                 })
                 .clone()
         };

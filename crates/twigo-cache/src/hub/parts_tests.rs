@@ -824,6 +824,30 @@ async fn a_namespace_review_the_cluster_rejects_ends_the_resolution_with_unautho
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_credential_rejected_mid_resolution_leaves_no_review_holding_a_request_slot() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    fake.state().reviews_take = Duration::from_secs(1);
+    fake.state()
+        .reviews_fail
+        .insert(Some("ns-10".to_owned()), StatusCode::UNAUTHORIZED);
+    let (hub, clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    until(&mut list, |state| *state == ViewState::Unauthorized).await;
+
+    sleep(Duration::from_secs(10)).await;
+    let usage = clients.usage();
+    let slots = usage.borrow().requests;
+    assert_eq!((slots.held, slots.queued), (0, 0));
+
+    fake.state().reviews_fail.clear();
+    let mut again = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.parts, Some(three_of_forty()));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_review_the_cluster_refuses_leaves_all_namespaces_to_the_clusters_own_answer() {
     let fake = Fake::default();
     allowed_in_three(&fake);
