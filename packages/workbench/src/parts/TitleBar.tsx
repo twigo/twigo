@@ -12,6 +12,7 @@ import {
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
 import { scopeWords } from "../spaces/scope";
+import { variant } from "../variants";
 import { ModeChip, ModeChipCopy } from "./ModeChip";
 import {
   BAR_GAP,
@@ -120,6 +121,8 @@ function Breadcrumb({
 }) {
   const { quickAccess } = useWorkbench();
   const scope = scopeWords(namespaces);
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  const whole = variant("crumb") === "list";
   const spoken =
     scope.more > 0
       ? `${scope.name} and ${String(scope.more)} more`
@@ -143,12 +146,18 @@ function Breadcrumb({
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb
         label={`Select namespace, ${spoken}`}
-        tooltip={scope.more > 0 ? `Namespaces: ${scope.all}` : undefined}
+        tooltip={
+          scope.more > 0 && !whole ? `Namespaces: ${scope.all}` : undefined
+        }
         onClick={opening("ns ")}
         className={cn(!copy && "max-w-max flex-1 basis-0")}
       >
-        <CutInTheMiddle text={scope.name} floor={SCOPE_FLOOR} separator="-" />
-        {scope.more > 0 && (
+        <CutInTheMiddle
+          text={whole ? scope.all : scope.name}
+          floor={SCOPE_FLOOR}
+          separator={whole ? ", " : "-"}
+        />
+        {scope.more > 0 && !whole && (
           <span className="shrink-0 text-label text-support tabular-nums">
             +{scope.more}
           </span>
