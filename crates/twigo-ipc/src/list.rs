@@ -344,11 +344,11 @@ impl ViewState {
         match self {
             ViewState::Forbidden { verb, resource } => Some(IpcError::new(
                 ErrorCode::ServerForbidden,
-                format!("you may not {verb} {resource}"),
+                format!("You may not {verb} {resource}."),
             )),
             ViewState::Unauthorized => Some(IpcError::new(
                 ErrorCode::ServerUnauthorized,
-                "no credentials for this context that the cluster accepts",
+                "The cluster does not accept the credentials.",
             )),
             ViewState::Error { error } => Some(error.clone()),
             _ => None,

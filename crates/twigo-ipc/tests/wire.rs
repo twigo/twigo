@@ -285,7 +285,7 @@ fn a_refused_state_says_its_words_as_an_error_and_the_others_say_none() {
     let refused = forbidden.refusal().unwrap();
     assert_eq!(refused.code, ErrorCode::ServerForbidden);
     assert_eq!(refused.kind, ErrorKind::Forbidden);
-    assert_eq!(refused.message, "you may not watch pods");
+    assert_eq!(refused.message, "You may not watch pods.");
     assert_eq!(
         ViewState::Unauthorized.refusal().unwrap().code,
         ErrorCode::ServerUnauthorized

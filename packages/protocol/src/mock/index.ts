@@ -561,7 +561,7 @@ export function createMockBackend(
     namespaces_list: (id) => {
       space(id);
       if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {
-        throw new IpcError("server.forbidden", "you may not list namespaces");
+        throw new IpcError("server.forbidden", "You may not list namespaces.");
       }
       return [...NAMESPACES].sort();
     },

@@ -3102,8 +3102,7 @@ async fn an_existing_deployment_whose_pods_are_refused_says_so() {
     else {
         panic!("its pods are refused");
     };
-    assert_eq!(error.kind, ErrorKind::Forbidden);
-    assert_eq!(error.message, "you may not watch pods");
+    assert_eq!(error.code, ErrorCode::ServerForbidden);
 }
 
 async fn failed_for_its_credential(fake: &Fake) -> Harness {

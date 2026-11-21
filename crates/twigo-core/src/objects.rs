@@ -429,7 +429,7 @@ async fn run(
                 held.owned = None;
             }
             if let Some(subscription) = &held.events {
-                let unavailable = unavailable(&subscription.state());
+                let unavailable = subscription.state().refusal();
                 let whole = subscription.listed();
                 if drained(subscription)
                     || unavailable != events.unavailable
@@ -463,7 +463,7 @@ async fn run(
             }
             let owned_unavailable = owned
                 .iter()
-                .find_map(|(_, subscription)| unavailable(&subscription.state()));
+                .find_map(|(_, subscription)| subscription.state().refusal());
             if owned_changed || changed || owned_unavailable != related.unavailable {
                 related = Related {
                     owners: owners(json, target.namespace.as_deref()),
@@ -720,23 +720,6 @@ impl Shown<'_> {
     }
 }
 
-/// Why an upstream's objects cannot be listed, in its state; None while
-/// they are listed or still coming.
-fn unavailable(state: &ViewState) -> Option<IpcError> {
-    match state {
-        ViewState::Forbidden { verb, resource } => Some(IpcError::new(
-            ErrorCode::ServerForbidden,
-            format!("You may not {verb} {resource}."),
-        )),
-        ViewState::Unauthorized => Some(IpcError::new(
-            ErrorCode::ServerUnauthorized,
-            "The cluster does not accept the credentials.",
-        )),
-        ViewState::Error { error } => Some(error.clone()),
-        _ => None,
-    }
-}
-
 /// Drains a subscription, saying whether anything changed.
 fn drained<T: twigo_cache::store::Item>(subscription: &Subscription<T>) -> bool {
     match subscription.drain() {
@@ -892,7 +875,7 @@ fn found(needs: &mut [Held]) -> bool {
             continue;
         };
         let moved = drained(objects);
-        let found = if let Some(message) = unavailable(&objects.state()) {
+        let found = if let Some(message) = objects.state().refusal() {
             Some(Found::Unavailable {
                 message: message.message,
             })
