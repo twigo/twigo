@@ -251,12 +251,11 @@ fn create(path: &Path) -> io::Result<(File, u64)> {
     Ok((file, size))
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "a log's own failure has no log to go to"
-)]
-fn say(what: &str) {
-    eprintln!("{what}");
+/// A log's own failure, which has no log to go to. Not `eprintln!`, which
+/// panics when the write fails, as one to a broken pipe does, and a panic
+/// inside the panic hook aborts the process.
+pub(crate) fn say(what: &str) {
+    let _ = writeln!(io::stderr(), "{what}");
 }
 
 #[cfg(test)]

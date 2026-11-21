@@ -164,12 +164,11 @@ fn log_tracer() {
     });
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "the log's own failure has no log to go to"
-)]
 fn report(path: &Path, error: &io::Error) {
-    eprintln!("the log {} cannot be opened: {error}", path.display());
+    rotating::say(&format!(
+        "the log {} cannot be opened: {error}",
+        path.display()
+    ));
 }
 
 #[cfg(test)]
