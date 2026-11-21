@@ -355,7 +355,6 @@ function Open({ session }: { session: Session }) {
                   id={rowIds.get(item)}
                   item={item}
                   cursor={item === active}
-                  selected={many ? on(item) : item === active}
                   on={on(item)}
                   many={many}
                   onPoint={() => {
@@ -416,7 +415,6 @@ function Row({
   id,
   item,
   cursor,
-  selected,
   on,
   many,
   onPoint,
@@ -426,8 +424,6 @@ function Row({
   id: string | undefined;
   item: QuickPickItem;
   cursor: boolean;
-  /** `aria-selected`: where the person picks several rows, whether it is ticked, and none for an action; else where the cursor is. */
-  selected: boolean | undefined;
   /** Whether it is ticked; none for a row with no box. */
   on: boolean | undefined;
   /** The list has rows with a box, which a row without one lines up with. */
@@ -439,10 +435,11 @@ function Row({
   const { platform } = useWorkbench();
   const Icon = item.icon;
   return (
+    // Among rows to tick, `aria-selected` says what is ticked, never where the cursor is.
     <QuickInputOption
       id={id}
       cursor={cursor}
-      aria-selected={selected}
+      aria-selected={many ? on : cursor}
       onPointerMove={onPoint}
       onClick={(event) => {
         if (
