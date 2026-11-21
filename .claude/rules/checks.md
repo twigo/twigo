@@ -89,6 +89,9 @@
 - json-patch moves only together with kube-core: `kube::api::Patch::Json` takes the `json_patch::Patch` of kube-core's own json-patch, `^4` in kube-core 5.0.0 and 5.1.0, and the bench harness builds that patch.
   With json-patch 5 beside it the harness fails to compile (`expected json_patch::Patch, found a different json_patch::Patch`), which failed every live job of Dependabot's PR #50 on 2026-11-14; json-patch 5's source differs from 4.2.0's only in its `jsonptr` requirement, 0.7.1 to 0.8.2.
   Dependabot ignores json-patch majors until kube-core requires 5.
+- jiff moves only together with kube-core and k8s-openapi: kube-core's `LogParams::since_time` is a `Timestamp` of the jiff both require, `^0.2` in kube-core 5.1.0 and k8s-openapi 0.29.0, and twigo-sessions sets it from its own.
+  With jiff 1.0 beside it twigo-sessions fails to compile (`expected k8s_openapi::jiff::Timestamp, found jiff::Timestamp`, `logs/stream.rs:585`), which failed `rust`, `app`, `macos` and every live job of Dependabot's PR #71 on 2026-11-21.
+  Dependabot ignores jiff majors until kube-core and k8s-openapi require 1.
 - `windows` and `windows-core` move together and by hand: `#[implement]` expands to `::windows_core` paths, so twigo-keyboard names that crate directly, at the version `windows` uses.
   CI does not build for Windows, so its green says nothing about them and Dependabot ignores both; check a bump with the Windows `cargo clippy` command above.
 - zbus stays on the major that `tauri-plugin-opener` and `tauri-plugin-single-instance` require, or Linux builds two D-Bus stacks; Dependabot ignores its majors until they move.
