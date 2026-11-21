@@ -116,8 +116,15 @@ impl Live {
         (Hub::new(connect), clients)
     }
 
-    /// The config of `live`'s cluster over the token of a service account.
-    async fn as_account(&self, accounts: &Api<ServiceAccount>, name: &str) -> Config {
+    /// The config of `live`'s cluster over the token of a new service account.
+    async fn as_account(&self, home: &str, name: &str) -> Config {
+        let accounts = Api::<ServiceAccount>::namespaced(self.admin.clone(), home);
+        let account: ServiceAccount =
+            serde_json::from_value(json!({ "metadata": { "name": name } })).unwrap();
+        accounts
+            .create(&PostParams::default(), &account)
+            .await
+            .unwrap();
         let request: TokenRequest =
             serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
         let token = accounts
@@ -407,18 +414,11 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         namespaces.push(live.namespace("hub-sa").await);
     }
     let home = &namespaces[0];
-    let accounts = Api::<ServiceAccount>::namespaced(live.admin.clone(), home);
-    let account: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "viewer" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &account)
-        .await
-        .unwrap();
     for namespace in &namespaces {
         live.allow_pods_in(namespace, home, "viewer").await;
         live.pod(namespace, "p").await;
     }
-    let config = live.as_account(&accounts, "viewer").await;
+    let config = live.as_account(home, "viewer").await;
 
     let (hub, _clients) = live.hub(Some(&config));
     let five: Vec<&str> = namespaces.iter().map(String::as_str).collect();
@@ -471,16 +471,10 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     until(&mut all, |all| all.state() == forbidden).await;
 
     // One that may list pods everywhere shares one cluster-wide upstream.
-    let lister: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "lister" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &lister)
-        .await
-        .unwrap();
     let everywhere = format!("{home}-pods");
     live.allow_everywhere(&everywhere, "pods", &["list", "watch"], home, "lister")
         .await;
-    let config = live.as_account(&accounts, "lister").await;
+    let config = live.as_account(home, "lister").await;
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the binding a moment later.
     let allowed = async {
@@ -517,13 +511,6 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         live.namespace("hub-all").await,
     ];
     let (home, others) = (&namespaces[0], &namespaces[1..]);
-    let accounts = Api::<ServiceAccount>::namespaced(live.admin.clone(), home);
-    let account: ServiceAccount =
-        serde_json::from_value(json!({ "metadata": { "name": "namer" } })).unwrap();
-    accounts
-        .create(&PostParams::default(), &account)
-        .await
-        .unwrap();
     for namespace in &namespaces {
         live.pod(namespace, "p").await;
     }
@@ -540,7 +527,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         "namer",
     )
     .await;
-    let config = live.as_account(&accounts, "namer").await;
+    let config = live.as_account(home, "namer").await;
 
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the bindings a moment later.
