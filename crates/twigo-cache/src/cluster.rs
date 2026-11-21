@@ -18,6 +18,21 @@ use twigo_kube::client::Clients;
 /// granted since counts; a yes holds, as the server still decides.
 pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 
+/// How long the namespaces a person may list a resource in hold once they
+/// are resolved, so each list of all namespaces opened meanwhile reads them
+/// and asks nothing.
+pub(crate) const RESOLVED_FOR: Duration = Duration::from_secs(300);
+
+/// What "all namespaces" of a resource came to for a person who may not list
+/// it cluster-wide.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    /// The namespaces they may list it in, sorted.
+    pub allowed: Vec<String>,
+    /// How many of the cluster's namespaces that leaves out.
+    pub omitted: u32,
+}
+
 /// What a review asks: the namespace, none for every namespace, and the access.
 type Asked = (Option<String>, Access);
 
@@ -41,6 +56,8 @@ struct Facts {
     /// The reviews under way, by what they ask, which each asker of the same
     /// waits for instead of sending its own.
     reviewing: HashMap<Asked, Review>,
+    /// By group and resource, what its all namespaces came to, and when.
+    resolved: HashMap<(String, String), (Resolved, Instant)>,
 }
 
 impl Cluster {
@@ -99,6 +116,23 @@ impl Cluster {
                 .clone()
         };
         review.await
+    }
+
+    /// What all namespaces of the resource `access` names came to, if that
+    /// was within [`RESOLVED_FOR`].
+    pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Resolved> {
+        let facts = self.facts(clients);
+        let (resolved, at) = facts
+            .resolved
+            .get(&(access.group.clone(), access.resource.clone()))?;
+        (at.elapsed() < RESOLVED_FOR).then(|| resolved.clone())
+    }
+
+    pub fn set_resolved(&self, clients: &Arc<Clients>, access: &Access, resolved: Resolved) {
+        self.facts(clients).resolved.insert(
+            (access.group.clone(), access.resource.clone()),
+            (resolved, Instant::now()),
+        );
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

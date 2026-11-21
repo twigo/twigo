@@ -7,6 +7,7 @@ use twigo_kube::client::Budgets;
 
 use super::tests::{budget, pods, query, reach, ready, settle, until};
 use super::*;
+use crate::cluster::RESOLVED_FOR;
 use crate::fake::Fake;
 
 fn forbidden() -> ViewState {
@@ -286,6 +287,7 @@ async fn a_list_has_the_columns_of_a_part_that_has_not_listed_yet() {
 #[tokio::test(start_paused = true)]
 async fn a_cluster_wide_part_whose_rewatch_waits_keeps_its_rows_and_is_stale() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     pods_in(&fake, &["a", "b", "z"]);
     let (hub, _clients) = fake.hub(budget(1));
     let mut list = hub.rows(query(&[])).await.unwrap();
@@ -343,4 +345,220 @@ fn a_list_says_the_state_of_its_rows_or_else_of_the_parts_still_on_their_way() {
     }
     assert_eq!(status(&[(ViewState::Queued, false)]), ViewState::Queued);
     assert_eq!(status(&[(ViewState::Stale, false)]), ViewState::Connecting);
+}
+
+fn forty_namespaces(fake: &Fake) -> Vec<String> {
+    let names: Vec<String> = (0..40).map(|n| format!("ns-{n:02}")).collect();
+    for name in &names {
+        fake.add("namespaces", None, name);
+        pods_in(fake, &[name]);
+    }
+    names
+}
+
+fn asked_of(fake: &Fake, names: &[String]) -> Vec<String> {
+    let asked = |name: &&String| fake.count(&format!("/api/v1/namespaces/{name}/pods")) > 0;
+    names.iter().filter(asked).cloned().collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_of_a_person_who_may_list_pods_in_three_of_forty_read_three_parts() {
+    let fake = Fake::default();
+    let names = forty_namespaces(&fake);
+    let mine = ["ns-05", "ns-18", "ns-31"];
+    for name in mine {
+        fake.allow(Some(name), "list", "pods");
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.names(), ["p-ns-05", "p-ns-18", "p-ns-31"]);
+    assert_eq!(mirror.status, Some(ViewState::Ready));
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 3,
+            omitted: 37,
+            unready: Vec::new(),
+        })
+    );
+    assert_eq!(asked_of(&fake, &names), mine, "no list or watch of the 37");
+    assert_eq!(fake.count("/api/v1/pods"), 0, "none cluster-wide");
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 41, "1 and 40");
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_of_a_person_who_may_list_pods_cluster_wide_is_one_part_after_one_review() {
+    let fake = Fake::default();
+    let names = forty_namespaces(&fake);
+    fake.allow(None, "list", "pods");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 40).await;
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 0,
+            unready: Vec::new(),
+        })
+    );
+    assert_eq!(hub.scopes(), [Scope::Cluster]);
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
+    assert_eq!(fake.count("/api/v1/namespaces?"), 0, "no index read");
+    assert_eq!(asked_of(&fake, &names), Vec::<String>::new());
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_clusters_refusal() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    fake.state().forbidden.insert("/api/v1/pods".to_owned());
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut refused = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut refused, &mut mirror, |m| m.status == Some(forbidden())).await;
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 0,
+            unready: vec![PartState {
+                part: Part::Cluster,
+                state: forbidden(),
+                shown: false,
+            }],
+        })
+    );
+    assert_eq!(
+        fake.count("selfsubjectaccessreviews"),
+        1,
+        "no namespace asked"
+    );
+
+    fake.state().forbidden.remove("/api/v1/namespaces");
+    sleep(RESOLVED_FOR).await;
+    let mut none = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut none, &mut mirror, |m| {
+        m.parts.as_ref().is_some_and(|parts| parts.omitted == 40)
+    })
+    .await;
+    assert_eq!(mirror.status, Some(forbidden()));
+    assert_eq!(mirror.names(), Vec::<&str>::new());
+}
+
+#[tokio::test(start_paused = true)]
+async fn what_all_namespaces_came_to_holds_for_five_minutes_and_is_resolved_again_after() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    for name in ["ns-05", "ns-18"] {
+        fake.allow(Some(name), "list", "pods");
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+    let reviews = fake.count("selfsubjectaccessreviews");
+    drop(first);
+
+    fake.add("namespaces", None, "ns-40");
+    fake.allow(Some("ns-40"), "list", "pods");
+    pods_in(&fake, &["ns-40"]);
+    sleep(RESOLVED_FOR - Duration::from_secs(1)).await;
+    let mut within = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut within, &mut mirror, |m| m.names().len() == 2).await;
+    assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
+    assert_eq!(
+        fake.count("selfsubjectaccessreviews"),
+        reviews,
+        "it sends no review"
+    );
+    drop(within);
+
+    sleep(Duration::from_secs(2)).await;
+    let mut after = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut after, &mut mirror, |m| m.names().len() == 3).await;
+    assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
+    assert_eq!(mirror.names(), ["p-ns-05", "p-ns-18", "p-ns-40"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_asks_for_at_most_eight_reviews_at_a_time() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    fake.state().reviews_take = Duration::from_secs(1);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut list, &mut mirror, |m| {
+        m.parts.as_ref().is_some_and(|parts| parts.omitted == 40)
+    })
+    .await;
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 41);
+    assert_eq!(fake.state().reviews_overlap, 8);
+}
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_say_connecting_until_their_reviews_are_in() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    fake.allow(Some("ns-05"), "list", "pods");
+    fake.state().reviews_take = Duration::from_secs(1);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    assert_eq!(list.state(), ViewState::Connecting);
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Connecting));
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 0,
+            unready: Vec::new(),
+        })
+    );
+    sleep(Duration::from_secs(3)).await;
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Connecting), "no refusal yet");
+    until_shown(&mut list, &mut mirror, |m| m.names().len() == 1).await;
+    assert_eq!(mirror.status, Some(ViewState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_that_ends_while_its_reviews_are_in_flight_reads_nothing() {
+    let fake = Fake::default();
+    let names = forty_namespaces(&fake);
+    fake.allow(Some("ns-05"), "list", "pods");
+    fake.state().reviews_take = Duration::from_secs(1);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    drop(hub.rows(query(&[])).await.unwrap());
+    sleep(Duration::from_secs(60)).await;
+    assert_eq!(asked_of(&fake, &names), Vec::<String>::new());
+    assert_eq!(fake.count("/api/v1/pods"), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_is_whole_only_once_it_has_resolved_and_listed() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    fake.allow(Some("ns-05"), "list", "pods");
+    fake.state().reviews_take = Duration::from_secs(1);
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&[])).await.unwrap();
+
+    let rows = list.whole().await.unwrap();
+    assert_eq!(rows.len(), 1);
 }

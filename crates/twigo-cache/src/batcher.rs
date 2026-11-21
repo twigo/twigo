@@ -181,6 +181,9 @@ async fn run(
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
             view.set_api(metrics.api());
+            if subscription.resolved() {
+                view.resolved();
+            }
             metrics.want(view.wants(reading));
             let (answered, update) = metrics.read();
             settled = answered;

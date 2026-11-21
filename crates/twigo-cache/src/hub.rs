@@ -23,8 +23,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
-use futures::FutureExt;
 use futures::future::{BoxFuture, select_all};
+use futures::{FutureExt, StreamExt};
 use jiff::Timestamp;
 use k8s_openapi::api::authorization::v1::{
     ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
@@ -38,7 +38,7 @@ use tokio::time::Instant;
 use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, Resolved};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
@@ -53,6 +53,8 @@ pub use crate::upstream::{Connect, RETRY_WITHIN, backoff};
 pub const LINGER: Duration = Duration::from_secs(60);
 /// More namespaces than this share one cluster-wide upstream.
 const NAMESPACES: usize = 4;
+/// The reviews of all namespaces that are under way at once.
+const REVIEWS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Resource {
@@ -343,10 +345,25 @@ impl Hub {
         };
         namespaces.sort();
         namespaces.dedup();
-        let namespaces = &namespaces[..];
+        let mut subscription = Subscription::new(key.clone(), &namespaces);
+        if query.resource.namespaced && namespaces.is_empty() {
+            // The clients may take long to come, as they do while a credential
+            // plugin signs the person in, and the list says `connecting` until
+            // they do, so what it reads is settled apart from this call.
+            let mut settling = Box::pin(settle(
+                Arc::downgrade(&subscription.inner),
+                self.clone(),
+                query,
+                key,
+            ));
+            if futures::poll!(&mut settling).is_pending() {
+                tokio::spawn(settling);
+            }
+            return Ok(subscription);
+        }
         let cluster_wide =
             namespaces.is_empty() || (namespaces.len() > NAMESPACES && self.may_list(&query).await);
-        let mut subscription = Subscription::new(key.clone(), namespaces);
+        let namespaces = &namespaces[..];
         if cluster_wide {
             let part = self.hold(&key, subscription.filter());
             subscription.set_parts(vec![part]);
@@ -362,6 +379,82 @@ impl Hub {
             subscription.set_parts(parts);
         }
         Ok(subscription)
+    }
+
+    /// The names of the context's namespaces, sorted, from its namespace
+    /// index (ARCHITECTURE 3.3): held, the whole list, and dropped, so it
+    /// lingers after; or the state that refuses it.
+    pub async fn namespaces(&self, context: &str) -> Result<Vec<String>, ViewState> {
+        let key = Key {
+            context: context.to_owned(),
+            resource: Resource {
+                group: String::new(),
+                version: "v1".to_owned(),
+                resource: "namespaces".to_owned(),
+                namespaced: false,
+            },
+            format: Format::Metadata,
+            scope: Scope::Cluster,
+            field_selector: None,
+        };
+        let mut index: Subscription<Row> = Subscription::new(key.clone(), &[]);
+        let part = self.hold(&key, None);
+        index.set_parts(vec![part]);
+        let rows = index.whole().await?;
+        let mut names: Vec<String> = rows.iter().map(|row| row.meta.name.to_string()).collect();
+        names.sort();
+        Ok(names)
+    }
+
+    /// What all namespaces of the query's resource come to for a person who
+    /// may not list it cluster-wide: the namespaces of the namespace index
+    /// where a review allows listing it, a few at a time, kept with the
+    /// context's clients. None when they may list it cluster-wide or the
+    /// cluster cannot say; none allowed when the index is refused, which the
+    /// cluster's own refusal then says.
+    async fn resolve(&self, query: &Query) -> Option<Resolved> {
+        let access = list_access(&query.resource);
+        let clients = (self.inner.connect)(query.context.clone()).await.ok()?;
+        let cluster = self.inner.cluster(&query.context);
+        if let Some(resolved) = cluster.resolved(&clients, &access) {
+            return Some(resolved);
+        }
+        if self.may(&query.context, None, &access).await != Some(false) {
+            return None;
+        }
+        let Ok(names) = self.namespaces(&query.context).await else {
+            return Some(Resolved::default());
+        };
+        let reviews: Vec<BoxFuture<'static, Option<bool>>> = names
+            .iter()
+            .map(|name| {
+                let (hub, context, access, name) = (
+                    self.clone(),
+                    query.context.clone(),
+                    access.clone(),
+                    name.clone(),
+                );
+                async move { hub.may(&context, Some(&name), &access).await }.boxed()
+            })
+            .collect();
+        let answers: Vec<Option<bool>> = futures::stream::iter(reviews)
+            .buffered(REVIEWS)
+            .collect()
+            .await;
+        let allowed: Vec<String> = names
+            .iter()
+            .zip(&answers)
+            .filter(|(_, may)| **may == Some(true))
+            .map(|(name, _)| name.clone())
+            .collect();
+        let resolved = Resolved {
+            omitted: u32::try_from(names.len() - allowed.len()).unwrap_or(u32::MAX),
+            allowed,
+        };
+        if answers.iter().all(Option::is_some) {
+            cluster.set_resolved(&clients, &access, resolved.clone());
+        }
+        Some(resolved)
     }
 
     /// An object, followed by an Object upstream for its editor, unless its
@@ -542,14 +635,7 @@ impl Hub {
 
     /// Whether the person may list the query's resource cluster-wide.
     async fn may_list(&self, query: &Query) -> bool {
-        let access = Access {
-            verb: "list".to_owned(),
-            group: query.resource.group.clone(),
-            resource: query.resource.resource.clone(),
-            subresource: None,
-            name: None,
-        };
-        self.may(&query.context, None, &access)
+        self.may(&query.context, None, &list_access(&query.resource))
             .await
             .unwrap_or(false)
     }
@@ -622,6 +708,17 @@ impl Hub {
             .cluster(context)
             .review(&clients, namespace, access, ask)
             .await
+    }
+}
+
+/// What listing the resource asks of RBAC, in a namespace or in all of them.
+fn list_access(resource: &Resource) -> Access {
+    Access {
+        verb: "list".to_owned(),
+        group: resource.group.clone(),
+        resource: resource.resource.clone(),
+        subresource: None,
+        name: None,
     }
 }
 
@@ -941,6 +1038,10 @@ pub struct Subscription<T> {
 struct SubscriptionInner<T> {
     key: Key,
     namespaces: Vec<String>,
+    /// For all namespaces of a person who may not list the resource
+    /// cluster-wide, how many of the cluster's namespaces its parts leave
+    /// out, once that is settled; none otherwise.
+    omitted: Mutex<Option<u32>>,
     parts: Mutex<Vec<Part<T>>>,
     /// Counts the times the parts changed.
     swapped: watch::Sender<u64>,
@@ -963,10 +1064,17 @@ impl<T: Item> Subscription<T> {
             inner: Arc::new(SubscriptionInner {
                 key,
                 namespaces: namespaces.to_vec(),
+                omitted: Mutex::new(None),
                 parts: Mutex::default(),
                 swapped,
             }),
         }
+    }
+
+    /// It reads the namespaces that all of them came to for a person who may
+    /// not list the resource cluster-wide, never the cluster.
+    pub fn resolved(&self) -> bool {
+        self.inner.omitted().is_some()
     }
 
     fn filter(&self) -> Option<Arc<HashSet<String>>> {
@@ -979,16 +1087,21 @@ impl<T: Item> Subscription<T> {
         self.seen.refresh(&self.inner);
     }
 
-    /// The state of the subscription: its least ready part's.
+    /// The state of the subscription: its least ready part's, or `connecting`
+    /// while it has none, as all namespaces have until their clients answer.
     pub fn state(&self) -> ViewState {
         let parts = self.inner.parts();
+        if parts.is_empty() {
+            return ViewState::Connecting;
+        }
         combine(parts.iter().map(|part| part.upstream.current()))
     }
 
     /// Every part has held a whole list since it started, so the rows are
     /// all there, if maybe stale.
     pub fn listed(&self) -> bool {
-        self.inner.parts().iter().all(|part| part.upstream.listed())
+        let parts = self.inner.parts();
+        !parts.is_empty() && parts.iter().all(|part| part.upstream.listed())
     }
 
     /// Its rows once every part has listed them, if maybe stale since; or
@@ -1049,8 +1162,14 @@ impl<T: Item> Subscription<T> {
             part.showing = *shown;
         }
         let delta = drain_parts(&parts, flipped);
-        let status = status(&looks);
-        let count = u32::try_from(parts.len()).unwrap_or(u32::MAX);
+        let (status, count) = if parts.is_empty() {
+            (ViewState::Connecting, 1)
+        } else {
+            (
+                status(&looks),
+                u32::try_from(parts.len()).unwrap_or(u32::MAX),
+            )
+        };
         let unready = parts
             .iter()
             .zip(looks)
@@ -1067,7 +1186,7 @@ impl<T: Item> Subscription<T> {
             parts: Parts {
                 count,
                 unready,
-                omitted: 0,
+                omitted: self.inner.omitted().unwrap_or(0),
             },
         }
     }
@@ -1134,6 +1253,10 @@ impl<T: Item> Subscription<T> {
 impl<T> SubscriptionInner<T> {
     fn parts(&self) -> MutexGuard<'_, Vec<Part<T>>> {
         self.parts.lock().expect("subscription lock")
+    }
+
+    fn omitted(&self) -> Option<u32> {
+        *self.omitted.lock().expect("subscription lock")
     }
 }
 
@@ -1236,6 +1359,30 @@ where
     };
     subscription.swapped.send_modify(|swaps| *swaps += 1);
     drop(replaced);
+}
+
+/// Settles what a subscription to all namespaces reads once its context's
+/// clients answer: the cluster-wide upstream for a person who may list the
+/// resource cluster-wide, else an upstream for each namespace they may list
+/// it in, or the cluster's own refusal when there is none; nothing if the
+/// subscription ends first.
+async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
+    let resolved = hub.resolve(&query).await;
+    let omitted = resolved.as_ref().map(|resolved| resolved.omitted);
+    let namespaces = resolved
+        .map(|resolved| resolved.allowed)
+        .unwrap_or_default();
+    let Some(subscription) = subscription.upgrade() else {
+        return;
+    };
+    let parts = if namespaces.is_empty() {
+        vec![hub.hold(&key, None)]
+    } else {
+        hub.per_namespace(&key, &namespaces)
+    };
+    *subscription.omitted.lock().expect("subscription lock") = omitted;
+    *subscription.parts() = parts;
+    subscription.swapped.send_modify(|swaps| *swaps += 1);
 }
 
 /// The state of a list from its parts' states and whether each one's rows

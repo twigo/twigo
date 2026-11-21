@@ -657,32 +657,11 @@ impl Core {
     /// (ARCHITECTURE 3.3), which lingers a while after each answer.
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
-        let mut index = self
-            .hub
-            .rows(Query {
-                context,
-                resource: Resource {
-                    group: String::new(),
-                    version: "v1".to_owned(),
-                    resource: "namespaces".to_owned(),
-                    namespaced: false,
-                },
-                format: RowFormat::Metadata,
-                namespaces: Vec::new(),
-                field_selector: None,
-            })
-            .await?;
-        match index.whole().await {
-            Ok(rows) => {
-                let mut names: Vec<String> =
-                    rows.iter().map(|row| row.meta.name.to_string()).collect();
-                names.sort();
-                Ok(names)
-            }
-            Err(state) => Err(state.refusal().unwrap_or_else(|| {
+        self.hub.namespaces(&context).await.map_err(|state| {
+            state.refusal().unwrap_or_else(|| {
                 IpcError::new(ErrorKind::Unavailable, "the cluster is unavailable")
-            })),
-        }
+            })
+        })
     }
 
     /// A list of a space's resource for a window, filtered, sorted and

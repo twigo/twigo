@@ -279,6 +279,7 @@ async fn a_watch_that_queues_once_nobody_shows_it_gives_up_its_place() {
 #[tokio::test(start_paused = true)]
 async fn a_borrowed_upstream_that_waits_goes_with_its_last_borrower() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     let (hub, _clients) = fake.hub(budget(1));
     let mut all = hub.rows(query(&[])).await.unwrap();
@@ -385,6 +386,7 @@ async fn a_resource_the_server_cannot_watch_is_listed_again() {
 #[tokio::test(start_paused = true)]
 async fn a_lingering_cluster_wide_upstream_serves_narrower_subscriptions() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("b"), "p2");
     let (hub, _clients) = fake.hub(Budgets::default());
@@ -449,6 +451,7 @@ fn drained(delta: Delta<Row>) -> (bool, Vec<String>, usize) {
 #[tokio::test(start_paused = true)]
 async fn a_drain_takes_what_changed_since_the_last_and_every_row_after_a_move() {
     let fake = Fake::default();
+    fake.allow(None, "list", "pods");
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("b"), "p2");
     let (hub, _clients) = fake.hub(Budgets::default());
