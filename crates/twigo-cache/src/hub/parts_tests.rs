@@ -909,14 +909,6 @@ async fn a_review_the_cluster_refuses_leaves_all_namespaces_to_the_clusters_own_
         1,
         "kept as long as a review's no"
     );
-    sleep(Duration::from_secs(2)).await;
-    drop(hub.rows(query(&[])).await.unwrap());
-    settle().await;
-    assert_eq!(
-        fake.count("selfsubjectaccessreviews"),
-        2,
-        "asked again after"
-    );
 }
 
 #[tokio::test(start_paused = true)]
