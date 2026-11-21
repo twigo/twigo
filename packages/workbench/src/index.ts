@@ -58,5 +58,5 @@ export {
   modeLabel,
   setByPolicyFile,
 } from "./spaces/modes";
-export { scopeWords } from "./spaces/scope";
+export { ALL_NAMESPACES, scopeNames, scopeWords } from "./spaces/scope";
 export { WorkbenchView } from "./WorkbenchView";
