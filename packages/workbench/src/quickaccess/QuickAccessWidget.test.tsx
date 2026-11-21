@@ -470,12 +470,13 @@ test("the footer says what Enter does to the row under the cursor: only this one
   const workbench = await testWorkbench();
   workbench.quickAccess.register(ticking().registered);
   await opened(workbench, "!");
-  expect(hint("Select")).toBe(true);
-  expect(hint("Only this")).toBe(false);
+  expect(hint("Close")).toBe(true);
+  expect(hint("Select")).toBe(false);
 
   press("ArrowDown");
   expect(hint("Select")).toBe(true);
   expect(hint("Only this")).toBe(false);
+  expect(hint("Close")).toBe(false);
 
   press("ArrowDown");
   expect(hint("Only this")).toBe(true);
@@ -484,6 +485,23 @@ test("the footer says what Enter does to the row under the cursor: only this one
   space();
   expect(hint("Apply · 0 namespaces")).toBe(true);
   expect(hint("Only this")).toBe(false);
+});
+
+test("the footer says Select, not Close, while the rows of a value typed come", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  workbench.quickAccess.register(ticking(undefined, { items }).registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  expect(hint("Close")).toBe(false);
+  await answer("", NAMESPACES);
+  expect(hint("Close")).toBe(true);
+
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  expect(hint("Close")).toBe(false);
+  expect(hint("Select")).toBe(true);
 });
 
 test("the input is a combobox on the list and names the row under the cursor, and none where no row is", async () => {

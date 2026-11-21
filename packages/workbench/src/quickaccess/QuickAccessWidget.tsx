@@ -241,6 +241,10 @@ function Open({ session }: { session: Session }) {
   const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
 
   const alone = many && !ticking && active?.checked !== undefined;
+  const action = active !== undefined && active.checked === undefined;
+  const loading = result.state === "loading";
+  // Nothing to take: no row under the cursor and no tick made.
+  const closes = many && !loading && !ticking && active === undefined;
 
   const applyChecked = () => {
     quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
@@ -250,14 +254,10 @@ function Open({ session }: { session: Session }) {
 
   const apply = (options: AcceptOptions) => {
     if (ask) quickAccess.submit();
-    else if (result.state === "loading") early.current = { value, options };
-    else if (!many) {
-      if (active) accept(active, options);
-    } else if (active?.checked === undefined && active !== undefined) {
-      accept(active, options);
-    } else if (ticking) applyChecked();
+    else if (loading) early.current = { value, options };
+    else if (closes) quickAccess.hide();
+    else if (ticking && !action) applyChecked();
     else if (active) accept(active, options);
-    else quickAccess.hide();
   };
 
   // An Enter before the rows of its value have come acts on them once they do.
@@ -390,11 +390,13 @@ function Open({ session }: { session: Session }) {
             ask?.acceptLabel ??
             (pick
               ? "Select"
-              : many && ticking
-                ? `Apply · ${words(count)}`
-                : alone
-                  ? (provider.acceptAloneLabel ?? provider.acceptLabel)
-                  : provider?.acceptLabel)
+              : closes
+                ? "Close"
+                : many && ticking
+                  ? `Apply · ${words(count)}`
+                  : alone
+                    ? (provider.acceptAloneLabel ?? provider.acceptLabel)
+                    : provider?.acceptLabel)
           }
         />
       </QuickInput>
