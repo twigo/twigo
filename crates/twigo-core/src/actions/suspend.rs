@@ -12,7 +12,7 @@ use std::sync::Weak;
 use http::Method;
 use serde_json::Value;
 use serde_json::json;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
+use twigo_ipc::{Affected, ErrorCode, IpcError, ObjectRef, ResourceRef};
 use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
@@ -32,7 +32,7 @@ pub(crate) async fn suspend(
     let target = Target::of(core, space, target)?;
     if !target.is("batch", &["jobs", "cronjobs"]) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionUnsupportedKind,
             "Twigo suspends jobs and cron jobs",
         ));
     }
@@ -54,7 +54,7 @@ pub(crate) async fn suspend(
     let what = format!("{kind} {}", target.name);
     if is(&object, suspend) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionNoChange,
             already(&what, suspend),
         ));
     }
@@ -139,7 +139,7 @@ fn already(what: &str, suspend: bool) -> String {
 fn nothing(what: &str, how: &str, suspend: bool) -> IpcError {
     let verb = if suspend { "suspend" } else { "resume" };
     IpcError::new(
-        ErrorKind::InvalidInput,
+        ErrorCode::ActionNoChange,
         format!("{} {how}, so there is nothing to {verb}", sentence(what)),
     )
 }
@@ -341,7 +341,7 @@ impl Run {
         }
         let Some(written) = answer else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionKeptChanging,
                 format!("{} kept changing, so Twigo changed nothing", sentence(what)),
             ));
         };

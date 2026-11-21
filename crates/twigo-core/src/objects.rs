@@ -20,7 +20,7 @@ use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
-    Block, ErrorKind, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
+    Block, ErrorCode, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
     ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
 
@@ -115,11 +115,11 @@ pub(crate) struct Reading(Arc<Control>);
 impl Reading {
     pub(crate) fn json(&self) -> Result<Value, IpcError> {
         let latest = self.0.latest.lock().expect("object lock").clone();
-        let object =
-            latest.ok_or_else(|| IpcError::new(ErrorKind::NotFound, "the object is not listed"))?;
+        let object = latest
+            .ok_or_else(|| IpcError::new(ErrorCode::ObjectNotListed, "the object is not listed"))?;
         serde_json::from_str(object.json.get()).map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::AnswerUndecodable,
                 format!("the object does not parse: {error}"),
             )
         })
@@ -130,7 +130,7 @@ impl Reading {
 fn values_of(object: &Value, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
     if object["apiVersion"] != "v1" || object["kind"] != "ConfigMap" {
         return Err(IpcError::new(
-            ErrorKind::Forbidden,
+            ErrorCode::ObjectValuesWithheld,
             "only a ConfigMap's values are sent".to_owned(),
         ));
     }
@@ -722,11 +722,17 @@ impl Shown<'_> {
 
 /// Why an upstream's objects cannot be listed, in its state; None while
 /// they are listed or still coming.
-fn unavailable(state: &ViewState) -> Option<String> {
+fn unavailable(state: &ViewState) -> Option<IpcError> {
     match state {
-        ViewState::Forbidden { verb, resource } => Some(format!("You may not {verb} {resource}.")),
-        ViewState::Unauthorized => Some("The cluster does not accept the credentials.".to_owned()),
-        ViewState::Error { error } => Some(error.message.clone()),
+        ViewState::Forbidden { verb, resource } => Some(IpcError::new(
+            ErrorCode::ServerForbidden,
+            format!("You may not {verb} {resource}."),
+        )),
+        ViewState::Unauthorized => Some(IpcError::new(
+            ErrorCode::ServerUnauthorized,
+            "The cluster does not accept the credentials.",
+        )),
+        ViewState::Error { error } => Some(error.clone()),
         _ => None,
     }
 }
@@ -887,7 +893,9 @@ fn found(needs: &mut [Held]) -> bool {
         };
         let moved = drained(objects);
         let found = if let Some(message) = unavailable(&objects.state()) {
-            Some(Found::Unavailable { message })
+            Some(Found::Unavailable {
+                message: message.message,
+            })
         } else if objects.listed() {
             if !moved && matches!(held.found, Some(Found::Listed { .. })) {
                 continue;
@@ -1009,6 +1017,7 @@ mod metered;
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use twigo_ipc::ErrorKind;
 
     use super::*;
 
@@ -1124,7 +1133,7 @@ mod tests {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::ConnectOther,
                     "no cluster".to_owned(),
                 ))
             })
@@ -1170,7 +1179,7 @@ mod tests {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::ConnectOther,
                     "no cluster".to_owned(),
                 ))
             })

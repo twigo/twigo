@@ -34,7 +34,7 @@ use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
-    Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
+    DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
     ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
@@ -312,7 +312,7 @@ impl Core {
     }
 
     /// The contexts the catalog lists, with what each lets through now.
-    pub fn contexts(&self) -> Option<Vec<Context>> {
+    pub fn contexts(&self) -> Option<twigo_ipc::Catalog> {
         // Out of the borrow: the policy reads the same channel for each
         // context, and a second borrow behind a waiting writer may deadlock
         // (tokio's `watch::Ref`).
@@ -406,7 +406,7 @@ impl Core {
         let context = planned.context.clone();
         if self.policy.connection(&context) != planned.connection {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionClusterChanged,
                 format!(
                     "{context} names another cluster now than when Twigo asked, so it sent nothing"
                 ),
@@ -427,7 +427,7 @@ impl Core {
                 },
             });
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionModeChanged,
                 format!(
                     "{context} is {} now, which asks for more than you confirmed, so Twigo sent nothing",
                     access.mode.name()
@@ -439,13 +439,13 @@ impl Core {
                 if since.elapsed() < Duration::from_secs((*seconds).into()) =>
             {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ConfirmCountdown,
                     "the countdown has not ended",
                 ));
             }
             Friction::Typed { text } if request.typed.as_deref() != Some(text.as_str()) => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ConfirmNameMismatch,
                     format!("type {text} to confirm"),
                 ));
             }
@@ -620,7 +620,7 @@ impl Core {
             .expect("converting a schema does not panic");
         schema.ok_or_else(|| {
             IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::OpenapiNoKind,
                 format!(
                     "the cluster's OpenAPI for {}/{} has no kind {}",
                     query.group, query.version, query.kind
@@ -636,7 +636,7 @@ impl Core {
             .into_iter()
             .find(|candidate| candidate.id == space)
             .and_then(|space| space.contexts.into_iter().next())
-            .ok_or_else(|| IpcError::new(ErrorKind::NotFound, format!("no space {space:?}")))
+            .ok_or_else(|| IpcError::new(ErrorCode::SpaceNotFound, format!("no space {space:?}")))
     }
 
     /// The resources a space's context serves, followed as they change.
@@ -659,7 +659,7 @@ impl Core {
         let context = self.context(space)?;
         self.hub.namespaces(&context).await.map_err(|state| {
             state.refusal().unwrap_or_else(|| {
-                IpcError::new(ErrorKind::Unavailable, "the cluster is unavailable")
+                IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable")
             })
         })
     }
@@ -747,7 +747,7 @@ impl Core {
         };
         if query.namespaced && query.namespace.is_none() {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::InternalRequest,
                 format!("{} names no namespace", query.name),
             ));
         }
@@ -855,10 +855,10 @@ impl Core {
         })?;
         let lines = lines
             .await
-            .map_err(|_| IpcError::new(ErrorKind::Unavailable, "the logs tab closed"))?;
+            .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))?;
         tokio::fs::write(path, lines).await.map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::FileUnwritten,
                 format!("could not write {}: {error}", path.display()),
             )
         })
@@ -1037,7 +1037,7 @@ fn connect(core: Weak<Core>) -> Connect {
         Box::pin(async move {
             let Some(core) = core.upgrade() else {
                 return Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::AppQuitting,
                     "Twigo is quitting".to_owned(),
                 ));
             };
@@ -1054,7 +1054,7 @@ fn connect(core: Weak<Core>) -> Connect {
 pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
     let refused = || {
         IpcError::new(
-            twigo_ipc::ErrorKind::InvalidInput,
+            twigo_ipc::ErrorCode::LinkRefused,
             format!("Twigo opens only sign-in links: {url}"),
         )
     };

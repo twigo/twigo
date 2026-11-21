@@ -33,7 +33,7 @@ pub(crate) use shell::{containers, shell};
 pub(crate) use suspend::suspend;
 pub(crate) use trigger::trigger;
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, ObjectRef, ResourceRef};
+use twigo_ipc::{ErrorCode, IpcError, ObjectRef, ResourceRef};
 use twigo_kube::client::Clients;
 use twigo_policy::Attributes;
 pub(crate) use undo::undo;
@@ -188,7 +188,7 @@ pub(crate) fn same(object: &Value, uid: &str, what: &str, sent: &str) -> Result<
         return Ok(());
     }
     Err(IpcError::new(
-        ErrorKind::Conflict,
+        ErrorCode::ActionObjectChanged,
         format!(
             "{} was replaced since Twigo asked, so it {sent}",
             sentence(what)
@@ -221,14 +221,14 @@ pub(crate) async fn clients_for(
 ) -> Result<(Arc<Core>, Arc<Clients>), IpcError> {
     let core = core
         .upgrade()
-        .ok_or_else(|| IpcError::new(ErrorKind::Unavailable, "Twigo is quitting"))?;
+        .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
     let clients = core
         .clients(context)
         .await
         .map_err(|error| IpcError::from(&error))?;
     if clients.connection() != connection {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ActionClusterChanged,
             format!("{context} names another cluster now than when Twigo asked, so it {sent}"),
         ));
     }
@@ -312,7 +312,7 @@ pub(crate) fn sentence(text: &str) -> String {
 pub(crate) fn kubectl(words: &[&str]) -> Result<String, IpcError> {
     shlex::try_join(words.iter().copied()).map_err(|error| {
         IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionUnquotable,
             format!("no shell can take these words: {error}"),
         )
     })

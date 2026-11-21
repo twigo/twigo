@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
+    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanId,
     PreviewId, SubscriptionId,
 };
 use twigo_policy::friction::Risk;
@@ -273,7 +273,7 @@ impl Bus {
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that asked for the plan is gone",
             ));
         }
@@ -281,7 +281,7 @@ impl Bus {
             && window.started.get(object) != Some(started)
         {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::BusPreviewReplaced,
                 "a newer preview of this object replaced this one",
             ));
         }
@@ -343,13 +343,13 @@ impl Bus {
         let window = inner.windows.entry(ticket.window.clone()).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that asked for the preview is gone",
             ));
         }
         if window.started.get(&prepared.object) != Some(&started) {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::BusPreviewReplaced,
                 "a newer preview of this object replaced this one",
             ));
         }
@@ -370,7 +370,7 @@ impl Bus {
         let held = inner.windows.get_mut(window);
         let Some((prepared, _)) = held.as_ref().and_then(|held| held.previews.get(&id)) else {
             return Err(IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::BusNotWaiting,
                 format!("no preview {} waits to apply", id.0),
             ));
         };
@@ -395,7 +395,7 @@ impl Bus {
         });
         let Some(held) = held else {
             return Err(IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::BusNotWaiting,
                 format!("no plan {} waits to run", id.0),
             ));
         };
@@ -416,7 +416,7 @@ impl Bus {
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that ran the plan is gone",
             ));
         }

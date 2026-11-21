@@ -6,7 +6,7 @@ use ts_rs::TS;
 
 use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
+    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, Discovered, DownloadLogs, ExecReview,
     Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget,
     GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
     LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
@@ -41,8 +41,8 @@ pub struct ContextsWatch;
 impl Command for ContextsWatch {
     const NAME: &'static str = "contexts_watch";
     type Request = ();
-    type Response = Vec<Context>;
-    type Message = Vec<Context>;
+    type Response = Catalog;
+    type Message = Catalog;
 }
 
 /// Ends a context's unlock now, by its name, which the audit log records.

@@ -4,7 +4,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
@@ -54,16 +54,19 @@ pub fn is_mask(text: &str) -> bool {
 pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcError> {
     if object["apiVersion"] != "v1" || object["kind"] != "Secret" {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::SecretNotASecret,
             "only a Secret's values are revealed".to_owned(),
         ));
     }
     let encoded = object["data"][key].as_str().ok_or_else(|| {
-        IpcError::new(ErrorKind::NotFound, format!("the Secret has no key {key}"))
+        IpcError::new(
+            ErrorCode::SecretNoKey,
+            format!("the Secret has no key {key}"),
+        )
     })?;
     let bytes = STANDARD.decode(encoded).map_err(|error| {
         IpcError::new(
-            ErrorKind::Internal,
+            ErrorCode::AnswerUndecodable,
             format!("the value of {key} is no base64: {error}"),
         )
     })?;
@@ -178,13 +181,13 @@ mod tests {
         let value = secret_value(&secret, "key.der").unwrap();
         assert_eq!(value, ("MIIBCgKCAQEA/w==".to_owned(), true));
         let missing = secret_value(&secret, "token").unwrap_err();
-        assert_eq!(missing.kind, ErrorKind::NotFound);
+        assert_eq!(missing.code, ErrorCode::SecretNoKey);
         let config = serde_json::json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "data": { "password": "aHVudGVyMg==" },
         });
         let refused = secret_value(&config, "password").unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::InvalidInput);
+        assert_eq!(refused.code, ErrorCode::SecretNotASecret);
     }
 }

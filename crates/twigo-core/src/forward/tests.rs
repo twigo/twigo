@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use twigo_env::ShellEnv;
-use twigo_ipc::{Gvr, Mode};
+use twigo_ipc::{ErrorKind, Gvr, Mode};
 
 use super::*;
 use crate::state::State;
@@ -419,7 +419,7 @@ async fn forwards_that_ran_listen_again_at_a_start_and_wait_for_their_first_conn
         forwards[2].state,
         ForwardState::Failed {
             error: IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ForwardPortInUse,
                 format!("port {held_port} is held by another process")
             )
         }
@@ -1437,7 +1437,7 @@ async fn a_run_the_forward_has_left_says_nothing_older_after_a_stop_and_nothing_
     old.as_ref()
         .unwrap()
         .data
-        .refuse(IpcError::new(ErrorKind::Permissions, "refused"));
+        .refuse(IpcError::new(ErrorCode::PolicyBlocked, "refused"));
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(seen.try_recv().is_err(), "nothing after the remove");
 }

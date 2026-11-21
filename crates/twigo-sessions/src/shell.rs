@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::io::ReaderStream;
-use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, IpcError, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Clients, Waiting};
 
 use crate::flow::{FRAME_MAX, Flow};
@@ -146,7 +146,7 @@ impl Session {
         let parked = self.parked.lock().expect("shell lock").take();
         let Some(parked) = parked else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::SessionStarted,
                 "this shell has started already",
             ));
         };

@@ -2,7 +2,7 @@
 //! only as the Reveal runs, read from the Secret as last listed then, and
 //! nothing is sent to the cluster.
 
-use twigo_ipc::{ErrorKind, IpcError, SubscriptionId};
+use twigo_ipc::{ErrorCode, IpcError, SubscriptionId};
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::secret_value;
 
@@ -68,7 +68,7 @@ pub(crate) fn reveal(
                 // Read as it runs, and only while the view it is for is open.
                 let core = this
                     .upgrade()
-                    .ok_or_else(|| IpcError::new(ErrorKind::Unavailable, "Twigo is quitting"))?;
+                    .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
                 let reading = core
                     .objects
                     .with(&window, object, |opened| opened.reading())?;

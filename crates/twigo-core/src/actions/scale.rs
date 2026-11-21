@@ -14,7 +14,7 @@ use std::sync::Weak;
 
 use http::Method;
 use serde_json::json;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
+use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ObjectRef, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
@@ -52,7 +52,7 @@ pub(crate) async fn scale(
     let known = count(&target, &current);
     if known == Some(u64::from(replicas)) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionNoChange,
             format!("{} has {replicas} replicas already", sentence(&what)),
         ));
     }
@@ -334,7 +334,7 @@ impl Run {
             }
             if now != from {
                 return Err(IpcError::new(
-                    ErrorKind::Conflict,
+                    ErrorCode::ActionObjectChanged,
                     format!(
                         "{} has {now} replicas now, not the {from} Twigo asked about, so it scaled nothing",
                         sentence(what)
@@ -352,7 +352,7 @@ impl Run {
         }
         let Some((object, current)) = written else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionKeptChanging,
                 format!("{} kept changing, so Twigo scaled nothing", sentence(what)),
             ));
         };

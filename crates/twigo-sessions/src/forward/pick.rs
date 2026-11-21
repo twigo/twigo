@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use backon::{BackoffBuilder, ExponentialBackoff, ExponentialBuilder};
 use tokio::time::Instant;
-use twigo_ipc::IpcError;
+use twigo_ipc::{ErrorCode, IpcError};
 
 use super::cause::Cause;
 use super::watching::Candidate;
@@ -22,7 +22,7 @@ const LONGEST: Duration = Duration::from_secs(30);
 pub(super) enum Known {
     /// Nothing is listed yet, or nothing is watched; why, when the cluster
     /// does not answer.
-    Unknown(Option<String>),
+    Unknown(Option<IpcError>),
     /// What fails a forward whoever asked: a rejected credential, or the
     /// target is gone.
     Fault(Cause),
@@ -38,10 +38,10 @@ pub(super) enum Known {
 pub(super) enum Chosen {
     Pod(Candidate),
     /// There is none, and why.
-    None(String),
+    None(IpcError),
     Fault(Cause),
     Refused(IpcError),
-    Unknown(Option<String>),
+    Unknown(Option<IpcError>),
 }
 
 struct Avoided {
@@ -53,7 +53,7 @@ struct Avoided {
 /// What the upgrade said when it answered 404: such a pod is not chosen
 /// before `until`, even as the only one.
 struct Missing {
-    words: String,
+    error: IpcError,
     until: Instant,
 }
 
@@ -116,7 +116,7 @@ impl Pick {
             Known::Fault(error) => return Chosen::Fault(error.clone()),
             Known::Refused(error) => return Chosen::Refused(error.clone()),
             Known::Listed { candidates, why } if candidates.is_empty() => {
-                return Chosen::None(why.clone());
+                return Chosen::None(IpcError::new(ErrorCode::ForwardNoReadyPod, why.clone()));
             }
             Known::Listed { candidates, .. } => candidates,
         };
@@ -145,7 +145,7 @@ impl Pick {
                 .filter_map(|candidate| self.held(candidate, now)?.missing(now))
                 .min_by_key(|missing| missing.until)
                 .expect("every candidate answered 404");
-            return Chosen::None(missing.words.clone());
+            return Chosen::None(missing.error.clone());
         };
         self.current = Some(chosen.clone());
         Chosen::Pod(chosen)
@@ -187,12 +187,12 @@ impl Pick {
         avoided.until = avoided.until.max(until);
     }
 
-    /// The upgrade to the pod answered 404, in these words.
-    pub(super) fn left(&mut self, key: &str, words: String, now: Instant) {
+    /// The upgrade to the pod answered 404, as `error`.
+    pub(super) fn left(&mut self, key: &str, error: IpcError, now: Instant) {
         let avoided = self.avoid(key, now);
         let until = now + LONGEST;
         avoided.until = avoided.until.max(until);
-        avoided.missing = Some(Missing { words, until });
+        avoided.missing = Some(Missing { error, until });
     }
 
     /// The pod carried a connection, so it is not avoided.

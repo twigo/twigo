@@ -67,7 +67,7 @@ use kube::client::Body;
 use kube::core::GroupVersionKind;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 use crate::errors;
 
@@ -106,11 +106,11 @@ impl From<&Error> for IpcError {
     fn from(error: &Error) -> Self {
         match error {
             Error::Request(error) => errors::request(error),
-            Error::NotListed(_) => IpcError::new(ErrorKind::NotFound, error.to_string()),
-            Error::Address(_)
-            | Error::Unverified(_)
-            | Error::Changing(_)
-            | Error::Decode { .. } => IpcError::new(ErrorKind::Unavailable, error.to_string()),
+            Error::NotListed(_) => IpcError::new(ErrorCode::OpenapiNotListed, error.to_string()),
+            Error::Address(_) | Error::Unverified(_) | Error::Changing(_) => {
+                IpcError::new(ErrorCode::OpenapiUnreadable, error.to_string())
+            }
+            Error::Decode { .. } => IpcError::new(ErrorCode::AnswerUndecodable, error.to_string()),
         }
     }
 }

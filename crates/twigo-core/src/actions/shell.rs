@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use serde_json::Value;
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, ShellContainers, ShellKind, ShellPod, ShellTarget};
+use twigo_ipc::{ErrorCode, IpcError, ShellContainers, ShellKind, ShellPod, ShellTarget};
 use twigo_policy::friction::Risk;
 use twigo_policy::{Actor, Attributes, Policy};
 use twigo_sessions::shell::{Join, SHELL, Session, Spec};
@@ -89,7 +89,7 @@ fn attach_settings(pod: &Value, container: &str) -> Result<(bool, bool), IpcErro
         })
         .ok_or_else(|| {
             IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::ShellNoContainer,
                 format!("Pod {} has no container {container}", name(pod)),
             )
         })
@@ -236,7 +236,7 @@ fn offered(pod: &Value) -> Result<ShellContainers, IpcError> {
     let phase = pod["status"]["phase"].as_str().unwrap_or_default();
     if matches!(phase, "Succeeded" | "Failed") {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ShellPodNotRunning,
             format!("Pod {} has finished", name(pod)),
         ));
     }
@@ -250,7 +250,7 @@ fn offered(pod: &Value) -> Result<ShellContainers, IpcError> {
     .collect();
     let Some(first) = containers.first().cloned() else {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ShellPodNotRunning,
             format!("Pod {} has no running container", name(pod)),
         ));
     };
@@ -288,7 +288,7 @@ mod tests {
 
     use jiff::SignedDuration;
     use serde_json::json;
-    use twigo_ipc::{Environment, Mode};
+    use twigo_ipc::{Environment, ErrorKind, Mode};
 
     use super::*;
 

@@ -14,7 +14,7 @@ use kube::api::{DeleteParams, Preconditions, PropagationPolicy};
 use serde_json::Value;
 use twigo_cache::hub::{Query, Resource, RowFormat};
 use twigo_cache::request::field_value;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ResourceRef};
+use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
@@ -39,14 +39,17 @@ pub(crate) async fn delete(
     targets: Vec<ResourceRef>,
 ) -> Result<Planned, IpcError> {
     let Some(first) = targets.first() else {
-        return Err(IpcError::new(ErrorKind::InvalidInput, "nothing to delete"));
+        return Err(IpcError::new(
+            ErrorCode::ActionNoTarget,
+            "nothing to delete",
+        ));
     };
     if targets
         .iter()
         .any(|target| target.gvr != first.gvr || target.namespaced != first.namespaced)
     {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionMixedTargets,
             "a delete of several objects takes them from one resource",
         ));
     }
@@ -105,7 +108,10 @@ pub(crate) async fn delete(
                 .as_str()
                 .map(str::to_owned)
                 .ok_or_else(|| {
-                    IpcError::new(ErrorKind::Internal, format!("{} has no uid", target.name))
+                    IpcError::new(
+                        ErrorCode::AnswerUndecodable,
+                        format!("{} has no uid", target.name),
+                    )
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -361,7 +367,7 @@ impl Run {
                 }
                 Answer::Replaced(_) => {
                     return Err(IpcError::new(
-                        ErrorKind::Conflict,
+                        ErrorCode::ActionObjectChanged,
                         format!(
                             "{what} was replaced since you confirmed, so Twigo deleted nothing"
                         ),
@@ -392,13 +398,15 @@ impl Run {
         let besides = self.besides(gone, &replaced, &failed);
         let deleted = format!("{}{besides}", self.told(waiting.len(), failed.len()));
         let finish = |text: String| match failed.first() {
-            Some((_, error)) => Err(IpcError::new(error.kind, text)),
+            Some((_, error)) => Err(IpcError::new(error.code, text)),
             None => Ok(Finished::Done(text)),
         };
         if waiting.is_empty() {
             return match failed.first() {
-                Some((_, error)) => Err(IpcError::new(error.kind, deleted)),
-                None if !replaced.is_empty() => Err(IpcError::new(ErrorKind::Conflict, deleted)),
+                Some((_, error)) => Err(IpcError::new(error.code, deleted)),
+                None if !replaced.is_empty() => {
+                    Err(IpcError::new(ErrorCode::ActionObjectChanged, deleted))
+                }
                 None => Ok(Finished::Done(deleted)),
             };
         }

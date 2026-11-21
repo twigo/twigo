@@ -5,7 +5,7 @@
 //! the list an error.
 
 use regex::{Regex, RegexBuilder};
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 use crate::table::Cell;
 
@@ -42,7 +42,7 @@ impl TextFilter {
                     .build()
                     .map_err(|error| {
                         IpcError::new(
-                            ErrorKind::InvalidInput,
+                            ErrorCode::FilterInvalidRegex,
                             format!("the filter /{pattern}/ is no regex: {error}"),
                         )
                     })?,
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn a_closed_regex_that_does_not_parse_is_invalid_input() {
         let error = TextFilter::parse("/web-[/").unwrap_err();
-        assert_eq!(error.kind, ErrorKind::InvalidInput);
+        assert_eq!(error.code, ErrorCode::FilterInvalidRegex);
     }
 
     #[test]

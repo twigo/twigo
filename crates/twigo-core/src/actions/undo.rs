@@ -15,7 +15,7 @@ use http::Method;
 use jiff::Timestamp;
 use serde_json::Value;
 use tokio::time::Instant;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::{ATTEMPTS, Target, clients_for, get, lost, patch_as_of, sentence};
@@ -190,7 +190,7 @@ impl Undos {
 pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> {
     let (id, connection, revert) = core.undos.get(space).ok_or_else(|| {
         IpcError::new(
-            ErrorKind::NotFound,
+            ErrorCode::UndoNothing,
             "nothing in this space can be undone now",
         )
     })?;
@@ -212,7 +212,7 @@ pub(crate) async fn undo(core: &Core, space: &str) -> Result<Planned, IpcError> 
                 .map_err(|error| IpcError::from(&error))?;
             if clients.connection() != connection {
                 return Err(IpcError::new(
-                    ErrorKind::Conflict,
+                    ErrorCode::ActionClusterChanged,
                     format!(
                         "{} names another cluster now than the one you changed, so nothing can be undone there",
                         target.context
@@ -267,7 +267,7 @@ fn ended_since(revert: &Revert, object: &Value) -> Option<IpcError> {
     }
     let how = super::suspend::ended(object)?;
     Some(IpcError::new(
-        ErrorKind::Conflict,
+        ErrorCode::ActionObjectChanged,
         format!(
             "{} {how} since you {} it, so Twigo left it",
             sentence(&revert.what),
@@ -291,13 +291,18 @@ async fn run(
         .is_some_and(|core| core.undos.take(&space, id));
     if !taken {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::UndoEnded,
             "the undo ended before it ran, so Twigo put nothing back",
         ));
     }
     let (_, clients) = clients_for(&core, context, connection, "put nothing back").await?;
     let (what, past) = (sentence(&revert.what), revert.past);
-    let left = |why: String| IpcError::new(ErrorKind::Conflict, format!("{why}, so Twigo left it"));
+    let left = |why: String| {
+        IpcError::new(
+            ErrorCode::ActionObjectChanged,
+            format!("{why}, so Twigo left it"),
+        )
+    };
     for attempt in 0..ATTEMPTS {
         let object = get(&clients, &revert.target.path).await?;
         if object["metadata"]["uid"].as_str() != Some(revert.uid.as_str()) {

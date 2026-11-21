@@ -36,14 +36,14 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_cache::hub::{Hub, Resource, backoff};
-use twigo_ipc::{ErrorKind, ForwardState, Gvr, IpcError};
+use twigo_ipc::{ErrorCode, ForwardState, Gvr, IpcError};
 
 use crate::pods::Reach;
 use cause::{Cause, Lift};
 use connect::{Connect, Kube};
 use connection::Fault;
 use pick::{Chosen, Known, Pick};
-use watching::{UNANSWERED_YET, Watching};
+use watching::{Watching, unanswered_yet};
 
 use listen::{Accepting, Socket, Sockets};
 
@@ -119,7 +119,7 @@ impl Target {
             .find(|(group, resource, ..)| *group == gvr.group && *resource == gvr.resource)
             .ok_or_else(|| {
                 IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ForwardUnsupportedTarget,
                     format!(
                         "{} cannot be forwarded to: a forward reaches a pod, a Service, or the pods of a Deployment, ReplicaSet, StatefulSet or DaemonSet",
                         crate::pods::resource_name(&gvr.group, &gvr.resource)
@@ -128,7 +128,7 @@ impl Target {
             })?;
         if namespace.is_empty() {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::InternalRequest,
                 format!("{name} names no namespace"),
             ));
         }
@@ -430,11 +430,11 @@ impl Shared {
         self.pick().failed(key, Instant::now());
     }
 
-    /// The upgrade to a pod behind a Service or a workload answered 404, in
-    /// `words`: whether another pod is left, which the status names then.
-    fn left(&self, key: &str, words: String) -> bool {
+    /// The upgrade to a pod behind a Service or a workload answered 404, as
+    /// `error`: whether another pod is left, which the status names then.
+    fn left(&self, key: &str, error: IpcError) -> bool {
         let now = Instant::now();
-        self.pick().left(key, words, now);
+        self.pick().left(key, error, now);
         matches!(self.choose(now), Chosen::Pod(_))
     }
 
@@ -830,9 +830,11 @@ impl Supervisor {
                     Fault::Fatal(error) => self.fail(error),
                     // That pod is avoided: the proof chooses again.
                     Fault::Left { .. } => {}
-                    Fault::Port(words) | Fault::NoPod(words) => {
-                        self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
+                    Fault::Port(words) => {
+                        let refused = IpcError::new(ErrorCode::ForwardPortRefused, words);
+                        self.unreachable(refused.into(), true);
                     }
+                    Fault::NoPod(error) => self.unreachable(error.into(), true),
                     Fault::Transient(cause) => self.unreachable(cause, true),
                     Fault::Lost => self.pause(),
                 }
@@ -895,7 +897,7 @@ impl Supervisor {
             self.fail(cause);
             return;
         }
-        self.reconnecting(cause.into_error().message);
+        self.reconnecting(cause.into_error());
         if retry {
             self.pause();
         }
@@ -905,7 +907,7 @@ impl Supervisor {
     /// a person's proof is under way, which ends by itself. The space's
     /// proof ends with this result, and the forward goes on proving only
     /// while it has connections.
-    fn reconnecting(&mut self, reason: String) {
+    fn reconnecting(&mut self, reason: IpcError) {
         if self.phase == Phase::Starting {
             return;
         }
@@ -969,12 +971,13 @@ impl Supervisor {
         match fault {
             Fault::Fatal(error) => self.fail(error),
             Fault::Port(_) | Fault::Left { alone: false, .. } => {}
-            Fault::NoPod(why) | Fault::Left { words: why, .. } => self.reconnecting(why),
+            Fault::NoPod(why) | Fault::Left { error: why, .. } => self.reconnecting(why),
             Fault::Transient(cause) if cause.is_gone() => self.fail(cause),
-            Fault::Transient(cause) => self.reconnecting(cause.into_error().message),
-            Fault::Lost => {
-                self.reconnecting("the connection to the cluster was lost".to_owned());
-            }
+            Fault::Transient(cause) => self.reconnecting(cause.into_error()),
+            Fault::Lost => self.reconnecting(IpcError::new(
+                ErrorCode::ConnectLost,
+                "the connection to the cluster was lost",
+            )),
         }
     }
 
@@ -990,10 +993,10 @@ impl Supervisor {
             proof.no_pod_by = None;
             let why = match self.shared.pick().choose(now) {
                 Chosen::None(why) | Chosen::Unknown(Some(why)) => why,
-                Chosen::Unknown(None) => UNANSWERED_YET.to_owned(),
+                Chosen::Unknown(None) => unanswered_yet(),
                 Chosen::Pod(_) | Chosen::Fault(_) | Chosen::Refused(_) => return,
             };
-            self.unreachable(IpcError::new(ErrorKind::Unavailable, why).into(), false);
+            self.unreachable(why.into(), false);
         }
     }
 

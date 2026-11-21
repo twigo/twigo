@@ -19,7 +19,7 @@ use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
+    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, Discovered, DownloadLogs, ErrorCode,
     ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
     ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent,
     ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell,
@@ -141,8 +141,8 @@ impl App {
 async fn contexts_watch(
     webview: Webview,
     app: State<'_, App>,
-    channel: Channel<Vec<Context>>,
-) -> Result<Vec<Context>, IpcError> {
+    channel: Channel<Catalog>,
+) -> Result<Catalog, IpcError> {
     let mut contexts = app.core.catalog.subscribe();
     let mut access = app.core.policy.changes();
     // Marks what it answers with as seen, so the follower sends only what
@@ -233,7 +233,7 @@ fn spaces_list(app: State<'_, App>) -> Vec<Space> {
 async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
     if app.core.catalog.contexts().await.find(&request).is_none() {
         return Err(IpcError::new(
-            ErrorKind::NotFound,
+            ErrorCode::ContextNotListed,
             format!("no source lists the context {request:?}"),
         ));
     }
@@ -488,7 +488,7 @@ async fn logs_download(
         });
     let picked = picked.await.map_err(|error| {
         IpcError::new(
-            ErrorKind::Internal,
+            ErrorCode::LogsDialogFailed,
             format!("the save dialog failed: {error}"),
         )
     })?;
@@ -497,7 +497,7 @@ async fn logs_download(
     };
     let path = picked.into_path().map_err(|error| {
         IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::LogsNotAFile,
             format!("Twigo saves logs only to a file on this computer: {error}"),
         )
     })?;
@@ -713,7 +713,7 @@ fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
         .open_url(url, None::<&str>)
         .map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::LinkOpenFailed,
                 format!("could not open {request}: {error}"),
             )
         })

@@ -5,7 +5,7 @@
 //! `a<1`, joined by commas. A NUL byte, where Go's lexer stops reading as at
 //! the end of the input, is refused as part of a key or a value.
 
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 use crate::meta::Labels;
 
@@ -72,7 +72,7 @@ fn keyword(text: &str) -> Option<Token> {
 
 fn invalid(message: String) -> IpcError {
     IpcError::new(
-        ErrorKind::InvalidInput,
+        ErrorCode::FilterInvalidSelector,
         format!("the label selector: {message}"),
     )
 }
@@ -404,7 +404,7 @@ mod tests {
             "!app=web",
         ] {
             let error = Selector::parse(selector).unwrap_err();
-            assert_eq!(error.kind, ErrorKind::InvalidInput, "{selector}");
+            assert_eq!(error.code, ErrorCode::FilterInvalidSelector, "{selector}");
         }
     }
 }

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 use twigo_ipc::{
-    ContextAuth, EnvVar, ExecPlugin, ExecReview, IpcError, PluginStatus, ReviewedPlugin,
+    ContextAuth, EnvVar, ErrorCode, ExecPlugin, ExecReview, IpcError, PluginStatus, ReviewedPlugin,
 };
 use twigo_kube::credentials::{Exec, RunError, Source, Status};
 use twigo_policy::Entry;
@@ -67,7 +67,7 @@ impl Core {
             .collect();
         self.trust.trust(digests).map_err(|error| {
             IpcError::new(
-                twigo_ipc::ErrorKind::Internal,
+                twigo_ipc::ErrorCode::TrustUnsaved,
                 format!("could not save the trusted plugins: {error}"),
             )
         })?;
@@ -146,7 +146,10 @@ impl AuthFollower {
         self.status = None;
         let Some(context) = contexts.find(&self.context) else {
             return ContextAuth::Invalid {
-                message: format!("no source lists the context {:?}", self.context),
+                error: IpcError::new(
+                    ErrorCode::ContextNotListed,
+                    format!("no source lists the context {:?}", self.context),
+                ),
             };
         };
         let exec = match context.entries.exec() {
@@ -154,7 +157,7 @@ impl AuthFollower {
             Ok(None) => return ContextAuth::None,
             Err(error) => {
                 return ContextAuth::Invalid {
-                    message: error.to_string(),
+                    error: IpcError::new(ErrorCode::ContextInvalid, error.to_string()),
                 };
             }
         };
@@ -207,7 +210,7 @@ fn plugin_status(status: &Status, exec: &Exec) -> PluginStatus {
             expires: expires.map(|at| at.to_string()),
         },
         Status::Failed { error, output } => PluginStatus::Failed {
-            error: error.to_string(),
+            error: twigo_kube::errors::plugin(error),
             output: output.clone(),
             install_hint: matches!(error, RunError::NotFound(_))
                 .then(|| exec.install_hint().filter(|_| exec.on_path()))

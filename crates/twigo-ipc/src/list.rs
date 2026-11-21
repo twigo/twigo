@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{ErrorKind, IpcError};
+use crate::{ErrorCode, IpcError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Gvr {
@@ -308,14 +308,24 @@ pub enum ColumnKind {
 pub enum ViewState {
     /// Waiting for a stream slot on the connection.
     Queued,
-    Connecting,
+    Connecting {
+        /// The last failure that may pass, which each retry meets.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        cause: Option<IpcError>,
+    },
     Syncing {
         loaded: u32,
     },
     Ready,
     Relisting,
     /// No event or bookmark in time; reconnecting.
-    Stale,
+    Stale {
+        /// The last failure that may pass, which each retry meets.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        cause: Option<IpcError>,
+    },
     Forbidden {
         verb: String,
         resource: String,
@@ -333,11 +343,11 @@ impl ViewState {
     pub fn refusal(&self) -> Option<IpcError> {
         match self {
             ViewState::Forbidden { verb, resource } => Some(IpcError::new(
-                ErrorKind::Forbidden,
+                ErrorCode::ServerForbidden,
                 format!("you may not {verb} {resource}"),
             )),
             ViewState::Unauthorized => Some(IpcError::new(
-                ErrorKind::Unauthorized,
+                ErrorCode::ServerUnauthorized,
                 "no credentials for this context that the cluster accepts",
             )),
             ViewState::Error { error } => Some(error.clone()),

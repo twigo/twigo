@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use twigo_describe::{Fact, Found, Input, Printed, describe};
 use twigo_ipc::{
-    Block, Condition, Container, EmbeddedList, EventList, Field, Finding, Fold, ObjectEvent,
-    Overview, Section, Span, Tone, Value as Shown, Vital,
+    Block, Condition, Container, EmbeddedList, ErrorCode, EventList, Field, Finding, Fold,
+    IpcError, ObjectEvent, Overview, Section, Span, Tone, Value as Shown, Vital,
 };
 
 #[derive(Deserialize)]
@@ -3250,7 +3250,10 @@ fn events_say_none_only_once_they_are_listed() {
     assert_eq!(
         say(EventList {
             listed: true,
-            unavailable: Some("You may not list events.".to_owned()),
+            unavailable: Some(IpcError::new(
+                ErrorCode::ServerForbidden,
+                "You may not list events."
+            )),
             ..EventList::default()
         }),
         "unavailable"

@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use futures::future::Either;
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
+    AnswerKubeconfigOffer, ErrorCode, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
     KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
 };
 use twigo_kube::client::Actor;
@@ -170,7 +170,7 @@ pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
 
 fn written(path: &Path, error: std::io::Error) -> IpcError {
     IpcError::new(
-        ErrorKind::Internal,
+        ErrorCode::FileUnwritten,
         format!("could not write {}: {error}", path.display()),
     )
 }
@@ -237,7 +237,7 @@ impl Core {
                 )
                 .map_err(|error| {
                     IpcError::new(
-                        ErrorKind::InvalidInput,
+                        ErrorCode::TerminalKubeconfigPath,
                         format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
                     )
                 })?;

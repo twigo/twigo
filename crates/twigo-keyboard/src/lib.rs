@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use linux as platform;
 #[cfg(target_os = "macos")]
 use macos as platform;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 pub use twigo_ipc::{KeyMapping, KeyboardLayout};
 pub use watch::{LayoutWatch, Subscription};
 #[cfg(windows)]
@@ -48,10 +48,10 @@ pub enum Error {
 
 impl From<&Error> for IpcError {
     fn from(error: &Error) -> Self {
-        let kind = match error {
-            Error::Unavailable(_) => ErrorKind::Unavailable,
-            Error::NotFound(_) => ErrorKind::NotFound,
+        let code = match error {
+            Error::Unavailable(_) => ErrorCode::KeyboardUnavailable,
+            Error::NotFound(_) => ErrorCode::KeyboardNotFound,
         };
-        IpcError::new(kind, error.to_string())
+        IpcError::new(code, error.to_string())
     }
 }

@@ -568,7 +568,10 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     fake.state().unavailable = 1;
     fake.state().requests.clear();
     fake.end_watches();
-    until(&mut pods, |state| *state == ViewState::Stale).await;
+    until(&mut pods, |state| {
+        *state == ViewState::Stale { cause: None }
+    })
+    .await;
     ready(&mut pods).await;
     let after = gaps(&fake);
     assert_eq!(after.len(), 1);
@@ -1245,7 +1248,7 @@ async fn rejected_credentials_wait_to_be_subscribed_again() {
     let mut again = hub.rows(query(&["a"])).await.unwrap();
     assert_eq!(
         again.state(),
-        ViewState::Connecting,
+        ViewState::Connecting { cause: None },
         "not the failure it retries"
     );
     ready(&mut again).await;
@@ -1293,7 +1296,10 @@ async fn whole_rows_wait_for_a_whole_list() {
     fake.state().unavailable = usize::MAX;
     let mut dead = hub.rows(query(&["c"])).await.unwrap();
     let started = Instant::now();
-    assert_eq!(dead.whole().await.unwrap_err(), ViewState::Stale);
+    assert_eq!(
+        dead.whole().await.unwrap_err(),
+        ViewState::Stale { cause: None }
+    );
     assert!(started.elapsed() >= 2 * RETRY_WITHIN);
 
     fake.state().unavailable = 0;
@@ -1361,7 +1367,11 @@ async fn a_name_that_can_be_no_path_segment_is_refused() {
     let (hub, _clients) = Fake::default().hub(Budgets::default());
     for name in ["a/pods", "a%2Fb", "..", ""] {
         let refused = hub.rows(query(&[name])).await.err().unwrap();
-        assert_eq!(refused.kind, twigo_ipc::ErrorKind::InvalidInput, "{name:?}");
+        assert_eq!(
+            refused.code,
+            twigo_ipc::ErrorCode::InternalRequest,
+            "{name:?}"
+        );
     }
     assert!(hub.scopes().is_empty());
 }
@@ -1407,7 +1417,15 @@ fn names_stay_in_their_segment() {
 fn parts_combine_into_their_least_ready_state() {
     let syncing = |loaded| ViewState::Syncing { loaded };
     assert_eq!(
-        combine([ViewState::Ready, syncing(2), syncing(3), ViewState::Stale].into_iter()),
+        combine(
+            [
+                ViewState::Ready,
+                syncing(2),
+                syncing(3),
+                ViewState::Stale { cause: None }
+            ]
+            .into_iter()
+        ),
         syncing(5)
     );
     assert_eq!(
@@ -1578,7 +1596,10 @@ async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_
         .no_endpoints
         .insert("/api/v1/namespaces".into());
     let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
-    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
+    assert_eq!(
+        answered.await.expect("it gives up"),
+        Err(ViewState::Stale { cause: None })
+    );
     assert!(
         (18..19).contains(&started.elapsed().as_secs()),
         "10 s after the slot came free at 8 s, not after the call: {:?}",

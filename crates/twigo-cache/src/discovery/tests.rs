@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, timeout};
-use twigo_ipc::{Discovered, ErrorKind, IpcError};
+use twigo_ipc::{Discovered, ErrorCode, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig::Fingerprint;
@@ -299,7 +299,7 @@ async fn an_untrusted_plugin_stops_the_follower() {
             connects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unauthorized,
+                    ErrorCode::CredentialsUntrusted,
                     "Twigo runs aws only once you trust it".to_owned(),
                 ))
             })
@@ -330,7 +330,7 @@ async fn clients_that_cannot_be_built_fail_rather_than_show_the_last_server() {
     rebuild(
         &current,
         Err(IpcError::new(
-            ErrorKind::Unavailable,
+            ErrorCode::ConnectOther,
             "no such file: ca.pem".to_owned(),
         )),
     );
@@ -385,7 +385,7 @@ async fn a_stopped_follower_restarts_once_its_kubeconfig_entry_changes() {
 async fn clients_refused_for_an_untrusted_plugin_come_once_the_entry_changes() {
     let fake = fake();
     let current = Arc::new(Mutex::new(Err(IpcError::new(
-        ErrorKind::Unauthorized,
+        ErrorCode::CredentialsUntrusted,
         "Twigo runs aws only once you trust it".to_owned(),
     ))));
     let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));

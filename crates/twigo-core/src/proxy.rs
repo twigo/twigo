@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OnceCell, watch};
 use tokio_util::sync::CancellationToken;
-use twigo_ipc::{BlockReason, Blocked, ErrorKind, IpcError, RequestClass};
+use twigo_ipc::{BlockReason, Blocked, ErrorCode, IpcError, RequestClass};
 use twigo_kube::client::{Actor, ActorClients, Clients};
 use twigo_policy::{Attributes, Policy};
 
@@ -170,7 +170,7 @@ impl Core {
     ) -> Result<ProxyProcess, IpcError> {
         if !matches!(actor, Actor::Terminal | Actor::Helm | Actor::Agent) {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::ProxyActorRefused,
                 format!(
                     "only a terminal, helm or an agent reaches a cluster through the policy proxy, never the actor {}",
                     actor.name()
@@ -188,7 +188,7 @@ impl Core {
             .await
             .map_err(|error| {
                 IpcError::new(
-                    ErrorKind::Internal,
+                    ErrorCode::ProxyUnbound,
                     format!("the policy proxy could not listen on 127.0.0.1: {error}"),
                 )
             })?;
@@ -230,7 +230,7 @@ impl Core {
         let written = kubeconfig::write(&self.proxy.dir, &path, &entries, context, &endpoint.ca);
         written.map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::FileUnwritten,
                 format!("could not write {}: {error}", path.display()),
             )
         })?;

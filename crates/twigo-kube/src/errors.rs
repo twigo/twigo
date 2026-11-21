@@ -3,47 +3,87 @@
 use http::StatusCode;
 use kube::core::Status;
 use tower::timeout::error::Elapsed;
-use twigo_ipc::{Blocked, ErrorKind, IpcError};
+use twigo_ipc::{Blocked, ErrorCode, IpcError, ServerCause, ServerStatus};
 
 use crate::credentials::{CredentialError, OidcError, RunError};
 
 /// A request's failure: the API server's status in its own words, rather
-/// than kube's `ApiError: … (Status { … })`, else why the request got no
-/// answer.
+/// than kube's `ApiError: … (Status { … })`, with its reason and causes as
+/// data, else why the request got no answer.
 pub fn request(error: &kube::Error) -> IpcError {
     if let Some(blocked) = gate(error) {
         return blocked.clone().into();
     }
-    let kind = match error {
+    let code = match error {
         kube::Error::Api(status) => match status.code {
-            400 | 422 => ErrorKind::InvalidInput,
-            401 => ErrorKind::Unauthorized,
-            403 => ErrorKind::Forbidden,
-            404 => ErrorKind::NotFound,
-            409 => ErrorKind::Conflict,
-            408 | 504 => ErrorKind::Timeout,
-            429 | 500..=599 => ErrorKind::Unavailable,
-            _ => ErrorKind::Internal,
+            400 | 422 => ErrorCode::ServerInvalid,
+            401 => ErrorCode::ServerUnauthorized,
+            403 => ErrorCode::ServerForbidden,
+            404 => ErrorCode::ServerNotFound,
+            409 => ErrorCode::ServerConflict,
+            408 | 504 => ErrorCode::ServerTimeout,
+            429 | 500..=599 => ErrorCode::ServerUnavailable,
+            _ => ErrorCode::ServerOther,
         },
-        kube::Error::Auth(_) => ErrorKind::Unauthorized,
+        kube::Error::Auth(_) => ErrorCode::CredentialsUnusable,
         kube::Error::Service(error) if let Some(error) = find::<CredentialError>(&**error) => {
             match error {
-                CredentialError::Run(RunError::Timeout { .. }) => ErrorKind::Timeout,
-                _ => ErrorKind::Unauthorized,
+                CredentialError::Run(error) => plugin_code(error),
+                CredentialError::SignInFailed(_) => ErrorCode::CredentialsPluginFailed,
             }
         }
         kube::Error::Service(error) if find::<OidcError>(&**error).is_some() => {
-            ErrorKind::Unauthorized
+            ErrorCode::CredentialsOidcRefresh
         }
-        kube::Error::Service(error) if find::<Elapsed>(&**error).is_some() => ErrorKind::Timeout,
-        kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorKind::Unavailable,
-        _ => ErrorKind::Internal,
+        kube::Error::Service(error) if find::<Elapsed>(&**error).is_some() => {
+            ErrorCode::ConnectTimeout
+        }
+        kube::Error::Service(_) | kube::Error::HyperError(_) => ErrorCode::ConnectOther,
+        kube::Error::ReadEvents(_) => ErrorCode::ConnectLost,
+        kube::Error::SerdeError(_)
+        | kube::Error::FromUtf8(_)
+        | kube::Error::LinesCodecMaxLineLengthExceeded => ErrorCode::AnswerUndecodable,
+        _ => ErrorCode::InternalRequest,
     };
     let message = match error {
         kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
         _ => error.to_string(),
     };
-    IpcError::new(kind, message)
+    let refused = IpcError::new(code, message);
+    match error {
+        kube::Error::Api(status) => refused.with_server(server(status)),
+        _ => refused,
+    }
+}
+
+/// A credential plugin's failed run, as the context's plugin panel says it.
+pub fn plugin(error: &RunError) -> IpcError {
+    IpcError::new(plugin_code(error), error.to_string())
+}
+
+fn plugin_code(error: &RunError) -> ErrorCode {
+    match error {
+        RunError::Timeout { .. } => ErrorCode::CredentialsPluginTimeout,
+        RunError::NotFound(_) => ErrorCode::CredentialsPluginMissing,
+        RunError::Cancelled(_) => ErrorCode::CredentialsPluginCancelled,
+        _ => ErrorCode::CredentialsPluginFailed,
+    }
+}
+
+fn server(status: &Status) -> ServerStatus {
+    ServerStatus {
+        reason: status.reason.clone(),
+        causes: status
+            .details
+            .iter()
+            .flat_map(|details| &details.causes)
+            .map(|cause| ServerCause {
+                reason: cause.reason.clone(),
+                field: cause.field.clone(),
+                message: cause.message.clone(),
+            })
+            .collect(),
+    }
 }
 
 /// The status a refused request answers with, as kube's
@@ -95,35 +135,40 @@ pub(crate) fn find<'a, T: std::error::Error + 'static>(
 #[cfg(test)]
 mod tests {
     use kube::core::Status;
+    use kube::core::response::{StatusCause, StatusDetails};
+    use twigo_ipc::ErrorKind;
 
     use super::*;
 
-    fn status(code: u16) -> ErrorKind {
+    fn status(code: u16) -> ErrorCode {
         let status = Status::failure("no", "Reason").with_code(code);
-        request(&kube::Error::Api(Box::new(status))).kind
+        request(&kube::Error::Api(Box::new(status))).code
     }
 
     #[test]
-    fn kinds() {
-        assert_eq!(status(401), ErrorKind::Unauthorized);
-        assert_eq!(status(403), ErrorKind::Forbidden);
-        assert_eq!(status(404), ErrorKind::NotFound);
-        assert_eq!(status(504), ErrorKind::Timeout);
-        assert_eq!(status(503), ErrorKind::Unavailable);
+    fn codes() {
+        assert_eq!(status(401), ErrorCode::ServerUnauthorized);
+        assert_eq!(status(403), ErrorCode::ServerForbidden);
+        assert_eq!(status(404), ErrorCode::ServerNotFound);
+        assert_eq!(status(504), ErrorCode::ServerTimeout);
+        assert_eq!(status(503), ErrorCode::ServerUnavailable);
+        assert_eq!(status(418), ErrorCode::ServerOther);
         let timed_out = kube::Error::Service(tower::timeout::error::Elapsed::new().into());
-        assert_eq!(request(&timed_out).kind, ErrorKind::Timeout);
+        assert_eq!(request(&timed_out).code, ErrorCode::ConnectTimeout);
         assert!(!no_credential(&timed_out));
         let refused = kube::Error::Service(std::io::Error::other("refused").into());
-        assert_eq!(request(&refused).kind, ErrorKind::Unavailable);
+        let refused = request(&refused);
+        assert_eq!(refused.code, ErrorCode::ConnectOther);
+        assert_eq!(refused.kind, ErrorKind::Unavailable);
         let plugin = |error: CredentialError| kube::Error::Service(error.into());
         let missing = plugin(CredentialError::Run(RunError::NotFound("aws".to_owned())));
-        assert_eq!(request(&missing).kind, ErrorKind::Unauthorized);
+        assert_eq!(request(&missing).code, ErrorCode::CredentialsPluginMissing);
         assert!(no_credential(&missing));
         let slow = plugin(CredentialError::Run(RunError::Timeout {
             command: "aws".to_owned(),
             after: std::time::Duration::from_secs(120),
         }));
-        assert_eq!(request(&slow).kind, ErrorKind::Timeout);
+        assert_eq!(request(&slow).code, ErrorCode::CredentialsPluginTimeout);
         assert!(no_credential(&slow));
     }
 
@@ -133,9 +178,9 @@ mod tests {
             .with_code(400);
         let refused = request(&kube::Error::Api(Box::new(status)));
         assert_eq!(
-            (refused.kind, refused.message.as_str()),
+            (refused.code, refused.message.as_str()),
             (
-                ErrorKind::InvalidInput,
+                ErrorCode::ServerInvalid,
                 "field label not supported: spec.containers"
             )
         );
@@ -144,6 +189,44 @@ mod tests {
             request(&kube::Error::Api(Box::new(silent)))
                 .message
                 .contains("InternalError")
+        );
+    }
+
+    #[test]
+    fn the_servers_reason_and_causes_are_data_and_never_a_code() {
+        let invalid = Status::failure("Deployment \"web\" is invalid", "Invalid")
+            .with_code(422)
+            .with_details(StatusDetails {
+                name: "web".to_owned(),
+                group: "apps".to_owned(),
+                kind: "Deployment".to_owned(),
+                uid: String::new(),
+                causes: vec![StatusCause {
+                    reason: "FieldValueInvalid".to_owned(),
+                    message: "Invalid value: -1: must be non-negative".to_owned(),
+                    field: "spec.replicas".to_owned(),
+                }],
+                retry_after_seconds: 0,
+            });
+        let refused = request(&kube::Error::Api(Box::new(invalid)));
+        assert_eq!(refused.code, ErrorCode::ServerInvalid);
+        assert_eq!(
+            refused.server,
+            Some(ServerStatus {
+                reason: "Invalid".to_owned(),
+                causes: vec![ServerCause {
+                    reason: "FieldValueInvalid".to_owned(),
+                    field: "spec.replicas".to_owned(),
+                    message: "Invalid value: -1: must be non-negative".to_owned(),
+                }],
+            })
+        );
+        let aggregated = Status::failure("no", "SomethingAnAggregatedApiMade").with_code(404);
+        let refused = request(&kube::Error::Api(Box::new(aggregated)));
+        assert_eq!(refused.code, ErrorCode::ServerNotFound);
+        assert_eq!(
+            refused.server.map(|server| server.reason).as_deref(),
+            Some("SomethingAnAggregatedApiMade")
         );
     }
 }
