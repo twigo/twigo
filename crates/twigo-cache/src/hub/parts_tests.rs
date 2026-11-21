@@ -742,33 +742,6 @@ fn three_of_forty() -> Parts {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_cluster_wide_review_that_does_not_answer_is_waited_for_never_taken_for_a_yes() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    fake.state()
-        .reviews_fail
-        .insert(None, StatusCode::SERVICE_UNAVAILABLE);
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-
-    sleep(Duration::from_secs(60)).await;
-    mirror.read(&list);
-    assert_eq!(mirror.status, Some(ViewState::Connecting));
-    assert_eq!(mirror.parts.as_ref().unwrap().count, 1);
-    assert_eq!(hub.scopes(), [], "no part, the cluster's included");
-    assert!(
-        fake.count("selfsubjectaccessreviews") > 5,
-        "it asks again, with the backoff"
-    );
-
-    fake.state().reviews_fail.clear();
-    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
-    assert_eq!(mirror.parts, Some(three_of_forty()));
-    assert_eq!(fake.count("/api/v1/pods"), 0);
-}
-
-#[tokio::test(start_paused = true)]
 async fn a_review_the_cluster_refuses_leaves_all_namespaces_to_the_clusters_own_answer() {
     let fake = Fake::default();
     allowed_in_three(&fake);
@@ -853,28 +826,6 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_next
     );
 }
 
-#[tokio::test(start_paused = true)]
-async fn the_namespaces_failing_without_a_refusal_are_waited_for_never_taken_for_a_refusal() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    fake.state()
-        .no_endpoints
-        .insert("/api/v1/namespaces".to_owned());
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-
-    sleep(Duration::from_secs(60)).await;
-    mirror.read(&list);
-    assert_eq!(mirror.status, Some(ViewState::Connecting));
-    assert_eq!(fake.count("/api/v1/pods"), 0, "never the cluster part");
-    assert!(fake.count("/api/v1/namespaces?") > 5, "it asks again");
-
-    fake.state().no_endpoints.clear();
-    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
-    assert_eq!(mirror.parts, Some(three_of_forty()));
-}
-
 fn connecting(
     fake: &Fake,
     failure: IpcError,
@@ -895,28 +846,59 @@ fn connecting(
 }
 
 #[tokio::test(start_paused = true)]
-async fn all_namespaces_say_the_clients_error_while_they_fail_and_settle_once_they_connect() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
+async fn all_namespaces_wait_for_what_does_not_answer_and_never_take_it_for_a_refusal() {
     let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
-    let (hub, down, ..) = connecting(&fake, error.clone());
-    let mut list = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-
-    assert_eq!(
-        list.state(),
-        ViewState::Error {
-            error: error.clone()
+    for (failing, says) in [
+        ("the cluster-wide review", ViewState::Connecting),
+        ("the namespaces", ViewState::Connecting),
+        (
+            "the clients",
+            ViewState::Error {
+                error: error.clone(),
+            },
+        ),
+    ] {
+        let fake = Fake::default();
+        allowed_in_three(&fake);
+        let (hub, down, tries, _clients) = connecting(&fake, error.clone());
+        down.store(failing == "the clients", Ordering::Relaxed);
+        match failing {
+            "the cluster-wide review" => {
+                let unavailable = StatusCode::SERVICE_UNAVAILABLE;
+                fake.state().reviews_fail.insert(None, unavailable);
+            }
+            "the namespaces" => {
+                let namespaces = "/api/v1/namespaces".to_owned();
+                fake.state().no_endpoints.insert(namespaces);
+            }
+            _ => {}
         }
-    );
-    sleep(Duration::from_secs(60)).await;
-    mirror.read(&list);
-    assert_eq!(mirror.status, Some(ViewState::Error { error }));
-    assert_eq!(hub.scopes(), [], "never the cluster's refusal");
+        let tried = || match failing {
+            "the cluster-wide review" => fake.count("selfsubjectaccessreviews"),
+            "the namespaces" => fake.count("/api/v1/namespaces?"),
+            _ => tries.load(Ordering::Relaxed),
+        };
+        let mut list = hub.rows(query(&[])).await.unwrap();
+        let mut mirror = Mirror::default();
+        assert_eq!(list.state(), says, "{failing}");
 
-    down.store(false, Ordering::Relaxed);
-    until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
-    assert_eq!(mirror.parts, Some(three_of_forty()));
+        sleep(Duration::from_secs(60)).await;
+        mirror.read(&list);
+        assert_eq!(mirror.status, Some(says), "{failing}");
+        assert_eq!(
+            hub.scopes(),
+            [],
+            "{failing}: no part, the cluster's included"
+        );
+        assert_eq!(fake.count("/api/v1/pods"), 0, "{failing}");
+        assert!(tried() > 5, "{failing}: it asks again, with the backoff");
+
+        down.store(false, Ordering::Relaxed);
+        fake.state().reviews_fail.clear();
+        fake.state().no_endpoints.clear();
+        until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
+        assert_eq!(mirror.parts, Some(three_of_forty()), "{failing}");
+    }
 }
 
 #[tokio::test(start_paused = true)]
