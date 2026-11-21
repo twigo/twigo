@@ -16,6 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 
+use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::{Pid, Uid, User, setsid};
 use tokio::io::AsyncReadExt;
@@ -219,6 +220,34 @@ async fn resolve_with(
         })
 }
 
+/// The process group `child` leads, as its start in a session of its own made
+/// it; none once it has been reaped.
+pub fn group_of(child: &tokio::process::Child) -> Option<Pid> {
+    child
+        .id()
+        .and_then(|id| i32::try_from(id).ok())
+        .map(Pid::from_raw)
+}
+
+/// Kills the process group `child` led, everything it started with it, and
+/// reaps `child`. A group that has ended already is no failure; any other is
+/// said.
+pub async fn kill_and_reap(
+    child: &mut tokio::process::Child,
+    group: Option<Pid>,
+    command: &(impl std::fmt::Display + Sync),
+) {
+    if let Some(group) = group
+        && let Err(error) = killpg(group, Signal::SIGKILL)
+        && error != Errno::ESRCH
+    {
+        tracing::warn!(%command, %error, "could not stop the process group");
+    }
+    if let Err(error) = child.wait().await {
+        tracing::warn!(%command, %error, "could not reap the process");
+    }
+}
+
 async fn run(
     shell: &Path,
     call: &[&OsStr],
@@ -232,10 +261,7 @@ async fn run(
     };
     let (mut child, mut printed) =
         spawn(shell, call).map_err(|error| failure(Reason::Start(error), b""))?;
-    let group = child
-        .id()
-        .and_then(|id| i32::try_from(id).ok())
-        .map(Pid::from_raw);
+    let group = group_of(&child);
 
     let mut buffer = Vec::new();
     let read = async {
@@ -262,14 +288,7 @@ async fn run(
         Ok(Err(reason)) => reason,
         Err(_) => {
             // The shell and everything its startup files left running.
-            if let Some(group) = group
-                && let Err(error) = killpg(group, Signal::SIGKILL)
-            {
-                tracing::warn!(path = %shell.display(), %error, "could not stop the shell's process group");
-            }
-            if let Err(error) = child.wait().await {
-                tracing::warn!(path = %shell.display(), %error, "could not reap the shell");
-            }
+            kill_and_reap(&mut child, group, &shell.display()).await;
             Reason::Timeout
         }
     };
