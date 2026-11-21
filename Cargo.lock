@@ -6027,6 +6027,7 @@ dependencies = [
  "tracing",
  "twigo-ipc",
  "twigo-kube",
+ "twigo-log",
  "twigo-quantity",
 ]
 
