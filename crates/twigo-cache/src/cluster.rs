@@ -14,6 +14,8 @@ use tokio::time::Instant;
 use twigo_ipc::Access;
 use twigo_kube::client::Clients;
 
+use crate::upstream::Failure;
+
 /// How long RBAC's no holds before it is asked again, so a RoleBinding
 /// granted since counts; a yes holds, as the server still decides.
 pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
@@ -55,20 +57,8 @@ struct Memo {
 /// What a review asks: the namespace, none for every namespace, and the access.
 type Asked = (Option<String>, Access);
 
-/// Why a review has no answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Unanswered {
-    /// The server rejects the credentials, or their plugin fails: asking again
-    /// by itself would run the plugin again.
-    Unauthorized,
-    /// The server refuses the review itself, as it will every time.
-    Refused,
-    /// A 429, a 5xx, a timeout or a connection that broke: it may answer later.
-    Failed,
-}
-
 /// A review under way, whose answer every asker of it takes.
-type Review = Shared<BoxFuture<'static, Result<bool, Unanswered>>>;
+type Review = Shared<BoxFuture<'static, Result<bool, Failure>>>;
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -118,8 +108,8 @@ impl Cluster {
         clients: &Arc<Clients>,
         namespace: Option<&str>,
         access: &Access,
-        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Unanswered>>,
-    ) -> Result<bool, Unanswered> {
+        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Failure>>,
+    ) -> Result<bool, Failure> {
         let asked: Asked = (namespace.map(str::to_owned), access.clone());
         let review = {
             let mut facts = self.facts(clients);

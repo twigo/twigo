@@ -42,7 +42,7 @@ use tokio::time::Instant;
 use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
-use crate::cluster::{Cluster, Resolved, Unanswered};
+use crate::cluster::{Cluster, Resolved};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
@@ -513,9 +513,9 @@ impl Hub {
         match self.review(&query.context, None, access).await {
             Ok(true) => return Ok(Found::Everywhere),
             Ok(false) => {}
-            Err(Unanswered::Refused) => return Ok(Found::refused()),
-            Err(Unanswered::Unauthorized) => return Err(ViewState::Unauthorized),
-            Err(Unanswered::Failed) => return Err(ViewState::Connecting),
+            Err(Failure::Refused(_)) => return Ok(Found::refused()),
+            Err(Failure::Unauthorized) => return Err(ViewState::Unauthorized),
+            Err(_) => return Err(ViewState::Connecting),
         }
         let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
@@ -523,7 +523,7 @@ impl Hub {
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
-        let reviews: Vec<BoxFuture<'static, Result<bool, Unanswered>>> = names
+        let reviews: Vec<BoxFuture<'static, Result<bool, Failure>>> = names
             .iter()
             .map(|name| {
                 let (hub, context, access, name) = (
@@ -538,7 +538,7 @@ impl Hub {
         let mut asked = futures::stream::iter(reviews).buffered(REVIEWS);
         let mut answers: Vec<Option<bool>> = Vec::with_capacity(names.len());
         while let Some(answer) = asked.next().await {
-            if answer == Err(Unanswered::Unauthorized) {
+            if matches!(answer, Err(Failure::Unauthorized)) {
                 return Err(ViewState::Unauthorized);
             }
             answers.push(answer.ok());
@@ -760,7 +760,7 @@ impl Hub {
                 name: None,
                 ..access.clone()
             };
-            if self.review(context, namespace, &whole).await == Ok(true) {
+            if matches!(self.review(context, namespace, &whole).await, Ok(true)) {
                 return Some(true);
             }
         }
@@ -772,7 +772,7 @@ impl Hub {
         context: &str,
         namespace: Option<&str>,
         access: &Access,
-    ) -> Result<bool, Unanswered> {
+    ) -> Result<bool, Failure> {
         // kube-apiserver authorizes a request on a namespace in that
         // namespace (apiserver v0.37.1, `endpoints/request/requestinfo.go`).
         let namespace = match (
@@ -787,8 +787,8 @@ impl Hub {
             (self.inner.connect)(context.to_owned())
                 .await
                 .map_err(|error| match error.kind {
-                    ErrorKind::Unauthorized => Unanswered::Unauthorized,
-                    _ => Unanswered::Failed,
+                    ErrorKind::Unauthorized => Failure::Unauthorized,
+                    _ => Failure::Transient,
                 })?;
         let ask = || {
             let review = SelfSubjectAccessReview {
@@ -812,11 +812,7 @@ impl Hub {
                     .create(&PostParams::default(), &review)
                     .await
                     .map_err(|error| {
-                        match upstream::failure(&error, "create", "selfsubjectaccessreviews") {
-                            Failure::Unauthorized => Unanswered::Unauthorized,
-                            Failure::Refused(_) => Unanswered::Refused,
-                            Failure::Gone | Failure::Transient => Unanswered::Failed,
-                        }
+                        upstream::failure(&error, "create", "selfsubjectaccessreviews")
                     })?;
                 Ok(answer.status.is_some_and(|status| status.allowed))
             }
