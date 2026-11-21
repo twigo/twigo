@@ -109,14 +109,14 @@ test("a list of one row of a kind of two words counts it by the words of its tit
         const found = message as Discovered;
         onMessage(
           command === "resources_watch" && found.state === "ready"
-            ? ({
+            ? {
                 ...found,
                 resources: found.resources.map((resource) =>
                   resource.gvr.resource === "deployments"
                     ? { ...resource, kind: "StatefulSet" }
                     : resource,
                 ),
-              } as typeof message)
+              }
             : message,
         );
       }),
