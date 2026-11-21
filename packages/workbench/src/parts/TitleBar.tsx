@@ -50,7 +50,7 @@ export function TitleBar() {
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
   const name = space?.contexts.join(" + ") ?? "";
-  const scope = space ? scopeWords(spaces.state(space.id).namespaces).all : "";
+  const namespaces = space ? spaces.state(space.id).namespaces : [];
   const width = useWidth(bar);
   const crumbs = useWidth(words);
   const { searchFolded, chipFolded, centred } = titleBarStage(width, {
@@ -78,7 +78,11 @@ export function TitleBar() {
         className={cn(BREADCRUMB, "min-w-0 overflow-hidden")}
       >
         {space && (
-          <Breadcrumb name={name} scope={scope} chipFolded={chipFolded} />
+          <Breadcrumb
+            name={name}
+            namespaces={namespaces}
+            chipFolded={chipFolded}
+          />
         )}
       </div>
       <CommandCenter space={space} folded={searchFolded} />
@@ -91,7 +95,7 @@ export function TitleBar() {
           data-copy="words"
           className={cn(BREADCRUMB, "w-max")}
         >
-          {space && <Breadcrumb name={name} scope={scope} copy />}
+          {space && <Breadcrumb name={name} namespaces={namespaces} copy />}
         </div>
         <div ref={setFind} data-copy="search" className="w-max">
           <div className={SEARCH}>
@@ -105,16 +109,21 @@ export function TitleBar() {
 
 function Breadcrumb({
   name,
-  scope,
+  namespaces,
   chipFolded = false,
   copy = false,
 }: {
   name: string;
-  scope: string;
+  namespaces: readonly string[];
   chipFolded?: boolean;
   copy?: boolean;
 }) {
   const { quickAccess } = useWorkbench();
+  const scope = scopeWords(namespaces);
+  const spoken =
+    scope.more > 0
+      ? `${scope.name} and ${String(scope.more)} more`
+      : scope.name;
   const opening = (prefix: string) =>
     copy
       ? undefined
@@ -124,7 +133,7 @@ function Breadcrumb({
   return (
     <>
       <Crumb
-        label="Switch space"
+        label={`Switch space, ${name}`}
         onClick={opening("ctx ")}
         className="font-medium"
       >
@@ -133,11 +142,17 @@ function Breadcrumb({
       {copy ? <ModeChipCopy /> : <ModeChip folded={chipFolded} />}
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb
-        label="Select namespace"
+        label={`Select namespace, ${spoken}`}
+        tooltip={scope.more > 0 ? `Namespaces: ${scope.all}` : undefined}
         onClick={opening("ns ")}
         className={cn(!copy && "max-w-max flex-1 basis-0")}
       >
-        <CutInTheMiddle text={scope} floor={SCOPE_FLOOR} separator=", " />
+        <CutInTheMiddle text={scope.name} floor={SCOPE_FLOOR} separator="-" />
+        {scope.more > 0 && (
+          <span className="shrink-0 text-label text-support tabular-nums">
+            +{scope.more}
+          </span>
+        )}
       </Crumb>
     </>
   );
@@ -146,11 +161,14 @@ function Breadcrumb({
 /** A crumb with no handler is the hidden copy that measures one. */
 function Crumb({
   label,
+  tooltip,
   onClick,
   className,
   children,
 }: {
   label: string;
+  /** What hover and focus show, where the crumb says less than its names. */
+  tooltip?: string | undefined;
   onClick: (() => void) | undefined;
   className?: string;
   children: ReactNode;
@@ -165,7 +183,8 @@ function Crumb({
       <ChevronDown aria-hidden className="size-3.5 shrink-0 text-support" />
     </>
   );
-  return onClick ? (
+  if (!onClick) return <span className={classes}>{face}</span>;
+  const button = (
     <button
       type="button"
       aria-label={label}
@@ -174,8 +193,14 @@ function Crumb({
     >
       {face}
     </button>
+  );
+  return tooltip === undefined ? (
+    button
   ) : (
-    <span className={classes}>{face}</span>
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent className="wrap-anywhere">{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 

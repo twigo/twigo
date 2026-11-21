@@ -87,18 +87,21 @@ test("the whole title bar drags the window, its controls excepted", async () => 
 
 test("the breadcrumb names the space and its scope and opens their pickers", async () => {
   const { workbench } = await mounted();
-  const space = screen.getByRole("button", { name: "Switch space" });
+  const space = screen.getByRole("button", { name: "Switch space, prod-eu" });
   expect(space.textContent).toBe("prod-eu");
   expect(space.querySelector("[data-color]")).toBeNull();
   expect(
-    screen.getByRole("button", { name: "Select namespace" }).textContent,
+    screen.getByRole("button", { name: "Select namespace, All namespaces" })
+      .textContent,
   ).toBe("All namespaces");
   fireEvent.click(space);
   expect(workbench.quickAccess.session?.value).toBe("ctx ");
   act(() => {
     workbench.quickAccess.hide();
   });
-  fireEvent.click(screen.getByRole("button", { name: "Select namespace" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select namespace, All namespaces" }),
+  );
   expect(workbench.quickAccess.session?.value).toBe("ns ");
 });
 
@@ -111,11 +114,35 @@ test("the breadcrumb follows the space and its namespace scope", async () => {
       namespaces: ["payments"],
     }));
   });
-  const space = screen.getByRole("button", { name: "Switch space" });
+  const space = screen.getByRole("button", { name: "Switch space, staging" });
   expect(space.textContent).toBe("staging");
   expect(
-    screen.getByRole("button", { name: "Select namespace" }).textContent,
+    screen.getByRole("button", { name: "Select namespace, payments" })
+      .textContent,
   ).toBe("payments");
+});
+
+test("several namespaces read as the scope chip does, the first name and how many follow, with every name in the tooltip and a name that says them", async () => {
+  const { workbench, container } = await mounted();
+  act(() => {
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: ["auth", "checkout", "payments"],
+    }));
+  });
+  const scope = screen.getByRole("button", {
+    name: "Select namespace, auth and 2 more",
+  });
+  expect(scope.textContent).toBe("auth+2");
+  const copy = container.querySelector('[data-copy="words"]')?.textContent;
+  expect(copy).toContain("auth+2");
+  expect(copy).not.toContain("checkout");
+  fireEvent.focus(scope);
+  expect(
+    await screen.findAllByText("Namespaces: auth, checkout, payments"),
+  ).not.toHaveLength(0);
+  fireEvent.click(scope);
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
 });
 
 test("the bar is tinted with the active context's colour, an automatic or a chosen one too", async () => {
@@ -420,18 +447,18 @@ async function inLongSpace() {
   return workbench;
 }
 
+const named = (label: string) =>
+  screen.getByRole("button", { name: new RegExp(`^${label}`) });
+
 const parts = (label: string) =>
-  [
-    ...(screen.getByRole("button", { name: label }).firstElementChild
-      ?.children ?? []),
-  ].map((part) => part.textContent);
+  [...(named(label).firstElementChild?.children ?? [])].map(
+    (part) => part.textContent,
+  );
 
 test("a long name is cut in the middle: the first characters and the end stay, 28 in all, and a short one is whole", async () => {
   await inLongSpace();
   const name = "prod-eu + staging + dev + qa + kind-local";
-  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
-    name,
-  );
+  expect(named("Switch space").textContent).toBe(name);
   expect(parts("Switch space")).toEqual([
     "prod-eu + stagin",
     "g + dev + qa ",
@@ -441,39 +468,25 @@ test("a long name is cut in the middle: the first characters and the end stay, 2
 
   await mounted();
   expect(parts("Switch space")).toEqual([]);
-  expect(screen.getByRole("button", { name: "Switch space" }).textContent).toBe(
-    "prod-eu",
-  );
+  expect(named("Switch space").textContent).toBe("prod-eu");
 });
 
-test("the scope is cut in the middle too: its last namespace stays, All namespaces is never cut", async () => {
+test("the first namespace is cut in the middle too, its end staying, and All namespaces is never cut", async () => {
   const { workbench } = await mounted();
   expect(parts("Select namespace")).toEqual([]);
   act(() => {
     workbench.spaces.update("prod-eu", (state) => ({
       ...state,
-      namespaces: ["payments", "checkout", "ledger"],
+      namespaces: ["platform-observability-eu", "search"],
     }));
   });
+  expect(named("Select namespace").textContent).toBe(
+    "platform-observability-eu+1",
+  );
   expect(parts("Select namespace")).toEqual([
-    "payments, ",
-    "checkout, ",
-    "ledger",
-  ]);
-  act(() => {
-    workbench.spaces.update("prod-eu", (state) => ({
-      ...state,
-      namespaces: ["payments", "checkout", "ledger", "platform-observability"],
-    }));
-  });
-  const scope = "payments, checkout, ledger, platform-observability";
-  expect(
-    screen.getByRole("button", { name: "Select namespace" }).textContent,
-  ).toBe(scope);
-  expect(parts("Select namespace")).toEqual([
-    "paym",
-    "ents, checkout, ledger, platform-o",
-    "bservability",
+    "platform-obser",
+    "vability-",
+    "eu",
   ]);
 });
 
@@ -487,6 +500,6 @@ test("with no active space the bar shows the search whole, whatever the last spa
     workbench.spaces.changes.emit();
   });
   measure(1100);
-  expect(screen.queryByRole("button", { name: "Switch space" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Switch space/ })).toBeNull();
   expect(search().textContent).toBe("Search Twigo⌘P");
 });
