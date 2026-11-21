@@ -5,7 +5,8 @@ Decided 2026-11-21.
 ## Decision
 
 - Every crate logs through `tracing`, never `eprintln!`; clippy denies `print_stderr` and `print_stdout` for the workspace.
-  What stays is a tool whose output is its interface, and the copy of Twigo that the login shell runs for `--dump-env`, each with an `#[expect]` that says why.
+  What stays is a tool whose output is its interface, such as the bench tools, the copy of Twigo that the login shell runs for `--dump-env`, and the line for a kubeconfig file the catalog skipped until it reports that in the window (`TODO.md`), each with an `#[expect]` that says why.
+  The log's own failures also go to stderr, since they have no log to go to: they write with `writeln!` and ignore its result, because `eprintln!` panics when stderr is a broken pipe, and a panic inside the panic hook aborts the process.
 - The target is the module path, so `TWIGO_LOG=warn,twigo=info,twigo_kube::credentials=debug` adds the debug lines of one module to the default.
 - Identifying values travel as fields named `context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`, `path` and `url`.
   The message is words.
