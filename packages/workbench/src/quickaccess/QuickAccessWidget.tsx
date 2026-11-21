@@ -177,12 +177,8 @@ function Open({ session }: { session: Session }) {
     ordered.map((item, index) => [item, `${ids}-${String(index)}`]),
   );
   const found = ordered.findIndex((item) => item.id === cursor.id);
-  const at =
-    found >= 0
-      ? found
-      : many && (resolved?.filter.trim() ?? "") === ""
-        ? -1
-        : 0;
+  const unfiltered = (resolved?.filter.trim() ?? "") === "";
+  const at = found >= 0 ? found : many && unfiltered ? -1 : 0;
   const active = ordered[at];
   const on = (item: QuickPickItem) =>
     item.checked === undefined
@@ -246,9 +242,10 @@ function Open({ session }: { session: Session }) {
   // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
   const written = provider?.live === true && checks.touched;
   // Nothing left to take: no row under the cursor and no tick made, or the ticks written already.
+  // The rows of a filter typed may put one under the cursor once they load, those of an empty filter never do.
   const closes =
     many &&
-    !loading &&
+    (!loading || unfiltered) &&
     !action &&
     !ticking &&
     (active === undefined || written);

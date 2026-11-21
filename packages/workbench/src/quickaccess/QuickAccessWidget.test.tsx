@@ -488,7 +488,7 @@ test("the footer says what Enter does to the row under the cursor: only this one
   expect(hint("Only this")).toBe(false);
 });
 
-test("the footer says Select, not Close, while the rows of a value typed come", async () => {
+test("the footer says Close while the rows of the opening come, and Select, not Close, while those of a value typed do", async () => {
   const workbench = await testWorkbench();
   const { items, answer } = slow();
   workbench.quickAccess.register(ticking(undefined, { items }).registered);
@@ -496,7 +496,7 @@ test("the footer says Select, not Close, while the rows of a value typed come", 
   act(() => {
     workbench.quickAccess.show("!");
   });
-  expect(hint("Close")).toBe(false);
+  expect(hint("Close")).toBe(true);
   await answer("", NAMESPACES);
   expect(hint("Close")).toBe(true);
 
