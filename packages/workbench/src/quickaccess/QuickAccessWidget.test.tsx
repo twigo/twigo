@@ -365,7 +365,8 @@ function ticking(
   const acceptChecked = vi.fn();
   return {
     ...provider("!", items, {
-      acceptLabel: "Only this",
+      acceptLabel: "Select",
+      acceptAloneLabel: "Only this",
       checkedWords: (count) => `${String(count)} namespaces`,
       acceptChecked,
       ...extra,
@@ -388,13 +389,32 @@ test("rows with a box open ticked as they say, with no row under the cursor, so 
   expect(selected()).toBeUndefined();
   expect(footer()).toContain("Space");
   expect(hint("Add or remove")).toBe(true);
-  expect(hint("Only this")).toBe(true);
 
   press("Enter");
   await act(() => Promise.resolve());
   expect(workbench.quickAccess.session).toBeUndefined();
   expect(accept).not.toHaveBeenCalled();
   expect(acceptChecked).not.toHaveBeenCalled();
+});
+
+test("the footer says what Enter does to the row under the cursor: only this one for a row with a box before the first tick, then the ticked set", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  expect(hint("Select")).toBe(true);
+  expect(hint("Only this")).toBe(false);
+
+  press("ArrowDown");
+  expect(hint("Select")).toBe(true);
+  expect(hint("Only this")).toBe(false);
+
+  press("ArrowDown");
+  expect(hint("Only this")).toBe(true);
+  expect(hint("Select")).toBe(false);
+
+  space();
+  expect(hint("Apply · 0 namespaces")).toBe(true);
+  expect(hint("Only this")).toBe(false);
 });
 
 test("the input is a combobox on the list and names the row under the cursor, and none where no row is", async () => {

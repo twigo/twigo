@@ -1196,6 +1196,7 @@ Extensions add commands, not prefixes.
 - **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) with `aria-checked`, a row without one is an action, the list says `aria-multiselectable`, and a polite status says how many are ticked.
   No row is under the cursor at the opening, until the person moves or types, so Enter at once closes with nothing changed.
   Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
+  Before the first tick the footer says `Only this` on a row with a box, and the provider's own verb (`Select`) on an action row or where no row is under the cursor.
   The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
 - **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the namespace index lists them, the order fixed for the opening, so a tick moves no row.
   Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.

@@ -72,6 +72,11 @@ export interface QuickAccessProvider {
   readonly hint?: string;
   /** What Enter does to a row, in the footer: `Open` unless it says. */
   readonly acceptLabel?: string;
+  /**
+   * With `acceptChecked`: what Enter does to a row with a box before the first
+   * tick, which it takes alone, in the footer: `acceptLabel` unless it says.
+   */
+  readonly acceptAloneLabel?: string;
   /** Whether ⌘↵ opens a row to the side; `accept` then gets `side`. */
   readonly toSide?: boolean;
   /**

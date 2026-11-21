@@ -238,6 +238,8 @@ function Open({ session }: { session: Session }) {
 
   const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
 
+  const alone = many && !ticking && active?.checked !== undefined;
+
   const applyChecked = () => {
     quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
       workbench.report(error);
@@ -380,7 +382,9 @@ function Open({ session }: { session: Session }) {
               ? "Select"
               : many && ticking
                 ? `Apply · ${words(count)}`
-                : provider?.acceptLabel)
+                : alone
+                  ? (provider.acceptAloneLabel ?? provider.acceptLabel)
+                  : provider?.acceptLabel)
           }
         />
       </QuickInput>

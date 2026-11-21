@@ -265,7 +265,8 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
     prefix: "ns ",
     placeholder: "Scope the space to namespaces",
     help: "Set the namespace scope",
-    acceptLabel: "Only this",
+    acceptLabel: "Select",
+    acceptAloneLabel: "Only this",
     checkedWords: namespaceCount,
     // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
     checklist: variant("pick") === "checklist",
