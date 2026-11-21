@@ -38,11 +38,13 @@ impl Listeners {
         let queue = DispatchQueue::new("io.twigo.netmon", None);
         let power = Power::start(events.clone(), &queue);
         if power.is_none() {
-            eprintln!("IORegisterForSystemPower failed, so a wake from sleep goes unseen");
+            tracing::warn!("IORegisterForSystemPower failed, so a wake from sleep goes unseen");
         }
         let network = Network::start(events, &queue);
         if network.is_none() {
-            eprintln!("the dynamic store refused its notifications, so network changes go unseen");
+            tracing::warn!(
+                "the dynamic store refused its notifications, so network changes go unseen"
+            );
         }
         Self {
             power,

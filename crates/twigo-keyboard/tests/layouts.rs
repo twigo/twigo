@@ -2,6 +2,10 @@
 //! layouts, Linux compiles them from XKB names. Windows can read a layout
 //! only once it is loaded into the session, so it has no cases. Without the
 //! test harness, since TIS must run on the main thread.
+#![expect(
+    clippy::print_stdout,
+    reason = "a test without the harness reports on its own streams"
+)]
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use twigo_keyboard::KeyboardLayout;

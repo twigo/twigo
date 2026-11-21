@@ -123,7 +123,7 @@ fn touches(result: &DebounceEventResult, name: &OsString) -> bool {
             }),
         Err(errors) => {
             for error in errors {
-                eprintln!("the watch of a terminal's kubeconfig failed: {error}");
+                tracing::warn!(%error, "the watch of a terminal's kubeconfig failed");
             }
             true
         }

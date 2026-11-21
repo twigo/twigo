@@ -195,10 +195,15 @@ impl Connections {
     /// Retires the connections of every context, as on wake from sleep, and
     /// tells their sessions that the network changed.
     pub fn wake(&self) {
-        for (name, clients) in self.built() {
+        let built = self.built();
+        for (name, clients) in &built {
             clients.connections().wake();
-            eprintln!("woke from sleep: retired the connections of {name}");
+            tracing::debug!(context = %name, "retired the connections after a wake from sleep");
         }
+        tracing::info!(
+            contexts = built.len(),
+            "woke from sleep, so the connections were retired"
+        );
     }
 
     /// Retires the connections of each context whose route moved, as after
@@ -206,7 +211,7 @@ impl Connections {
     pub fn retire_moved(&self) {
         for (name, clients) in self.built() {
             if clients.connections().retire_moved() {
-                eprintln!("the route to {name} moved: retired its connections");
+                tracing::info!(context = %name, "the route moved, so the connections were retired");
             }
         }
     }

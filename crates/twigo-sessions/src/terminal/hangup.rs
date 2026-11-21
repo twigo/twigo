@@ -134,6 +134,8 @@ fn runs_in(group: Pid, shell: Pid) -> bool {
 fn send(group: Pid, signal: Signal) {
     match killpg(group, signal) {
         Ok(()) | Err(Errno::ESRCH) => {}
-        Err(error) => eprintln!("could not send {signal} to the process group {group}: {error}"),
+        Err(error) => {
+            tracing::warn!(%signal, group = group.as_raw(), %error, "could not send a signal to the process group");
+        }
     }
 }

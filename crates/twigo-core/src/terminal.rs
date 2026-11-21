@@ -319,7 +319,7 @@ impl Core {
         let text = match std::fs::read_to_string(file) {
             Ok(text) => text,
             Err(error) => {
-                eprintln!("could not read {}: {error}", file.display());
+                tracing::error!(path = %file.display(), %error, "could not read the terminal's kubeconfig");
                 return None;
             }
         };
@@ -341,10 +341,7 @@ impl Core {
         match watcher::watch(offers, Arc::clone(&source), written, proxied) {
             Ok(watcher) => Some((watcher, source)),
             Err(error) => {
-                eprintln!(
-                    "could not watch {}, so what tools write there is not offered: {error}",
-                    file.display()
-                );
+                tracing::warn!(path = %file.display(), %error, "could not watch the terminal's kubeconfig, so what tools write there is not offered");
                 None
             }
         }

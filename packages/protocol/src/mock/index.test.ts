@@ -1372,6 +1372,21 @@ test("a request for an idle plugin's credential starts its run, and only sign-in
   ).rejects.toThrow("only sign-in links");
 });
 
+test("the webview's errors reach the console, which stands for the diagnostics log", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const backend = createMockBackend();
+  const logged = backend.invoke("diagnostics_log", {
+    level: "warn",
+    message: "a part crashed",
+    stack: null,
+    source: "react-caught",
+  });
+  await vi.advanceTimersByTimeAsync(50);
+  await logged;
+  expect(warn).toHaveBeenCalledWith("[react-caught] a part crashed", "");
+  warn.mockRestore();
+});
+
 test("a request runs a failed unattended plugin again, as Rust holds only a sign-in's failure", async () => {
   vi.useRealTimers();
   const backend = createMockBackend("pluginFailed");

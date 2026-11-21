@@ -6,6 +6,7 @@
 //! list answers then. It scales metrics-server back.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run -p twigo-cache --example record_metrics
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::path::Path;
 use std::time::Duration;

@@ -6,14 +6,14 @@ use ts_rs::TS;
 
 use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
-    Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget,
-    GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
-    LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
-    PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
-    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
-    TerminalSession,
+    ApprovalEvent, ClusterVersion, Context, ContextAuth, DiagnosticsEntry, Discovered,
+    DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
+    ForwardStarted, ForwardTarget, GetValues, KeyboardLayout, KubeconfigOffer,
+    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs,
+    OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery,
+    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
+    ShellContainers, ShellEnvironment, ShellInput, ShellMessage, ShellPod, ShellResize, Space,
+    StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 
 pub trait Command {
@@ -465,6 +465,38 @@ pub struct UrlOpen;
 impl Command for UrlOpen {
     const NAME: &'static str = "url_open";
     type Request = String;
+    type Response = ();
+    type Message = ();
+}
+
+/// Writes an error the webview caught, or did not, to the diagnostics log
+/// with the window's label; the webview waits for no answer.
+pub struct DiagnosticsLog;
+
+impl Command for DiagnosticsLog {
+    const NAME: &'static str = "diagnostics_log";
+    type Request = DiagnosticsEntry;
+    type Response = ();
+    type Message = ();
+}
+
+/// Shows the current diagnostics log file in the system's file manager.
+pub struct LogReveal;
+
+impl Command for LogReveal {
+    const NAME: &'static str = "log_reveal";
+    type Request = ();
+    type Response = ();
+    type Message = ();
+}
+
+/// Sets how much Twigo's own crates write to the diagnostics log until Twigo
+/// quits, and logs the change.
+pub struct LogLevelSet;
+
+impl Command for LogLevelSet {
+    const NAME: &'static str = "log_level_set";
+    type Request = SetLogLevel;
     type Response = ();
     type Message = ();
 }

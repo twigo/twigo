@@ -30,7 +30,14 @@ pub struct Contexts {
 /// The contexts as the sources list them, ordered.
 fn sorted(catalog: kubeconfig::Catalog) -> Vec<kubeconfig::Context> {
     for failure in &catalog.failures {
-        eprintln!("skipped {}: {}", failure.file.display(), failure.message);
+        // @todo: log a failed file by its path and location, and show it in the window, once the catalog carries its failures to the UI (TODO.md)
+        #[expect(
+            clippy::print_stderr,
+            reason = "the message quotes the lines around the fault, which a log must not hold"
+        )]
+        {
+            eprintln!("skipped {}: {}", failure.file.display(), failure.message);
+        }
     }
     let mut contexts = catalog.contexts;
     contexts.sort_by(|a, b| by_order(a.order, b.order).then_with(|| a.name.cmp(&b.name)));
@@ -214,9 +221,7 @@ impl Catalog {
         match Watch::start(sources.clone(), publish.clone(), wrote) {
             Ok(watch) => *followed = Some(watch),
             Err(error) => {
-                eprintln!(
-                    "could not watch the kubeconfig files, so their changes go unseen: {error}"
-                );
+                tracing::warn!(%error, "could not watch the kubeconfig files, so their changes go unseen");
                 publish(sources.load());
             }
         }

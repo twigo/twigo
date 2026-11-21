@@ -2,6 +2,7 @@
 //! discovery, as `resources_watch` answers them.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run -p twigo-kube --example record_discovery
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::path::Path;
 

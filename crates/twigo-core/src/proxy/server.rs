@@ -13,6 +13,7 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+use twigo_log::Repeats;
 
 use super::handle::handle;
 use super::tls::Tls;
@@ -53,11 +54,22 @@ async fn accept(listener: TcpListener, tls: TlsAcceptor, address: SocketAddr, co
         .timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT)
         .max_header_size(MAX_HEADER_SIZE);
+    let mut failures = Repeats::default();
     loop {
         let stream = match listener.accept().await {
-            Ok((stream, _)) => stream,
+            Ok((stream, _)) => {
+                if let Some(count) = failures.ended() {
+                    tracing::warn!(
+                        count,
+                        "the policy proxy accepts connections again, after more failures"
+                    );
+                }
+                stream
+            }
             Err(error) => {
-                eprintln!("the policy proxy could not accept a connection: {error}");
+                if failures.failed() {
+                    tracing::warn!(%error, "the policy proxy could not accept a connection");
+                }
                 tokio::time::sleep(ACCEPT_PAUSE).await;
                 continue;
             }

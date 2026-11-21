@@ -13,6 +13,9 @@ publish.workspace = true
 # their own.
 test-util = []
 
+[lints]
+workspace = true
+
 [dependencies]
 atomic-write-file.workspace = true
 base64.workspace = true
@@ -40,11 +43,13 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
 twigo-cache.workspace = true
 twigo-describe.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-log.workspace = true
 twigo-netmon.workspace = true
 twigo-policy.workspace = true
 twigo-quantity.workspace = true

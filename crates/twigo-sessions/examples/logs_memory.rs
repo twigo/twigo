@@ -4,6 +4,7 @@
 //! `pad` lengthens each line, so the bound of their bytes holds them.
 //!
 //! cargo run --release -p twigo-sessions --example logs_memory [pad]
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::sync::Arc;
 

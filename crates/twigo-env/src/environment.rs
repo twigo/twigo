@@ -41,7 +41,7 @@ impl Environment {
         let status = match resolve(&self.shell).await {
             Ok(env) => Status::Resolved(Arc::new(env)),
             Err(failure) => {
-                eprintln!("the login shell's environment is unknown: {failure}");
+                tracing::warn!(%failure, "the login shell's environment is unknown");
                 Status::Failed {
                     env: Arc::new(ShellEnv::from_process()),
                     failure: Arc::new(failure),

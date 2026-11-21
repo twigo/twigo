@@ -88,7 +88,7 @@ impl Lock {
 impl Drop for Lock {
     fn drop(&mut self) {
         if let Err(error) = fs::remove_file(&self.0) {
-            eprintln!("could not remove {}: {error}", self.0.display());
+            tracing::warn!(path = %self.0.display(), %error, "could not remove the lock file");
         }
     }
 }
