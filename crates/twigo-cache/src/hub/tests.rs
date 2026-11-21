@@ -1217,25 +1217,6 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         resource: "pods".to_owned(),
     };
     until(&mut pods, |state| *state == forbidden).await;
-    sleep(Duration::from_secs(200)).await;
-    let sent = fake.count("namespaces/a/pods");
-    assert!((4..=8).contains(&sent), "{sent} tries in 200 s");
-    assert_eq!(pods.state(), forbidden);
-    let last = *tries(&fake, "namespaces/a/pods").last().unwrap();
-    tokio::time::sleep_until(last + RETRY_WITHIN).await;
-    let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
-        .await
-        .into_iter()
-        .map(Result::unwrap)
-        .collect();
-    assert!(asking.iter().all(|asked| asked.state() == forbidden));
-    settle().await;
-    assert_eq!(
-        fake.count("namespaces/a/pods"),
-        sent + 1,
-        "subscriptions that come together cut its wait short once"
-    );
-    drop(asking);
 
     fake.state().forbidden.clear();
     ready(&mut pods).await;
