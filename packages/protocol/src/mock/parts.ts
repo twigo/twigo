@@ -19,16 +19,6 @@ const BOUND: Readonly<Record<string, readonly string[]>> = {
   rbacTypedNamespaces: ["default", "payments"],
 };
 
-/**
- * The namespaces that "All namespaces" resolves to for a person who may list
- * the namespaces and not the resource cluster-wide, as the hub resolves it
- * (ARCHITECTURE 3.2); none for a person who may do neither, whose "All
- * namespaces" the cluster refuses.
- */
-function resolvedFor(scenario: string): readonly string[] | undefined {
-  return scenario === "rbacNamespaces" ? BOUND[scenario] : undefined;
-}
-
 /** What a scenario makes of one part, whatever the list's own state is; none leaves the part to it. */
 export type Pin = (
   part: Part,
@@ -101,9 +91,11 @@ export class MockParts {
   ) {
     this.#pin = pinOf(scenario, query.gvr.resource);
     const names = [...new Set(query.namespaces)].sort();
+    // Only a person who may list the namespaces has "All namespaces" resolved
+    // to those they may read; for the other the cluster refuses it.
     const resolved =
-      query.namespaced && names.length === 0
-        ? resolvedFor(scenario)
+      query.namespaced && names.length === 0 && scenario === "rbacNamespaces"
+        ? BOUND[scenario]
         : undefined;
     this.#resolved = resolved;
     this.#gvr = JSON.stringify(query.gvr);
