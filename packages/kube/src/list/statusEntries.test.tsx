@@ -238,7 +238,7 @@ test.each([
     of22(part("team-b", FORBIDDEN)),
     "Forbidden · 1 of 22 namespaces",
     "error",
-    "May not watch pods in team-b",
+    "team-b: You may not watch pods.",
   ],
   [
     "a part in error",
@@ -347,7 +347,7 @@ test("several kinds of trouble: the worst leads and the tooltip lists the rest, 
     text: "Forbidden · 2 of 22 namespaces",
     tone: "error",
     tooltip: [
-      "May not watch pods in team-b, team-d",
+      "team-b, team-d: You may not watch pods.",
       "team-x: no rows yet",
       "team-c: no updates, reconnecting",
     ].join("\n"),
@@ -380,7 +380,7 @@ test("a list that has the rows of one namespace says the others are refused, in 
   await act(() => vi.advanceTimersByTimeAsync(1500));
   const forbidden = entry("Forbidden · 2 of 3 namespaces");
   expect(forbidden?.getAttribute("title")).toBe(
-    "May not watch pods in auth, payments\nKubernetes v1.33.4",
+    "auth, payments: You may not watch pods.\nKubernetes v1.33.4",
   );
   expect(screen.queryByText("Access denied")).toBeNull();
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
@@ -400,7 +400,7 @@ test("a list in which every namespace is refused is replaced by the denial", asy
   expect(screen.getByText("Access denied")).toBeTruthy();
   expect(
     entry("Forbidden · 2 of 2 namespaces")?.getAttribute("title"),
-  ).toContain("May not watch pods in auth, payments");
+  ).toContain("auth, payments: You may not watch pods.");
 });
 
 test("a list whose last namespaces wait for a stream shows the rows it has and says so", async () => {

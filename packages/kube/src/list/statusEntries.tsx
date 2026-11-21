@@ -1,6 +1,7 @@
 import {
   leastReady,
   readiness,
+  refusal,
   SHOWS_ROWS,
   type Parts,
   type PartState,
@@ -112,11 +113,9 @@ function describe({ state, shown, parts }: Kind): string {
   const where = namesOf(parts, state.state === "syncing");
   switch (state.state) {
     case "forbidden":
-      return `May not ${state.verb} ${state.resource} in ${where}`;
     case "unauthorized":
-      return `${where}: the cluster rejected the credentials`;
     case "error":
-      return `${where}: ${state.error.message}`;
+      return `${where}: ${refusal(state).message}`;
     case "queued":
       return `${where}: ${shown ? "rows as last listed" : "no rows yet"}`;
     case "connecting":

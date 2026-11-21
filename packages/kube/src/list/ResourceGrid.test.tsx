@@ -207,9 +207,7 @@ test("a list of all namespaces that is refused says so and offers to choose name
   });
   await settle(30);
   expect(
-    screen.getByText(
-      "These credentials may not list pods in every namespace at once.",
-    ),
+    screen.getByText("You may not list pods in every namespace at once."),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Choose namespaces" }));
@@ -220,9 +218,7 @@ test("a list of all namespaces that is refused says so and offers to choose name
     workbench.editors.open("k8s-list://prod-eu/v1/pods?ns=auth");
   });
   await settle(30);
-  expect(
-    screen.getByText("These credentials may not watch pods."),
-  ).toBeTruthy();
+  expect(screen.getByText("You may not watch pods.")).toBeTruthy();
   expect(
     screen.queryByRole("button", { name: "Choose namespaces" }),
   ).toBeNull();
@@ -232,9 +228,7 @@ test("a list of all namespaces that is refused says so and offers to choose name
     workbench.editors.open("k8s-list://prod-eu/v1/nodes");
   });
   await settle(30);
-  expect(
-    screen.getByText("These credentials may not watch nodes."),
-  ).toBeTruthy();
+  expect(screen.getByText("You may not watch nodes.")).toBeTruthy();
 });
 
 test.each([
