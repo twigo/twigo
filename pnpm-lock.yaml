@@ -291,17 +291,17 @@ importers:
         specifier: workspace:*
         version: link:../workbench
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.333
-        version: 0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)
+        specifier: 0.12.0-beta.334
+        version: 0.12.0-beta.334(@xterm/xterm@6.1.0-beta.338)
       '@xterm/addon-unicode11':
-        specifier: 0.10.0-beta.331
-        version: 0.10.0-beta.331(@xterm/xterm@6.1.0-beta.337)
+        specifier: 0.10.0-beta.332
+        version: 0.10.0-beta.332(@xterm/xterm@6.1.0-beta.338)
       '@xterm/addon-webgl':
-        specifier: 0.20.0-beta.330
-        version: 0.20.0-beta.330(@xterm/xterm@6.1.0-beta.337)
+        specifier: 0.20.0-beta.331
+        version: 0.20.0-beta.331(@xterm/xterm@6.1.0-beta.338)
       '@xterm/xterm':
-        specifier: 6.1.0-beta.337
-        version: 6.1.0-beta.337
+        specifier: 6.1.0-beta.338
+        version: 6.1.0-beta.338
       lucide-react:
         specifier: ^1.75.0
         version: 1.75.0(@types/react@19.3.0)(react@19.3.1)
@@ -2177,23 +2177,23 @@ packages:
   '@vscode/l10n@0.0.18':
     resolution: {integrity: sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ==}
 
-  '@xterm/addon-fit@0.12.0-beta.333':
-    resolution: {integrity: sha512-klXLc84a/fU3ct9SViM0V9FP1BcrWukm3UsGtppVbi3nuXNid/Oe7ThzHdDjrqKuxISl0ENQ2pkIha6CAnU9kw==}
+  '@xterm/addon-fit@0.12.0-beta.334':
+    resolution: {integrity: sha512-fIFQHJ15PER9KhAG24IhA5vF4ysHEKrJgImt/ZqRcahvNUGF1T3WnpJ6bLvlvnsft7bVT0ofBWySx6nxFNAXkA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.337
+      '@xterm/xterm': ^6.1.0-beta.338
 
-  '@xterm/addon-unicode11@0.10.0-beta.331':
-    resolution: {integrity: sha512-GW2EOP+4+ZXQS/KfTgriP2QxDOSMe9ffnEkq7tgIwAfiTUcE3X/oxn6wBNdyxuM/5mLyK7wzi1O8ycV83yAYPw==}
+  '@xterm/addon-unicode11@0.10.0-beta.332':
+    resolution: {integrity: sha512-74+j6gsPld1czK1Zl8+z9LBLsZUZFcgHXP4VSwd+DAPZYTLQcDFV+DbY854enx/9uKNyxuYwR0ec86XFej6iEA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.337
+      '@xterm/xterm': ^6.1.0-beta.338
 
-  '@xterm/addon-webgl@0.20.0-beta.330':
-    resolution: {integrity: sha512-gcxemutOlpGCEnxZckSwR8oZ/twZXrcQw6N3aRcDVrPguIMr9YvrzegfllCo4WxRnOc4gWkHhjD1toX3emug3A==}
+  '@xterm/addon-webgl@0.20.0-beta.331':
+    resolution: {integrity: sha512-gAcYQI1zgO62vAZmeAho1C3D+rqoFslS60eGr5lfxah+POEQCzIjEV97wrDwzY1m+VReKawMiYkZ8Nhawbzkfw==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.337
+      '@xterm/xterm': ^6.1.0-beta.338
 
-  '@xterm/xterm@6.1.0-beta.337':
-    resolution: {integrity: sha512-zstczNBAT/FaaWzCCoLx3DavRcAW0ndK7g/Y0893nPvZwWmjMU8WeuqJYqMRVommGwv1KRoxdlOOt0KukxHadA==}
+  '@xterm/xterm@6.1.0-beta.338':
+    resolution: {integrity: sha512-VBygvapFKV5gsqvVFsk6gYpArn4AXnUtZvt3tfN2LXI284i0mivC6Kus84GMJo0GJPLRFziWcSPVz95nViPuWw==}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -5231,19 +5231,19 @@ snapshots:
 
   '@vscode/l10n@0.0.18': {}
 
-  '@xterm/addon-fit@0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)':
+  '@xterm/addon-fit@0.12.0-beta.334(@xterm/xterm@6.1.0-beta.338)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.337
+      '@xterm/xterm': 6.1.0-beta.338
 
-  '@xterm/addon-unicode11@0.10.0-beta.331(@xterm/xterm@6.1.0-beta.337)':
+  '@xterm/addon-unicode11@0.10.0-beta.332(@xterm/xterm@6.1.0-beta.338)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.337
+      '@xterm/xterm': 6.1.0-beta.338
 
-  '@xterm/addon-webgl@0.20.0-beta.330(@xterm/xterm@6.1.0-beta.337)':
+  '@xterm/addon-webgl@0.20.0-beta.331(@xterm/xterm@6.1.0-beta.338)':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.337
+      '@xterm/xterm': 6.1.0-beta.338
 
-  '@xterm/xterm@6.1.0-beta.337': {}
+  '@xterm/xterm@6.1.0-beta.338': {}
 
   acorn-jsx@5.3.2(acorn@8.19.0):
     dependencies:
