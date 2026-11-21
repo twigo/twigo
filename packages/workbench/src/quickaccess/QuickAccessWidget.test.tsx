@@ -812,7 +812,10 @@ test("a row with no box is taken alone whatever is ticked", async () => {
   press("ArrowDown");
   press("ArrowDown");
   space();
+  expect(hint("Apply · 0 namespaces")).toBe(true);
   press("ArrowUp");
+  expect(hint("Select")).toBe(true);
+  expect(hint("Apply")).toBe(false);
   press("Enter");
   await act(() => Promise.resolve());
   expect(accept).toHaveBeenCalledWith(

@@ -392,7 +392,7 @@ function Open({ session }: { session: Session }) {
               ? "Select"
               : closes
                 ? "Close"
-                : many && ticking
+                : many && ticking && !action
                   ? `Apply · ${words(count)}`
                   : alone
                     ? (provider.acceptAloneLabel ?? provider.acceptLabel)
