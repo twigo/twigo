@@ -28,8 +28,8 @@ use tokio::task::JoinHandle;
 use twigo_core::Core;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    BusyWhy, ErrorKind, Forward, ForwardId, ForwardStarted, ForwardState, ForwardTarget, Gvr, Mode,
-    ResumeForward, StartForward,
+    BusyWhy, ErrorCode, ErrorKind, Forward, ForwardId, ForwardStarted, ForwardState, ForwardTarget,
+    Gvr, Mode, ResumeForward, StartForward,
 };
 use twigo_kube::client::{Actor, ProxyEnv};
 
@@ -793,7 +793,7 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     let ForwardState::Failed { error } = forward(&second, started.id).state else {
         unreachable!("waited for");
     };
-    assert_eq!(error.message, "Pod solo is gone");
+    assert_eq!(error.code, ErrorCode::TargetGone);
     let mut left = Vec::new();
     tokio::time::timeout(WAIT, client.read_to_end(&mut left))
         .await

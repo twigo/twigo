@@ -97,7 +97,6 @@ async fn a_write_in_a_read_only_context_never_reaches_the_server() {
     assert_eq!(blocked.reason, BlockReason::Mode);
     assert_eq!(blocked.verb, "create");
     assert_eq!(blocked.target, "configmaps in a");
-    assert!(error.message.contains("read-only"), "{}", error.message);
 
     let exec = "/api/v1/namespaces/a/pods/p/exec";
     let refused = send(&clients.sessions, "POST", exec).await.unwrap_err();

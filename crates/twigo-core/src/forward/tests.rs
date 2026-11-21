@@ -1506,10 +1506,7 @@ async fn a_forward_whose_port_another_forward_of_twigo_holds_says_so() {
     let ForwardState::Failed { error } = failed else {
         unreachable!("waited for");
     };
-    assert_eq!(
-        error.message,
-        format!("port {local} is held by another forward of Twigo, to Pod api")
-    );
+    assert_eq!(error.code, ErrorCode::ForwardPortInUse);
 }
 
 #[test]
@@ -2474,7 +2471,7 @@ async fn after_the_shutdown_no_command_saves_binds_or_starts() {
     drop(claim);
     let quitting = |answer: Result<ForwardStarted, IpcError>| {
         let error = answer.unwrap_err();
-        assert_eq!(error.message, "Twigo is quitting");
+        assert_eq!(error.code, ErrorCode::AppQuitting);
     };
     quitting(racing.await.unwrap());
     let asked = api.requests.load(Ordering::SeqCst);
@@ -2638,7 +2635,8 @@ async fn a_start_whose_read_outlasts_the_shutdown_binds_nothing() {
     api.release.notify_one();
     let refused = starting.await.unwrap().unwrap_err();
     assert_eq!(
-        refused.message, "Twigo is quitting",
+        refused.code,
+        ErrorCode::AppQuitting,
         "not a busy port and a free one found by binding"
     );
     assert!(listed(&core).is_empty());

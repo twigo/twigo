@@ -894,7 +894,7 @@ async fn a_person_s_start_fails_at_once_and_the_forward_closes_what_it_accepts()
         unreachable!("waited for");
     };
     assert_eq!(error.kind, ErrorKind::Unavailable);
-    assert_eq!(error.message, "the upgrade to web-1 was refused with 500");
+    assert_eq!(error.code, ErrorCode::ServerUnavailable);
     let mut left = Vec::new();
     within("its connection closes", first.read_to_end(&mut left))
         .await
