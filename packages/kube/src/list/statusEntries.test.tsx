@@ -100,6 +100,37 @@ test("a list of one row counts it by the resource's singular", async () => {
   expect(screen.queryByText("1 deployments")).toBeNull();
 });
 
+test("a list of one row whose version discovery serves another counts it by the singular of the version served", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, (message) => {
+        const found = message as Discovered;
+        onMessage(
+          command === "resources_watch" && found.state === "ready"
+            ? {
+                ...found,
+                resources: found.resources.map((resource) =>
+                  resource.gvr.resource === "deployments"
+                    ? {
+                        ...resource,
+                        gvr: { ...resource.gvr, version: "v1beta1" },
+                      }
+                    : resource,
+                ),
+              }
+            : message,
+        );
+      }),
+  };
+  await openList(
+    backend,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 deployment")).toBeTruthy();
+});
+
 test("a list of one row of a kind of two words counts it by the words of its title", async () => {
   const mock = createMockBackend("ready");
   const backend: Backend = {

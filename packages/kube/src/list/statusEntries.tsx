@@ -8,7 +8,7 @@ import {
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
-import { sameGvr, useClusterVersion, type Discovery } from "../discovery";
+import { servedAs, useClusterVersion, type Discovery } from "../discovery";
 import {
   byHealth,
   HEALTH,
@@ -262,7 +262,7 @@ export function listEntries({
     const found = discovery.last(input.space);
     const kind =
       found?.state === "ready"
-        ? found.value.find((resource) => sameGvr(resource.gvr, input.gvr))?.kind
+        ? servedAs(found.value, input.gvr)?.kind
         : undefined;
     const rows =
       list.total === 1 && kind !== undefined
