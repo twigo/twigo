@@ -12,37 +12,25 @@
 //! each credential plugin a person trusted, and each command of a person's
 //! that the policy refused before anything was sent.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::Path;
 
 use jiff::Timestamp;
 use serde::Serialize;
 use twigo_ipc::{BlockReason, Blocked, ContextAccess, Friction, Mode, ModeSource, RequestClass};
+use twigo_log::{Limits, Rotating};
 
 use crate::{Actor, Attributes, Change, Refused};
 
-/// The size past which the log moves aside.
-const LIMIT: u64 = 8 << 20;
-/// How many logs that moved aside stay.
-const KEPT: usize = 5;
+/// The size past which the log moves aside, and how many logs that moved
+/// aside stay.
+const LIMITS: Limits = Limits {
+    size: 8 << 20,
+    kept: 5,
+};
 
 /// Where entries go; nowhere for the tools and tests that own their clusters.
 pub struct Audit {
-    log: Option<Mutex<Log>>,
-}
-
-struct Log {
-    path: PathBuf,
-    file: File,
-    /// Whether `file` is the one at `path`: not once a rotation moved it
-    /// and no new one could be opened there.
-    in_place: bool,
-    /// What it holds, as far as this process knows.
-    size: u64,
-    limit: u64,
-    kept: usize,
+    log: Option<Rotating>,
 }
 
 /// One line of the log, which [`Audit::record`] stamps with its time.
@@ -195,30 +183,13 @@ struct Line<'a> {
 
 impl Audit {
     /// The log at `path`, appended to, its directory made if the app's first
-    /// run has not made it yet. A file that cannot be opened logs to stderr
-    /// once and keeps nothing: the log records, it guards nothing.
+    /// run has not made it yet. A file that cannot be opened is logged and
+    /// keeps nothing: the log records, it guards nothing.
     pub fn open(path: &Path) -> Self {
-        Self::rotating(path, LIMIT, KEPT)
-    }
-
-    fn rotating(path: &Path, limit: u64, kept: usize) -> Self {
-        let opened = path
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| create(path));
-        match opened {
-            Ok((file, size)) => Self {
-                log: Some(Mutex::new(Log {
-                    path: path.to_owned(),
-                    file,
-                    in_place: true,
-                    size,
-                    limit,
-                    kept,
-                })),
-            },
+        match Rotating::open(path, LIMITS) {
+            Ok(log) => Self { log: Some(log) },
             Err(error) => {
-                eprintln!("the audit log {} cannot be opened: {error}", path.display());
+                tracing::error!(path = %path.display(), %error, "the audit log cannot be opened, so nothing is recorded");
                 Self::off()
             }
         }
@@ -238,20 +209,7 @@ impl Audit {
         })
         .expect("an entry serializes");
         line.push(b'\n');
-        let mut log = log.lock().expect("audit lock");
-        let size = line.len() as u64;
-        if !log.in_place {
-            log.reopen();
-        }
-        if log.in_place && log.size > 0 && log.size + size > log.limit {
-            log.rotate();
-        }
-        // One write per line on a file opened to append, so lines of
-        // concurrent writers never interleave.
-        match log.file.write_all(&line) {
-            Ok(()) => log.size += size,
-            Err(error) => eprintln!("the audit log could not be written: {error}"),
-        }
+        log.append(&line);
     }
 
     /// A request the gate let out or stopped, or the policy proxy stopped on
@@ -300,75 +258,6 @@ impl Audit {
     }
 }
 
-impl Log {
-    /// Moves the log to `audit.1.jsonl`, each older one up by one, the
-    /// oldest past `kept` overwritten, and opens a new one; a log gone from
-    /// its place moves none of them. A move that fails is said on stderr and
-    /// the log goes on where it is, to try again after another `limit`.
-    fn rotate(&mut self) {
-        self.size = 0;
-        if !matches!(std::fs::exists(&self.path), Ok(false)) {
-            let moved = (1..=self.kept)
-                .rev()
-                .map(|number| (self.numbered(number - 1), self.numbered(number)))
-                .try_for_each(|(from, to)| match std::fs::rename(&from, &to) {
-                    Err(error) if error.kind() == io::ErrorKind::NotFound && from != self.path => {
-                        Ok(())
-                    }
-                    moved => moved,
-                });
-            if let Err(error) = moved {
-                eprintln!(
-                    "the audit log {} could not move aside: {error}",
-                    self.path.display()
-                );
-                return;
-            }
-        }
-        self.in_place = false;
-        self.reopen();
-    }
-
-    /// Opens a new log at `path` for the one that left it. One that cannot
-    /// be opened is said on stderr, and the lines go on to the one that left
-    /// until the next line opens one.
-    fn reopen(&mut self) {
-        match create(&self.path) {
-            Ok((file, size)) => {
-                self.file = file;
-                self.size = size;
-                self.in_place = true;
-            }
-            Err(error) => eprintln!(
-                "the audit log {} could not be opened anew, so this line goes to the one that left its place: {error}",
-                self.path.display()
-            ),
-        }
-    }
-
-    /// `audit.<number>.jsonl`, and the log itself for 0.
-    fn numbered(&self, number: usize) -> PathBuf {
-        match number {
-            0 => self.path.clone(),
-            _ => self.path.with_extension(format!("{number}.jsonl")),
-        }
-    }
-}
-
-/// Opens `path` to append, made 0600 if it is new, with what it holds.
-fn create(path: &Path) -> io::Result<(File, u64)> {
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let file = options.open(path)?;
-    let size = file.metadata()?.len();
-    Ok((file, size))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,96 +275,5 @@ mod tests {
         });
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains(r#""event":"ended""#), "{written}");
-    }
-
-    fn ended(audit: &Audit, outcome: &str) {
-        audit.record(&Entry::Ended {
-            context: "kind-a",
-            command: "apply",
-            target: "deployments/web",
-            outcome,
-            message: "",
-        });
-    }
-
-    fn outcomes(path: &Path) -> Vec<String> {
-        std::fs::read_to_string(path)
-            .unwrap()
-            .lines()
-            .map(|line| {
-                let line: serde_json::Value = serde_json::from_str(line).unwrap();
-                line["outcome"].as_str().unwrap().to_owned()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn past_its_limit_the_log_moves_aside_and_the_oldest_past_the_count_goes() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("audit.jsonl");
-        let audit = Audit::rotating(&path, 1, 2);
-        for outcome in ["a", "b", "c", "d"] {
-            ended(&audit, outcome);
-        }
-        let names = |number: usize| home.path().join(format!("audit.{number}.jsonl"));
-        assert_eq!(outcomes(&path), ["d"]);
-        assert_eq!(outcomes(&names(1)), ["c"]);
-        assert_eq!(outcomes(&names(2)), ["b"]);
-        let mut files: Vec<_> = std::fs::read_dir(home.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        files.sort();
-        assert_eq!(files, ["audit.1.jsonl", "audit.2.jsonl", "audit.jsonl"]);
-        #[cfg(unix)]
-        for file in [path, names(1), names(2)] {
-            use std::os::unix::fs::PermissionsExt as _;
-            let mode = std::fs::metadata(&file).unwrap().permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "{}", file.display());
-        }
-    }
-
-    #[test]
-    fn a_log_that_cannot_move_aside_goes_on_where_it_is() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("audit.jsonl");
-        let taken = home.path().join("audit.1.jsonl");
-        std::fs::create_dir(&taken).unwrap();
-        std::fs::write(taken.join("kept"), "").unwrap();
-        let audit = Audit::rotating(&path, 1, 1);
-        for outcome in ["a", "b", "c"] {
-            ended(&audit, outcome);
-        }
-        assert_eq!(outcomes(&path), ["a", "b", "c"]);
-    }
-
-    #[test]
-    fn a_log_that_left_its_place_opens_anew_and_moves_no_older_one() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("audit.jsonl");
-        let names = |number: usize| home.path().join(format!("audit.{number}.jsonl"));
-        let audit = Audit::rotating(&path, 1, 4);
-        ended(&audit, "a");
-        ended(&audit, "b");
-        {
-            let mut log = audit.log.as_ref().unwrap().lock().unwrap();
-            std::fs::rename(names(1), names(2)).unwrap();
-            std::fs::rename(&path, names(1)).unwrap();
-            log.in_place = false;
-            log.size = 0;
-        }
-        ended(&audit, "c");
-        ended(&audit, "d");
-        assert_eq!(outcomes(&path), ["d"]);
-        assert_eq!(outcomes(&names(1)), ["c"]);
-        assert_eq!(outcomes(&names(2)), ["b"]);
-        assert_eq!(outcomes(&names(3)), ["a"]);
-
-        std::fs::remove_file(&path).unwrap();
-        ended(&audit, "e");
-        assert_eq!(outcomes(&path), ["e"]);
-        assert_eq!(outcomes(&names(1)), ["c"]);
-        assert_eq!(outcomes(&names(2)), ["b"]);
-        assert_eq!(outcomes(&names(3)), ["a"]);
     }
 }

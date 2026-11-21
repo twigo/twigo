@@ -25,7 +25,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 tower.workspace = true
+tracing.workspace = true
 twigo-ipc.workspace = true
+twigo-log.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
