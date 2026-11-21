@@ -1196,7 +1196,7 @@ Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
   It draws its own listbox and holds its own cursor: the input is a combobox whose `aria-activedescendant` names the row under the cursor, and a row is an option.
-  A value typed puts the cursor on the first row, whatever the cursor did before, and Enter before the rows of that value have come waits for them and acts on the cursor's row once they do; typing again withdraws it.
+  A value typed puts the cursor on the first row, whatever the cursor did before, or on none where the provider takes ticked rows and the filter is empty, and Enter before the rows of that value have come waits for them and acts on the cursor's row once they do; typing again withdraws it.
   Where the person takes one row at a time `aria-selected` is on the cursor's row, selection following focus as the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) describes it.
 - **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   A row that opens something in another space leads with that space's tile, as a `:` list does whose `@` names another space's context (4.2).
