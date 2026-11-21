@@ -98,6 +98,7 @@ function EntryView({ entry }: { entry: StatusEntry }) {
           ACCENT[entry.accent],
         ]
       : interactive && "hover:text-content hover:before:bg-row-hover",
+    entry.quiet && "text-quiet",
   );
   if (entry.popover) {
     const { open, onOpenChange, content } = entry.popover;

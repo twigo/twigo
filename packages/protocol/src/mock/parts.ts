@@ -1,5 +1,6 @@
 import type { ListQuery, Part, Parts, ViewState } from "../generated";
 import { leastReady, REFUSED, SHOWS_ROWS } from "../viewState";
+import { NAMESPACES as CLUSTER_NAMESPACES } from "./fixtures";
 
 /** States in which Rust knows the server's columns: from a list's first page on. */
 const KNOWS_COLUMNS = new Set<ViewState["state"]>([
@@ -11,6 +12,22 @@ const KNOWS_COLUMNS = new Set<ViewState["state"]>([
 
 /** More namespaces than the hub's `NAMESPACES` are read cluster-wide, by a person who may list the kind there. */
 const NAMESPACES = 4;
+
+/** The namespaces where a scenario's person may list pods. */
+const BOUND: Readonly<Record<string, readonly string[]>> = {
+  rbacNamespaces: ["default"],
+  rbacTypedNamespaces: ["default", "payments"],
+};
+
+/**
+ * The namespaces that "All namespaces" resolves to for a person who may list
+ * the namespaces and not the resource cluster-wide, as the hub resolves it
+ * (ARCHITECTURE 3.2); none for a person who may do neither, whose "All
+ * namespaces" the cluster refuses.
+ */
+function resolvedFor(scenario: string): readonly string[] | undefined {
+  return scenario === "rbacNamespaces" ? BOUND[scenario] : undefined;
+}
 
 /** What a scenario makes of one part, whatever the list's own state is; none leaves the part to it. */
 export type Pin = (
@@ -29,9 +46,10 @@ export function pinOf(scenario: string, resource: string): Pin | undefined {
     state: { state: "forbidden", verb: "watch", resource },
     shown: false,
   } as const;
-  if (scenario === "rbacNamespaces") {
+  const bound = BOUND[scenario];
+  if (bound) {
     return (part) =>
-      part.kind === "namespace" && part.name === "default"
+      part.kind === "namespace" && bound.includes(part.name)
         ? undefined
         : refused;
   }
@@ -59,16 +77,24 @@ export interface PartsView {
 export class MockParts {
   readonly #parts: readonly Part[];
   readonly #pin: Pin | undefined;
+  /** The namespaces "All namespaces" resolved to, with every other one left out. */
+  readonly #resolved: readonly string[] | undefined;
 
-  constructor(query: ListQuery, pin: Pin | undefined) {
-    this.#pin = pin;
+  constructor(query: ListQuery, scenario: string) {
+    this.#pin = pinOf(scenario, query.gvr.resource);
     const names = [...new Set(query.namespaces)].sort();
+    const resolved =
+      query.namespaced && names.length === 0
+        ? resolvedFor(scenario)
+        : undefined;
+    this.#resolved = resolved;
+    const read = resolved ?? names;
     this.#parts =
       !query.namespaced ||
-      names.length === 0 ||
-      (pin === undefined && names.length > NAMESPACES)
+      read.length === 0 ||
+      (this.#pin === undefined && read.length > NAMESPACES)
         ? [{ kind: "cluster" }]
-        : names.map((name) => ({ kind: "namespace", name }));
+        : read.map((name) => ({ kind: "namespace", name }));
   }
 
   /** The list while the parts a scenario leaves alone are in `state`. */
@@ -105,10 +131,12 @@ export class MockParts {
       parts: {
         count: of,
         unready: placed.filter(({ state }) => state.state !== "ready"),
-        omitted: 0,
+        omitted: this.#resolved
+          ? CLUSTER_NAMESPACES.length - this.#resolved.length
+          : 0,
       },
       namespaces:
-        shown.length === of
+        shown.length === of && !this.#resolved
           ? null
           : shown.flatMap(({ part }) =>
               part.kind === "namespace" ? [part.name] : [],

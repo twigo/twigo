@@ -90,6 +90,39 @@ test("the status bar counts the active list's rows", async () => {
   expect(screen.getByText("5,000 pods")).toBeTruthy();
 });
 
+test("a list of one row counts it by the resource's singular", async () => {
+  await openList(
+    undefined,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 deployment")).toBeTruthy();
+  expect(screen.queryByText("1 deployments")).toBeNull();
+});
+
+test("a list of all namespaces that leaves some out says how many it reads of how many there are, quietly", async () => {
+  await openList(createMockBackend("rbacNamespaces"));
+  await settle(30);
+  const cluster = entry("1 of 12 namespaces");
+  expect(cluster?.getAttribute("title")).toBe(
+    [
+      "Pods in the 1 namespace these credentials may list; 11 others are left out",
+      "Connected · Kubernetes v1.33.4",
+    ].join("\n"),
+  );
+  expect(cluster?.className).toContain("text-quiet");
+  expect(screen.queryByText("v1.33.4")).toBeNull();
+});
+
+test("a selection, which leaves none out, keeps the cluster's version", async () => {
+  await openList(
+    createMockBackend("rbacNamespaces"),
+    "k8s-list://prod-eu/v1/pods?ns=default",
+  );
+  await settle(30);
+  expect(screen.getByText("v1.33.4")).toBeTruthy();
+  expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
+});
+
 const statusOf = (row: HTMLElement) =>
   row.querySelector('[data-column="Status"]')?.textContent ?? "";
 const pressed = () =>

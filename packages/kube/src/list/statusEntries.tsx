@@ -8,7 +8,7 @@ import {
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
-import { useClusterVersion, type Discovery } from "../discovery";
+import { sameGvr, useClusterVersion, type Discovery } from "../discovery";
 import {
   byHealth,
   HEALTH,
@@ -198,6 +198,26 @@ export function clusterEntries(
     const connection = state && CONNECTION[state.state];
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";
+    const tooltip = [connection?.text, known && `Kubernetes ${known}`]
+      .filter(Boolean)
+      .join(" · ");
+    if (list && healthy && list.parts.omitted > 0) {
+      const { count, omitted } = list.parts;
+      return [
+        {
+          id: "cluster",
+          text: `${String(count)} of ${String(count + omitted)} namespaces`,
+          quiet: true,
+          ...(connection && { tone: connection.tone }),
+          tooltip: [
+            `${list.title} in the ${String(count)} ${count === 1 ? "namespace" : "namespaces"} these credentials may list; ${String(omitted)} ${omitted === 1 ? "other is" : "others are"} left out`,
+            tooltip,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      ];
+    }
     return [
       {
         id: "cluster",
@@ -206,9 +226,7 @@ export function clusterEntries(
             ? known
             : ((state && stateLabel(state)) ?? connection?.text ?? ""),
         ...(connection && { tone: connection.tone }),
-        tooltip: [connection?.text, known && `Kubernetes ${known}`]
-          .filter(Boolean)
-          .join(" · "),
+        tooltip,
       },
     ];
   };
@@ -223,11 +241,16 @@ const ORDER: readonly Health[] = ["error", "warn"];
 export function listEntries({
   statuses,
   states,
-}: Pick<ListServices, "statuses" | "states">): () => readonly StatusEntry[] {
+  discovery,
+}: Pick<
+  ListServices,
+  "statuses" | "states" | "discovery"
+>): () => readonly StatusEntry[] {
   return function useListEntries() {
     const { editors } = useWorkbench();
     useChanges(editors.changes);
     useChanges(statuses.changes);
+    useChanges(discovery.changes);
     const active = editors.active;
     const list = active === undefined ? undefined : statuses.get(active);
     const input = active === undefined ? undefined : parseListUri(active);
@@ -235,9 +258,18 @@ export function listEntries({
       return [];
     const column = statusColumn(input.gvr);
     const counts = column && byHealth(input.gvr, column, list.counts);
-    const total = list.total.toLocaleString("en");
+    const found = discovery.last(input.space);
+    const singular =
+      found?.state === "ready"
+        ? found.value.find((resource) => sameGvr(resource.gvr, input.gvr))
+            ?.singular
+        : undefined;
+    const rows =
+      list.total === 1 && singular !== undefined
+        ? singular
+        : list.title.toLowerCase();
     return [
-      { id: "rows", text: `${total} ${list.title.toLowerCase()}` },
+      { id: "rows", text: `${list.total.toLocaleString("en")} ${rows}` },
       ...(counts
         ? ORDER.filter((health) => counts[health].count > 0).map(
             (health): StatusEntry => ({

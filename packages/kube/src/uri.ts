@@ -1,4 +1,5 @@
 import type { ForwardId, Gvr, LogTarget } from "@twigo/protocol";
+import { scopeNames } from "@twigo/workbench";
 import type { Health } from "./columns";
 
 /**
@@ -34,7 +35,7 @@ export function listUri({
     .join("/");
   const query = new URLSearchParams();
   if (namespaces && namespaces.length > 0)
-    query.set("ns", namespaces.join(","));
+    query.set("ns", scopeNames(namespaces).join(","));
   if (text) query.set("q", text);
   if (labels) query.set("l", labels);
   if (health) query.set("h", health);

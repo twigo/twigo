@@ -55,6 +55,7 @@ export interface Source {
 
 const BARE_OK = parseWhen("(listFocus || pageFocus) && !inputFocus");
 const QUICK_OPEN = parseWhen("inQuickOpen");
+const QUICK_OPEN_MANY = parseWhen("inQuickOpen && quickOpenCanPickMany");
 /** Bare keys that edit no line of text, so they drive quick access's list from its input. */
 const QUICK_OPEN_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
 
@@ -200,11 +201,13 @@ function key(when: When): string {
   );
 }
 
-/** Bare keys fire in a focused list or page, and ↑, ↓ and Enter in quick access too (ARCHITECTURE 5.2). */
+/** Bare keys fire in a focused list or page, and ↑, ↓ and Enter in quick access too, with Space where it takes ticked rows (ARCHITECTURE 5.2). */
 function bareFires(press: Press, lookup: Lookup): boolean {
+  const id = pressId(press);
   return (
     evaluate(BARE_OK, lookup) ||
-    (QUICK_OPEN_KEYS.has(pressId(press)) && evaluate(QUICK_OPEN, lookup))
+    (QUICK_OPEN_KEYS.has(id) && evaluate(QUICK_OPEN, lookup)) ||
+    (id === "Space" && evaluate(QUICK_OPEN_MANY, lookup))
   );
 }
 

@@ -13,7 +13,11 @@ import {
 } from "@twigo/protocol";
 import { fuzzyMatch, type TextRange } from "@twigo/ui";
 import {
+  ALL_NAMESPACES,
   filtered,
+  scopeNames,
+  variant,
+  type QuickAccessContext,
   type QuickAccessProvider,
   type QuickPickItem,
   type RecentEditor,
@@ -48,6 +52,23 @@ export function parseK9s(input: string): K9sQuery | undefined {
     else query = { ...query, namespace: token };
   }
   return labels.length > 0 ? { ...query, labels: labels.join(",") } : query;
+}
+
+/** A namespace's name is an RFC 1123 label. */
+const NAMESPACE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
+
+/**
+ * The namespaces a `:` query's bare word names: none for `all`, which stands
+ * alone, else each name between its commas as typed; undefined where the word
+ * is no list of namespaces.
+ */
+export function namespacesOf(word: string): readonly string[] | undefined {
+  if (word === "all") return [];
+  const names = word.split(",").filter(Boolean);
+  return names.length > 0 &&
+    names.every((name) => name !== "all" && NAMESPACE.test(name))
+    ? names
+    : undefined;
 }
 
 /**
@@ -130,8 +151,14 @@ export function listProvider(
       }
       const resource = resolveResource(resources, query.resource);
       if (!resource) return [];
+      const namespaces =
+        query.namespace === undefined
+          ? undefined
+          : namespacesOf(query.namespace);
+      if (query.namespace !== undefined && namespaces === undefined) return [];
       const parts = [
-        query.namespace && `in ${query.namespace}`,
+        namespaces &&
+          `in ${namespaces.length === 0 ? "all" : namespaces.join(", ")}`,
         query.text && `/${query.text}`,
         query.labels,
         query.context && `@${query.context}`,
@@ -163,13 +190,16 @@ export function listProvider(
         ? resolveResource(resources, typed.resource)
         : resources.find((candidate) => gvrId(candidate) === item.id);
       if (!resource) return;
+      const namespaces =
+        typed?.namespace === undefined
+          ? undefined
+          : namespacesOf(typed.namespace);
       const target = typed?.context ? await spaces.open(typed.context) : space;
       editors.open(
         listUri({
           space: target.id,
           gvr: resource.gvr,
-          ...(typed?.namespace &&
-            typed.namespace !== "all" && { namespaces: [typed.namespace] }),
+          ...(namespaces && namespaces.length > 0 && { namespaces }),
           ...(typed?.text && { text: typed.text }),
           ...(typed?.labels && { labels: typed.labels }),
         }),
@@ -178,9 +208,6 @@ export function listProvider(
     },
   };
 }
-
-/** A namespace's name is an RFC 1123 label. */
-const NAMESPACE = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
 
 /** The namespaces of a space, or none when the person may not list them. */
 async function listNamespaces(
@@ -195,49 +222,97 @@ async function listNamespaces(
   }
 }
 
+/** What one opening of `ns ` asked once: the scope it opened on, and the namespaces the cluster lists. */
+interface Opening {
+  readonly current: readonly string[];
+  readonly listed: Promise<readonly string[] | undefined>;
+}
+
+const ALL = "all namespaces";
+
+const namespaceCount = (count: number) =>
+  count === 0
+    ? "all namespaces"
+    : `${String(count)} ${count === 1 ? "namespace" : "namespaces"}`;
+
 /**
- * `ns `: the active space's namespace scope (ARCHITECTURE 4.2). Whoever may
+ * `ns `: the active space's namespace scope (ARCHITECTURE 4.2): the current
+ * namespaces ticked, then the others, and several may be ticked. Whoever may
  * not list namespaces types one in.
  */
 export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
   const { spaces, backend } = workbench;
-  const ALL = "all namespaces";
+  const openings = new WeakMap<QuickAccessContext, Opening>();
+  const opening = (space: string, context: QuickAccessContext): Opening => {
+    let found = openings.get(context);
+    if (!found) {
+      const listed = listNamespaces(backend, space);
+      void listed.catch(() => openings.delete(context));
+      found = { current: spaces.state(space).namespaces, listed };
+      openings.set(context, found);
+    }
+    return found;
+  };
+  const scope = (namespaces: readonly string[]) => {
+    const space = spaces.active;
+    if (!space) return;
+    spaces.update(space.id, (state) => ({
+      ...state,
+      namespaces: scopeNames(namespaces),
+    }));
+  };
   return {
     prefix: "ns ",
-    placeholder: "Scope the space to a namespace",
+    placeholder: "Scope the space to namespaces",
     help: "Set the namespace scope",
-    acceptLabel: "Select",
-    async items(filter) {
+    acceptLabel: "Only this",
+    checkedWords: namespaceCount,
+    // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+    checklist: variant("pick") === "checklist",
+    live: variant("pick") === "live",
+    async items(filter, context) {
       const space = spaces.active;
       if (!space) return [];
+      const { current, listed } = opening(space.id, context);
+      const names = await listed;
       const search = filter.trim();
-      const listed = await listNamespaces(backend, space.id);
-      const typed = listed === undefined && NAMESPACE.test(search);
-      const current = spaces.state(space.id).namespaces;
-      const items = [ALL, ...(listed ?? (typed ? [search] : []))].map(
-        (name) => ({
-          id: name,
-          label: name,
-          ...(((name === ALL && current.length === 0) ||
-            current.includes(name)) && {
-            description: "current",
-          }),
-          ...(typed &&
-            name === search &&
-            !current.includes(name) && {
+      const typed =
+        names === undefined && NAMESPACE.test(search) ? [search] : [];
+      const row = (name: string, extra: Partial<QuickPickItem>) => ({
+        id: name,
+        label: name,
+        ...extra,
+      });
+      const all: QuickPickItem = {
+        id: ALL,
+        label: ALL_NAMESPACES,
+        description: current.length === 0 ? "current" : "new namespaces join",
+      };
+      const selected = current.map((name) =>
+        row(name, { checked: true, group: "Selected" }),
+      );
+      const others = (names ?? typed)
+        .filter((name) => !current.includes(name))
+        .map((name) =>
+          row(name, {
+            checked: false,
+            group: "Namespaces",
+            ...(names === undefined && {
               description: "you may not list namespaces",
             }),
-        }),
-      );
-      return typed ? items : filtered(items, search);
+          }),
+        );
+      return [
+        ...filtered([all], search),
+        ...filtered(selected, search),
+        ...filtered(others, search),
+      ];
     },
     accept(item) {
-      const space = spaces.active;
-      if (!space) return;
-      spaces.update(space.id, (state) => ({
-        ...state,
-        namespaces: item.id === ALL ? [] : [item.id],
-      }));
+      scope(item.id === ALL ? [] : [item.id]);
+    },
+    acceptChecked(ids) {
+      scope(ids);
     },
   };
 }

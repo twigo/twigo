@@ -14,17 +14,23 @@ export function ViewStatus({
   status,
   what,
   onRetry,
+  onChoose,
   inline = false,
 }: {
   status: ViewState;
   /** What failed to load, lower case: `pods`. */
   what: string;
   onRetry?: () => void;
+  /** Given by a list of every namespace: where it is refused, it says so and offers to choose namespaces in place of a retry. */
+  onChoose?: () => void;
   /** A one-line message for a panel too small for the full one. */
   inline?: boolean;
 }): ReactNode {
-  const retry = onRetry && { label: "Retry", onClick: onRetry };
-  const shown = viewProblem(status, what);
+  const everyNamespace = onChoose !== undefined && status.state === "forbidden";
+  const retry = everyNamespace
+    ? { label: "Choose namespaces", onClick: onChoose }
+    : onRetry && { label: "Retry", onClick: onRetry };
+  const shown = viewProblem(status, what, everyNamespace);
   if (!shown) return null;
   if (inline) {
     return (

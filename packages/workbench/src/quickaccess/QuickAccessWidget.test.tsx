@@ -322,3 +322,285 @@ test("the footer shows the keys from the registry and, on no prefix, the prefixe
   });
   expect(footer()).toBe("↑↓Move↩Run");
 });
+
+const space = () => fireEvent.keyDown(input(), { key: " ", code: "Space" });
+const rowOf = (name: string) => screen.getByRole("option", { name });
+const checkedOf = (name: string) => rowOf(name).getAttribute("aria-checked");
+const hint = (words: string) => footer().includes(words);
+
+const NAMESPACES: readonly QuickPickItem[] = [
+  { id: "all", label: "All namespaces" },
+  { id: "payments", label: "payments", group: "Selected", checked: true },
+  { id: "auth", label: "auth", group: "Others", checked: false },
+  { id: "batch", label: "batch", group: "Others", checked: false },
+];
+
+function ticking(
+  items: readonly QuickPickItem[] = NAMESPACES,
+  extra: Partial<QuickAccessProvider> = {},
+) {
+  const acceptChecked = vi.fn();
+  return {
+    ...provider("!", items, {
+      acceptLabel: "Only this",
+      checkedWords: (count) => `${String(count)} namespaces`,
+      acceptChecked,
+      ...extra,
+    }),
+    acceptChecked,
+  };
+}
+
+test("rows with a box open ticked as they say, with no row under the cursor, so Enter at once changes nothing", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept, acceptChecked } = ticking();
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  expect(checkedOf("payments")).toBe("true");
+  expect(checkedOf("auth")).toBe("false");
+  expect(rowOf("All namespaces").getAttribute("aria-checked")).toBeNull();
+  expect(screen.getByRole("listbox").getAttribute("aria-multiselectable")).toBe(
+    "true",
+  );
+  expect(selected()).toBeUndefined();
+  expect(footer()).toContain("Space");
+  expect(hint("Add or remove")).toBe(true);
+  expect(hint("Only this")).toBe(true);
+
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session).toBeUndefined();
+  expect(accept).not.toHaveBeenCalled();
+  expect(acceptChecked).not.toHaveBeenCalled();
+});
+
+test("↓ from no row goes to the first row, and ↑ to the last", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  expect(selected()).toBe("All namespaces");
+
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await act(() => Promise.resolve());
+  expect(selected()).toBeUndefined();
+  press("ArrowUp");
+  expect(selected()).toBe("batch");
+});
+
+test("a pointer over a row puts the cursor on it where no row was under it", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  expect(selected()).toBeUndefined();
+  fireEvent.pointerMove(rowOf("auth"));
+  expect(selected()).toBe("auth");
+});
+
+test("Space ticks the row under the cursor and Enter applies the ticked set, which the footer and a status say", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept, acceptChecked } = ticking();
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  space();
+  expect(checkedOf("payments")).toBe("true");
+  expect(screen.getByRole("status").textContent).toBe("");
+
+  press("ArrowDown");
+  space();
+  expect(checkedOf("payments")).toBe("false");
+  press("ArrowDown");
+  space();
+  expect(checkedOf("auth")).toBe("true");
+  expect(screen.getByRole("status").textContent).toBe("1 namespaces selected");
+  expect(hint("Apply · 1 namespaces")).toBe(true);
+
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(acceptChecked).toHaveBeenCalledWith(["auth"], "", expect.anything());
+  expect(accept).not.toHaveBeenCalled();
+  expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("a row the filter hides keeps its tick, and is applied", async () => {
+  const workbench = await testWorkbench();
+  const { registered, acceptChecked } = ticking(undefined, {
+    items: (filter) =>
+      NAMESPACES.filter((item) => item.label.startsWith(filter)),
+  });
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  expect(screen.queryByText("payments")).not.toBeNull();
+
+  fireEvent.change(input(), { target: { value: "!au" } });
+  await act(() => Promise.resolve());
+  expect(screen.queryByText("payments")).toBeNull();
+  space();
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(acceptChecked).toHaveBeenCalledWith(
+    ["payments", "auth"],
+    "au",
+    expect.anything(),
+  );
+});
+
+test("a load that the next value outdated still seeds the ticks of its rows", async () => {
+  const workbench = await testWorkbench();
+  const pending = new Map<string, (items: readonly QuickPickItem[]) => void>();
+  const { registered, acceptChecked } = ticking(undefined, {
+    items: (filter) =>
+      new Promise((resolve) => {
+        pending.set(filter, resolve);
+      }),
+  });
+  workbench.quickAccess.register(registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  fireEvent.change(input(), { target: { value: "!au" } });
+  await act(async () => {
+    pending.get("")?.(NAMESPACES);
+    pending.get("au")?.(NAMESPACES.filter((item) => item.id === "auth"));
+    await Promise.resolve();
+  });
+  space();
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(acceptChecked).toHaveBeenCalledWith(
+    ["payments", "auth"],
+    "au",
+    expect.anything(),
+  );
+});
+
+test("after a tick the filter's text is selected and the prefix is not", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    ticking(undefined, {
+      items: (filter) =>
+        NAMESPACES.filter((item) => item.label.startsWith(filter)),
+    }).registered,
+  );
+  await opened(workbench, "!au");
+  await act(() => Promise.resolve());
+  space();
+  const field = input() as HTMLInputElement;
+  expect([field.selectionStart, field.selectionEnd]).toEqual([1, 3]);
+  expect(document.activeElement).toBe(field);
+});
+
+test("Enter and a click take one row alone until the first tick, and a click ticks after it", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept, acceptChecked } = ticking();
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  press("ArrowDown");
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "auth" }),
+    "",
+    expect.anything(),
+    { side: false },
+  );
+
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await act(() => Promise.resolve());
+  fireEvent.click(rowOf("batch"));
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenLastCalledWith(
+    expect.objectContaining({ id: "batch" }),
+    "",
+    expect.anything(),
+    { side: false },
+  );
+
+  accept.mockClear();
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await act(() => Promise.resolve());
+  press("ArrowDown");
+  press("ArrowDown");
+  space();
+  fireEvent.click(rowOf("batch"));
+  expect(checkedOf("batch")).toBe("true");
+  expect(accept).not.toHaveBeenCalled();
+  expect(acceptChecked).not.toHaveBeenCalled();
+  expect(workbench.quickAccess.session).toBeDefined();
+});
+
+test("a click on a row's box ticks it and does not accept it, and so does ⌘-click on the row", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept } = ticking();
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  fireEvent.click(rowOf("batch"), { metaKey: true });
+  expect(checkedOf("batch")).toBe("true");
+  expect(accept).not.toHaveBeenCalled();
+
+  act(() => {
+    workbench.quickAccess.hide();
+  });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await act(() => Promise.resolve());
+  const box = rowOf("auth").querySelector("span[class*='pl-2']");
+  if (!box) throw new Error("no box");
+  fireEvent.click(box);
+  expect(checkedOf("auth")).toBe("true");
+  expect(accept).not.toHaveBeenCalled();
+  expect(hint("Apply · 2 namespaces")).toBe(true);
+});
+
+test("a row with no box is taken alone whatever is ticked", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept, acceptChecked } = ticking();
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  space();
+  press("ArrowUp");
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "all" }),
+    "",
+    expect.anything(),
+    { side: false },
+  );
+  expect(acceptChecked).not.toHaveBeenCalled();
+});
+
+test("Space types the space that ends a prefix and ticks nothing, and ticks once the provider takes ticks", async () => {
+  const workbench = await testWorkbench();
+  const { registered } = ticking(undefined, { prefix: "ns " });
+  workbench.quickAccess.register(registered);
+  workbench.quickAccess.register(
+    provider("", [{ id: "a", label: "alpha" }]).registered,
+  );
+  await opened(workbench, "ns");
+  expect(space()).toBe(true);
+  expect(footer()).not.toContain("Add or remove");
+
+  fireEvent.change(input(), { target: { value: "ns " } });
+  await act(() => Promise.resolve());
+  press("ArrowDown");
+  press("ArrowDown");
+  expect(space()).toBe(false);
+  expect(checkedOf("payments")).toBe("false");
+});

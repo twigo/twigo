@@ -203,6 +203,63 @@ test("the rail hides a space whose context no source lists, and shows it again w
   ]);
 });
 
+function named(name: string, namespace: string | null): Context {
+  return {
+    name,
+    color: null,
+    source: "~/.kube/config",
+    server: null,
+    namespace,
+    access: UNMARKED,
+  };
+}
+
+test("a space no one scoped starts on the namespace its first context names, else every namespace, and keeps it unwritten", async () => {
+  const { backend } = withCatalog([
+    named("prod-eu", "payments"),
+    named("staging", null),
+    named("dev", null),
+  ]);
+  const invoke = vi.spyOn(backend, "invoke");
+  const { spaces } = await window(backend);
+  expect(spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+  expect(spaces.state("staging").namespaces).toEqual([]);
+  await vi.runAllTimersAsync();
+  const written = invoke.mock.calls.flatMap(([command, request]) =>
+    command === "state_set" ? (request as { key: string }[]) : [],
+  );
+  expect(written.map(({ key }) => key)).not.toContain("namespaces");
+});
+
+test("what the person chose stays over the context's namespace, all namespaces too", async () => {
+  const contexts = [named("prod-eu", "payments"), named("staging", "auth")];
+  const { backend } = withCatalog(contexts);
+  const first = await window(backend);
+  first.spaces.update("prod-eu", (state) => ({ ...state, namespaces: [] }));
+  first.spaces.update("staging", (state) => ({
+    ...state,
+    namespaces: ["search"],
+  }));
+  await settled(first.state.settled());
+
+  const { spaces } = await window(backend);
+  expect(spaces.state("prod-eu").namespaces).toEqual([]);
+  expect(spaces.state("staging").namespaces).toEqual(["search"]);
+});
+
+test("a space no one scoped follows its context's namespace as the catalog comes and changes, until the person scopes it", async () => {
+  const { backend, change } = withCatalog([named("prod-eu", null)]);
+  const { spaces } = await window(backend);
+  expect(spaces.state("prod-eu").namespaces).toEqual([]);
+
+  change([named("prod-eu", "payments")]);
+  expect(spaces.state("prod-eu").namespaces).toEqual(["payments"]);
+
+  spaces.update("prod-eu", (state) => ({ ...state, namespaces: ["auth"] }));
+  change([named("prod-eu", "checkout")]);
+  expect(spaces.state("prod-eu").namespaces).toEqual(["auth"]);
+});
+
 test("with no space for any listed context, the first context's space opens", async () => {
   const { backend } = withCatalog([
     {
