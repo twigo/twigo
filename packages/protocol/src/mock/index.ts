@@ -778,7 +778,7 @@ export function createMockBackend(
           kind,
           cluster(context),
           state,
-          new MockParts(query, scenario),
+          new MockParts(query, scenario, cluster(context).resolved),
           onMessage,
           join,
         ),
@@ -1297,6 +1297,10 @@ class Subscription {
       groups: groupsChanged ? (groups ?? []) : null,
       metrics: metricsChanged ? metrics : null,
     });
+    if (view.resolving) {
+      this.#parts.resolved();
+      this.#dirty = true;
+    }
   }
 }
 

@@ -142,6 +142,31 @@ test("a list of all namespaces that leaves some out says how many it reads of ho
   expect(screen.queryByText("v1.33.4")).toBeNull();
 });
 
+test("a list of all namespaces says connecting while the core works out which it reads, with no refusal and no count of one, and then how many it reads", async () => {
+  const mock = createMockBackend("rbacNamespaces");
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const backend: Backend = {
+    ...mock,
+    invoke: (command, request) =>
+      command === "list_ack"
+        ? held.then(() => mock.invoke(command, request))
+        : mock.invoke(command, request),
+  };
+  await openList(backend);
+  await settle(10);
+  expect(screen.getAllByText("Connecting…").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Forbidden|may not list/)).toBeNull();
+  expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
+
+  release?.();
+  await settle(30);
+  expect(entry("1 of 12 namespaces")).toBeTruthy();
+  expect(screen.queryByText("Connecting…")).toBeNull();
+});
+
 test("a selection, which leaves none out, keeps the cluster's version", async () => {
   await openList(
     createMockBackend("rbacNamespaces"),

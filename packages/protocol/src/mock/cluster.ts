@@ -164,6 +164,8 @@ export class Cluster {
    * starts ready, as on a shared upstream.
    */
   readonly synced = new Set<string>();
+  /** The resources whose "All namespaces" a person without cluster-wide rights has resolved, as the core keeps the set. */
+  readonly resolved = new Set<string>();
   readonly #random: () => number;
   /** Rollouts draw from a stream of their own, so the churn stays as it was. */
   readonly #rollouts: () => number;

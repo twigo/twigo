@@ -47,8 +47,11 @@ function query(rest: Partial<ListQuery> = {}): ListQuery {
   };
 }
 
-async function open(scenario: MockScenario, q: ListQuery = query()) {
-  const backend = createMockBackend(scenario);
+async function open(
+  scenario: MockScenario,
+  q: ListQuery = query(),
+  backend = createMockBackend(scenario),
+) {
   const batches: ListBatch[] = [];
   const pending = backend.subscribe("list_subscribe", q, (b) =>
     batches.push(b),
@@ -623,6 +626,24 @@ test("All namespaces of a person who may list namespaces has the rows of the one
       .find((batch) => batch.columns?.length)
       ?.columns?.map((column) => column.name),
   ).toContain("Namespace");
+});
+
+test("All namespaces of a person who may list namespaces says connecting with no part first, as the core does while it resolves, and the next list of the resource has its parts at once", async () => {
+  const sub = await open("rbacNamespaces", namespaced([]));
+  const first = await settled(sub);
+  expect(first[0]).toMatchObject({
+    status: { state: "connecting" },
+    total: 0,
+    columns: [],
+    parts: { count: 1, unready: [], omitted: 0 },
+  });
+  expect(first[0]?.window?.ids ?? []).toEqual([]);
+  expect(first[1]?.parts).toMatchObject({ count: 1, omitted: 11 });
+
+  const again = await settled(
+    await open("rbacNamespaces", namespaced([]), sub.backend),
+  );
+  expect(again[0]?.parts).toMatchObject({ count: 1, omitted: 11 });
 });
 
 test("All namespaces of a person who may not list namespaces is refused, a typed selection reads the namespaces they are bound in, and any other is refused alone", async () => {
