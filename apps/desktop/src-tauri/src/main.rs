@@ -114,7 +114,6 @@ impl Followers {
 struct Shell {
     environment: Arc<Environment>,
     followers: Followers,
-    /// Its resolution, which ends with the app.
     resolving: JoinHandle<()>,
 }
 
@@ -151,7 +150,6 @@ async fn shell_environment_retry(shell: State<'_, Shell>) -> Result<(), IpcError
 /// credentials and of the active space's resources.
 struct App {
     core: Arc<Core>,
-    /// The supervisor of the core's duties, which ends with the app.
     supervisor: JoinHandle<()>,
     contexts: Followers,
     auth: Followers,

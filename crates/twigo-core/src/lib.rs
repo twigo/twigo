@@ -1129,8 +1129,6 @@ impl Core {
         }
     }
 
-    /// Tells the state store and the connections which contexts the sources
-    /// list.
     async fn follow_seen(&self) {
         let mut contexts = self.catalog.subscribe();
         loop {
@@ -1146,7 +1144,6 @@ impl Core {
         }
     }
 
-    /// Makes the terminals' offers anew as the files change.
     async fn follow_offers(&self) {
         let mut written = self.catalog.written();
         while written.changed().await.is_ok() {

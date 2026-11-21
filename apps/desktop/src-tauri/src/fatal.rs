@@ -24,7 +24,6 @@ pub struct Path {
 }
 
 impl Path {
-    /// Makes the path ready, once the app exists.
     pub fn ready(&self, app: &AppHandle) {
         let _ = self.app.set(app.clone());
     }
