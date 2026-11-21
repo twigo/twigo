@@ -31,7 +31,7 @@ hyper-util.workspace = true
 ipnet.workspace = true
 jiff.workspace = true
 k8s-openapi.workspace = true
-kube.workspace = true
+kube = { workspace = true, features = ["ws"] }
 nix.workspace = true
 notify-debouncer-full.workspace = true
 percent-encoding.workspace = true

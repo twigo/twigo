@@ -11,14 +11,14 @@ use http::{Method, Request, StatusCode, Uri};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::client::legacy::Client;
-use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
 use rustls::{ClientConfig, RootCertStore};
 
-use super::dial::Dialer;
+use super::dial::{self, Dialer};
 use super::proxy::{ProxyEnv, proxy_for};
+use crate::errors::innermost;
 
 /// client-go sets none; a refresh that hangs would hold every request.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -66,7 +66,7 @@ impl Idp {
         };
         let proxy =
             proxy_for(issuer, None, env).map_err(|error| IdpError::Proxy(error.to_string()))?;
-        let mut http = HttpConnector::new();
+        let mut http = dial::http();
         http.enforce_http(false);
         let dialer = Dialer::new(http, proxy.as_ref())
             .map_err(|error| IdpError::Proxy(error.to_string()))?;
@@ -122,7 +122,7 @@ impl Idp {
                 .client
                 .request(request)
                 .await
-                .map_err(|error| failed(error.to_string()))?;
+                .map_err(|error| failed(innermost(&error)))?;
             let status = response.status();
             let body = Limited::new(response.into_body(), MAX_BODY)
                 .collect()
@@ -134,5 +134,32 @@ impl Idp {
         tokio::time::timeout(TIMEOUT, exchange)
             .await
             .map_err(|_| IdpError::Timeout(uri.to_string()))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_request_that_gets_no_answer_says_why() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let issuer: Uri = format!(
+            "https://127.0.0.1:{}",
+            listener.local_addr().unwrap().port()
+        )
+        .parse()
+        .unwrap();
+        drop(listener);
+        let mut params = CertificateParams::new(Vec::new()).unwrap();
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca = CertifiedIssuer::self_signed(params, KeyPair::generate().unwrap()).unwrap();
+        let idp = Idp::new(&issuer, Some(ca.pem().as_bytes()), &ProxyEnv::default()).unwrap();
+        let IdpError::Request { message, .. } = idp.get(&issuer).await.unwrap_err() else {
+            panic!("the request was made");
+        };
+        assert!(message.contains("onnection refused"), "{message}");
     }
 }
