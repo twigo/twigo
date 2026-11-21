@@ -15,6 +15,9 @@ updates:
       # kube-core's `Patch::Json` takes the `Patch` of json-patch 4, which the bench harness builds.
       - dependency-name: json-patch
         update-types: ["version-update:semver-major"]
+      # kube-core's `LogParams::since_time` is a `Timestamp` of jiff 0.2, which twigo-sessions builds.
+      - dependency-name: jiff
+        update-types: ["version-update:semver-major"]
     groups:
       kube:
         patterns: [kube, k8s-openapi]
