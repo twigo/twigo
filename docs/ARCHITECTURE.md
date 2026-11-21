@@ -104,7 +104,7 @@ Everything NATS-specific goes.
 | `libs/ui` (shadcn components, `theme.css` tokens, sparkline, `cn`)                                                                                                                                                                                                              | `packages/ui`                           | It is the base of the design system (4.9). `code-viewer` (CodeMirror) is replaced by Monaco.                                                                                                                                                                                                    |
 | `apps/twigo/src/index.css`: typography (Inter `cv01`/`ss03`, weights 510/590, 13 px base, tabular numbers) and the dockview tab skin (selected-tab chip, no underline)                                                                                                          | `packages/ui`, `packages/workbench`     | The rest of the design language (4.9).                                                                                                                                                                                                                                                          |
 | `ErrorBoundary`, `PanelBoundary`, `store/zoom.ts`, `store/commandHistory.ts`, `lib/updater.ts` + `store/updateCheck.ts`, `shell/menu.ts` (native menu built from commands), `lib/appVersion.ts`                                                                                 | `packages/workbench`                    | `menu.ts` changes: it is built from the menu registry (5.1), not a hand-written list. `store/zoom.ts` became `src/zoom.ts`, which keeps the factor in the app's state while `apps/desktop` applies it (4.1).                                                                                    |
-| Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error kinds are generated from Rust instead of written by hand.                                                                                                                                                                                                                                 |
+| Typed IPC errors: Rust `Error::kind` + TS `IpcError` (`lib/api.ts`, `nats/error.rs`)                                                                                                                                                                                            | `crates/twigo-ipc`, `packages/protocol` | Error codes and kinds are generated from Rust instead of written by hand ([decision](decisions/error-codes.md)).                                                                                                                                                                                |
 | Bounded coalescing with a `dropped` counter (`nats/subscription.rs`)                                                                                                                                                                                                            | `twigo-sessions` (logs)                 | The same rule holds: never lose data silently, show the gap.                                                                                                                                                                                                                                    |
 
 ### Adapt
@@ -711,12 +711,17 @@ Each upstream reports one of:
 - `stale` (no event or bookmark in time, or the stream broke; reconnecting)
 - `forbidden` (verb and resource from the 403)
 - `unauthorized` (a sign-in action is offered)
-- `error` (a typed kind plus a retry)
+- `error` (an `IpcError`, with its code and its kind, plus a retry)
+
+`connecting` and `stale` carry `cause`, the last failure that may pass, as an `IpcError`, so a list that waits can say why without turning into an `error` and back at each retry.
 
 A refusal outranks `queued`: a `forbidden` part whose retry waits for a watch says `forbidden`.
 
 Every view header and the status bar render these states.
 A blank table is never an error state.
+
+Every failure that reaches the window is an `IpcError` with a code: a view's `error`, a cause, a refused command, a session's end, a forward's `reconnecting` and `failed`, a plugin's failure, a context's `problem` and an object's unavailable events.
+The code names the condition (`connect.refused`, `server.forbidden`), its kind is the class that retries and sign-ins branch on, and the API server's own `reason` and `causes` travel beside it as `server`, never as a code ([decision](decisions/error-codes.md)).
 
 A list reads its upstreams as parts, one per namespace or one for the cluster (`Parts`, `ListBatch.parts`):
 
