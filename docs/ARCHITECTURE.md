@@ -304,6 +304,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
       A review that another asker has under way is not sent again, so lists opened together ask each question once.
       The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
       The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
+      A resolution asks again the cluster-wide review, whose no is kept 30 s, and the namespaces that were refused or did not answer, and keeps the ones allowed, since a yes is kept for the clients' life, as the server still decides: a namespace revoked since stays in the set, its part refused and saying so, until the clients are rebuilt.
       Only a resolution that answers every question replaces the set, with a set, the cluster-wide yes or a refusal: one that fails, or leaves a review unanswered, keeps it, and the next list resolves it again.
       A set with no namespace allowed, or a refusal to list the namespaces, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
     - `Parts.omitted` counts the namespaces the cluster lists that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
