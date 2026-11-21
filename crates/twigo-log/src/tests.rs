@@ -11,7 +11,6 @@ fn open(directory: &Path, spec: &str) -> (Dispatch, Log) {
     let (dispatch, filter) = subscriber(BoxMakeWriter::new(file.clone()), EnvFilter::new(spec));
     let log = Log {
         path: file.path().to_owned(),
-        file: Some(file),
         filter,
     };
     (dispatch, log)

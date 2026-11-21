@@ -425,8 +425,11 @@ mod tests {
         )
         .unwrap();
         let _held = rotating.state();
-        let started = Instant::now();
-        assert!(!rotating.try_append(b"a\n", Duration::from_millis(20)));
-        assert!(started.elapsed() < Duration::from_secs(5));
+        let (done, finished) = std::sync::mpsc::channel();
+        let other = rotating.clone();
+        std::thread::spawn(move || {
+            let _ = done.send(other.try_append(b"a\n", Duration::from_millis(20)));
+        });
+        assert_eq!(finished.recv_timeout(Duration::from_secs(5)), Ok(false));
     }
 }

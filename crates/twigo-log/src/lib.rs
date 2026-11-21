@@ -49,7 +49,7 @@ pub const FILE: &str = "twigo.log";
 
 /// The environment variable that sets the filter at start, in `EnvFilter`'s
 /// syntax.
-pub const ENV: &str = "TWIGO_LOG";
+const ENV: &str = "TWIGO_LOG";
 
 /// Warnings of any library, and Twigo's own crates from info up.
 const DEFAULT_FILTER: &str = "warn,twigo=info";
@@ -64,7 +64,6 @@ const LIMITS: Limits = Limits {
 /// file at each launch with the previous runs' as `twigo.1.log` to
 /// `twigo.5.log`, 4 MiB at most each, mode 0600.
 pub struct Log {
-    file: Option<Rotating>,
     path: PathBuf,
     filter: reload::Handle<EnvFilter, Registry>,
 }
@@ -97,7 +96,6 @@ impl Log {
             tracing::warn!(%error, "{ENV} is not a filter, so the default applies");
         }
         Self {
-            file,
             path,
             filter: handle,
         }
@@ -106,11 +104,6 @@ impl Log {
     /// Where the current run's file is, whether it opened.
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    /// Whether the file is open: not once it could not be created.
-    pub fn is_open(&self) -> bool {
-        self.file.is_some()
     }
 
     /// Twigo's own crates log from `level` up and the libraries from warn,
