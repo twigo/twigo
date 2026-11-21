@@ -10,10 +10,10 @@
 //!   to more than four, one cluster-wide upstream when the person may list
 //!   the resource cluster-wide, filtered by namespace in Rust.
 //! - A subscription to every namespace gets that upstream too, whole; else
-//!   an upstream per namespace of the index where a review allows listing
-//!   the resource, a set kept with the clients for five minutes, and the
-//!   cluster's own refusal when there is none. It has no part, and says
-//!   `connecting`, until its context's clients answer.
+//!   an upstream per namespace where a review allows listing the resource,
+//!   a set kept with the clients for five minutes, and the cluster's own
+//!   refusal when there is none. It has no part, and says what it waits on,
+//!   until what it reads is settled.
 //! - Hysteresis: a cluster-wide upstream serves narrower subscriptions too,
 //!   without holding it. Once it has lingered, they move to upstreams per
 //!   namespace, keeping its rows until theirs are listed.
