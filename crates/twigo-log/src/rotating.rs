@@ -312,17 +312,23 @@ mod tests {
     }
 
     #[test]
-    fn a_file_that_cannot_move_aside_goes_on_where_it_is() {
+    fn a_file_that_cannot_move_aside_goes_on_and_tries_again_after_another_size() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("log.jsonl");
         let taken = home.path().join("log.1.jsonl");
         std::fs::create_dir(&taken).unwrap();
         std::fs::write(taken.join("kept"), "").unwrap();
-        let rotating = Rotating::open(&path, Limits { size: 1, kept: 1 }).unwrap();
-        for line in ["a", "b", "c"] {
+        let rotating = Rotating::open(&path, Limits { size: 9, kept: 1 }).unwrap();
+        for line in ["l1", "l2", "l3", "l4"] {
             put(&rotating, line);
         }
-        assert_eq!(lines(&path), ["a", "b", "c"]);
+        assert_eq!(lines(&path), ["l1", "l2", "l3", "l4"]);
+        std::fs::remove_dir_all(&taken).unwrap();
+        for line in ["l5", "l6", "l7"] {
+            put(&rotating, line);
+        }
+        assert_eq!(lines(&path), ["l7"]);
+        assert_eq!(lines(&taken), ["l1", "l2", "l3", "l4", "l5", "l6"]);
     }
 
     #[test]
