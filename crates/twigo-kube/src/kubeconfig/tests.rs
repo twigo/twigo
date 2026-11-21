@@ -175,6 +175,32 @@ contexts:
 }
 
 #[test]
+fn a_context_says_the_namespace_it_names_and_none_when_it_names_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(
+        dir.path(),
+        "config",
+        "
+clusters:
+- name: c
+  cluster: { server: 'https://10.0.0.1:6443' }
+contexts:
+- name: kind-named
+  context: { cluster: c, namespace: payments }
+- name: kind-empty
+  context: { cluster: c, namespace: '' }
+- name: kind-absent
+  context: { cluster: c }
+",
+    );
+    let catalog = kubectl(&[&file]).load();
+    let namespace = |name| context(&catalog, name).namespace.clone();
+    assert_eq!(namespace("kind-named").as_deref(), Some("payments"));
+    assert_eq!(namespace("kind-empty"), None);
+    assert_eq!(namespace("kind-absent"), None);
+}
+
+#[test]
 fn a_missing_file_is_skipped_and_a_broken_one_reported() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("missing");

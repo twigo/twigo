@@ -98,7 +98,7 @@ impl Contexts {
                 source: context.source.clone(),
                 server: context.server.clone(),
                 access: policy.access(&context.name),
-                namespace: None,
+                namespace: context.namespace.clone(),
             })
             .collect()
     }

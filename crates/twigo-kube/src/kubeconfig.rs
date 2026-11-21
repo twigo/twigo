@@ -190,6 +190,9 @@ pub struct Context {
     /// The URL of the cluster it reaches, without user info, query or
     /// fragment; none without a cluster entry or a server that parses.
     pub server: Option<String>,
+    /// The namespace it names, which a new space of it starts on; none when
+    /// it names none or an empty one.
+    pub namespace: Option<String>,
     /// Where the context goes among the others, lowest first.
     pub order: Option<i64>,
     /// `twigo.readOnly` there and anything but `false`: a lock to
@@ -227,6 +230,9 @@ impl Context {
             color: extension.color,
             source,
             server: cluster.and_then(server),
+            namespace: entry
+                .and_then(|context| context.namespace.clone())
+                .filter(|namespace| !namespace.is_empty()),
             order: extension.order,
             read_only: extension.read_only,
             environment: extension.environment,
