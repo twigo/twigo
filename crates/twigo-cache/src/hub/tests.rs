@@ -1688,3 +1688,34 @@ async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
     let wait = Duration::from_millis(500)..=RETRY_WITHIN;
     assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
 }
+
+/// Panics under the lock of the store a scope's rows are kept in.
+fn poison_store(hub: &Hub) {
+    let upstream = hub
+        .inner
+        .registry()
+        .entries
+        .values()
+        .next()
+        .expect("one upstream")
+        .upstream::<Row>();
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        upstream.store.items(|_| panic!("a reader's bug"));
+    }));
+    assert!(poisoned.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_panics_as_it_joins_does_not_keep_a_subscriber_of_the_scope() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut first).await;
+    poison_store(&hub);
+    let joined =
+        futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(hub.rows(query(&["a"]))))
+            .await;
+    assert!(joined.is_err());
+    assert_eq!(hub.subscribers("pods"), 1, "the first list's alone");
+}
