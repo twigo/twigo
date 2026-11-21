@@ -8,6 +8,7 @@ mod auth;
 mod bus;
 pub mod catalog;
 pub mod connections;
+mod delete;
 mod errors;
 mod forward;
 pub mod objects;

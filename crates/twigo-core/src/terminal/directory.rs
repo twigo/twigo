@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 use kube::config::NamedContext;
 use serde_json::json;
 
+use crate::delete::deleted;
+
 /// Deleted with the terminal.
 pub(super) struct Directory(PathBuf);
 
@@ -68,21 +70,13 @@ impl Directory {
 
 impl Drop for Directory {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.0)
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            tracing::warn!(path = %self.0.display(), %error, "could not delete");
-        }
+        deleted(&self.0, fs::remove_dir_all(&self.0));
     }
 }
 
 /// What a previous run left: the directories of terminals that ended with it.
 pub(super) fn wipe(root: &Path) {
-    if let Err(error) = fs::remove_dir_all(root)
-        && error.kind() != io::ErrorKind::NotFound
-    {
-        tracing::warn!(path = %root.display(), %error, "could not delete");
-    }
+    deleted(root, fs::remove_dir_all(root));
 }
 
 #[cfg(test)]

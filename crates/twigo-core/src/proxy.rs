@@ -27,6 +27,7 @@ use twigo_policy::{Attributes, Policy};
 
 use crate::approvals::Approvals;
 use crate::catalog::Contexts;
+use crate::delete::deleted;
 use crate::{ClientsError, Core};
 pub(crate) use tokens::{Digest, Holder};
 
@@ -55,12 +56,7 @@ impl Proxy {
     /// Deletes what a previous run left in `dir`: the kubeconfigs of
     /// processes that ended with it, whose tokens no longer mean anything.
     pub(crate) fn new(dir: PathBuf) -> Self {
-        match std::fs::remove_dir_all(&dir) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                tracing::warn!(path = %dir.display(), %error, "could not delete");
-            }
-            _ => {}
-        }
+        deleted(&dir, std::fs::remove_dir_all(&dir));
         Self {
             dir,
             endpoint: OnceCell::new(),
@@ -143,11 +139,7 @@ impl Drop for ProxyProcess {
         self.proxy.revoke(self.id);
         self.ended.cancel();
         self.approvals.end_process(self.id);
-        if let Err(error) = std::fs::remove_file(&self.kubeconfig)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!(path = %self.kubeconfig.display(), %error, "could not delete");
-        }
+        deleted(&self.kubeconfig, std::fs::remove_file(&self.kubeconfig));
     }
 }
 
