@@ -294,8 +294,8 @@ importers:
         specifier: 0.12.0-beta.333
         version: 0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)
       '@xterm/addon-unicode11':
-        specifier: 0.10.0-beta.331
-        version: 0.10.0-beta.331(@xterm/xterm@6.1.0-beta.337)
+        specifier: 0.10.0-beta.332
+        version: 0.10.0-beta.332(@xterm/xterm@6.1.0-beta.337)
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.330
         version: 0.20.0-beta.330(@xterm/xterm@6.1.0-beta.337)
@@ -2175,10 +2175,10 @@ packages:
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.337
 
-  '@xterm/addon-unicode11@0.10.0-beta.331':
-    resolution: {integrity: sha512-GW2EOP+4+ZXQS/KfTgriP2QxDOSMe9ffnEkq7tgIwAfiTUcE3X/oxn6wBNdyxuM/5mLyK7wzi1O8ycV83yAYPw==}
+  '@xterm/addon-unicode11@0.10.0-beta.332':
+    resolution: {integrity: sha512-74+j6gsPld1czK1Zl8+z9LBLsZUZFcgHXP4VSwd+DAPZYTLQcDFV+DbY854enx/9uKNyxuYwR0ec86XFej6iEA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.337
+      '@xterm/xterm': ^6.1.0-beta.338
 
   '@xterm/addon-webgl@0.20.0-beta.330':
     resolution: {integrity: sha512-gcxemutOlpGCEnxZckSwR8oZ/twZXrcQw6N3aRcDVrPguIMr9YvrzegfllCo4WxRnOc4gWkHhjD1toX3emug3A==}
@@ -5216,7 +5216,7 @@ snapshots:
     dependencies:
       '@xterm/xterm': 6.1.0-beta.337
 
-  '@xterm/addon-unicode11@0.10.0-beta.331(@xterm/xterm@6.1.0-beta.337)':
+  '@xterm/addon-unicode11@0.10.0-beta.332(@xterm/xterm@6.1.0-beta.337)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.337
 
