@@ -824,6 +824,31 @@ async fn a_namespace_review_the_cluster_rejects_ends_the_resolution_with_unautho
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_namespaces_the_cluster_rejects_say_unauthorized_and_are_not_listed_again_by_itself() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    fake.state()
+        .unauthorized
+        .insert("/api/v1/namespaces".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let list = hub.rows(query(&[])).await.unwrap();
+
+    sleep(Duration::from_secs(120)).await;
+    assert_eq!(list.state(), ViewState::Unauthorized);
+    assert_eq!(
+        fake.count("/api/v1/namespaces?"),
+        1,
+        "a retry would run the plugin"
+    );
+    assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
+
+    fake.state().unauthorized.clear();
+    let mut again = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_credential_rejected_mid_resolution_leaves_no_review_holding_a_request_slot() {
     let fake = Fake::default();
     allowed_in_three(&fake);
