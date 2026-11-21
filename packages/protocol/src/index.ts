@@ -78,6 +78,8 @@ export type {
   EventList,
   ErrorCode,
   ErrorKind,
+  ServerCause,
+  ServerStatus,
   ExecPlugin,
   ExecReview,
   Grouping,

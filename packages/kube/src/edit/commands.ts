@@ -15,6 +15,7 @@ import {
 import { toIpcError, type ObjectRef, type ResourceRef } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
 import {
+  notifyError,
   spaceMark,
   type ContextValue,
   type MenuId,
@@ -237,10 +238,10 @@ export function registerEdits(
       editors.open(uri, { preserveFocus: true });
       return true;
     } catch (error) {
-      notify.error(
-        `Cannot open ${made.what} in ${nameOf(space)}: ${toIpcError(error).message}`,
-        { tile: tileOf(space) },
-      );
+      notifyError(toIpcError(error), {
+        lead: `Cannot open ${made.what} in ${nameOf(space)}: `,
+        tile: tileOf(space),
+      });
       return false;
     }
   };

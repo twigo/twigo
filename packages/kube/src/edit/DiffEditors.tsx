@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
 import {
+  ErrorMessage,
   useChanges,
   useEditorShown,
   useWorkbench,
@@ -153,7 +154,11 @@ function ServerDiff({
   if (modified === undefined) {
     return problem ? (
       <EmptyState icon={problem.icon} title={problem.title}>
-        {problem.body}
+        {problem.error ? (
+          <ErrorMessage error={problem.error} message={problem.body} />
+        ) : (
+          problem.body
+        )}
       </EmptyState>
     ) : (
       <Skeleton className="m-3 h-4 w-1/2" />

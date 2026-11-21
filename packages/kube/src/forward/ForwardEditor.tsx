@@ -12,7 +12,12 @@ import {
   type Property,
 } from "@twigo/ui";
 import { formatBytes } from "@twigo/utils";
-import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
+import {
+  ErrorMessage,
+  useChanges,
+  useWorkbench,
+  type EditorProps,
+} from "@twigo/workbench";
 import { objectUri, parsePfUri } from "../uri";
 import { isPod } from "./kinds";
 import type { Forwards } from "./service";
@@ -255,7 +260,9 @@ function Problem({ forward }: { forward: Forward }) {
   if (state.state === "reconnecting") {
     return (
       <Callout tone="warn" title="Reconnecting">
-        <p>{state.reason.message}</p>
+        <p>
+          <ErrorMessage error={state.reason} />
+        </p>
         <p className="text-support">
           It looks again while it has connections, and at its next one.
         </p>
@@ -271,7 +278,9 @@ function Problem({ forward }: { forward: Forward }) {
   const listens = listensOn(forward).length > 0;
   return (
     <Callout tone={tone} title={title}>
-      <p className="break-words">{error.message}</p>
+      <p className="break-words">
+        <ErrorMessage error={error} />
+      </p>
       <p className="text-support">
         {!listens
           ? `Nothing listens on ${where}. Change Local Port… moves it to another port, and Start tries this one again.`

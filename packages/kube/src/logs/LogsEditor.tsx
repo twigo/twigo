@@ -20,6 +20,7 @@ import {
   useWidth,
 } from "@twigo/ui";
 import {
+  ErrorMessage,
   useChanges,
   useListRegistration,
   useWorkbench,
@@ -228,7 +229,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
               : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
           }
         >
-          {failed[0].error.message}
+          <ErrorMessage error={failed[0].error} />
         </Banner>
       )}
       {problem && total > 0 && (

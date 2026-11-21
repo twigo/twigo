@@ -63,6 +63,7 @@ export function objectProblem({
       variant: "muted" as const,
       title: "The object does not exist",
       body: "It is gone from the server.",
+      error: undefined,
     };
   }
   return viewProblem(status, "the object");

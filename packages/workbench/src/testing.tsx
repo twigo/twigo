@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { act, fireEvent } from "@testing-library/react";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import type { Area } from "./editors/registry";
 import type { Platform } from "./keybindings/chord";
+import type { ErrorMessage } from "./ErrorMessage";
 import { WorkbenchContext } from "./react";
 import { registerCore } from "./core";
 import { Workbench } from "./services";
@@ -109,4 +110,12 @@ export async function confirmAsking(workbench: Workbench): Promise<void> {
   act(() => {
     confirm(plan.friction.kind === "typed" ? plan.friction.text : undefined);
   });
+}
+
+/** The words of a toast that `notifyError` raised: what leads its message, then the error's own. */
+export function toastWords(message: unknown): string {
+  const { lead = "", error } = (
+    message as ReactElement<ComponentProps<typeof ErrorMessage>>
+  ).props;
+  return `${lead}${error.message}`;
 }

@@ -457,7 +457,7 @@ test("a start that the mode refuses starts nothing and says so as a warning in t
   expect(calls("forward_start")).toHaveLength(2);
   const [toast] = live();
   expect(toast).toMatch(
-    /^PEpayments-gateway:http is not forwarded: prod-eu is read-only by prod-eu in \/Library\/Application Support\/Twigo\/policy\.json, so Twigo did not send get pods\/portforward in payments$/,
+    /^PEpayments-gateway:http is not forwarded: prod-eu is read-only by prod-eu in \/Library\/Application Support\/Twigo\/policy\.json, so Twigo did not send get pods\/portforward in paymentspolicy\.blockedCopy details$/,
   );
   expect(
     document
@@ -506,7 +506,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   };
   await start();
   expect(live()).toEqual([
-    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itUnlock for 15 minutes",
+    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itpolicy.blockedCopy detailsUnlock for 15 minutes",
   ]);
   fireEvent.click(toastButton("Unlock for 15 minutes"));
   await confirmAsking(workbench);
@@ -526,7 +526,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   });
   await start();
   expect(live()).toEqual([
-    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send it",
+    "PEpayments-gateway:http is not forwarded: prod-eu is read-only, so Twigo did not send itpolicy.blockedCopy details",
     "PEUnlocked prod-eu for 15 minutes",
   ]);
 });

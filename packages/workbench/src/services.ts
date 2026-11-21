@@ -1,6 +1,6 @@
 import type { Backend, KeyboardLayout } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import { notify, type ActionGroups } from "@twigo/ui";
+import type { ActionGroups } from "@twigo/ui";
 import { Approvals } from "./approvals/service";
 import { menuActions } from "./commands/actions";
 import { Menus, type MenuId } from "./commands/menus";
@@ -14,6 +14,7 @@ import { Credentials } from "./credentials";
 import type { Lookup } from "./contextkey/when";
 import { Keybindings } from "./keybindings/service";
 import { Lists } from "./lists/service";
+import { notifyError } from "./notifyError";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
 import { spaceMark } from "./parts/spaceMark";
@@ -155,11 +156,12 @@ export class Workbench {
 
   /** Shows a failure the user did not ask to see but must know about, led by the tile of the space whose context the gate refused. */
   report(error: unknown, command?: string): void {
-    const { message, blocked } = toIpcError(error);
-    const text = command ? `${command}: ${message}` : message;
-    notify.error(text, {
-      key: text,
-      tile: spaceMark(blocked && this.spaces.ofContext(blocked.context)),
+    const ipc = toIpcError(error);
+    notifyError(ipc, {
+      ...(command && { lead: `${command}: ` }),
+      tile: spaceMark(
+        ipc.blocked && this.spaces.ofContext(ipc.blocked.context),
+      ),
     });
   }
 }

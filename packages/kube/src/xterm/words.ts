@@ -1,6 +1,6 @@
 import type { ShellEnd } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import type { SessionState } from "@twigo/workbench";
+import { errorLines, type SessionState } from "@twigo/workbench";
 import type { SessionStatus } from "./terminal";
 
 /** What a tab says of an ending, in the tab and once in the scrollback (ARCHITECTURE 4.6). */
@@ -38,8 +38,15 @@ export function ending(end: ShellEnd): Ending {
         label: "No shell",
         tone: "warn",
       };
-    case "failed":
-      return { title: end.error.message, label: "Failed", tone: "error" };
+    case "failed": {
+      const [title = "", ...more] = errorLines(end.error);
+      return {
+        title,
+        ...(more.length > 0 && { detail: more.join("\n") }),
+        label: "Failed",
+        tone: "error",
+      };
+    }
     case "connectionLost":
       return {
         title: "The connection was lost. A shell cannot be resumed.",

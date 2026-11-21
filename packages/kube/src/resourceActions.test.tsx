@@ -10,7 +10,7 @@ import type { AccessQuery, ResourceRef } from "@twigo/protocol";
 import { createMockBackend, protect } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import type { Lookup, Workbench } from "@twigo/workbench";
-import { tabsIn } from "@twigo/workbench/testing";
+import { tabsIn, toastWords } from "@twigo/workbench/testing";
 import {
   hoverIcons,
   mountKube,
@@ -570,7 +570,7 @@ test("a write the context's mode holds, clicked in the details' row, reaches the
   ).toEqual([]);
   const [message, options] =
     error.mock.calls[error.mock.calls.length - 1] ?? [];
-  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(toastWords(message)).toMatch(/^prod-eu is read-only/);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
 
@@ -814,7 +814,7 @@ test("a hovered row's verb the context's mode holds runs on that row and meets t
   ).toEqual([]);
   const [message, options] =
     error.mock.calls[error.mock.calls.length - 1] ?? [];
-  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(toastWords(message)).toMatch(/^prod-eu is read-only/);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
 

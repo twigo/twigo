@@ -25,6 +25,7 @@ export * from "./components/chip";
 export * from "./components/copy-button";
 export * from "./components/count";
 export * from "./components/cut-in-the-middle";
+export * from "./components/error-details";
 export * from "./components/icon-button";
 export * from "./components/key-hints";
 export * from "./components/link-button";

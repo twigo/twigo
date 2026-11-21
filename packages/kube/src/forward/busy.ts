@@ -1,6 +1,11 @@
 import { toIpcError, type Forward, type ForwardStarted } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
-import { spaceMark, unlockAction, type Workbench } from "@twigo/workbench";
+import {
+  notifyError,
+  spaceMark,
+  unlockAction,
+  type Workbench,
+} from "@twigo/workbench";
 import type { Forwards } from "./service";
 import { targetWords } from "./words";
 
@@ -38,10 +43,13 @@ export async function unlessRefused<T>(
   try {
     return await run();
   } catch (error) {
-    const { blocked, message } = toIpcError(error);
+    const refused = toIpcError(error);
+    const { blocked } = refused;
     if (blocked === undefined) throw error;
     const action = unlockAction(workbench.operations, error);
-    notify.warning(`${what} is not forwarded: ${message}`, {
+    notifyError(refused, {
+      lead: `${what} is not forwarded: `,
+      warning: true,
       key: `forward-refused:${what}`,
       tile: spaceMark(workbench.spaces.ofContext(blocked.context)),
       ...(action && { action }),
@@ -108,14 +116,12 @@ export function tellFailure(
     void forwards.settled(forward).then((settled) => {
       if (settled?.state.state !== "failed") return;
       const { error } = settled.state;
-      const tell = error.blocked ? notify.warning : notify.error;
-      tell(
-        `${targetWords(settled)} → ${String(settled.local)} failed: ${error.message}`,
-        {
-          key: `forward-failed:${String(settled.id)}`,
-          tile: spaceMark(workbench.spaces.get(settled.target.space)),
-        },
-      );
+      notifyError(error, {
+        lead: `${targetWords(settled)} → ${String(settled.local)} failed: `,
+        warning: error.blocked !== undefined,
+        key: `forward-failed:${String(settled.id)}`,
+        tile: spaceMark(workbench.spaces.get(settled.target.space)),
+      });
     });
   };
 }
