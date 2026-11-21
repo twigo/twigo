@@ -14,6 +14,8 @@ test.each([
   ["Endpoints", "endpoints", "Endpoints"],
   ["PriorityClass", "priorityclasses", "Priority Classes"],
   ["FooBar", "widgets", "Foo Bars"],
+  ["PodMetrics", "pods", "Pod Metrics"],
+  ["NodeMetrics", "nodes", "Node Metrics"],
 ])("%s with %s → %s", (kind, resource, title) => {
   expect(pluralTitle(kind, resource)).toBe(title);
 });

@@ -180,6 +180,14 @@ test(": a row that names another space's context leads with its tile, and one th
   ).toBeUndefined();
 });
 
+test.each([
+  [":podmetrics", "Pod Metrics"],
+  [":nodemetrics", "Node Metrics"],
+])("%s offers the list titled %s", async (typed, title) => {
+  const { run } = await kube();
+  expect((await run(typed)).items[0]?.label).toBe(title);
+});
+
 test("an unknown resource gives nothing to open", async () => {
   const { run } = await kube();
   expect((await run(":gizmos payments")).items).toEqual([]);

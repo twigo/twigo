@@ -225,13 +225,21 @@ export const singularTitle = (kind: string): string =>
 /**
  * A list's title from its kind's words and its resource, the plural that
  * discovery gives: `NetworkPolicy` + `networkpolicies` → `Network Policies`.
+ * A kind that is plural already stays whole where its resource names only its
+ * first words: `PodMetrics` + `pods` → `Pod Metrics`.
  */
 export function pluralTitle(kind: string, resource: string): string {
   const words = kindWords(kind);
   const last = words.pop() ?? "";
   const prefix = words.join("").toLowerCase();
-  const plural = resource.startsWith(prefix)
+  const leaves = resource.startsWith(prefix)
     ? resource.slice(prefix.length)
-    : `${last}s`;
+    : undefined;
+  const plural =
+    leaves === undefined
+      ? `${last}s`
+      : leaves.startsWith(last.charAt(0).toLowerCase())
+        ? leaves
+        : last;
   return [...words, plural.charAt(0).toUpperCase() + plural.slice(1)].join(" ");
 }
