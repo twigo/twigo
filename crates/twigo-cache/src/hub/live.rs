@@ -566,12 +566,16 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     tokio::time::timeout(Duration::from_secs(30), allowed)
         .await
         .expect("the bindings count within half a minute");
+    let index = Api::<Namespace>::all(clients.api.clone());
+    let every = kube::api::ListParams::default();
+    let before = index.list(&every).await.unwrap().items.len();
     let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| {
         let shown = all.drain_shown();
         shown.status == ViewState::Ready && shown.parts.count == 2
     })
     .await;
+    let after = index.list(&every).await.unwrap().items.len();
     let read: Vec<&String> = [home, &others[0]].into();
     let mut scopes: Vec<Scope> = read
         .iter()
@@ -583,9 +587,11 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         "an upstream for each of the two"
     );
     assert_eq!(all.items().len(), 2, "their pods");
+    // The other tests of this binary make and delete namespaces meanwhile.
+    let left_out = usize::try_from(all.drain_shown().parts.omitted).unwrap() + 2;
     assert!(
-        all.drain_shown().parts.omitted >= 1,
-        "the third namespace and the cluster's own are left out"
+        (before.min(after)..=before.max(after)).contains(&left_out),
+        "the namespaces of the cluster less the two read: {left_out}, counted {before} then {after}"
     );
 
     bindings
