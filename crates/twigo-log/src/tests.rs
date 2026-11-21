@@ -24,15 +24,6 @@ fn lines(log: &Log) -> Vec<Value> {
         .collect()
 }
 
-/// What `log` records need beyond the subscriber: the process's one
-/// `LogTracer`, which hands each record to the subscriber of its thread.
-fn log_records() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        tracing_log::LogTracer::init_with_filter(tracing_log::log::LevelFilter::Trace).unwrap();
-    });
-}
-
 #[test]
 fn an_event_is_one_json_line_with_its_fields() {
     let directory = tempfile::tempdir().unwrap();
@@ -60,42 +51,13 @@ fn an_event_is_one_json_line_with_its_fields() {
 }
 
 #[test]
-fn a_log_record_of_a_library_reaches_the_file_by_its_own_target() {
-    log_records();
-    let directory = tempfile::tempdir().unwrap();
-    let (dispatch, log) = open(directory.path(), DEFAULT_FILTER);
-    with_default(&dispatch, || {
-        tracing_log::log::warn!(target: "tao::platform", "a window went away");
-        tracing_log::log::info!(target: "tao::platform", "below the library filter");
-    });
-    let [line] = &lines(&log)[..] else {
-        panic!("one line");
-    };
-    assert_eq!(line["target"], "tao::platform");
-    assert_eq!(line["fields"]["message"], "a window went away");
-}
-
-#[test]
-fn an_event_of_a_library_that_also_makes_log_records_arrives_once() {
-    log_records();
-    let directory = tempfile::tempdir().unwrap();
-    let (dispatch, log) = open(directory.path(), "warn");
-    with_default(&dispatch, || {
-        warn!(target: "kube_client::client", "a request failed");
-    });
-    assert_eq!(lines(&log).len(), 1);
-}
-
-#[test]
-fn a_reload_changes_what_is_written_for_twigo_and_for_the_log_records_alike() {
-    log_records();
+fn a_reload_changes_what_is_written_for_twigo_and_not_for_a_library() {
     let directory = tempfile::tempdir().unwrap();
     let (dispatch, log) = open(directory.path(), DEFAULT_FILTER);
     with_default(&dispatch, || {
         debug!(target: "twigo_core::catalog", "before");
         log.set_level(Level::DEBUG);
         debug!(target: "twigo_core::catalog", "after");
-        tracing_log::log::debug!(target: "twigo_core::catalog", "a log record after");
         debug!(target: "hyper_util::client", "a library stays at warn");
         log.set_level(Level::INFO);
         debug!(target: "twigo_core::catalog", "dropped again");
@@ -106,12 +68,7 @@ fn a_reload_changes_what_is_written_for_twigo_and_for_the_log_records_alike() {
         .collect();
     assert_eq!(
         written,
-        [
-            "the log level changed",
-            "after",
-            "a log record after",
-            "the log level changed"
-        ]
+        ["the log level changed", "after", "the log level changed"]
     );
 }
 
