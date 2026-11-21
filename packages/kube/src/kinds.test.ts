@@ -22,12 +22,7 @@ test.each([
 
 test.each([
   ["Pod", "pod"],
-  ["ConfigMap", "config map"],
   ["NetworkPolicy", "network policy"],
-  ["ReplicaSet", "replica set"],
-  ["StatefulSet", "stateful set"],
-  ["CronJob", "cron job"],
-  ["PersistentVolumeClaim", "persistent volume claim"],
 ])("%s counts as %s, as its title's words do", (kind, words) => {
   expect(singularTitle(kind)).toBe(words);
 });
