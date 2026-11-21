@@ -1577,6 +1577,43 @@ async fn the_namespaces_a_person_may_not_list_or_the_cluster_cannot_say_are_a_st
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_answers_at_once() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "b");
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let listed = || fake.count("/api/v1/namespaces?");
+
+    fake.state().unavailable = 1;
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Ok(vec!["a".into(), "b".into()])
+    );
+    assert_eq!(listed(), 2, "one 503, then the names");
+
+    fake.state().unavailable = usize::MAX;
+    let started = Instant::now();
+    let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
+    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
+    assert!(
+        (10..11).contains(&started.elapsed().as_secs()),
+        "{:?}",
+        started.elapsed()
+    );
+
+    fake.state().unavailable = 0;
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces".to_owned());
+    let (before, started) = (listed(), Instant::now());
+    assert!(matches!(
+        hub.namespaces("kind-test").await,
+        Err(ViewState::Forbidden { .. })
+    ));
+    assert_eq!((listed() - before, started.elapsed()), (1, Duration::ZERO));
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_new_subscription_cuts_short_the_wait_of_a_refused_part_and_an_open_list_keeps_it() {
     for dropped in [false, true] {
         let fake = Fake::default();

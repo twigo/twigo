@@ -59,6 +59,9 @@ pub const LINGER: Duration = Duration::from_secs(60);
 const NAMESPACES: usize = 4;
 /// The reviews of all namespaces that are under way at once.
 const REVIEWS: usize = 8;
+/// How long a reader that needs a whole list waits for a stale upstream to
+/// answer: two of the longest backoffs.
+const STALE_FOR: Duration = RETRY_WITHIN.saturating_mul(2);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Resource {
@@ -387,8 +390,27 @@ impl Hub {
 
     /// The names of the context's namespaces, sorted, from one list of their
     /// metadata, which takes a request slot and no watch; or the state that
-    /// refuses it, `stale` when the cluster does not answer.
+    /// refuses it. A transient failure is tried again with the backoff for
+    /// two of its longest waits, and says `stale` after.
     pub async fn namespaces(&self, context: &str) -> Result<Vec<String>, ViewState> {
+        let mut backoff = backoff();
+        let tried = tokio::time::timeout(STALE_FOR, async {
+            loop {
+                match self.read_namespaces(context).await {
+                    Err(ViewState::Stale) => {}
+                    answered => return answered,
+                }
+                let pause = backoff
+                    .next()
+                    .expect("the backoff has no maximum of attempts");
+                tokio::time::sleep(pause).await;
+            }
+        });
+        tried.await.unwrap_or(Err(ViewState::Stale))
+    }
+
+    /// One try of [`namespaces`](Self::namespaces).
+    async fn read_namespaces(&self, context: &str) -> Result<Vec<String>, ViewState> {
         let clients = (self.inner.connect)(context.to_owned())
             .await
             .map_err(unconnected)?;
@@ -491,7 +513,7 @@ impl Hub {
             Err(Unanswered::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(Unanswered::Failed) => return Err(ViewState::Connecting),
         }
-        let names = match self.namespaces(&query.context).await {
+        let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
             Err(ViewState::Forbidden { .. }) => return Ok(Found::refused()),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
@@ -1238,7 +1260,7 @@ impl<T: Item> Subscription<T> {
                 state if failed(&state) => return Err(state),
                 _ if self.listed() => return Ok(self.items()),
                 ViewState::Stale => {
-                    let tried = tokio::time::timeout(2 * RETRY_WITHIN, async {
+                    let tried = tokio::time::timeout(STALE_FOR, async {
                         while self.state() == ViewState::Stale {
                             self.changed().await;
                         }
