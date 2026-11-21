@@ -378,11 +378,7 @@ async fn resolved_to_two(fake: &Fake) -> Hub {
 #[tokio::test(start_paused = true)]
 async fn all_namespaces_of_a_person_who_may_list_pods_in_three_of_forty_read_three_parts() {
     let fake = Fake::default();
-    let names = forty_namespaces(&fake);
-    let mine = ["ns-05", "ns-18", "ns-31"];
-    for name in mine {
-        fake.allow(Some(name), "list", "pods");
-    }
+    let names = allowed_in_three(&fake);
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut list = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
@@ -390,16 +386,13 @@ async fn all_namespaces_of_a_person_who_may_list_pods_in_three_of_forty_read_thr
     until_shown(&mut list, &mut mirror, |m| m.names().len() == 3).await;
     assert_eq!(mirror.names(), ["p-ns-05", "p-ns-18", "p-ns-31"]);
     assert_eq!(mirror.status, Some(ViewState::Ready));
-    assert_eq!(
-        mirror.parts,
-        Some(Parts {
-            count: 3,
-            omitted: 37,
-            unready: Vec::new(),
-        })
-    );
+    assert_eq!(mirror.parts, Some(three_of_forty()));
     assert!(list.resolved());
-    assert_eq!(asked_of(&fake, &names), mine, "no list or watch of the 37");
+    assert_eq!(
+        asked_of(&fake, &names),
+        ["ns-05", "ns-18", "ns-31"],
+        "no list or watch of the 37"
+    );
     assert_eq!(fake.count("/api/v1/pods"), 0, "none cluster-wide");
     assert_eq!(fake.count("selfsubjectaccessreviews"), 41, "1 and 40");
 }
