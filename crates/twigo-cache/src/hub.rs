@@ -608,6 +608,7 @@ impl Hub {
                         let task = self.spawn(key, Arc::clone(&upstream), run);
                         std::mem::replace(&mut entry.task, task).abort();
                     }
+                    upstream.retry();
                     upstream
                 }
                 None => {

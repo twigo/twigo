@@ -427,6 +427,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 - **Refusals retry too.**
   A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
   A part that has never listed, whose first list got a 403, waits 30 s and the backoff's jitter (30–60 s) between tries instead, the time the hub keeps a review's no: a person who may not read a namespace stays refused, and the 37 parts refused of a selection of 40 sent 9.75 requests a second at the backoff, 197 of 200 sent 52.75 (kind 1.37.0, 2026-11-21, a service account bound in 3 namespaces, over a selection of every namespace).
+  A subscription that holds such a part anew ends that wait and tries at once, so Retry after a grant and a list opened again do not wait it out, while an open list keeps its 30 s.
   Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds

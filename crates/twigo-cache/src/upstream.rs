@@ -21,7 +21,7 @@ use http::{HeaderMap, Request};
 use http_body_util::BodyExt;
 use jiff::Timestamp;
 use kube::client::Body;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
@@ -84,6 +84,8 @@ pub(crate) struct Upstream<T> {
     state: watch::Sender<ViewState>,
     /// It holds a watch open, so evicting it frees one.
     watching: AtomicBool,
+    /// A new subscription cuts short the wait of a part that RBAC refused.
+    retry: Notify,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +121,7 @@ impl<T: Item> Upstream<T> {
             }),
             state: watch::Sender::new(ViewState::Connecting),
             watching: AtomicBool::new(false),
+            retry: Notify::new(),
         }
     }
 
@@ -149,6 +152,12 @@ impl<T: Item> Upstream<T> {
 
     pub fn watching(&self) -> bool {
         self.watching.load(Ordering::Relaxed)
+    }
+
+    /// Ends the wait of a part whose first list RBAC refused, so the one who
+    /// subscribes anew finds out at once whether that still holds.
+    pub fn retry(&self) {
+        self.retry.notify_waiters();
     }
 
     /// The state of a run about to start, set before it does, so nobody
@@ -725,14 +734,18 @@ where
     /// Shows why the server refused, then waits to try again: an API server
     /// that just restarted refuses for a while what it allows, so a part
     /// that has listed tries soon, while one that never did, whose RBAC said
-    /// no, waits for the no to pass.
+    /// no, waits for the no to pass, or for a new subscription.
     async fn refused(&mut self, view: ViewState) {
-        let unlisted_no =
-            matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed;
-        self.set_phase(Phase::Refused(view));
-        if unlisted_no {
-            tokio::time::sleep(refusal_pause()).await;
+        if matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed {
+            // Before the state shows, so a subscription that sees it wakes the wait.
+            let retry = self.upstream.retry.notified();
+            self.set_phase(Phase::Refused(view));
+            tokio::select! {
+                () = tokio::time::sleep(refusal_pause()) => {}
+                () = retry => {}
+            }
         } else {
+            self.set_phase(Phase::Refused(view));
             self.pause().await;
         }
     }

@@ -1230,8 +1230,8 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     settle().await;
     assert_eq!(
         fake.count("namespaces/a/pods"),
-        tries,
-        "subscriptions leave its backoff alone"
+        tries + 1,
+        "subscriptions that come together cut its wait short once"
     );
     drop(asking);
 
@@ -1574,4 +1574,60 @@ async fn the_namespaces_a_person_may_not_list_or_the_cluster_cannot_say_are_a_st
         .no_endpoints
         .insert("/api/v1/namespaces".to_owned());
     assert_eq!(hub.namespaces("kind-test").await, Err(ViewState::Stale));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_subscription_cuts_short_the_wait_of_a_refused_part_and_an_open_list_keeps_it() {
+    for dropped in [false, true] {
+        let fake = Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        fake.state()
+            .forbidden
+            .insert("/api/v1/namespaces/a/pods".to_owned());
+        let (hub, _clients) = fake.hub(Budgets::default());
+        let mut first = hub.rows(query(&["a"])).await.unwrap();
+        let refused = |state: &ViewState| matches!(state, ViewState::Forbidden { .. });
+        until(&mut first, refused).await;
+        sleep(Duration::from_secs(2)).await;
+
+        fake.state().forbidden.clear();
+        sleep(Duration::from_secs(20)).await;
+        assert!(refused(&first.state()), "the open list keeps its 30 s");
+        if dropped {
+            drop(first);
+        }
+        let mut again = hub.rows(query(&["a"])).await.unwrap();
+        let tried = tokio::time::timeout(Duration::from_secs(5), ready(&mut again));
+        tried.await.expect("a list opened anew tries at once");
+        assert_eq!(names(&again), ["p1"]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_first_list_that_ends_in_anything_but_a_403_tries_again_within_5_s() {
+    for garbled in [false, true] {
+        let fake = Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        if garbled {
+            fake.state()
+                .garbled
+                .insert("/api/v1/namespaces/a/pods".to_owned());
+        } else {
+            fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
+        }
+        let (hub, _clients) = fake.hub(Budgets::default());
+        let mut pods = hub.rows(query(&["a"])).await.unwrap();
+        until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+
+        fake.state().requests.clear();
+        sleep(Duration::from_secs(120)).await;
+        let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
+        assert!(
+            gaps.len() >= 20,
+            "{} tries in 120 s, garbled: {garbled}",
+            gaps.len() + 1
+        );
+        let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+        assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
+    }
 }
