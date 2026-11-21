@@ -4,6 +4,7 @@ export * from "./components/dropdown-menu";
 export * from "./components/popover";
 export * from "./components/tooltip";
 export * from "./components/command";
+export * from "./components/quick-input";
 export * from "./components/dialog";
 export * from "./components/confirm-dialog";
 export * from "./components/empty-state";
