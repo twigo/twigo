@@ -425,7 +425,9 @@ impl Hub {
     /// says.
     ///
     /// A set kept past its time is read at once, and resolved again in the
-    /// background for the lists after it. What does not answer is no answer:
+    /// background for the lists after it; a resolution that fails or leaves a
+    /// review unanswered keeps the set, which the next list resolves again.
+    /// What does not answer is no answer:
     /// when the clients, the cluster-wide review or the list of namespaces
     /// fail with anything but a refusal, the state the subscription waits on
     /// comes instead, and a review the server refuses leaves the cluster part
@@ -446,8 +448,8 @@ impl Hub {
         Ok(kept.resolved)
     }
 
-    /// Asks what all namespaces come to and keeps it, or forgets the set it
-    /// replaces when there is none to keep.
+    /// Asks what all namespaces come to and keeps it: what every question
+    /// answers replaces the set it renews, and what does not leaves it be.
     async fn renew(
         &self,
         query: &Query,
@@ -455,28 +457,43 @@ impl Hub {
         cluster: &Cluster,
     ) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
-        let asked = self.ask(query, &access).await;
-        match &asked {
-            Ok((resolved, true)) => cluster.set_resolved(clients, &access, resolved.clone()),
-            _ => cluster.forget_resolved(clients, &access),
+        match self.ask(query, &access).await {
+            Ok(Found::Everywhere) => {
+                cluster.forget_resolved(clients, &access);
+                Ok(Resolved::default())
+            }
+            Ok(Found::Namespaces {
+                resolved,
+                answered: true,
+            }) => {
+                cluster.set_resolved(clients, &access, resolved.clone());
+                Ok(resolved)
+            }
+            Ok(Found::Namespaces {
+                resolved,
+                answered: false,
+            }) => {
+                cluster.set_unsettled(clients, &access, Some(resolved.clone()));
+                Ok(resolved)
+            }
+            Err(waiting) => {
+                cluster.set_unsettled(clients, &access, None);
+                Err(waiting)
+            }
         }
-        asked.map(|(resolved, _)| resolved)
     }
 
-    /// What all namespaces come to, and whether it is worth keeping: every
-    /// question answered, which a person who may list cluster-wide needs no
-    /// set for.
-    async fn ask(&self, query: &Query, access: &Access) -> Result<(Resolved, bool), ViewState> {
+    async fn ask(&self, query: &Query, access: &Access) -> Result<Found, ViewState> {
         match self.review(&query.context, None, access).await {
-            Ok(true) => return Ok((Resolved::default(), false)),
+            Ok(true) => return Ok(Found::Everywhere),
             Ok(false) => {}
-            Err(Unanswered::Refused) => return Ok((Resolved::default(), true)),
+            Err(Unanswered::Refused) => return Ok(Found::refused()),
             Err(Unanswered::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(Unanswered::Failed) => return Err(ViewState::Connecting),
         }
         let names = match self.namespaces(&query.context).await {
             Ok(names) => names,
-            Err(ViewState::Forbidden { .. }) => return Ok((Resolved::default(), true)),
+            Err(ViewState::Forbidden { .. }) => return Ok(Found::refused()),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
@@ -510,7 +527,10 @@ impl Hub {
             omitted: u32::try_from(names.len() - allowed.len()).unwrap_or(u32::MAX),
             allowed,
         };
-        Ok((resolved, answers.iter().all(Option::is_some)))
+        Ok(Found::Namespaces {
+            resolved,
+            answered: answers.iter().all(Option::is_some),
+        })
     }
 
     /// An object, followed by an Object upstream for its editor, unless its
@@ -780,6 +800,25 @@ impl Hub {
             .cluster(context)
             .review(&clients, namespace, access, ask)
             .await
+    }
+}
+
+/// What a resolution of all namespaces found.
+enum Found {
+    /// The person may list the resource cluster-wide, which needs no set.
+    Everywhere,
+    /// The namespaces where they may list it, and whether every review
+    /// answered.
+    Namespaces { resolved: Resolved, answered: bool },
+}
+
+impl Found {
+    /// No namespace, which the cluster's own refusal then says.
+    fn refused() -> Self {
+        Found::Namespaces {
+            resolved: Resolved::default(),
+            answered: true,
+        }
     }
 }
 

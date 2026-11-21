@@ -589,6 +589,68 @@ async fn a_set_read_past_five_minutes_is_forgotten_once_the_person_may_list_clus
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_renewal_that_does_not_settle_keeps_the_set_and_the_next_list_resolves_it_again() {
+    for failure in ["the cluster-wide review", "the namespaces", "one review"] {
+        let fake = Fake::default();
+        forty_namespaces(&fake);
+        for name in ["ns-05", "ns-18"] {
+            fake.allow(Some(name), "list", "pods");
+        }
+        let (hub, _clients) = fake.hub(Budgets::default());
+        let mut first = hub.rows(query(&[])).await.unwrap();
+        let mut mirror = Mirror::default();
+        until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+        drop(first);
+
+        sleep(RESOLVED_FOR + Duration::from_secs(1)).await;
+        match failure {
+            "the cluster-wide review" => {
+                let unavailable = StatusCode::SERVICE_UNAVAILABLE;
+                fake.state().reviews_fail.insert(None, unavailable);
+            }
+            "the namespaces" => {
+                let namespaces = "/api/v1/namespaces".to_owned();
+                fake.state().no_endpoints.insert(namespaces);
+            }
+            _ => {
+                let unavailable = StatusCode::SERVICE_UNAVAILABLE;
+                let namespace = Some("ns-30".to_owned());
+                fake.state().reviews_fail.insert(namespace, unavailable);
+            }
+        }
+        let renewing = hub.rows(query(&[])).await.unwrap();
+        sleep(Duration::from_secs(10)).await;
+        let next = hub.rows(query(&[])).await.unwrap();
+        let mut mirror = Mirror::default();
+        mirror.read(&next);
+        let parts = mirror.parts.as_ref().unwrap();
+        assert_eq!(
+            (parts.count, parts.omitted, next.resolved()),
+            (2, 38, true),
+            "{failure} failed, and the list starts with the set it had"
+        );
+
+        fake.state().reviews_fail.clear();
+        fake.state().no_endpoints.clear();
+        fake.add("namespaces", None, "ns-40");
+        fake.allow(Some("ns-40"), "list", "pods");
+        pods_in(&fake, &["ns-40"]);
+        let resolving = hub.rows(query(&[])).await.unwrap();
+        sleep(Duration::from_secs(10)).await;
+        let mut later = hub.rows(query(&[])).await.unwrap();
+        let mut mirror = Mirror::default();
+        until_shown(&mut later, &mut mirror, |m| m.names().len() == 3).await;
+        assert_eq!(
+            mirror.names(),
+            ["p-ns-05", "p-ns-18", "p-ns-40"],
+            "{failure} answers again, and it is resolved anew"
+        );
+        assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
+        drop((renewing, resolving));
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn all_namespaces_asks_for_at_most_eight_reviews_at_a_time() {
     let fake = Fake::default();
     forty_namespaces(&fake);
@@ -804,7 +866,7 @@ async fn a_review_the_cluster_refuses_leaves_all_namespaces_to_the_clusters_own_
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_set_is_not_kept() {
+async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_next_list_asks_again() {
     let fake = Fake::default();
     forty_namespaces(&fake);
     for name in ["ns-05", "ns-31"] {
@@ -833,9 +895,19 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_set_
 
     fake.state().reviews_fail.clear();
     let second = hub.rows(query(&[])).await.unwrap();
-    sleep(Duration::from_secs(5)).await;
     let mut mirror = Mirror::default();
     mirror.read(&second);
+    let parts = mirror.parts.as_ref().unwrap();
+    assert_eq!(
+        (parts.count, parts.omitted),
+        (3, 37),
+        "the guess is read at once, and asked again"
+    );
+
+    sleep(Duration::from_secs(5)).await;
+    let third = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    mirror.read(&third);
     assert_eq!(
         mirror.parts,
         Some(Parts {
@@ -843,7 +915,7 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_set_
             omitted: 38,
             unready: Vec::new(),
         }),
-        "the guess was not kept"
+        "the answer replaced the guess"
     );
 }
 

@@ -42,10 +42,12 @@ pub(crate) struct Kept {
     pub renew: bool,
 }
 
-/// What all namespaces of a resource came to, and when.
+/// What all namespaces of a resource came to, and until when it is read as
+/// it is.
 struct Memo {
     resolved: Resolved,
-    at: Instant,
+    /// From then on the first list that reads it resolves it again.
+    due: Instant,
     /// Someone resolves it again.
     renewing: bool,
 }
@@ -156,29 +158,59 @@ impl Cluster {
         let memo = facts
             .resolved
             .get_mut(&(access.group.clone(), access.resource.clone()))?;
-        let age = memo.at.elapsed();
+        let due = Instant::now() >= memo.due;
         if memo.resolved.allowed.is_empty() {
-            return (age < REFUSED_FOR).then(|| Kept {
+            return (!due).then(|| Kept {
                 resolved: memo.resolved.clone(),
                 renew: false,
             });
         }
-        let renew = age >= RESOLVED_FOR && !std::mem::replace(&mut memo.renewing, true);
+        let renew = due && !std::mem::replace(&mut memo.renewing, true);
         Some(Kept {
             resolved: memo.resolved.clone(),
             renew,
         })
     }
 
+    /// What every question of a resolution answered replaces what was kept.
     pub fn set_resolved(&self, clients: &Arc<Clients>, access: &Access, resolved: Resolved) {
+        let kept = if resolved.allowed.is_empty() {
+            REFUSED_FOR
+        } else {
+            RESOLVED_FOR
+        };
         self.facts(clients).resolved.insert(
             (access.group.clone(), access.resource.clone()),
             Memo {
                 resolved,
-                at: Instant::now(),
+                due: Instant::now() + kept,
                 renewing: false,
             },
         );
+    }
+
+    /// A resolution that did not answer every question leaves the set it
+    /// renews as it is, for the next list to resolve again. With none, its
+    /// guess, which counts what did not answer as allowed, is kept, due at
+    /// once.
+    pub fn set_unsettled(&self, clients: &Arc<Clients>, access: &Access, guess: Option<Resolved>) {
+        let mut facts = self.facts(clients);
+        let key = (access.group.clone(), access.resource.clone());
+        match facts.resolved.get_mut(&key) {
+            Some(memo) if !memo.resolved.allowed.is_empty() => memo.renewing = false,
+            _ => {
+                if let Some(resolved) = guess {
+                    facts.resolved.insert(
+                        key,
+                        Memo {
+                            resolved,
+                            due: Instant::now(),
+                            renewing: false,
+                        },
+                    );
+                }
+            }
+        }
     }
 
     pub fn forget_resolved(&self, clients: &Arc<Clients>, access: &Access) {
