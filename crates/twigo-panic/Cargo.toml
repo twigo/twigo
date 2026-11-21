@@ -1,0 +1,25 @@
+[package]
+name = "twigo-panic"
+description = "What a panic does in Twigo: the supervisor of the app-wide duties, the helper that ends an item, the join that re-raises, and the seam that arms a panic by name"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# `inject::arm`, and the sites that panic once it armed their name: for tests and the check build.
+inject = []
+
+[lints]
+workspace = true
+
+[dependencies]
+futures.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+twigo-panic = { workspace = true, features = ["inject"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util", "time"] }

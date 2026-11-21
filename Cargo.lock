@@ -6227,6 +6227,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "twigo-panic"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "tokio",
+ "tracing",
+ "twigo-panic",
+]
+
+[[package]]
 name = "twigo-policy"
 version = "0.1.0"
 dependencies = [
