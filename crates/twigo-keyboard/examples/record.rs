@@ -2,9 +2,8 @@
 //! Mac, read without selecting them: the input source stays as it is.
 //!
 //! cargo run -p twigo-keyboard --example record
-#![expect(clippy::print_stdout, reason = "an example's output is its result")]
-
 #[cfg(target_os = "macos")]
+#[expect(clippy::print_stdout, reason = "an example's output is its result")]
 fn main() {
     use std::path::Path;
 
@@ -32,6 +31,7 @@ fn main() {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[expect(clippy::print_stderr, reason = "an example's output is its result")]
 fn main() {
     eprintln!("the layouts are recorded from macOS's installed layouts; run this on a Mac");
     std::process::exit(1);
