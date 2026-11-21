@@ -300,19 +300,22 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     - One SelfSubjectAccessReview asks whether they may list it cluster-wide, and the clients keep its answer: a yes for their life, a no for 30 s.
       A yes keeps one cluster-wide upstream, as for any selection of more than four.
     - A no resolves the set: the names of the namespaces, a review of each, at most 8 at a time, and an upstream per namespace that a review allows.
-      The names come from one list request of the namespaces' metadata, in pages as the hub lists, which takes a request slot and never waits for a watch; the picker's `namespaces_list` reads them the same way, once per opening.
+      The names come from one list request of the namespaces' metadata, in pages as the hub lists, which takes a request slot and never waits for a watch; the picker's `namespaces_list` reads them the same way, once per opening, and tries a transient failure again with the backoff for 10 s before it answers `stale`, while a refusal answers at once.
       A review that another asker has under way is not sent again, so lists opened together ask each question once.
       The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
       The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
+      Only a resolution that answers every question replaces the set, with a set, the cluster-wide yes or a refusal: one that fails, or leaves a review unanswered, keeps it, and the next list resolves it again.
       A set with no namespace allowed, or a refusal to list the namespaces, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
     - `Parts.omitted` counts the namespaces the cluster lists that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
     - With no namespace allowed, or the list of namespaces refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).
     - What does not answer is no answer.
-      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state, and the set is not kept, so the next list asks again.
-      The clients may take long to come, as they do while a credential plugin signs the person in, and they, the cluster-wide review or the list of namespaces may fail with anything but a refusal.
+      A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state.
+      With no answered set to keep, such a set is kept as a guess that the next list reads at once and resolves again.
+      The clients may take long to come, as they do while a credential plugin signs the person in, and they, the cluster-wide review or the list of namespaces may fail without a refusal: a 429, a 5xx, a timeout or a connection that broke.
       The hub settles what "all" reads apart from the list's subscription, which returns at once, and tries again with the backoff below: the subscription has no part and says what it waits on, the clients' error while they fail and else `connecting`, never the cluster's refusal.
-      Clients that say `unauthorized` stay so until a new subscription asks, since a retry would run the plugin by itself.
+      Clients that say `unauthorized`, and a review or the list of namespaces that the cluster answers with a 401 or a failed credential plugin, stay so until a new subscription asks, since a retry would run the plugin by itself.
+      A review that the server refuses itself, which waiting does not change, leaves all namespaces to the cluster part, which says the server's own answer; it is kept 30 s, as a review's no.
     - On kind 1.37.0 (2026-11-21, a scratch probe that opens the list through the hub, with a delay added before each request as an assumed round trip, not a remote cluster's), a person allowed 3 of 46 namespaces had rows 32–34 ms after the list opened and 517–524 ms with 50 ms added; allowed 3 of 206, 71–162 and 1670–1718 ms; a cluster admin's first rows come 52–67 ms later than they did with 50 ms added, for the review that asks first (three runs each at 46 and at 206 namespaces, 58 and 60 ms on average), and on loopback within the runs' spread (21–23 ms before and 23–27 ms after at 46, 35–56 and 32–40 at 206).
     - The 8 reviews at a time leave the context's request slots (28) to the rest of the UI: at 206 namespaces and 50 ms added, the home page's three namespaced kinds, 621 reviews, had rows at 1779 ms with 8, 1521–1571 ms with 16 and 1462–1520 ms with 28, and an unrelated request took 55, 81 and 219 ms meanwhile.
   - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
@@ -427,7 +430,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
 - **Refusals retry too.**
   A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
   A part that has never listed, whose first list got a 403, waits 30 s and the backoff's jitter (30–60 s) between tries instead, the time the hub keeps a review's no: a person who may not read a namespace stays refused, and the 37 parts refused of a selection of 40 sent 9.75 requests a second at the backoff, 197 of 200 sent 52.75 (kind 1.37.0, 2026-11-21, a service account bound in 3 namespaces, over a selection of every namespace).
-  A subscription that holds such a part anew ends that wait and tries at once, so Retry after a grant and a list opened again do not wait it out, while an open list keeps its 30 s.
+  A subscription that holds such a part anew ends that wait once it has run 5 s, the ordinary backoff's longest, and tries then, so Retry after a grant and a list opened again try within 5 s of the refusal, and a filter typed over many refused parts asks each at most once per 5 s; an open list keeps its 30 s.
   Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds
