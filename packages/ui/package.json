@@ -18,7 +18,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "fuzzysort": "^4.0.2",
-    "lucide-react": "^1.72.0",
+    "lucide-react": "^1.75.0",
     "radix-ui": "^1.8.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
@@ -39,6 +39,6 @@
     "jsdom": "^31.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
