@@ -914,11 +914,12 @@ async fn all_namespaces_of_rejected_credentials_say_unauthorized_and_wait_for_a_
         assert_eq!((slots.held, slots.queued), (0, 0), "{rejected}");
 
         down.store(false, Ordering::Relaxed);
-        let mut state = fake.state();
-        state.plugin_timed_out = false;
-        state.reviews_fail.clear();
-        state.unauthorized.clear();
-        drop(state);
+        {
+            let mut state = fake.state();
+            state.plugin_timed_out = false;
+            state.reviews_fail.clear();
+            state.unauthorized.clear();
+        }
         let mut again = hub.rows(query(&[])).await.unwrap();
         let mut mirror = Mirror::default();
         until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
