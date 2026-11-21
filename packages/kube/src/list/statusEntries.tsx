@@ -8,7 +8,13 @@ import {
   type ViewState,
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { useChanges, useWorkbench, type StatusEntry } from "@twigo/workbench";
+import {
+  errorLines,
+  useChanges,
+  useWorkbench,
+  type ErrorLike,
+  type StatusEntry,
+} from "@twigo/workbench";
 import { servedAs, useClusterVersion, type Discovery } from "../discovery";
 import {
   byHealth,
@@ -20,11 +26,12 @@ import {
 import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
+import { causeWords, statusWord, type Failure } from "./errorWords";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
 import { namespaceWords } from "./scope";
 
 const CONNECTION: Readonly<
-  Record<ViewState["state"], { tone: Tone; text: string }>
+  Record<Exclude<ViewState["state"], "error">, { tone: Tone; text: string }>
 > = {
   ready: { tone: "ok", text: "Connected" },
   relisting: { tone: "ok", text: "Connected" },
@@ -34,8 +41,21 @@ const CONNECTION: Readonly<
   syncing: { tone: "warn", text: "Syncing" },
   forbidden: { tone: "error", text: "Forbidden" },
   unauthorized: { tone: "error", text: "Unauthorized" },
-  error: { tone: "error", text: "Unreachable" },
 };
+
+/** The status bar's word and tone for a state; an error says its own word, as the variant has it. */
+function connectionOf(state: ViewState): { tone: Tone; text: string } {
+  return state.state === "error"
+    ? { tone: "error", text: statusWord(state.error) }
+    : CONNECTION[state.state];
+}
+
+/** What kept a state from being well: the cluster's refusal, or the failure a waiting list met last. */
+function failureOf(state: ViewState): ErrorLike | undefined {
+  return state.state === "connecting" || state.state === "stale"
+    ? state.cause
+    : refusal(state);
+}
 
 const LOADING: ReadonlySet<ViewState["state"]> = new Set([
   "connecting",
@@ -91,7 +111,7 @@ export function partsLine({
     state.state === "syncing" ? [state] : [],
   );
   const said = syncing.length > 0 ? leastReady(syncing) : worst;
-  const { text, tone } = CONNECTION[worst.state];
+  const { text, tone } = connectionOf(worst);
   return {
     text: `${stateLabel(said) ?? text} · ${alike.length} of ${count} namespaces`,
     tone,
@@ -105,7 +125,13 @@ export function partsLine({
 /** A part whose first list broke off holds no rows: it is connecting again, as Rust says of a list that shows none. */
 function asSeen(part: PartState): PartState {
   return part.state.state === "stale" && !part.shown
-    ? { ...part, state: { state: "connecting" } }
+    ? {
+        ...part,
+        state: {
+          state: "connecting",
+          ...(part.state.cause && { cause: part.state.cause }),
+        },
+      }
     : part;
 }
 
@@ -115,20 +141,24 @@ function describe({ state, shown, parts }: Kind): string {
     case "forbidden":
     case "unauthorized":
     case "error":
-      return `${where}: ${refusal(state).message}`;
+      return `${where}: ${errorLines(refusal(state)).join(" · ")}`;
     case "queued":
       return `${where}: ${shown ? "rows as last listed" : "no rows yet"}`;
     case "connecting":
-      return `${where}: connecting`;
+      return `${where}: connecting${caused(state.cause)}`;
     case "syncing":
       return `${where}: loading`;
     case "stale":
-      return `${where}: no updates, reconnecting`;
+      return `${where}: no updates, reconnecting${caused(state.cause)}`;
     case "relisting":
       return `${where}: relisting`;
     case "ready":
       return where;
   }
+}
+
+function caused(cause: Failure | undefined): string {
+  return cause ? ` · ${causeWords(cause)}` : "";
 }
 
 /** Parts by name, the first few; a part of a kind this webview does not know is counted and not named. */
@@ -196,12 +226,18 @@ export function clusterEntries(
       ];
     }
     const state = list && spoken(list);
-    const connection = state && CONNECTION[state.state];
+    const connection = state && connectionOf(state);
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";
-    const tooltip = [connection?.text, known && `Kubernetes ${known}`]
+    const failure = state && failureOf(state);
+    const tooltip = [
+      [connection?.text, known && `Kubernetes ${known}`]
+        .filter(Boolean)
+        .join(" · "),
+      ...(failure ? errorLines(failure) : []),
+    ]
       .filter(Boolean)
-      .join(" · ");
+      .join("\n");
     const left =
       list && healthy && list.parts.omitted > 0
         ? { title: list.title, ...list.parts }

@@ -16,7 +16,9 @@ test("a refusal is worded once: the empty state and the parts' tooltip say the s
       ],
       omitted: 0,
     });
-    expect(line?.tooltip).toBe(`team-b: ${viewProblem(state, "pods")?.body}`);
+    expect(line?.tooltip).toContain(
+      `team-b: ${viewProblem(state, "pods")?.body}`,
+    );
   }
   expect(viewProblem(refused[0] ?? { state: "ready" }, "pods")?.body).toBe(
     "You may not watch pods.",

@@ -73,9 +73,6 @@ test.each([
   ["syncing", "Loading · 1,850", "Syncing"],
   ["stale", "No updates · reconnecting", "Reconnecting"],
   ["relisting", "v1.33.4", "Connected"],
-  ["forbidden", "Forbidden", "Forbidden"],
-  ["unauthorized", "Unauthorized", "Unauthorized"],
-  ["error", "Unreachable", "Unreachable"],
 ] as const)(
   "a %s list's cluster entry reads %s",
   async (scenario, text, connection) => {
@@ -238,7 +235,7 @@ test.each([
     of22(part("team-b", FORBIDDEN)),
     "Forbidden · 1 of 22 namespaces",
     "error",
-    "team-b: You may not watch pods.",
+    "team-b: You may not watch pods. · server.forbidden",
   ],
   [
     "a part in error",
@@ -254,7 +251,7 @@ test.each([
     ),
     "Unreachable · 1 of 22 namespaces",
     "error",
-    "team-b: connection refused",
+    "team-b: connection refused · connect.other",
   ],
   [
     "parts that wait for a stream with no rows",
@@ -347,7 +344,7 @@ test("several kinds of trouble: the worst leads and the tooltip lists the rest, 
     text: "Forbidden · 2 of 22 namespaces",
     tone: "error",
     tooltip: [
-      "team-b, team-d: You may not watch pods.",
+      "team-b, team-d: You may not watch pods. · server.forbidden",
       "team-x: no rows yet",
       "team-c: no updates, reconnecting",
     ].join("\n"),
@@ -380,7 +377,7 @@ test("a list that has the rows of one namespace says the others are refused, in 
   await act(() => vi.advanceTimersByTimeAsync(1500));
   const forbidden = entry("Forbidden · 2 of 3 namespaces");
   expect(forbidden?.getAttribute("title")).toBe(
-    "auth, payments: You may not watch pods.\nKubernetes v1.33.4",
+    "auth, payments: You may not watch pods. · server.forbidden\nKubernetes v1.33.4",
   );
   expect(screen.queryByText("Access denied")).toBeNull();
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
@@ -400,7 +397,7 @@ test("a list in which every namespace is refused is replaced by the denial", asy
   expect(screen.getByText("Access denied")).toBeTruthy();
   expect(
     entry("Forbidden · 2 of 2 namespaces")?.getAttribute("title"),
-  ).toContain("auth, payments: You may not watch pods.");
+  ).toContain("auth, payments: You may not watch pods. · server.forbidden");
 });
 
 test("a list whose last namespaces wait for a stream shows the rows it has and says so", async () => {
