@@ -175,8 +175,69 @@ test("an empty list that leaves namespaces out speaks of the ones shown, not of 
   ).toBeTruthy();
 });
 
+test("an empty list of all namespaces that leaves some out speaks of the ones the person may list", async () => {
+  const workbench = await mountKube(createMockBackend("rbacNamespaces"));
+  act(() => {
+    workbench.spaces.select("dev");
+    workbench.editors.open("k8s-list://dev/v1/pods");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("No pods in the 1 namespace you may list"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Nothing of this kind exists in them, and these credentials may not list pods in the other 11.",
+    ),
+  ).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://dev/v1/pods?q=api");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("No matching pods in the 1 namespace you may list"),
+  ).toBeTruthy();
+});
+
+test("a list of all namespaces that is refused says so and offers to choose namespaces, and a selection that is refused keeps its words", async () => {
+  const workbench = await mountKube(createMockBackend("rbacTypedNamespaces"));
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/pods");
+  });
+  await settle(30);
+  expect(
+    screen.getByText(
+      "These credentials may not list pods in every namespace at once.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Choose namespaces" }));
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
+
+  act(() => {
+    workbench.quickAccess.hide();
+    workbench.editors.open("k8s-list://prod-eu/v1/pods?ns=auth");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("These credentials may not watch pods."),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Choose namespaces" }),
+  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open("k8s-list://prod-eu/v1/nodes");
+  });
+  await settle(30);
+  expect(
+    screen.getByText("These credentials may not watch nodes."),
+  ).toBeTruthy();
+});
+
 test.each([
-  ["forbidden", "Access denied"],
   ["unauthorized", "Sign-in needed"],
   ["error", "Could not load pods"],
 ] as const)("%s shows its own panel with a retry", async (scenario, title) => {

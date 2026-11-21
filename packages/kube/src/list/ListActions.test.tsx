@@ -595,7 +595,9 @@ test("a list pinned with namespaces of its own shows them as a label that no cli
   expect(label.textContent).toBe("checkout");
   expect(label.tabIndex).toBe(0);
   expect(
-    screen.queryByRole("button", { name: /namespaces|checkout/i }),
+    screen.queryByRole("button", {
+      name: /^(Namespaces?: |Show all namespaces$|checkout)/i,
+    }),
   ).toBeNull();
 
   fireEvent.click(label);
@@ -632,7 +634,11 @@ test("the label of a list with namespaces of its own folds as the chip does and 
     return label.textContent.trim();
   });
   expect(shown).toEqual(["payments+2", "+2", ""]);
-  expect(screen.queryByRole("button", { name: /namespaces/i })).toBeNull();
+  expect(
+    screen.queryByRole("button", {
+      name: /^(Namespaces?: |Show all namespaces$)/,
+    }),
+  ).toBeNull();
 });
 
 const formOf = () => {

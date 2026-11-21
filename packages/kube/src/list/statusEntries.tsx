@@ -198,6 +198,26 @@ export function clusterEntries(
     const connection = state && CONNECTION[state.state];
     if (!connection && !known) return [];
     const healthy = !connection || connection.tone === "ok";
+    const tooltip = [connection?.text, known && `Kubernetes ${known}`]
+      .filter(Boolean)
+      .join(" · ");
+    if (list && healthy && list.parts.omitted > 0) {
+      const { count, omitted } = list.parts;
+      return [
+        {
+          id: "cluster",
+          text: `${String(count)} of ${String(count + omitted)} namespaces`,
+          quiet: true,
+          ...(connection && { tone: connection.tone }),
+          tooltip: [
+            `${list.title} in the ${String(count)} ${count === 1 ? "namespace" : "namespaces"} these credentials may list; ${String(omitted)} ${omitted === 1 ? "other is" : "others are"} left out`,
+            tooltip,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+      ];
+    }
     return [
       {
         id: "cluster",
@@ -206,9 +226,7 @@ export function clusterEntries(
             ? known
             : ((state && stateLabel(state)) ?? connection?.text ?? ""),
         ...(connection && { tone: connection.tone }),
-        tooltip: [connection?.text, known && `Kubernetes ${known}`]
-          .filter(Boolean)
-          .join(" · "),
+        tooltip,
       },
     ];
   };
