@@ -29,8 +29,8 @@ use twigo_policy::Policy;
 use twigo_sessions::shell::Frame;
 use twigo_sessions::terminal::{Spec, Terminal};
 
+use crate::Core;
 use crate::proxy::ProxyProcess;
-use crate::{ClientsError, Core};
 use directory::Directory;
 pub(crate) use offers::Offers;
 use offers::Source;
@@ -200,7 +200,7 @@ impl Core {
         // process, whose proxy follows the mode by itself.
         let contexts = self.catalog.contexts().await;
         let Some(found) = contexts.find(&context) else {
-            return Err(IpcError::from(&ClientsError::NoContext(context)));
+            return Err(crate::errors::unlisted(&context));
         };
         let kind = kind(&self.policy, &context);
         let sources = self

@@ -323,8 +323,14 @@ impl Core {
     async fn listed(&self, context: &str) -> Result<(), IpcError> {
         match self.catalog.contexts().await.find(context) {
             Some(_) => Ok(()),
-            None => Err(IpcError::from(&ClientsError::NoContext(context.to_owned()))),
+            None => Err(errors::unlisted(context)),
         }
+    }
+
+    /// The space of a context the catalog lists, opened if the person has none yet.
+    pub async fn space_open(&self, context: &str) -> Result<twigo_ipc::Space, IpcError> {
+        self.listed(context).await?;
+        Ok(self.state.open_space(context))
     }
 
     /// What a command will do and the friction it asks for (ARCHITECTURE

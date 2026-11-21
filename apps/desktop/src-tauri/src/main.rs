@@ -231,13 +231,7 @@ fn spaces_list(app: State<'_, App>) -> Vec<Space> {
 
 #[tauri::command]
 async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
-    if app.core.catalog.contexts().await.find(&request).is_none() {
-        return Err(IpcError::new(
-            ErrorCode::ContextNotListed,
-            format!("no source lists the context {request:?}"),
-        ));
-    }
-    Ok(app.core.state.open_space(&request))
+    app.core.space_open(&request).await
 }
 
 #[tauri::command]

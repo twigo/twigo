@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use twigo_env::ShellEnv;
-use twigo_ipc::{ErrorKind, Gvr, Mode};
+use twigo_ipc::{ErrorCode, ErrorKind, Gvr, Mode};
 
 use super::*;
 use crate::state::State;
@@ -522,8 +522,7 @@ async fn a_forward_of_a_context_the_catalog_lacks_fails_naming_it() {
     let ForwardState::Failed { error } = failed else {
         unreachable!("waited for");
     };
-    assert_eq!(error.kind, ErrorKind::NotFound);
-    assert_eq!(error.message, "no source lists the context \"kind-gone\"");
+    assert_eq!(error.code, ErrorCode::ContextNotListed);
 }
 
 #[tokio::test]
@@ -999,7 +998,7 @@ async fn a_forward_goes_back_to_waiting_when_its_context_is_back_in_the_catalog(
     let ForwardState::Failed { error } = failed else {
         unreachable!("waited for");
     };
-    assert_eq!(error.message, "no source lists the context \"kind-plain\"");
+    assert_eq!(error.code, ErrorCode::ContextNotListed);
 
     std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
     until("the catalog has it again", || {
@@ -1010,8 +1009,6 @@ async fn a_forward_goes_back_to_waiting_when_its_context_is_back_in_the_catalog(
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 }
-
-const NO_SOURCE: &str = "no source lists the context \"kind-plain\"";
 
 fn failed_with(core: &Core, wanted: impl Fn(&IpcError) -> bool) -> Option<ForwardState> {
     let now = listed(core).first()?.state.clone();
@@ -1047,7 +1044,7 @@ async fn restored_without_its_context(dir: &Path) -> Arc<Core> {
     assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
     lose_the_context(dir);
     until("the catalog loses the context", || {
-        failed_with(&core, |error| error.message == NO_SOURCE)
+        failed_with(&core, |error| error.code == ErrorCode::ContextNotListed)
     })
     .await;
     core
@@ -1069,9 +1066,9 @@ async fn a_resume_and_a_move_while_the_catalog_lacks_the_context_answer_the_refu
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(refused.code, ErrorCode::ContextNotListed);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
+    assert!(failed_with(&core, |error| error.code == ErrorCode::ContextNotListed).is_some());
 
     let moved = free();
     let refused = core
@@ -1081,12 +1078,12 @@ async fn a_resume_and_a_move_while_the_catalog_lacks_the_context_answer_the_refu
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(refused.code, ErrorCode::ContextNotListed);
     assert_eq!(listed(&core)[0].local, local);
     assert!(std::net::TcpListener::bind(("127.0.0.1", moved)).is_ok());
     assert!(TcpStream::connect(("127.0.0.1", local)).await.is_ok());
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(failed_with(&core, |error| error.message == NO_SOURCE).is_some());
+    assert!(failed_with(&core, |error| error.code == ErrorCode::ContextNotListed).is_some());
     let states = states_of(&seen);
     assert!(!states.contains(&ForwardState::Starting), "{states:?}");
 
@@ -1139,7 +1136,7 @@ async fn a_resume_and_a_move_ask_the_catalog_themselves_whether_the_forward_may_
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(refused.code, ErrorCode::ContextNotListed);
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 
     let refused = core
@@ -1149,7 +1146,7 @@ async fn a_resume_and_a_move_ask_the_catalog_themselves_whether_the_forward_may_
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.message, NO_SOURCE);
+    assert_eq!(refused.code, ErrorCode::ContextNotListed);
     assert_eq!(listed(&core)[0].local, local);
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
 }
@@ -1270,7 +1267,7 @@ async fn the_refusal_s_words_follow_a_change_of_cause() {
 
     lose_the_context(dir.path());
     until("the words name the context", || {
-        failed_with(&core, |error| error.message == NO_SOURCE)
+        failed_with(&core, |error| error.code == ErrorCode::ContextNotListed)
     })
     .await;
 
@@ -2188,7 +2185,7 @@ async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lack
         })
         .await
         .unwrap_err();
-    assert_eq!(refused.message, NO_SOURCE, "before it binds");
+    assert_eq!(refused.code, ErrorCode::ContextNotListed, "before it binds");
     let moved = free();
     for asked in [Some(local), Some(moved)] {
         let refused = core
@@ -2199,7 +2196,7 @@ async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lack
             })
             .await
             .unwrap_err();
-        assert_eq!(refused.message, NO_SOURCE);
+        assert_eq!(refused.code, ErrorCode::ContextNotListed);
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(states_of(&seen).is_empty());

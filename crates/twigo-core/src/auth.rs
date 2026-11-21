@@ -146,10 +146,7 @@ impl AuthFollower {
         self.status = None;
         let Some(context) = contexts.find(&self.context) else {
             return ContextAuth::Invalid {
-                error: IpcError::new(
-                    ErrorCode::ContextNotListed,
-                    format!("no source lists the context {:?}", self.context),
-                ),
+                error: crate::errors::unlisted(&self.context),
             };
         };
         let exec = match context.entries.exec() {

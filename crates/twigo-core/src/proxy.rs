@@ -25,9 +25,9 @@ use twigo_ipc::{BlockReason, Blocked, ErrorCode, IpcError, RequestClass};
 use twigo_kube::client::{Actor, ActorClients, Clients};
 use twigo_policy::{Attributes, Policy};
 
+use crate::Core;
 use crate::approvals::Approvals;
 use crate::catalog::Contexts;
-use crate::{ClientsError, Core};
 pub(crate) use tokens::{Digest, Holder};
 
 /// The proxy's endpoint, its tokens and the actors' clients it sends with.
@@ -179,7 +179,7 @@ impl Core {
         }
         let contexts = self.catalog.contexts().await;
         if contexts.find(context).is_none() {
-            return Err(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+            return Err(crate::errors::unlisted(context));
         }
         let endpoint = self
             .proxy

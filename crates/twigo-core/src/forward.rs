@@ -30,7 +30,7 @@ pub(crate) use saved::{Saved, SavedForward};
 
 use crate::catalog::Contexts;
 use crate::proxy::{Changes, blocked};
-use crate::{ClientsError, Core, actions};
+use crate::{Core, actions};
 
 /// A forward's `Changed` goes out at most four times a second, unless its
 /// state changed.
@@ -277,7 +277,7 @@ impl Checks {
     fn refusal(&self, context: &str, target: &ForwardTarget) -> Option<IpcError> {
         let contexts = self.catalog.borrow().clone()?;
         if contexts.find(context).is_none() {
-            return Some(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+            return Some(crate::errors::unlisted(context));
         }
         blocked(&self.policy, context, &attributes(target), Actor::Ui)
             .map(|blocked| IpcError::from(*blocked))
