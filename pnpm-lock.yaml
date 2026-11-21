@@ -291,8 +291,8 @@ importers:
         specifier: workspace:*
         version: link:../workbench
       '@xterm/addon-fit':
-        specifier: 0.12.0-beta.333
-        version: 0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)
+        specifier: 0.12.0-beta.334
+        version: 0.12.0-beta.334(@xterm/xterm@6.1.0-beta.337)
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.331
         version: 0.10.0-beta.331(@xterm/xterm@6.1.0-beta.337)
@@ -2170,10 +2170,10 @@ packages:
   '@vscode/l10n@0.0.18':
     resolution: {integrity: sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ==}
 
-  '@xterm/addon-fit@0.12.0-beta.333':
-    resolution: {integrity: sha512-klXLc84a/fU3ct9SViM0V9FP1BcrWukm3UsGtppVbi3nuXNid/Oe7ThzHdDjrqKuxISl0ENQ2pkIha6CAnU9kw==}
+  '@xterm/addon-fit@0.12.0-beta.334':
+    resolution: {integrity: sha512-fIFQHJ15PER9KhAG24IhA5vF4ysHEKrJgImt/ZqRcahvNUGF1T3WnpJ6bLvlvnsft7bVT0ofBWySx6nxFNAXkA==}
     peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.337
+      '@xterm/xterm': ^6.1.0-beta.338
 
   '@xterm/addon-unicode11@0.10.0-beta.331':
     resolution: {integrity: sha512-GW2EOP+4+ZXQS/KfTgriP2QxDOSMe9ffnEkq7tgIwAfiTUcE3X/oxn6wBNdyxuM/5mLyK7wzi1O8ycV83yAYPw==}
@@ -5212,7 +5212,7 @@ snapshots:
 
   '@vscode/l10n@0.0.18': {}
 
-  '@xterm/addon-fit@0.12.0-beta.333(@xterm/xterm@6.1.0-beta.337)':
+  '@xterm/addon-fit@0.12.0-beta.334(@xterm/xterm@6.1.0-beta.337)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.337
 
