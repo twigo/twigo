@@ -294,12 +294,24 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   - Coming back resumes from the last `resourceVersion`, or relists on `410 Gone`.
 - **Scope follows the namespace selection.**
   - One upstream per selected namespace, so looking at 200 pods in one namespace never watches the cluster's 50k.
-  - "All namespaces", or more than a few selected namespaces (default 4), switches to one cluster-wide upstream, if the user may list the kind cluster-wide (one SelfSubjectAccessReview, kept with the context's clients).
+  - More than a few selected namespaces (default 4) switch to one cluster-wide upstream, if the person may list the kind cluster-wide.
     Rust then filters by namespace.
+  - **"All namespaces" lists the namespaces where the person may list the kind.**
+    - One SelfSubjectAccessReview asks whether they may list it cluster-wide, and the clients keep its answer: a yes for their life, a no for 30 s.
+      A yes keeps one cluster-wide upstream, as for any selection of more than four.
+    - A no resolves the set: the names of the namespace index (3.3), a review of each, at most 8 at a time, and an upstream per namespace that a review allows.
+      A review that another asker has under way is not sent again, so lists opened together ask each question once.
+      The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review, and the first one after resolves again, so a namespace created or a binding granted since shows then.
+    - `Parts.omitted` counts the namespaces of the index that the set leaves out (3.7).
+    - With no namespace allowed, or the index refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
+      Such a person types the namespaces they read in (4.5).
+    - The context's clients may take long to come, as they do while a credential plugin signs the person in, so the hub settles what "all" reads apart from the list's subscription, which returns at once: it has no part and says `connecting` until then, never a refusal.
+    - On kind 1.37.0 (2026-11-21, a scratch probe that opens the list through the hub, with a delay added before each request as an assumed round trip, not a remote cluster's), a person allowed 3 of 46 namespaces had rows 32–34 ms after the list opened and 517–524 ms with 50 ms added; allowed 3 of 206, 71–162 and 1670–1718 ms; a cluster admin's first rows come one round trip later than they did, 2–4 ms on loopback and about 55 ms with 50 ms added, for the review that asks first.
+    - The 8 reviews at a time leave the context's request slots (28) to the rest of the UI: at 206 namespaces and 50 ms added, the home page's three namespaced kinds, 621 reviews, had rows at 1779 ms with 8, 1524–1571 ms with 16 and 1462–1520 ms with 28, and an unrelated request took 55, 81 and 219 ms meanwhile.
   - Hysteresis: while a cluster-wide upstream runs or lingers, it serves narrower selections too, without holding it, so toggling back and forth costs nothing.
     Once it has lingered out, those selections move to upstreams per namespace, and keep its rows until theirs are listed.
-  - Users who may not list namespaces type them in.
-    The context's default namespace is preselected.
+    A person refused cluster-wide never has one.
+  - A new space starts on the namespace its kubeconfig context names (`Context.namespace`), else on all namespaces.
 - **Label selectors** are applied in Rust, because labels are in the row metadata.
   Field selectors always go to the server as their own upstream: row metadata does not carry the fields they match.
 - **One HTTP/2 connection per cluster.**
@@ -407,6 +419,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
   A watch the server ends without sending anything reopens after the backoff too.
 - **Refusals retry too.**
   A `forbidden` or another error shows in the view while the upstream keeps trying with the backoff: a kind 1.33 API server answered a watch it had allowed with 403 for a while after a restart (`restart_live`, 2026-11-02).
+  A part that has never listed, whose first list got a 403, waits 30 s and the backoff's jitter (30–60 s) between tries instead, the time the hub keeps a review's no: a person who may not read a namespace stays refused, and the 37 parts refused of a selection of 40 sent 9.75 requests a second at the backoff, 197 of 200 sent 52.75 (kind 1.37.0, 2026-11-21, a service account bound in 3 namespaces, over a selection of every namespace).
   Only `unauthorized`, a 401 the auth layer's retry did not cure or a credential plugin that failed, stops the upstream until a subscription asks for it again, since retrying would run the plugin by itself.
 
 ### 3.3 Three upstream kinds
@@ -584,7 +597,7 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     The time of one row differed between the runs by up to 1.2 times (the 19 namespaces: 10.3, 10.9 and 11.9 ms), and the namespaces' lists never took as long as the cluster's.
   - Sorted by CPU or Memory, a list reads every namespace of the list, not the window's: the one exception to "only the window", since rows without a sample would otherwise sort wherever the window left them and the order would move as it does.
     A list of all namespaces sorted so asks for the cluster in one request as well (decision 69) and its namespaces as the fallback: the cluster covers the namespaces' and the pods' readers only while it answers, so when it is forbidden or unavailable they are listed themselves and say their own state.
-    A list of chosen namespaces never asks for the cluster.
+    A list of chosen namespaces never asks for the cluster, nor does a list of all namespaces that the hub resolved to the namespaces the person may list (3.2): a person who may not list the pods cluster-wide is taken to be refused their metrics there too, so the request would only repeat every 15 s to be refused.
   - A list's first batch has what the poller already holds.
     A list that joins a scope another reads, as a new query's subscription does while the old one is still open (4.4), has the scope's samples and state in its first batch, with no request.
     A list sorted by CPU or Memory whose first window says it reads metrics holds the first batch that shows its rows until each of its scopes has answered or failed once, so that its first order is the true one, and for 2 s at most, a bound of its own beside the poll's interval.
@@ -701,8 +714,9 @@ A list reads its upstreams as parts, one per namespace or one for the cluster (`
 - `status` is the state of the rows shown: the least ready of the parts shown, one that waits for a watch after its whole list counting as `stale`.
   While no part shows, it is the least ready of the parts still on their way, one whose first list broke off counting as `connecting`, and once none is, the worst refusal.
   So `ready`, `relisting` and `stale` say that some part's rows are shown, and a refusal that no part is on its way.
-- `parts` has `count`, the parts the list reads, and `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`).
+- `parts` has `count`, the parts the list reads, `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`), and `omitted`, for all namespaces of a person who may not list the kind cluster-wide, the namespaces of the cluster that the parts leave out because they may not list it there (3.2), and 0 otherwise.
   It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
+- While the hub settles what all namespaces read (3.2) the list has no part: it says `connecting`, with `count` 1 and nothing unready, and the parts come when it has.
 - A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.
 - A part that starts or stops showing sends every row of the parts shown again (3.4).
 
