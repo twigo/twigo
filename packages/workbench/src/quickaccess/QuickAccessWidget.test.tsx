@@ -280,6 +280,42 @@ test("the row under the cursor scrolls into view as the cursor moves", async () 
   spy.mockRestore();
 });
 
+test("a value typed puts the cursor on the best match, however the cursor moved before", async () => {
+  const workbench = await testWorkbench();
+  const rows: readonly QuickPickItem[] = [
+    { id: "alpha", label: "alpha" },
+    { id: "alpine", label: "alpine" },
+    { id: "beta", label: "beta" },
+  ];
+  const { registered, accept } = provider("!", rows, {
+    items: (filter) => rows.filter((row) => row.label.includes(filter)),
+  });
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  expect(selected()).toBe("alpine");
+
+  fireEvent.change(input(), { target: { value: "!al" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("alpha");
+
+  fireEvent.change(input(), { target: { value: "!" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("alpha");
+
+  press("ArrowDown");
+  fireEvent.change(input(), { target: { value: "!al" } });
+  await act(() => Promise.resolve());
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "alpha" }),
+    "al",
+    expect.anything(),
+    { side: false },
+  );
+});
+
 test("a key the user binds instead moves, and the unbound one does not", async () => {
   const workbench = await testWorkbench();
   workbench.keybindings.register("user", [
@@ -491,6 +527,30 @@ test("Space ticks the row under the cursor and Enter applies the ticked set, whi
   expect(acceptChecked).toHaveBeenCalledWith(["auth"], "", expect.anything());
   expect(accept).not.toHaveBeenCalled();
   expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("a value typed leaves no row under the cursor when the filter is empty again, and puts it on the first row otherwise, after a tick too", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    ticking(undefined, {
+      items: (filter) =>
+        NAMESPACES.filter((item) => item.label.includes(filter)),
+    }).registered,
+  );
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  space();
+  expect(selected()).toBe("payments");
+
+  fireEvent.change(input(), { target: { value: "!a" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("All namespaces");
+  expect(checkedOf("payments")).toBe("false");
+
+  fireEvent.change(input(), { target: { value: "!" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBeUndefined();
 });
 
 test("a row the filter hides keeps its tick, and is applied", async () => {

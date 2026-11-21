@@ -102,7 +102,8 @@ function Open({ session }: { session: Session }) {
   const provider = resolved?.provider;
   const many = provider?.acceptChecked !== undefined;
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
-  const [selected, setSelected] = useState("");
+  const [cursor, setCursor] = useState({ value, id: "" });
+  if (cursor.value !== value) setCursor({ value, id: "" });
   const [held, setChecks] = useState(noChecks(""));
   const checks = held.prefix === provider?.prefix ? held : noChecks("");
   const root = useRef<HTMLDivElement>(null);
@@ -174,7 +175,7 @@ function Open({ session }: { session: Session }) {
   const rowIds = new Map(
     ordered.map((item, index) => [item, `${ids}-${String(index)}`]),
   );
-  const found = ordered.findIndex((item) => item.id === selected);
+  const found = ordered.findIndex((item) => item.id === cursor.id);
   const at =
     found >= 0
       ? found
@@ -268,7 +269,7 @@ function Open({ session }: { session: Session }) {
                 ? 0
                 : ordered.length - 1
               : (at + delta + ordered.length) % ordered.length;
-          setSelected(ordered[next]?.id ?? "");
+          setCursor({ value, id: ordered[next]?.id ?? "" });
         },
         accept: apply,
         toggle: () => {
@@ -358,7 +359,7 @@ function Open({ session }: { session: Session }) {
                   selected={item === active}
                   on={on(item)}
                   onPoint={() => {
-                    setSelected(item.id);
+                    setCursor({ value, id: item.id });
                   }}
                   onSelect={() => {
                     if (on(item) !== undefined && ticking) toggle(item);
