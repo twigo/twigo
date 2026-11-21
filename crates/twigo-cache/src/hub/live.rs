@@ -558,24 +558,24 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
-        let index = Api::<Namespace>::all(clients.api.clone());
-        while index.list(&one).await.is_err() {
+        let namespace_api = Api::<Namespace>::all(clients.api.clone());
+        while namespace_api.list(&one).await.is_err() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     };
     tokio::time::timeout(Duration::from_secs(30), allowed)
         .await
         .expect("the bindings count within half a minute");
-    let index = Api::<Namespace>::all(clients.api.clone());
+    let namespace_api = Api::<Namespace>::all(clients.api.clone());
     let every = kube::api::ListParams::default();
-    let before = index.list(&every).await.unwrap().items.len();
+    let before = namespace_api.list(&every).await.unwrap().items.len();
     let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| {
         let shown = all.drain_shown();
         shown.status == ViewState::Ready && shown.parts.count == 2
     })
     .await;
-    let after = index.list(&every).await.unwrap().items.len();
+    let after = namespace_api.list(&every).await.unwrap().items.len();
     let read: Vec<&String> = [home, &others[0]].into();
     let mut scopes: Vec<Scope> = read
         .iter()

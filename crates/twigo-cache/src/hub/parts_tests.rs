@@ -412,12 +412,17 @@ async fn all_namespaces_of_a_person_who_may_list_pods_cluster_wide_is_one_part_a
     );
     assert_eq!(hub.scopes(), [Scope::Cluster]);
     assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
-    assert_eq!(fake.count("/api/v1/namespaces?"), 0, "no index read");
+    assert_eq!(
+        fake.count("/api/v1/namespaces?"),
+        0,
+        "no list of namespaces"
+    );
     assert_eq!(asked_of(&fake, &names), Vec::<String>::new());
 }
 
 #[tokio::test(start_paused = true)]
-async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_clusters_refusal() {
+async fn all_namespaces_when_the_namespaces_are_refused_or_nothing_is_allowed_is_the_clusters_refusal()
+ {
     let fake = Fake::default();
     forty_namespaces(&fake);
     fake.state().forbidden.insert("/api/v1/pods".to_owned());
@@ -485,7 +490,7 @@ async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_c
                 shown: false,
             }],
         }),
-        "the index's 40 are no count of what a cluster part leaves out"
+        "the 40 namespaces are no count of what a cluster part leaves out"
     );
     assert_eq!(mirror.names(), Vec::<&str>::new());
     assert!(!none.resolved(), "it reads the cluster, not parts");
@@ -503,7 +508,7 @@ async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_reso
     let mut first = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
     until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
-    let (reviews, index) = (
+    let (reviews, listed) = (
         fake.count("selfsubjectaccessreviews"),
         fake.count("/api/v1/namespaces?"),
     );
@@ -518,7 +523,7 @@ async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_reso
     until_shown(&mut within, &mut mirror, |m| m.names().len() == 2).await;
     assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
     assert_eq!(fake.count("selfsubjectaccessreviews"), reviews);
-    assert_eq!(fake.count("/api/v1/namespaces?"), index, "it asks nothing");
+    assert_eq!(fake.count("/api/v1/namespaces?"), listed, "it asks nothing");
     drop(within);
 
     sleep(Duration::from_secs(2)).await;
@@ -537,7 +542,7 @@ async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_reso
     sleep(Duration::from_secs(10)).await;
     assert_eq!(
         fake.count("/api/v1/namespaces?"),
-        index + 1,
+        listed + 1,
         "resolved again once, for both"
     );
     mirror.read(&open);
@@ -920,7 +925,7 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_next
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_index_that_fails_without_refusing_is_waited_for_never_taken_for_a_refusal() {
+async fn the_namespaces_failing_without_a_refusal_are_waited_for_never_taken_for_a_refusal() {
     let fake = Fake::default();
     allowed_in_three(&fake);
     fake.state()
