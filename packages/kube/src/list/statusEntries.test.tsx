@@ -90,6 +90,15 @@ test("the status bar counts the active list's rows", async () => {
   expect(screen.getByText("5,000 pods")).toBeTruthy();
 });
 
+test("a list of one row counts it by the resource's singular", async () => {
+  await openList(
+    undefined,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 deployment")).toBeTruthy();
+  expect(screen.queryByText("1 deployments")).toBeNull();
+});
+
 const statusOf = (row: HTMLElement) =>
   row.querySelector('[data-column="Status"]')?.textContent ?? "";
 const pressed = () =>
