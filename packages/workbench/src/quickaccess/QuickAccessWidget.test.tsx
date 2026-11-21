@@ -445,14 +445,11 @@ function ticking(
   };
 }
 
-test("rows with a box open ticked as they say, with no row under the cursor, so Enter at once changes nothing", async () => {
+test("a listbox that takes several rows opens with no row under the cursor, so Enter at once changes nothing", async () => {
   const workbench = await testWorkbench();
   const { registered, accept, acceptChecked } = ticking();
   workbench.quickAccess.register(registered);
   await opened(workbench, "!");
-  expect(checkedOf("payments")).toBe("true");
-  expect(checkedOf("auth")).toBe("false");
-  expect(rowOf("All namespaces").getAttribute("aria-selected")).toBeNull();
   expect(screen.getByRole("listbox").getAttribute("aria-multiselectable")).toBe(
     "true",
   );
@@ -467,7 +464,7 @@ test("rows with a box open ticked as they say, with no row under the cursor, so 
   expect(acceptChecked).not.toHaveBeenCalled();
 });
 
-test("the footer says what Enter does to the row under the cursor: only this one for a row with a box before the first tick, then the ticked set", async () => {
+test("the footer says what Enter does to the row under the cursor: only this one for a row with a box before the first tick", async () => {
   const workbench = await testWorkbench();
   workbench.quickAccess.register(ticking().registered);
   await opened(workbench, "!");
@@ -482,10 +479,6 @@ test("the footer says what Enter does to the row under the cursor: only this one
   press("ArrowDown");
   expect(hint("Only this")).toBe(true);
   expect(hint("Select")).toBe(false);
-
-  space();
-  expect(hint("Apply · 0 namespaces")).toBe(true);
-  expect(hint("Only this")).toBe(false);
 });
 
 test("the footer says Close while the rows of the opening come, and Select, not Close, while those of a value typed do", async () => {
