@@ -22,6 +22,8 @@
 //! batch, an object's values, a kubeconfig's text or a server's message for
 //! a failed request.
 
+#[cfg(feature = "test-util")]
+mod capture;
 mod facts;
 mod panic;
 mod repeats;
@@ -31,10 +33,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 
+#[cfg(feature = "test-util")]
+pub use capture::{Captured, capture};
 pub use facts::Facts;
 pub use panic::install_hook;
 pub use repeats::Repeats;
-pub use rotating::{Limits, Rotating};
+pub use rotating::{Failure, Limits, Rotating};
 pub use tracing::Level;
 use tracing::level_filters::LevelFilter;
 use tracing_log::AsLog;
@@ -77,7 +81,7 @@ impl Log {
     /// be opened is said on stderr, and the log goes there.
     pub fn start(directory: &Path, facts: &Facts) -> Self {
         let path = directory.join(FILE);
-        let file = Rotating::open_new(&path, LIMITS)
+        let file = Rotating::open_new(&path, LIMITS, rotating::to_stderr)
             .inspect_err(|error| report(&path, error))
             .ok();
         let (spec, filter, invalid) = initial_filter();
@@ -172,10 +176,11 @@ fn log_tracer() {
 }
 
 fn report(path: &Path, error: &io::Error) {
-    rotating::say(&format!(
-        "the log {} cannot be opened: {error}",
-        path.display()
-    ));
+    rotating::to_stderr(&Failure {
+        path,
+        what: "cannot be opened",
+        error,
+    });
 }
 
 #[cfg(test)]
