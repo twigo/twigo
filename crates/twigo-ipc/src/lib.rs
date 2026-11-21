@@ -7,6 +7,7 @@ mod apply;
 mod approval;
 pub mod command;
 mod credentials;
+mod diagnostics;
 mod discovery;
 mod environment;
 mod error;
@@ -36,6 +37,7 @@ pub use approval::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId, NoDiff,
 };
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
+pub use diagnostics::{DiagnosticsEntry, DiagnosticsLevel, LogVerbosity, SetLogLevel};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;
 pub use error::{ErrorKind, IpcError};

@@ -533,6 +533,12 @@ export function createMockBackend(
       globalThis.open(url, "_blank", "noopener,noreferrer");
       return null;
     },
+    diagnostics_log: ({ level, message, stack, source }) => {
+      console[level](`[${source}] ${message}`, stack ?? "");
+      return null;
+    },
+    log_reveal: () => null,
+    log_level_set: () => null,
     namespaces_list: (id) => {
       space(id);
       if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {

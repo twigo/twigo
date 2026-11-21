@@ -392,6 +392,19 @@ export type DataEntry = { key: string, bytes: number,
 binary: boolean, };
 
 /**
+ * What the webview tells the diagnostics log (ARCHITECTURE 4.10): an error
+ * it caught or did not, which the log writes with the window's label.
+ */
+export type DiagnosticsEntry = { level: DiagnosticsLevel, message: string, stack: string | null, 
+/**
+ * What caught it: `error`, `unhandledrejection`, or the React root
+ * option that did.
+ */
+source: string, };
+
+export type DiagnosticsLevel = "error" | "warn" | "info";
+
+/**
  * A context's resources as discovery last answered, or why it did not.
  * `cluster` names the cluster the context reaches: its URL, its
  * `tls-server-name` and the CAs it is trusted with.
@@ -1127,6 +1140,8 @@ previous: boolean, };
  */
 export type LogTarget = { space: string, gvr: Gvr, namespace: string, name: string, };
 
+export type LogVerbosity = "info" | "debug" | "trace";
+
 /**
  * How a session shows its buffer; a change filters it again in Rust and
  * reopens nothing.
@@ -1632,6 +1647,12 @@ tone: Tone | null,
  */
 fold: Fold, blocks: Array<Block>, };
 
+/**
+ * How much Twigo's own crates write to the diagnostics log until Twigo
+ * quits; the libraries stay at warnings.
+ */
+export type SetLogLevel = { level: LogVerbosity, };
+
 export type SetLogSource = { id: SubscriptionId, source: LogSource, };
 
 export type SetLogView = { id: SubscriptionId, view: LogView, };
@@ -1958,4 +1979,7 @@ export type Commands = {
   approvals_watch: { request: null; response: null; message: ApprovalEvent };
   approval_answer: { request: AnswerApproval; response: null; message: null };
   url_open: { request: string; response: null; message: null };
+  diagnostics_log: { request: DiagnosticsEntry; response: null; message: null };
+  log_reveal: { request: null; response: null; message: null };
+  log_level_set: { request: SetLogLevel; response: null; message: null };
 };
