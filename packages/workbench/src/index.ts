@@ -59,5 +59,4 @@ export {
   setByPolicyFile,
 } from "./spaces/modes";
 export { ALL_NAMESPACES, scopeNames, scopeWords } from "./spaces/scope";
-export { variant } from "./variants";
 export { WorkbenchView } from "./WorkbenchView";

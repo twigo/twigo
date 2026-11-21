@@ -210,14 +210,6 @@ function Open({ session }: { session: Session }) {
     if (before === undefined) return;
     const next = new Map(checks.ticks).set(item.id, !before);
     setChecks({ prefix: provider?.prefix ?? "", ticks: next, touched: true });
-    // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-    if (provider?.live) {
-      quickAccess
-        .acceptChecked(ticked({ ...checks, ticks: next }), { close: false })
-        .catch((error: unknown) => {
-          workbench.report(error);
-        });
-    }
     // The next name replaces what is filtered now, and not the prefix.
     const input = field.current;
     if (input) {
@@ -229,26 +221,19 @@ function Open({ session }: { session: Session }) {
     }
   };
 
-  // From the first tick, Enter applies the ticked set and a click ticks.
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  const ticking =
-    provider?.live !== true && (checks.touched || provider?.checklist === true);
-
   const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
 
-  const alone = many && !ticking && active?.checked !== undefined;
+  const alone = many && !checks.touched && active?.checked !== undefined;
   const action = active !== undefined && active.checked === undefined;
   const loading = result.state === "loading";
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  const written = provider?.live === true && checks.touched;
-  // Nothing left to take: no row under the cursor and no tick made, or the ticks written already.
+  // Nothing left to take: no row under the cursor and no tick made.
   // The rows of a filter typed may put one under the cursor once they load, those of an empty filter never do.
   const closes =
     many &&
     (!loading || unfiltered) &&
     !action &&
-    !ticking &&
-    (active === undefined || written);
+    !checks.touched &&
+    active === undefined;
 
   const applyChecked = () => {
     quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
@@ -260,7 +245,7 @@ function Open({ session }: { session: Session }) {
     if (ask) quickAccess.submit();
     else if (loading) early.current = { value, options };
     else if (closes) quickAccess.hide();
-    else if (ticking && !action) applyChecked();
+    else if (checks.touched && !action) applyChecked();
     else if (active) accept(active, options);
   };
 
@@ -377,7 +362,7 @@ function Open({ session }: { session: Session }) {
                     setCursor({ value, id: item.id });
                   }}
                   onSelect={() => {
-                    if (on(item) !== undefined && ticking) toggle(item);
+                    if (on(item) !== undefined && checks.touched) toggle(item);
                     else accept(item, { side: false });
                   }}
                   onToggle={() => {
@@ -398,7 +383,7 @@ function Open({ session }: { session: Session }) {
               ? "Select"
               : closes
                 ? "Close"
-                : many && ticking && !action
+                : many && checks.touched && !action
                   ? `Apply · ${words(count)}`
                   : alone
                     ? (provider.acceptAloneLabel ?? provider.acceptLabel)

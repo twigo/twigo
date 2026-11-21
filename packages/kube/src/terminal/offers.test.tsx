@@ -38,7 +38,6 @@ const withdrawals: (() => Promise<unknown>)[] = [];
 
 afterEach(async () => {
   for (const withdraw of withdrawals.splice(0)) await act(withdraw);
-  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
@@ -571,21 +570,4 @@ test("an offer outlives the tab it came from, and still moves", async () => {
       ([command]) => command === "kubeconfig_offer_answer",
     )?.[1],
   ).toEqual({ id: 1, revision: 0, answer: "move" });
-});
-
-test("an offer is a toast only, with no bar over its terminal, whatever the address asks for", async () => {
-  history.replaceState(null, "", "/?variant=offer:bar");
-  const { backend, create } = await mounted();
-  await create();
-  await later(OFFER_AFTER_MS);
-  expect(live()).toHaveLength(1);
-  expect(live()[0]).toContain(FIRST);
-  const panel = document.querySelector('[aria-label="Panel"]');
-  expect(panel?.textContent).not.toContain(FIRST);
-  expect(
-    within(panel as HTMLElement).queryByRole("button", {
-      name: "Move to ~/.kube/config",
-    }),
-  ).toBeNull();
-  leave(backend);
 });

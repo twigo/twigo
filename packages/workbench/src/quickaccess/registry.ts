@@ -106,20 +106,6 @@ export interface QuickAccessProvider {
     filter: string,
     context: QuickAccessContext,
   ): void | Promise<void>;
-  /**
-   * A variant for the checkpoint: every row ticks from the start, so a click
-   * ticks and Enter applies the ticked set at once.
-   *
-   * @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-   */
-  readonly checklist?: boolean;
-  /**
-   * A variant for the checkpoint: a tick applies at once and the widget stays
-   * open, while Enter and a click take one row alone.
-   *
-   * @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-   */
-  readonly live?: boolean;
 }
 
 /** What the open widget does for the `quickInput.*` commands. */
@@ -305,21 +291,13 @@ export class QuickAccess {
     });
   }
 
-  /**
-   * Applies the ticked rows of the open session as the provider's set, and
-   * closes unless told to stay, which the live variant tells.
-   *
-   * @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-   */
-  async acceptChecked(
-    ids: readonly string[],
-    { close = true }: { close?: boolean } = {},
-  ): Promise<void> {
+  /** Applies the ticked rows of the open session as the provider's set, and closes. */
+  async acceptChecked(ids: readonly string[]): Promise<void> {
     const session = this.#session;
     if (!session) return;
     const resolved = this.resolve(session.value);
     if (!resolved?.provider.acceptChecked) return;
-    if (close) this.#close();
+    this.#close();
     await resolved.provider.acceptChecked(
       ids,
       resolved.filter,
