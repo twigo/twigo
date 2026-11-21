@@ -165,6 +165,7 @@ impl<T: Item> Upstream<T> {
     /// The state of a run about to start, set before it does, so nobody
     /// reads a failure it is about to retry.
     pub fn restart(&self) {
+        self.store.recover();
         self.update(|status| {
             status.queued = false;
             status.phase = if status.listed {
@@ -264,7 +265,16 @@ async fn start<D: Decode>(
         backoff: backoff(),
         unwatchable: false,
     };
-    if let Err(view) = run.run(next).await {
+    // A panic ends the upstream as a failure: the lists on it say so, and the
+    // next list that holds it starts it again.
+    let ended = twigo_panic::contain("hub upstream", run.run(next))
+        .await
+        .unwrap_or_else(|_| {
+            Err(ViewState::Error {
+                error: IpcError::panicked("the watch behind this list"),
+            })
+        });
+    if let Err(view) = ended {
         run.upstream.update(|status| {
             status.queued = false;
             status.phase = Phase::Failed(view);
