@@ -46,7 +46,7 @@ use crate::cluster::{Cluster, Resolved};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
-use crate::request::{Format, field_value};
+use crate::request::{Collection, Format, field_value};
 use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
 use crate::upstream::{self, Clock, Env, Spec, Upstream};
@@ -385,41 +385,50 @@ impl Hub {
         Ok(subscription)
     }
 
-    /// The names of the context's namespaces, sorted, from its namespace
-    /// index (ARCHITECTURE 3.3): held, the whole list, and dropped, so it
-    /// lingers after; or the state that refuses it.
+    /// The names of the context's namespaces, sorted, from one list of their
+    /// metadata, which takes a request slot and no watch; or the state that
+    /// refuses it, `stale` when the cluster does not answer.
     pub async fn namespaces(&self, context: &str) -> Result<Vec<String>, ViewState> {
-        let key = Key {
-            context: context.to_owned(),
-            resource: Resource {
-                group: String::new(),
-                version: "v1".to_owned(),
-                resource: "namespaces".to_owned(),
-                namespaced: false,
-            },
+        let clients = (self.inner.connect)(context.to_owned())
+            .await
+            .map_err(unconnected)?;
+        let resource = Resource {
+            group: String::new(),
+            version: "v1".to_owned(),
+            resource: "namespaces".to_owned(),
+            namespaced: false,
+        };
+        let path = resource.path(&Scope::Cluster);
+        let collection = Collection {
+            path: &path,
             format: Format::Metadata,
-            scope: Scope::Cluster,
             field_selector: None,
         };
-        let mut index: Subscription<Row> = Subscription::new(key.clone(), &[]);
-        let part = self.hold(&key, None);
-        index.set_parts(vec![part]);
-        let rows = index.whole().await?;
+        let rows = upstream::read(
+            &clients,
+            &self.inner.clock,
+            &collection,
+            &resource.name(),
+            MetaDecoder,
+        )
+        .await?;
         let mut names: Vec<String> = rows.iter().map(|row| row.meta.name.to_string()).collect();
         names.sort();
         Ok(names)
     }
 
     /// What all namespaces of the query's resource come to for a person who
-    /// may not list it cluster-wide: the namespaces of the namespace index
-    /// where a review allows listing it, a few at a time, kept with the
-    /// context's clients. No namespace when they may list it cluster-wide, or
-    /// may list it nowhere, or the index is refused, which the cluster's own
-    /// refusal then says. What does not answer is no answer: a namespace
-    /// whose review does not counts as allowed, as an unanswered check does
-    /// for the UI (ARCHITECTURE 5.1), and its part says its own state; when
-    /// the clients, the cluster-wide review or the index fail with anything
-    /// but a refusal, it is the state the subscription waits on that comes.
+    /// may not list it cluster-wide: the namespaces where a review allows
+    /// listing it, a few at a time, kept with the context's clients. No
+    /// namespace when they may list it cluster-wide, or may list it nowhere,
+    /// or the namespaces are refused, which the cluster's own refusal then
+    /// says.
+    ///
+    /// What does not answer is no answer. A namespace whose review does not
+    /// counts as allowed, as an unanswered check does for the UI
+    /// (ARCHITECTURE 5.1), and its part says its own state. When the clients,
+    /// the cluster-wide review or the list of namespaces fail with anything
+    /// but a refusal, the state the subscription waits on comes instead.
     async fn resolve(&self, query: &Query) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
         let clients = (self.inner.connect)(query.context.clone())

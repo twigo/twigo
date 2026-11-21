@@ -1532,3 +1532,46 @@ async fn a_part_refused_before_it_listed_tries_again_after_30_s_and_one_that_lis
     let wait = Duration::from_millis(500)..=RETRY_WITHIN;
     assert!(once.iter().all(|gap| wait.contains(gap)), "{once:?}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_are_read_in_pages_with_no_watch_whatever_the_budget() {
+    let fake = Fake::default();
+    for n in 0..1100 {
+        fake.add("namespaces", None, &format!("ns-{n:04}"));
+    }
+    fake.add("pods", Some("ns-0000"), "p1");
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut shown = hub.rows(query(&["ns-0000"])).await.unwrap();
+    ready(&mut shown).await;
+
+    let read = tokio::time::timeout(Duration::from_secs(10), hub.namespaces("kind-test"));
+    let names = read.await.expect("no watch to wait for").unwrap();
+    assert_eq!(names.len(), 1100);
+    assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(fake.count("/api/v1/namespaces?"), 3, "pages of 500");
+    assert_eq!(fake.count("watch=true"), 1, "the pods' alone");
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_a_person_may_not_list_or_the_cluster_cannot_say_are_a_state() {
+    let fake = Fake::default();
+    fake.add("namespaces", None, "a");
+    let (hub, _clients) = fake.hub(Budgets::default());
+
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces".to_owned());
+    assert_eq!(
+        hub.namespaces("kind-test").await,
+        Err(ViewState::Forbidden {
+            verb: "list".to_owned(),
+            resource: "namespaces".to_owned(),
+        })
+    );
+
+    fake.state().forbidden.clear();
+    fake.state()
+        .no_endpoints
+        .insert("/api/v1/namespaces".to_owned());
+    assert_eq!(hub.namespaces("kind-test").await, Err(ViewState::Stale));
+}

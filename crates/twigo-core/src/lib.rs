@@ -653,8 +653,8 @@ impl Core {
             .await
     }
 
-    /// The namespaces of a space's context, from its namespace index
-    /// (ARCHITECTURE 3.3), which lingers a while after each answer.
+    /// The namespaces of a space's context, as the cluster lists them each
+    /// time (ARCHITECTURE 3.2).
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
         self.hub.namespaces(&context).await.map_err(|state| {

@@ -431,11 +431,7 @@ where
                     Next::List
                 }
                 Outcome::Undecodable(error) => {
-                    let error = IpcError::new(
-                        ErrorKind::Internal,
-                        format!("could not decode the server's answer: {error}"),
-                    );
-                    self.refused(ViewState::Error { error }).await;
+                    self.refused(undecodable(&error)).await;
                     Next::List
                 }
                 Outcome::Failed { error, verb, next } => {
@@ -780,6 +776,47 @@ fn advance(from: &mut Box<str>, meta: &crate::meta::Meta) {
     if !meta.resource_version.is_empty() {
         from.clone_from(&meta.resource_version);
     }
+}
+
+/// Every item of a collection, listed once in pages as an upstream lists it,
+/// for a reader that needs the names and no watch: the list takes a request
+/// slot, where a watch waits for one of the budget's watches.
+pub(crate) async fn read<D: Decode>(
+    clients: &Clients,
+    clock: &Clock,
+    collection: &Collection<'_>,
+    resource: &str,
+    mut decoder: D,
+) -> Result<Vec<D::Item>, ViewState> {
+    let mut items = Vec::new();
+    let mut token: Option<Box<str>> = None;
+    loop {
+        let request = request::list(collection, LIMIT, token.as_deref());
+        let (body, received) =
+            fetch(clients, request, clock).await.map_err(|error| {
+                match failure(&error, "list", resource) {
+                    Failure::Refused(view) => view,
+                    Failure::Unauthorized => ViewState::Unauthorized,
+                    Failure::Gone | Failure::Transient => ViewState::Stale,
+                }
+            })?;
+        let page = decoder
+            .decode_list(&body, received)
+            .map_err(|error| undecodable(&error))?;
+        items.extend(page.items);
+        match page.continue_token {
+            Some(next) => token = Some(next),
+            None => return Ok(items),
+        }
+    }
+}
+
+fn undecodable(error: &DecodeError) -> ViewState {
+    let error = IpcError::new(
+        ErrorKind::Internal,
+        format!("could not decode the server's answer: {error}"),
+    );
+    ViewState::Error { error }
 }
 
 /// A list page, and when its response started: its status and headers have

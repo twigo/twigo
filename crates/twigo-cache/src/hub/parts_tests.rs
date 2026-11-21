@@ -746,3 +746,28 @@ async fn all_namespaces_of_clients_that_are_unauthorized_wait_for_a_new_subscrip
     let mut mirror = Mirror::default();
     until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn all_namespaces_are_resolved_while_every_watch_is_taken() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    fake.allow(Some("ns-05"), "list", "pods");
+    let (hub, _clients) = fake.hub(budget(1));
+    let mut other = hub.rows(query(&["ns-18"])).await.unwrap();
+    ready(&mut other).await;
+    let list = hub.rows(query(&[])).await.unwrap();
+
+    sleep(Duration::from_secs(5)).await;
+    let mut mirror = Mirror::default();
+    mirror.read(&list);
+    assert_eq!(mirror.status, Some(ViewState::Queued));
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 39,
+            unready: vec![namespace_part("ns-05", ViewState::Queued, false)],
+        }),
+        "its part waits for a stream, the list does not wait to know it"
+    );
+}
