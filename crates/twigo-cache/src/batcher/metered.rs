@@ -912,6 +912,31 @@ async fn a_list_of_all_namespaces_that_a_person_may_list_in_two_never_asks_the_c
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_list_of_all_namespaces_that_the_cluster_refuses_asks_nobody_for_metrics() {
+    let fake = cluster(true).await;
+    fake.state().forbidden.insert("/api/v1/pods".to_owned());
+    let sort = Sort {
+        column: "CPU".to_owned(),
+        descending: true,
+    };
+    let mut list = Metered::start_all(fake, Some(sort)).await;
+    list.batcher().set_window(0, 6, true);
+    let batches = list.watch(Duration::from_secs(40)).await;
+    assert!(
+        batches
+            .iter()
+            .any(|batch| matches!(batch.status, ViewState::Forbidden { .. })),
+        "refused: {:?}",
+        batches
+            .iter()
+            .map(|batch| &batch.status)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(list.fake.count("/apis/metrics.k8s.io/"), 0);
+    assert_eq!(polls(&list.fake, "a") + polls(&list.fake, "b"), 0);
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_cells_arrive_change_in_place_and_an_unchanged_answer_sends_no_batch() {
     let mut list = Metered::start(cluster(true).await, None).await;
     list.batcher().set_window(0, 3, true);
