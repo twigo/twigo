@@ -116,6 +116,26 @@ impl Live {
         (Hub::new(connect), clients)
     }
 
+    /// The config of `live`'s cluster over the token of a service account.
+    async fn as_account(&self, accounts: &Api<ServiceAccount>, name: &str) -> Config {
+        let request: TokenRequest =
+            serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
+        let token = accounts
+            .create_token_request(name, &PostParams::default(), &request)
+            .await
+            .unwrap()
+            .status
+            .unwrap()
+            .token
+            .expect("a token");
+        let mut config = self.config.clone();
+        config.auth_info = AuthInfo {
+            token: Some(token.into()),
+            ..AuthInfo::default()
+        };
+        config
+    }
+
     async fn minor(&self) -> u32 {
         let info = self.admin.apiserver_version().await.unwrap();
         info.minor.trim_end_matches('+').parse().unwrap()
@@ -354,21 +374,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
             .unwrap();
         live.pod(namespace, "p").await;
     }
-    let request: TokenRequest =
-        serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
-    let token = accounts
-        .create_token_request("viewer", &PostParams::default(), &request)
-        .await
-        .unwrap()
-        .status
-        .unwrap()
-        .token
-        .expect("a token");
-    let mut config = live.config.clone();
-    config.auth_info = AuthInfo {
-        token: Some(token.into()),
-        ..AuthInfo::default()
-    };
+    let config = live.as_account(&accounts, "viewer").await;
 
     let (hub, _clients) = live.hub(Some(&config));
     let five: Vec<&str> = namespaces.iter().map(String::as_str).collect();
@@ -446,19 +452,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
         .create(&PostParams::default(), &binding)
         .await
         .unwrap();
-    let token = accounts
-        .create_token_request("lister", &PostParams::default(), &request)
-        .await
-        .unwrap()
-        .status
-        .unwrap()
-        .token
-        .expect("a token");
-    let mut config = live.config.clone();
-    config.auth_info = AuthInfo {
-        token: Some(token.into()),
-        ..AuthInfo::default()
-    };
+    let config = live.as_account(&accounts, "lister").await;
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the binding a moment later.
     let allowed = async {
@@ -552,21 +546,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
         .create(&PostParams::default(), &binding)
         .await
         .unwrap();
-    let request: TokenRequest =
-        serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
-    let token = accounts
-        .create_token_request("namer", &PostParams::default(), &request)
-        .await
-        .unwrap()
-        .status
-        .unwrap()
-        .token
-        .expect("a token");
-    let mut config = live.config.clone();
-    config.auth_info = AuthInfo {
-        token: Some(token.into()),
-        ..AuthInfo::default()
-    };
+    let config = live.as_account(&accounts, "namer").await;
 
     let (hub, clients) = live.hub(Some(&config));
     // The authorizer learns of the bindings a moment later.
