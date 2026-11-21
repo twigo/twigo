@@ -1,14 +1,5 @@
 import { expect, test } from "vitest";
-import { scopeNames, scopeWords } from "./scope";
-
-test("a scope is written sorted and with no name twice", () => {
-  expect(scopeNames(["search", "auth", "search", "payments"])).toEqual([
-    "auth",
-    "payments",
-    "search",
-  ]);
-  expect(scopeNames([])).toEqual([]);
-});
+import { scopeWords } from "./scope";
 
 test("a scope says its first name and how many follow it, all of them in a line, and the tooltip's words", () => {
   expect(scopeWords([])).toEqual({

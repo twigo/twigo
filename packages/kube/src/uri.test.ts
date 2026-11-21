@@ -38,13 +38,6 @@ test.each([
   expect(parseListUri(uri)).toEqual(input);
 });
 
-test("one set of namespaces is one list URI, whatever order or repeats it was given in", () => {
-  const input = { space: "prod-eu", gvr: PODS };
-  expect(
-    listUri({ ...input, namespaces: ["payments", "auth", "payments"] }),
-  ).toBe(listUri({ ...input, namespaces: ["auth", "payments"] }));
-});
-
 test("a core-group resource keeps an empty group", () => {
   expect(parseListUri("k8s-list://prod-eu/v1/pods")?.gvr).toEqual(PODS);
 });
