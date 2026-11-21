@@ -16,6 +16,7 @@ import {
   statusColumn,
   type Health,
 } from "../columns";
+import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
@@ -259,14 +260,13 @@ export function listEntries({
     const column = statusColumn(input.gvr);
     const counts = column && byHealth(input.gvr, column, list.counts);
     const found = discovery.last(input.space);
-    const singular =
+    const kind =
       found?.state === "ready"
-        ? found.value.find((resource) => sameGvr(resource.gvr, input.gvr))
-            ?.singular
+        ? found.value.find((resource) => sameGvr(resource.gvr, input.gvr))?.kind
         : undefined;
     const rows =
-      list.total === 1 && singular !== undefined
-        ? singular
+      list.total === 1 && kind !== undefined
+        ? singularTitle(kind)
         : list.title.toLowerCase();
     return [
       { id: "rows", text: `${list.total.toLocaleString("en")} ${rows}` },

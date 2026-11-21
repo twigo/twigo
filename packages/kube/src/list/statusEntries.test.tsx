@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
+  Discovered,
   ListBatch,
   Parts,
   PartState,
@@ -97,6 +98,34 @@ test("a list of one row counts it by the resource's singular", async () => {
   );
   expect(screen.getByText("1 deployment")).toBeTruthy();
   expect(screen.queryByText("1 deployments")).toBeNull();
+});
+
+test("a list of one row of a kind of two words counts it by the words of its title", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, (message) => {
+        const found = message as Discovered;
+        onMessage(
+          command === "resources_watch" && found.state === "ready"
+            ? ({
+                ...found,
+                resources: found.resources.map((resource) =>
+                  resource.gvr.resource === "deployments"
+                    ? { ...resource, kind: "StatefulSet" }
+                    : resource,
+                ),
+              } as typeof message)
+            : message,
+        );
+      }),
+  };
+  await openList(
+    backend,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 stateful set")).toBeTruthy();
 });
 
 test("a list of all namespaces that leaves some out says how many it reads of how many there are, quietly", async () => {

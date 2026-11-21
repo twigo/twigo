@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import RESOURCES from "../../protocol/src/mock/resources.json";
-import { pluralTitle, sections } from "./kinds";
+import { pluralTitle, sections, singularTitle } from "./kinds";
 
 test.each([
   ["Pod", "pods", "Pods"],
@@ -16,6 +16,18 @@ test.each([
   ["FooBar", "widgets", "Foo Bars"],
 ])("%s with %s → %s", (kind, resource, title) => {
   expect(pluralTitle(kind, resource)).toBe(title);
+});
+
+test.each([
+  ["Pod", "pod"],
+  ["ConfigMap", "config map"],
+  ["NetworkPolicy", "network policy"],
+  ["ReplicaSet", "replica set"],
+  ["StatefulSet", "stateful set"],
+  ["CronJob", "cron job"],
+  ["PersistentVolumeClaim", "persistent volume claim"],
+])("%s counts as %s, as its title's words do", (kind, words) => {
+  expect(singularTitle(kind)).toBe(words);
 });
 
 test("recorded discovery fills Lens's sections, then custom groups", () => {
