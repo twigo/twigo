@@ -259,6 +259,7 @@ test("a Reveal whose Secret closed before it ran fails, and says so", async () =
     {
       state: "failed",
       error: {
+        code: "subscription.not-found",
         kind: "notFound",
         message: `no object subscription ${String(object)}`,
       },
@@ -783,6 +784,7 @@ test("a scale whose replicas moved since its plan scales nothing, and one that f
     {
       state: "failed",
       error: {
+        code: "action.object-changed",
         kind: "conflict",
         message: `Deployment ${name} has ${String(count + 1)} replicas now, not the ${String(count)} Twigo asked about, so it scaled nothing`,
       },
@@ -859,6 +861,7 @@ test("a Job that completes before its suspend runs is not suspended, nor its res
     {
       state: "failed",
       error: {
+        code: "action.no-change",
         kind: "invalidInput",
         message: `Job ${job} has completed, so there is nothing to suspend`,
       },
@@ -990,7 +993,11 @@ test("a run whose object went since its plan fails, as Rust's read of it does", 
   expect(await run(backend, cordon.id)).toEqual([
     {
       state: "failed",
-      error: { kind: "notFound", message: `nodes "${node}" not found` },
+      error: {
+        code: "server.not-found",
+        kind: "notFound",
+        message: `nodes "${node}" not found`,
+      },
     },
   ]);
 });
@@ -1642,7 +1649,7 @@ test("a protection plan is refused once the context changed and changed back, as
   const access = async (context: string) =>
     (
       await answered(backend.subscribe("contexts_watch", null, () => undefined))
-    ).find((candidate) => candidate.name === context)?.access;
+    ).contexts.find((candidate) => candidate.name === context)?.access;
 
   const sameType = await answered(
     backend.invoke("command_plan", SET_ENVIRONMENT("staging", "staging")),

@@ -12,6 +12,7 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
+use twigo_ipc::IpcError;
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
 use twigo_policy::{Metadata, Policy, TypeLock};
 
@@ -96,8 +97,9 @@ impl Contexts {
         }
     }
 
-    pub fn ipc(&self, policy: &Policy) -> Vec<twigo_ipc::Context> {
-        self.listed
+    pub fn ipc(&self, policy: &Policy) -> twigo_ipc::Catalog {
+        let contexts = self
+            .listed
             .iter()
             .map(|context| twigo_ipc::Context {
                 name: context.name.clone(),
@@ -106,8 +108,13 @@ impl Contexts {
                 server: context.server.clone(),
                 access: policy.access(&context.name),
                 namespace: context.namespace.clone(),
+                problem: context.problem.as_ref().map(IpcError::from),
             })
-            .collect()
+            .collect();
+        twigo_ipc::Catalog {
+            contexts,
+            failures: Vec::new(),
+        }
     }
 }
 

@@ -10,14 +10,14 @@ use futures::FutureExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, sleep_until, timeout};
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_kube::client::{Actor, Clients, Permit, Waiting};
 
 use super::cause::{Cause, lasts};
 use super::connect::Connected;
 use super::listen::Socket;
 use super::pick::Chosen;
-use super::watching::{Candidate, UNANSWERED_YET};
+use super::watching::{Candidate, unanswered_yet};
 use super::{CANDIDATE_WAIT, CONNECT_TIMEOUT, Kind, Open, PROBE_WINDOW, QUIET, Report, Shared, at};
 use crate::shell::abandoned;
 
@@ -36,10 +36,10 @@ pub(super) enum Fault {
     /// The pod's side refused the port, in its own words.
     Port(String),
     /// No pod was a candidate within the wait, and why.
-    NoPod(String),
-    /// The upgrade to a pod behind a Service or a workload answered 404, in
-    /// `words`, so that pod is avoided; `alone` when no other was left.
-    Left { words: String, alone: bool },
+    NoPod(IpcError),
+    /// The upgrade to a pod behind a Service or a workload answered 404, as
+    /// `error`, so that pod is avoided; `alone` when no other was left.
+    Left { error: IpcError, alone: bool },
     /// The clients were replaced, or the network changed under them.
     Lost,
 }
@@ -48,9 +48,8 @@ impl Fault {
     /// What the forward's `failure` says of it.
     pub(super) fn words(&self) -> Option<String> {
         match self {
-            Fault::Port(words) | Fault::NoPod(words) | Fault::Left { words, .. } => {
-                Some(words.clone())
-            }
+            Fault::Port(words) => Some(words.clone()),
+            Fault::NoPod(error) | Fault::Left { error, .. } => Some(error.message.clone()),
             Fault::Transient(cause) => Some(cause.error().message.clone()),
             Fault::Fatal(_) | Fault::Lost => None,
         }
@@ -239,9 +238,8 @@ async fn pod(shared: &Shared, link: &mut Link, deadline: Instant) -> Result<Cand
             Chosen::Pod(candidate) => return Ok(candidate),
             // The forward fails with it, which ends this connection.
             Chosen::Fault(_) => return Err(Over::Ended),
-            Chosen::Refused(error) => error.message,
-            Chosen::None(why) => why,
-            Chosen::Unknown(why) => why.unwrap_or_else(|| UNANSWERED_YET.to_owned()),
+            Chosen::Refused(error) | Chosen::None(error) => error,
+            Chosen::Unknown(why) => why.unwrap_or_else(unanswered_yet),
         };
         if now >= deadline {
             return Err(Over::Fault(Fault::NoPod(why)));
@@ -278,15 +276,15 @@ async fn connect(
         Ok(Err(error)) => match Cause::upgrade(&error) {
             Some(gone) if target.kind == Kind::Pod => Fault::Transient(gone),
             Some(gone) => {
-                let words = gone.into_error().message;
-                let alone = !shared.left(&candidate.key, words.clone());
-                return Err(Over::Fault(Fault::Left { words, alone }));
+                let error = gone.into_error();
+                let alone = !shared.left(&candidate.key, error.clone());
+                return Err(Over::Fault(Fault::Left { error, alone }));
             }
             None => fault(twigo_kube::errors::request(&error)),
         },
         Err(_) => Fault::Transient(
             IpcError::new(
-                ErrorKind::Timeout,
+                ErrorCode::ConnectTimeout,
                 format!("timed out opening a stream to pod {}", candidate.name),
             )
             .into(),
@@ -443,7 +441,7 @@ pub(super) async fn probe(
             permit.map_err(|_| {
                 Over::Fault(Fault::Transient(
                     IpcError::new(
-                        ErrorKind::Timeout,
+                        ErrorCode::SessionBusy,
                         "every session of this context stayed in use",
                     )
                     .into(),

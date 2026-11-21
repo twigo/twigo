@@ -11,7 +11,7 @@ use futures::future::{BoxFuture, select_all};
 use serde::{Deserialize, Deserializer};
 use twigo_cache::hub::{Hub, Resource, Subscription};
 use twigo_cache::object::Object;
-use twigo_ipc::{IpcError, ViewState};
+use twigo_ipc::{ErrorCode, IpcError, ViewState};
 
 use super::cause::Cause;
 use super::pick::Known;
@@ -20,9 +20,12 @@ use crate::pods::{Subscriptions, v1};
 
 const SERVICE_NAME: &str = "kubernetes.io/service-name";
 
-pub(super) const UNANSWERED: &str = "the cluster does not answer";
-pub(super) const UNANSWERED_YET: &str = "the cluster has not answered yet";
-const WAITING_FOR_A_SLOT: &str = "waiting for a stream slot of this context";
+pub(super) fn unanswered_yet() -> IpcError {
+    IpcError::new(
+        ErrorCode::ForwardClusterUnanswered,
+        "the cluster has not answered yet",
+    )
+}
 
 /// A pod a connection can go to, and the port it reaches there.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,13 +223,22 @@ fn refusal(states: &[ViewState]) -> Option<Known> {
 /// watches are taken and a paged list while all its requests are, and the
 /// cluster does not answer when one that has listed nothing yet is
 /// reconnecting.
-fn unanswered(states: &[ViewState]) -> Option<String> {
+fn unanswered(states: &[ViewState]) -> Option<IpcError> {
     if states.contains(&ViewState::Queued) {
-        return Some(WAITING_FOR_A_SLOT.to_owned());
+        return Some(IpcError::new(
+            ErrorCode::ForwardWaitingForSlot,
+            "waiting for a stream slot of this context",
+        ));
     }
     states
-        .contains(&ViewState::Stale)
-        .then(|| UNANSWERED.to_owned())
+        .iter()
+        .any(|state| matches!(state, ViewState::Stale { .. }))
+        .then(|| {
+            IpcError::new(
+                ErrorCode::ForwardClusterUnanswered,
+                "the cluster does not answer",
+            )
+        })
 }
 
 /// A list the API server sends as `null` when it is empty.

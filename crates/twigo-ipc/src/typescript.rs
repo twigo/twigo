@@ -4,7 +4,6 @@ use std::fmt::Write;
 
 use ts_rs::{Config, TS, TypeVisitor};
 
-use crate::ShellEvent;
 use crate::command::{
     AccessReview, ApplyPreview, ApprovalAnswerSend, ApprovalsWatch, ClusterVersionGet, Command,
     CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextRelock, ContextSignIn,
@@ -17,6 +16,7 @@ use crate::command::{
     ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput,
     ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
 };
+use crate::{ErrorCode, ShellEvent};
 
 /// The TypeScript module of `packages/protocol`: every type the commands
 /// reach, and the `Commands` table that types its invoke client.
@@ -99,6 +99,25 @@ pub fn typescript() -> String {
     }
     out.push_str("\nexport type Commands = {\n");
     out.push_str(&module.commands);
+    out.push_str("};\n");
+    out
+}
+
+/// The kind of every error code, as the table the mock reads beside the
+/// generated module, so that it cannot disagree with `ErrorCode::kind`.
+pub fn error_kinds() -> String {
+    let mut out = String::from(
+        "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n\n",
+    );
+    out.push_str("import type { ErrorCode, ErrorKind } from \"./generated\";\n\n");
+    out.push_str("export const ERROR_KINDS: Record<ErrorCode, ErrorKind> = {\n");
+    for code in ErrorCode::ALL {
+        let (wire, kind) = (
+            serde_json::to_string(code).expect("a code serializes"),
+            serde_json::to_string(&code.kind()).expect("a kind serializes"),
+        );
+        writeln!(out, "  {wire}: {kind},").expect("writing to a String cannot fail");
+    }
     out.push_str("};\n");
     out
 }

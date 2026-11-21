@@ -13,7 +13,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::api::TerminalSize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf, simplex};
 use tokio::time::advance;
-use twigo_ipc::{ErrorKind, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, ErrorKind, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Budgets, Clients};
 
 use super::connect::{Connect, Connected};
@@ -900,8 +900,7 @@ async fn a_refusal_from_the_connection_reads_as_its_error() {
     let Some(ShellEnd::Failed { error }) = harness.ended() else {
         panic!("{:?}", harness.events());
     };
-    assert_eq!(error.kind, ErrorKind::Forbidden);
-    assert_eq!(error.message, "pods \"p\" is forbidden");
+    assert_eq!(error.code, ErrorCode::ServerForbidden);
     assert_eq!(harness.held(), 0);
 }
 

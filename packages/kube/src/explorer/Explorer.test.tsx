@@ -161,7 +161,11 @@ test("a failed discovery says why in place of the tree", async () => {
       setTimeout(() => {
         (onMessage as (message: unknown) => void)({
           state: "failed",
-          error: { kind: "unavailable", message: "no route to the cluster" },
+          error: {
+            code: "connect.other",
+            kind: "unavailable",
+            message: "no route to the cluster",
+          },
         });
       }, 0);
       return Promise.resolve(null as never);

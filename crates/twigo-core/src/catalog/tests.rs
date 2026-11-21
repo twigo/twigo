@@ -1,5 +1,7 @@
 use std::fs;
 
+use twigo_ipc::ErrorCode;
+
 use super::*;
 
 const CONFIG: &str = "
@@ -31,6 +33,7 @@ async fn contexts_come_by_order_then_by_name() {
         .contexts()
         .await
         .ipc(&Policy::open())
+        .contexts
         .into_iter()
         .map(|c| c.name)
         .collect();
@@ -54,9 +57,9 @@ contexts: [{ name: kind-a, context: { cluster: c, namespace: payments } }]
     .unwrap();
     let catalog = Catalog::default();
     catalog.follow(Sources::explicit(file.clone()));
-    let contexts = catalog.contexts().await.ipc(&Policy::open());
+    let listed = catalog.contexts().await.ipc(&Policy::open());
     assert_eq!(
-        contexts,
+        listed.contexts,
         [twigo_ipc::Context {
             name: "kind-a".to_owned(),
             color: None,
@@ -64,7 +67,53 @@ contexts: [{ name: kind-a, context: { cluster: c, namespace: payments } }]
             server: Some("https://kind:6443".to_owned()),
             access: Policy::open().access("kind-a"),
             namespace: Some("payments".to_owned()),
+            problem: None,
         }]
+    );
+    assert!(listed.failures.is_empty());
+}
+
+#[tokio::test]
+async fn a_context_whose_entries_are_missing_says_so_with_its_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(
+        &file,
+        "
+contexts:
+  - name: kind-gone
+    context: { cluster: gone, user: u }
+  - name: kind-userless
+    context: { cluster: c, user: nobody }
+  - name: kind-empty
+clusters:
+  - name: c
+    cluster: { server: 'https://kind:6443' }
+users:
+  - name: u
+",
+    )
+    .unwrap();
+    let catalog = Catalog::default();
+    catalog.follow(Sources::explicit(file));
+    let listed = catalog.contexts().await.ipc(&Policy::open());
+    let problems: Vec<(&str, Option<ErrorCode>)> = listed
+        .contexts
+        .iter()
+        .map(|context| {
+            (
+                context.name.as_str(),
+                context.problem.as_ref().map(|problem| problem.code),
+            )
+        })
+        .collect();
+    assert_eq!(
+        problems,
+        [
+            ("kind-empty", Some(ErrorCode::ContextEmpty)),
+            ("kind-gone", Some(ErrorCode::ContextMissingCluster)),
+            ("kind-userless", Some(ErrorCode::ContextMissingUser)),
+        ]
     );
 }
 

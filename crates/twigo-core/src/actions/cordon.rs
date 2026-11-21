@@ -11,7 +11,7 @@ use std::sync::Weak;
 use http::Method;
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::undo::{Asks, Revert, Unchanged};
@@ -106,7 +106,7 @@ pub(crate) async fn cordon(
     let name = &target.name;
     if is(&object, unschedulable) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionNoChange,
             already(name, unschedulable),
         ));
     }
@@ -179,7 +179,7 @@ async fn send(
     }
     let Some(written) = answer else {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ActionKeptChanging,
             format!("Node {name} kept changing, so Twigo changed nothing"),
         ));
     };

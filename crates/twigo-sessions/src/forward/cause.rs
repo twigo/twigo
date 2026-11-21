@@ -1,7 +1,7 @@
 //! Why a forward fails, what starts it again, and which errors fail it
 //! whoever asked for the proof.
 
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, ErrorKind, IpcError};
 
 /// An error that fails a forward. Only a watch of the target itself that
 /// finds it missing and a 404 on the upgrade to a pod that is the target say
@@ -34,7 +34,7 @@ impl Cause {
     /// A watch of the target itself lists nothing.
     pub(super) fn gone(label: &str, name: &str) -> Self {
         Self {
-            error: IpcError::new(ErrorKind::NotFound, format!("{label} {name} is gone")),
+            error: IpcError::new(ErrorCode::TargetGone, format!("{label} {name} is gone")),
             gone: true,
         }
     }

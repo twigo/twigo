@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, NamedContext};
 use serde::Deserialize;
-use twigo_ipc::{ContextColor, Environment};
+use twigo_ipc::{ContextColor, Environment, ErrorCode, IpcError};
 
 use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
@@ -377,6 +377,17 @@ pub enum Problem {
     MissingCluster(String),
     #[error("no kubeconfig defines the user {0:?}")]
     MissingUser(String),
+}
+
+impl From<&Problem> for IpcError {
+    fn from(problem: &Problem) -> Self {
+        let code = match problem {
+            Problem::NoContext => ErrorCode::ContextEmpty,
+            Problem::MissingCluster(_) => ErrorCode::ContextMissingCluster,
+            Problem::MissingUser(_) => ErrorCode::ContextMissingUser,
+        };
+        IpcError::new(code, problem.to_string())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

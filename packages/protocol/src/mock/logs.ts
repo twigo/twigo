@@ -168,7 +168,7 @@ export class MockLogs {
         return inNamespace.filter((pod) => pod.name.startsWith(`${name}-`));
       default:
         throw new IpcError(
-          "invalidInput",
+          "logs.unsupported-target",
           `logs follow pods and workloads, not ${gvr.resource}`,
         );
     }

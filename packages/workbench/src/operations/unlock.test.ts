@@ -13,7 +13,7 @@ function refusal(source: ModeSource, more: Partial<Blocked> = {}): IpcError {
     target: "pods/portforward in payments",
     ...more,
   };
-  return new IpcError("permissions", "prod-eu is read-only", blocked);
+  return new IpcError("policy.blocked", "prod-eu is read-only", blocked);
 }
 
 function operationsOf(unlock: (context: string) => Promise<never>) {
@@ -51,7 +51,9 @@ test("a refusal that is not the mode of a read-only context, and any other error
   expect(none(refusal(source, { reason: "noApproval" }))).toBeUndefined();
   expect(none(refusal(source, { reason: "noGrant" }))).toBeUndefined();
   expect(none(refusal(source, { reason: "unmarked" }))).toBeUndefined();
-  expect(none(new IpcError("notFound", "no forward 41"))).toBeUndefined();
+  expect(
+    none(new IpcError("forward.not-found", "no forward 41")),
+  ).toBeUndefined();
   expect(none(new Error("boom"))).toBeUndefined();
 });
 

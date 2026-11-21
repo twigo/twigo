@@ -118,13 +118,22 @@ test("the link to a web port uses the local port and its scheme", () => {
   ).toBe("https://localhost:9443");
 });
 
+const NO_POD = {
+  code: "forward.no-ready-pod",
+  kind: "unavailable",
+  message: "no pod",
+} as const;
+
 test.each<[ForwardState, string, string, boolean]>([
   [{ state: "starting" }, "Starting", "idle", true],
   [{ state: "restored" }, "Restored", "idle", false],
   [{ state: "ready" }, "Ready", "ok", false],
-  [{ state: "reconnecting", reason: "no pod" }, "Reconnecting", "warn", true],
+  [{ state: "reconnecting", reason: NO_POD }, "Reconnecting", "warn", true],
   [
-    { state: "failed", error: { kind: "notFound", message: "gone" } },
+    {
+      state: "failed",
+      error: { code: "target.gone", kind: "notFound", message: "gone" },
+    },
     "Failed",
     "error",
     false,
@@ -138,7 +147,7 @@ test.each<[ForwardState, string, string, boolean]>([
 
 test("a reason or a failure is the state's detail, and waiting connections turn a ready forward to a warning", () => {
   expect(
-    stateOf(forward({ state: { state: "reconnecting", reason: "no pod" } }))
+    stateOf(forward({ state: { state: "reconnecting", reason: NO_POD } }))
       .detail,
   ).toBe("no pod");
   expect(
@@ -146,7 +155,11 @@ test("a reason or a failure is the state's detail, and waiting connections turn 
       forward({
         state: {
           state: "failed",
-          error: { kind: "notFound", message: "gone" },
+          error: {
+            code: "server.not-found",
+            kind: "notFound",
+            message: "gone",
+          },
         },
       }),
     ).detail,
@@ -162,6 +175,7 @@ test("a forward that the context's mode refuses says the mode, as a warning, and
     state: {
       state: "failed",
       error: {
+        code: "policy.blocked",
         kind: "permissions",
         message:
           "dev is read-only by dev in policy.json, so Twigo did not send create pods/x/portforward in ns",
@@ -188,6 +202,7 @@ test("a forward that the context's mode refuses says the mode, as a warning, and
 const REFUSED = (source: ModeSource): ForwardState => ({
   state: "failed",
   error: {
+    code: "policy.blocked",
     kind: "permissions",
     message:
       "dev is read-only, so Twigo did not send get pods/x/portforward in ns",
@@ -204,9 +219,9 @@ const REFUSED = (source: ModeSource): ForwardState => ({
 });
 const FAILED: ForwardState = {
   state: "failed",
-  error: { kind: "internal", message: "x" },
+  error: { code: "internal.ipc", kind: "internal", message: "x" },
 };
-const RECONNECTING: ForwardState = { state: "reconnecting", reason: "no pod" };
+const RECONNECTING: ForwardState = { state: "reconnecting", reason: NO_POD };
 
 test.each<
   [
@@ -310,9 +325,13 @@ test("a forward listens on its addresses unless it is stopped or the core bound 
 
 test("a forward's tab says connecting while it starts or reconnects, nothing while it listens, ended once it is stopped or held by the mode, and failed only when it failed", () => {
   const of = (state: ForwardState) => sessionOf(forward({ state }));
-  const error = { kind: "unavailable", message: "refused" } as const;
+  const error = {
+    code: "connect.other",
+    kind: "unavailable",
+    message: "refused",
+  } as const;
   expect(of({ state: "starting" })).toBe("connecting");
-  expect(of({ state: "reconnecting", reason: "pod gone" })).toBe("connecting");
+  expect(of({ state: "reconnecting", reason: NO_POD })).toBe("connecting");
   expect(of({ state: "restored" })).toBe("running");
   expect(of({ state: "ready" })).toBe("running");
   expect(of({ state: "stopped" })).toBe("ended");

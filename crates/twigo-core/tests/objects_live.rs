@@ -431,7 +431,9 @@ async fn events_that_may_not_be_listed_say_why() {
         .await;
     let reason = events(&batch).and_then(|list| list.unavailable.clone());
     assert!(
-        reason.as_deref().is_some_and(|why| why.contains("events")),
+        reason
+            .as_ref()
+            .is_some_and(|why| why.code == twigo_ipc::ErrorCode::ServerForbidden),
         "{reason:?}"
     );
     assert!(

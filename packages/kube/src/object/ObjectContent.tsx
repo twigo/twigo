@@ -189,7 +189,7 @@ export function RelatedView({
       ) : (
         <section aria-label="Owns">
           <h3 className="mb-1 text-xs font-semibold text-support">Owns</h3>
-          <p className="text-error">{related.unavailable}</p>
+          <p className="text-error">{related.unavailable.message}</p>
         </section>
       )}
     </div>

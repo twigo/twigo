@@ -28,7 +28,7 @@ export function parseText(source: string): TextFilter | null {
       regex = new RegExp(pattern, "i");
     } catch (error) {
       throw new IpcError(
-        "invalidInput",
+        "filter.invalid-regex",
         `the filter /${pattern}/ is no regex: ${String(error)}`,
       );
     }

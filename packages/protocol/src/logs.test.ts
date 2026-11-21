@@ -141,7 +141,7 @@ test("a refused view stays refused through later batches until a view is taken",
   fake.backend.invoke = (command: string, request: unknown) => {
     if (command === "logs_set_view" && refuse)
       return Promise.reject(
-        new IpcError("invalidInput", "the filter /(/ is no regex"),
+        new IpcError("filter.invalid-regex", "the filter /(/ is no regex"),
       );
     return invoke(command as never, request as never);
   };
@@ -193,7 +193,7 @@ test("a change sent is not settled until a batch counts it or Rust refuses it", 
       (request as SetLogView).view.filter === "/(/"
     )
       return Promise.reject(
-        new IpcError("invalidInput", "the filter /(/ is no regex"),
+        new IpcError("filter.invalid-regex", "the filter /(/ is no regex"),
       );
     return invoke(command as never, request as never);
   };

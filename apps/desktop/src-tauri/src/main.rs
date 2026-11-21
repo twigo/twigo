@@ -20,8 +20,8 @@ use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, DiagnosticsEntry, DiagnosticsLevel,
-    Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
+    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, DiagnosticsLevel,
+    Discovered, DownloadLogs, ErrorCode, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
     ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
     KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
     NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
@@ -169,8 +169,8 @@ impl App {
 async fn contexts_watch(
     webview: Webview,
     app: State<'_, App>,
-    channel: Channel<Vec<Context>>,
-) -> Result<Vec<Context>, IpcError> {
+    channel: Channel<Catalog>,
+) -> Result<Catalog, IpcError> {
     let mut contexts = app.core.catalog.subscribe();
     let mut access = app.core.policy.changes();
     // Marks what it answers with as seen, so the follower sends only what
@@ -253,13 +253,7 @@ fn spaces_list(app: State<'_, App>) -> Vec<Space> {
 
 #[tauri::command]
 async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
-    if app.core.catalog.contexts().await.find(&request).is_none() {
-        return Err(IpcError::new(
-            ErrorKind::NotFound,
-            format!("no source lists the context {request:?}"),
-        ));
-    }
-    Ok(app.core.state.open_space(&request))
+    app.core.space_open(&request).await
 }
 
 #[tauri::command]
@@ -489,7 +483,7 @@ async fn logs_download(
         });
     let picked = picked.await.map_err(|error| {
         IpcError::new(
-            ErrorKind::Internal,
+            ErrorCode::LogsDialogFailed,
             format!("the save dialog failed: {error}"),
         )
     })?;
@@ -498,7 +492,7 @@ async fn logs_download(
     };
     let path = picked.into_path().map_err(|error| {
         IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::LogsNotAFile,
             format!("Twigo saves logs only to a file on this computer: {error}"),
         )
     })?;
@@ -694,7 +688,7 @@ fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
         .open_url(url, None::<&str>)
         .map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::LinkOpenFailed,
                 format!("could not open {request}: {error}"),
             )
         })
@@ -733,7 +727,7 @@ fn log_reveal(handle: AppHandle, log: State<'_, Log>) -> Result<(), IpcError> {
         .reveal_item_in_dir(log.path())
         .map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::FileUnrevealed,
                 format!("could not show the log file: {error}"),
             )
         })

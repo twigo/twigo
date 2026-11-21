@@ -255,7 +255,7 @@ function Problem({ forward }: { forward: Forward }) {
   if (state.state === "reconnecting") {
     return (
       <Callout tone="warn" title="Reconnecting">
-        <p>{state.reason}</p>
+        <p>{state.reason.message}</p>
         <p className="text-support">
           It looks again while it has connections, and at its next one.
         </p>

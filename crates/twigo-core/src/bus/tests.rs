@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    BlockReason, Environment, ErrorKind, Execute, Friction, Mode, ModeSource, OperationEvent,
-    PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
+    BlockReason, Environment, ErrorCode, ErrorKind, Execute, Friction, Mode, ModeSource,
+    OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
@@ -841,10 +841,7 @@ async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
     let [OperationEvent::Failed { error }] = told.as_slice() else {
         panic!("{told:?}");
     };
-    assert_eq!(
-        error.message,
-        "Job j has completed, so there is nothing to suspend"
-    );
+    assert_eq!(error.code, ErrorCode::ActionNoChange);
     assert!(
         !server
             .seen
@@ -874,11 +871,7 @@ async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
         space: space.clone(),
     };
     let refused = core.command_plan("main", undo).await.unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::Conflict);
-    assert_eq!(
-        refused.message,
-        "Job r has completed since you resumed it, so Twigo left it"
-    );
+    assert_eq!(refused.code, ErrorCode::ActionObjectChanged);
 }
 
 fn previewed(name: &str) -> Previewed {
@@ -1558,8 +1551,7 @@ async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
     let Some(ShellEnd::Failed { error }) = ended(&told) else {
         panic!("{:?}", told.lock().unwrap());
     };
-    assert_eq!(error.kind, ErrorKind::Forbidden);
-    assert_eq!(error.message, "forbidden by the server");
+    assert_eq!(error.code, ErrorCode::ServerForbidden);
     core.shell_close("main", id).unwrap();
 }
 

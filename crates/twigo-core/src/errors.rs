@@ -1,28 +1,39 @@
 //! How the core's errors reach the webview (`IpcError`).
 
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_policy::Refused;
 
 use crate::ClientsError;
 
+/// No source lists the context: the one place that says so, for a command, a session, a policy
+/// change and the webview's own ask.
+pub(crate) fn unlisted(context: &str) -> IpcError {
+    IpcError::new(
+        ErrorCode::ContextNotListed,
+        format!("no source lists the context {context:?}"),
+    )
+}
+
 impl From<&ClientsError> for IpcError {
     fn from(error: &ClientsError) -> Self {
-        let kind = match error {
-            ClientsError::NoContext(_) | ClientsError::NoPlugin(_) => ErrorKind::NotFound,
-            ClientsError::Invalid(..) | ClientsError::Oidc(..) => ErrorKind::InvalidInput,
-            ClientsError::Untrusted(..) => ErrorKind::Unauthorized,
-            ClientsError::Connect(..) => ErrorKind::Unavailable,
+        let code = match error {
+            ClientsError::NoContext(context) => return unlisted(context),
+            ClientsError::NoPlugin(_) => ErrorCode::ContextNoPlugin,
+            ClientsError::Invalid(..) | ClientsError::Connect(..) => ErrorCode::ContextInvalid,
+            ClientsError::Oidc(..) => ErrorCode::CredentialsOidcConfig,
+            ClientsError::Untrusted(..) => ErrorCode::CredentialsUntrusted,
         };
-        IpcError::new(kind, error.to_string())
+        IpcError::new(code, error.to_string())
     }
 }
 
 pub(crate) fn refused(error: &Refused) -> IpcError {
-    let kind = match error {
-        Refused::PolicyFile(..) | Refused::PolicyFileUnreadable(_) => ErrorKind::Permissions,
-        Refused::NotLocked(..) => ErrorKind::InvalidInput,
-        Refused::Unlisted(_) => ErrorKind::NotFound,
-        Refused::Changed(_) => ErrorKind::Conflict,
+    let code = match error {
+        Refused::PolicyFile(..) => ErrorCode::PolicyFileSetsMode,
+        Refused::PolicyFileUnreadable(_) => ErrorCode::PolicyFileUnreadable,
+        Refused::NotLocked(..) => ErrorCode::PolicyNotLocked,
+        Refused::Unlisted(context) => return unlisted(context),
+        Refused::Changed(_) => ErrorCode::PolicyChanged,
     };
-    IpcError::new(kind, error.to_string())
+    IpcError::new(code, error.to_string())
 }

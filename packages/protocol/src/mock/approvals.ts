@@ -377,22 +377,28 @@ export class MockApprovals {
   answer({ id, answer, typed }: AnswerApproval): null {
     const ask = this.#waiting.get(id);
     if (ask === undefined) {
-      throw new IpcError("notFound", `the ask ${String(id)} is gone`);
+      throw new IpcError("approval.gone", `the ask ${String(id)} is gone`);
     }
     if (answer.kind !== "deny" && (answer.kind === "mark") !== ask.unmarked) {
       throw new IpcError(
-        "invalidInput",
+        ask.unmarked ? "approval.unmarked" : "approval.marked",
         ask.unmarked
           ? "this ask takes the context's type or a denial"
           : "this ask does not ask what the context is",
       );
     }
     if (answer.kind !== "deny" && ask.typed && typed !== ask.context) {
-      throw new IpcError("invalidInput", `type ${ask.context} to confirm`);
+      throw new IpcError(
+        "confirm.name-mismatch",
+        `type ${ask.context} to confirm`,
+      );
     }
     if (answer.kind === "lasting") {
       if (ask.lastingMinutes === null) {
-        throw new IpcError("invalidInput", "this ask offers no lasting answer");
+        throw new IpcError(
+          "approval.once-only",
+          "this ask offers no lasting answer",
+        );
       }
       this.#lasting.set(grantOf(ask), {
         until: Date.now() + ask.lastingMinutes * 60_000,

@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tower::BoxError;
 use twigo_cache::fake::{frame, stream};
 use twigo_cache::hub::{Connect, Hub};
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 
 pub const NAMESPACE: &str = "shop";
@@ -108,13 +108,13 @@ impl Fake {
                 Box::pin(async move {
                     if missing {
                         return Err(IpcError::new(
-                            ErrorKind::NotFound,
+                            ErrorCode::ContextNotListed,
                             "no source lists the context \"kind-test\"",
                         ));
                     }
                     if failing {
                         return Err(IpcError::new(
-                            ErrorKind::Unavailable,
+                            ErrorCode::ConnectOther,
                             "the context's clients could not be made",
                         ));
                     }

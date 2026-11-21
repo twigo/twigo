@@ -314,7 +314,7 @@ export function createMockBackend(
 
   const space = (id: string) => {
     const found = spaces.find((candidate) => candidate.id === id);
-    if (!found) throw new IpcError("notFound", `no space ${id}`);
+    if (!found) throw new IpcError("space.not-found", `no space ${id}`);
     return found;
   };
 
@@ -336,7 +336,8 @@ export function createMockBackend(
 
   const subscription = (id: number) => {
     const found = subscriptions.get(id);
-    if (!found) throw new IpcError("notFound", `no subscription ${id}`);
+    if (!found)
+      throw new IpcError("subscription.not-found", `no subscription ${id}`);
     return found;
   };
 
@@ -347,7 +348,8 @@ export function createMockBackend(
   >();
   const shellOf = (id: number) => {
     const found = shells.get(id);
-    if (!found) throw new IpcError("notFound", `no session ${id}`);
+    if (!found)
+      throw new IpcError("subscription.not-found", `no session ${id}`);
     return found;
   };
   const terminals = new Map<
@@ -364,12 +366,19 @@ export function createMockBackend(
     const parked = terminals.get(id);
     if (parked) {
       if (!parked.terminal) {
-        throw new IpcError("conflict", `session ${id} has not opened`);
+        throw new IpcError(
+          "subscription.not-found",
+          `session ${id} has not opened`,
+        );
       }
       return parked.terminal;
     }
     const { shell } = shellOf(id);
-    if (!shell) throw new IpcError("conflict", `session ${id} has not opened`);
+    if (!shell)
+      throw new IpcError(
+        "subscription.not-found",
+        `session ${id} has not opened`,
+      );
     return shell;
   };
 
@@ -378,14 +387,19 @@ export function createMockBackend(
       (candidate) =>
         candidate.namespace === namespace && candidate.name === name,
     );
-    if (!pod) throw new IpcError("notFound", `pods "${name}" not found`);
+    if (!pod)
+      throw new IpcError("server.not-found", `pods "${name}" not found`);
     return shellContainers(pod, shellScenario);
   };
 
   const objects = new Map<number, MockObject>();
   const object = (id: number) => {
     const found = objects.get(id);
-    if (!found) throw new IpcError("notFound", `no object subscription ${id}`);
+    if (!found)
+      throw new IpcError(
+        "subscription.not-found",
+        `no object subscription ${id}`,
+      );
     return found;
   };
 
@@ -446,7 +460,10 @@ export function createMockBackend(
     secret: (id) => {
       const context = objectContexts.get(id);
       if (context === undefined) {
-        throw new IpcError("notFound", `no object subscription ${id}`);
+        throw new IpcError(
+          "subscription.not-found",
+          `no object subscription ${id}`,
+        );
       }
       return { context, ...object(id).names };
     },
@@ -465,7 +482,11 @@ export function createMockBackend(
   const logs = new Map<number, MockLogs>();
   const log = (id: number) => {
     const found = logs.get(id);
-    if (!found) throw new IpcError("notFound", `no logs subscription ${id}`);
+    if (!found)
+      throw new IpcError(
+        "subscription.not-found",
+        `no logs subscription ${id}`,
+      );
     return found;
   };
   /** The cluster's followed logs go to the sessions in the order they opened (ARCHITECTURE 3.2). */
@@ -502,7 +523,10 @@ export function createMockBackend(
       ),
     space_open: (name) => {
       if (!CONTEXTS.some((context) => context.name === name)) {
-        throw new IpcError("notFound", `no source lists the context ${name}`);
+        throw new IpcError(
+          "context.not-listed",
+          `no source lists the context ${name}`,
+        );
       }
       const open = spaces.find(
         (candidate) =>
@@ -515,7 +539,8 @@ export function createMockBackend(
     },
     cluster_version: (name) => {
       const version = VERSIONS[name];
-      if (!version) throw new IpcError("notFound", `no context ${name}`);
+      if (!version)
+        throw new IpcError("context.not-listed", `no context ${name}`);
       auth.check(name);
       return { gitVersion: version };
     },
@@ -526,7 +551,7 @@ export function createMockBackend(
     url_open: (url) => {
       if (!signInLink(url)) {
         throw new IpcError(
-          "invalidInput",
+          "link.refused",
           `Twigo opens only sign-in links: ${url}`,
         );
       }
@@ -542,7 +567,7 @@ export function createMockBackend(
     namespaces_list: (id) => {
       space(id);
       if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {
-        throw new IpcError("forbidden", "you may not list namespaces");
+        throw new IpcError("server.forbidden", "You may not list namespaces.");
       }
       return [...NAMESPACES].sort();
     },
@@ -551,7 +576,7 @@ export function createMockBackend(
       const schema = recordedSchema(group, version, kind);
       if (schema === undefined) {
         throw new IpcError(
-          "notFound",
+          "openapi.no-kind",
           `the cluster's OpenAPI for ${group}/${version} has no kind ${kind}`,
         );
       }
@@ -577,7 +602,10 @@ export function createMockBackend(
         try {
           JSON.parse(value);
         } catch {
-          throw new IpcError("invalidInput", `the value of ${key} is not JSON`);
+          throw new IpcError(
+            "state.not-json",
+            `the value of ${key} is not JSON`,
+          );
         }
       }
       for (const { space: id, key, value } of entries) {
@@ -614,7 +642,7 @@ export function createMockBackend(
     shell_containers: ({ space: id, namespace, pod }) => {
       const [context] = space(id).contexts;
       if (context === undefined) {
-        throw new IpcError("notFound", `space ${id} has no context`);
+        throw new IpcError("context.not-listed", `space ${id} has no context`);
       }
       return containersOf(context, namespace, pod);
     },
@@ -727,13 +755,16 @@ export function createMockBackend(
     list_subscribe: (query, onMessage) => {
       const [context] = space(query.space).contexts;
       if (context === undefined) {
-        throw new IpcError("notFound", `space ${query.space} has no context`);
+        throw new IpcError(
+          "context.not-listed",
+          `space ${query.space} has no context`,
+        );
       }
       const { group, version, resource } = query.gvr;
       const kind = KINDS[`${group}/${version}/${resource}`];
       if (!kind) {
         throw new IpcError(
-          "notFound",
+          "apply.kind-not-served",
           `the mock backend serves only pods, nodes, deployments, jobs and events, not ${resource}`,
         );
       }
@@ -769,7 +800,12 @@ export function createMockBackend(
         typeof selected === "string"
           ? {
               state: "error",
-              error: { kind: "invalidInput", message: selected },
+              error: {
+                code: "server.invalid",
+                kind: "invalidInput",
+                message: selected,
+                server: { reason: "BadRequest", causes: [] },
+              },
             }
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
@@ -852,7 +888,10 @@ export function createMockBackend(
       const parked = terminals.get(open.id);
       if (parked) {
         if (parked.terminal) {
-          throw new IpcError("conflict", `session ${open.id} opened already`);
+          throw new IpcError(
+            "session.started",
+            `session ${open.id} opened already`,
+          );
         }
         parked.terminal = new MockTerminal(
           {
@@ -876,7 +915,10 @@ export function createMockBackend(
       }
       const found = shellOf(open.id);
       if (found.shell) {
-        throw new IpcError("conflict", `session ${open.id} opened already`);
+        throw new IpcError(
+          "session.started",
+          `session ${open.id} opened already`,
+        );
       }
       const [context] = space(found.target.space).contexts;
       found.shell = new MockShell(
@@ -976,8 +1018,10 @@ const PINNED: Readonly<
   error: {
     state: "error",
     error: {
-      kind: "unavailable",
-      message: "dial tcp 10.0.0.1:6443: connect: connection refused",
+      code: "server.invalid",
+      kind: "invalidInput",
+      message: "field label not supported: spec.containers",
+      server: { reason: "BadRequest", causes: [] },
     },
   },
 };

@@ -852,7 +852,7 @@ async fn clients_that_a_failed_credential_could_not_build_come_with_the_next_rea
             Box::pin(async move {
                 if refused {
                     return Err(twigo_ipc::IpcError::new(
-                        twigo_ipc::ErrorKind::Unauthorized,
+                        twigo_ipc::ErrorCode::CredentialsUntrusted,
                         "Twigo runs aws only once you trust it".to_owned(),
                     ));
                 }

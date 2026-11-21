@@ -1,7 +1,7 @@
 //! The TCP ports a target declares (ARCHITECTURE 4.6), read from its object.
 
 use serde_json::Value;
-use twigo_ipc::{ErrorKind, ForwardPort, IpcError};
+use twigo_ipc::{ErrorCode, ForwardPort, IpcError};
 
 /// The ports of `object`, a `kind`, in the order of its spec, TCP ones only.
 /// Their `local` and `forward` are for the caller to fill.
@@ -17,7 +17,7 @@ pub(super) fn declared(
     };
     if ports.is_empty() {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ForwardNoPort,
             format!("{kind} {name} declares no TCP port to forward to"),
         ));
     }
@@ -143,6 +143,7 @@ pub(super) fn local(remembered: Option<u16>, port: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use twigo_ipc::ErrorKind;
 
     use super::*;
 

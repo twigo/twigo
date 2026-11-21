@@ -458,7 +458,7 @@ async fn clients_that_cannot_be_built_after_an_answer_leave_what_it_confirmed_ke
     assert!(first.api().borrow().columns(Kind::Pods));
 
     let broken = Err(IpcError::new(
-        twigo_ipc::ErrorKind::Unavailable,
+        twigo_ipc::ErrorCode::ConnectOther,
         "no such file: ca.pem".to_owned(),
     ));
     let replaced = std::mem::replace(&mut *current.lock().unwrap(), broken);

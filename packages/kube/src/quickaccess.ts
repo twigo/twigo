@@ -217,7 +217,7 @@ async function listNamespaces(
   try {
     return await backend.invoke("namespaces_list", space);
   } catch (error) {
-    if (toIpcError(error).kind === "forbidden") return undefined;
+    if (toIpcError(error).code === "server.forbidden") return undefined;
     throw error;
   }
 }

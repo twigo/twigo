@@ -583,7 +583,7 @@ fn nanos(time: jiff::Timestamp) -> i64 {
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc;
-    use twigo_ipc::{Containers, ErrorKind, Gvr, LevelFilter, LogTarget, Since};
+    use twigo_ipc::{Containers, ErrorCode, Gvr, LevelFilter, LogTarget, Since};
 
     use twigo_ipc::LogEntry;
 
@@ -878,7 +878,7 @@ mod tests {
         assert_eq!(run.subscriptions.state(), ViewState::Ready);
         fake.delete("web-1");
         until(&mut run, "the pod gone", |run| run.pods.is_empty()).await;
-        let gone = IpcError::new(ErrorKind::NotFound, "pods web-1 is gone");
+        let gone = IpcError::new(ErrorCode::TargetGone, "pods web-1 is gone");
         assert_eq!(run.subscriptions.state(), ViewState::Error { error: gone });
     }
 

@@ -22,7 +22,7 @@ export function useCredentialEntries(): readonly StatusEntry[] {
         id: "credentials",
         text: "Kubeconfig entry unusable",
         icon: TriangleAlert,
-        tooltip: auth.message,
+        tooltip: auth.error.message,
       },
     ];
   }

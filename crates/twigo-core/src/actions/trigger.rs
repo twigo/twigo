@@ -8,7 +8,7 @@ use std::sync::Weak;
 use http::Method;
 use serde_json::{Map, Value, json};
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 use twigo_policy::friction::Risk;
 
 use super::{Target, attributes, clients_for, get, write};
@@ -155,7 +155,7 @@ impl Run {
         let cronjob = get(&clients, &self.target.path).await?;
         if cronjob["metadata"]["uid"].as_str() != Some(self.uid.as_str()) {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionObjectChanged,
                 format!(
                     "cron job {} was replaced since you confirmed, so Twigo created nothing",
                     self.target.name
@@ -170,7 +170,7 @@ impl Run {
         {
             Ok(_) => Ok(Finished::Done(format!("Created job {}", self.job))),
             Err(kube::Error::Api(status)) if status.code == 409 => Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::TriggerJobExists,
                 format!("Job {} exists already, so Twigo created nothing", self.job),
             )),
             Err(error) => Err(twigo_kube::errors::request(&error)),

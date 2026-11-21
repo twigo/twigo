@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use futures::future::Either;
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
+    AnswerKubeconfigOffer, ErrorCode, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
     KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
 };
 use twigo_kube::client::Actor;
@@ -29,8 +29,8 @@ use twigo_policy::Policy;
 use twigo_sessions::shell::Frame;
 use twigo_sessions::terminal::{Spec, Terminal};
 
+use crate::Core;
 use crate::proxy::ProxyProcess;
-use crate::{ClientsError, Core};
 use directory::Directory;
 pub(crate) use offers::Offers;
 use offers::Source;
@@ -170,7 +170,7 @@ pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
 
 fn written(path: &Path, error: std::io::Error) -> IpcError {
     IpcError::new(
-        ErrorKind::Internal,
+        ErrorCode::FileUnwritten,
         format!("could not write {}: {error}", path.display()),
     )
 }
@@ -200,7 +200,7 @@ impl Core {
         // process, whose proxy follows the mode by itself.
         let contexts = self.catalog.contexts().await;
         let Some(found) = contexts.find(&context) else {
-            return Err(IpcError::from(&ClientsError::NoContext(context)));
+            return Err(crate::errors::unlisted(&context));
         };
         let kind = kind(&self.policy, &context);
         let sources = self
@@ -237,7 +237,7 @@ impl Core {
                 )
                 .map_err(|error| {
                     IpcError::new(
-                        ErrorKind::InvalidInput,
+                        ErrorCode::TerminalKubeconfigPath,
                         format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
                     )
                 })?;

@@ -24,7 +24,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
-use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, IpcError, ShellEnd, ShellEvent};
 use twigo_log::Repeats;
 
 use crate::flow::{FRAME_MAX, Flow};
@@ -104,7 +104,7 @@ impl Terminal {
         let parked = self.parked.lock().expect("terminal lock").take();
         let Some(Parked { spec, commands }) = parked else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::SessionStarted,
                 "this terminal has started already",
             ));
         };
@@ -113,7 +113,7 @@ impl Terminal {
             Ok(spawned) => spawned,
             Err(error) => {
                 let error = IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::TerminalStartFailed,
                     format!("could not start {}: {error}", spec.program.display()),
                 );
                 send(Frame::Event(ShellEvent::Ended {
@@ -284,7 +284,7 @@ async fn run(
         Ok(status) => ending(status),
         Err(error) => ShellEnd::Failed {
             error: IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::TerminalWaitFailed,
                 format!("could not learn how the shell ended: {error}"),
             ),
         },

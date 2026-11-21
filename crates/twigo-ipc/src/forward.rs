@@ -178,7 +178,7 @@ pub enum ForwardState {
     /// when no other is left. It looks again while it has connections, and
     /// at the next one.
     Reconnecting {
-        reason: String,
+        reason: IpcError,
     },
     /// Still listening, unless its local port was held when it was restored
     /// (`addresses` is then empty). Its connections end and what it accepts is

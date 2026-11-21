@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use twigo_ipc::{
-    BlockReason, Blocked, Cell, ColumnValues, ContextAccess, Environment, ErrorKind, Grouping, Gvr,
-    IpcError, ListQuery, Lock, LockSource, Mode, ModeSource, Part, PartState, Parts, RequestClass,
-    RowId, Sort, SubscriptionId, ViewState,
+    BlockReason, Blocked, Cell, ColumnValues, ContextAccess, Environment, ErrorCode, ErrorKind,
+    Grouping, Gvr, IpcError, ListQuery, Lock, LockSource, Mode, ModeSource, Part, PartState, Parts,
+    RequestClass, RowId, ServerCause, ServerStatus, Sort, SubscriptionId, ViewState,
 };
 
 fn wire<T: serde::Serialize>(value: &T) -> Value {
@@ -19,11 +19,34 @@ fn view_states_are_tagged_by_state() {
     );
     assert_eq!(
         wire(&ViewState::Error {
-            error: IpcError::new(ErrorKind::Unavailable, "refused"),
+            error: IpcError::new(ErrorCode::ConnectRefused, "refused"),
         }),
-        json!({"state": "error", "error": {"kind": "unavailable", "message": "refused"}})
+        json!({
+            "state": "error",
+            "error": {"code": "connect.refused", "kind": "unavailable", "message": "refused"},
+        })
     );
     assert_eq!(wire(&ViewState::Ready), json!({"state": "ready"}));
+}
+
+#[test]
+fn a_waiting_state_names_its_cause_only_when_it_has_one() {
+    assert_eq!(
+        wire(&ViewState::Connecting { cause: None }),
+        json!({"state": "connecting"})
+    );
+    let cause = IpcError::new(ErrorCode::ConnectRefused, "refused");
+    let stale = ViewState::Stale {
+        cause: Some(cause.clone()),
+    };
+    assert_eq!(
+        wire(&stale),
+        json!({"state": "stale", "cause": wire(&cause)})
+    );
+    assert_eq!(
+        serde_json::from_value::<ViewState>(json!({"state": "stale"})).unwrap(),
+        ViewState::Stale { cause: None }
+    );
 }
 
 #[test]
@@ -182,8 +205,8 @@ fn a_context_s_access_says_where_its_mode_comes_from() {
 #[test]
 fn only_a_blocked_request_s_error_carries_its_rule() {
     assert_eq!(
-        wire(&IpcError::new(ErrorKind::Forbidden, "no")),
-        json!({"kind": "forbidden", "message": "no"})
+        wire(&IpcError::new(ErrorCode::ServerForbidden, "no")),
+        json!({"code": "server.forbidden", "kind": "forbidden", "message": "no"})
     );
     let blocked = Blocked {
         context: "prod-eu".to_owned(),
@@ -198,6 +221,7 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
     assert_eq!(
         wire(&error),
         json!({
+            "code": "policy.blocked",
             "kind": "permissions",
             "message": "prod-eu is read-only by your choice, so Twigo did not send create configmaps in a",
             "blocked": {
@@ -213,9 +237,43 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
     );
     let read: IpcError = serde_json::from_value(wire(&error)).unwrap();
     assert_eq!(read, error);
-    let plain: IpcError =
-        serde_json::from_value(json!({"kind": "timeout", "message": "late"})).unwrap();
+    let plain: IpcError = serde_json::from_value(
+        json!({"code": "server.timeout", "kind": "timeout", "message": "late"}),
+    )
+    .unwrap();
     assert_eq!(plain.blocked, None);
+    assert_eq!(plain.server, None);
+}
+
+#[test]
+fn the_servers_status_travels_as_data_beside_the_code() {
+    let status = ServerStatus {
+        reason: "Invalid".to_owned(),
+        causes: vec![ServerCause {
+            reason: "FieldValueInvalid".to_owned(),
+            field: "spec.replicas".to_owned(),
+            message: "must be non-negative".to_owned(),
+        }],
+    };
+    let error = IpcError::new(ErrorCode::ServerInvalid, "invalid").with_server(status);
+    assert_eq!(
+        wire(&error),
+        json!({
+            "code": "server.invalid",
+            "kind": "invalidInput",
+            "message": "invalid",
+            "server": {
+                "reason": "Invalid",
+                "causes": [{
+                    "reason": "FieldValueInvalid",
+                    "field": "spec.replicas",
+                    "message": "must be non-negative",
+                }],
+            },
+        })
+    );
+    let read: IpcError = serde_json::from_value(wire(&error)).unwrap();
+    assert_eq!(read, error);
 }
 
 #[test]
@@ -225,16 +283,17 @@ fn a_refused_state_says_its_words_as_an_error_and_the_others_say_none() {
         resource: "pods".into(),
     };
     let refused = forbidden.refusal().unwrap();
+    assert_eq!(refused.code, ErrorCode::ServerForbidden);
     assert_eq!(refused.kind, ErrorKind::Forbidden);
-    assert_eq!(refused.message, "you may not watch pods");
+    assert_eq!(refused.message, "You may not watch pods.");
     assert_eq!(
-        ViewState::Unauthorized.refusal().unwrap().kind,
-        ErrorKind::Unauthorized
+        ViewState::Unauthorized.refusal().unwrap().code,
+        ErrorCode::ServerUnauthorized
     );
-    let failed = IpcError::new(ErrorKind::Internal, "broken");
+    let failed = IpcError::new(ErrorCode::InternalPanic, "broken");
     let error = ViewState::Error {
         error: failed.clone(),
     };
     assert_eq!(error.refusal(), Some(failed));
-    assert_eq!(ViewState::Stale.refusal(), None);
+    assert_eq!(ViewState::Stale { cause: None }.refusal(), None);
 }

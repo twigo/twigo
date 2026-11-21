@@ -164,7 +164,7 @@ export class ListView {
     if (this.#closed) return;
     if (batch.metrics === "absent") {
       this.#fail(
-        new IpcError("internal", "a list was told metrics are absent"),
+        new IpcError("internal.ipc", "a list was told metrics are absent"),
       );
       return;
     }

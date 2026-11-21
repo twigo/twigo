@@ -299,7 +299,7 @@ test("a session that closed takes no more, and an ended one refuses input as the
   const error = await refused(
     shell.backend.invoke("shell_input", { id: shell.session.id, data: [97] }),
   );
-  expect(error.kind).toBe("conflict");
+  expect(error.code).toBe("subscription.not-found");
   await answered(shell.backend.invoke("shell_close", shell.session.id));
   const gone = await refused(
     shell.backend.invoke("shell_input", { id: shell.session.id, data: [97] }),
@@ -556,7 +556,7 @@ test("an answer to another revision than the offer's is refused as a conflict, a
       answer: "move",
     }),
   );
-  expect(error.kind).toBe("conflict");
+  expect(error.code).toBe("offer.changed");
   await answered(
     backend.invoke("kubeconfig_offer_answer", {
       id: offer.id,

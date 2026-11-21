@@ -224,6 +224,22 @@ lines: number, warnings: number, errors: number, };
 
 export type BusyWhy = "inUse" | "notPermitted";
 
+/**
+ * What the catalog's sources list, and what they could not.
+ */
+export type Catalog = { contexts: Array<Context>, 
+/**
+ * The kubeconfig files that exist and could not be read or merged,
+ * whose contexts are missing.
+ */
+failures: Array<CatalogFailure>, };
+
+export type CatalogFailure = { 
+/**
+ * The file, as a person names it: `~/.kube/config`.
+ */
+source: string, error: IpcError, };
+
 export type Cell = null | boolean | number | number | string;
 
 /**
@@ -354,7 +370,12 @@ access: ContextAccess,
  * The namespace the kubeconfig context names, which a new space of it
  * starts on; none when it names none.
  */
-namespace: string | null, };
+namespace: string | null, 
+/**
+ * Why no connection can be made, when the kubeconfig already says:
+ * `context.empty`, `context.missing-cluster` or `context.missing-user`.
+ */
+problem: IpcError | null, };
 
 /**
  * What a context lets through now, and why.
@@ -381,7 +402,7 @@ unlockedUntil: number | null, };
 /**
  * How a context gets its credentials.
  */
-export type ContextAuth = { "state": "none" } | { "state": "invalid", message: string, } | { "state": "untrusted", plugin: ExecPlugin, } | { "state": "plugin", plugin: ExecPlugin, status: PluginStatus, };
+export type ContextAuth = { "state": "none" } | { "state": "invalid", error: IpcError, } | { "state": "untrusted", plugin: ExecPlugin, } | { "state": "plugin", plugin: ExecPlugin, status: PluginStatus, };
 
 export type ContextColor = "red" | "orange" | "yellow" | "green" | "blue" | "purple";
 
@@ -444,6 +465,16 @@ export type EnvVar = { name: string, value: string, };
  */
 export type Environment = "production" | "staging" | "development" | "local";
 
+/**
+ * Why something failed, named by a condition: `family.condition`.
+ *
+ * A wire name is written out for each code, so renaming a variant
+ * never moves it, and it is never reused or removed: a code that no
+ * site builds any more stays, as a report or an issue may still name
+ * it. The test `error_codes` pins every name and kind.
+ */
+export type ErrorCode = "connect.refused" | "connect.unresolved" | "connect.timeout" | "connect.certificate" | "connect.tls" | "connect.proxy" | "connect.lost" | "connect.other" | "server.unauthorized" | "server.forbidden" | "server.not-found" | "server.conflict" | "server.invalid" | "server.timeout" | "server.unavailable" | "server.other" | "credentials.untrusted" | "credentials.plugin-missing" | "credentials.plugin-failed" | "credentials.plugin-timeout" | "credentials.plugin-cancelled" | "credentials.oidc-config" | "credentials.oidc-refresh" | "credentials.unusable" | "kubeconfig.unreadable" | "kubeconfig.unparsable" | "kubeconfig.unmergeable" | "kubeconfig.unwatched" | "context.not-listed" | "context.empty" | "context.missing-cluster" | "context.missing-user" | "context.invalid" | "context.no-plugin" | "policy.blocked" | "policy.file-unreadable" | "policy.file-sets-mode" | "policy.not-locked" | "policy.changed" | "answer.undecodable" | "discovery.not-aggregated" | "openapi.no-kind" | "openapi.not-listed" | "openapi.unreadable" | "exec.failed" | "forward.not-found" | "forward.invalid-port" | "forward.no-port" | "forward.unsupported-target" | "forward.port-in-use" | "forward.port-not-permitted" | "forward.listen-failed" | "forward.no-ready-pod" | "forward.port-refused" | "forward.waiting-for-slot" | "forward.cluster-unanswered" | "target.gone" | "state.set-aside" | "state.unsaved" | "state.reserved" | "state.not-json" | "space.not-found" | "trust.set-aside" | "trust.unsaved" | "audit.off" | "audit.unwritten" | "tokens.unsaved" | "file.unwritten" | "file.unrevealed" | "internal.panic" | "internal.ipc" | "internal.request" | "action.object-changed" | "action.cluster-changed" | "action.mode-changed" | "action.kept-changing" | "action.no-change" | "action.unsupported-kind" | "action.paused" | "action.no-target" | "action.mixed-targets" | "action.unquotable" | "action.drain-refused" | "apply.invalid-edit" | "apply.masked-value" | "apply.wrong-target" | "apply.kind-not-served" | "apply.no-object" | "apply.integer-too-large" | "apply.other-version" | "undo.nothing" | "undo.ended" | "trigger.job-exists" | "bus.not-waiting" | "bus.preview-replaced" | "window.gone" | "subscription.not-found" | "app.quitting" | "approval.gone" | "approval.other-window" | "approval.unmarked" | "approval.marked" | "approval.once-only" | "confirm.name-mismatch" | "confirm.countdown" | "offer.gone" | "offer.other-window" | "offer.answering" | "offer.changed" | "offer.locked" | "offer.unmoved" | "session.started" | "session.busy" | "shell.no-container" | "shell.pod-not-running" | "terminal.start-failed" | "terminal.wait-failed" | "terminal.kubeconfig-path" | "logs.unsupported-target" | "logs.invalid-time" | "logs.no-previous" | "logs.stream-failed" | "logs.dialog-failed" | "logs.not-a-file" | "filter.invalid-regex" | "filter.invalid-selector" | "object.not-listed" | "object.values-withheld" | "secret.not-a-secret" | "secret.no-key" | "proxy.actor-refused" | "proxy.unbound" | "link.refused" | "link.open-failed" | "keyboard.unavailable" | "keyboard.not-found";
+
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "permissions" | "timeout" | "unavailable" | "internal";
 
 /**
@@ -460,7 +491,7 @@ listed: boolean,
  * Why they cannot be listed, as when the person may not list events;
  * None while they are listed or still coming.
  */
-unavailable: string | null, };
+unavailable: IpcError | null, };
 
 /**
  * An exec credential plugin as the kubeconfig names it (ARCHITECTURE 6.2).
@@ -649,7 +680,7 @@ export type ForwardStarted = { "outcome": "started", forward: Forward, } | { "ou
  */
 free: number, };
 
-export type ForwardState = { "state": "starting" } | { "state": "restored" } | { "state": "ready" } | { "state": "reconnecting", reason: string, } | { "state": "failed", error: IpcError, } | { "state": "stopped" };
+export type ForwardState = { "state": "starting" } | { "state": "restored" } | { "state": "ready" } | { "state": "reconnecting", reason: IpcError, } | { "state": "failed", error: IpcError, } | { "state": "stopped" };
 
 /**
  * What a forward reaches: a pod, a Service, or a Deployment, ReplicaSet,
@@ -753,15 +784,24 @@ from: string,
 to: string, buckets: Array<Bucket>, };
 
 /**
- * The error every command returns. The webview branches on `kind`; `message`
- * is for people.
+ * The error every command returns, and every state that holds a failure.
+ *
+ * `code` names the condition and is what a person reads, searches and
+ * copies, and what a test holds; `kind` is its class, derived from it,
+ * which retries, sign-ins and refusals branch on; `message` is for people
+ * and is never matched. The core branches on `kind`, the webview on `code`
+ * where one condition matters and on `kind` where a class does.
  */
-export type IpcError = { kind: ErrorKind, message: string, 
+export type IpcError = { code: ErrorCode, kind: ErrorKind, message: string, 
 /**
  * With `permissions`: the mode and its source, when the gate stopped a
  * request.
  */
-blocked?: Blocked, };
+blocked?: Blocked, 
+/**
+ * With a request the API server answered: its status, as data.
+ */
+server?: ServerStatus, };
 
 /**
  * The characters one key types; empty where it types none.
@@ -1494,7 +1534,7 @@ since: string, output: string, } | { "state": "ready",
  * RFC 3339; none when the credential lasts until the cluster
  * rejects it.
  */
-expires: string | null, } | { "state": "failed", error: string, output: string, 
+expires: string | null, } | { "state": "failed", error: IpcError, output: string, 
 /**
  * The kubeconfig's `installHint`, when the command was not found.
  */
@@ -1521,7 +1561,7 @@ export type Related = { owners: Array<RelatedObject>, owned: Array<RelatedObject
 /**
  * Why some owned objects cannot be listed.
  */
-unavailable: string | null, };
+unavailable: IpcError | null, };
 
 export type RelatedObject = { target: ObjectRef, 
 /**
@@ -1646,6 +1686,27 @@ tone: Tone | null,
  * How it opens until the person folds or opens it.
  */
 fold: Fold, blocks: Array<Block>, };
+
+/**
+ * One cause of an `Invalid` status, as kubectl prints it: `field: message`.
+ */
+export type ServerCause = { reason: string, 
+/**
+ * `spec.replicas`; empty when the cause names no field.
+ */
+field: string, message: string, };
+
+/**
+ * What the API server said of a request it refused, beside Twigo's own
+ * code. The reason is the server's, an open set that an aggregated API or
+ * a webhook may answer any string for, so it is never a Twigo code.
+ */
+export type ServerStatus = { 
+/**
+ * The `reason` of the `Status`: `Forbidden`, `AlreadyExists`, `Invalid`;
+ * empty when the server gave none.
+ */
+reason: string, causes: Array<ServerCause>, };
 
 /**
  * How much Twigo's own crates write to the diagnostics log until Twigo
@@ -1900,7 +1961,15 @@ export type ValueCount = { value: string, count: number, };
 /**
  * The state of a subscription, or of one part of a list (ARCHITECTURE 3.7).
  */
-export type ViewState = { "state": "queued" } | { "state": "connecting" } | { "state": "syncing", loaded: number, } | { "state": "ready" } | { "state": "relisting" } | { "state": "stale" } | { "state": "forbidden", verb: string, resource: string, } | { "state": "unauthorized" } | { "state": "error", error: IpcError, };
+export type ViewState = { "state": "queued" } | { "state": "connecting", 
+/**
+ * The last failure that may pass, which each retry meets.
+ */
+cause?: IpcError, } | { "state": "syncing", loaded: number, } | { "state": "ready" } | { "state": "relisting" } | { "state": "stale", 
+/**
+ * The last failure that may pass, which each retry meets.
+ */
+cause?: IpcError, } | { "state": "forbidden", verb: string, resource: string, } | { "state": "unauthorized" } | { "state": "error", error: IpcError, };
 
 /**
  * One cell of the vitals strip, such as `Restarts` `4` `11 d ago`.
@@ -1923,7 +1992,7 @@ start: number, ids: Array<RowId>, };
 
 export type Commands = {
   spaces_list: { request: null; response: Array<Space>; message: null };
-  contexts_watch: { request: null; response: Array<Context>; message: Array<Context> };
+  contexts_watch: { request: null; response: Catalog; message: Catalog };
   context_relock: { request: string; response: null; message: null };
   command_plan: { request: PlanRequest; response: Plan; message: null };
   command_execute: { request: Execute; response: null; message: OperationEvent };

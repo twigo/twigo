@@ -7,7 +7,7 @@ use nix::sys::signal::{Signal, kill};
 use nix::unistd::{Pid, getpgid};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-use twigo_ipc::{ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, ShellEnd, ShellEvent};
 
 use super::{Spec, Terminal};
 use crate::shell::Frame;
@@ -195,14 +195,7 @@ async fn a_program_that_cannot_start_ends_failed_in_words() {
     else {
         panic!("not a failure");
     };
-    assert!(
-        error.message.starts_with(&format!(
-            "could not start {}: ",
-            dir.path().join("missing").display()
-        )),
-        "{}",
-        error.message
-    );
+    assert_eq!(error.code, ErrorCode::TerminalStartFailed);
 }
 
 #[tokio::test]

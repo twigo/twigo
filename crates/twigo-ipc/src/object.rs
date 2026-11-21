@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::{Gvr, MetricsState, SubscriptionId, ViewState};
+use crate::{Gvr, IpcError, MetricsState, SubscriptionId, ViewState};
 
 /// Names one object of a space.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -387,7 +387,7 @@ pub struct EventList {
     pub listed: bool,
     /// Why they cannot be listed, as when the person may not list events;
     /// None while they are listed or still coming.
-    pub unavailable: Option<String>,
+    pub unavailable: Option<IpcError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -536,7 +536,7 @@ pub struct Related {
     pub owners: Vec<RelatedObject>,
     pub owned: Vec<RelatedObject>,
     /// Why some owned objects cannot be listed.
-    pub unavailable: Option<String>,
+    pub unavailable: Option<IpcError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

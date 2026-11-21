@@ -424,11 +424,11 @@ fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
 
 impl From<&Error> for twigo_ipc::IpcError {
     fn from(error: &Error) -> Self {
-        let kind = match error {
-            Error::NoSpace(_) => twigo_ipc::ErrorKind::NotFound,
-            Error::Reserved(_) => twigo_ipc::ErrorKind::Permissions,
-            Error::NotJson { .. } => twigo_ipc::ErrorKind::InvalidInput,
+        let code = match error {
+            Error::NoSpace(_) => twigo_ipc::ErrorCode::SpaceNotFound,
+            Error::Reserved(_) => twigo_ipc::ErrorCode::StateReserved,
+            Error::NotJson { .. } => twigo_ipc::ErrorCode::StateNotJson,
         };
-        Self::new(kind, error.to_string())
+        Self::new(code, error.to_string())
     }
 }

@@ -11,7 +11,7 @@ use std::sync::Weak;
 use http::Method;
 use jiff::Timestamp;
 use serde_json::{Value, json};
-use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef, ResourceRef};
+use twigo_ipc::{Affected, ErrorCode, IpcError, ObjectRef, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
@@ -32,7 +32,7 @@ pub(crate) async fn restart(
     let target = Target::of(core, space, target)?;
     if !target.is("apps", &["deployments", "statefulsets", "daemonsets"]) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionUnsupportedKind,
             "Twigo restarts deployments, stateful sets and daemon sets",
         ));
     }
@@ -53,7 +53,7 @@ pub(crate) async fn restart(
     let what = format!("{kind} {}", target.name);
     if object["spec"]["paused"] == true {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ActionPaused,
             format!("{what} is paused, so it cannot restart until its rollout resumes"),
         ));
     }
@@ -200,7 +200,7 @@ async fn send(
         lost(attempt).await;
     }
     Err(IpcError::new(
-        ErrorKind::Conflict,
+        ErrorCode::ActionKeptChanging,
         format!(
             "{} kept changing, so Twigo restarted nothing",
             sentence(&what)

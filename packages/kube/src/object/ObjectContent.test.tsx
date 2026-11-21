@@ -16,7 +16,11 @@ test("owned objects that cannot be listed say why instead of none", () => {
       related={{
         owners: [],
         owned: [],
-        unavailable: "You may not list pods.",
+        unavailable: {
+          code: "server.forbidden",
+          kind: "forbidden",
+          message: "You may not list pods.",
+        },
       }}
       onOpen={() => undefined}
     />,
@@ -63,7 +67,11 @@ test("an object that is gone, or cannot be read, leaves its edit reachable when 
       ...INITIAL_OBJECT,
       status: {
         state: "error",
-        error: { kind: "unavailable", message: "no route to host" },
+        error: {
+          code: "connect.other",
+          kind: "unavailable",
+          message: "no route to host",
+        },
       },
     },
     forbidden: {

@@ -23,7 +23,7 @@ use jiff::Timestamp;
 use kube::client::Body;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
-use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_ipc::{ErrorCode, ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
 use crate::cluster::{Cluster, REFUSED_FOR};
@@ -120,7 +120,7 @@ impl<T: Item> Upstream<T> {
                 queued: false,
                 listed: false,
             }),
-            state: watch::Sender::new(ViewState::Connecting),
+            state: watch::Sender::new(ViewState::Connecting { cause: None }),
             watching: AtomicBool::new(false),
             retry: Notify::new(),
         }
@@ -187,11 +187,11 @@ impl<T: Item> Upstream<T> {
         let view = match (&status.phase, status.queued) {
             (Phase::Failed(view) | Phase::Refused(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
-            (Phase::Connecting, _) => ViewState::Connecting,
+            (Phase::Connecting, _) => ViewState::Connecting { cause: None },
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,
             (Phase::Relisting, _) => ViewState::Relisting,
-            (Phase::Stale, _) => ViewState::Stale,
+            (Phase::Stale, _) => ViewState::Stale { cause: None },
         };
         // Under the lock, so states go out in the order they were set.
         self.state.send_if_modified(|state| {
@@ -815,7 +815,7 @@ pub(crate) async fn read<D: Decode>(
                 match failure(&error, "list", resource) {
                     Failure::Refused(view) => view,
                     Failure::Unauthorized => ViewState::Unauthorized,
-                    Failure::Gone | Failure::Transient => ViewState::Stale,
+                    Failure::Gone | Failure::Transient => ViewState::Stale { cause: None },
                 }
             })?;
         let page = decoder
@@ -831,7 +831,7 @@ pub(crate) async fn read<D: Decode>(
 
 fn undecodable(error: &DecodeError) -> ViewState {
     let error = IpcError::new(
-        ErrorKind::Internal,
+        ErrorCode::AnswerUndecodable,
         format!("could not decode the server's answer: {error}"),
     );
     ViewState::Error { error }

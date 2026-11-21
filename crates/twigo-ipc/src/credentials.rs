@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::IpcError;
+
 /// An exec credential plugin as the kubeconfig names it (ARCHITECTURE 6.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -29,7 +31,7 @@ pub enum ContextAuth {
     /// No plugin: a token, a certificate or nothing, from the kubeconfig.
     None,
     /// The kubeconfig's entry for the context cannot be used.
-    Invalid { message: String },
+    Invalid { error: IpcError },
     /// The plugin runs only once the person trusts it.
     Untrusted { plugin: ExecPlugin },
     Plugin {
@@ -63,7 +65,7 @@ pub enum PluginStatus {
         expires: Option<String>,
     },
     Failed {
-        error: String,
+        error: IpcError,
         output: String,
         /// The kubeconfig's `installHint`, when the command was not found.
         install_hint: Option<String>,

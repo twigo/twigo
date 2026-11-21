@@ -167,7 +167,13 @@ test("a cancelled sign-in stays on screen with its failure", async () => {
   await vi.advanceTimersByTimeAsync(10);
   expect(credentials.auth).toMatchObject({
     state: "plugin",
-    status: { state: "failed", error: "exec: kubelogin was cancelled" },
+    status: {
+      state: "failed",
+      error: {
+        code: "credentials.plugin-cancelled",
+        message: "exec: kubelogin was cancelled",
+      },
+    },
   });
   expect(credentials.panelOpen).toBe(true);
 });
@@ -479,7 +485,16 @@ test("a credential comes after none or a failed run, not after a run its own rej
   run(
     "aws",
     running,
-    { state: "failed", error: "exit 255", output: "", installHint: null },
+    {
+      state: "failed",
+      error: {
+        code: "credentials.plugin-failed",
+        kind: "unauthorized",
+        message: "exit 255",
+      },
+      output: "",
+      installHint: null,
+    },
     running,
     ready,
   );

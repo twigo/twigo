@@ -628,7 +628,9 @@ function NewestEvents({
 /** An object's events, newest first, or why they cannot be listed. */
 export function Events({ list }: { list: EventList }) {
   const { events, unavailable } = list;
-  if (unavailable !== null) return <p className="text-error">{unavailable}</p>;
+  if (unavailable !== null) {
+    return <p className="text-error">{unavailable.message}</p>;
+  }
   if (events.length === 0) return <p className="text-support">No events</p>;
   return (
     <ul className="flex flex-col gap-1.5">

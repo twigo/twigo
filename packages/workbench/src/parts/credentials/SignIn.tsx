@@ -48,7 +48,7 @@ export function SignInBody({
 
       {failed ? (
         <div className="mt-3 space-y-2">
-          <p className="text-error">{status.error}</p>
+          <p className="text-error">{status.error.message}</p>
           {fix && (
             <p>
               Run <code className="font-mono">{fix}</code> in a terminal, then

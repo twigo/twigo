@@ -49,7 +49,7 @@ function instant(text: string): bigint {
   const at = time(text);
   if (at === null) {
     throw new IpcError(
-      "invalidInput",
+      "logs.invalid-time",
       `${JSON.stringify(text)} is no RFC 3339 time`,
     );
   }
@@ -74,7 +74,7 @@ function searcher(source: string): Search | null {
       regex = new RegExp(pattern, "gi");
     } catch (error) {
       throw new IpcError(
-        "invalidInput",
+        "filter.invalid-regex",
         `the search /${pattern}/ is no regex: ${String(error)}`,
       );
     }

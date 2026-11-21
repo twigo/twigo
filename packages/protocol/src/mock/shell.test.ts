@@ -172,10 +172,7 @@ test("a pod that runs nothing is refused in words, and one that is not there is 
       pod: pending.name,
     }),
   );
-  expect(error.kind).toBe("invalidInput");
-  expect(error.message).toBe(
-    `pod ${pending.name} is ${pending.status}, so it runs no container to open a shell in`,
-  );
+  expect(error.code).toBe("shell.pod-not-running");
   const missing = await refused(
     backend.invoke("shell_containers", {
       space: "kind-local",
@@ -352,7 +349,7 @@ test("exit N ends the session with its code after the output, and Ctrl-D on an e
   const refusedInput = await refused(
     shell.backend.invoke("shell_input", { id: shell.id, data: [97] }),
   );
-  expect(refusedInput.kind).toBe("conflict");
+  expect(refusedInput.code).toBe("subscription.not-found");
 
   const other = await openShell();
   await vi.advanceTimersByTimeAsync(500);

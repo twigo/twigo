@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use twigo_ipc::{ErrorKind, IpcError, SubscriptionId};
+use twigo_ipc::{ErrorCode, IpcError, SubscriptionId};
 
 /// Each held `T` ends its subscription when dropped.
 pub struct Subscriptions<T> {
@@ -59,7 +59,7 @@ impl<T> Subscriptions<T> {
 
     fn missing(&self, id: SubscriptionId) -> IpcError {
         IpcError::new(
-            ErrorKind::NotFound,
+            ErrorCode::SubscriptionNotFound,
             format!("no {} subscription {}", self.what, id.0),
         )
     }
@@ -88,7 +88,7 @@ impl<T> Subscriptions<T> {
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 format!("the page that asked for the {} is gone", self.what),
             ));
         }

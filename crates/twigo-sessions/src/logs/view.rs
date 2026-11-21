@@ -9,7 +9,7 @@ use aho_corasick::AhoCorasick;
 use regex::{Regex, RegexBuilder};
 use twigo_cache::view::TextFilter;
 use twigo_ipc::{
-    Bucket, ErrorKind, Histogram, IpcError, Level, LevelFilter, LogAround, LogEntries, LogEntry,
+    Bucket, ErrorCode, Histogram, IpcError, Level, LevelFilter, LogAround, LogEntries, LogEntry,
     LogMatches, LogView, LogWindow, TextRange,
 };
 
@@ -87,7 +87,7 @@ impl Spec {
 fn time(text: &str) -> Result<i64, IpcError> {
     let invalid = || {
         IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::LogsInvalidTime,
             format!("{text:?} is no RFC 3339 time"),
         )
     };
@@ -117,7 +117,7 @@ impl Search {
                     .build()
                     .map_err(|error| {
                         IpcError::new(
-                            ErrorKind::InvalidInput,
+                            ErrorCode::FilterInvalidRegex,
                             format!("the search /{pattern}/ is no regex: {error}"),
                         )
                     })?,
@@ -129,7 +129,7 @@ impl Search {
                     .build([text])
                     .map_err(|error| {
                         IpcError::new(
-                            ErrorKind::InvalidInput,
+                            ErrorCode::FilterInvalidRegex,
                             format!("the search {text:?} cannot be built: {error}"),
                         )
                     })?,

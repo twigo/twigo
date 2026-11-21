@@ -14,7 +14,7 @@ use twigo_cache::meta::Meta;
 use twigo_cache::object::Object;
 use twigo_cache::store::Item;
 use twigo_cache::table::{Column, Row};
-use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_ipc::{ErrorCode, IpcError, ViewState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Reach {
@@ -153,7 +153,7 @@ impl Subscriptions {
         if state == ViewState::Ready && self.target_missing() {
             return ViewState::Error {
                 error: IpcError::new(
-                    ErrorKind::NotFound,
+                    ErrorCode::TargetGone,
                     format!(
                         "{} {} is gone",
                         resource_name(&self.target.resource.group, &self.target.resource.resource),

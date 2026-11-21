@@ -104,7 +104,9 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
   const spaces = backend.invoke("spaces_list", null);
   const contexts = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
-  const colors = new Map((await contexts).map((c) => [c.name, c.color]));
+  const colors = new Map(
+    (await contexts).contexts.map((c) => [c.name, c.color]),
+  );
   expect(
     (await spaces).map((s) => [s.id, colors.get(s.contexts[0] ?? "")]),
   ).toEqual([
@@ -117,9 +119,9 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
 test("a context's mode follows the strictest of its locks, a choice over them, and an unlock that ends by itself, and a context nothing marks is unmarked", async () => {
   const backend = createMockBackend();
   const seen: Context[][] = [];
-  const first = backend.subscribe("contexts_watch", null, (next) =>
-    seen.push(next),
-  );
+  const first = backend
+    .subscribe("contexts_watch", null, (next) => seen.push(next.contexts))
+    .then((catalog) => catalog.contexts);
   await vi.advanceTimersByTimeAsync(0);
   const access = (contexts: Context[] | undefined, name: string) =>
     contexts?.find((context) => context.name === name)?.access;
@@ -226,7 +228,9 @@ test("an admin's policy file holds its contexts and leaves the others", async ()
   const backend = createMockBackend("policyFile");
   const first = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
-  const prod = (await first).find((context) => context.name === "prod-eu");
+  const prod = (await first).contexts.find(
+    (context) => context.name === "prod-eu",
+  );
   expect(prod?.access.source.kind).toBe("policyFile");
 
   const refused = [
@@ -851,8 +855,10 @@ test("a field selector keeps the pods of one node, and one on a field pods lack 
   expect(wrong.batches[0]?.status).toEqual({
     state: "error",
     error: {
+      code: "server.invalid",
       kind: "invalidInput",
       message: "field label not supported: spec.containers",
+      server: { reason: "BadRequest", causes: [] },
     },
   });
   expect(wrong.batches[0]?.total).toBe(0);

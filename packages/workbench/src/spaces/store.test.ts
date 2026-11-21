@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, Context } from "@twigo/protocol";
+import type { Backend, Catalog as Listed, Context } from "@twigo/protocol";
 import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
 import { ContextKeys } from "../contextkey/service";
 import { StateStore } from "../state/store";
@@ -146,15 +146,15 @@ test("a failed save reaches onError", async () => {
 
 function withCatalog(contexts: readonly Context[]) {
   const backend = createMockBackend("ready");
-  let send: ((next: Context[]) => void) | undefined;
+  let send: ((next: Listed) => void) | undefined;
   const subscribe = backend.subscribe.bind(backend);
   vi.spyOn(backend, "subscribe").mockImplementation((command, request, on) => {
     if (command !== "contexts_watch") return subscribe(command, request, on);
     send = on;
-    return Promise.resolve([...contexts]);
+    return Promise.resolve({ contexts: [...contexts], failures: [] });
   });
   const change = (next: readonly Context[]) => {
-    send?.([...next]);
+    send?.({ contexts: [...next], failures: [] });
   };
   return { backend, change };
 }
@@ -168,6 +168,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       server: null,
       namespace: null,
       access: UNMARKED,
+      problem: null,
     },
     {
       name: "staging",
@@ -176,6 +177,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       server: null,
       namespace: null,
       access: UNMARKED,
+      problem: null,
     },
     {
       name: "dev",
@@ -184,6 +186,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       server: null,
       namespace: null,
       access: UNMARKED,
+      problem: null,
     },
   ];
   const { backend, change } = withCatalog(all);
@@ -211,6 +214,7 @@ function named(name: string, namespace: string | null): Context {
     server: null,
     namespace,
     access: UNMARKED,
+    problem: null,
   };
 }
 
@@ -293,6 +297,7 @@ test("with no space for any listed context, the first context's space opens", as
       server: null,
       namespace: null,
       access: UNMARKED,
+      problem: null,
     },
   ]);
   const { spaces } = await window(backend);

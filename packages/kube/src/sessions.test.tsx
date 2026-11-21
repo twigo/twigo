@@ -233,7 +233,10 @@ const STREAMS: readonly [ViewState, boolean][] = [
   [{ state: "forbidden", verb: "get", resource: "pods/log" }, false],
   [{ state: "unauthorized" }, false],
   [
-    { state: "error", error: { kind: "unavailable", message: "broken" } },
+    {
+      state: "error",
+      error: { code: "connect.other", kind: "unavailable", message: "broken" },
+    },
     false,
   ],
 ];
@@ -300,7 +303,10 @@ const POD_STREAMS: readonly [StreamState, boolean][] = [
   [{ state: "off" }, false],
   [{ state: "overLimit" }, false],
   [
-    { state: "error", error: { kind: "unavailable", message: "broken" } },
+    {
+      state: "error",
+      error: { code: "connect.other", kind: "unavailable", message: "broken" },
+    },
     false,
   ],
 ];

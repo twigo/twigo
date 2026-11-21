@@ -270,7 +270,11 @@ test("events that cannot be listed say why instead of none", () => {
                 type: "events",
                 events: [],
                 listed: false,
-                unavailable: "You may not list events.events.k8s.io.",
+                unavailable: {
+                  code: "server.forbidden",
+                  kind: "forbidden",
+                  message: "You may not list events.events.k8s.io.",
+                },
               },
             ],
           },
