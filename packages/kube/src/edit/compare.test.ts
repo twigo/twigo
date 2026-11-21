@@ -41,7 +41,7 @@ test("what is typed reaches Rust as the list's text, so an object past the first
 const POD = "k8s://prod-eu//v1/pods/default/source";
 
 test("forbidden cluster-wide falls back to the selected namespaces and the object's own, and the picker says so", async () => {
-  const workbench = await testWorkbench("rbacNamespaces");
+  const workbench = await testWorkbench("rbacTypedNamespaces");
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
     namespaces: ["default"],
@@ -58,11 +58,11 @@ test("forbidden cluster-wide falls back to the selected namespaces and the objec
 
 test.each([
   [["default", "auth"], "auth"],
-  [["auth", "payments"], "auth, payments"],
+  [["auth", "checkout"], "auth, checkout"],
 ])(
   "namespaces selected that may not be listed (%j) are named, and the rows of the object's own are offered",
   async (namespaces, named) => {
-    const workbench = await testWorkbench("rbacNamespaces");
+    const workbench = await testWorkbench("rbacTypedNamespaces");
     workbench.spaces.update("prod-eu", (state) => ({ ...state, namespaces }));
     const found = await comparisons(workbench, POD, true)("");
     expect(found).toMatchObject({
@@ -75,7 +75,7 @@ test.each([
 );
 
 test("when the object's own namespace is the one refused, the rows are from the other namespaces selected", async () => {
-  const workbench = await testWorkbench("rbacNamespaces");
+  const workbench = await testWorkbench("rbacTypedNamespaces");
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
     namespaces: ["default"],
@@ -95,14 +95,14 @@ test("when the object's own namespace is the one refused, the rows are from the 
 });
 
 test("forbidden in the selected namespaces and the object's own says that, not nothing", async () => {
-  const workbench = await testWorkbench("rbacNamespaces");
+  const workbench = await testWorkbench("rbacTypedNamespaces");
   const auth = "k8s://prod-eu//v1/pods/auth/auth-api-1a4uyl1-r2bkk";
   await expect(comparisons(workbench, auth, true)("")).rejects.toThrow(
     "You may not list pods in this cluster, nor in the object's own namespace (auth).",
   );
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
-    namespaces: ["payments"],
+    namespaces: ["checkout"],
   }));
   await expect(comparisons(workbench, auth, true)("")).rejects.toThrow(
     "You may not list pods in this cluster, nor in the namespaces selected and the object's own.",

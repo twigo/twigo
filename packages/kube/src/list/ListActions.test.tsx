@@ -736,7 +736,7 @@ test("the chip keeps its form and the focus on its close mark while the strip na
 
 test("the close mark of a list that follows the space leaves the focus in the list's editor when the wider list has no grid to take it", async () => {
   laidOutScoped();
-  const workbench = await openList(createMockBackend("rbacNamespaces"));
+  const workbench = await openList(createMockBackend("rbacTypedNamespaces"));
   act(() => {
     workbench.spaces.update("prod-eu", (state) => ({
       ...state,
