@@ -494,6 +494,132 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
 
 #[tokio::test]
 #[ignore = "needs TWIGO_TEST_KUBECONFIG"]
+async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_list_pods_in() {
+    let live = live().await;
+    let namespaces = [
+        live.namespace("hub-all").await,
+        live.namespace("hub-all").await,
+        live.namespace("hub-all").await,
+    ];
+    let (home, others) = (&namespaces[0], &namespaces[1..]);
+    let accounts = Api::<ServiceAccount>::namespaced(live.admin.clone(), home);
+    let account: ServiceAccount =
+        serde_json::from_value(json!({ "metadata": { "name": "namer" } })).unwrap();
+    accounts
+        .create(&PostParams::default(), &account)
+        .await
+        .unwrap();
+    for namespace in &namespaces {
+        live.pod(namespace, "p").await;
+    }
+    for namespace in [home, &others[0]] {
+        let role: Role = serde_json::from_value(json!({
+            "metadata": { "name": "pods" },
+            "rules": [{ "apiGroups": [""], "resources": ["pods"], "verbs": ["list", "watch"] }]
+        }))
+        .unwrap();
+        Api::<Role>::namespaced(live.admin.clone(), namespace)
+            .create(&PostParams::default(), &role)
+            .await
+            .unwrap();
+        let binding: RoleBinding = serde_json::from_value(json!({
+            "metadata": { "name": "namer-pods" },
+            "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "pods" },
+            "subjects": [{ "kind": "ServiceAccount", "name": "namer", "namespace": home }]
+        }))
+        .unwrap();
+        Api::<RoleBinding>::namespaced(live.admin.clone(), namespace)
+            .create(&PostParams::default(), &binding)
+            .await
+            .unwrap();
+    }
+    let name = format!("{home}-namespaces");
+    let role: ClusterRole = serde_json::from_value(json!({
+        "metadata": { "name": name },
+        "rules": [{ "apiGroups": [""], "resources": ["namespaces"], "verbs": ["get", "list", "watch"] }]
+    }))
+    .unwrap();
+    let roles = Api::<ClusterRole>::all(live.admin.clone());
+    roles.create(&PostParams::default(), &role).await.unwrap();
+    let binding: ClusterRoleBinding = serde_json::from_value(json!({
+        "metadata": { "name": name },
+        "roleRef": { "apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": name },
+        "subjects": [{ "kind": "ServiceAccount", "name": "namer", "namespace": home }]
+    }))
+    .unwrap();
+    let bindings = Api::<ClusterRoleBinding>::all(live.admin.clone());
+    bindings
+        .create(&PostParams::default(), &binding)
+        .await
+        .unwrap();
+    let request: TokenRequest =
+        serde_json::from_value(json!({ "spec": { "audiences": [] } })).unwrap();
+    let token = accounts
+        .create_token_request("namer", &PostParams::default(), &request)
+        .await
+        .unwrap()
+        .status
+        .unwrap()
+        .token
+        .expect("a token");
+    let mut config = live.config.clone();
+    config.auth_info = AuthInfo {
+        token: Some(token.into()),
+        ..AuthInfo::default()
+    };
+
+    let (hub, clients) = live.hub(Some(&config));
+    // The authorizer learns of the bindings a moment later.
+    let allowed = async {
+        let one = kube::api::ListParams::default().limit(1);
+        for namespace in [home, &others[0]] {
+            let pods = Api::<Pod>::namespaced(clients.api.clone(), namespace);
+            while pods.list(&one).await.is_err() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+        let index = Api::<Namespace>::all(clients.api.clone());
+        while index.list(&one).await.is_err() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(30), allowed)
+        .await
+        .expect("the bindings count within half a minute");
+    let mut all = hub.rows(live.query(&[])).await.unwrap();
+    until(&mut all, |all| {
+        let shown = all.drain_shown();
+        shown.status == ViewState::Ready && shown.parts.count == 2
+    })
+    .await;
+    let read: Vec<&String> = [home, &others[0]].into();
+    let mut scopes: Vec<Scope> = read
+        .iter()
+        .map(|namespace| Scope::Namespace((*namespace).clone()))
+        .collect();
+    scopes.sort_by_key(|scope| format!("{scope:?}"));
+    assert!(
+        scopes.iter().all(|scope| hub.scopes().contains(scope)),
+        "an upstream for each of the two"
+    );
+    assert_eq!(all.items().len(), 2, "their pods");
+    assert!(
+        all.drain_shown().parts.omitted >= 1,
+        "the third namespace and the cluster's own are left out"
+    );
+
+    bindings
+        .delete(&name, &DeleteParams::default())
+        .await
+        .unwrap();
+    roles.delete(&name, &DeleteParams::default()).await.unwrap();
+    for namespace in &namespaces {
+        live.delete_namespace(namespace).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs TWIGO_TEST_KUBECONFIG"]
 async fn an_object_upstream_follows_an_edit() {
     let live = live().await;
     let namespace = live.namespace("hub-object").await;
