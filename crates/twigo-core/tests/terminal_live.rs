@@ -121,10 +121,7 @@ impl Live {
         );
         core.set_terminal_zdotdir(None);
         let (status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-        tokio::spawn({
-            let core = Arc::clone(&core);
-            async move { core.run(followed, None).await }
-        });
+        core.start_for_tests(followed, None);
         core.catalog.contexts().await;
         for name in [&context, &alias] {
             core.policy

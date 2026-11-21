@@ -9,10 +9,11 @@ mod tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{self, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use atomic_write_file::AtomicWriteFile;
@@ -20,6 +21,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use twigo_ipc::{ForwardId, Space, StateEntry, StateSnapshot};
+use twigo_panic::{Reporter, inject};
 use twigo_policy::Choices;
 
 use crate::forward::Saved;
@@ -80,6 +82,8 @@ struct Inner {
     /// one.
     written: Mutex<u64>,
     scheduled: AtomicBool,
+    /// Told when the writer thread's write panics.
+    reporter: OnceLock<Reporter>,
 }
 
 struct Data {
@@ -142,6 +146,7 @@ impl State {
             data: Mutex::new(Data { file, version: 0 }),
             written: Mutex::new(0),
             scheduled: AtomicBool::new(false),
+            reporter: OnceLock::new(),
         });
         let (wake, woken) = mpsc::channel();
         let writer = Arc::clone(&inner);
@@ -337,6 +342,19 @@ impl State {
         self.inner.write()
     }
 
+    /// Tells `reporter` when a write of the writer thread panics, which the
+    /// thread goes on after.
+    pub(crate) fn report_to(&self, reporter: Reporter) {
+        // Once: the core that opened the store is the one that reports.
+        let _ = self.inner.reporter.set(reporter);
+    }
+
+    /// Whether the writer thread can go on after a panic: not once the state
+    /// lock is poisoned, since nothing else saves.
+    pub(crate) fn can_write(&self) -> bool {
+        !self.inner.data.is_poisoned()
+    }
+
     fn changed(&self, data: &mut Data) {
         data.version += 1;
         if !self.inner.scheduled.swap(true, Ordering::AcqRel) {
@@ -352,19 +370,33 @@ impl Inner {
     }
 
     /// The writer thread: once woken, waits [`WRITE_DELAY`], then writes
-    /// everything changed so far. Ends with the store.
+    /// everything changed so far. Ends with the store. A write that panics
+    /// is told to the reporter and leaves the changes for the next one.
     fn write_after(&self, delay: Duration, woken: &Receiver<()>) {
         while woken.recv().is_ok() {
             std::thread::sleep(delay);
             self.scheduled.store(false, Ordering::Release);
-            if let Err(error) = self.write() {
-                tracing::error!(path = %self.path.display(), %error, "could not save the state");
+            let written = catch_unwind(AssertUnwindSafe(|| {
+                inject::check("state writer");
+                self.write()
+            }));
+            match written {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::error!(path = %self.path.display(), %error, "could not save the state");
+                }
+                Err(_) => {
+                    if let Some(reporter) = self.reporter.get() {
+                        reporter.panicked("state writer");
+                    }
+                }
             }
         }
     }
 
     fn write(&self) -> io::Result<()> {
-        let mut written = self.written.lock().expect("state write lock");
+        // Its number holds no invariant a panic could break.
+        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
         let (version, json) = {
             let data = self.lock();
             if data.version == *written {

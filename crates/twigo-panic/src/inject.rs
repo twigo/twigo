@@ -10,7 +10,7 @@
 pub fn check(_name: &str) {}
 
 #[cfg(feature = "inject")]
-pub use armed::{arm, check};
+pub use armed::{arm, armed, check};
 
 #[cfg(feature = "inject")]
 mod armed {
@@ -43,6 +43,15 @@ mod armed {
                 times,
             },
         );
+    }
+
+    /// How many panics `name` has left for this runtime.
+    pub fn armed(name: &str) -> u32 {
+        let armed = ARMED.lock().unwrap_or_else(PoisonError::into_inner);
+        armed
+            .get(name)
+            .filter(|arm| arm.runtime.is_none() || arm.runtime == runtime())
+            .map_or(0, |arm| arm.times)
     }
 
     /// Panics if `name` is armed for this runtime, and counts it spent.

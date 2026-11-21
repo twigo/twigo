@@ -111,13 +111,7 @@ fn running(dir: &Path) -> Arc<Core> {
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 

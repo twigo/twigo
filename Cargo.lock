@@ -5949,6 +5949,7 @@ dependencies = [
  "twigo-keyboard",
  "twigo-log",
  "twigo-netmon",
+ "twigo-panic",
 ]
 
 [[package]]

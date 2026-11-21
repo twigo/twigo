@@ -1048,11 +1048,10 @@ impl Core {
         table.changed(id);
     }
 
-    /// Restores the forwards, then asks the policy and the catalog for each
-    /// again whenever either changes; never returns.
+    /// Asks the policy and the catalog for each forward again whenever
+    /// either changes; never returns.
     pub(crate) async fn follow_forward_modes(&self) {
         let mut changes = Changes::new(&self.policy, &self.catalog.subscribe());
-        self.restore_forwards().await;
         loop {
             self.forwards.recheck();
             changes.next().await;

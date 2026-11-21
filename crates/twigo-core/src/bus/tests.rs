@@ -42,10 +42,7 @@ fn running_with(dir: &Path, text: &str) -> Arc<Core> {
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 

@@ -344,17 +344,11 @@ async fn core_task(dir: &Path, cluster: &Cluster) -> (Arc<Core>, JoinHandle<()>)
 
 fn running(dir: &Path) -> (Arc<Core>, JoinHandle<()>) {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    let task = tokio::spawn({
-        let core = Arc::clone(&core);
-        let kubeconfig = dir.join("config");
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
+    let kubeconfig = dir.join("config");
+    let task = core.start_for_tests(followed, Some(kubeconfig));
     (core, task)
 }
 

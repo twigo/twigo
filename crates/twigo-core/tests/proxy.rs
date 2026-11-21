@@ -389,16 +389,10 @@ async fn unmarked(dir: &Path, fake: &Fake) -> Arc<Core> {
     let server = format!("http://{}", fake.address);
     std::fs::write(&kubeconfig, self::kubeconfig(&server, KIND_A)).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     core
 }

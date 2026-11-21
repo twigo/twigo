@@ -20,6 +20,7 @@ pub mod trust;
 mod usage;
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -46,6 +47,7 @@ use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
+use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
@@ -98,6 +100,10 @@ pub struct Core {
     /// Both None until the login shell's environment is known.
     proxy_env: watch::Sender<Option<ProxyEnv>>,
     shell_env: watch::Sender<Option<Arc<ShellEnv>>>,
+    /// What the threads and loops that outlive a call tell the supervisor
+    /// [`Core::start`] runs, whose reads wait here until it starts.
+    reporter: Reporter,
+    reports: Mutex<Option<Reports>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,7 +130,9 @@ impl Core {
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
+        let (reporter, reports) = twigo_panic::reports();
         let state = State::open(data.join("state.json"));
+        state.report_to(reporter.clone());
         let catalog = Catalog::default();
         let policy = Policy::new(
             PolicyFile::read(policy_file),
@@ -132,7 +140,9 @@ impl Core {
             state.choices(),
             Audit::open(&data.join("audit.jsonl")),
         );
-        let catalog = catalog.audited_by(Arc::clone(&policy));
+        let catalog = catalog
+            .audited_by(Arc::clone(&policy))
+            .supervised_by(reporter.clone());
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         let discovery = Arc::new(Cache::new(cache.join("discovery")));
         Arc::new_cyclic(|core| {
@@ -167,6 +177,8 @@ impl Core {
                 focused,
                 proxy_env: watch::Sender::new(None),
                 shell_env,
+                reporter,
+                reports: Mutex::new(Some(reports)),
             }
         })
     }
@@ -956,8 +968,8 @@ impl Core {
 
     /// Retires every connection on wake, and those whose route moved on a
     /// network change, which also tells the sessions of those (ARCHITECTURE
-    /// 3.2, 4.6); never returns.
-    pub async fn follow_network(&self, mut watch: twigo_netmon::Watch) {
+    /// 3.2, 4.6), for as long as the watch lasts.
+    async fn follow_network(&self, mut watch: twigo_netmon::Watch) {
         while let Some(event) = watch.next().await {
             self.network_event(event);
         }
@@ -970,70 +982,159 @@ impl Core {
         }
     }
 
-    /// Follows the catalog's sources and the login shell's proxy variables,
-    /// tells the state store and the connections which contexts the sources
-    /// list, and makes the terminals' offers anew as the files change; never
-    /// returns. In the explicit mode (ARCHITECTURE 5.5)
-    /// `explicit` is the only source; otherwise the sources come from the
-    /// login shell's environment, as `status` follows it, read again
-    /// whenever it is resolved.
-    pub async fn run(&self, mut status: watch::Receiver<Status>, explicit: Option<PathBuf>) {
-        let sources = async {
-            if let Some(file) = &explicit {
-                self.catalog
-                    .follow(catalog::sources(Some(file.clone()), None, None));
+    /// Restores the forwards, then runs the app-wide duties, each as a task
+    /// of its own under a supervisor (ARCHITECTURE 2.1), until the fatal
+    /// path has run. The caller spawns what this returns, and keeps its
+    /// handle.
+    ///
+    /// The duties follow the catalog's sources and the login shell's proxy
+    /// variables, tell the state store and the connections which contexts the
+    /// sources list, make the terminals' offers anew as the files change, end
+    /// the unlocks that run out, recheck the forwards when a mode or the
+    /// catalog changes, and, where `network` is given, retire connections on
+    /// wake and on a network change. A duty that panics starts again, at most
+    /// three times in five minutes; past that, and for a thread of the
+    /// core's that cannot go on, `fatal` is called. In the explicit mode
+    /// (ARCHITECTURE 5.5) `explicit` is the only source; otherwise the
+    /// sources come from the login shell's environment, as `status` follows
+    /// it, read again whenever it is resolved.
+    pub fn start(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+        network: Option<fn() -> twigo_netmon::Watch>,
+        fatal: impl Fn(Fatal) + Send + 'static,
+    ) -> impl Future<Output = ()> + Send + 'static {
+        let reports = self
+            .reports
+            .lock()
+            .expect("reports lock")
+            .take()
+            .expect("a core starts once");
+        let mut supervisor = Supervisor::new(reports, fatal);
+        self.duty(&mut supervisor, "catalog sources", move |core| {
+            let (status, explicit) = (status.clone(), explicit.clone());
+            async move { core.follow_sources(status, explicit).await }
+        });
+        self.duty(&mut supervisor, "seen contexts", |core| async move {
+            core.follow_seen().await;
+        });
+        self.duty(&mut supervisor, "terminal offers", |core| async move {
+            core.follow_offers().await;
+        });
+        self.duty(&mut supervisor, "unlock expiry", |core| async move {
+            core.policy.follow_unlocks().await;
+        });
+        self.duty(&mut supervisor, "forward modes", |core| async move {
+            core.follow_forward_modes().await;
+        });
+        if let Some(watch) = network {
+            self.duty(&mut supervisor, "network", move |core| async move {
+                core.follow_network(watch()).await;
+            });
+        }
+        let core = Arc::clone(self);
+        supervisor.thread("kubeconfig watch", move || {
+            core.catalog
+                .sources()
+                .map(|sources| core.catalog.follow(sources))
+                .is_some()
+        });
+        let core = Arc::clone(self);
+        supervisor.thread("state writer", move || core.state.can_write());
+        let core = Arc::clone(self);
+        async move {
+            // Once: a panic here ends the forwards' commands, which wait for
+            // it.
+            if twigo_panic::contain("forward restore", core.restore_forwards())
+                .await
+                .is_err()
+            {
+                core.reporter.fatal("forward restore");
             }
-            loop {
-                let env = match &*status.borrow_and_update() {
-                    Status::Resolving => None,
-                    Status::Resolved(env) | Status::Failed { env, .. } => Some(env.clone()),
-                };
-                if let Some(env) = env {
-                    let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
-                    let proxy = ProxyEnv::from_vars(var);
-                    // Published first, so a watch the retire re-opens builds
-                    // with the new variables.
-                    self.proxy_env.send_replace(Some(proxy.clone()));
-                    self.connections.follow_env(&proxy);
-                    self.shell_env.send_replace(Some(Arc::clone(&env)));
-                    if explicit.is_none() {
-                        let home = env.get("HOME").map(Path::new);
-                        self.catalog
-                            .follow(catalog::sources(None, env.get("KUBECONFIG"), home));
-                    }
-                }
-                if status.changed().await.is_err() {
-                    return;
+            supervisor.run().await;
+        }
+    }
+
+    /// [`Core::start`] on the runtime, without the network, for tests: a duty
+    /// that panics past the limit panics the task this returns.
+    #[cfg(feature = "test-util")]
+    pub fn start_for_tests(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(self.start(status, explicit, None, |fatal| panic!("{fatal}")))
+    }
+
+    /// Adds a duty that runs `run` on this core, again after each panic.
+    fn duty<F>(
+        self: &Arc<Self>,
+        supervisor: &mut Supervisor,
+        name: &'static str,
+        run: impl Fn(Arc<Self>) -> F + Send + 'static,
+    ) where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let core = Arc::clone(self);
+        supervisor.task(name, move || run(Arc::clone(&core)));
+    }
+
+    /// Follows the catalog's sources and the login shell's proxy variables;
+    /// ends when the status's sender is gone.
+    async fn follow_sources(&self, mut status: watch::Receiver<Status>, explicit: Option<PathBuf>) {
+        if let Some(file) = &explicit {
+            self.catalog
+                .follow(catalog::sources(Some(file.clone()), None, None));
+        }
+        loop {
+            let env = match &*status.borrow_and_update() {
+                Status::Resolving => None,
+                Status::Resolved(env) | Status::Failed { env, .. } => Some(env.clone()),
+            };
+            if let Some(env) = env {
+                let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
+                let proxy = ProxyEnv::from_vars(var);
+                // Published first, so a watch the retire re-opens builds
+                // with the new variables.
+                self.proxy_env.send_replace(Some(proxy.clone()));
+                self.connections.follow_env(&proxy);
+                self.shell_env.send_replace(Some(Arc::clone(&env)));
+                if explicit.is_none() {
+                    let home = env.get("HOME").map(Path::new);
+                    self.catalog
+                        .follow(catalog::sources(None, env.get("KUBECONFIG"), home));
                 }
             }
-        };
-        let seen = async {
-            let mut contexts = self.catalog.subscribe();
-            loop {
-                let listed = contexts.borrow_and_update().clone();
-                if let Some(listed) = listed {
-                    let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
-                    self.state.saw(&names, Timestamp::now());
-                    self.connections.keep(listed.iter());
-                }
-                if contexts.changed().await.is_err() {
-                    return;
-                }
+            if status.changed().await.is_err() {
+                return;
             }
-        };
-        let offered = async {
-            let mut written = self.catalog.written();
-            while written.changed().await.is_ok() {
-                self.terminals.refresh_offers().await;
+        }
+    }
+
+    /// Tells the state store and the connections which contexts the sources
+    /// list.
+    async fn follow_seen(&self) {
+        let mut contexts = self.catalog.subscribe();
+        loop {
+            let listed = contexts.borrow_and_update().clone();
+            if let Some(listed) = listed {
+                let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
+                self.state.saw(&names, Timestamp::now());
+                self.connections.keep(listed.iter());
             }
-        };
-        tokio::join!(
-            sources,
-            seen,
-            offered,
-            self.policy.follow_unlocks(),
-            self.follow_forward_modes()
-        );
+            if contexts.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Makes the terminals' offers anew as the files change.
+    async fn follow_offers(&self) {
+        let mut written = self.catalog.written();
+        while written.changed().await.is_ok() {
+            self.terminals.refresh_offers().await;
+        }
     }
 }
 
