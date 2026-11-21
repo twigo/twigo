@@ -325,7 +325,10 @@ test("a refused answer shows its words in the dialog, which stays, and the next 
   fireEvent.change(screen.getByLabelText("Type prod-eu to confirm"), {
     target: { value: "prod-eu" },
   });
-  control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
+  control.refuse = new IpcError(
+    "confirm.name-mismatch",
+    "type prod-eu to confirm",
+  );
   choose("Allow delete");
   await waitFor(() => {
     expect(screen.getByRole("alert").textContent).toContain(
@@ -347,7 +350,10 @@ function refusedDelete(control: Awaited<ReturnType<typeof broker>>["control"]) {
   fireEvent.change(screen.getByLabelText("Type prod-eu to confirm"), {
     target: { value: "prod-eu" },
   });
-  control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
+  control.refuse = new IpcError(
+    "confirm.name-mismatch",
+    "type prod-eu to confirm",
+  );
   choose("Allow delete");
   return waitFor(() => {
     expect(screen.getByRole("alert").textContent).toContain(
@@ -431,7 +437,7 @@ test("an ask withdrawn while its answer is on its way closes the dialog, and the
   expect(warning).not.toHaveBeenCalled();
 
   control.refuse = new IpcError(
-    "notFound",
+    "approval.gone",
     "the process no longer waits for this answer",
   );
   release();

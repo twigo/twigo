@@ -34,7 +34,7 @@ async function change(backend: Backend, request: Protection): Promise<void> {
       .subscribe("command_execute", { plan: plan.id, typed }, (event) => {
         if (event.state === "done") resolve();
         else if (event.state === "failed") {
-          reject(new IpcError(event.error.kind, event.error.message));
+          reject(new IpcError(event.error.code, event.error.message));
         }
       })
       .catch(reject);

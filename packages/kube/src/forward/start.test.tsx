@@ -474,7 +474,7 @@ test("a start that a lock the person may lift refuses offers the unlock for 15 m
   const unlock = vi.spyOn(mock, "invoke");
   const refusal = (source: Blocked["source"]) =>
     new IpcError(
-      "permissions",
+      "policy.blocked",
       "prod-eu is read-only, so Twigo did not send it",
       {
         context: "prod-eu",
@@ -568,7 +568,7 @@ test("a start that fails for another reason than a busy port or the mode is show
   const mock = createMockBackend("live");
   const backend = startFailing(
     mock,
-    new IpcError("unavailable", "the cluster does not answer"),
+    new IpcError("forward.cluster-unanswered", "the cluster does not answer"),
   );
   const workbench = await openList(backend);
   await act(() => vi.advanceTimersByTimeAsync(1500));

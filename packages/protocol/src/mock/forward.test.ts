@@ -417,11 +417,11 @@ const POLICY = "/Library/Application Support/Twigo/policy.json";
 async function accessOf(backend: Backend, name: string) {
   let found: ContextAccess | undefined;
   const first = await answered(
-    backend.subscribe("contexts_watch", null, (contexts) => {
-      found = contexts.find((context) => context.name === name)?.access;
+    backend.subscribe("contexts_watch", null, (catalog) => {
+      found = catalog.contexts.find((context) => context.name === name)?.access;
     }),
   );
-  found = first.find((context) => context.name === name)?.access;
+  found = first.contexts.find((context) => context.name === name)?.access;
   return () => found;
 }
 
@@ -587,7 +587,11 @@ test("a reconnecting pod target waits for that pod, and only a Service or a work
   const lost = latest(forward.id)?.state;
   expect(lost).toEqual({
     state: "reconnecting",
-    reason: `pod ${pod.name} is not ready; waiting for it`,
+    reason: {
+      code: "forward.no-ready-pod",
+      kind: "unavailable",
+      message: `pod ${pod.name} is not ready; waiting for it`,
+    },
   });
   await vi.advanceTimersByTimeAsync(RECONNECTS_FOR_MS);
   expect(latest(forward.id)).toMatchObject({
@@ -600,6 +604,11 @@ test("a reconnecting pod target waits for that pod, and only a Service or a work
   const behind = latest(service.id)?.state;
   expect(behind).toMatchObject({ state: "reconnecting" });
   expect(behind).toMatchObject({
-    reason: expect.stringContaining("waiting for another ready pod") as string,
+    reason: {
+      code: "forward.no-ready-pod",
+      message: expect.stringContaining(
+        "waiting for another ready pod",
+      ) as string,
+    },
   });
 });

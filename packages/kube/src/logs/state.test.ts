@@ -26,7 +26,7 @@ const snapshot = (more: Partial<LogsSnapshot>): LogsSnapshot => ({
 
 const BROKEN: StreamState = {
   state: "error",
-  error: { kind: "unavailable", message: "broken" },
+  error: { code: "connect.other", kind: "unavailable", message: "broken" },
 };
 
 test("a logs tab says connecting until its pods are known, and running for a workload that has none yet", () => {
@@ -40,7 +40,10 @@ test("a logs tab says failed while its target is down, whatever its streams were
   for (const status of [
     { state: "forbidden", verb: "get", resource: "pods/log" },
     { state: "unauthorized" },
-    { state: "error", error: { kind: "unavailable", message: "broken" } },
+    {
+      state: "error",
+      error: { code: "connect.other", kind: "unavailable", message: "broken" },
+    },
   ] as const) {
     expect(logsState(snapshot({ status, pods }))).toBe("failed");
   }

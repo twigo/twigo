@@ -1,5 +1,6 @@
 import { IpcError } from "../error";
 import type {
+  Catalog,
   Context,
   ContextAccess,
   Environment,
@@ -54,7 +55,7 @@ export interface Kubeconfigs {
 
 /** What `twigo-policy` keeps for each context, over the fixtures' kubeconfig marks. */
 export class MockAccess {
-  readonly #watchers = new Set<(contexts: Context[]) => void>();
+  readonly #watchers = new Set<(catalog: Catalog) => void>();
   readonly #modes = new Map<string, Mode>(Object.entries(CHOSEN));
   readonly #environments = new Map<string, Environment | null>(
     Object.entries(MARKED),
@@ -73,9 +74,9 @@ export class MockAccess {
     },
   ) {}
 
-  watch(onMessage: (contexts: Context[]) => void): Context[] {
+  watch(onMessage: (catalog: Catalog) => void): Catalog {
     this.#watchers.add(onMessage);
-    return this.#list();
+    return this.#catalog();
   }
 
   setMode(name: string, mode: Mode | null): void {
@@ -100,7 +101,7 @@ export class MockAccess {
     const { mode, unlockedUntil } = this.of(name);
     if (mode !== "read-only" && unlockedUntil === null) {
       throw new IpcError(
-        "invalidInput",
+        "policy.not-locked",
         `${name} is ${mode}, so there is nothing to unlock`,
       );
     }
@@ -178,7 +179,7 @@ export class MockAccess {
     fixture(name);
     if (this.#policyFileSets(name)) {
       throw new IpcError(
-        "permissions",
+        "policy.file-sets-mode",
         `${this.#pattern(name)} in ${POLICY_FILE} sets this context's mode, which Twigo cannot change`,
       );
     }
@@ -195,9 +196,13 @@ export class MockAccess {
     }));
   }
 
+  #catalog(): Catalog {
+    return { contexts: this.#list(), failures: [] };
+  }
+
   #emit(): void {
-    const contexts = this.#list();
-    for (const watcher of this.#watchers) watcher(contexts);
+    const catalog = this.#catalog();
+    for (const watcher of this.#watchers) watcher(catalog);
   }
 
   #access(
@@ -318,7 +323,10 @@ function strictest(
 function fixture(name: string): Context {
   const context = CONTEXTS.find((candidate) => candidate.name === name);
   if (!context) {
-    throw new IpcError("notFound", `no source lists the context ${name}`);
+    throw new IpcError(
+      "context.not-listed",
+      `no source lists the context ${name}`,
+    );
   }
   return context;
 }

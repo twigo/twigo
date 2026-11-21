@@ -29,7 +29,7 @@ test.each<[ShellEnd, "ended" | "failed"]>([
   [
     {
       reason: "failed",
-      error: { kind: "unavailable", message: "broken" },
+      error: { code: "connect.other", kind: "unavailable", message: "broken" },
     },
     "failed",
   ],

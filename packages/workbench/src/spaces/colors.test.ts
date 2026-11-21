@@ -1,6 +1,6 @@
 import { act } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
-import type { Context } from "@twigo/protocol";
+import type { Catalog, Context } from "@twigo/protocol";
 import { createMockBackend, UNMARKED } from "@twigo/protocol/mock";
 import { StateStore } from "../state/store";
 import { confirmAsking, testWorkbench } from "../testing";
@@ -128,18 +128,22 @@ test("the colour command does nothing for a space the rail no longer shows", asy
     server: null,
     namespace: null,
     access: UNMARKED,
+    problem: null,
   }));
   const backend = createMockBackend("ready");
-  let send: ((next: Context[]) => void) | undefined;
+  let send: ((next: Catalog) => void) | undefined;
   const subscribe = backend.subscribe.bind(backend);
   vi.spyOn(backend, "subscribe").mockImplementation((command, request, on) => {
     if (command !== "contexts_watch") return subscribe(command, request, on);
     send = on;
-    return Promise.resolve(contexts);
+    return Promise.resolve({ contexts, failures: [] });
   });
   const workbench = await testWorkbench("ready", backend);
   act(() => {
-    send?.(contexts.filter((context) => context.name !== "staging"));
+    send?.({
+      contexts: contexts.filter((context) => context.name !== "staging"),
+      failures: [],
+    });
   });
   expect(workbench.spaces.list.map((space) => space.id)).toEqual([
     "prod-eu",

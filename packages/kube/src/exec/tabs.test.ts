@@ -440,7 +440,11 @@ test.each<[ShellEnd, string]>([
   [
     {
       reason: "failed",
-      error: { kind: "notFound", message: "pod api-0 is gone" },
+      error: {
+        code: "target.gone",
+        kind: "notFound",
+        message: "pod api-0 is gone",
+      },
     },
     "pod api-0 is gone",
   ],

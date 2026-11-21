@@ -80,7 +80,7 @@ test("the next input goes after a call failed too, and the failure is reported",
   fake.send(running);
   session.input(new Uint8Array([97]));
   session.input(new Uint8Array([98]));
-  const failure = new IpcError("notFound", "no shell");
+  const failure = new IpcError("shell.no-container", "no shell");
   fake.calls[0]?.[3](failure);
   await Promise.resolve();
   await Promise.resolve();
@@ -172,7 +172,9 @@ test("each event is the state, and ended comes last", () => {
 
 test("a shell that could not be opened ends as failed, in the error's words", async () => {
   const { fake, session } = opened();
-  fake.refuse(new IpcError("notFound", "no plan 4 waits to open a shell"));
+  fake.refuse(
+    new IpcError("bus.not-waiting", "no plan 4 waits to open a shell"),
+  );
   await Promise.resolve();
   await Promise.resolve();
   expect(session.getSnapshot()).toMatchObject({

@@ -67,6 +67,7 @@ export const CONTEXTS: Context[] = [
       environment: "production",
       unlockedUntil: null,
     },
+    problem: null,
   },
   {
     name: "staging",
@@ -80,6 +81,7 @@ export const CONTEXTS: Context[] = [
       environment: "staging",
       unlockedUntil: null,
     },
+    problem: null,
   },
   {
     name: "dev",
@@ -93,6 +95,7 @@ export const CONTEXTS: Context[] = [
       environment: "development",
       unlockedUntil: null,
     },
+    problem: null,
   },
   {
     name: "qa",
@@ -101,6 +104,7 @@ export const CONTEXTS: Context[] = [
     server: "https://qa.internal:6443",
     namespace: null,
     access: UNMARKED,
+    problem: null,
   },
   {
     name: "analytics",
@@ -117,6 +121,7 @@ export const CONTEXTS: Context[] = [
       environment: null,
       unlockedUntil: null,
     },
+    problem: null,
   },
   {
     name: "kind-local",
@@ -130,6 +135,7 @@ export const CONTEXTS: Context[] = [
       environment: "local",
       unlockedUntil: null,
     },
+    problem: null,
   },
 ];
 

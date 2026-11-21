@@ -82,7 +82,11 @@ test("the active space is followed again once a credential comes, whatever it an
   });
   push("prod-eu", {
     state: "failed",
-    error: { kind: "unauthorized", message: "no credentials" },
+    error: {
+      code: "server.unauthorized",
+      kind: "unauthorized",
+      message: "no credentials",
+    },
   });
   await expect(discovery.resources("prod-eu")).rejects.toMatchObject({
     kind: "unauthorized",

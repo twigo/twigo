@@ -85,9 +85,9 @@ export class KubeconfigOffers {
       });
       this.#remove(id);
     } catch (error) {
-      // The core withdraws an offer that would now move nothing, and only the conflict says why.
-      const conflict = toIpcError(error).kind === "conflict";
-      if (conflict || this.#offers.some((o) => o.id === id)) this.report(error);
+      // The core withdraws an offer that would now move nothing, and only `offer.changed` says why.
+      const changed = toIpcError(error).code === "offer.changed";
+      if (changed || this.#offers.some((o) => o.id === id)) this.report(error);
     }
     this.#answering.delete(id);
     this.changes.emit();

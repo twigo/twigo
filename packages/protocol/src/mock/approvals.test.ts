@@ -403,7 +403,8 @@ const typeOf = async (backend: Backend, context: string) => {
   const watch = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
   const contexts = await watch;
-  return contexts.find(({ name }) => name === context)?.access.environment;
+  return contexts.contexts.find(({ name }) => name === context)?.access
+    .environment;
 };
 
 test("an ask of a context nobody marked takes its type or a denial alone, and its type answers no ordinary ask", async () => {

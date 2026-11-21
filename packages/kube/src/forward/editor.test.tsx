@@ -618,7 +618,10 @@ test("a resume that fails for another reason than a busy port or the mode is sho
     invoke: (command, request) =>
       failing && command === "forward_resume"
         ? Promise.reject(
-            new IpcError("unavailable", "the cluster does not answer"),
+            new IpcError(
+              "forward.cluster-unanswered",
+              "the cluster does not answer",
+            ),
           )
         : mock.invoke(command, request),
     subscribe: (command, request, onMessage) =>
@@ -747,7 +750,12 @@ const REFUSED = (source: ModeSource): Forward["state"] => {
   };
   return {
     state: "failed",
-    error: { kind: "permissions", message: "qa is read-only", blocked },
+    error: {
+      code: "policy.blocked",
+      kind: "permissions",
+      message: "qa is read-only",
+      blocked,
+    },
   };
 };
 
@@ -775,6 +783,7 @@ test("a forward that listens nowhere says so: not on an address, and that Change
     state: {
       state: "failed",
       error: {
+        code: "forward.port-in-use",
         kind: "conflict",
         message: "port 8080 is held by another process",
       },

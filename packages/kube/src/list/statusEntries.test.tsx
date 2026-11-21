@@ -245,7 +245,11 @@ test.each([
     of22(
       part("team-b", {
         state: "error",
-        error: { kind: "unavailable", message: "connection refused" },
+        error: {
+          code: "connect.other",
+          kind: "unavailable",
+          message: "connection refused",
+        },
       }),
     ),
     "Unreachable · 1 of 22 namespaces",

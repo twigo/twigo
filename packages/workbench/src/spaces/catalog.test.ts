@@ -1,6 +1,6 @@
 import { UNMARKED } from "@twigo/protocol/mock";
 import { expect, test, vi } from "vitest";
-import type { Backend, Context } from "@twigo/protocol";
+import type { Backend, Catalog as Listed, Context } from "@twigo/protocol";
 import { Catalog } from "./catalog";
 
 const ONE: Context[] = [
@@ -11,6 +11,7 @@ const ONE: Context[] = [
     server: null,
     namespace: null,
     access: UNMARKED,
+    problem: null,
   },
 ];
 const TWO: Context[] = [
@@ -21,20 +22,24 @@ const TWO: Context[] = [
     server: null,
     namespace: null,
     access: UNMARKED,
+    problem: null,
   },
 ];
 
 function backend(early: Context[] | undefined) {
-  let send: ((next: Context[]) => void) | undefined;
+  let send: ((next: Listed) => void) | undefined;
   const fake = {
     invoke: vi.fn(),
     subscribe: vi.fn((_command: string, _request: unknown, on: typeof send) => {
       send = on;
-      if (early) on?.(early);
-      return Promise.resolve(ONE);
+      if (early) on?.({ contexts: early, failures: [] });
+      return Promise.resolve({ contexts: ONE, failures: [] });
     }),
   } as unknown as Backend;
-  return { fake, send: (next: Context[]) => send?.(next) };
+  return {
+    fake,
+    send: (next: Context[]) => send?.({ contexts: next, failures: [] }),
+  };
 }
 
 test("lists the answer, then each change", async () => {

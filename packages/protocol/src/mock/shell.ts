@@ -73,7 +73,7 @@ export function shellContainers(
 ): ShellContainers {
   if (pod.status !== "Running") {
     throw new IpcError(
-      "invalidInput",
+      "shell.pod-not-running",
       `pod ${pod.name} is ${pod.status}, so it runs no container to open a shell in`,
     );
   }
@@ -185,7 +185,7 @@ export class MockShell {
       return;
     }
     if (this.#state !== "running") {
-      throw new IpcError("conflict", "the shell does not run");
+      throw new IpcError("subscription.not-found", "the shell does not run");
     }
     for (const character of text) this.#key(character);
   }

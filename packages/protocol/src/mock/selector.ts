@@ -26,7 +26,10 @@ const SPECIAL = new Set(["=", "!", "(", ")", ",", ">", "<"]);
 const WHITESPACE = new Set([" ", "\t", "\r", "\n"]);
 
 function invalid(message: string): IpcError {
-  return new IpcError("invalidInput", `the label selector: ${message}`);
+  return new IpcError(
+    "filter.invalid-selector",
+    `the label selector: ${message}`,
+  );
 }
 
 function lex(source: string): Token[] {

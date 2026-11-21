@@ -64,7 +64,7 @@ export function stateOf({ state, queued }: Forward): Shown {
         label: "Reconnecting",
         tone: "warn",
         pulse: true,
-        detail: state.reason,
+        detail: state.reason.message,
       };
     case "failed":
       return state.error.blocked

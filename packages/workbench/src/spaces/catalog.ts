@@ -22,12 +22,12 @@ export class Catalog {
       "contexts_watch",
       null,
       (next) => {
-        this.#set(next);
+        this.#set(next.contexts);
       },
     );
     // Tauri sends channel messages apart from the command's response, so a
     // change may arrive first; it is the newer list.
-    if (this.#contexts === undefined) this.#set(first);
+    if (this.#contexts === undefined) this.#set(first.contexts);
   }
 
   #set(contexts: readonly Context[]): void {

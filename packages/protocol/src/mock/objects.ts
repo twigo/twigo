@@ -178,7 +178,7 @@ export class MockObject {
     const recorded = name === undefined ? undefined : RECORDED[name];
     if (name === undefined || recorded === undefined) {
       throw new IpcError(
-        "notFound",
+        "object.not-listed",
         `the mock backend has no recorded ${resource}`,
       );
     }
@@ -339,7 +339,10 @@ export class MockObject {
       data?: Record<string, string>;
     };
     if (object.kind !== "ConfigMap") {
-      throw new IpcError("forbidden", "only a ConfigMap's values are sent");
+      throw new IpcError(
+        "object.values-withheld",
+        "only a ConfigMap's values are sent",
+      );
     }
     return keys.map((key) => object.data?.[key] ?? null);
   }
@@ -348,11 +351,14 @@ export class MockObject {
   reveal(key: string): { value: string; binary: boolean } {
     const values = VALUES[this.#fixture];
     if (values === undefined) {
-      throw new IpcError("invalidInput", "only a Secret's values are revealed");
+      throw new IpcError(
+        "secret.not-a-secret",
+        "only a Secret's values are revealed",
+      );
     }
     const value = values[key];
     if (value === undefined) {
-      throw new IpcError("notFound", `the Secret has no key ${key}`);
+      throw new IpcError("secret.no-key", `the Secret has no key ${key}`);
     }
     return value;
   }
