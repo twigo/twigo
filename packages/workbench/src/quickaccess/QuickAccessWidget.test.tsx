@@ -341,6 +341,33 @@ test("a key the user binds instead moves, and the unbound one does not", async (
   expect(footer()).toContain("↑⌃JMove");
 });
 
+test("⌃N and ⌃P move as ↓ and ↑ do on macOS, which the footer still says, and ⌃N is not bound elsewhere", async () => {
+  for (const [platform, moves] of [
+    ["mac", true],
+    ["linux", false],
+  ] as const) {
+    const workbench = await testWorkbench("ready", undefined, platform);
+    workbench.quickAccess.register(
+      provider("!", [
+        { id: "a", label: "alpha" },
+        { id: "b", label: "beta" },
+        { id: "c", label: "gamma" },
+      ]).registered,
+    );
+    await opened(workbench, "!");
+    expect(selected()).toBe("alpha");
+    press("KeyN", { ctrlKey: true });
+    expect(selected()).toBe(moves ? "beta" : "alpha");
+    if (moves) {
+      press("KeyN", { ctrlKey: true });
+      press("KeyP", { ctrlKey: true });
+      expect(selected()).toBe("beta");
+    }
+    expect(footer()).toContain(moves ? "↑↓Move" : "UpDownMove");
+    cleanup();
+  }
+});
+
 test("⌘↵ opens to the side only where the provider can", async () => {
   const workbench = await testWorkbench();
   const side = provider("", [{ id: "a", label: "alpha" }], { toSide: true });
