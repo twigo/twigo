@@ -297,13 +297,9 @@ test("ns offers the current namespaces ticked and a typed name where namespaces 
     ["team-a", true, undefined],
   ]);
   expect(await rows("team-b")).toEqual([
-    ["All namespaces", undefined, "new namespaces join"],
     ["team-b", false, "you may not list namespaces"],
   ]);
-  expect(await rows("team-a")).toEqual([
-    ["All namespaces", undefined, "new namespaces join"],
-    ["team-a", true, undefined],
-  ]);
+  expect(await rows("team-a")).toEqual([["team-a", true, undefined]]);
 
   for (const invalid of ["Team A", "a/b", "-a"]) {
     expect((await rows(invalid)).map(([label]) => label)).not.toContain(

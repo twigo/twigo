@@ -303,7 +303,7 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
           }),
         );
       return [
-        ...(names === undefined ? [all] : filtered([all], search)),
+        ...filtered([all], search),
         ...filtered(selected, search),
         ...filtered(others, search),
       ];
