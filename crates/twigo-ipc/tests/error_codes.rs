@@ -231,23 +231,31 @@ fn every_code_keeps_its_wire_name_and_kind() {
     }
 }
 
+fn wire_names() -> Vec<String> {
+    ErrorCode::ALL
+        .iter()
+        .map(|code| serde_json::from_value(serde_json::to_value(code).unwrap()).unwrap())
+        .collect()
+}
+
 #[test]
 fn no_code_is_missing_from_the_table_or_named_twice() {
     let pinned: Vec<ErrorCode> = PINNED.iter().map(|&(code, ..)| code).collect();
     for code in ErrorCode::ALL {
         assert!(pinned.contains(code), "{code:?} is not pinned");
     }
-    let mut names: Vec<&str> = PINNED.iter().map(|&(_, wire, _)| wire).collect();
-    names.sort_unstable();
-    names.dedup();
-    assert_eq!(names.len(), PINNED.len(), "a wire name is used twice");
     assert_eq!(PINNED.len(), ErrorCode::ALL.len());
+    let mut names = wire_names();
+    names.sort_unstable();
+    let unique = names.len();
+    names.dedup();
+    assert_eq!(names.len(), unique, "a wire name is used twice");
 }
 
 #[test]
 fn a_wire_name_is_a_family_and_a_condition() {
-    for &(_, wire, _) in PINNED {
-        let (family, condition) = wire.split_once('.').expect(wire);
+    for wire in wire_names() {
+        let (family, condition) = wire.split_once('.').expect(&wire);
         let word = |text: &str| {
             !text.is_empty()
                 && text

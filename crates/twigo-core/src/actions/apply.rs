@@ -2195,6 +2195,35 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_s_causes_lose_a_secret_s_values_as_its_message_does() {
+        let cause = |message: &str| twigo_ipc::ServerCause {
+            reason: "FieldValueInvalid".to_owned(),
+            field: "data[token]".to_owned(),
+            message: message.to_owned(),
+        };
+        let refused = IpcError::new(ErrorCode::ServerInvalid, "invalid: Invalid value: hunter2")
+            .with_server(twigo_ipc::ServerStatus {
+                reason: "Invalid".to_owned(),
+                causes: vec![cause("Invalid value: hunter2"), cause("nothing to hide")],
+            });
+        let scrubbed = scrubbed(refused, &["hunter2".to_owned()]);
+        assert_eq!(
+            scrubbed.message,
+            format!("invalid: Invalid value: {HIDDEN}")
+        );
+        let server = scrubbed.server.expect("the server's status stays");
+        assert_eq!(server.reason, "Invalid");
+        let messages: Vec<&str> = server.causes.iter().map(|c| c.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            [
+                format!("Invalid value: {HIDDEN}").as_str(),
+                "nothing to hide"
+            ]
+        );
+    }
+
+    #[test]
     fn what_a_dry_run_s_answer_holds_is_scrubbed_too() {
         let mut secrets = secret_values(&[&json!({ "stringData": { "a": "first" } })]);
         let answer = json!({ "data": { "token": "dHlwZWQ=", "a": "Zmlyc3Q=" } });
