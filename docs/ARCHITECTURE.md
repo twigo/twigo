@@ -1815,7 +1815,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
   Every file is mode 0600.
   A second launch hands over to the running app before the log opens, so it never moves the first one's file.
 - **What a line is.**
-  JSON, one line per event: `timestamp`, `level`, `target` (the module path, so `TWIGO_LOG=twigo_kube::credentials=debug` narrows to one module) and `fields`, whose `message` is words.
+  JSON, one line per event: `timestamp`, `level`, `target` (the module path, so `TWIGO_LOG=warn,twigo=info,twigo_kube::credentials=debug` adds the debug lines of one module to the default) and `fields`, whose `message` is words.
   Identifying values travel as fields of fixed names, `context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`, `path` and `url`, never inside the message, so a report can alias a value by the field that carries it.
   The first line of each run holds its facts: Twigo's version, the commit (`local build` for a build that was not given one), the OS and its version, the architecture, the web engine and its version, and the filter in force.
   The `log` records of Tauri and the libraries arrive as events through `tracing-log`, and so do the `tracing` events of kube-client, hyper-util and h2, each once.
@@ -1826,7 +1826,8 @@ What a person needs when something goes wrong, and what a bug report holds, star
   Twigo logs a change of state, not each repeat: a listener that keeps failing logs its first failure and, when it works again or ends, how many followed, and what happens per event goes to `trace`.
 - **How much.**
   The filter is `warn,twigo=info`: warnings of any library, and Twigo's own crates from info.
-  `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); a value that is not a filter is said in the log and the default applies.
+  `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); it replaces the whole default, so `TWIGO_LOG=warn` is warnings only, Twigo's own crates included, and the first line of the run, which holds its facts, is written whatever it says.
+  A value that is not a filter is said in the log and the default applies.
   **Set Log Level…** raises Twigo's own crates to info, debug or trace while the libraries stay at warn, until Twigo quits; it swaps the filter at run time and logs the change.
   `log_level_set` is its command, and no menu entry calls it yet.
 - **Reveal Log File.**
