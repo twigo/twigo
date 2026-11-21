@@ -38,7 +38,7 @@ pub use rotating::{Limits, Rotating};
 pub use tracing::Level;
 use tracing::level_filters::LevelFilter;
 use tracing_log::AsLog;
-use tracing_subscriber::filter::ParseError;
+use tracing_subscriber::filter::{Directive, ParseError};
 use tracing_subscriber::fmt::writer::BoxMakeWriter;
 use tracing_subscriber::layer::SubscriberExt as _;
 use tracing_subscriber::reload;
@@ -72,8 +72,9 @@ impl Log {
     /// Opens the log in `directory` and makes it the process's `tracing`
     /// subscriber and `log` logger, then writes the first line of the run.
     ///
-    /// The filter is `warn,twigo=info`, or `TWIGO_LOG` where it is set. A file
-    /// that cannot be opened is said on stderr, and the log goes there.
+    /// The filter is `warn,twigo=info`, or `TWIGO_LOG` where it is set, which
+    /// replaces it whole but for the first line of the run. A file that cannot
+    /// be opened is said on stderr, and the log goes there.
     pub fn start(directory: &Path, facts: &Facts) -> Self {
         let path = directory.join(FILE);
         let file = Rotating::open_new(&path, LIMITS)
@@ -121,7 +122,7 @@ impl Log {
 fn initial_filter() -> (String, EnvFilter, Option<ParseError>) {
     match std::env::var(ENV) {
         Ok(spec) if !spec.is_empty() => match EnvFilter::try_new(&spec) {
-            Ok(filter) => (spec, filter, None),
+            Ok(filter) => (spec, filter.add_directive(facts_directive()), None),
             Err(error) => (DEFAULT_FILTER.to_owned(), default_filter(), Some(error)),
         },
         _ => (DEFAULT_FILTER.to_owned(), default_filter(), None),
@@ -130,6 +131,12 @@ fn initial_filter() -> (String, EnvFilter, Option<ParseError>) {
 
 fn default_filter() -> EnvFilter {
     EnvFilter::new(DEFAULT_FILTER)
+}
+
+/// The facts line is an `info` event of `twigo_log::facts`, which a filter
+/// that names no such target would drop.
+fn facts_directive() -> Directive {
+    "twigo_log::facts=info".parse().expect("a filter directive")
 }
 
 /// A registry with the filter behind a reload layer and a JSON-lines layer
