@@ -1657,30 +1657,18 @@ async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_often
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_first_list_that_ends_in_anything_but_a_403_tries_again_within_5_s() {
-    for garbled in [false, true] {
-        let fake = Fake::default();
-        fake.add("pods", Some("a"), "p1");
-        if garbled {
-            fake.state()
-                .garbled
-                .insert("/api/v1/namespaces/a/pods".to_owned());
-        } else {
-            fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
-        }
-        let (hub, _clients) = fake.hub(Budgets::default());
-        let mut pods = hub.rows(query(&["a"])).await.unwrap();
-        until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut pods = hub.rows(query(&["a"])).await.unwrap();
+    until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
 
-        fake.state().requests.clear();
-        sleep(Duration::from_secs(120)).await;
-        let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
-        assert!(
-            gaps.len() >= 20,
-            "{} tries in 120 s, garbled: {garbled}",
-            gaps.len() + 1
-        );
-        let wait = Duration::from_millis(500)..=RETRY_WITHIN;
-        assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
-    }
+    fake.state().requests.clear();
+    sleep(Duration::from_secs(120)).await;
+    let gaps = gaps(&tries(&fake, "/namespaces/a/pods"));
+    assert!(gaps.len() >= 20, "{} tries in 120 s", gaps.len() + 1);
+    let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+    assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
 }

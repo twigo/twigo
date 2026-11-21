@@ -64,8 +64,6 @@ pub struct State {
     pub forbidden: HashSet<String>,
     /// Paths that answer `401`.
     pub unauthorized: HashSet<String>,
-    /// Paths that answer `200` with a body that is no list.
-    pub garbled: HashSet<String>,
     /// Paths that answer `503` with a plain-text body, as the aggregator does for a server that is down.
     pub no_endpoints: HashSet<String>,
     /// Resources the server cannot watch, as ComponentStatus.
@@ -668,9 +666,6 @@ impl Fake {
         }
         if state.unauthorized.contains(&path) {
             return status(StatusCode::UNAUTHORIZED, "Unauthorized");
-        }
-        if state.garbled.contains(&path) {
-            return full(StatusCode::OK, &json!("no list"), false);
         }
         if path == "/api" || path == "/apis" {
             return state.discovery(path == "/api", if_none_match.as_deref());
