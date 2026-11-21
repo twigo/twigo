@@ -8,6 +8,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
+  Discovered,
   ListBatch,
   Parts,
   PartState,
@@ -99,6 +100,34 @@ test("a list of one row counts it by the resource's singular", async () => {
   expect(screen.queryByText("1 deployments")).toBeNull();
 });
 
+test("a list of one row of a kind of two words counts it by the words of its title", async () => {
+  const mock = createMockBackend("ready");
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) =>
+      mock.subscribe(command, request, (message) => {
+        const found = message as Discovered;
+        onMessage(
+          command === "resources_watch" && found.state === "ready"
+            ? {
+                ...found,
+                resources: found.resources.map((resource) =>
+                  resource.gvr.resource === "deployments"
+                    ? { ...resource, kind: "StatefulSet" }
+                    : resource,
+                ),
+              }
+            : message,
+        );
+      }),
+  };
+  await openList(
+    backend,
+    "k8s-list://prod-eu/apps/v1/deployments?ns=payments&q=gateway",
+  );
+  expect(screen.getByText("1 stateful set")).toBeTruthy();
+});
+
 test("a list of all namespaces that leaves some out says how many it reads of how many there are, quietly", async () => {
   await openList(createMockBackend("rbacNamespaces"));
   await settle(30);
@@ -111,6 +140,31 @@ test("a list of all namespaces that leaves some out says how many it reads of ho
   );
   expect(cluster?.className).toContain("text-quiet");
   expect(screen.queryByText("v1.33.4")).toBeNull();
+});
+
+test("a list of all namespaces says connecting while the core works out which it reads, with no refusal and no count of one, and then how many it reads", async () => {
+  const mock = createMockBackend("rbacNamespaces");
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const backend: Backend = {
+    ...mock,
+    invoke: (command, request) =>
+      command === "list_ack"
+        ? held.then(() => mock.invoke(command, request))
+        : mock.invoke(command, request),
+  };
+  await openList(backend);
+  await settle(10);
+  expect(screen.getAllByText("Connecting…").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Forbidden|may not list/)).toBeNull();
+  expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
+
+  release?.();
+  await settle(30);
+  expect(entry("1 of 12 namespaces")).toBeTruthy();
+  expect(screen.queryByText("Connecting…")).toBeNull();
 });
 
 test("a selection, which leaves none out, keeps the cluster's version", async () => {

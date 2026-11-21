@@ -118,20 +118,24 @@ function QuickInputGroup({
   );
 }
 
-/** A row under the cursor when `selected`; a row with a box says `aria-checked` itself. */
+/**
+ * A row, drawn under the cursor when `cursor`; the cursor is the combobox's
+ * `aria-activedescendant`, not the row's selection, which its owner says with
+ * `aria-selected`.
+ */
 function QuickInputOption({
   className,
-  selected,
+  cursor,
   ...props
-}: React.ComponentProps<"div"> & { selected: boolean }) {
+}: React.ComponentProps<"div"> & { cursor: boolean }) {
   return (
     <div
       data-slot="quick-input-option"
       role="option"
-      aria-selected={selected}
+      data-cursor={cursor || undefined}
       className={cn(
         "relative flex h-[26px] select-none items-center gap-2 rounded-sm px-2 text-body outline-none",
-        "aria-selected:bg-row-active",
+        "data-cursor:bg-row-active",
         "[&_svg]:shrink-0",
         className,
       )}

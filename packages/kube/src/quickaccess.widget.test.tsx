@@ -64,3 +64,40 @@ test("Enter on the typed name alone takes it as the only namespace", async () =>
   await settle();
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["team-b"]);
 });
+
+test.each([
+  ["c", "checkout"],
+  ["pa", "payments"],
+])(
+  "ns %s then Enter takes %s, though All namespaces matches the text too",
+  async (typed, name) => {
+    const workbench = await mountKube();
+    act(() => {
+      workbench.quickAccess.show("ns ");
+    });
+    await settle();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: `ns ${typed}` },
+    });
+    await settle();
+    key("Enter");
+    await settle();
+    expect(workbench.spaces.state("prod-eu").namespaces).toEqual([name]);
+  },
+);
+
+test("a person who may not list namespaces ticks the name typed with Space, though All namespaces matches the text too", async () => {
+  const workbench = await mountKube(createMockBackend("rbacTypedNamespaces"));
+  act(() => {
+    workbench.quickAccess.show("ns ");
+  });
+  await settle();
+  fireEvent.change(screen.getByRole("combobox"), {
+    target: { value: "ns space" },
+  });
+  await settle();
+  key("Space");
+  key("Enter");
+  await settle();
+  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["space"]);
+});

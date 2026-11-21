@@ -71,7 +71,18 @@ export interface PartsView {
   readonly namespaces: readonly string[] | null;
   /** Some part has its first page, so Rust knows the columns. */
   readonly knows: boolean;
+  /** The list is yet to learn which namespaces it reads: this is not its parts. */
+  readonly resolving: boolean;
 }
+
+/** What a list says while it works out which namespaces "All namespaces" reads: `connecting`, one part that is none yet, nothing left out. */
+const RESOLVING: PartsView = {
+  status: { state: "connecting" },
+  parts: { count: 1, unready: [], omitted: 0 },
+  namespaces: [],
+  knows: false,
+  resolving: true,
+};
 
 /** The parts of one list, which the hub keeps one upstream each for. */
 export class MockParts {
@@ -79,8 +90,15 @@ export class MockParts {
   readonly #pin: Pin | undefined;
   /** The namespaces "All namespaces" resolved to, with every other one left out. */
   readonly #resolved: readonly string[] | undefined;
+  readonly #gvr: string;
+  #resolving: boolean;
 
-  constructor(query: ListQuery, scenario: string) {
+  /** `kept` is what a cluster has resolved, by resource: the core keeps the set, so a later list of the resource starts with its parts. */
+  constructor(
+    query: ListQuery,
+    scenario: string,
+    private readonly kept: Set<string>,
+  ) {
     this.#pin = pinOf(scenario, query.gvr.resource);
     const names = [...new Set(query.namespaces)].sort();
     const resolved =
@@ -88,6 +106,8 @@ export class MockParts {
         ? resolvedFor(scenario)
         : undefined;
     this.#resolved = resolved;
+    this.#gvr = JSON.stringify(query.gvr);
+    this.#resolving = resolved !== undefined && !kept.has(this.#gvr);
     const read = resolved ?? names;
     this.#parts =
       !query.namespaced ||
@@ -97,8 +117,15 @@ export class MockParts {
         : read.map((name) => ({ kind: "namespace", name }));
   }
 
+  /** Called once the list has said it is resolving: from the next view on it reads the namespaces it resolved to. */
+  resolved(): void {
+    this.#resolving = false;
+    this.kept.add(this.#gvr);
+  }
+
   /** The list while the parts a scenario leaves alone are in `state`. */
   at(state: ViewState): PartsView {
+    if (this.#resolving) return RESOLVING;
     const of = this.#parts.length;
     const placed = this.#parts.map((part, at) => ({
       part,
@@ -144,6 +171,7 @@ export class MockParts {
       knows: placed.some(
         ({ state, shown }) => shown || KNOWS_COLUMNS.has(state.state),
       ),
+      resolving: false,
     };
   }
 }

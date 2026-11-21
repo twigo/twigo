@@ -102,11 +102,13 @@ function Open({ session }: { session: Session }) {
   const provider = resolved?.provider;
   const many = provider?.acceptChecked !== undefined;
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
-  const [selected, setSelected] = useState("");
+  const [cursor, setCursor] = useState({ value, id: "" });
+  if (cursor.value !== value) setCursor({ value, id: "" });
   const [held, setChecks] = useState(noChecks(""));
   const checks = held.prefix === provider?.prefix ? held : noChecks("");
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
+  const early = useRef<{ value: string; options: AcceptOptions }>(undefined);
 
   // The command a row accepted may pick in the tick the palette closed in, after
   // quick access gave the focus back and before this widget unmounted, so
@@ -174,7 +176,7 @@ function Open({ session }: { session: Session }) {
   const rowIds = new Map(
     ordered.map((item, index) => [item, `${ids}-${String(index)}`]),
   );
-  const found = ordered.findIndex((item) => item.id === selected);
+  const found = ordered.findIndex((item) => item.id === cursor.id);
   const at =
     found >= 0
       ? found
@@ -239,6 +241,17 @@ function Open({ session }: { session: Session }) {
   const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
 
   const alone = many && !ticking && active?.checked !== undefined;
+  const action = active !== undefined && active.checked === undefined;
+  const loading = result.state === "loading";
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  const written = provider?.live === true && checks.touched;
+  // Nothing left to take: no row under the cursor and no tick made, or the ticks written already.
+  const closes =
+    many &&
+    !loading &&
+    !action &&
+    !ticking &&
+    (active === undefined || written);
 
   const applyChecked = () => {
     quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
@@ -248,14 +261,18 @@ function Open({ session }: { session: Session }) {
 
   const apply = (options: AcceptOptions) => {
     if (ask) quickAccess.submit();
-    else if (!many) {
-      if (active) accept(active, options);
-    } else if (active?.checked === undefined && active !== undefined) {
-      accept(active, options);
-    } else if (ticking) applyChecked();
+    else if (loading) early.current = { value, options };
+    else if (closes) quickAccess.hide();
+    else if (ticking && !action) applyChecked();
     else if (active) accept(active, options);
-    else quickAccess.hide();
   };
+
+  // An Enter before the rows of its value have come acts on them once they do.
+  useEffect(() => {
+    const waiting = early.current;
+    early.current = undefined;
+    if (waiting?.value === value) apply(waiting.options);
+  });
 
   useEffect(
     () =>
@@ -268,7 +285,7 @@ function Open({ session }: { session: Session }) {
                 ? 0
                 : ordered.length - 1
               : (at + delta + ordered.length) % ordered.length;
-          setSelected(ordered[next]?.id ?? "");
+          setCursor({ value, id: ordered[next]?.id ?? "" });
         },
         accept: apply,
         toggle: () => {
@@ -355,10 +372,11 @@ function Open({ session }: { session: Session }) {
                   key={item.id}
                   id={rowIds.get(item)}
                   item={item}
-                  selected={item === active}
+                  cursor={item === active}
+                  selected={many ? on(item) : item === active}
                   on={on(item)}
                   onPoint={() => {
-                    setSelected(item.id);
+                    setCursor({ value, id: item.id });
                   }}
                   onSelect={() => {
                     if (on(item) !== undefined && ticking) toggle(item);
@@ -380,11 +398,13 @@ function Open({ session }: { session: Session }) {
             ask?.acceptLabel ??
             (pick
               ? "Select"
-              : many && ticking
-                ? `Apply · ${words(count)}`
-                : alone
-                  ? (provider.acceptAloneLabel ?? provider.acceptLabel)
-                  : provider?.acceptLabel)
+              : closes
+                ? "Close"
+                : many && ticking && !action
+                  ? `Apply · ${words(count)}`
+                  : alone
+                    ? (provider.acceptAloneLabel ?? provider.acceptLabel)
+                    : provider?.acceptLabel)
           }
         />
       </QuickInput>
@@ -412,6 +432,7 @@ function Asked({
 function Row({
   id,
   item,
+  cursor,
   selected,
   on,
   onPoint,
@@ -420,7 +441,9 @@ function Row({
 }: {
   id: string | undefined;
   item: QuickPickItem;
-  selected: boolean;
+  cursor: boolean;
+  /** `aria-selected`: where the person picks several rows, whether it is ticked, and none for an action; else where the cursor is. */
+  selected: boolean | undefined;
   /** Whether it is ticked; none for a row with no box. */
   on: boolean | undefined;
   onPoint: () => void;
@@ -432,7 +455,8 @@ function Row({
   return (
     <QuickInputOption
       id={id}
-      selected={selected}
+      cursor={cursor}
+      aria-selected={selected}
       onPointerMove={onPoint}
       onClick={(event) => {
         if (
@@ -445,7 +469,6 @@ function Row({
         }
       }}
       className={item.tile ? "h-9" : undefined}
-      aria-checked={on}
     >
       {on !== undefined && (
         <span

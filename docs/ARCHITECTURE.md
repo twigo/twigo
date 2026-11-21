@@ -1155,7 +1155,7 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - An empty list names where it looked, the context, then the namespaces it is narrowed to: `No pods in prod-eu`, `No pods in prod-eu · payments`, and `No matching pods in dev · payments-x, auth-x` under a filter; so do a list inside an Overview and the Port forwards view, as the empty panel names its space (4.1).
   A list of all namespaces that leaves some out because the credentials may not list the kind there speaks of the ones it reads, `No pods in the 3 namespaces you may list`.
-  The status bar's cluster entry says the same in numbers, `3 of 46 namespaces` in the quiet role, with the ones left out named in its tooltip, unless a parts line that names unready parts (3.7) takes its place, and its rows entry says `1 deployment` where it has one row.
+  The status bar's cluster entry says the same in numbers, `3 of 46 namespaces` in the quiet role, with how many are left out in its tooltip, unless a parts line that names unready parts (3.7) takes its place, and its rows entry says `1 deployment` where it has one row.
   A list of all namespaces that the cluster refuses says `These credentials may not list pods in every namespace at once.` and offers Choose namespaces, which opens the picker (4.5), where a refused selection or a cluster-scoped kind keeps `These credentials may not watch pods.` and its Retry.
   While parts of the list are not shown it can speak only of the namespaces that are: `No pods in the namespaces shown`, `No matching pods in the namespaces shown`, and the page says that the namespaces that are not ready are left out and the status bar says which (3.7).
 - Single-key verbs work only when a table is focused (context key `listFocus`), or on an object editor's Overview outside a text field (5.1): `l` logs, `s` shell, `f` port-forward, which asks which port, even of one, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
@@ -1193,6 +1193,8 @@ Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
   It draws its own listbox and holds its own cursor: the input is a combobox whose `aria-activedescendant` names the row under the cursor, and a row is an option.
+  A value typed puts the cursor on the first row, whatever the cursor did before, and Enter before the rows of that value have come waits for them and acts on the cursor's row once they do; typing again withdraws it.
+  Where the person takes one row at a time `aria-selected` is on the cursor's row, selection following focus as the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) describes it.
 - **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   A row that opens something in another space leads with that space's tile, as a `:` list does whose `@` names another space's context (4.2).
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
@@ -1201,12 +1203,14 @@ Extensions add commands, not prefixes.
 - **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
   Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
   On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
-- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) with `aria-checked`, a row without one is an action, the list says `aria-multiselectable`, and a polite status says how many are ticked.
-  No row is under the cursor at the opening, until the person moves or types, so Enter at once closes with nothing changed.
+- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) and says with `aria-selected` whether it is ticked, a row without one is an action and says nothing of selection, and the list says `aria-multiselectable`; a polite status says how many are ticked.
+  The cursor is the input's `aria-activedescendant` alone, since the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) keeps focus apart from the selected state and indicates the selection of each option with `aria-selected` or `aria-checked`, never both.
+  No row is under the cursor at the opening, until the person moves or types a value, so Enter at once closes with nothing changed.
   Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
-  Before the first tick the footer says `Only this` on a row with a box, and the provider's own verb (`Select`) on an action row or where no row is under the cursor.
+  Before the first tick the footer says `Only this` on a row with a box, the provider's own verb (`Select`) on an action row, and `Close` where no row is under the cursor, since Enter then closes.
   The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
 - **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the namespace index lists them, the order fixed for the opening, so a tick moves no row.
+  Once text is typed `All namespaces` goes after the namespaces that match it, so the cursor, which goes to the first row, lands on the best namespace.
   Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
   A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
   The picker asks `namespaces_list` once for each opening, and a scope is written sorted and with no name twice, here, by `:` and in a list's URI, so one set of namespaces is one list URI.
@@ -1902,6 +1906,7 @@ interface CommandDescriptor {
 - **Bare keys** fire only in `listFocus` or `pageFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
   Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
+  On macOS ⌃N and ⌃P move the cursor down and up too, as VS Code binds them under the same `inQuickOpen` ([`quickOpenSelectNext` and `quickOpenSelectPrevious`](https://github.com/microsoft/vscode/blob/1.144.0/src/vs/workbench/browser/actions/quickAccessActions.ts#L245-L279)); the footer names ↑ and ↓.
   Space is the same under `inQuickOpen && quickOpenCanPickMany`, where the open provider takes ticked rows: what is picked is never a name that holds a space, so Space ticks the row under the cursor and types nothing, while the space that ends the `ns ` prefix is still typed, since the input resolves to the provider with no prefix until it is.
 - **The keybindings editor** shows conflicts and the source of every binding.
 - **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).

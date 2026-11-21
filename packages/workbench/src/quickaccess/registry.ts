@@ -305,7 +305,12 @@ export class QuickAccess {
     });
   }
 
-  /** Applies the ticked rows of the open session as the provider's set, and closes unless told to stay. */
+  /**
+   * Applies the ticked rows of the open session as the provider's set, and
+   * closes unless told to stay, which the live variant tells.
+   *
+   * @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+   */
   async acceptChecked(
     ids: readonly string[],
     { close = true }: { close?: boolean } = {},

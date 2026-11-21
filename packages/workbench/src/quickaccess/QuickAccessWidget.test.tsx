@@ -44,7 +44,8 @@ const press = (code: string, init: KeyboardEventInit = {}) => {
   fireEvent.keyDown(input(), { key: code.replace(/^Key/, ""), code, ...init });
 };
 const selected = () =>
-  document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
+  document.getElementById(input().getAttribute("aria-activedescendant") ?? "")
+    ?.textContent ?? undefined;
 const footer = () => screen.getByLabelText("Keys").textContent;
 
 test("a pick with a source is asked for the rows of each value typed, and shows them as they come", async () => {
@@ -128,7 +129,7 @@ test("a pick's notice says what its rows are, and shows with none", async () => 
   expect(screen.getByText("No results")).toBeTruthy();
 });
 
-test("items loaded for another value are neither shown nor accepted", async () => {
+test("items loaded for another value are neither shown nor accepted, and an Enter meanwhile takes the rows of its own value", async () => {
   const workbench = await testWorkbench();
   const pending = new Map<string, (items: QuickPickItem[]) => void>();
   const accept = vi.fn();
@@ -161,7 +162,13 @@ test("items loaded for another value are neither shown nor accepted", async () =
     pending.get("ab")?.([{ id: "ab", label: "alphabet" }]);
     await Promise.resolve();
   });
-  expect(screen.getByText("alphabet")).toBeTruthy();
+  expect(accept).toHaveBeenCalledTimes(1);
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "ab" }),
+    "ab",
+    expect.anything(),
+    { side: false },
+  );
 });
 
 test("a row draws what its provider says: icon or tile, matches, description, state, kind and keys", async () => {
@@ -280,6 +287,42 @@ test("the row under the cursor scrolls into view as the cursor moves", async () 
   spy.mockRestore();
 });
 
+test("a value typed puts the cursor on the best match, however the cursor moved before", async () => {
+  const workbench = await testWorkbench();
+  const rows: readonly QuickPickItem[] = [
+    { id: "alpha", label: "alpha" },
+    { id: "alpine", label: "alpine" },
+    { id: "beta", label: "beta" },
+  ];
+  const { registered, accept } = provider("!", rows, {
+    items: (filter) => rows.filter((row) => row.label.includes(filter)),
+  });
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  expect(selected()).toBe("alpine");
+
+  fireEvent.change(input(), { target: { value: "!al" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("alpha");
+
+  fireEvent.change(input(), { target: { value: "!" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("alpha");
+
+  press("ArrowDown");
+  fireEvent.change(input(), { target: { value: "!al" } });
+  await act(() => Promise.resolve());
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "alpha" }),
+    "al",
+    expect.anything(),
+    { side: false },
+  );
+});
+
 test("a key the user binds instead moves, and the unbound one does not", async () => {
   const workbench = await testWorkbench();
   workbench.keybindings.register("user", [
@@ -297,6 +340,33 @@ test("a key the user binds instead moves, and the unbound one does not", async (
   press("KeyJ", { ctrlKey: true });
   expect(selected()).toBe("beta");
   expect(footer()).toContain("↑⌃JMove");
+});
+
+test("⌃N and ⌃P move as ↓ and ↑ do on macOS, which the footer still says, and ⌃N is not bound elsewhere", async () => {
+  for (const [platform, moves] of [
+    ["mac", true],
+    ["linux", false],
+  ] as const) {
+    const workbench = await testWorkbench("ready", undefined, platform);
+    workbench.quickAccess.register(
+      provider("!", [
+        { id: "a", label: "alpha" },
+        { id: "b", label: "beta" },
+        { id: "c", label: "gamma" },
+      ]).registered,
+    );
+    await opened(workbench, "!");
+    expect(selected()).toBe("alpha");
+    press("KeyN", { ctrlKey: true });
+    expect(selected()).toBe(moves ? "beta" : "alpha");
+    if (moves) {
+      press("KeyN", { ctrlKey: true });
+      press("KeyP", { ctrlKey: true });
+      expect(selected()).toBe("beta");
+    }
+    expect(footer()).toContain(moves ? "↑↓Move" : "UpDownMove");
+    cleanup();
+  }
 });
 
 test("⌘↵ opens to the side only where the provider can", async () => {
@@ -348,7 +418,7 @@ test("the footer shows the keys from the registry and, on no prefix, the prefixe
 
 const space = () => fireEvent.keyDown(input(), { key: " ", code: "Space" });
 const rowOf = (name: string) => screen.getByRole("option", { name });
-const checkedOf = (name: string) => rowOf(name).getAttribute("aria-checked");
+const checkedOf = (name: string) => rowOf(name).getAttribute("aria-selected");
 const hint = (words: string) => footer().includes(words);
 
 const NAMESPACES: readonly QuickPickItem[] = [
@@ -382,7 +452,7 @@ test("rows with a box open ticked as they say, with no row under the cursor, so 
   await opened(workbench, "!");
   expect(checkedOf("payments")).toBe("true");
   expect(checkedOf("auth")).toBe("false");
-  expect(rowOf("All namespaces").getAttribute("aria-checked")).toBeNull();
+  expect(rowOf("All namespaces").getAttribute("aria-selected")).toBeNull();
   expect(screen.getByRole("listbox").getAttribute("aria-multiselectable")).toBe(
     "true",
   );
@@ -401,12 +471,13 @@ test("the footer says what Enter does to the row under the cursor: only this one
   const workbench = await testWorkbench();
   workbench.quickAccess.register(ticking().registered);
   await opened(workbench, "!");
-  expect(hint("Select")).toBe(true);
-  expect(hint("Only this")).toBe(false);
+  expect(hint("Close")).toBe(true);
+  expect(hint("Select")).toBe(false);
 
   press("ArrowDown");
   expect(hint("Select")).toBe(true);
   expect(hint("Only this")).toBe(false);
+  expect(hint("Close")).toBe(false);
 
   press("ArrowDown");
   expect(hint("Only this")).toBe(true);
@@ -415,6 +486,23 @@ test("the footer says what Enter does to the row under the cursor: only this one
   space();
   expect(hint("Apply · 0 namespaces")).toBe(true);
   expect(hint("Only this")).toBe(false);
+});
+
+test("the footer says Select, not Close, while the rows of a value typed come", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  workbench.quickAccess.register(ticking(undefined, { items }).registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  expect(hint("Close")).toBe(false);
+  await answer("", NAMESPACES);
+  expect(hint("Close")).toBe(true);
+
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  expect(hint("Close")).toBe(false);
+  expect(hint("Select")).toBe(true);
 });
 
 test("the input is a combobox on the list and names the row under the cursor, and none where no row is", async () => {
@@ -437,6 +525,48 @@ test("the input is a combobox on the list and names the row under the cursor, an
   const group = screen.getByRole("group", { name: "Selected" });
   expect(group.contains(rowOf("payments"))).toBe(true);
   expect(group.contains(rowOf("auth"))).toBe(false);
+});
+
+test("a listbox that takes several rows says which are selected and never where the cursor is, as the APG's multi-select listbox does", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  press("ArrowDown");
+  expect(selected()).toBe("auth");
+  expect(rowOf("auth").hasAttribute("data-cursor")).toBe(true);
+  expect(rowOf("payments").hasAttribute("data-cursor")).toBe(false);
+  expect(checkedOf("auth")).toBe("false");
+  expect(checkedOf("payments")).toBe("true");
+  expect(checkedOf("batch")).toBe("false");
+  expect(rowOf("All namespaces").hasAttribute("aria-selected")).toBe(false);
+  expect(document.querySelector("[aria-checked]")).toBeNull();
+
+  space();
+  expect(checkedOf("auth")).toBe("true");
+});
+
+test("a listbox of one row to take says aria-selected where the cursor is, where selection follows focus", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    provider("!", [
+      { id: "a", label: "alpha" },
+      { id: "b", label: "beta" },
+    ]).registered,
+  );
+  await opened(workbench, "!");
+  const states = () => [
+    rowOf("alpha").getAttribute("aria-selected"),
+    rowOf("beta").getAttribute("aria-selected"),
+  ];
+  expect(states()).toEqual(["true", "false"]);
+  expect(screen.getByRole("listbox").hasAttribute("aria-multiselectable")).toBe(
+    false,
+  );
+  press("ArrowDown");
+  expect(states()).toEqual(["false", "true"]);
+  expect(selected()).toBe("beta");
 });
 
 test("↓ from no row goes to the first row, and ↑ to the last", async () => {
@@ -491,6 +621,92 @@ test("Space ticks the row under the cursor and Enter applies the ticked set, whi
   expect(acceptChecked).toHaveBeenCalledWith(["auth"], "", expect.anything());
   expect(accept).not.toHaveBeenCalled();
   expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("a value typed leaves no row under the cursor when the filter is empty again, and puts it on the first row otherwise, after a tick too", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    ticking(undefined, {
+      items: (filter) =>
+        NAMESPACES.filter((item) => item.label.includes(filter)),
+    }).registered,
+  );
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  space();
+  expect(selected()).toBe("payments");
+
+  fireEvent.change(input(), { target: { value: "!a" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBe("All namespaces");
+  expect(checkedOf("payments")).toBe("false");
+
+  fireEvent.change(input(), { target: { value: "!" } });
+  await act(() => Promise.resolve());
+  expect(selected()).toBeUndefined();
+});
+
+function slow() {
+  const pending = new Map<string, (items: readonly QuickPickItem[]) => void>();
+  const items = (filter: string) =>
+    new Promise<readonly QuickPickItem[]>((resolve) => {
+      pending.set(filter, resolve);
+    });
+  const answer = (filter: string, rows: readonly QuickPickItem[]) =>
+    act(async () => {
+      pending.get(filter)?.(rows);
+      await Promise.resolve();
+    });
+  return { items, answer };
+}
+
+test("an Enter before the rows of the value typed have come acts on the cursor's row once they do", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  const { registered, accept } = ticking(undefined, { items });
+  workbench.quickAccess.register(registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await answer("", NAMESPACES);
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(workbench.quickAccess.session).toBeDefined();
+  expect(accept).not.toHaveBeenCalled();
+
+  await answer(
+    "pay",
+    NAMESPACES.filter((item) => item.id === "payments"),
+  );
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "payments" }),
+    "pay",
+    expect.anything(),
+    { side: false },
+  );
+  expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("a value typed after an Enter that waits for rows withdraws it", async () => {
+  const workbench = await testWorkbench();
+  const { items, answer } = slow();
+  const { registered, accept } = ticking(undefined, { items });
+  workbench.quickAccess.register(registered);
+  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    workbench.quickAccess.show("!");
+  });
+  await answer("", NAMESPACES);
+  fireEvent.change(input(), { target: { value: "!pay" } });
+  press("Enter");
+  fireEvent.change(input(), { target: { value: "!paym" } });
+  await answer("pay", NAMESPACES);
+  await answer("paym", NAMESPACES);
+  expect(accept).not.toHaveBeenCalled();
+  expect(workbench.quickAccess.session).toBeDefined();
 });
 
 test("a row the filter hides keeps its tick, and is applied", async () => {
@@ -639,7 +855,10 @@ test("a row with no box is taken alone whatever is ticked", async () => {
   press("ArrowDown");
   press("ArrowDown");
   space();
+  expect(hint("Apply · 0 namespaces")).toBe(true);
   press("ArrowUp");
+  expect(hint("Select")).toBe(true);
+  expect(hint("Apply")).toBe(false);
   press("Enter");
   await act(() => Promise.resolve());
   expect(accept).toHaveBeenCalledWith(

@@ -303,11 +303,15 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
             }),
           }),
         );
-      return [
-        ...filtered([all], search),
+      const namespaces = [
         ...filtered(selected, search),
         ...filtered(others, search),
       ];
+      // A filter puts the cursor on the first row, which is to be a namespace.
+      const action = filtered([all], search);
+      return search === ""
+        ? [...action, ...namespaces]
+        : [...namespaces, ...action];
     },
     accept(item) {
       scope(item.id === ALL ? [] : [item.id]);

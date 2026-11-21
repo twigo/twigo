@@ -231,6 +231,30 @@ test("a space no one scoped starts on the namespace its first context names, els
   expect(written.map(({ key }) => key)).not.toContain("namespaces");
 });
 
+test.each([
+  ["names none", named("prod-eu", null), []],
+  ["names auth", named("prod-eu", "auth"), ["auth"]],
+])(
+  "a space of several contexts starts on the namespace its first context %s, whatever the others name",
+  async (_, first, expected) => {
+    const { backend: mock } = withCatalog([
+      first,
+      named("prod-us", "payments"),
+    ]);
+    const backend: Backend = {
+      ...mock,
+      invoke(command, request) {
+        if (command !== "spaces_list") return mock.invoke(command, request);
+        return Promise.resolve([
+          { id: "pair", name: "pair", contexts: ["prod-eu", "prod-us"] },
+        ] as never);
+      },
+    };
+    const { spaces } = await window(backend);
+    expect(spaces.state("pair").namespaces).toEqual(expected);
+  },
+);
+
 test("what the person chose stays over the context's namespace, all namespaces too", async () => {
   const contexts = [named("prod-eu", "payments"), named("staging", "auth")];
   const { backend } = withCatalog(contexts);

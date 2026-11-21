@@ -215,12 +215,19 @@ export function sections<T extends { readonly gvr: Gvr }>(
   ];
 }
 
+const kindWords = (kind: string) =>
+  kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
+
+/** One object of a kind as its list's title says the kind: `NetworkPolicy` → `network policy`. */
+export const singularTitle = (kind: string): string =>
+  kindWords(kind).join(" ").toLowerCase();
+
 /**
  * A list's title from its kind's words and its resource, the plural that
  * discovery gives: `NetworkPolicy` + `networkpolicies` → `Network Policies`.
  */
 export function pluralTitle(kind: string, resource: string): string {
-  const words = kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(" ");
+  const words = kindWords(kind);
   const last = words.pop() ?? "";
   const prefix = words.join("").toLowerCase();
   const plural = resource.startsWith(prefix)
