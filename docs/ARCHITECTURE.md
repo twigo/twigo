@@ -788,7 +788,9 @@ The layout per space is persisted (dockview `toJSON` and which parts show); part
 The title bar gives way in a fixed order where it is too narrow, by the widths of hidden copies of its parts at their natural size ([decision](decisions/parts-give-way-by-width.md)).
 First the search field folds to an icon that keeps its key, ⌘P, and still opens quick access; then the search leaves the middle for the bar's right end; then the mode chip folds to its icon, a 20 px square, its words in its tooltip; only then are the crumbs cut.
 Each crumb is cut in the middle, a fixed head and tail around a middle that shrinks to no less than 2em, so that a whole glyph and the ellipsis always show, the scope first and the name only once the scope is at its floor.
-The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail its last namespace by the same rule, 1 to 12, so `All namespaces` is never cut, and no text as short as its floor is.
+The name keeps 28 characters, head and tail together, its tail the part after its last `:` or `/` while that leaves the head 4 characters, 1 to 24, else its last 12, so that an EKS ARN keeps its cluster's name; the scope keeps 16, its tail the part after its name's last `-` by the same rule, so `All namespaces` is never cut, and no text as short as its floor is.
+The scope crumb reads as the scope chip does (4.4): `All namespaces`, or the first namespace cut in the middle and `+N` for the others, with every name in its tooltip, so a scope of any length takes no more of the bar than one long name, and the hidden copy that decides the stages measures that form.
+The crumbs' accessible names say what they hold, `Switch space, prod-eu` and `Select namespace, payments and 2 more`.
 A stage counts half a pixel for each rounded width it adds up, so that a part stays whole only where it fits whichever way the widths were rounded.
 The bar stays 36 px high, which the position of the macOS traffic lights in `tauri.conf.json` is tied to.
 The mode chip after the context's name says its type and its lock, `Production · read-only`, and opens what set it and the choices the person has (6.4).
@@ -1130,6 +1132,9 @@ A resolver maps a URI pattern to an editor pane by priority, as VS Code's editor
   A group's actions are keyed by their editor, so one list's stage does not carry over to the next, and as they settle the strip scrolls its own tab list, not the split views around it, to keep the active tab in view, as dockview 8.8.3 does only as a tab activates ([`_scrollTabIntoView`](https://github.com/mathuo/dockview/blob/v8.8.3/packages/dockview-core/src/dockview/components/titlebar/tabs.ts#L839-L888)).
 - A pinned list keeps its namespaces, text and health in its URI and shows at the top of the explorer; a kind whose list is open shows its rows and its worst health there.
 - An empty list names where it looked, the context, then the namespaces it is narrowed to: `No pods in prod-eu`, `No pods in prod-eu · payments`, and `No matching pods in dev · payments-x, auth-x` under a filter; so do a list inside an Overview and the Port forwards view, as the empty panel names its space (4.1).
+  A list of all namespaces that leaves some out because the credentials may not list the kind there speaks of the ones it reads, `No pods in the 3 namespaces you may list`.
+  The status bar's cluster entry says the same in numbers, `3 of 46 namespaces` in the quiet role, with the ones left out named in its tooltip, unless a parts line that names unready parts (3.7) takes its place, and its rows entry says `1 deployment` where it has one row.
+  A list of all namespaces that the cluster refuses says `These credentials may not list pods in every namespace at once.` and offers Choose namespaces, which opens the picker (4.5), where a refused selection or a cluster-scoped kind keeps `These credentials may not watch pods.` and its Retry.
   While parts of the list are not shown it can speak only of the namespaces that are: `No pods in the namespaces shown`, `No matching pods in the namespaces shown`, and the page says that the namespaces that are not ready are left out and the status bar says which (3.7).
 - Single-key verbs work only when a table is focused (context key `listFocus`), or on an object editor's Overview outside a text field (5.1): `l` logs, `s` shell, `f` port-forward, which asks which port, even of one, `⌘⌫` delete (with confirmation), off a bare key since k9s users deleted the wrong object from one ([research](research/workbench-design.md)).
   `e` shows the YAML and `⌘↵` opens the object in an editor in a list only, since both need `list.uri`.
@@ -1173,6 +1178,15 @@ Extensions add commands, not prefixes.
 - **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
   Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
   On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
+- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) with `aria-checked`, a row without one is an action, the list says `aria-multiselectable`, and a polite status says how many are ticked.
+  No row is under the cursor at the opening, until the person moves or types, so Enter at once closes with nothing changed.
+  Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
+  The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
+- **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the namespace index lists them, the order fixed for the opening, so a tick moves no row.
+  Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
+  A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
+  The picker asks `namespaces_list` once for each opening, and a scope is written sorted and with no name twice, here, by `:` and in a list's URI, so one set of namespaces is one list URI.
+- **`:` takes several namespaces**: a namespace word splits on commas, each name must be a namespace's (an RFC 1123 label), `all` stands alone, and a word that is no list of namespaces gives no row; the row says `in payments, auth`.
 
 ### 4.6 Logs, terminal and editors
 
@@ -1586,6 +1600,7 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   - It has two scopes, as VS Code's storage has: the app's, and each space's.
     The app keeps the rail's spaces in order, the active space, part sizes, quick-access history, the columns chosen per kind, the colours chosen for contexts and the interface zoom (4.1).
     A space keeps its editors, which parts show and their containers, moved views, its namespace scope, the editors it opened recently and each view's own state.
+    Until the person scopes it a space keeps no scope: it follows the namespace its first context names in the kubeconfig, else every namespace.
   - Part sizes are the app's, so switching spaces never moves the splits; VS Code keeps them per profile for the same reason.
     `parts/sizes` holds the side bars' widths, the panel's height and the width of a list's details (4.3), each once the person has resized it; the details' is stored as it was clamped when the drag ended.
   - Each value is a key that one module owns, such as `parts`, `namespaces`, `recent` or `view/<id>` in a space, and `parts/sizes`, `quickaccess/history` or `window/zoom` in the app.
@@ -1815,7 +1830,7 @@ interface CommandDescriptor {
   - `object.uri`: the URI of the editor whose Overview holds the focus, the list editor's for the details, which the page's own commands act on, and unset while another view is shown
   - `object.filtered`: that page's filter holds text
   - `object.subject`: the object an object editor shows, as `resource/details` names it, once discovery has named its resource; the commands of a resource take it as their subject where they are given none, and the details set none, their verbs acting on the list's selected row
-  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side)
+  - `inQuickOpen`, `quickOpenToSide` (the open provider opens rows to the side), `quickOpenCanPickMany` (it takes ticked rows)
   - `resource.group`, `resource.kind`, `resource.namespaced`, `resource.namespace`, `resource.scalable` (discovery lists its `scale` subresource)
   - `resource.selected`: a command of a resource has an object to act on, the list's selected row, or an object editor's once discovery names its resource, and false in a list inside an Overview
   - `resource.cordoned`, `resource.suspended`, `resource.ended`: what the selected row's cells say, or an object editor's printed cells (`header.printed`) once its Overview has come, so a menu offers Uncordon only on a cordoned node, Resume only on a suspended Job or CronJob, and neither Suspend nor Resume on a Job that ended
@@ -1863,6 +1878,7 @@ interface CommandDescriptor {
 - **Bare keys** fire only in `listFocus` or `pageFocus` and never inside inputs or Monaco.
   This keeps legacy `isTypingTarget`.
   Quick access's input is the one exception, for ↑, ↓ and Enter under `inQuickOpen`: they edit no line of text, and drive its list as in VS Code's quick input.
+  Space is the same under `inQuickOpen && quickOpenCanPickMany`, where the open provider takes ticked rows: what is picked is never a name that holds a space, so Space ticks the row under the cursor and types nothing, while the space that ends the `ns ` prefix is still typed, since the input resolves to the provider with no prefix until it is.
 - **The keybindings editor** shows conflicts and the source of every binding.
 - **Keymaps** ship as contributions: Default (VS Code-like) and k9s (vim movement, `:` mode on bare `:` in `listFocus`).
 - **macOS native menu accelerators** come from the same table.
