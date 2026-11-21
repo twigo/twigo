@@ -243,8 +243,15 @@ function Open({ session }: { session: Session }) {
   const alone = many && !ticking && active?.checked !== undefined;
   const action = active !== undefined && active.checked === undefined;
   const loading = result.state === "loading";
-  // Nothing to take: no row under the cursor and no tick made.
-  const closes = many && !loading && !ticking && active === undefined;
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  const written = provider?.live === true && checks.touched;
+  // Nothing left to take: no row under the cursor and no tick made, or the ticks written already.
+  const closes =
+    many &&
+    !loading &&
+    !action &&
+    !ticking &&
+    (active === undefined || written);
 
   const applyChecked = () => {
     quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
