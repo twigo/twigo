@@ -498,7 +498,7 @@ async fn more_than_four_namespaces_watch_cluster_wide_only_if_the_person_may_lis
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     fake.add("pods", Some("f"), "p2");
-    fake.state().may_list = true;
+    fake.allow(None, "list", "pods");
     let (hub, _clients) = fake.hub(Budgets::default());
     let mut wide = hub.rows(query(&five)).await.unwrap();
     ready(&mut wide).await;
@@ -1444,11 +1444,11 @@ async fn a_no_from_rbac_is_asked_again_after_30_s_and_a_yes_holds() {
     sleep(crate::cluster::REFUSED_FOR - Duration::from_secs(1)).await;
     assert_eq!(may().await, Some(false));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
-    fake.state().may_list = true;
+    fake.allow(Some("a"), "delete", "pods");
     sleep(Duration::from_secs(2)).await;
     assert_eq!(may().await, Some(true));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
-    fake.state().may_list = false;
+    fake.deny(Some("a"), "delete", "pods");
     sleep(crate::cluster::REFUSED_FOR * 2).await;
     assert_eq!(may().await, Some(true));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);

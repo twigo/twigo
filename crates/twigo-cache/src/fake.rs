@@ -2,9 +2,9 @@
 //! resource, namespace and name, as metadata unless a test puts whole ones,
 //! list pages, watches resumed from a `resourceVersion` or streaming their
 //! initial events as each group answers them, gzip for what asks for it,
-//! `410 Gone` below a compacted version, refusals, probes, access reviews,
-//! aggregated discovery with its ETags, and the Metrics API, which lists
-//! whole and cannot be watched.
+//! `410 Gone` below a compacted version, refusals, probes, access reviews
+//! answered by what they ask, aggregated discovery with its ETags, and the
+//! Metrics API, which lists whole and cannot be watched.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::Infallible;
@@ -68,8 +68,10 @@ pub struct State {
     pub no_endpoints: HashSet<String>,
     /// Resources the server cannot watch, as ComponentStatus.
     pub unwatchable: HashSet<String>,
-    /// The person may list pods cluster-wide.
-    pub may_list: bool,
+    /// What access reviews are answered yes to, by the namespace (none for
+    /// every namespace), the verb and the resource they ask; any other is
+    /// answered no.
+    allowed: HashSet<(Option<String>, String, String)>,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
     /// `/version` sends its headers and never its body, as over a connection
@@ -355,6 +357,33 @@ impl Fake {
         state.change(group, resource, namespace, "DELETED", object);
     }
 
+    /// Answers the reviews of `verb` on `resource` in `namespace` yes, or in
+    /// every namespace with none.
+    pub fn allow(&self, namespace: Option<&str>, verb: &str, resource: &str) {
+        self.state()
+            .allowed
+            .insert(Self::review_key(namespace, verb, resource));
+    }
+
+    /// Answers them no again.
+    pub fn deny(&self, namespace: Option<&str>, verb: &str, resource: &str) {
+        self.state()
+            .allowed
+            .remove(&Self::review_key(namespace, verb, resource));
+    }
+
+    fn review_key(
+        namespace: Option<&str>,
+        verb: &str,
+        resource: &str,
+    ) -> (Option<String>, String, String) {
+        (
+            namespace.map(str::to_owned),
+            verb.to_owned(),
+            resource.to_owned(),
+        )
+    }
+
     pub fn streams(&self, group: &str, answer: Streams) {
         self.state().streams.insert(group.to_owned(), answer);
     }
@@ -527,7 +556,43 @@ impl Fake {
                 after: std::time::Duration::from_secs(120),
             })));
         }
+        if path.ends_with("selfsubjectaccessreviews") {
+            return Ok(self.review(request).await);
+        }
         Ok(self.respond(request))
+    }
+
+    /// Answers the access review the request holds by what it asks.
+    async fn review(&self, request: Request<kube::client::Body>) -> Response<Body> {
+        let uri = request.uri().to_string();
+        let body = request
+            .into_body()
+            .collect()
+            .await
+            .expect("a review's body")
+            .to_bytes();
+        let review: Value = serde_json::from_slice(&body).expect("a review");
+        let asks = &review["spec"]["resourceAttributes"];
+        let asked = |field: &str| asks[field].as_str().map(str::to_owned);
+        let key = (
+            asked("namespace"),
+            asked("verb").expect("a verb"),
+            asked("resource").expect("a resource"),
+        );
+        let mut state = self.state();
+        state.requests.push((Instant::now(), uri));
+        let allowed = state.allowed.contains(&key);
+        drop(state);
+        full(
+            StatusCode::CREATED,
+            &json!({
+                "apiVersion": "authorization.k8s.io/v1",
+                "kind": "SelfSubjectAccessReview",
+                "spec": {},
+                "status": { "allowed": allowed }
+            }),
+            false,
+        )
     }
 
     fn respond(&self, request: Request<kube::client::Body>) -> Response<Body> {
@@ -557,19 +622,6 @@ impl Fake {
                 return stream(receiver, false);
             }
             return full(StatusCode::OK, &json!({ "gitVersion": "v1.37.0" }), false);
-        }
-        if path.ends_with("selfsubjectaccessreviews") {
-            let allowed = state.may_list;
-            return full(
-                StatusCode::CREATED,
-                &json!({
-                    "apiVersion": "authorization.k8s.io/v1",
-                    "kind": "SelfSubjectAccessReview",
-                    "spec": {},
-                    "status": { "allowed": allowed }
-                }),
-                false,
-            );
         }
         if state.unavailable > 0 {
             state.unavailable -= 1;
