@@ -256,15 +256,12 @@ test("ns takes a row alone, or the ticked set sorted, and none ticked or the All
   await payments.accept();
   expect(scope()).toEqual(["payments"]);
 
-  const filter = "";
   const provider = workbench.quickAccess.resolve("ns ")?.provider;
   if (!provider?.acceptChecked) throw new Error("no ticked set");
-  await act(() =>
-    provider.acceptChecked?.(["search", "auth", "search"], filter, NOWHERE),
-  );
+  await act(() => provider.acceptChecked?.(["search", "auth", "search"]));
   expect(scope()).toEqual(["auth", "search"]);
 
-  await act(() => provider.acceptChecked?.([], filter, NOWHERE));
+  await act(() => provider.acceptChecked?.([]));
   expect(scope()).toEqual([]);
 
   await payments.accept();

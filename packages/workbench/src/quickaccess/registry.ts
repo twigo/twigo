@@ -101,11 +101,7 @@ export interface QuickAccessProvider {
    * set, which this takes. Until then `accept` takes one row alone. A row
    * that the filter hides keeps its tick.
    */
-  acceptChecked?(
-    ids: readonly string[],
-    filter: string,
-    context: QuickAccessContext,
-  ): void | Promise<void>;
+  acceptChecked?(ids: readonly string[]): void | Promise<void>;
 }
 
 /** What the open widget does for the `quickInput.*` commands. */
@@ -298,11 +294,7 @@ export class QuickAccess {
     const resolved = this.resolve(session.value);
     if (!resolved?.provider.acceptChecked) return;
     this.#close();
-    await resolved.provider.acceptChecked(
-      ids,
-      resolved.filter,
-      session.context,
-    );
+    await resolved.provider.acceptChecked(ids);
   }
 
   /** The open widget's rows, while it shows them. */

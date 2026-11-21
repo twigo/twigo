@@ -618,7 +618,7 @@ test("Space ticks the row under the cursor and Enter applies the ticked set, whi
 
   press("Enter");
   await act(() => Promise.resolve());
-  expect(acceptChecked).toHaveBeenCalledWith(["auth"], "", expect.anything());
+  expect(acceptChecked).toHaveBeenCalledWith(["auth"]);
   expect(accept).not.toHaveBeenCalled();
   expect(workbench.quickAccess.session).toBeUndefined();
 });
@@ -725,11 +725,7 @@ test("a row the filter hides keeps its tick, and is applied", async () => {
   space();
   press("Enter");
   await act(() => Promise.resolve());
-  expect(acceptChecked).toHaveBeenCalledWith(
-    ["payments", "auth"],
-    "au",
-    expect.anything(),
-  );
+  expect(acceptChecked).toHaveBeenCalledWith(["payments", "auth"]);
 });
 
 test("a load that the next value outdated still seeds the ticks of its rows", async () => {
@@ -755,11 +751,7 @@ test("a load that the next value outdated still seeds the ticks of its rows", as
   space();
   press("Enter");
   await act(() => Promise.resolve());
-  expect(acceptChecked).toHaveBeenCalledWith(
-    ["payments", "auth"],
-    "au",
-    expect.anything(),
-  );
+  expect(acceptChecked).toHaveBeenCalledWith(["payments", "auth"]);
 });
 
 test("after a tick the filter's text is selected and the prefix is not", async () => {
