@@ -609,7 +609,14 @@ impl Supervisor {
                 Some(control) = self.control.recv() => self.control(control),
                 Some(report) = self.reports.recv() => self.report(report),
                 Some(socket) = self.sockets.recv() => self.accepted(socket),
-                Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.publish(),
+                Some(ended) = self.tasks.join_next(), if !self.tasks.is_empty() => {
+                    if let Err(error) = ended
+                        && error.is_panic()
+                    {
+                        tracing::error!(context = %self.shared.config.context, "a connection of a forward panicked, so it ended");
+                    }
+                    self.publish();
+                }
                 opened = ready(&mut self.opening) => self.opened(opened),
                 () = changed(&mut self.watching) => self.look(),
                 proved = probed(&mut self.proof) => self.proved(proved),
