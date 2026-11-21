@@ -769,110 +769,6 @@ async fn a_cluster_wide_review_that_does_not_answer_is_waited_for_never_taken_fo
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_review_the_cluster_rejects_says_unauthorized_and_is_not_asked_again_by_itself() {
-    for plugin in [false, true] {
-        let fake = Fake::default();
-        allowed_in_three(&fake);
-        if plugin {
-            fake.state().plugin_timed_out = true;
-        } else {
-            fake.state()
-                .reviews_fail
-                .insert(None, StatusCode::UNAUTHORIZED);
-        }
-        let (hub, _clients) = fake.hub(Budgets::default());
-        let list = hub.rows(query(&[])).await.unwrap();
-
-        sleep(Duration::from_secs(120)).await;
-        assert_eq!(list.state(), ViewState::Unauthorized, "plugin: {plugin}");
-        assert_eq!(
-            fake.count("selfsubjectaccessreviews"),
-            1,
-            "a retry would run the plugin, plugin: {plugin}"
-        );
-        assert_eq!(hub.scopes(), [], "plugin: {plugin}");
-
-        fake.state().reviews_fail.clear();
-        fake.state().plugin_timed_out = false;
-        let mut again = hub.rows(query(&[])).await.unwrap();
-        let mut mirror = Mirror::default();
-        until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
-    }
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_namespace_review_the_cluster_rejects_ends_the_resolution_with_unauthorized() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    fake.state()
-        .reviews_fail
-        .insert(Some("ns-18".to_owned()), StatusCode::UNAUTHORIZED);
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let list = hub.rows(query(&[])).await.unwrap();
-
-    sleep(Duration::from_secs(120)).await;
-    assert_eq!(list.state(), ViewState::Unauthorized);
-    assert_eq!(
-        hub.scopes(),
-        [],
-        "no part, not even for the namespaces allowed"
-    );
-    assert!(
-        fake.count("selfsubjectaccessreviews") <= 41,
-        "not asked again by itself"
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_namespaces_the_cluster_rejects_say_unauthorized_and_are_not_listed_again_by_itself() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    fake.state()
-        .unauthorized
-        .insert("/api/v1/namespaces".to_owned());
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let list = hub.rows(query(&[])).await.unwrap();
-
-    sleep(Duration::from_secs(120)).await;
-    assert_eq!(list.state(), ViewState::Unauthorized);
-    assert_eq!(
-        fake.count("/api/v1/namespaces?"),
-        1,
-        "a retry would run the plugin"
-    );
-    assert_eq!(fake.count("selfsubjectaccessreviews"), 1);
-
-    fake.state().unauthorized.clear();
-    let mut again = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn a_credential_rejected_mid_resolution_leaves_no_review_holding_a_request_slot() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    fake.state().reviews_take = Duration::from_secs(1);
-    fake.state()
-        .reviews_fail
-        .insert(Some("ns-10".to_owned()), StatusCode::UNAUTHORIZED);
-    let (hub, clients) = fake.hub(Budgets::default());
-    let mut list = hub.rows(query(&[])).await.unwrap();
-    until(&mut list, |state| *state == ViewState::Unauthorized).await;
-
-    sleep(Duration::from_secs(10)).await;
-    let usage = clients.usage();
-    let slots = usage.borrow().requests;
-    assert_eq!((slots.held, slots.queued), (0, 0));
-
-    fake.state().reviews_fail.clear();
-    let mut again = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
-    assert_eq!(mirror.parts, Some(three_of_forty()));
-}
-
-#[tokio::test(start_paused = true)]
 async fn a_review_the_cluster_refuses_leaves_all_namespaces_to_the_clusters_own_answer() {
     let fake = Fake::default();
     allowed_in_three(&fake);
@@ -979,12 +875,15 @@ async fn the_namespaces_failing_without_a_refusal_are_waited_for_never_taken_for
     assert_eq!(mirror.parts, Some(three_of_forty()));
 }
 
-fn connecting(fake: &Fake, failure: IpcError) -> (Hub, Arc<AtomicBool>, Arc<AtomicUsize>) {
+fn connecting(
+    fake: &Fake,
+    failure: IpcError,
+) -> (Hub, Arc<AtomicBool>, Arc<AtomicUsize>, Arc<Clients>) {
     let clients = fake.clients(Budgets::default());
     let down = Arc::new(AtomicBool::new(true));
     let tries = Arc::new(AtomicUsize::new(0));
     let connect: Connect = {
-        let (down, tries) = (Arc::clone(&down), Arc::clone(&tries));
+        let (down, tries, clients) = (Arc::clone(&down), Arc::clone(&tries), Arc::clone(&clients));
         Arc::new(move |_context| {
             tries.fetch_add(1, Ordering::Relaxed);
             let (clients, failure) = (Arc::clone(&clients), failure.clone());
@@ -992,7 +891,7 @@ fn connecting(fake: &Fake, failure: IpcError) -> (Hub, Arc<AtomicBool>, Arc<Atom
             Box::pin(async move { if down { Err(failure) } else { Ok(clients) } })
         })
     };
-    (Hub::new(connect), down, tries)
+    (Hub::new(connect), down, tries, clients)
 }
 
 #[tokio::test(start_paused = true)]
@@ -1000,7 +899,7 @@ async fn all_namespaces_say_the_clients_error_while_they_fail_and_settle_once_th
     let fake = Fake::default();
     allowed_in_three(&fake);
     let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
-    let (hub, down, _tries) = connecting(&fake, error.clone());
+    let (hub, down, ..) = connecting(&fake, error.clone());
     let mut list = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
 
@@ -1021,25 +920,70 @@ async fn all_namespaces_say_the_clients_error_while_they_fail_and_settle_once_th
 }
 
 #[tokio::test(start_paused = true)]
-async fn all_namespaces_of_clients_that_are_unauthorized_wait_for_a_new_subscription() {
-    let fake = Fake::default();
-    allowed_in_three(&fake);
-    let error = IpcError::new(ErrorKind::Unauthorized, "the plugin failed");
-    let (hub, down, tries) = connecting(&fake, error);
-    let list = hub.rows(query(&[])).await.unwrap();
+async fn all_namespaces_of_rejected_credentials_say_unauthorized_and_wait_for_a_new_subscription() {
+    for rejected in [
+        "the clients",
+        "the plugin",
+        "the cluster-wide review",
+        "the namespaces",
+        "a namespace's review",
+    ] {
+        let fake = Fake::default();
+        allowed_in_three(&fake);
+        fake.state().reviews_take = Duration::from_secs(1);
+        let error = IpcError::new(ErrorKind::Unauthorized, "the plugin failed");
+        let (hub, down, tries, clients) = connecting(&fake, error);
+        down.store(rejected == "the clients", Ordering::Relaxed);
+        {
+            let mut state = fake.state();
+            match rejected {
+                "the plugin" => state.plugin_timed_out = true,
+                "the cluster-wide review" => {
+                    state.reviews_fail.insert(None, StatusCode::UNAUTHORIZED);
+                }
+                "the namespaces" => {
+                    state.unauthorized.insert("/api/v1/namespaces".to_owned());
+                }
+                "a namespace's review" => {
+                    let namespace = Some("ns-18".to_owned());
+                    state
+                        .reviews_fail
+                        .insert(namespace, StatusCode::UNAUTHORIZED);
+                }
+                _ => {}
+            }
+        }
+        let list = hub.rows(query(&[])).await.unwrap();
 
-    sleep(Duration::from_secs(60)).await;
-    assert_eq!(list.state(), ViewState::Unauthorized);
-    assert_eq!(
-        tries.load(Ordering::Relaxed),
-        1,
-        "a retry would run the plugin"
-    );
+        sleep(Duration::from_secs(60)).await;
+        let sent = (fake.state().requests.len(), tries.load(Ordering::Relaxed));
+        sleep(Duration::from_secs(60)).await;
+        assert_eq!(list.state(), ViewState::Unauthorized, "{rejected}");
+        assert_eq!(
+            (fake.state().requests.len(), tries.load(Ordering::Relaxed)),
+            sent,
+            "{rejected}: a retry would run the plugin"
+        );
+        assert_eq!(
+            hub.scopes(),
+            [],
+            "{rejected}: no part, not even for the namespaces allowed"
+        );
+        let usage = clients.usage();
+        let slots = usage.borrow().requests;
+        assert_eq!((slots.held, slots.queued), (0, 0), "{rejected}");
 
-    down.store(false, Ordering::Relaxed);
-    let mut again = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
+        down.store(false, Ordering::Relaxed);
+        let mut state = fake.state();
+        state.plugin_timed_out = false;
+        state.reviews_fail.clear();
+        state.unauthorized.clear();
+        drop(state);
+        let mut again = hub.rows(query(&[])).await.unwrap();
+        let mut mirror = Mirror::default();
+        until_shown(&mut again, &mut mirror, |m| m.names().len() == 3).await;
+        assert_eq!(mirror.parts, Some(three_of_forty()), "{rejected}");
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -1050,7 +994,7 @@ async fn a_reader_of_a_list_with_no_part_sees_what_it_waits_on_change() {
         .reviews_fail
         .insert(None, StatusCode::SERVICE_UNAVAILABLE);
     let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
-    let (hub, down, _tries) = connecting(&fake, error.clone());
+    let (hub, down, ..) = connecting(&fake, error.clone());
     down.store(false, Ordering::Relaxed);
     let mut list = hub.rows(query(&[])).await.unwrap();
     assert_eq!(list.state(), ViewState::Connecting);
