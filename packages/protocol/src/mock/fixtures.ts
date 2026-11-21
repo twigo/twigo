@@ -60,6 +60,7 @@ export const CONTEXTS: Context[] = [
     color: "red",
     source: "~/.kube/config",
     server: "https://4f2a9c1e7b.gr7.eu-west-1.eks.amazonaws.com",
+    namespace: null,
     access: {
       mode: "read-only",
       source: { kind: "environment", environment: "production" },
@@ -72,6 +73,7 @@ export const CONTEXTS: Context[] = [
     color: "orange",
     source: "~/.kube/config",
     server: "https://9d3e1b7c0a.yl4.eu-west-1.eks.amazonaws.com",
+    namespace: null,
     access: {
       mode: "guarded",
       source: { kind: "environment", environment: "staging" },
@@ -84,6 +86,7 @@ export const CONTEXTS: Context[] = [
     color: "green",
     source: "~/.kube/config",
     server: "https://34.141.62.18",
+    namespace: null,
     access: {
       mode: "read-write",
       source: { kind: "environment", environment: "development" },
@@ -96,6 +99,7 @@ export const CONTEXTS: Context[] = [
     color: null,
     source: "~/.kube/config",
     server: "https://qa.internal:6443",
+    namespace: null,
     access: UNMARKED,
   },
   {
@@ -103,6 +107,7 @@ export const CONTEXTS: Context[] = [
     color: null,
     source: "~/.kube/config",
     server: "https://analytics.internal:6443",
+    namespace: null,
     access: {
       mode: "read-write",
       source: {
@@ -118,6 +123,7 @@ export const CONTEXTS: Context[] = [
     color: null,
     source: "~/.kube/kind.yaml",
     server: "https://127.0.0.1:52144",
+    namespace: null,
     access: {
       mode: "read-write",
       source: { kind: "environment", environment: "local" },

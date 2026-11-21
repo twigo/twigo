@@ -30,6 +30,7 @@ fn view_states_are_tagged_by_state() {
 fn parts_are_tagged_by_kind() {
     let parts = Parts {
         count: 22,
+        omitted: 0,
         unready: vec![PartState {
             part: Part::Namespace {
                 name: "team-b".into(),
@@ -43,7 +44,7 @@ fn parts_are_tagged_by_kind() {
     };
     assert_eq!(
         wire(&parts),
-        json!({"count": 22, "unready": [{
+        json!({"count": 22, "omitted": 0, "unready": [{
             "part": {"kind": "namespace", "name": "team-b"},
             "state": {"state": "forbidden", "verb": "watch", "resource": "pods"},
             "shown": false,

@@ -131,6 +131,7 @@ impl Rig {
 fn ready() -> Parts {
     Parts {
         count: 1,
+        omitted: 0,
         unready: Vec::new(),
     }
 }
@@ -537,6 +538,7 @@ fn the_parts_come_in_the_first_batch_and_when_they_change() {
 
     let waiting = Parts {
         count: 3,
+        omitted: 0,
         unready: vec![unready("c", ViewState::Queued, true)],
     };
     let batch = rig
@@ -1374,6 +1376,7 @@ fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
         view.set_api(api);
         let connecting = Parts {
             count: 1,
+            omitted: 0,
             unready: vec![unready("a", ViewState::Connecting, false)],
         };
         let before = view.batch(ViewState::Connecting, connecting).unwrap();

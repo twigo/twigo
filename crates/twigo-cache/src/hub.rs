@@ -1061,7 +1061,11 @@ impl<T: Item> Subscription<T> {
         Shown {
             delta,
             status,
-            parts: Parts { count, unready },
+            parts: Parts {
+                count,
+                unready,
+                omitted: 0,
+            },
         }
     }
 

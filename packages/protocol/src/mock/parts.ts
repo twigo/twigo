@@ -105,6 +105,7 @@ export class MockParts {
       parts: {
         count: of,
         unready: placed.filter(({ state }) => state.state !== "ready"),
+        omitted: 0,
       },
       namespaces:
         shown.length === of

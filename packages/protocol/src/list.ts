@@ -38,7 +38,7 @@ export interface ListSnapshot {
 }
 
 /** What a list says of its parts until a batch names them, and once it has failed. */
-const ONE_PART: Parts = { count: 1, unready: [] };
+const ONE_PART: Parts = { count: 1, unready: [], omitted: 0 };
 
 /** Before the first batch. */
 export const INITIAL_SNAPSHOT: ListSnapshot = {

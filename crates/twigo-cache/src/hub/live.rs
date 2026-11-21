@@ -399,6 +399,7 @@ async fn a_service_account_without_a_cluster_wide_list_keeps_an_upstream_per_nam
     let mut partly = hub.rows(live.query(&six)).await.unwrap();
     let named = Parts {
         count: 6,
+        omitted: 0,
         unready: vec![PartState {
             part: Part::Namespace {
                 name: refused.clone(),

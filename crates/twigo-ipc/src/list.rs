@@ -25,7 +25,10 @@ pub struct ListQuery {
     /// that does not ignores `namespaces`, and one that does gets a
     /// Namespace column unless `namespaces` names one.
     pub namespaced: bool,
-    /// Empty for every namespace the space covers.
+    /// Empty for every namespace where the person may list the resource:
+    /// the cluster's when they may list it cluster-wide, else each one a
+    /// review allows among the namespaces they may list. A person who may
+    /// list neither gets the cluster's refusal.
     pub namespaces: Vec<String>,
     pub label_selector: Option<String>,
     /// Sent to the server, as `spec.nodeName=kind-control-plane` picks a
@@ -166,6 +169,10 @@ pub struct Parts {
     pub count: u32,
     /// The parts that are not ready, each with its own state.
     pub unready: Vec<PartState>,
+    /// For every namespace, the namespaces it leaves out because the person
+    /// may not list the resource there; 0 for a selection, or for a
+    /// cluster-wide part.
+    pub omitted: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

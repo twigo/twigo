@@ -135,7 +135,11 @@ const part = (name: string, state: ViewState, shown = false): PartState => ({
   shown,
 });
 
-const of22 = (...unready: PartState[]): Parts => ({ count: 22, unready });
+const of22 = (...unready: PartState[]): Parts => ({
+  count: 22,
+  unready,
+  omitted: 0,
+});
 
 test.each([
   [
@@ -269,9 +273,9 @@ test("a part of a kind the webview does not know is counted and not named", () =
 
 test("a list of one part, or with every part ready, says nothing of its parts", () => {
   expect(
-    partsLine({ count: 1, unready: [part("team-b", FORBIDDEN)] }),
+    partsLine({ count: 1, unready: [part("team-b", FORBIDDEN)], omitted: 0 }),
   ).toBeUndefined();
-  expect(partsLine({ count: 22, unready: [] })).toBeUndefined();
+  expect(partsLine({ count: 22, unready: [], omitted: 0 })).toBeUndefined();
 });
 
 const OWN = "k8s-list://prod-eu/v1/pods?ns=auth,default,payments";
@@ -334,6 +338,7 @@ test("a list of one part says what its part waits for, not that its updates stop
                 status: { state: "stale" },
                 parts: {
                   count: 1,
+                  omitted: 0,
                   unready: [
                     {
                       part: { kind: "cluster" },

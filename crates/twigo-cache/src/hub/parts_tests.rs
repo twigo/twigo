@@ -117,6 +117,7 @@ async fn one_forbidden_namespace_of_five_shows_the_rows_of_the_four() {
         mirror.parts,
         Some(Parts {
             count: 5,
+            omitted: 0,
             unready: vec![namespace_part("c", forbidden(), false)],
         })
     );

@@ -5,6 +5,7 @@ import { leavesOut } from "./listStatus";
 test("a list leaves out the namespaces whose waiting part shows no rows", () => {
   const waiting = (shown: boolean): Parts => ({
     count: 3,
+    omitted: 0,
     unready: [
       {
         part: { kind: "namespace", name: "auth" },

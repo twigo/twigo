@@ -28,6 +28,9 @@ pub struct Context {
     pub server: Option<String>,
     /// Its mode, where the mode comes from and what it is marked as.
     pub access: ContextAccess,
+    /// The namespace the kubeconfig context names, which a new space of it
+    /// starts on; none when it names none.
+    pub namespace: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

@@ -144,6 +144,7 @@ test("a batch without parts keeps the previous ones, and a failed list has none"
   await vi.runAllTimersAsync();
   const parts = {
     count: 3,
+    omitted: 0,
     unready: [
       {
         part: { kind: "namespace" as const, name: "team-b" },
@@ -155,13 +156,17 @@ test("a batch without parts keeps the previous ones, and a failed list has none"
   fake.send(batch(1, { window: { start: 0, ids: [] }, parts }));
   fake.send(batch(2, { total: 3 }));
   expect(view.getSnapshot().parts).toEqual(parts);
-  fake.send(batch(3, { parts: { count: 3, unready: [] } }));
+  fake.send(batch(3, { parts: { count: 3, unready: [], omitted: 0 } }));
   expect(view.getSnapshot().parts.unready).toEqual([]);
 
   fake.send(batch(4, { parts }));
   fake.send(batch(5, { metrics: "absent" }));
   expect(view.getSnapshot().status.state).toBe("error");
-  expect(view.getSnapshot().parts).toEqual({ count: 1, unready: [] });
+  expect(view.getSnapshot().parts).toEqual({
+    count: 1,
+    unready: [],
+    omitted: 0,
+  });
 });
 
 test("every seq is acknowledged once, after the next frame", async () => {

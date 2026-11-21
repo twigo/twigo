@@ -63,6 +63,7 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
             source: file.display().to_string(),
             server: Some("https://kind:6443".to_owned()),
             access: Policy::open().access("kind-a"),
+            namespace: None,
         }]
     );
 }

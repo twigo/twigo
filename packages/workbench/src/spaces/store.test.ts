@@ -166,6 +166,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       color: null,
       source: "~/.kube/config",
       server: null,
+      namespace: null,
       access: UNMARKED,
     },
     {
@@ -173,6 +174,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       color: null,
       source: "~/.kube/config",
       server: null,
+      namespace: null,
       access: UNMARKED,
     },
     {
@@ -180,6 +182,7 @@ test("the rail hides a space whose context no source lists, and shows it again w
       color: null,
       source: "~/.kube/config",
       server: null,
+      namespace: null,
       access: UNMARKED,
     },
   ];
@@ -207,6 +210,7 @@ test("with no space for any listed context, the first context's space opens", as
       color: null,
       source: "~/.kube/config",
       server: null,
+      namespace: null,
       access: UNMARKED,
     },
   ]);
