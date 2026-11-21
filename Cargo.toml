@@ -59,7 +59,7 @@ hyper-timeout = "0.5.2"
 hyper-util = { version = "0.1.21", features = ["client-legacy", "client-proxy", "http1", "http2", "tokio"] }
 indexset = "0.18.0"
 ipnet = "2.12.2"
-jiff = "0.2.38"
+jiff = "1.0.1"
 # The major kube-core requires: its `Patch::Json` takes this crate's `Patch`.
 json-patch = "4.2.0"
 jsonschema = { version = "0.61.1", default-features = false }
