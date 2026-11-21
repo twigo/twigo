@@ -33,6 +33,11 @@
   box-shadow: inset 0 1px 0
     color-mix(in oklab, var(--twigo-context) 40%, transparent);
 }
+/* Its text steps up a role, and quiet with it: quiet keeps 4.5:1 on the shell,
+   not on the tint. */
+.twigo-statusbar[data-strong] .text-quiet {
+  color: var(--support);
+}
 .twigo-mode-chip {
   color: var(--twigo-context-ink);
   background: color-mix(in oklab, var(--twigo-context) 14%, transparent);
