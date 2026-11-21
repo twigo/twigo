@@ -1213,7 +1213,7 @@ Extensions add commands, not prefixes.
   Before the first tick the footer says `Only this` on a row with a box, the provider's own verb (`Select`) on an action row, and `Close` where no row is under the cursor, since Enter then closes.
   The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
 - **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the cluster lists them, the order fixed for the opening, so a tick moves no row.
-  Once text is typed the namespaces that match come ranked by their score, ticked or not and under no heading, and `All namespaces` goes after them, so the cursor, which goes to the first row, lands on the best namespace.
+  Once text is typed the namespaces that match come ranked by their score, ticked or not and under no heading, and `All namespaces` goes after them when the text matches it too, so the cursor, which goes to the first row, lands on the best namespace.
   Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
   A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
   The picker asks `namespaces_list` once for each opening, and a scope is written sorted and with no name twice, here, by `:` and in a list's URI, so one set of namespaces is one list URI.
