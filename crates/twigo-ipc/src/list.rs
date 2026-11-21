@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::IpcError;
+use crate::{ErrorKind, IpcError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Gvr {
@@ -325,4 +325,23 @@ pub enum ViewState {
     Error {
         error: IpcError,
     },
+}
+
+impl ViewState {
+    /// What the cluster's refusal says as an error: none for a state that is
+    /// not one.
+    pub fn refusal(&self) -> Option<IpcError> {
+        match self {
+            ViewState::Forbidden { verb, resource } => Some(IpcError::new(
+                ErrorKind::Forbidden,
+                format!("you may not {verb} {resource}"),
+            )),
+            ViewState::Unauthorized => Some(IpcError::new(
+                ErrorKind::Unauthorized,
+                "no credentials for this context that the cluster accepts",
+            )),
+            ViewState::Error { error } => Some(error.clone()),
+            _ => None,
+        }
+    }
 }

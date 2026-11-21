@@ -217,3 +217,24 @@ fn only_a_blocked_request_s_error_carries_its_rule() {
         serde_json::from_value(json!({"kind": "timeout", "message": "late"})).unwrap();
     assert_eq!(plain.blocked, None);
 }
+
+#[test]
+fn a_refused_state_says_its_words_as_an_error_and_the_others_say_none() {
+    let forbidden = ViewState::Forbidden {
+        verb: "watch".into(),
+        resource: "pods".into(),
+    };
+    let refused = forbidden.refusal().unwrap();
+    assert_eq!(refused.kind, ErrorKind::Forbidden);
+    assert_eq!(refused.message, "you may not watch pods");
+    assert_eq!(
+        ViewState::Unauthorized.refusal().unwrap().kind,
+        ErrorKind::Unauthorized
+    );
+    let failed = IpcError::new(ErrorKind::Internal, "broken");
+    let error = ViewState::Error {
+        error: failed.clone(),
+    };
+    assert_eq!(error.refusal(), Some(failed));
+    assert_eq!(ViewState::Stale.refusal(), None);
+}

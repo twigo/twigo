@@ -37,7 +37,7 @@ use twigo_ipc::{
     Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -679,19 +679,9 @@ impl Core {
                 names.sort();
                 Ok(names)
             }
-            Err(ViewState::Forbidden { verb, resource }) => Err(IpcError::new(
-                ErrorKind::Forbidden,
-                format!("you may not {verb} {resource}"),
-            )),
-            Err(ViewState::Unauthorized) => Err(IpcError::new(
-                ErrorKind::Unauthorized,
-                "no credentials for this context that the cluster accepts".to_owned(),
-            )),
-            Err(ViewState::Error { error }) => Err(error),
-            Err(_) => Err(IpcError::new(
-                ErrorKind::Unavailable,
-                "the cluster is unavailable".to_owned(),
-            )),
+            Err(state) => Err(state.refusal().unwrap_or_else(|| {
+                IpcError::new(ErrorKind::Unavailable, "the cluster is unavailable")
+            })),
         }
     }
 
