@@ -372,7 +372,8 @@ function Open({ session }: { session: Session }) {
                   key={item.id}
                   id={rowIds.get(item)}
                   item={item}
-                  selected={item === active}
+                  cursor={item === active}
+                  selected={many ? on(item) : item === active}
                   on={on(item)}
                   onPoint={() => {
                     setCursor({ value, id: item.id });
@@ -431,6 +432,7 @@ function Asked({
 function Row({
   id,
   item,
+  cursor,
   selected,
   on,
   onPoint,
@@ -439,7 +441,10 @@ function Row({
 }: {
   id: string | undefined;
   item: QuickPickItem;
-  selected: boolean;
+  /** Whether the cursor is on it. */
+  cursor: boolean;
+  /** `aria-selected`: where the person picks several rows, whether it is ticked, and none for an action; else where the cursor is. */
+  selected: boolean | undefined;
   /** Whether it is ticked; none for a row with no box. */
   on: boolean | undefined;
   onPoint: () => void;
@@ -451,7 +456,8 @@ function Row({
   return (
     <QuickInputOption
       id={id}
-      selected={selected}
+      cursor={cursor}
+      aria-selected={selected}
       onPointerMove={onPoint}
       onClick={(event) => {
         if (
@@ -464,7 +470,6 @@ function Row({
         }
       }}
       className={item.tile ? "h-9" : undefined}
-      aria-checked={on}
     >
       {on !== undefined && (
         <span

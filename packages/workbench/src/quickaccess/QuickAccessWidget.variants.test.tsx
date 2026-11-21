@@ -54,7 +54,7 @@ test("a checklist ticks on a click and applies the ticked set on Enter from the 
   });
   expect(footer()).toContain("Apply · 1 namespaces");
   fireEvent.click(rowOf("auth"));
-  expect(rowOf("auth").getAttribute("aria-checked")).toBe("true");
+  expect(rowOf("auth").getAttribute("aria-selected")).toBe("true");
   expect(accept).not.toHaveBeenCalled();
 
   press("Enter");

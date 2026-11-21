@@ -44,7 +44,8 @@ const press = (code: string, init: KeyboardEventInit = {}) => {
   fireEvent.keyDown(input(), { key: code.replace(/^Key/, ""), code, ...init });
 };
 const selected = () =>
-  document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
+  document.getElementById(input().getAttribute("aria-activedescendant") ?? "")
+    ?.textContent ?? undefined;
 const footer = () => screen.getByLabelText("Keys").textContent;
 
 test("a pick with a source is asked for the rows of each value typed, and shows them as they come", async () => {
@@ -417,7 +418,7 @@ test("the footer shows the keys from the registry and, on no prefix, the prefixe
 
 const space = () => fireEvent.keyDown(input(), { key: " ", code: "Space" });
 const rowOf = (name: string) => screen.getByRole("option", { name });
-const checkedOf = (name: string) => rowOf(name).getAttribute("aria-checked");
+const checkedOf = (name: string) => rowOf(name).getAttribute("aria-selected");
 const hint = (words: string) => footer().includes(words);
 
 const NAMESPACES: readonly QuickPickItem[] = [
@@ -451,7 +452,7 @@ test("rows with a box open ticked as they say, with no row under the cursor, so 
   await opened(workbench, "!");
   expect(checkedOf("payments")).toBe("true");
   expect(checkedOf("auth")).toBe("false");
-  expect(rowOf("All namespaces").getAttribute("aria-checked")).toBeNull();
+  expect(rowOf("All namespaces").getAttribute("aria-selected")).toBeNull();
   expect(screen.getByRole("listbox").getAttribute("aria-multiselectable")).toBe(
     "true",
   );
@@ -524,6 +525,48 @@ test("the input is a combobox on the list and names the row under the cursor, an
   const group = screen.getByRole("group", { name: "Selected" });
   expect(group.contains(rowOf("payments"))).toBe(true);
   expect(group.contains(rowOf("auth"))).toBe(false);
+});
+
+test("a listbox that takes several rows says which are selected and never where the cursor is, as the APG's multi-select listbox does", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  press("ArrowDown");
+  press("ArrowDown");
+  press("ArrowDown");
+  expect(selected()).toBe("auth");
+  expect(rowOf("auth").hasAttribute("data-cursor")).toBe(true);
+  expect(rowOf("payments").hasAttribute("data-cursor")).toBe(false);
+  expect(checkedOf("auth")).toBe("false");
+  expect(checkedOf("payments")).toBe("true");
+  expect(checkedOf("batch")).toBe("false");
+  expect(rowOf("All namespaces").hasAttribute("aria-selected")).toBe(false);
+  expect(document.querySelector("[aria-checked]")).toBeNull();
+
+  space();
+  expect(checkedOf("auth")).toBe("true");
+});
+
+test("a listbox of one row to take says aria-selected where the cursor is, where selection follows focus", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    provider("!", [
+      { id: "a", label: "alpha" },
+      { id: "b", label: "beta" },
+    ]).registered,
+  );
+  await opened(workbench, "!");
+  const states = () => [
+    rowOf("alpha").getAttribute("aria-selected"),
+    rowOf("beta").getAttribute("aria-selected"),
+  ];
+  expect(states()).toEqual(["true", "false"]);
+  expect(screen.getByRole("listbox").hasAttribute("aria-multiselectable")).toBe(
+    false,
+  );
+  press("ArrowDown");
+  expect(states()).toEqual(["false", "true"]);
+  expect(selected()).toBe("beta");
 });
 
 test("↓ from no row goes to the first row, and ↑ to the last", async () => {
