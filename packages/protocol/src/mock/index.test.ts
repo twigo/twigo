@@ -548,6 +548,80 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
+test("a list whose cluster does not answer carries the failure that keeps it waiting, and an object opened under it has none of its parts", async () => {
+  for (const [scenario, state, code] of [
+    ["connectRefused", "connecting", "connect.refused"],
+    ["connectCertificate", "connecting", "connect.certificate"],
+    ["connectLost", "stale", "connect.lost"],
+  ] as const) {
+    const status = (await open(scenario)).batches[0]?.status;
+    expect(status, scenario).toMatchObject({ state, cause: { code } });
+  }
+  const refused = (await open("serverRefuses")).batches[0]?.status;
+  expect(refused).toMatchObject({
+    state: "error",
+    error: {
+      code: "server.invalid",
+      kind: "invalidInput",
+      server: { reason: "Invalid" },
+    },
+  });
+  expect(
+    refused?.state === "error" && refused.error.server?.causes.length,
+  ).toBeGreaterThan(0);
+
+  const backend = createMockBackend("connectRefused");
+  const objects: ObjectBatch[] = [];
+  const pending = backend.subscribe(
+    "object_open",
+    {
+      object: {
+        space: "prod-eu",
+        gvr: { group: "", version: "v1", resource: "pods" },
+        namespaced: true,
+        namespace: "default",
+        name: "web",
+      },
+      parts: { ...OVERVIEW, overview: true, manifest: true },
+    },
+    (batch) => objects.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  await pending;
+  expect(objects[0]).toMatchObject({
+    status: { state: "connecting", cause: { code: "connect.refused" } },
+    exists: false,
+    overview: null,
+    manifest: null,
+  });
+});
+
+test("the catalog names the kubeconfig files it could not read, and the context whose entry names no user", async () => {
+  const catalogs = async (scenario: MockScenario) => {
+    const backend = createMockBackend(scenario);
+    const pending = backend.subscribe("contexts_watch", null, () => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    return pending;
+  };
+  const broken = await catalogs("kubeconfigFailures");
+  expect(broken.failures.map(({ error }) => error.code)).toEqual([
+    "kubeconfig.unparsable",
+    "kubeconfig.unreadable",
+  ]);
+  expect(broken.failures.every(({ source }) => source.startsWith("~/"))).toBe(
+    true,
+  );
+  expect(
+    broken.contexts.flatMap(({ problem }) => (problem ? [problem.code] : [])),
+  ).toEqual(["context.missing-user"]);
+  expect(broken.contexts.length).toBeGreaterThan(0);
+
+  const none = await catalogs("kubeconfigAllFailed");
+  expect(none.contexts).toEqual([]);
+  expect(none.failures).toHaveLength(2);
+  expect((await catalogs("live")).failures).toEqual([]);
+});
+
 test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {
   const nodes = {
     gvr: { group: "", version: "v1", resource: "nodes" },

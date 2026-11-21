@@ -35,6 +35,16 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import {
+  CAUSE_SCENARIOS,
+  CAUSED,
+  catalogOf,
+  isCauseScenario,
+  isKubeconfigScenario,
+  KUBECONFIG_SCENARIOS,
+  type CauseScenario,
+  type KubeconfigScenario,
+} from "./diagnostics";
+import {
   FORWARD_SCENARIOS,
   isForwardScenario,
   MockForwards,
@@ -84,7 +94,6 @@ import {
 } from "./terminal";
 import { recordedSchema } from "./schemas";
 import {
-  CONTEXTS,
   FORBIDDEN,
   NAMESPACES,
   POD_COUNT,
@@ -127,7 +136,7 @@ export { SCRAPE_MS } from "./metrics";
  * `live` connects, syncs and then changes pods every second, and refuses
  * the lists `FORBIDDEN` names; any other value pins that state.
  */
-type ListScenario = "live" | ViewState["state"];
+type ListScenario = "live" | ViewState["state"] | CauseScenario;
 
 /**
  * A list scenario, `shellTimeout`: live lists while the login shell's
@@ -158,7 +167,9 @@ type ListScenario = "live" | ViewState["state"];
  * or while port-forwards are busy, lose their pod, fail, queue, come back
  * from an earlier run or are forbidden (`forwardBusy` and the like), or
  * while the context's Metrics API is not served, does not answer or refuses
- * the person (`metricsNone` and the like).
+ * the person (`metricsNone` and the like), or live lists while the catalog's
+ * kubeconfig files fail (`kubeconfigFailures` and the like). A pinned cause
+ * (`connectRefused` and the like) is a list scenario.
  */
 export type MockScenario =
   | ListScenario
@@ -175,7 +186,8 @@ export type MockScenario =
   | ApprovalScenario
   | TerminalScenario
   | ForwardScenario
-  | MetricsScenario;
+  | MetricsScenario
+  | KubeconfigScenario;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -193,6 +205,8 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...TERMINAL_SCENARIOS,
   ...FORWARD_SCENARIOS,
   ...METRICS_SCENARIOS,
+  ...KUBECONFIG_SCENARIOS,
+  ...CAUSE_SCENARIOS,
   "queued",
   "connecting",
   "syncing",
@@ -267,14 +281,19 @@ export function createMockBackend(
     isApprovalScenario(scenario) ||
     isTerminalScenario(scenario) ||
     isForwardScenario(scenario) ||
-    isMetricsScenario(scenario)
+    isMetricsScenario(scenario) ||
+    isKubeconfigScenario(scenario)
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
     isMetricsScenario(scenario) ? scenario : undefined,
   );
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
-  const access = new MockAccess(scenario === "policyFile");
+  const access = new MockAccess(
+    scenario === "policyFile",
+    undefined,
+    catalogOf(scenario),
+  );
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
     access,
@@ -522,7 +541,7 @@ export function createMockBackend(
           scenario !== "viewer" || ["get", "list", "watch"].includes(verb),
       ),
     space_open: (name) => {
-      if (!CONTEXTS.some((context) => context.name === name)) {
+      if (!access.has(name)) {
         throw new IpcError(
           "context.not-listed",
           `no source lists the context ${name}`,
@@ -863,6 +882,9 @@ export function createMockBackend(
                 ...(scenario === "statusChange" && {
                   change: "status" as const,
                 }),
+                ...(isCauseScenario(scenario) && {
+                  status: CAUSED[scenario],
+                }),
               },
         ),
       );
@@ -1014,6 +1036,7 @@ const PINNED: Readonly<
   ready: { state: "ready" },
   relisting: { state: "relisting" },
   stale: { state: "stale" },
+  ...CAUSED,
   unauthorized: { state: "unauthorized" },
   error: {
     state: "error",

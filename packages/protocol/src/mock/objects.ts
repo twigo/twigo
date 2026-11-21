@@ -12,7 +12,9 @@ import type {
   RelatedObject,
   Usage,
   Value,
+  ViewState,
 } from "../generated";
+import { SHOWS_ROWS } from "../viewState";
 import {
   hash,
   imageOf,
@@ -104,6 +106,8 @@ export interface EditBinding {
   readonly key: string;
   /** `server`: a colleague edits it; `status`: a controller writes its status. */
   readonly change?: "server" | "status";
+  /** A state that a scenario pins the object in, whatever the cluster says. */
+  readonly status?: ViewState;
 }
 
 /**
@@ -140,6 +144,7 @@ export class MockObject {
   /** The last usage that did not wait, which stays until its scope answers again. */
   #kept: Usage | undefined;
   #parts: ObjectParts;
+  readonly #status: ViewState;
   #seq = 0;
 
   constructor(
@@ -215,6 +220,7 @@ export class MockObject {
     };
     this.#onMessage = onMessage;
     this.#parts = parts;
+    this.#status = binding?.status ?? { state: "ready" };
     this.#read();
     setTimeout(() => {
       this.#send(parts);
@@ -381,15 +387,16 @@ export class MockObject {
       return;
     }
     this.#seq += 1;
+    const shown = SHOWS_ROWS.has(this.#status.state);
     this.#onMessage({
       seq: this.#seq,
-      status: { state: "ready" },
-      exists: true,
-      overview: parts.overview ? this.#overview : null,
-      manifest: parts.manifest ? this.#manifest : null,
-      events: parts.events ? events(this.#overview) : null,
-      related: parts.related ? this.#related : null,
-      usage,
+      status: this.#status,
+      exists: shown,
+      overview: shown && parts.overview ? this.#overview : null,
+      manifest: shown && parts.manifest ? this.#manifest : null,
+      events: shown && parts.events ? events(this.#overview) : null,
+      related: shown && parts.related ? this.#related : null,
+      usage: shown ? usage : null,
     });
   }
 }
