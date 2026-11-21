@@ -4,8 +4,6 @@ use tracing::{Dispatch, debug, info, warn};
 
 use super::*;
 
-/// A log in `directory` as `Log::start` makes it, whose subscriber is the
-/// one this test runs under instead of the process's.
 fn open(directory: &Path, spec: &str) -> (Dispatch, Log) {
     let file = Rotating::open_new(&directory.join(FILE), LIMITS).unwrap();
     let (dispatch, filter) = subscriber(BoxMakeWriter::new(file.clone()), EnvFilter::new(spec));

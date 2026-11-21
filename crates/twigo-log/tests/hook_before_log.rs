@@ -1,5 +1,3 @@
-//! A panic before the log opens goes to stderr, in the log's own shape.
-
 use std::process::Command;
 
 use serde_json::Value;

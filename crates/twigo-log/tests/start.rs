@@ -1,5 +1,3 @@
-//! `Log::start` sets the process's one subscriber and `log` logger.
-
 use serde_json::Value;
 use twigo_log::{Facts, Level, Log};
 

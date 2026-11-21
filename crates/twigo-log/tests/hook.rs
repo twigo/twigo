@@ -1,5 +1,3 @@
-//! The hook is the process's, so each test file has one.
-
 use std::path::Path;
 
 use serde_json::Value;
