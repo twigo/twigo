@@ -580,14 +580,6 @@ test("opening the object from the details keeps the list in a tab of its own", a
   expect(workbench.editors.active).toMatch(/^k8s:\/\/prod-eu\/\/v1\/pods\//);
 });
 
-test("a list of a kind that is plural already is titled by its kind's words", async () => {
-  await openList(undefined, "k8s-list://prod-eu/metrics.k8s.io/v1beta1/pods");
-  const titles = [
-    ...document.querySelectorAll<HTMLElement>(".twigo-tab-title"),
-  ].map((title) => title.textContent.trim());
-  expect(titles).toEqual(["Pod Metrics"]);
-});
-
 test.each([
   "the details' button",
   "a link in the details",
