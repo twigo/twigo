@@ -302,7 +302,7 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     - A no resolves the set: the names of the namespace index (3.3), a review of each, at most 8 at a time, and an upstream per namespace that a review allows.
       A review that another asker has under way is not sent again, so lists opened together ask each question once.
       The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review, and the first one after resolves again, so a namespace created or a binding granted since shows then.
-    - `Parts.omitted` counts the namespaces of the index that the set leaves out (3.7).
+    - `Parts.omitted` counts the namespaces of the index that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
     - With no namespace allowed, or the index refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).
     - The context's clients may take long to come, as they do while a credential plugin signs the person in, so the hub settles what "all" reads apart from the list's subscription, which returns at once: it has no part and says `connecting` until then, never a refusal.
@@ -714,7 +714,7 @@ A list reads its upstreams as parts, one per namespace or one for the cluster (`
 - `status` is the state of the rows shown: the least ready of the parts shown, one that waits for a watch after its whole list counting as `stale`.
   While no part shows, it is the least ready of the parts still on their way, one whose first list broke off counting as `connecting`, and once none is, the worst refusal.
   So `ready`, `relisting` and `stale` say that some part's rows are shown, and a refusal that no part is on its way.
-- `parts` has `count`, the parts the list reads, `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`), and `omitted`, for all namespaces of a person who may not list the kind cluster-wide, the namespaces of the cluster that the parts leave out because they may not list it there (3.2), and 0 otherwise.
+- `parts` has `count`, the parts the list reads, `unready`, each part that is not `ready` with its own state and whether its rows are shown (`shown`), and `omitted`, for all namespaces settled on parts per namespace, the namespaces of the cluster that those parts leave out because the person may not list the kind there (3.2), and 0 for any other list, the cluster part included.
   It goes in the first batch and whenever it changes, and a change of `parts` alone is a batch.
 - While the hub settles what all namespaces read (3.2) the list has no part: it says `connecting`, with `count` 1 and nothing unready, and the parts come when it has.
 - A cluster-wide upstream that serves a narrower selection without being held is the part `Cluster`.

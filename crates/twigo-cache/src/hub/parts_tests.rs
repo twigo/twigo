@@ -384,6 +384,7 @@ async fn all_namespaces_of_a_person_who_may_list_pods_in_three_of_forty_read_thr
             unready: Vec::new(),
         })
     );
+    assert!(list.resolved());
     assert_eq!(asked_of(&fake, &names), mine, "no list or watch of the 37");
     assert_eq!(fake.count("/api/v1/pods"), 0, "none cluster-wide");
     assert_eq!(fake.count("selfsubjectaccessreviews"), 41, "1 and 40");
@@ -444,16 +445,28 @@ async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_c
         "no namespace asked"
     );
 
+    assert!(!refused.resolved());
+
     fake.state().forbidden.remove("/api/v1/namespaces");
     sleep(RESOLVED_FOR).await;
     let mut none = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
-    until_shown(&mut none, &mut mirror, |m| {
-        m.parts.as_ref().is_some_and(|parts| parts.omitted == 40)
-    })
-    .await;
-    assert_eq!(mirror.status, Some(forbidden()));
+    until_shown(&mut none, &mut mirror, |m| m.status == Some(forbidden())).await;
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 0,
+            unready: vec![PartState {
+                part: Part::Cluster,
+                state: forbidden(),
+                shown: false,
+            }],
+        }),
+        "the index's 40 are no count of what a cluster part leaves out"
+    );
     assert_eq!(mirror.names(), Vec::<&str>::new());
+    assert!(!none.resolved(), "it reads the cluster, not parts");
 }
 
 #[tokio::test(start_paused = true)]
@@ -502,7 +515,7 @@ async fn all_namespaces_asks_for_at_most_eight_reviews_at_a_time() {
     let mut list = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
     until_shown(&mut list, &mut mirror, |m| {
-        m.parts.as_ref().is_some_and(|parts| parts.omitted == 40)
+        m.status == Some(ViewState::Ready)
     })
     .await;
     assert_eq!(fake.count("selfsubjectaccessreviews"), 41);

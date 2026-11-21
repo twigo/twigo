@@ -1042,9 +1042,9 @@ pub struct Subscription<T> {
 struct SubscriptionInner<T> {
     key: Key,
     namespaces: Vec<String>,
-    /// For all namespaces of a person who may not list the resource
-    /// cluster-wide, how many of the cluster's namespaces its parts leave
-    /// out, once that is settled; none otherwise.
+    /// For all namespaces settled on parts per namespace, how many of the
+    /// cluster's namespaces they leave out; none otherwise, the cluster part
+    /// included.
     omitted: Mutex<Option<u32>>,
     parts: Mutex<Vec<Part<T>>>,
     /// Counts the times the parts changed.
@@ -1075,8 +1075,8 @@ impl<T: Item> Subscription<T> {
         }
     }
 
-    /// It reads the namespaces that all of them came to for a person who may
-    /// not list the resource cluster-wide, never the cluster.
+    /// It reads parts per namespace, the namespaces that all of them came to
+    /// for a person who may not list the resource cluster-wide.
     pub fn resolved(&self) -> bool {
         self.inner.omitted().is_some()
     }
@@ -1371,18 +1371,17 @@ where
 /// it in, or the cluster's own refusal when there is none; nothing if the
 /// subscription ends first.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
-    let resolved = hub.resolve(&query).await;
-    let omitted = resolved.as_ref().map(|resolved| resolved.omitted);
-    let namespaces = resolved
-        .map(|resolved| resolved.allowed)
-        .unwrap_or_default();
+    let resolved = hub.resolve(&query).await.unwrap_or_default();
     let Some(subscription) = subscription.upgrade() else {
         return;
     };
-    let parts = if namespaces.is_empty() {
-        vec![hub.hold(&key, None)]
+    let (parts, omitted) = if resolved.allowed.is_empty() {
+        (vec![hub.hold(&key, None)], None)
     } else {
-        hub.per_namespace(&key, &namespaces)
+        (
+            hub.per_namespace(&key, &resolved.allowed),
+            Some(resolved.omitted),
+        )
     };
     *subscription.omitted.lock().expect("subscription lock") = omitted;
     *subscription.parts() = parts;
