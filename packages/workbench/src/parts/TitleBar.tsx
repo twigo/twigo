@@ -11,6 +11,7 @@ import {
 } from "@twigo/ui";
 import type { Space } from "@twigo/protocol";
 import { useChanges, useWorkbench } from "../react";
+import { scopeWords } from "../spaces/scope";
 import { ModeChip, ModeChipCopy } from "./ModeChip";
 import {
   BAR_GAP,
@@ -49,7 +50,7 @@ export function TitleBar() {
   const space = spaces.active;
   const color = space && colors.ofSpace(space);
   const name = space?.contexts.join(" + ") ?? "";
-  const scope = space ? scopeOf(spaces.state(space.id).namespaces) : "";
+  const scope = space ? scopeWords(spaces.state(space.id).namespaces).all : "";
   const width = useWidth(bar);
   const crumbs = useWidth(words);
   const { searchFolded, chipFolded, centred } = titleBarStage(width, {
@@ -100,10 +101,6 @@ export function TitleBar() {
       </div>
     </header>
   );
-}
-
-function scopeOf(namespaces: readonly string[]): string {
-  return namespaces.length === 0 ? "All namespaces" : namespaces.join(", ");
 }
 
 function Breadcrumb({
