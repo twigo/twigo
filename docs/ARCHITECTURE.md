@@ -1823,6 +1823,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
 - **Written when it happens.**
   Each line is one append under a lock, so a line is on disk when the call returns, and a panic's record is there before the hook returns.
   A failure to open, move or write the file is said once on stderr, and again only after a write succeeded in between; it never stops the app.
+  The audit log (6.4) is written by the same code, but its failures are logged here at error instead, since a launched app's stderr reaches nobody.
   A process that launchd starts has `/dev/null` for stderr (`lsof` on Finder's pid, macOS 27.2.1, 2026-11-21; not run for Twigo from the Dock), so the file is the record of a run there.
   Twigo logs a change of state, not each repeat: a listener that keeps failing logs its first failure and, when it works again or ends, how many followed, and what happens per event goes to `trace`.
 - **How much.**
@@ -2479,8 +2480,9 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   The log names targets, never a value, so the actors of M3 only add their name.
   A file that cannot be opened is logged (4.10) and keeps nothing: the log records, it guards nothing.
   Past 8 MiB the log moves to `audit.1.jsonl`, each older one up by one as far as `audit.5.jsonl`, whose last content goes, and a new `audit.jsonl` opens, each 0600: at most 48 MiB.
-  A move that fails is said on stderr and the log goes on where it is, to try again after another 8 MiB.
-  A new log that cannot be opened after the move is said on stderr, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
+  A move that fails is logged at error (4.10) and the log goes on where it is, to try again after another 8 MiB.
+  A new log that cannot be opened after the move is logged at error, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.
+  A write that fails is logged at error too, once until a write succeeds.
   The older logs move only with the log, so a log gone from its place, as when a person deleted it, is opened anew and moves none of them.
 
 - **How the UI shows a mode and asks before damage**, designed with the owner on 2026-11-03 ([research](research/workbench-design.md)), for M2:
