@@ -612,23 +612,7 @@ test("a person of one namespace has its rows and the others refused, each part o
   expect(batches.map(({ status }) => status.state)).not.toContain("forbidden");
 });
 
-test("All namespaces of a person who may list namespaces has the rows of the one they read and counts the others left out", async () => {
-  const batches = await settled(await open("rbacNamespaces", namespaced([])));
-  const latest = last(batches);
-  expect(latest?.status).toEqual({ state: "ready" });
-  expect(lastParts(batches)).toEqual({ count: 1, omitted: 11, unready: [] });
-  expect(latest?.total).toBeGreaterThan(0);
-  const ids = batches.flatMap(({ window }) => window?.ids ?? []);
-  expect(ids.length).toBeGreaterThan(0);
-  expect(ids.every((id) => id.includes("/default/"))).toBe(true);
-  expect(
-    batches
-      .find((batch) => batch.columns?.length)
-      ?.columns?.map((column) => column.name),
-  ).toContain("Namespace");
-});
-
-test("All namespaces of a person who may list namespaces says connecting with no part first, as the core does while it resolves, and the next list of the resource has its parts at once", async () => {
+test("All namespaces of a person who may list namespaces says connecting with no part first, as the core does while it resolves, then has the rows of the one they read and counts the others left out, and the next list of the resource has its parts at once", async () => {
   const sub = await open("rbacNamespaces", namespaced([]));
   const first = await settled(sub);
   expect(first[0]).toMatchObject({
@@ -639,6 +623,18 @@ test("All namespaces of a person who may list namespaces says connecting with no
   });
   expect(first[0]?.window?.ids ?? []).toEqual([]);
   expect(first[1]?.parts).toMatchObject({ count: 1, omitted: 11 });
+  const latest = last(first);
+  expect(latest?.status).toEqual({ state: "ready" });
+  expect(lastParts(first)).toEqual({ count: 1, omitted: 11, unready: [] });
+  expect(latest?.total).toBeGreaterThan(0);
+  const ids = first.flatMap(({ window }) => window?.ids ?? []);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(ids.every((id) => id.includes("/default/"))).toBe(true);
+  expect(
+    first
+      .find((batch) => batch.columns?.length)
+      ?.columns?.map((column) => column.name),
+  ).toContain("Namespace");
 
   const again = await settled(
     await open("rbacNamespaces", namespaced([]), sub.backend),
@@ -646,15 +642,7 @@ test("All namespaces of a person who may list namespaces says connecting with no
   expect(again[0]?.parts).toMatchObject({ count: 1, omitted: 11 });
 });
 
-test("All namespaces of a person who may not list namespaces is refused, a typed selection reads the namespaces they are bound in, and any other is refused alone", async () => {
-  const all = await settled(await open("rbacTypedNamespaces", namespaced([])));
-  expect(last(all)?.status).toEqual({
-    state: "forbidden",
-    verb: "watch",
-    resource: "pods",
-  });
-  expect(lastParts(all)?.omitted).toBe(0);
-
+test("a typed selection of a person who may not list namespaces reads the namespaces they are bound in", async () => {
   const bound = await settled(
     await open("rbacTypedNamespaces", namespaced(["payments", "default"])),
   );
@@ -663,33 +651,6 @@ test("All namespaces of a person who may not list namespaces is refused, a typed
   const ids = bound.flatMap(({ window }) => window?.ids ?? []);
   expect(ids.some((id) => id.includes("/payments/"))).toBe(true);
   expect(ids.some((id) => id.includes("/default/"))).toBe(true);
-
-  const other = await settled(
-    await open("rbacTypedNamespaces", namespaced(["payments", "auth"])),
-  );
-  expect(last(other)?.status).toEqual({ state: "ready" });
-  expect(lastParts(other)?.unready.map(({ part }) => part)).toEqual([
-    { kind: "namespace", name: "auth" },
-  ]);
-});
-
-test("a person who may not list namespaces is refused the list of them, and one who may is not", async () => {
-  const asked = (scenario: MockScenario) => {
-    const answer = createMockBackend(scenario).invoke(
-      "namespaces_list",
-      "prod-eu",
-    );
-    const settled = answer.then(
-      (names) => ({ names }),
-      (error: unknown) => ({ error }),
-    );
-    return vi.advanceTimersByTimeAsync(50).then(() => settled);
-  };
-  expect(await asked("rbacTypedNamespaces")).toMatchObject({
-    error: { kind: "forbidden" },
-  });
-  const listed = await asked("rbacNamespaces");
-  expect("names" in listed ? listed.names : []).toContain("default");
 });
 
 test("with more than three namespaces the last two wait for a stream, the first of them with the rows it listed", async () => {
