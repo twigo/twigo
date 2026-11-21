@@ -1574,7 +1574,9 @@ async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_
         async move { hub.namespaces("kind-test").await }
     });
     settle().await;
-    fake.state().unavailable = usize::MAX;
+    fake.state()
+        .no_endpoints
+        .insert("/api/v1/namespaces".into());
     let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
     assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
     assert!(
@@ -1584,7 +1586,7 @@ async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_
     );
     assert_eq!(slow.await.unwrap(), Ok(vec!["a".into(), "b".into()]));
 
-    fake.state().unavailable = 0;
+    fake.state().no_endpoints.clear();
     fake.state().body_takes = Duration::from_secs(11);
     let started = Instant::now();
     assert_eq!(

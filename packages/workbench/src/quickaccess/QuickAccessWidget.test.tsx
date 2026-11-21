@@ -481,10 +481,11 @@ test("the footer says what Enter does to the row under the cursor: only this one
   expect(hint("Select")).toBe(false);
 });
 
-test("the footer says Close while the rows of the opening come, and Select, not Close, while those of a value typed do", async () => {
+test("the footer says Close while the rows of the opening come, and Select, not Close, while those of a value typed do, whose row an Enter meanwhile takes once they come", async () => {
   const workbench = await testWorkbench();
   const { items, answer } = slow();
-  workbench.quickAccess.register(ticking(undefined, { items }).registered);
+  const { registered, accept } = ticking(undefined, { items });
+  workbench.quickAccess.register(registered);
   render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
   act(() => {
     workbench.quickAccess.show("!");
@@ -496,6 +497,17 @@ test("the footer says Close while the rows of the opening come, and Select, not 
   fireEvent.change(input(), { target: { value: "!pay" } });
   expect(hint("Close")).toBe(false);
   expect(hint("Select")).toBe(true);
+  press("Enter");
+  await answer(
+    "pay",
+    NAMESPACES.filter((item) => item.id === "payments"),
+  );
+  expect(accept).toHaveBeenCalledWith(
+    expect.objectContaining({ id: "payments" }),
+    "pay",
+    expect.anything(),
+    { side: false },
+  );
 });
 
 test("the input is a combobox on the list and names the row under the cursor, and none where no row is", async () => {

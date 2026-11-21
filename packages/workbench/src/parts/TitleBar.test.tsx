@@ -141,6 +141,8 @@ test("several namespaces read as the scope chip does, the first name and how man
   expect(
     await screen.findAllByText("Namespaces: auth, checkout, payments"),
   ).not.toHaveLength(0);
+  fireEvent.click(scope);
+  expect(workbench.quickAccess.session?.value).toBe("ns ");
 });
 
 test("the bar is tinted with the active context's colour, an automatic or a chosen one too", async () => {

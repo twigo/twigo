@@ -640,6 +640,10 @@ test("All namespaces of a person who may list namespaces says connecting with no
     await open("rbacNamespaces", namespaced([]), sub.backend),
   );
   expect(again[0]?.parts).toMatchObject({ count: 1, omitted: 11 });
+
+  const names = sub.backend.invoke("namespaces_list", "prod-eu");
+  await vi.advanceTimersByTimeAsync(50);
+  expect(await names).toContain("default");
 });
 
 test("a typed selection of a person who may not list namespaces reads the namespaces they are bound in", async () => {

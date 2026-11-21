@@ -66,6 +66,7 @@ test("Enter on the typed name alone takes it as the only namespace", async () =>
 });
 
 test.each([
+  [[], "c", "checkout"],
   [["payments"], "s", "search"],
   [["payments"], "n", "notify"],
   [["payments", "search"], "c", "checkout"],
