@@ -23,7 +23,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  history.replaceState(null, "", "/");
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllTimers();
