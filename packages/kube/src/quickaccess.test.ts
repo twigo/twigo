@@ -17,7 +17,6 @@ import {
 import { listUri, objectUri } from "./uri";
 
 const NOWHERE: QuickAccessContext = { lookup: () => undefined };
-/** One opening of quick access has one context. */
 const opening = (): QuickAccessContext => ({ lookup: () => undefined });
 const DISCOVERY: readonly Resource[] = RESOURCES;
 

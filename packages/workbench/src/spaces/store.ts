@@ -34,7 +34,7 @@ export interface SpaceState {
   readonly parts: PartStates;
   /** Views the user moved, by view ID: the container they now live in. */
   readonly placement: Readonly<Record<string, string>>;
-  /** Empty for every namespace; a space that has kept none starts on its first context's own (N9). */
+  /** Empty for every namespace; a space that has kept none starts on its first context's own. */
   readonly namespaces: readonly string[];
   /** The editors it opened, newest first ({@link RecentEditors}). */
   readonly recent: readonly RecentEditor[];
