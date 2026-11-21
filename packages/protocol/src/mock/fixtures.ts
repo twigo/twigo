@@ -107,7 +107,7 @@ export const CONTEXTS: Context[] = [
     color: null,
     source: "~/.kube/config",
     server: "https://analytics.internal:6443",
-    namespace: null,
+    namespace: "batch",
     access: {
       mode: "read-write",
       source: {

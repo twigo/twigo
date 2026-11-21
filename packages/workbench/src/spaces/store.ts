@@ -34,7 +34,7 @@ export interface SpaceState {
   readonly parts: PartStates;
   /** Views the user moved, by view ID: the container they now live in. */
   readonly placement: Readonly<Record<string, string>>;
-  /** Empty for every namespace. */
+  /** Empty for every namespace; a space that has kept none starts on its first context's own (N9). */
   readonly namespaces: readonly string[];
   /** The editors it opened, newest first ({@link RecentEditors}). */
   readonly recent: readonly RecentEditor[];
@@ -111,6 +111,8 @@ export class Spaces {
   #active: string | undefined;
   #opening = false;
   readonly #states = new Map<string, SpaceState>();
+  /** The spaces whose scope no one has chosen, which follow what their context names. */
+  readonly #unscoped = new Set<string>();
   readonly #views = new Map<string, Map<string, unknown>>();
 
   constructor(
@@ -121,7 +123,15 @@ export class Spaces {
     private readonly onError: (error: unknown) => void,
   ) {
     catalog.changes.subscribe(() => {
-      if (this.#all) this.#refresh();
+      if (!this.#all) return;
+      for (const id of this.#unscoped) {
+        const state = this.#states.get(id);
+        const start = this.#startsOn(id);
+        if (state && state.namespaces.join() !== start.join()) {
+          this.#states.set(id, { ...state, namespaces: start });
+        }
+      }
+      this.#refresh();
     });
   }
 
@@ -185,12 +195,19 @@ export class Spaces {
     if (!state) {
       const read = <K extends keyof SpaceState>(key: K) =>
         this.store.get(id, key, SCHEMAS[key], DEFAULT_STATE[key]);
+      const chosen = this.store.get<readonly string[] | undefined>(
+        id,
+        "namespaces",
+        SCHEMAS.namespaces,
+        undefined,
+      );
+      if (chosen === undefined) this.#unscoped.add(id);
       state = {
         editors: read("editors"),
         panelEditors: read("panelEditors"),
         parts: read("parts"),
         placement: read("placement"),
-        namespaces: read("namespaces"),
+        namespaces: chosen ?? this.#startsOn(id),
         recent: read("recent"),
       };
       this.#states.set(id, state);
@@ -202,6 +219,7 @@ export class Spaces {
     const before = this.state(id);
     const after = change(before);
     if (after === before) return;
+    if (after.namespaces !== before.namespaces) this.#unscoped.delete(id);
     this.#states.set(id, after);
     for (const key of KEYS) {
       if (after[key] !== before[key]) this.store.set(id, key, after[key]);
@@ -221,6 +239,13 @@ export class Spaces {
       if (keys.every((key) => next[key] === current[key])) return state;
       return { ...state, parts: { ...state.parts, [location]: next } };
     });
+  }
+
+  /** The namespace the space's first context names, as kubectl and k9s start on it, else every namespace. */
+  #startsOn(id: string): readonly string[] {
+    const context = this.#all?.find((space) => space.id === id)?.contexts[0];
+    const namespace = context && this.catalog.find(context)?.namespace;
+    return namespace ? [namespace] : DEFAULT_STATE.namespaces;
   }
 
   /** What a view keeps in a space, read back unchecked: the view checks it. */
