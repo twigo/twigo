@@ -584,7 +584,6 @@ impl Fake {
         Ok(self.respond(request))
     }
 
-    /// Answers the access review the request holds by what it asks.
     async fn review(&self, request: Request<kube::client::Body>) -> Response<Body> {
         let uri = request.uri().to_string();
         let body = request

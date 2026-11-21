@@ -22,8 +22,7 @@ pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
 
 /// How long the namespaces a person may list a resource in hold once they
 /// are resolved, so each list of all namespaces opened meanwhile reads them
-/// and asks nothing. The first list after that reads them anyway, and they
-/// are resolved again for the lists after it.
+/// and asks nothing.
 pub(crate) const RESOLVED_FOR: Duration = Duration::from_secs(300);
 
 /// What "all namespaces" of a resource came to.
@@ -36,7 +35,6 @@ pub(crate) struct Resolved {
     pub omitted: u32,
 }
 
-/// What [`Cluster::resolved`] finds.
 pub(crate) struct Kept {
     pub resolved: Resolved,
     /// It is due, past [`RESOLVED_FOR`], and the asker is the one to resolve

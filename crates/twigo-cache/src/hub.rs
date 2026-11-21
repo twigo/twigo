@@ -812,7 +812,6 @@ impl Hub {
     }
 }
 
-/// What listing the resource asks of RBAC, in a namespace or in all of them.
 fn list_access(resource: &Resource) -> Access {
     Access {
         verb: "list".to_owned(),
@@ -1490,10 +1489,7 @@ where
     drop(replaced);
 }
 
-/// Settles what a subscription to all namespaces reads once its context's
-/// clients answer: the cluster-wide upstream for a person who may list the
-/// resource cluster-wide, else an upstream for each namespace they may list
-/// it in, or the cluster's own refusal when there is none; nothing if the
+/// Settles what a subscription to all namespaces reads, nothing if the
 /// subscription ends first. What does not answer is tried again with the
 /// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
