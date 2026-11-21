@@ -37,8 +37,8 @@ pub(crate) struct Resolved {
 /// What [`Cluster::resolved`] finds.
 pub(crate) struct Kept {
     pub resolved: Resolved,
-    /// It is past [`RESOLVED_FOR`], and the asker is the one to resolve it
-    /// again.
+    /// It is due, as a set is past [`RESOLVED_FOR`] and a guess at once, and
+    /// the asker is the one to resolve it again.
     pub renew: bool,
 }
 
@@ -152,9 +152,10 @@ impl Cluster {
     }
 
     /// What all namespaces of the resource `access` names came to, if it is
-    /// kept. A set of namespaces stays past [`RESOLVED_FOR`] and is read by
-    /// every asker, the first of whom resolves it again; a refusal, which no
-    /// namespace is allowed, lasts [`REFUSED_FOR`], as a review's no.
+    /// kept. A set of namespaces stays past its time, which a guess has at
+    /// once, and is read by every asker, the first of whom resolves it again;
+    /// a refusal, which no namespace is allowed, lasts [`REFUSED_FOR`], as a
+    /// review's no.
     pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Kept> {
         let mut facts = self.facts(clients);
         let memo = facts
