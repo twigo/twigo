@@ -22,6 +22,7 @@ use http_body_util::BodyExt;
 use jiff::Timestamp;
 use kube::client::Body;
 use tokio::sync::{Notify, watch};
+use tokio::time::Instant;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
@@ -154,8 +155,9 @@ impl<T: Item> Upstream<T> {
         self.watching.load(Ordering::Relaxed)
     }
 
-    /// Ends the wait of a part whose first list RBAC refused, so the one who
-    /// subscribes anew finds out at once whether that still holds.
+    /// Ends the wait of a part whose first list RBAC refused once it has run
+    /// [`RETRY_WITHIN`], so the one who subscribes anew finds out within that
+    /// whether the refusal still holds.
     pub fn retry(&self) {
         self.retry.notify_waiters();
     }
@@ -734,15 +736,18 @@ where
     /// Shows why the server refused, then waits to try again: an API server
     /// that just restarted refuses for a while what it allows, so a part
     /// that has listed tries soon, while one that never did, whose RBAC said
-    /// no, waits for the no to pass, or for a new subscription.
+    /// no, waits for the no to pass, or for a new subscription, which ends the
+    /// wait once it has run [`RETRY_WITHIN`], so a filter typed over many
+    /// refused parts asks each at most that often.
     async fn refused(&mut self, view: ViewState) {
         if matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed {
             // Before the state shows, so a subscription that sees it wakes the wait.
             let retry = self.upstream.retry.notified();
+            let refused = Instant::now();
             self.set_phase(Phase::Refused(view));
             tokio::select! {
                 () = tokio::time::sleep(refusal_pause()) => {}
-                () = retry => {}
+                () = retry => tokio::time::sleep_until(refused + RETRY_WITHIN).await,
             }
         } else {
             self.set_phase(Phase::Refused(view));

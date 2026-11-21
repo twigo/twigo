@@ -1218,9 +1218,11 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     };
     until(&mut pods, |state| *state == forbidden).await;
     sleep(Duration::from_secs(200)).await;
-    let tries = fake.count("namespaces/a/pods");
-    assert!((4..=8).contains(&tries), "{tries} tries in 200 s");
+    let sent = fake.count("namespaces/a/pods");
+    assert!((4..=8).contains(&sent), "{sent} tries in 200 s");
     assert_eq!(pods.state(), forbidden);
+    let last = *tries(&fake, "namespaces/a/pods").last().unwrap();
+    tokio::time::sleep_until(last + RETRY_WITHIN).await;
     let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
         .await
         .into_iter()
@@ -1230,7 +1232,7 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
     settle().await;
     assert_eq!(
         fake.count("namespaces/a/pods"),
-        tries + 1,
+        sent + 1,
         "subscriptions that come together cut its wait short once"
     );
     drop(asking);
@@ -1634,9 +1636,37 @@ async fn a_new_subscription_cuts_short_the_wait_of_a_refused_part_and_an_open_li
             drop(first);
         }
         let mut again = hub.rows(query(&["a"])).await.unwrap();
-        let tried = tokio::time::timeout(Duration::from_secs(5), ready(&mut again));
-        tried.await.expect("a list opened anew tries at once");
+        let tried = tokio::time::timeout(Duration::from_secs(1), ready(&mut again));
+        tried
+            .await
+            .expect("a list opened anew tries at once, the wait having run 5 s");
         assert_eq!(names(&again), ["p1"]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_oftener() {
+    let fake = Fake::default();
+    let namespaces = ["a", "b", "c"];
+    for namespace in namespaces {
+        fake.state()
+            .forbidden
+            .insert(format!("/api/v1/namespaces/{namespace}/pods"));
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut typed = Vec::new();
+    for _ in 0..30 {
+        typed.push(hub.rows(query(&namespaces)).await.unwrap());
+        sleep(Duration::from_secs(1)).await;
+    }
+    for namespace in namespaces {
+        let gaps = gaps(&tries(&fake, &format!("/namespaces/{namespace}/pods")));
+        assert!(gaps.len() >= 4, "{namespace}: {gaps:?}");
+        let wait = RETRY_WITHIN..=RETRY_WITHIN + Duration::from_secs(1);
+        assert!(
+            gaps.iter().all(|gap| wait.contains(gap)),
+            "{namespace}: {gaps:?}"
+        );
     }
 }
 
