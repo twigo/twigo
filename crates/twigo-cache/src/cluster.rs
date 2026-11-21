@@ -141,9 +141,9 @@ impl Cluster {
 
     /// What all namespaces of the resource `access` names came to, if it is
     /// kept. A set of namespaces stays past its time and is read by every
-    /// asker, the first of whom resolves it again;
-    /// a set with no namespace, which the cluster-wide yes and a refusal come
-    /// to, lasts [`REFUSED_FOR`], as a review's no.
+    /// asker, the first of whom resolves it again; a set with no namespace,
+    /// which the cluster-wide yes and a refusal come to, lasts
+    /// [`REFUSED_FOR`], as a review's no.
     pub fn resolved(&self, clients: &Arc<Clients>, access: &Access) -> Option<Kept> {
         let mut facts = self.facts(clients);
         let memo = facts

@@ -447,8 +447,8 @@ impl Hub {
     /// may not list it cluster-wide, as kept with the context's clients or
     /// asked anew: the namespaces where a review allows listing it. No
     /// namespace when they may list it cluster-wide, or may list it nowhere,
-    /// or the namespaces are refused, which the cluster's own refusal then
-    /// says.
+    /// or the namespaces are refused, which the cluster part then answers,
+    /// with its rows or its own refusal.
     ///
     /// A set kept past its time is read at once, and resolved again in the
     /// background for the lists after it; a resolution that fails or leaves a
@@ -1489,7 +1489,7 @@ where
     drop(replaced);
 }
 
-/// Settles what a subscription to all namespaces reads, nothing if the
+/// Settles what a subscription to all namespaces reads, and nothing if the
 /// subscription ends first. What does not answer is tried again with the
 /// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
