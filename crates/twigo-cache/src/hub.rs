@@ -42,14 +42,14 @@ use tokio::time::Instant;
 use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
-use crate::cluster::{Cluster, Resolved};
+use crate::cluster::{Cluster, Resolved, Unanswered};
 use crate::decode::Decode;
 use crate::meta::MetaDecoder;
 use crate::object::{Object, ObjectDecoder};
 use crate::request::{Collection, Format, field_value};
 use crate::store::{Drained, Feed, Item, RowKey};
 use crate::table::{Column, Row, TableDecoder};
-use crate::upstream::{self, Clock, Env, Spec, Upstream};
+use crate::upstream::{self, Clock, Env, Failure, Spec, Upstream};
 
 pub use crate::upstream::{Connect, RETRY_WITHIN, backoff};
 
@@ -428,7 +428,8 @@ impl Hub {
     /// background for the lists after it. What does not answer is no answer:
     /// when the clients, the cluster-wide review or the list of namespaces
     /// fail with anything but a refusal, the state the subscription waits on
-    /// comes instead.
+    /// comes instead, and a review the server refuses leaves the cluster part
+    /// to say what it answers.
     async fn resolve(&self, query: &Query) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
         let clients = (self.inner.connect)(query.context.clone())
@@ -466,10 +467,12 @@ impl Hub {
     /// question answered, which a person who may list cluster-wide needs no
     /// set for.
     async fn ask(&self, query: &Query, access: &Access) -> Result<(Resolved, bool), ViewState> {
-        match self.may(&query.context, None, access).await {
-            Some(true) => return Ok((Resolved::default(), false)),
-            Some(false) => {}
-            None => return Err(ViewState::Connecting),
+        match self.review(&query.context, None, access).await {
+            Ok(true) => return Ok((Resolved::default(), false)),
+            Ok(false) => {}
+            Err(Unanswered::Refused) => return Ok((Resolved::default(), true)),
+            Err(Unanswered::Unauthorized) => return Err(ViewState::Unauthorized),
+            Err(Unanswered::Failed) => return Err(ViewState::Connecting),
         }
         let names = match self.namespaces(&query.context).await {
             Ok(names) => names,
@@ -477,7 +480,7 @@ impl Hub {
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
-        let reviews: Vec<BoxFuture<'static, Option<bool>>> = names
+        let reviews: Vec<BoxFuture<'static, Result<bool, Unanswered>>> = names
             .iter()
             .map(|name| {
                 let (hub, context, access, name) = (
@@ -486,13 +489,17 @@ impl Hub {
                     access.clone(),
                     name.clone(),
                 );
-                async move { hub.may(&context, Some(&name), &access).await }.boxed()
+                async move { hub.review(&context, Some(&name), &access).await }.boxed()
             })
             .collect();
-        let answers: Vec<Option<bool>> = futures::stream::iter(reviews)
-            .buffered(REVIEWS)
-            .collect()
-            .await;
+        let mut asked = futures::stream::iter(reviews).buffered(REVIEWS);
+        let mut answers: Vec<Option<bool>> = Vec::with_capacity(names.len());
+        while let Some(answer) = asked.next().await {
+            if answer == Err(Unanswered::Unauthorized) {
+                return Err(ViewState::Unauthorized);
+            }
+            answers.push(answer.ok());
+        }
         let allowed: Vec<String> = names
             .iter()
             .zip(&answers)
@@ -707,11 +714,11 @@ impl Hub {
                 name: None,
                 ..access.clone()
             };
-            if self.review(context, namespace, &whole).await == Some(true) {
+            if self.review(context, namespace, &whole).await == Ok(true) {
                 return Some(true);
             }
         }
-        self.review(context, namespace, access).await
+        self.review(context, namespace, access).await.ok()
     }
 
     async fn review(
@@ -719,7 +726,7 @@ impl Hub {
         context: &str,
         namespace: Option<&str>,
         access: &Access,
-    ) -> Option<bool> {
+    ) -> Result<bool, Unanswered> {
         // kube-apiserver authorizes a request on a namespace in that
         // namespace (apiserver v0.37.1, `endpoints/request/requestinfo.go`).
         let namespace = match (
@@ -730,7 +737,13 @@ impl Hub {
             (Some(name), "", "namespaces") => Some(name.as_str()),
             _ => namespace,
         };
-        let clients = (self.inner.connect)(context.to_owned()).await.ok()?;
+        let clients =
+            (self.inner.connect)(context.to_owned())
+                .await
+                .map_err(|error| match error.kind {
+                    ErrorKind::Unauthorized => Unanswered::Unauthorized,
+                    _ => Unanswered::Failed,
+                })?;
         let ask = || {
             let review = SelfSubjectAccessReview {
                 spec: SelfSubjectAccessReviewSpec {
@@ -749,8 +762,17 @@ impl Hub {
             };
             let reviews = Api::<SelfSubjectAccessReview>::all(clients.api.clone());
             async move {
-                let answer = reviews.create(&PostParams::default(), &review).await.ok()?;
-                Some(answer.status.is_some_and(|status| status.allowed))
+                let answer = reviews
+                    .create(&PostParams::default(), &review)
+                    .await
+                    .map_err(|error| {
+                        match upstream::failure(&error, "create", "selfsubjectaccessreviews") {
+                            Failure::Unauthorized => Unanswered::Unauthorized,
+                            Failure::Refused(_) => Unanswered::Refused,
+                            Failure::Gone | Failure::Transient => Unanswered::Failed,
+                        }
+                    })?;
+                Ok(answer.status.is_some_and(|status| status.allowed))
             }
             .boxed()
         };

@@ -75,8 +75,8 @@ pub struct State {
     /// answered no.
     allowed: HashSet<(Option<String>, String, String)>,
     /// The namespaces, none for every namespace, whose access reviews get
-    /// `503`.
-    pub reviews_unavailable: HashSet<Option<String>>,
+    /// this status instead of an answer.
+    pub reviews_fail: HashMap<Option<String>, StatusCode>,
     /// Each access review waits this long before it is answered.
     pub reviews_take: std::time::Duration,
     /// The most access reviews that waited at once.
@@ -606,8 +606,8 @@ impl Fake {
         let takes = {
             let mut state = self.state();
             state.requests.push((Instant::now(), uri));
-            if state.reviews_unavailable.contains(&key.0) {
-                return status(StatusCode::SERVICE_UNAVAILABLE, "ServiceUnavailable");
+            if let Some(&code) = state.reviews_fail.get(&key.0) {
+                return status(code, code.canonical_reason().unwrap_or("Failure"));
             }
             state.reviews_take
         };

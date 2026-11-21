@@ -53,8 +53,20 @@ struct Memo {
 /// What a review asks: the namespace, none for every namespace, and the access.
 type Asked = (Option<String>, Access);
 
+/// Why a review has no answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unanswered {
+    /// The server rejects the credentials, or their plugin fails: asking again
+    /// by itself would run the plugin again.
+    Unauthorized,
+    /// The server refuses the review itself, as it will every time.
+    Refused,
+    /// A 429, a 5xx, a timeout or a connection that broke: it may answer later.
+    Failed,
+}
+
 /// A review under way, whose answer every asker of it takes.
-type Review = Shared<BoxFuture<'static, Option<bool>>>;
+type Review = Shared<BoxFuture<'static, Result<bool, Unanswered>>>;
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -96,22 +108,22 @@ impl Cluster {
 
     /// Whether RBAC lets the person do `access` in `namespace`, or with none
     /// in every namespace: the answer kept, else the one `ask` sends, which
-    /// every asker of the same review shares while it is under way. None
-    /// when the cluster cannot answer.
+    /// every asker of the same review shares while it is under way. Only an
+    /// answer is kept.
     pub async fn review(
         self: &Arc<Self>,
         clients: &Arc<Clients>,
         namespace: Option<&str>,
         access: &Access,
-        ask: impl FnOnce() -> BoxFuture<'static, Option<bool>>,
-    ) -> Option<bool> {
+        ask: impl FnOnce() -> BoxFuture<'static, Result<bool, Unanswered>>,
+    ) -> Result<bool, Unanswered> {
         let asked: Asked = (namespace.map(str::to_owned), access.clone());
         let review = {
             let mut facts = self.facts(clients);
             if let Some(&(may, at)) = facts.may.get(&asked)
                 && (may || at.elapsed() < REFUSED_FOR)
             {
-                return Some(may);
+                return Ok(may);
             }
             facts
                 .reviewing
@@ -122,7 +134,7 @@ impl Cluster {
                         let may = ask.await;
                         let mut facts = cluster.facts(&clients);
                         facts.reviewing.remove(&asked);
-                        if let Some(may) = may {
+                        if let Ok(may) = may {
                             facts.may.insert(asked, (may, Instant::now()));
                         }
                         may

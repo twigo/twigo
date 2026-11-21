@@ -896,14 +896,14 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
     answered
 }
 
-enum Failure {
+pub(crate) enum Failure {
     Gone,
     Transient,
     Refused(ViewState),
     Unauthorized,
 }
 
-fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
+pub(crate) fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     if twigo_kube::errors::no_credential(error) {
         return Failure::Unauthorized;
     }
