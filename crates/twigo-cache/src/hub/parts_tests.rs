@@ -1005,6 +1005,24 @@ async fn all_namespaces_of_clients_that_are_unauthorized_wait_for_a_new_subscrip
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_reader_of_a_list_with_no_part_sees_what_it_waits_on_change() {
+    let fake = Fake::default();
+    allowed_in_three(&fake);
+    fake.state()
+        .reviews_fail
+        .insert(None, StatusCode::SERVICE_UNAVAILABLE);
+    let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
+    let (hub, down, _tries) = connecting(&fake, error.clone());
+    down.store(false, Ordering::Relaxed);
+    let mut list = hub.rows(query(&[])).await.unwrap();
+    assert_eq!(list.state(), ViewState::Connecting);
+
+    down.store(true, Ordering::Relaxed);
+    let says = ViewState::Error { error };
+    until(&mut list, |state| *state == says).await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn all_namespaces_are_resolved_while_every_watch_is_taken() {
     let fake = Fake::default();
     forty_namespaces(&fake);
