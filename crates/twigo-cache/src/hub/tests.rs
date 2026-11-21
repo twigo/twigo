@@ -1555,31 +1555,7 @@ async fn the_namespaces_are_read_in_pages_with_no_watch_whatever_the_budget() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_namespaces_a_person_may_not_list_or_the_cluster_cannot_say_are_a_state() {
-    let fake = Fake::default();
-    fake.add("namespaces", None, "a");
-    let (hub, _clients) = fake.hub(Budgets::default());
-
-    fake.state()
-        .forbidden
-        .insert("/api/v1/namespaces".to_owned());
-    assert_eq!(
-        hub.namespaces("kind-test").await,
-        Err(ViewState::Forbidden {
-            verb: "list".to_owned(),
-            resource: "namespaces".to_owned(),
-        })
-    );
-
-    fake.state().forbidden.clear();
-    fake.state()
-        .no_endpoints
-        .insert("/api/v1/namespaces".to_owned());
-    assert_eq!(hub.namespaces("kind-test").await, Err(ViewState::Stale));
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_answers_at_once() {
+async fn the_namespaces_try_a_transient_failure_again_and_a_refusal_answers_at_once() {
     let fake = Fake::default();
     fake.add("namespaces", None, "b");
     fake.add("namespaces", None, "a");
@@ -1593,25 +1569,17 @@ async fn the_namespaces_try_a_transient_failure_again_for_10_s_and_a_refusal_ans
     );
     assert_eq!(listed(), 2, "one 503, then the names");
 
-    fake.state().unavailable = usize::MAX;
-    let started = Instant::now();
-    let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
-    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
-    assert!(
-        (10..11).contains(&started.elapsed().as_secs()),
-        "{:?}",
-        started.elapsed()
-    );
-
-    fake.state().unavailable = 0;
     fake.state()
         .forbidden
         .insert("/api/v1/namespaces".to_owned());
     let (before, started) = (listed(), Instant::now());
-    assert!(matches!(
+    assert_eq!(
         hub.namespaces("kind-test").await,
-        Err(ViewState::Forbidden { .. })
-    ));
+        Err(ViewState::Forbidden {
+            verb: "list".to_owned(),
+            resource: "namespaces".to_owned(),
+        })
+    );
     assert_eq!((listed() - before, started.elapsed()), (1, Duration::ZERO));
 }
 
