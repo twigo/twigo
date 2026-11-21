@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use twigo_ipc::ContextColor;
+use twigo_ipc::{ContextColor, ErrorCode};
 
 use super::*;
 
@@ -209,7 +209,72 @@ fn a_missing_file_is_skipped_and_a_broken_one_reported() {
     let catalog = kubectl(&[&missing, &broken, &first]).load();
     assert_eq!(names(&catalog), ["kind-a"]);
     assert_eq!(catalog.failures.len(), 1);
-    assert_eq!(catalog.failures[0].file, broken);
+    assert_eq!(catalog.failures[0].source, broken.display().to_string());
+}
+
+#[test]
+fn each_file_that_fails_says_why_by_its_code_and_quotes_nothing_of_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let unreadable = dir.path().join("a-directory");
+    fs::create_dir(&unreadable).unwrap();
+    let broken = write(dir.path(), "broken", "contexts: [unclosed");
+    let tokened = write(
+        dir.path(),
+        "tokened",
+        "users:\n- name: u\n  user:\n    token: secret-token-value\n  extra: [\n",
+    );
+    let other = write(dir.path(), "other", "kind: Other\ncontexts: []\n");
+    let first = write(dir.path(), "first", FIRST);
+    let catalog = kubectl(&[&unreadable, &broken, &tokened, &first, &other]).load();
+
+    assert_eq!(names(&catalog), ["kind-a"]);
+    let failed: Vec<(String, ErrorCode)> = catalog
+        .failures
+        .iter()
+        .map(|failure| (failure.source.clone(), failure.error.code))
+        .collect();
+    let named = |file: &Path| file.display().to_string();
+    assert_eq!(
+        failed,
+        [
+            (named(&unreadable), ErrorCode::KubeconfigUnreadable),
+            (named(&broken), ErrorCode::KubeconfigUnparsable),
+            (named(&tokened), ErrorCode::KubeconfigUnparsable),
+            (named(&other), ErrorCode::KubeconfigUnmergeable),
+        ]
+    );
+    let parse = &catalog.failures[2].error.message;
+    assert!(parse.contains("line 5, column"), "{parse}");
+    for failure in &catalog.failures {
+        let message = &failure.error.message;
+        assert!(!message.contains("secret-token-value"), "{message}");
+        assert!(!message.contains('\n'), "{message}");
+        assert!(
+            !message.contains(&dir.path().display().to_string()),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn files_whose_changes_go_unseen_fail_by_a_code_of_their_own() {
+    let home = Path::new("/home/someone");
+    let list =
+        std::env::join_paths([home.join(".kube/config"), PathBuf::from("/etc/kube")]).unwrap();
+    let sources = Sources::kubectl(Some(&list), Some(home));
+    let catalog = Catalog::default().unwatched(&sources, &"too many open files");
+    let failed: Vec<(&str, ErrorCode)> = catalog
+        .failures
+        .iter()
+        .map(|failure| (failure.source.as_str(), failure.error.code))
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            ("~/.kube/config", ErrorCode::KubeconfigUnwatched),
+            ("/etc/kube", ErrorCode::KubeconfigUnwatched),
+        ]
+    );
 }
 
 #[test]

@@ -12,7 +12,7 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
-use twigo_ipc::IpcError;
+use twigo_ipc::{CatalogFailure, IpcError};
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
 use twigo_policy::{Metadata, Policy, TypeLock};
 
@@ -21,6 +21,8 @@ use twigo_policy::{Metadata, Policy, TypeLock};
 #[derive(Debug, PartialEq, Eq)]
 pub struct Contexts {
     listed: Vec<kubeconfig::Context>,
+    /// The files that could not be read, merged or watched.
+    failures: Vec<CatalogFailure>,
     /// By name: the read at which what the catalog says of the context for
     /// its mode last changed, or it was listed again ([`Metadata::revision`]).
     revisions: HashMap<String, u64>,
@@ -28,27 +30,37 @@ pub struct Contexts {
     read: u64,
 }
 
-/// The contexts as the sources list them, ordered.
-fn sorted(catalog: kubeconfig::Catalog) -> Vec<kubeconfig::Context> {
-    for failure in &catalog.failures {
-        // @todo: log a failed file by its path and location, and show it in the window, once the catalog carries its failures to the UI (TODO.md)
-        #[expect(
-            clippy::print_stderr,
-            reason = "the message quotes the lines around the fault, which a log must not hold"
-        )]
-        {
-            eprintln!("skipped {}: {}", failure.file.display(), failure.message);
-        }
-    }
+/// The contexts as the sources list them, ordered, and what they could not.
+fn sorted(catalog: kubeconfig::Catalog) -> (Vec<kubeconfig::Context>, Vec<CatalogFailure>) {
     let mut contexts = catalog.contexts;
     contexts.sort_by(|a, b| by_order(a.order, b.order).then_with(|| a.name.cmp(&b.name)));
-    contexts
+    (contexts, catalog.failures)
+}
+
+/// Says what changed in the failures since the last read, one line for each
+/// file: a failure that holds is not said again.
+fn tell_failures(before: &[CatalogFailure], now: &[CatalogFailure]) {
+    for failure in now.iter().filter(|failure| !before.contains(failure)) {
+        tracing::warn!(
+            path = %failure.source,
+            code = %failure.error.code,
+            "{}",
+            failure.error.message
+        );
+    }
+    for failure in before.iter().filter(|failure| !now.contains(failure)) {
+        tracing::info!(path = %failure.source, code = %failure.error.code, "the file no longer fails");
+    }
 }
 
 impl Contexts {
     /// `listed`, read after `before`: a context keeps its revision while
     /// what the catalog says of it stays, else takes this read's.
-    fn new(listed: Vec<kubeconfig::Context>, before: Option<&Self>) -> Self {
+    fn new(
+        listed: Vec<kubeconfig::Context>,
+        failures: Vec<CatalogFailure>,
+        before: Option<&Self>,
+    ) -> Self {
         let read = before.map_or(0, |before| before.read + 1);
         let mut revisions = HashMap::new();
         for context in &listed {
@@ -65,6 +77,7 @@ impl Contexts {
         }
         Self {
             listed,
+            failures,
             revisions,
             read,
         }
@@ -113,7 +126,7 @@ impl Contexts {
             .collect();
         twigo_ipc::Catalog {
             contexts,
-            failures: Vec::new(),
+            failures: self.failures.clone(),
         }
     }
 }
@@ -205,16 +218,19 @@ impl Catalog {
             let current = Arc::clone(&self.generation);
             let policy = self.policy.clone();
             move |catalog: kubeconfig::Catalog| {
-                let listed = sorted(catalog);
+                let (listed, failures) = sorted(catalog);
                 // Under the channel's write lock, which the successor's
                 // publish takes too, so the two cannot interleave.
                 contexts.send_if_modified(|now| {
                     if current.load(atomic::Ordering::Acquire) != generation
-                        || now.as_ref().is_some_and(|now| now.listed == listed)
+                        || now
+                            .as_ref()
+                            .is_some_and(|now| now.listed == listed && now.failures == failures)
                     {
                         return false;
                     }
-                    let next = Contexts::new(listed, now.as_deref());
+                    tell_failures(now.as_ref().map_or(&[], |now| &now.failures), &failures);
+                    let next = Contexts::new(listed, failures, now.as_deref());
                     if let (Some(policy), Some(before)) = (&policy, now.as_deref()) {
                         next.tell(before, policy);
                     }
@@ -227,10 +243,7 @@ impl Catalog {
         let wrote = move || written.send_modify(|count| *count += 1);
         match Watch::start(sources.clone(), publish.clone(), wrote) {
             Ok(watch) => *followed = Some(watch),
-            Err(error) => {
-                tracing::warn!(%error, "could not watch the kubeconfig files, so their changes go unseen");
-                publish(sources.load());
-            }
+            Err(error) => publish(sources.load().unwatched(&sources, &error)),
         }
     }
 

@@ -117,6 +117,35 @@ users:
     );
 }
 
+#[tokio::test]
+async fn a_file_that_fails_reaches_the_webview_beside_the_contexts_of_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = dir.path().join("good");
+    let broken = dir.path().join("broken");
+    fs::write(&good, CONFIG).unwrap();
+    fs::write(
+        &broken,
+        "users:\n- name: u\n  user: { token: hunter2 }\n  extra: [\n",
+    )
+    .unwrap();
+    let list = std::env::join_paths([&broken, &good]).unwrap();
+    let catalog = Catalog::default();
+    catalog.follow(Sources::kubectl(Some(&list), None));
+
+    let listed = catalog.contexts().await.ipc(&Policy::open());
+    assert_eq!(listed.contexts.len(), 5);
+    let failed: Vec<(&str, ErrorCode)> = listed
+        .failures
+        .iter()
+        .map(|failure| (failure.source.as_str(), failure.error.code))
+        .collect();
+    assert_eq!(
+        failed,
+        [(broken.to_str().unwrap(), ErrorCode::KubeconfigUnparsable)]
+    );
+    assert!(!listed.failures[0].error.message.contains("hunter2"));
+}
+
 #[test]
 fn the_explicit_mode_never_reads_home() {
     let dir = tempfile::tempdir().unwrap();
