@@ -177,7 +177,7 @@ test("a selection, which leaves none out, keeps the cluster's version", async ()
     "k8s-list://prod-eu/v1/pods?ns=default",
   );
   await settle(30);
-  expect(screen.getByText("v1.33.4")).toBeTruthy();
+  expect(entry("v1.33.4")?.className).not.toContain("text-quiet");
   expect(screen.queryByText(/ of \d+ namespaces$/)).toBeNull();
 });
 

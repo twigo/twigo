@@ -202,32 +202,28 @@ export function clusterEntries(
     const tooltip = [connection?.text, known && `Kubernetes ${known}`]
       .filter(Boolean)
       .join(" · ");
-    if (list && healthy && list.parts.omitted > 0) {
-      const { count, omitted } = list.parts;
-      return [
-        {
-          id: "cluster",
-          text: `${String(count)} of ${String(count + omitted)} namespaces`,
-          quiet: true,
-          ...(connection && { tone: connection.tone }),
-          tooltip: [
-            `${list.title} in the ${String(count)} ${count === 1 ? "namespace" : "namespaces"} these credentials may list; ${String(omitted)} ${omitted === 1 ? "other is" : "others are"} left out`,
-            tooltip,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        },
-      ];
-    }
+    const left =
+      list && healthy && list.parts.omitted > 0
+        ? { title: list.title, ...list.parts }
+        : undefined;
     return [
       {
         id: "cluster",
-        text:
-          healthy && known
+        text: left
+          ? `${String(left.count)} of ${String(left.count + left.omitted)} namespaces`
+          : healthy && known
             ? known
             : ((state && stateLabel(state)) ?? connection?.text ?? ""),
+        ...(left && { quiet: true }),
         ...(connection && { tone: connection.tone }),
-        tooltip,
+        tooltip: left
+          ? [
+              `${left.title} in the ${String(left.count)} ${left.count === 1 ? "namespace" : "namespaces"} these credentials may list; ${String(left.omitted)} ${left.omitted === 1 ? "other is" : "others are"} left out`,
+              tooltip,
+            ]
+              .filter(Boolean)
+              .join("\n")
+          : tooltip,
       },
     ];
   };
