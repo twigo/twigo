@@ -182,7 +182,13 @@ async fn answer(
             if !client_ok {
                 (401, serde_json::json!({"error": "invalid_client"}))
             } else if form.get("refresh_token") != Some(&issued.refresh) {
-                (400, serde_json::json!({"error": "invalid_grant"}))
+                (
+                    400,
+                    serde_json::json!({
+                        "error": "invalid_grant",
+                        "error_description": format!("the refresh token {} is not valid", form["refresh_token"]),
+                    }),
+                )
             } else {
                 let n = u32::try_from(issued.grants.len()).unwrap();
                 issued.refresh = format!("r{}", n + 1);
@@ -557,6 +563,35 @@ async fn a_rejected_token_stays_while_the_issuer_refuses_its_refresh() {
         tried,
         "one refresh per rejected token"
     );
+}
+
+#[tokio::test]
+async fn a_refresh_the_issuer_refuses_is_logged_by_its_status_and_not_by_its_reply() {
+    let issuer = Issuer::start("not-the-token").await;
+    issuer.issued.lock().unwrap().form_only = true;
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("SPENT-refresh")));
+    let events = twigo_log::capture();
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    setup.oidc.credential().await.unwrap();
+
+    let lines = events.lines();
+    let line = lines
+        .iter()
+        .find(|line| {
+            line["fields"]["message"] == "kept the rejected oidc token, since its refresh failed"
+        })
+        .unwrap_or_else(|| panic!("the refresh's event in {lines:?}"));
+    assert_eq!(line["level"], "WARN");
+    assert_eq!(line["fields"]["user"], "dev");
+    assert_eq!(
+        line["fields"]["error"],
+        "oidc: the refresh failed: 400 Bad Request"
+    );
+    let line = line.to_string();
+    assert!(!line.contains("SPENT-refresh"), "{line}");
+    assert!(!line.contains("invalid_grant"), "{line}");
 }
 
 #[tokio::test]

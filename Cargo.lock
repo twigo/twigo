@@ -6189,6 +6189,7 @@ dependencies = [
  "twigo-cache",
  "twigo-env",
  "twigo-ipc",
+ "twigo-log",
  "twigo-policy",
  "yaml-edit",
 ]
