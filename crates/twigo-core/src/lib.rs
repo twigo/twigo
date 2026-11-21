@@ -47,7 +47,7 @@ use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
-use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
+use twigo_panic::{Fatal, Reporter, Reports, Supervisor, inject};
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
@@ -508,7 +508,24 @@ impl Core {
         );
         let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
-            let ended = run(progress.clone()).await;
+            // Its own task, so that a panic in it ends the plan as failed
+            // here, with the undo and the bus entry freed. A plan is never
+            // retried: a write must not go out twice.
+            let ended = match tokio::spawn({
+                let progress = progress.clone();
+                async move {
+                    inject::check("plan run");
+                    run(progress).await
+                }
+            })
+            .await
+            {
+                Ok(ended) => ended,
+                Err(error) => {
+                    tracing::error!(%context, command, panicked = error.is_panic(), "a plan's run ended on a panic");
+                    Err(IpcError::panicked("this run"))
+                }
+            };
             let undo_until = space.zip(ticket).and_then(|(space, ticket)| {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
                 undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
