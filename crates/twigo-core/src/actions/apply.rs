@@ -300,14 +300,24 @@ fn whole_tokens_replaced(text: &str, value: &str) -> String {
     replaced
 }
 
+/// `error` with its message scrubbed of `secrets`; for a Secret the causes
+/// keep only their reason and field, as each cause's message quotes the
+/// patched object in a spelling no value matches: the object's JSON, HTML
+/// characters escaped, quoted again as a string ([`NewInvalid`] writes a
+/// cause's `ErrorBody()` and the message's `Error()`, which `scrub` cuts
+/// only at `patch: Invalid value: "`).
+///
+/// [`NewInvalid`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apimachinery/pkg/api/errors/errors.go#L284-L312
 fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
     error.message = scrub(&error.message, secrets);
-    for cause in error
-        .server
-        .iter_mut()
-        .flat_map(|server| &mut server.causes)
-    {
-        cause.message = scrub(&cause.message, secrets);
+    if !secrets.is_empty() {
+        for cause in error
+            .server
+            .iter_mut()
+            .flat_map(|server| &mut server.causes)
+        {
+            cause.message.clear();
+        }
     }
     error
 }
@@ -2195,32 +2205,49 @@ mod tests {
     }
 
     #[test]
-    fn a_refusal_s_causes_lose_a_secret_s_values_as_its_message_does() {
-        let cause = |message: &str| twigo_ipc::ServerCause {
-            reason: "FieldValueInvalid".to_owned(),
-            field: "data[token]".to_owned(),
-            message: message.to_owned(),
+    fn a_secret_s_refusal_keeps_its_causes_reason_and_field_but_never_their_message() {
+        let quoted = r#"{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"line1\\nsec\\\"ret\\u003ctag\\u003e\\u0026end\"},\"type\":\"Opaque\"}"#;
+        let status = |message: String, cause: String| {
+            serde_json::from_value::<Status>(json!({
+                "status": "Failure",
+                "reason": "Invalid",
+                "code": 422,
+                "message": message,
+                "details": { "causes": [{
+                    "reason": "FieldValueInvalid",
+                    "message": cause,
+                    "field": "patch",
+                }] },
+            }))
+            .unwrap()
         };
-        let refused = IpcError::new(ErrorCode::ServerInvalid, "invalid: Invalid value: hunter2")
-            .with_server(twigo_ipc::ServerStatus {
-                reason: "Invalid".to_owned(),
-                causes: vec![cause("Invalid value: hunter2"), cause("nothing to hide")],
-            });
-        let scrubbed = scrubbed(refused, &["hunter2".to_owned()]);
-        assert_eq!(
-            scrubbed.message,
-            format!("invalid: Invalid value: {HIDDEN}")
+        let refused = status(
+            format!(
+                r#""" is invalid: patch: Invalid value: "{quoted}": illegal base64 data at input byte 0"#
+            ),
+            format!(r#"Invalid value: "{quoted}": illegal base64 data at input byte 0"#),
         );
-        let server = scrubbed.server.expect("the server's status stays");
+        let secrets = secret_values(&[&json!({
+            "data": { "bad": "@@@" },
+            "stringData": { "k": "line1\nsec\"ret<tag>&end" },
+        })]);
+        let Refused::Other(error) = Refused::of(&kube::Error::Api(Box::new(refused)), &secrets)
+        else {
+            panic!("a 422 that no field names is an ordinary refusal");
+        };
+        assert_eq!(error.code, ErrorCode::ServerInvalid);
+        let server = error.server.as_ref().expect("the server's status stays");
         assert_eq!(server.reason, "Invalid");
-        let messages: Vec<&str> = server.causes.iter().map(|c| c.message.as_str()).collect();
         assert_eq!(
-            messages,
-            [
-                format!("Invalid value: {HIDDEN}").as_str(),
-                "nothing to hide"
-            ]
+            server.causes,
+            [twigo_ipc::ServerCause {
+                reason: "FieldValueInvalid".to_owned(),
+                field: "patch".to_owned(),
+                message: String::new(),
+            }]
         );
+        let sent = serde_json::to_string(&error).unwrap();
+        assert!(!sent.contains("line1") && !sent.contains("u003c"), "{sent}");
     }
 
     #[test]
