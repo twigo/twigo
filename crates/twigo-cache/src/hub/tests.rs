@@ -1003,7 +1003,7 @@ async fn a_failure_that_says_nothing_of_streaming_is_retried_by_streaming() {
         fake.add("pods", Some("a"), "p1");
         let (hub, _clients) = fake.hub(Budgets::default());
         let mut pods = hub.rows(query(&["a"])).await.unwrap();
-        sleep(Duration::from_secs(30)).await;
+        sleep(Duration::from_secs(90)).await;
         assert!(streamed(&fake, PODS_A) > 1, "{code}: tried again");
         assert_eq!(paged(&fake, PODS_A), 0, "{code}: no page");
 
@@ -1214,9 +1214,9 @@ async fn a_forbidden_upstream_retries_until_it_is_allowed() {
         resource: "pods".to_owned(),
     };
     until(&mut pods, |state| *state == forbidden).await;
-    sleep(Duration::from_secs(30)).await;
+    sleep(Duration::from_secs(200)).await;
     let tries = fake.count("namespaces/a/pods");
-    assert!((6..=60).contains(&tries), "{tries} tries in 30 s");
+    assert!((4..=8).contains(&tries), "{tries} tries in 200 s");
     assert_eq!(pods.state(), forbidden);
     let asking: Vec<_> = futures::future::join_all((0..10).map(|_| hub.rows(query(&["a"]))))
         .await
@@ -1481,4 +1481,51 @@ async fn reviews_of_the_same_question_in_flight_send_one_request() {
     );
     assert_eq!(ask("a").await, Some(true));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2, "a yes is kept");
+}
+
+/// When each list or watch of `path` was sent.
+fn tries(fake: &Fake, path: &str) -> Vec<Instant> {
+    let state = fake.state();
+    state
+        .requests
+        .iter()
+        .filter(|(_, request)| request.contains(path))
+        .map(|(at, _)| *at)
+        .collect()
+}
+
+fn gaps(tries: &[Instant]) -> Vec<Duration> {
+    tries.windows(2).map(|pair| pair[1] - pair[0]).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_part_refused_before_it_listed_tries_again_after_30_s_and_one_that_listed_within_5() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    fake.add("pods", Some("b"), "p2");
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/a/pods".to_owned());
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut never = hub.rows(query(&["a"])).await.unwrap();
+    let mut once = hub.rows(query(&["b"])).await.unwrap();
+    ready(&mut once).await;
+    fake.state()
+        .forbidden
+        .insert("/api/v1/namespaces/b/pods".to_owned());
+    fake.end_watches();
+    let refused = |state: &ViewState| matches!(state, ViewState::Forbidden { .. });
+    until(&mut never, refused).await;
+    until(&mut once, refused).await;
+
+    fake.state().requests.clear();
+    sleep(Duration::from_secs(200)).await;
+    let never = gaps(&tries(&fake, "/namespaces/a/pods"));
+    assert!(never.len() >= 2, "{never:?}");
+    let wait = crate::cluster::REFUSED_FOR..=2 * crate::cluster::REFUSED_FOR;
+    assert!(never.iter().all(|gap| wait.contains(gap)), "{never:?}");
+    let once = gaps(&tries(&fake, "/namespaces/b/pods"));
+    assert!(once.len() >= 40, "{} tries in 200 s", once.len() + 1);
+    let wait = Duration::from_millis(500)..=RETRY_WITHIN;
+    assert!(once.iter().all(|gap| wait.contains(gap)), "{once:?}");
 }

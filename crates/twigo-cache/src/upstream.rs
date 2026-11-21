@@ -25,7 +25,7 @@ use tokio::sync::watch;
 use twigo_ipc::{ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
-use crate::cluster::Cluster;
+use crate::cluster::{Cluster, REFUSED_FOR};
 use crate::decode::{Decode, DecodeError, Event};
 use crate::encoding;
 use crate::request::{self, Collection, Format, WatchFrom};
@@ -264,10 +264,22 @@ async fn start<D: Decode>(
 /// The pause between a failure and the next try: 0.5–5 s in all, as the
 /// upstreams, log streams and forwards wait.
 pub fn backoff() -> ExponentialBackoff {
+    paced(Duration::from_millis(500), RETRY_WITHIN / 2)
+}
+
+/// The pause before a part whose first list RBAC refused tries again: the
+/// hub's own lifetime of RBAC's no, `REFUSED_FOR`.
+fn refusal_pause() -> Duration {
+    paced(REFUSED_FOR, REFUSED_FOR)
+        .next()
+        .expect("the backoff has no maximum of attempts")
+}
+
+fn paced(min: Duration, max: Duration) -> ExponentialBackoff {
     // Jitter adds up to the delay again (ARCHITECTURE 3.2).
     ExponentialBuilder::new()
-        .with_min_delay(Duration::from_millis(500))
-        .with_max_delay(RETRY_WITHIN / 2)
+        .with_min_delay(min)
+        .with_max_delay(max)
         .with_jitter()
         .without_max_times()
         .build()
@@ -715,10 +727,18 @@ where
     }
 
     /// Shows why the server refused, then waits to try again: an API server
-    /// that just restarted refuses for a while what it allows.
+    /// that just restarted refuses for a while what it allows, so a part
+    /// that has listed tries soon, while one that never did, whose RBAC said
+    /// no, waits for the no to pass.
     async fn refused(&mut self, view: ViewState) {
+        let unlisted_no =
+            matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed;
         self.set_phase(Phase::Refused(view));
-        self.pause().await;
+        if unlisted_no {
+            tokio::time::sleep(refusal_pause()).await;
+        } else {
+            self.pause().await;
+        }
     }
 
     async fn pause(&mut self) {
