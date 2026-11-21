@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use http::StatusCode;
 use tokio::time::{Instant, sleep};
-use twigo_ipc::ViewState;
+use twigo_ipc::{ErrorCode, ViewState};
 use twigo_kube::client::{Actor, Budgets, Class};
 
 use super::*;
@@ -16,6 +16,16 @@ pub(super) fn forbidden() -> ViewState {
     ViewState::Forbidden {
         verb: "watch".to_owned(),
         resource: "pods".to_owned(),
+    }
+}
+
+/// The code of the failure that a waiting state waits out.
+pub(super) fn waits_on(state: &ViewState) -> Option<ErrorCode> {
+    match state {
+        ViewState::Connecting { cause } | ViewState::Stale { cause } => {
+            cause.as_ref().map(|cause| cause.code)
+        }
+        _ => None,
     }
 }
 
@@ -568,10 +578,7 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     fake.state().unavailable = 1;
     fake.state().requests.clear();
     fake.end_watches();
-    until(&mut pods, |state| {
-        *state == ViewState::Stale { cause: None }
-    })
-    .await;
+    until(&mut pods, |state| matches!(state, ViewState::Stale { .. })).await;
     ready(&mut pods).await;
     let after = gaps(&fake);
     assert_eq!(after.len(), 1);
@@ -1296,10 +1303,9 @@ async fn whole_rows_wait_for_a_whole_list() {
     fake.state().unavailable = usize::MAX;
     let mut dead = hub.rows(query(&["c"])).await.unwrap();
     let started = Instant::now();
-    assert_eq!(
-        dead.whole().await.unwrap_err(),
-        ViewState::Stale { cause: None }
-    );
+    let failed = dead.whole().await.unwrap_err();
+    assert!(matches!(failed, ViewState::Stale { .. }), "{failed:?}");
+    assert_eq!(waits_on(&failed), Some(ErrorCode::ServerUnavailable));
     assert!(started.elapsed() >= 2 * RETRY_WITHIN);
 
     fake.state().unavailable = 0;
@@ -1596,10 +1602,9 @@ async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_
         .no_endpoints
         .insert("/api/v1/namespaces".into());
     let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
-    assert_eq!(
-        answered.await.expect("it gives up"),
-        Err(ViewState::Stale { cause: None })
-    );
+    let gave_up = answered.await.expect("it gives up").unwrap_err();
+    assert!(matches!(gave_up, ViewState::Stale { .. }), "{gave_up:?}");
+    assert_eq!(waits_on(&gave_up), Some(ErrorCode::ServerUnavailable));
     assert!(
         (18..19).contains(&started.elapsed().as_secs()),
         "10 s after the slot came free at 8 s, not after the call: {:?}",

@@ -109,6 +109,10 @@ struct Status {
     queued: bool,
     /// The store has held a whole list since the upstream started.
     listed: bool,
+    /// The last failure that may pass, which `connecting` and `stale` wait
+    /// out; it goes with any other phase, as a part that lists again has
+    /// none.
+    cause: Option<IpcError>,
 }
 
 impl<T: Item> Upstream<T> {
@@ -119,6 +123,7 @@ impl<T: Item> Upstream<T> {
                 phase: Phase::Connecting,
                 queued: false,
                 listed: false,
+                cause: None,
             }),
             state: watch::Sender::new(ViewState::Connecting { cause: None }),
             watching: AtomicBool::new(false),
@@ -184,14 +189,21 @@ impl<T: Item> Upstream<T> {
     fn update(&self, change: impl FnOnce(&mut Status)) {
         let mut status = self.status();
         change(&mut status);
+        if !matches!(status.phase, Phase::Connecting | Phase::Stale) {
+            status.cause = None;
+        }
         let view = match (&status.phase, status.queued) {
             (Phase::Failed(view) | Phase::Refused(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
-            (Phase::Connecting, _) => ViewState::Connecting { cause: None },
+            (Phase::Connecting, _) => ViewState::Connecting {
+                cause: status.cause.clone(),
+            },
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,
             (Phase::Relisting, _) => ViewState::Relisting,
-            (Phase::Stale, _) => ViewState::Stale { cause: None },
+            (Phase::Stale, _) => ViewState::Stale {
+                cause: status.cause.clone(),
+            },
         };
         // Under the lock, so states go out in the order they were set.
         self.state.send_if_modified(|state| {
@@ -404,24 +416,24 @@ where
                     if quiet {
                         // A server or proxy that ends watches at once must
                         // not have them reopened at once.
-                        self.interrupted();
+                        self.interrupted(None);
                         self.pause().await;
                     }
                     next
                 }
                 Outcome::Retired(next) => {
-                    self.interrupted();
+                    self.interrupted(None);
                     next
                 }
                 Outcome::Idle { next, seen } => {
-                    self.interrupted();
+                    self.interrupted(None);
                     answers(&clients, seen).await;
                     next
                 }
                 Outcome::NotStreamed => unreachable!("a streaming list is only asked for by list"),
                 Outcome::Gone => Next::List,
                 Outcome::NoColumns(next) => {
-                    self.interrupted();
+                    self.interrupted(None);
                     self.pause().await;
                     next
                 }
@@ -448,8 +460,8 @@ where
                 Outcome::Failed { error, verb, next } => {
                     match failure(&error, verb, &self.spec.resource) {
                         Failure::Gone => Next::List,
-                        Failure::Transient => {
-                            self.interrupted();
+                        Failure::Transient(cause) => {
+                            self.interrupted(Some(cause));
                             self.pause().await;
                             next
                         }
@@ -720,9 +732,13 @@ where
     }
 
     /// A list or watch broke off: the upstream is stale while it
-    /// reconnects, or still relisting.
-    fn interrupted(&self) {
+    /// reconnects, or still relisting. `cause` is the failure that broke it,
+    /// when one did; it replaces the last one, which stays till then.
+    fn interrupted(&self, cause: Option<IpcError>) {
         self.upstream.update(|status| {
+            if cause.is_some() {
+                status.cause = cause;
+            }
             if status.phase != Phase::Relisting {
                 status.phase = Phase::Stale;
             }
@@ -815,7 +831,8 @@ pub(crate) async fn read<D: Decode>(
                 match failure(&error, "list", resource) {
                     Failure::Refused(view) => view,
                     Failure::Unauthorized => ViewState::Unauthorized,
-                    Failure::Gone | Failure::Transient => ViewState::Stale { cause: None },
+                    Failure::Gone => ViewState::Stale { cause: None },
+                    Failure::Transient(cause) => ViewState::Stale { cause: Some(cause) },
                 }
             })?;
         let page = decoder
@@ -904,29 +921,68 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
 #[derive(Clone)]
 pub(crate) enum Failure {
     Gone,
-    Transient,
+    /// What may pass, with the failure that says so.
+    Transient(IpcError),
     Refused(ViewState),
     Unauthorized,
+}
+
+impl Failure {
+    /// The failure that may pass, if this is one.
+    pub(crate) fn cause(self) -> Option<IpcError> {
+        match self {
+            Failure::Transient(cause) => Some(cause),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     if twigo_kube::errors::no_credential(error) {
         return Failure::Unauthorized;
     }
-    match error {
-        kube::Error::Api(status) if status.code == 410 => return Failure::Gone,
-        // The connection broke under the watch.
-        kube::Error::ReadEvents(_) => return Failure::Transient,
-        _ => {}
+    if matches!(error, kube::Error::Api(status) if status.code == 410) {
+        return Failure::Gone;
     }
     let error = twigo_kube::errors::request(error);
     match error.kind {
-        ErrorKind::Unavailable | ErrorKind::Timeout => Failure::Transient,
+        ErrorKind::Unavailable | ErrorKind::Timeout => Failure::Transient(error),
         ErrorKind::Unauthorized => Failure::Unauthorized,
         ErrorKind::Forbidden => Failure::Refused(ViewState::Forbidden {
             verb: verb.to_owned(),
             resource: resource.to_owned(),
         }),
         _ => Failure::Refused(ViewState::Error { error }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use twigo_ipc::ViewState;
+
+    use super::*;
+    use crate::table::Row;
+
+    #[test]
+    fn a_cause_goes_when_the_part_lists_again_and_stays_while_it_waits() {
+        let upstream = Upstream::<Row>::new();
+        let refused = IpcError::new(ErrorCode::ConnectRefused, "refused");
+        upstream.update(|status| {
+            status.cause = Some(refused.clone());
+            status.phase = Phase::Stale;
+        });
+        let cause = Some(refused);
+        assert_eq!(
+            upstream.current(),
+            ViewState::Stale {
+                cause: cause.clone()
+            }
+        );
+        upstream.update(|status| status.phase = Phase::Connecting);
+        assert_eq!(upstream.current(), ViewState::Connecting { cause });
+
+        upstream.update(|status| status.phase = Phase::Ready);
+        upstream.update(|status| status.phase = Phase::Stale);
+        assert_eq!(upstream.current(), ViewState::Stale { cause: None });
     }
 }

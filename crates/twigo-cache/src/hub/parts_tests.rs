@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use http::StatusCode;
 use tokio::time::sleep;
-use twigo_ipc::{Part, PartState, Parts, ViewState};
+use twigo_ipc::{ErrorCode, Part, PartState, Parts, ViewState};
 use twigo_kube::client::Budgets;
 
-use super::tests::{budget, forbidden, pods, query, reach, ready, settle, until};
+use super::tests::{budget, forbidden, pods, query, reach, ready, settle, until, waits_on};
 use super::*;
 use crate::cluster::{REFUSED_FOR, RESOLVED_FOR};
 use crate::fake::Fake;
@@ -217,11 +217,33 @@ async fn a_first_list_that_broke_off_on_a_transient_error_says_connecting() {
     let mut mirror = Mirror::default();
 
     until_shown(&mut list, &mut mirror, |m| {
-        m.unready() == [namespace_part("a", ViewState::Stale { cause: None }, false)]
+        matches!(m.unready(), [part] if matches!(part.state, ViewState::Stale { .. }) && !part.shown)
     })
     .await;
-    assert_eq!(mirror.status, Some(ViewState::Connecting { cause: None }));
+    let status = mirror.status.clone().expect("a batch came");
+    assert!(matches!(status, ViewState::Connecting { .. }), "{status:?}");
+    assert_eq!(waits_on(&status), Some(ErrorCode::ServerUnavailable));
 
+    until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
+    assert_eq!(mirror.status, Some(ViewState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_connection_says_why_while_the_part_waits_and_a_list_that_recovers_drops_it() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a"]);
+    fake.state().refused = true;
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&["a"])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| {
+        m.status.as_ref().and_then(waits_on) == Some(ErrorCode::ConnectRefused)
+    })
+    .await;
+    assert!(matches!(mirror.status, Some(ViewState::Connecting { .. })));
+
+    fake.state().refused = false;
     until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
     assert_eq!(mirror.status, Some(ViewState::Ready));
 }
@@ -828,19 +850,19 @@ async fn all_namespaces_wait_for_what_does_not_answer_and_never_take_it_for_a_re
         ErrorCode::CredentialsPluginTimeout,
         "the credential plugin timed out",
     );
-    for (failing, says) in [
-        (
-            "the cluster-wide review",
-            ViewState::Connecting { cause: None },
-        ),
-        ("the namespaces", ViewState::Connecting { cause: None }),
-        (
-            "the clients",
-            ViewState::Error {
-                error: error.clone(),
-            },
-        ),
-    ] {
+    for failing in ["the cluster-wide review", "the namespaces", "the clients"] {
+        let says = |state: &ViewState| match failing {
+            "the clients" => {
+                *state
+                    == ViewState::Error {
+                        error: error.clone(),
+                    }
+            }
+            _ => {
+                matches!(state, ViewState::Connecting { .. })
+                    && waits_on(state) == Some(ErrorCode::ServerUnavailable)
+            }
+        };
         let fake = Fake::default();
         allowed_in_three(&fake);
         let (hub, down, tries, _clients) = connecting(&fake, error.clone());
@@ -863,11 +885,17 @@ async fn all_namespaces_wait_for_what_does_not_answer_and_never_take_it_for_a_re
         };
         let mut list = hub.rows(query(&[])).await.unwrap();
         let mut mirror = Mirror::default();
-        assert_eq!(list.state(), says, "{failing}");
+        let first = list.state();
+        let waiting_for_the_first_try = matches!(first, ViewState::Connecting { cause: None });
+        assert!(
+            says(&first) || waiting_for_the_first_try,
+            "{failing}: {first:?}"
+        );
 
         sleep(Duration::from_secs(60)).await;
         mirror.read(&list);
-        assert_eq!(mirror.status, Some(says), "{failing}");
+        let status = mirror.status.clone().expect("a batch came");
+        assert!(says(&status), "{failing}: {status:?}");
         assert_eq!(
             hub.scopes(),
             [],

@@ -38,7 +38,7 @@ use twigo_ipc::{
     DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -665,9 +665,11 @@ impl Core {
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
         self.hub.namespaces(&context).await.map_err(|state| {
-            state.refusal().unwrap_or_else(|| {
-                IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable")
-            })
+            match state {
+                ViewState::Stale { cause: Some(cause) } => Some(cause),
+                state => state.refusal(),
+            }
+            .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
         })
     }
 

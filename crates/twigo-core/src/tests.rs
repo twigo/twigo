@@ -779,6 +779,17 @@ fn mark_local(core: &Core) {
         .unwrap();
 }
 
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_of_a_cluster_that_refuses_the_connection_say_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path(), UNREACHABLE);
+    core.catalog.contexts().await;
+    let space = core.state.open_space("kind-local").id;
+
+    let error = core.namespaces(&space).await.unwrap_err();
+    assert_eq!(error.code, twigo_ipc::ErrorCode::ConnectRefused);
+}
+
 #[tokio::test]
 async fn a_context_s_mode_comes_from_its_kubeconfig_and_reaches_its_clients() {
     let dir = tempfile::tempdir().unwrap();

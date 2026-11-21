@@ -82,6 +82,8 @@ pub struct State {
     reviews_waiting: usize,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
+    /// Every request fails as when the cluster refuses the connection.
+    pub refused: bool,
     /// `/version` sends its headers and never its body, as over a connection
     /// whose window is full.
     pub version_body_hangs: bool,
@@ -549,6 +551,14 @@ impl Fake {
         request: Request<kube::client::Body>,
     ) -> Result<Response<Body>, BoxError> {
         let path = request.uri().path();
+        if self.state().refused {
+            self.state()
+                .requests
+                .push((Instant::now(), request.uri().to_string()));
+            return Err(Box::new(std::io::Error::from(
+                std::io::ErrorKind::ConnectionRefused,
+            )));
+        }
         if (path == "/api" || path == "/apis") && self.state().discovery_hangs {
             self.state()
                 .requests
