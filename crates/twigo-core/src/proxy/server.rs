@@ -14,6 +14,7 @@ use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 use twigo_log::Repeats;
+use twigo_panic::contain;
 
 use super::handle::handle;
 use super::tls::Tls;
@@ -39,7 +40,23 @@ pub(super) async fn bind(core: Weak<Core>) -> std::io::Result<Endpoint> {
     let tls = Tls::new()?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
-    tokio::spawn(accept(listener, tls.acceptor, address, core));
+    // Its listener goes with it, and the address is in every proxy
+    // kubeconfig: nothing starts it again.
+    tokio::spawn({
+        let owner = core.clone();
+        async move {
+            if contain(
+                "policy proxy",
+                accept(listener, tls.acceptor, address, core),
+            )
+            .await
+            .is_err()
+                && let Some(owner) = owner.upgrade()
+            {
+                owner.reporter.fatal("policy proxy");
+            }
+        }
+    });
     Ok(Endpoint {
         address,
         ca: tls.ca,

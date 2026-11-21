@@ -2,15 +2,20 @@
 //! has no runtime to be scoped to, so any other thread of the process may
 //! spend it: these tests run alone, one at a time.
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use tokio::runtime::Runtime;
+use tokio::sync::{mpsc, watch};
+use twigo_core::Core;
 use twigo_core::catalog::{self, Catalog};
 use twigo_core::state::State;
-use twigo_ipc::StateEntry;
+use twigo_env::{ShellEnv, Status};
+use twigo_ipc::{Environment, StateEntry};
+use twigo_kube::client::Actor;
 use twigo_panic::{Supervisor, inject, reports};
 
 fn serial() -> MutexGuard<'static, ()> {
@@ -113,4 +118,65 @@ fn a_kubeconfig_watch_that_panics_is_followed_again_by_the_supervisor() {
 
     write(dir.path(), THREE);
     until("the new watch", || listed(&catalog) == 3);
+}
+
+#[tokio::test]
+async fn a_policy_proxy_whose_accept_loop_panics_takes_the_fatal_path_at_once() {
+    inject::arm("policy proxy", 1);
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), ONE);
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (told, fatal) = mpsc::unbounded_channel();
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+        std::iter::empty::<(OsString, OsString)>(),
+    ))));
+    let supervising = tokio::spawn(core.start(
+        followed,
+        Some(dir.path().join("config")),
+        None,
+        move |why| told.send(why).unwrap(),
+    ));
+    core.catalog.contexts().await;
+    core.policy
+        .set_environment("kind-a", Some(Environment::Local))
+        .unwrap();
+    let _process = core
+        .proxy_process(Actor::Terminal, "Terminal 1", Some("main"), "kind-a")
+        .await
+        .unwrap();
+
+    let mut fatal = fatal;
+    let why = tokio::time::timeout(Duration::from_secs(5), fatal.recv())
+        .await
+        .expect("the fatal path within five seconds")
+        .unwrap();
+    assert_eq!(why.duty, "policy proxy");
+    supervising.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_duty_that_panics_four_times_takes_the_fatal_path() {
+    inject::arm("unlock expiry", 4);
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (told, mut fatal) = mpsc::unbounded_channel();
+    let (_status, followed) = watch::channel(Status::Resolving);
+    let supervising = tokio::spawn(core.start(followed, None, None, move |why| {
+        told.send(why).unwrap();
+    }));
+    let why = tokio::time::timeout(Duration::from_secs(5), fatal.recv())
+        .await
+        .expect("the fatal path within five seconds")
+        .unwrap();
+    assert_eq!(why.duty, "unlock expiry");
+    assert_eq!(inject::armed("unlock expiry"), 0, "it panicked four times");
+    supervising.await.unwrap();
 }
