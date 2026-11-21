@@ -16,6 +16,7 @@ import {
   ALL_NAMESPACES,
   filtered,
   scopeNames,
+  variant,
   type QuickAccessContext,
   type QuickAccessProvider,
   type QuickPickItem,
@@ -266,6 +267,9 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
     help: "Set the namespace scope",
     acceptLabel: "Only this",
     checkedWords: namespaceCount,
+    // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+    checklist: variant("pick") === "checklist",
+    live: variant("pick") === "live",
     async items(filter, context) {
       const space = spaces.active;
       if (!space) return [];

@@ -215,16 +215,16 @@ function Open({ session }: { session: Session }) {
   const toggle = (item: QuickPickItem) => {
     const before = on(item);
     if (before === undefined) return;
-    setChecks((held) => {
-      const base = held.prefix === provider?.prefix ? held : noChecks("");
-      const ticks = new Map(base.ticks);
-      ticks.set(item.id, !(base.ticks.get(item.id) ?? before));
-      return {
-        prefix: provider?.prefix ?? "",
-        ticks,
-        touched: true,
-      };
-    });
+    const next = new Map(checks.ticks).set(item.id, !before);
+    setChecks({ prefix: provider?.prefix ?? "", ticks: next, touched: true });
+    // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+    if (provider?.live) {
+      quickAccess
+        .acceptChecked(ticked({ ...checks, ticks: next }), { close: false })
+        .catch((error: unknown) => {
+          workbench.report(error);
+        });
+    }
     // The next name replaces what is filtered now, and not the prefix.
     const input = field.current;
     if (input) {
@@ -235,6 +235,11 @@ function Open({ session }: { session: Session }) {
       );
     }
   };
+
+  // From the first tick, Enter applies the ticked set and a click ticks.
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  const ticking =
+    provider?.live !== true && (checks.touched || provider?.checklist === true);
 
   const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
 
@@ -250,7 +255,7 @@ function Open({ session }: { session: Session }) {
       if (active) accept(active, options);
     } else if (active?.checked === undefined && active !== undefined) {
       accept(active, options);
-    } else if (checks.touched) applyChecked();
+    } else if (ticking) applyChecked();
     else if (active) accept(active, options);
     else quickAccess.hide();
   };
@@ -370,8 +375,7 @@ function Open({ session }: { session: Session }) {
                         : undefined
                     }
                     onSelect={() => {
-                      if (on(item) !== undefined && checks.touched)
-                        toggle(item);
+                      if (on(item) !== undefined && ticking) toggle(item);
                       else accept(item, { side: false });
                     }}
                     onToggle={() => {
@@ -390,7 +394,7 @@ function Open({ session }: { session: Session }) {
             ask?.acceptLabel ??
             (pick
               ? "Select"
-              : many && checks.touched
+              : many && ticking
                 ? `Apply · ${words(count)}`
                 : provider?.acceptLabel)
           }
