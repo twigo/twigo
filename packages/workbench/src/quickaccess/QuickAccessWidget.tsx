@@ -441,7 +441,6 @@ function Row({
 }: {
   id: string | undefined;
   item: QuickPickItem;
-  /** Whether the cursor is on it. */
   cursor: boolean;
   /** `aria-selected`: where the person picks several rows, whether it is ticked, and none for an action; else where the cursor is. */
   selected: boolean | undefined;
