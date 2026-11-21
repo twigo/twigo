@@ -1440,23 +1440,13 @@ async fn a_no_from_rbac_is_asked_again_after_30_s_and_a_yes_holds() {
     assert_eq!(fake.count("selfsubjectaccessreviews"), 2);
 }
 
-fn list_pods() -> twigo_ipc::Access {
-    twigo_ipc::Access {
-        verb: "list".to_owned(),
-        group: String::new(),
-        resource: "pods".to_owned(),
-        subresource: None,
-        name: None,
-    }
-}
-
 #[tokio::test(start_paused = true)]
 async fn reviews_of_the_same_question_in_flight_send_one_request() {
     let fake = Fake::default();
     fake.allow(Some("a"), "list", "pods");
     fake.state().reviews_take = Duration::from_secs(1);
     let (hub, _clients) = fake.hub(Budgets::default());
-    let access = list_pods();
+    let access = list_access(&pods());
     let ask = |namespace| hub.may("kind-test", Some(namespace), &access);
     let answers = tokio::join!(ask("a"), ask("a"), ask("b"));
     assert_eq!(answers, (Some(true), Some(true), Some(false)));
