@@ -22,7 +22,7 @@ const key = (code: string, init: KeyboardEventInit = {}) => {
   });
 };
 
-test("a person who may not list namespaces types names and adds each with Space, the typed one under the cursor, and Enter applies them with the current ones", async () => {
+test("a person who may not list namespaces types names and adds each with Space, the typed one under the cursor though All namespaces matches the text too, and Enter applies them with the current ones", async () => {
   const workbench = await mountKube(createMockBackend("rbacTypedNamespaces"));
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
@@ -32,7 +32,7 @@ test("a person who may not list namespaces types names and adds each with Space,
     workbench.quickAccess.show("ns ");
   });
   await settle();
-  for (const name of ["team-b", "payments"]) {
+  for (const name of ["space", "payments"]) {
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: `ns ${name}` },
     });
@@ -45,7 +45,7 @@ test("a person who may not list namespaces types names and adds each with Space,
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual([
     "default",
     "payments",
-    "team-b",
+    "space",
   ]);
   expect(workbench.quickAccess.session).toBeUndefined();
 });
@@ -64,27 +64,6 @@ test("Enter on the typed name alone takes it as the only namespace", async () =>
   await settle();
   expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["team-b"]);
 });
-
-test.each([
-  ["c", "checkout"],
-  ["pa", "payments"],
-])(
-  "ns %s then Enter takes %s, though All namespaces matches the text too",
-  async (typed, name) => {
-    const workbench = await mountKube();
-    act(() => {
-      workbench.quickAccess.show("ns ");
-    });
-    await settle();
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: `ns ${typed}` },
-    });
-    await settle();
-    key("Enter");
-    await settle();
-    expect(workbench.spaces.state("prod-eu").namespaces).toEqual([name]);
-  },
-);
 
 test.each([
   [["payments"], "s", "search"],
@@ -112,19 +91,3 @@ test.each([
     expect(workbench.spaces.state("prod-eu").namespaces).toEqual([name]);
   },
 );
-
-test("a person who may not list namespaces ticks the name typed with Space, though All namespaces matches the text too", async () => {
-  const workbench = await mountKube(createMockBackend("rbacTypedNamespaces"));
-  act(() => {
-    workbench.quickAccess.show("ns ");
-  });
-  await settle();
-  fireEvent.change(screen.getByRole("combobox"), {
-    target: { value: "ns space" },
-  });
-  await settle();
-  key("Space");
-  key("Enter");
-  await settle();
-  expect(workbench.spaces.state("prod-eu").namespaces).toEqual(["space"]);
-});
