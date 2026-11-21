@@ -622,9 +622,9 @@ impl Core {
             .await
             .map_err(|e| IpcError::from(&e))?;
         let gvk = GroupVersionKind::gvk(&query.group, &query.version, &query.kind);
-        let schema = tokio::task::spawn_blocking(move || document.json_schema(&gvk))
-            .await
-            .expect("converting a schema does not panic");
+        let schema = twigo_panic::joined(
+            tokio::task::spawn_blocking(move || document.json_schema(&gvk)).await,
+        );
         schema.ok_or_else(|| {
             IpcError::new(
                 ErrorCode::OpenapiNoKind,

@@ -47,6 +47,7 @@ tower.workspace = true
 tracing.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
+twigo-panic.workspace = true
 twigo-policy.workspace = true
 yaml-edit.workspace = true
 

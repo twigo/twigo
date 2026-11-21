@@ -6027,6 +6027,7 @@ dependencies = [
  "tracing",
  "twigo-ipc",
  "twigo-kube",
+ "twigo-panic",
  "twigo-quantity",
 ]
 
@@ -6071,6 +6072,7 @@ dependencies = [
  "twigo-kube",
  "twigo-log",
  "twigo-netmon",
+ "twigo-panic",
  "twigo-policy",
  "twigo-quantity",
  "twigo-sessions",
@@ -6189,6 +6191,7 @@ dependencies = [
  "twigo-cache",
  "twigo-env",
  "twigo-ipc",
+ "twigo-panic",
  "twigo-policy",
  "yaml-edit",
 ]
