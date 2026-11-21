@@ -46,7 +46,7 @@ fn edit(
     id_token: &str,
     refresh_token: Option<&str>,
 ) -> Result<String, PersistError> {
-    let file = YamlFile::from_str(text).map_err(|error| WriteError::Parse(error.to_string()))?;
+    let file = YamlFile::from_str(text).map_err(WriteError::from)?;
     let config = file
         .documents()
         .filter_map(|document| document.as_mapping()?.get_sequence("users"))
