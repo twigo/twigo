@@ -812,13 +812,19 @@ impl Core {
         local: Option<u16>,
     ) -> Result<ForwardStarted, IpcError> {
         let (context, base, runs) = {
-            let table = self.forwards.table();
-            let entry = table.entries.get(&id.0).ok_or_else(|| {
+            let mut table = self.forwards.table();
+            let missing = || {
                 IpcError::new(
                     ErrorCode::ForwardNotFound,
                     format!("forward {} was removed", id.0),
                 )
-            })?;
+            };
+            // A data path that ended on a panic starts only as a new one.
+            let entry = table.entries.get_mut(&id.0).ok_or_else(missing)?;
+            if entry.run.as_ref().is_some_and(|run| run.data.ended()) {
+                entry.stop();
+            }
+            let entry = &table.entries[&id.0];
             let target = &entry.base.target;
             self.forwards.admit(&table, &entry.context, target)?;
             (

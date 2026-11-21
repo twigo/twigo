@@ -6302,6 +6302,7 @@ dependencies = [
  "twigo-ipc",
  "twigo-kube",
  "twigo-log",
+ "twigo-panic",
 ]
 
 [[package]]

@@ -2133,6 +2133,48 @@ async fn a_resume_and_a_move_of_a_failed_forward_answer_starting_and_start_it_ag
 }
 
 #[tokio::test]
+async fn a_forward_whose_data_path_panics_fails_and_a_resume_starts_it_as_a_new_one() {
+    twigo_panic::inject::arm("forward", 1);
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let local = free();
+    let ForwardStarted::Started { forward } = core
+        .forward_start(StartForward {
+            target: target("kind-plain", "api"),
+            port: 8080,
+            local: Some(local),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a free port starts");
+    };
+    until("its data path's panic fails it", || {
+        failed_with(&core, |error| error.code == ErrorCode::InternalPanic)
+    })
+    .await;
+
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward {
+            id: forward.id,
+            local: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert_eq!(forward.local, local, "on the port it had");
+    until("the forward is ready", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_the_refusal_and_starts_nothing()
  {
     let dir = tempfile::tempdir().unwrap();
