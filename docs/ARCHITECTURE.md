@@ -1823,12 +1823,12 @@ What a person needs when something goes wrong, and what a bug report holds, star
   The filter is `warn,twigo=info`: warnings of any library, and Twigo's own crates from info.
   `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); a value that is not a filter is said in the log and the default applies.
   **Set Log Level…** raises Twigo's own crates to info, debug or trace while the libraries stay at warn, until Twigo quits; it swaps the filter at run time and logs the change.
-  `log_level_set` is its command.
+  `log_level_set` is its command, and no menu entry calls it yet.
 - **Reveal Log File.**
-  `log_reveal` shows the current file in the system's file manager.
+  `log_reveal` shows the current file in the system's file manager, and no menu entry calls it yet.
   Rust calls the opener plugin, so the webview holds no permission of the plugin's own, as with `url_open`.
 - **The webview.**
-  Its errors reach the log through one command, `diagnostics_log`, with the window's label, as events of the target `twigo::webview`.
+  Its errors reach the log through one command, `diagnostics_log`, with the window's label, as events of the target `twigo::webview`; the webview does not call it yet.
 - **The panic hook.**
   `twigo-log` installs it first in `main`, after the `--dump-env` copy has returned, since that copy never opens the log.
   A panic writes one record in the log's own shape: the time, the thread's name, the tokio task's id where the panic is in one, the location, the message, a backtrace and Twigo's version.
