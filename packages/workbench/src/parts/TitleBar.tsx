@@ -146,9 +146,7 @@ function Breadcrumb({
       <ChevronRight aria-hidden className="size-3.5 shrink-0 text-quiet" />
       <Crumb
         label={`Select namespace, ${spoken}`}
-        tooltip={
-          scope.more > 0 && !whole ? `Namespaces: ${scope.all}` : undefined
-        }
+        tooltip={scope.more > 0 && !whole ? scope.tooltip : undefined}
         onClick={opening("ns ")}
         className={cn(!copy && "max-w-max flex-1 basis-0")}
       >
