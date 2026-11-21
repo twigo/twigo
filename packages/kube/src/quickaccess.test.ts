@@ -185,8 +185,12 @@ test("an unknown resource gives nothing to open", async () => {
   expect((await run(":gizmos payments")).items).toEqual([]);
 });
 
-test("ns lists all namespaces, the current ones ticked under Selected, then the others", async () => {
+test("ns lists all namespaces, the current ones ticked under Selected, then the others, and says all namespaces is the current scope when it is", async () => {
   const { workbench, run } = await kube();
+  expect((await run("ns ")).items[0]).toMatchObject({
+    label: "All namespaces",
+    description: "current",
+  });
   workbench.spaces.update("prod-eu", (state) => ({
     ...state,
     namespaces: ["auth", "payments"],
@@ -229,15 +233,6 @@ test("ns ranks every namespace the filter matches by its score, ticked or not, w
   expect(labels[labels.length - 1]).toBe("All namespaces");
   expect(items.every(({ group }) => group === undefined)).toBe(true);
   expect(items.find(({ label }) => label === "search")?.checked).toBe(true);
-});
-
-test("ns says that all namespaces is the current scope when it is", async () => {
-  const { run } = await kube();
-  const [all] = (await run("ns ")).items;
-  expect(all).toMatchObject({
-    label: "All namespaces",
-    description: "current",
-  });
 });
 
 test("ns takes a row alone, or the ticked set sorted, and none ticked or the All row is every namespace", async () => {
