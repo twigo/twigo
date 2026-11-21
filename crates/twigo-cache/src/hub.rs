@@ -595,30 +595,33 @@ impl Hub {
             _ => namespace,
         };
         let clients = (self.inner.connect)(context.to_owned()).await.ok()?;
-        let cluster = self.inner.cluster(context);
-        if let Some(may) = cluster.may(&clients, namespace, access) {
-            return Some(may);
-        }
-        let review = SelfSubjectAccessReview {
-            spec: SelfSubjectAccessReviewSpec {
-                resource_attributes: Some(ResourceAttributes {
-                    verb: Some(access.verb.clone()),
-                    group: Some(access.group.clone()),
-                    resource: Some(access.resource.clone()),
-                    subresource: access.subresource.clone(),
-                    namespace: namespace.map(str::to_owned),
-                    name: access.name.clone(),
-                    ..ResourceAttributes::default()
-                }),
-                ..SelfSubjectAccessReviewSpec::default()
-            },
-            ..SelfSubjectAccessReview::default()
+        let ask = || {
+            let review = SelfSubjectAccessReview {
+                spec: SelfSubjectAccessReviewSpec {
+                    resource_attributes: Some(ResourceAttributes {
+                        verb: Some(access.verb.clone()),
+                        group: Some(access.group.clone()),
+                        resource: Some(access.resource.clone()),
+                        subresource: access.subresource.clone(),
+                        namespace: namespace.map(str::to_owned),
+                        name: access.name.clone(),
+                        ..ResourceAttributes::default()
+                    }),
+                    ..SelfSubjectAccessReviewSpec::default()
+                },
+                ..SelfSubjectAccessReview::default()
+            };
+            let reviews = Api::<SelfSubjectAccessReview>::all(clients.api.clone());
+            async move {
+                let answer = reviews.create(&PostParams::default(), &review).await.ok()?;
+                Some(answer.status.is_some_and(|status| status.allowed))
+            }
+            .boxed()
         };
-        let reviews = Api::<SelfSubjectAccessReview>::all(clients.api.clone());
-        let answer = reviews.create(&PostParams::default(), &review).await.ok()?;
-        let may = answer.status.is_some_and(|status| status.allowed);
-        cluster.set_may(&clients, namespace, access, may);
-        Some(may)
+        self.inner
+            .cluster(context)
+            .review(&clients, namespace, access, ask)
+            .await
     }
 }
 

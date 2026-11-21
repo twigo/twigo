@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use tokio::time::Instant;
 
 use twigo_ipc::Access;
@@ -15,6 +17,12 @@ use twigo_kube::client::Clients;
 /// How long RBAC's no holds before it is asked again, so a RoleBinding
 /// granted since counts; a yes holds, as the server still decides.
 pub(crate) const REFUSED_FOR: Duration = Duration::from_secs(30);
+
+/// What a review asks: the namespace, none for every namespace, and the access.
+type Asked = (Option<String>, Access);
+
+/// A review under way, whose answer every asker of it takes.
+type Review = Shared<BoxFuture<'static, Option<bool>>>;
 
 #[derive(Default)]
 pub(crate) struct Cluster {
@@ -29,7 +37,10 @@ struct Facts {
     paged: HashSet<(String, String)>,
     /// By namespace, none for all of them, and what is asked: the answer,
     /// and when it came.
-    may: HashMap<(Option<String>, Access), (bool, Instant)>,
+    may: HashMap<Asked, (bool, Instant)>,
+    /// The reviews under way, by what they ask, which each asker of the same
+    /// waits for instead of sending its own.
+    reviewing: HashMap<Asked, Review>,
 }
 
 impl Cluster {
@@ -49,30 +60,45 @@ impl Cluster {
             .insert((group.to_owned(), version.to_owned()));
     }
 
-    pub fn may(
-        &self,
+    /// Whether RBAC lets the person do `access` in `namespace`, or with none
+    /// in every namespace: the answer kept, else the one `ask` sends, which
+    /// every asker of the same review shares while it is under way. None
+    /// when the cluster cannot answer.
+    pub async fn review(
+        self: &Arc<Self>,
         clients: &Arc<Clients>,
         namespace: Option<&str>,
         access: &Access,
+        ask: impl FnOnce() -> BoxFuture<'static, Option<bool>>,
     ) -> Option<bool> {
-        let &(may, at) = self
-            .facts(clients)
-            .may
-            .get(&(namespace.map(str::to_owned), access.clone()))?;
-        (may || at.elapsed() < REFUSED_FOR).then_some(may)
-    }
-
-    pub fn set_may(
-        &self,
-        clients: &Arc<Clients>,
-        namespace: Option<&str>,
-        access: &Access,
-        may: bool,
-    ) {
-        self.facts(clients).may.insert(
-            (namespace.map(str::to_owned), access.clone()),
-            (may, Instant::now()),
-        );
+        let asked: Asked = (namespace.map(str::to_owned), access.clone());
+        let review = {
+            let mut facts = self.facts(clients);
+            if let Some(&(may, at)) = facts.may.get(&asked)
+                && (may || at.elapsed() < REFUSED_FOR)
+            {
+                return Some(may);
+            }
+            facts
+                .reviewing
+                .entry(asked.clone())
+                .or_insert_with(|| {
+                    let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
+                    async move {
+                        let may = ask.await;
+                        let mut facts = cluster.facts(&clients);
+                        facts.reviewing.remove(&asked);
+                        if let Some(may) = may {
+                            facts.may.insert(asked, (may, Instant::now()));
+                        }
+                        may
+                    }
+                    .boxed()
+                    .shared()
+                })
+                .clone()
+        };
+        review.await
     }
 
     fn facts(&self, clients: &Arc<Clients>) -> MutexGuard<'_, Facts> {

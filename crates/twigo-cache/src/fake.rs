@@ -72,6 +72,11 @@ pub struct State {
     /// every namespace), the verb and the resource they ask; any other is
     /// answered no.
     allowed: HashSet<(Option<String>, String, String)>,
+    /// Each access review waits this long before it is answered.
+    pub reviews_take: std::time::Duration,
+    /// The most access reviews that waited at once.
+    pub reviews_overlap: usize,
+    reviews_waiting: usize,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
     /// `/version` sends its headers and never its body, as over a connection
@@ -239,20 +244,34 @@ fn target(path: &str) -> Target {
     }
 }
 
-struct Waiting<'a>(&'a Fake);
+/// A request that waits for its answer: a Metrics API one, or an access review.
+struct Waiting<'a> {
+    fake: &'a Fake,
+    review: bool,
+}
 
 impl<'a> Waiting<'a> {
-    fn start(fake: &'a Fake) -> Self {
+    fn start(fake: &'a Fake, review: bool) -> Self {
         let mut state = fake.state();
-        state.metrics_waiting += 1;
-        state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
-        Self(fake)
+        if review {
+            state.reviews_waiting += 1;
+            state.reviews_overlap = state.reviews_overlap.max(state.reviews_waiting);
+        } else {
+            state.metrics_waiting += 1;
+            state.metrics_overlap = state.metrics_overlap.max(state.metrics_waiting);
+        }
+        Self { fake, review }
     }
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
-        self.0.state().metrics_waiting -= 1;
+        let mut state = self.fake.state();
+        if self.review {
+            state.reviews_waiting -= 1;
+        } else {
+            state.metrics_waiting -= 1;
+        }
     }
 }
 
@@ -534,7 +553,7 @@ impl Fake {
             return std::future::pending().await;
         }
         if path.starts_with("/apis/metrics.k8s.io/") && !self.state().metrics_takes.is_zero() {
-            let _waiting = Waiting::start(self);
+            let _waiting = Waiting::start(self, false);
             let takes = self.state().metrics_takes;
             tokio::time::sleep(takes).await;
             return Ok(self.respond(request));
@@ -579,10 +598,16 @@ impl Fake {
             asked("verb").expect("a verb"),
             asked("resource").expect("a resource"),
         );
-        let mut state = self.state();
-        state.requests.push((Instant::now(), uri));
-        let allowed = state.allowed.contains(&key);
-        drop(state);
+        let takes = {
+            let mut state = self.state();
+            state.requests.push((Instant::now(), uri));
+            state.reviews_take
+        };
+        if !takes.is_zero() {
+            let _waiting = Waiting::start(self, true);
+            tokio::time::sleep(takes).await;
+        }
+        let allowed = self.state().allowed.contains(&key);
         full(
             StatusCode::CREATED,
             &json!({
