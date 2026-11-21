@@ -22,7 +22,7 @@ pub struct Column {
     pub priority: i32,
     /// Whether its text cells hold a duration that the server printed when
     /// it sent the row, which then stops counting: a `date`, and the columns
-    /// of [`PRINTED`].
+    /// of `PRINTED`.
     pub prints_duration: bool,
 }
 

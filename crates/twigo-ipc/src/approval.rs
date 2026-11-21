@@ -24,7 +24,7 @@ pub struct ApprovalAsk {
     /// What the client says it runs, `kubectl apply`, from its own
     /// `Kubectl-Command` header: a label, never checked.
     pub command: Option<String>,
-    /// The word a person reads in "Allow Terminal 2 to <verb> <target>":
+    /// The word a person reads in `"Allow Terminal 2 to <verb> <target>"`:
     /// `exec` for `pods/exec` and `attach` for `pods/attach`, which RBAC
     /// calls `create` or `get`, `evict` for `pods/eviction`, which RBAC calls
     /// `create`, and RBAC's verb otherwise: `create`, `patch`, `delete`.
