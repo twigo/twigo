@@ -216,6 +216,21 @@ test("ns lists all namespaces, the current ones ticked under Selected, then the 
   expect(others.map((item) => item.label)).not.toContain("payments");
 });
 
+test("ns ranks every namespace the filter matches by its score, ticked or not, with no heading and All namespaces after them", async () => {
+  const { workbench, run } = await kube();
+  workbench.spaces.update("prod-eu", (state) => ({
+    ...state,
+    namespaces: ["payments", "search"],
+  }));
+  const { items } = await run("ns c");
+  const labels = items.map(({ label }) => label);
+  expect(labels[0]).toBe("checkout");
+  expect(labels.indexOf("batch")).toBeLessThan(labels.indexOf("search"));
+  expect(labels[labels.length - 1]).toBe("All namespaces");
+  expect(items.every(({ group }) => group === undefined)).toBe(true);
+  expect(items.find(({ label }) => label === "search")?.checked).toBe(true);
+});
+
 test("ns says that all namespaces is the current scope when it is", async () => {
   const { run } = await kube();
   const [all] = (await run("ns ")).items;

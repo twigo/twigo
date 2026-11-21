@@ -86,6 +86,33 @@ test.each([
   },
 );
 
+test.each([
+  [["payments"], "s", "search"],
+  [["payments"], "n", "notify"],
+  [["payments", "search"], "c", "checkout"],
+  [["payments", "search"], "ch", "checkout"],
+])(
+  "with %j current, ns %s then Enter takes %s, a better match than the current namespaces",
+  async (current, typed, name) => {
+    const workbench = await mountKube();
+    workbench.spaces.update("prod-eu", (state) => ({
+      ...state,
+      namespaces: current,
+    }));
+    act(() => {
+      workbench.quickAccess.show("ns ");
+    });
+    await settle();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: `ns ${typed}` },
+    });
+    await settle();
+    key("Enter");
+    await settle();
+    expect(workbench.spaces.state("prod-eu").namespaces).toEqual([name]);
+  },
+);
+
 test("a person who may not list namespaces ticks the name typed with Space, though All namespaces matches the text too", async () => {
   const workbench = await mountKube(createMockBackend("rbacTypedNamespaces"));
   act(() => {

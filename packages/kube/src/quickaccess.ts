@@ -303,15 +303,16 @@ export function namespaceProvider(workbench: Workbench): QuickAccessProvider {
             }),
           }),
         );
-      const namespaces = [
-        ...filtered(selected, search),
-        ...filtered(others, search),
+      if (search === "") return [all, ...selected, ...others];
+      // A filter puts the cursor on the first row, which is to be the best
+      // namespace, ticked or not. The widget gathers rows by group, so the
+      // ranked rows keep none.
+      return [
+        ...filtered([...selected, ...others], search).map(
+          ({ group, ...rest }) => rest,
+        ),
+        ...filtered([all], search),
       ];
-      // A filter puts the cursor on the first row, which is to be a namespace.
-      const action = filtered([all], search);
-      return search === ""
-        ? [...action, ...namespaces]
-        : [...namespaces, ...action];
     },
     accept(item) {
       scope(item.id === ALL ? [] : [item.id]);
