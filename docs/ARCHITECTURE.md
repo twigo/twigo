@@ -302,7 +302,9 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
     - A no resolves the set: the names of the namespaces, a review of each, at most 8 at a time, and an upstream per namespace that a review allows.
       The names come from one list request of the namespaces' metadata, in pages as the hub lists, which takes a request slot and never waits for a watch; the picker's `namespaces_list` reads them the same way, once per opening.
       A review that another asker has under way is not sent again, so lists opened together ask each question once.
-      The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review, and the first one after resolves again, so a namespace created or a binding granted since shows then.
+      The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
+      The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
+      A set with no namespace allowed, or a refusal to list the namespaces, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
     - `Parts.omitted` counts the namespaces of the index that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
     - With no namespace allowed, or the index refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).

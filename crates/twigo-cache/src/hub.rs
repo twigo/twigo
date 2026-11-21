@@ -418,34 +418,62 @@ impl Hub {
     }
 
     /// What all namespaces of the query's resource come to for a person who
-    /// may not list it cluster-wide: the namespaces where a review allows
-    /// listing it, a few at a time, kept with the context's clients. No
+    /// may not list it cluster-wide, as kept with the context's clients or
+    /// asked anew: the namespaces where a review allows listing it. No
     /// namespace when they may list it cluster-wide, or may list it nowhere,
     /// or the namespaces are refused, which the cluster's own refusal then
     /// says.
     ///
-    /// What does not answer is no answer. A namespace whose review does not
-    /// counts as allowed, as an unanswered check does for the UI
-    /// (ARCHITECTURE 5.1), and its part says its own state. When the clients,
-    /// the cluster-wide review or the list of namespaces fail with anything
-    /// but a refusal, the state the subscription waits on comes instead.
+    /// A set kept past its time is read at once, and resolved again in the
+    /// background for the lists after it. What does not answer is no answer:
+    /// when the clients, the cluster-wide review or the list of namespaces
+    /// fail with anything but a refusal, the state the subscription waits on
+    /// comes instead.
     async fn resolve(&self, query: &Query) -> Result<Resolved, ViewState> {
         let access = list_access(&query.resource);
         let clients = (self.inner.connect)(query.context.clone())
             .await
             .map_err(unconnected)?;
         let cluster = self.inner.cluster(&query.context);
-        if let Some(resolved) = cluster.resolved(&clients, &access) {
-            return Ok(resolved);
+        let Some(kept) = cluster.resolved(&clients, &access) else {
+            return self.renew(query, &clients, &cluster).await;
+        };
+        if kept.renew {
+            let (hub, query) = (self.clone(), query.clone());
+            tokio::spawn(async move { hub.renew(&query, &clients, &cluster).await });
         }
-        match self.may(&query.context, None, &access).await {
-            Some(true) => return Ok(Resolved::default()),
+        Ok(kept.resolved)
+    }
+
+    /// Asks what all namespaces come to and keeps it, or forgets the set it
+    /// replaces when there is none to keep.
+    async fn renew(
+        &self,
+        query: &Query,
+        clients: &Arc<Clients>,
+        cluster: &Cluster,
+    ) -> Result<Resolved, ViewState> {
+        let access = list_access(&query.resource);
+        let asked = self.ask(query, &access).await;
+        match &asked {
+            Ok((resolved, true)) => cluster.set_resolved(clients, &access, resolved.clone()),
+            _ => cluster.forget_resolved(clients, &access),
+        }
+        asked.map(|(resolved, _)| resolved)
+    }
+
+    /// What all namespaces come to, and whether it is worth keeping: every
+    /// question answered, which a person who may list cluster-wide needs no
+    /// set for.
+    async fn ask(&self, query: &Query, access: &Access) -> Result<(Resolved, bool), ViewState> {
+        match self.may(&query.context, None, access).await {
+            Some(true) => return Ok((Resolved::default(), false)),
             Some(false) => {}
             None => return Err(ViewState::Connecting),
         }
         let names = match self.namespaces(&query.context).await {
             Ok(names) => names,
-            Err(ViewState::Forbidden { .. }) => return Ok(Resolved::default()),
+            Err(ViewState::Forbidden { .. }) => return Ok((Resolved::default(), true)),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
             Err(_) => return Err(ViewState::Connecting),
         };
@@ -475,10 +503,7 @@ impl Hub {
             omitted: u32::try_from(names.len() - allowed.len()).unwrap_or(u32::MAX),
             allowed,
         };
-        if answers.iter().all(Option::is_some) {
-            cluster.set_resolved(&clients, &access, resolved.clone());
-        }
-        Ok(resolved)
+        Ok((resolved, answers.iter().all(Option::is_some)))
     }
 
     /// An object, followed by an Object upstream for its editor, unless its

@@ -8,7 +8,7 @@ use twigo_kube::client::Budgets;
 
 use super::tests::{budget, pods, query, reach, ready, settle, until};
 use super::*;
-use crate::cluster::RESOLVED_FOR;
+use crate::cluster::{REFUSED_FOR, RESOLVED_FOR};
 use crate::fake::Fake;
 
 fn forbidden() -> ViewState {
@@ -447,12 +447,32 @@ async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_c
     );
 
     assert!(!refused.resolved());
+    assert_eq!(fake.count("/api/v1/namespaces?"), 1);
+
+    sleep(REFUSED_FOR - Duration::from_secs(1)).await;
+    let within = hub.rows(query(&[])).await.unwrap();
+    assert_eq!(within.state(), forbidden(), "no wait for its refusal");
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("/api/v1/namespaces?"),
+        1,
+        "a refusal kept for 30 s is read, not asked"
+    );
 
     fake.state().forbidden.remove("/api/v1/namespaces");
-    sleep(RESOLVED_FOR).await;
+    sleep(Duration::from_secs(2)).await;
     let mut none = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
     until_shown(&mut none, &mut mirror, |m| m.status == Some(forbidden())).await;
+    assert_eq!(fake.count("/api/v1/namespaces?"), 2, "asked again after");
+    let kept = hub.rows(query(&[])).await.unwrap();
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        fake.count("/api/v1/namespaces?"),
+        2,
+        "no namespace allowed is kept the same"
+    );
+    drop(kept);
     assert_eq!(
         mirror.parts,
         Some(Parts {
@@ -471,7 +491,8 @@ async fn all_namespaces_when_the_index_is_refused_or_nothing_is_allowed_is_the_c
 }
 
 #[tokio::test(start_paused = true)]
-async fn what_all_namespaces_came_to_holds_for_five_minutes_and_is_resolved_again_after() {
+async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_resolved_again_for_the_lists_after()
+ {
     let fake = Fake::default();
     forty_namespaces(&fake);
     for name in ["ns-05", "ns-18"] {
@@ -481,7 +502,10 @@ async fn what_all_namespaces_came_to_holds_for_five_minutes_and_is_resolved_agai
     let mut first = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
     until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
-    let reviews = fake.count("selfsubjectaccessreviews");
+    let (reviews, index) = (
+        fake.count("selfsubjectaccessreviews"),
+        fake.count("/api/v1/namespaces?"),
+    );
     drop(first);
 
     fake.add("namespaces", None, "ns-40");
@@ -492,19 +516,75 @@ async fn what_all_namespaces_came_to_holds_for_five_minutes_and_is_resolved_agai
     let mut mirror = Mirror::default();
     until_shown(&mut within, &mut mirror, |m| m.names().len() == 2).await;
     assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
-    assert_eq!(
-        fake.count("selfsubjectaccessreviews"),
-        reviews,
-        "it sends no review"
-    );
+    assert_eq!(fake.count("selfsubjectaccessreviews"), reviews);
+    assert_eq!(fake.count("/api/v1/namespaces?"), index, "it asks nothing");
     drop(within);
 
     sleep(Duration::from_secs(2)).await;
-    let mut after = hub.rows(query(&[])).await.unwrap();
+    fake.state().reviews_take = Duration::from_secs(1);
+    let open = hub.rows(query(&[])).await.unwrap();
+    let also = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
-    until_shown(&mut after, &mut mirror, |m| m.names().len() == 3).await;
-    assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
+    mirror.read(&open);
+    let parts = mirror.parts.as_ref().unwrap();
+    assert_eq!(
+        (parts.count, parts.omitted),
+        (2, 38),
+        "the set is read at once, past its time"
+    );
+
+    sleep(Duration::from_secs(10)).await;
+    assert_eq!(
+        fake.count("/api/v1/namespaces?"),
+        index + 1,
+        "resolved again once, for both"
+    );
+    mirror.read(&open);
+    assert_eq!(
+        mirror.parts.as_ref().unwrap().count,
+        2,
+        "it keeps its parts"
+    );
+    let later = hub.rows(query(&[])).await.unwrap();
+    sleep(Duration::from_secs(1)).await;
+    let mut mirror = Mirror::default();
+    mirror.read(&later);
     assert_eq!(mirror.names(), ["p-ns-05", "p-ns-18", "p-ns-40"]);
+    assert_eq!(mirror.parts.as_ref().unwrap().omitted, 38);
+    drop(also);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_set_read_past_five_minutes_is_forgotten_once_the_person_may_list_cluster_wide() {
+    let fake = Fake::default();
+    forty_namespaces(&fake);
+    for name in ["ns-05", "ns-18"] {
+        fake.allow(Some(name), "list", "pods");
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+    drop(first);
+
+    sleep(RESOLVED_FOR + Duration::from_secs(1)).await;
+    fake.allow(None, "list", "pods");
+    let stale = hub.rows(query(&[])).await.unwrap();
+    assert!(stale.resolved(), "read at once, as it was");
+    sleep(Duration::from_secs(5)).await;
+    let later = hub.rows(query(&[])).await.unwrap();
+    sleep(Duration::from_secs(1)).await;
+    let mut mirror = Mirror::default();
+    mirror.read(&later);
+    assert_eq!(mirror.names().len(), 40);
+    assert_eq!(
+        mirror.parts,
+        Some(Parts {
+            count: 1,
+            omitted: 0,
+            unready: Vec::new(),
+        })
+    );
 }
 
 #[tokio::test(start_paused = true)]
