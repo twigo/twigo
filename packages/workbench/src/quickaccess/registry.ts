@@ -40,6 +40,12 @@ export interface QuickPickItem {
   readonly keybinding?: string;
   /** Items group under headings in the order they come. */
   readonly group?: string;
+  /**
+   * With `acceptChecked` on the provider: present, the row has a box and
+   * starts with this tick; absent, the row is an action that Enter or a
+   * click takes alone.
+   */
+  readonly checked?: boolean;
 }
 
 export interface AcceptOptions {
@@ -68,6 +74,12 @@ export interface QuickAccessProvider {
   readonly acceptLabel?: string;
   /** Whether ⌘↵ opens a row to the side; `accept` then gets `side`. */
   readonly toSide?: boolean;
+  /**
+   * What the ticked rows are in words, `3 namespaces`: the footer says
+   * `Apply · 3 namespaces` once a row is ticked, and a status line says how
+   * many are. Without `acceptChecked` it is not read.
+   */
+  readonly checkedWords?: (count: number) => string;
   items(
     filter: string,
     context: QuickAccessContext,
@@ -78,6 +90,17 @@ export interface QuickAccessProvider {
     context: QuickAccessContext,
     options?: AcceptOptions,
   ): void | Promise<void>;
+  /**
+   * Its presence lets the person tick rows that have a box (Space, a click
+   * on the box, ⌘-click), and from the first tick Enter applies the ticked
+   * set, which this takes. Until then `accept` takes one row alone. A row
+   * that the filter hides keeps its tick.
+   */
+  acceptChecked?(
+    ids: readonly string[],
+    filter: string,
+    context: QuickAccessContext,
+  ): void | Promise<void>;
 }
 
 /** What the open widget does for the `quickInput.*` commands. */
@@ -85,6 +108,8 @@ export interface QuickAccessList {
   /** Moves the selection, wrapping around. */
   move(delta: number): void;
   accept(options: AcceptOptions): void;
+  /** Ticks or unticks the row under the cursor, where it has a box. */
+  toggle(): void;
 }
 
 /**
@@ -259,6 +284,20 @@ export class QuickAccess {
     await resolved.provider.accept(item, resolved.filter, session.context, {
       side: side && resolved.provider.toSide === true,
     });
+  }
+
+  /** Applies the ticked rows of the open session as the provider's set. */
+  async acceptChecked(ids: readonly string[]): Promise<void> {
+    const session = this.#session;
+    if (!session) return;
+    const resolved = this.resolve(session.value);
+    if (!resolved?.provider.acceptChecked) return;
+    this.#close();
+    await resolved.provider.acceptChecked(
+      ids,
+      resolved.filter,
+      session.context,
+    );
   }
 
   /** The open widget's rows, while it shows them. */

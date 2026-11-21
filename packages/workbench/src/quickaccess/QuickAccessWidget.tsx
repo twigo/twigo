@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   Command,
   CommandEmpty,
@@ -9,6 +15,7 @@ import {
   HighlightedLabel,
   Kbd,
   StatusLabel,
+  Tick,
   Tile,
 } from "@twigo/ui";
 import { toIpcError } from "@twigo/protocol";
@@ -60,14 +67,54 @@ type Loaded =
 /** cmdk's own keys, which go to the keybinding service instead. */
 const BOUND_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
 
+/** The value cmdk holds while no row is under the cursor: for an empty one it takes the first row. */
+const NO_ROW = "no-row-";
+
+interface Checks {
+  readonly prefix: string;
+  /** Every row met so far, hidden by the filter or not, as ticked or not. */
+  readonly ticks: ReadonlyMap<string, boolean>;
+  /** Whether a row was ticked or unticked: from then Enter applies the ticked set and a click ticks. */
+  readonly touched: boolean;
+}
+
+const noChecks = (prefix: string): Checks => ({
+  prefix,
+  ticks: new Map(),
+  touched: false,
+});
+
+/** The ticks with those of the rows met first, which start as the rows say. */
+function seeded(
+  before: Checks,
+  prefix: string,
+  items: readonly QuickPickItem[],
+): Checks {
+  const base = before.prefix === prefix ? before : noChecks(prefix);
+  const added = items.filter(
+    (item) => item.checked !== undefined && !base.ticks.has(item.id),
+  );
+  if (added.length === 0) return base;
+  const ticks = new Map(base.ticks);
+  for (const item of added) ticks.set(item.id, item.checked === true);
+  return { ...base, ticks };
+}
+
+const ticked = (checks: Checks): string[] =>
+  [...checks.ticks].flatMap(([id, on]) => (on ? [id] : []));
+
 function Open({ session }: { session: Session }) {
   const workbench = useWorkbench();
   const { quickAccess, keybindings, keys } = workbench;
   const { value, pick, ask, context } = session;
-  const provider =
-    pick || ask ? undefined : quickAccess.resolve(value)?.provider;
+  const resolved = pick || ask ? undefined : quickAccess.resolve(value);
+  const provider = resolved?.provider;
+  const many = provider?.acceptChecked !== undefined;
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
   const [selected, setSelected] = useState("");
+  const [nudge, setNudge] = useState(0);
+  const [held, setChecks] = useState(noChecks(""));
+  const checks = held.prefix === provider?.prefix ? held : noChecks("");
   const root = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -89,6 +136,13 @@ function Open({ session }: { session: Session }) {
     let live = true;
     Promise.resolve(load()).then(
       (picked) => {
+        // A load that another value has outdated still names the rows with a
+        // tick, so a row the filter hides before it is shown keeps its own.
+        if (target?.provider.acceptChecked) {
+          const { prefix } = target.provider;
+          const rows = "items" in picked ? picked.items : picked;
+          setChecks((before) => seeded(before, prefix, rows));
+        }
         if (live) {
           setLoaded({
             value,
@@ -125,11 +179,19 @@ function Open({ session }: { session: Session }) {
   const ordered = groups.flatMap((group) =>
     items.filter((item) => item.group === group),
   );
-  const at = Math.max(
-    0,
-    ordered.findIndex((item) => item.id === selected),
-  );
+  const found = ordered.findIndex((item) => item.id === selected);
+  const at =
+    found >= 0
+      ? found
+      : many && (resolved?.filter.trim() ?? "") === ""
+        ? -1
+        : 0;
   const active = ordered[at];
+  const on = (item: QuickPickItem) =>
+    item.checked === undefined
+      ? undefined
+      : (checks.ticks.get(item.id) ?? item.checked);
+  const count = ticked(checks).length;
 
   const toSide = provider?.toSide === true;
   useEffect(() => {
@@ -138,10 +200,11 @@ function Open({ session }: { session: Session }) {
     const scope = keys.scope(element);
     scope.set("inQuickOpen", true);
     scope.set("quickOpenToSide", toSide);
+    scope.set("quickOpenCanPickMany", many);
     return () => {
       scope.dispose();
     };
-  }, [keys, toSide]);
+  }, [keys, toSide, many]);
 
   const accept = (item: QuickPickItem, options: AcceptOptions) => {
     quickAccess.accept(item, options).catch((error: unknown) => {
@@ -149,20 +212,68 @@ function Open({ session }: { session: Session }) {
     });
   };
 
+  const toggle = (item: QuickPickItem) => {
+    const before = on(item);
+    if (before === undefined) return;
+    setChecks((held) => {
+      const base = held.prefix === provider?.prefix ? held : noChecks("");
+      const ticks = new Map(base.ticks);
+      ticks.set(item.id, !(base.ticks.get(item.id) ?? before));
+      return {
+        prefix: provider?.prefix ?? "",
+        ticks,
+        touched: true,
+      };
+    });
+    // The next name replaces what is filtered now, and not the prefix.
+    const input = field.current;
+    if (input) {
+      input.focus();
+      input.setSelectionRange(
+        value.length - (resolved?.filter.length ?? 0),
+        value.length,
+      );
+    }
+  };
+
+  const words = (n: number) => provider?.checkedWords?.(n) ?? String(n);
+
+  const applyChecked = () => {
+    quickAccess.acceptChecked(ticked(checks)).catch((error: unknown) => {
+      workbench.report(error);
+    });
+  };
+
+  const apply = (options: AcceptOptions) => {
+    if (ask) quickAccess.submit();
+    else if (!many) {
+      if (active) accept(active, options);
+    } else if (active?.checked === undefined && active !== undefined) {
+      accept(active, options);
+    } else if (checks.touched) applyChecked();
+    else if (active) accept(active, options);
+    else quickAccess.hide();
+  };
+
   useEffect(
     () =>
       quickAccess.attach({
         move: (delta) => {
           if (ordered.length === 0) return;
-          const next = (at + delta + ordered.length) % ordered.length;
+          const next =
+            at < 0
+              ? delta > 0
+                ? 0
+                : ordered.length - 1
+              : (at + delta + ordered.length) % ordered.length;
           setSelected(ordered[next]?.id ?? "");
         },
-        accept: (options) => {
-          if (ask) quickAccess.submit();
-          else if (active) accept(active, options);
+        accept: apply,
+        toggle: () => {
+          if (active) toggle(active);
         },
       }),
-    // `ordered` and `active` come anew with every render, as does `accept`.
+    // `ordered` and `active` come anew with every render, as do the handlers.
   );
 
   useEffect(() => {
@@ -181,8 +292,15 @@ function Open({ session }: { session: Session }) {
       <Command
         ref={root}
         shouldFilter={false}
-        value={active?.id ?? ""}
-        onValueChange={setSelected}
+        value={active?.id ?? (many ? `${NO_ROW}${String(nudge)}` : "")}
+        // cmdk picks the first row whenever its rows or its search change, and
+        // keeps it unless the value it is given changes, so where no row is under
+        // the cursor each pick gives it a new value to hold instead.
+        onValueChange={(next) => {
+          if (many && at < 0) setNudge((before) => before + 1);
+          else setSelected(next);
+        }}
+        disablePointerSelection={many}
         label="Quick access"
         className="absolute top-10 left-1/2 h-auto w-[min(600px,62vw)] -translate-x-1/2"
         onKeyDown={(event) => {
@@ -217,7 +335,12 @@ function Open({ session }: { session: Session }) {
             ask?.placeholder ?? pick?.placeholder ?? provider?.placeholder
           }
         />
-        <CommandList>
+        <CommandList aria-multiselectable={many ? "true" : undefined}>
+          {many && (
+            <p role="status" className="sr-only">
+              {checks.touched ? `${words(count)} selected` : ""}
+            </p>
+          )}
           {result.state === "ready" && result.notice !== undefined && (
             <p role="status" className="px-3 py-2 text-xs text-support">
               {result.notice}
@@ -238,8 +361,21 @@ function Open({ session }: { session: Session }) {
                   <Row
                     key={item.id}
                     item={item}
-                    onAccept={() => {
-                      accept(item, { side: false });
+                    on={on(item)}
+                    onHover={
+                      many
+                        ? () => {
+                            setSelected(item.id);
+                          }
+                        : undefined
+                    }
+                    onSelect={() => {
+                      if (on(item) !== undefined && checks.touched)
+                        toggle(item);
+                      else accept(item, { side: false });
+                    }}
+                    onToggle={() => {
+                      toggle(item);
                     }}
                   />
                 ))}
@@ -249,8 +385,14 @@ function Open({ session }: { session: Session }) {
         <Footer
           provider={provider}
           moves={!ask}
+          many={many}
           acceptLabel={
-            ask?.acceptLabel ?? (pick ? "Select" : provider?.acceptLabel)
+            ask?.acceptLabel ??
+            (pick
+              ? "Select"
+              : many && checks.touched
+                ? `Apply · ${words(count)}`
+                : provider?.acceptLabel)
           }
         />
       </Command>
@@ -277,18 +419,49 @@ function Asked({
 
 function Row({
   item,
-  onAccept,
+  on,
+  onHover,
+  onSelect,
+  onToggle,
 }: {
   item: QuickPickItem;
-  onAccept: () => void;
+  /** Whether it is ticked; none for a row with no box. */
+  on: boolean | undefined;
+  /** Where cmdk's own pointer selection is off. */
+  onHover: (() => void) | undefined;
+  onSelect: () => void;
+  onToggle: () => void;
 }) {
+  const { platform } = useWorkbench();
   const Icon = item.icon;
   return (
     <CommandItem
       value={item.id}
-      onSelect={onAccept}
+      onSelect={onSelect}
       className={item.tile ? "h-9" : undefined}
+      {...(onHover && { onPointerMoveCapture: onHover })}
+      {...(on !== undefined && {
+        "aria-checked": on,
+        // cmdk's own click accepts the row; the capture phase comes first.
+        onClickCapture: (event: MouseEvent<HTMLElement>) => {
+          if (platform === "mac" ? event.metaKey : event.ctrlKey) {
+            event.stopPropagation();
+            onToggle();
+          }
+        },
+      })}
     >
+      {on !== undefined && (
+        <span
+          className="-ml-2 flex h-full items-center pr-0.5 pl-2"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <Tick on={on} />
+        </span>
+      )}
       {item.tile && (
         <Tile
           letters={initials(item.tile.name)}
@@ -336,11 +509,13 @@ function Row({
 function Footer({
   provider,
   moves,
+  many,
   acceptLabel,
 }: {
   provider: QuickAccessProvider | undefined;
   /** Whether it shows rows to move through; an input does not. */
   moves: boolean;
+  many: boolean;
   /** What Enter does: `Open` unless it says. */
   acceptLabel: string | undefined;
 }) {
@@ -352,6 +527,7 @@ function Footer({
   };
   const move = [...keysOf(QUICK_INPUT.previous), ...keysOf(QUICK_INPUT.next)];
   const accept = keysOf(QUICK_INPUT.accept);
+  const toggle = many ? keysOf(QUICK_INPUT.toggle) : [];
   const side = provider?.toSide ? keysOf(QUICK_INPUT.acceptToSide) : [];
   const prefixes =
     provider?.prefix === ""
@@ -365,6 +541,7 @@ function Footer({
       className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border px-3 text-2xs whitespace-nowrap text-support"
     >
       {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
+      {toggle.length > 0 && <Hint keys={toggle}>Add or remove</Hint>}
       {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}
       {side.length > 0 && <Hint keys={side}>Open to the side</Hint>}
       <span className="flex-1" />
