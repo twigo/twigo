@@ -488,13 +488,9 @@ impl Hub {
                 cluster.set_resolved(clients, &access, resolved.clone());
                 Ok(resolved)
             }
-            Ok((resolved, false)) => {
-                cluster.set_unsettled(clients, &access, Some(resolved.clone()));
-                Ok(resolved)
-            }
-            Err(waiting) => {
-                cluster.set_unsettled(clients, &access, None);
-                Err(waiting)
+            unsettled => {
+                cluster.set_unsettled(clients, &access);
+                unsettled.map(|(resolved, _)| resolved)
             }
         }
     }

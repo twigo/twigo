@@ -948,20 +948,12 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_next
     );
 
     fake.state().reviews_fail.clear();
-    let second = hub.rows(query(&[])).await.unwrap();
+    let mut second = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
-    mirror.read(&second);
-    let parts = mirror.parts.as_ref().unwrap();
-    assert_eq!(
-        (parts.count, parts.omitted),
-        (3, 37),
-        "the guess is read at once, and asked again"
-    );
-
-    sleep(Duration::from_secs(5)).await;
-    let third = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    mirror.read(&third);
+    until_shown(&mut second, &mut mirror, |m| {
+        m.parts.as_ref().is_some_and(|parts| parts.count == 2)
+    })
+    .await;
     assert_eq!(
         mirror.parts,
         Some(Parts {
@@ -969,7 +961,7 @@ async fn a_namespace_whose_review_does_not_answer_counts_as_allowed_and_the_next
             omitted: 38,
             unready: Vec::new(),
         }),
-        "the answer replaced the guess"
+        "asked again, and the answer is the set"
     );
 }
 
