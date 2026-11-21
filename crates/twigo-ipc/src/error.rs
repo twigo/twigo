@@ -112,6 +112,19 @@ macro_rules! error_codes {
                     $(ErrorCode::$variant => ErrorKind::$kind,)*
                 }
             }
+
+            /// The wire name: `connect.refused`.
+            pub const fn wire(self) -> &'static str {
+                match self {
+                    $(ErrorCode::$variant => $wire,)*
+                }
+            }
+        }
+
+        impl std::fmt::Display for ErrorCode {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.wire())
+            }
         }
     };
 }

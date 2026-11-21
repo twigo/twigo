@@ -228,6 +228,7 @@ fn every_code_keeps_its_wire_name_and_kind() {
             "{wire}"
         );
         assert_eq!(code.kind(), kind, "{wire}");
+        assert_eq!(code.to_string(), wire, "the log names it as the wire does");
         assert_eq!(IpcError::new(code, "").kind, kind, "{wire}");
     }
 }
