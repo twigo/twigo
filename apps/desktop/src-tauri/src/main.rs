@@ -19,16 +19,17 @@ use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
-    ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
-    ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent,
-    ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell,
-    OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
-    ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
-    SubscriptionId, TerminalSession,
+    ApprovalEvent, ClusterVersion, Context, ContextAuth, DiagnosticsEntry, DiagnosticsLevel,
+    Discovered, DownloadLogs, ErrorKind, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
+    ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
+    KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
+    NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
+    PlanRequest, ResumeForward, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellPod,
+    ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
+use twigo_log::{Facts, Level, Log};
 
 /// The explicit mode's kubeconfig (ARCHITECTURE 5.5): the only source of
 /// contexts, of which only `kind-*` and `kwok-*` count. Debug and bench
@@ -52,7 +53,7 @@ fn keyboard_layout_watch(
     let watch = keyboard.watch.as_ref().map_err(IpcError::from)?;
     let (layout, subscription) = watch.subscribe(move |layout| {
         if let Err(error) = channel.send(layout.clone()) {
-            eprintln!("could not send the keyboard layout: {error}");
+            tracing::debug!(%error, "could not send the keyboard layout");
         }
     });
     keyboard
@@ -99,7 +100,7 @@ fn shell_environment_watch(
         while status.changed().await.is_ok() {
             let next = ShellEnvironment::from(&*status.borrow_and_update());
             if let Err(error) = channel.send(next) {
-                eprintln!("could not send the shell environment: {error}");
+                tracing::debug!(%error, "could not send the shell environment");
             }
         }
     });
@@ -163,7 +164,7 @@ async fn contexts_watch(
             if let Some(next) = core.contexts()
                 && let Err(error) = channel.send(next)
             {
-                eprintln!("could not send the contexts: {error}");
+                tracing::debug!(%error, "could not send the contexts");
             }
         }
     });
@@ -197,7 +198,7 @@ async fn command_execute(
             match channel.send(event) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("could not send an operation's event: {error}");
+                    tracing::debug!(%error, "could not send an operation's event");
                     false
                 }
             }
@@ -279,7 +280,7 @@ async fn context_auth_watch(
         loop {
             let next = auth.next().await;
             if let Err(error) = channel.send(next) {
-                eprintln!("could not send the context's credentials: {error}");
+                tracing::debug!(%error, "could not send the context's credentials");
             }
         }
     });
@@ -300,7 +301,7 @@ fn resources_watch(
     let follower = tauri::async_runtime::spawn(async move {
         let send = |next: Discovered| {
             if let Err(error) = channel.send(next) {
-                eprintln!("could not send the resources: {error}");
+                tracing::debug!(%error, "could not send the resources");
             }
         };
         let mut resources = match core.follow_resources(&request).await {
@@ -326,7 +327,7 @@ async fn list_subscribe(
             match channel.send(batch) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("could not send a list batch: {error}");
+                    tracing::debug!(%error, "could not send a list batch");
                     false
                 }
             }
@@ -369,7 +370,7 @@ async fn object_open(
             match channel.send(batch) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("could not send an object batch: {error}");
+                    tracing::debug!(%error, "could not send an object batch");
                     false
                 }
             }
@@ -426,7 +427,7 @@ async fn logs_open(
             match channel.send(batch) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("could not send a logs batch: {error}");
+                    tracing::debug!(%error, "could not send a logs batch");
                     false
                 }
             }
@@ -538,7 +539,7 @@ async fn shell_open(
             match body.and_then(|body| channel.send(body)) {
                 Ok(()) => true,
                 Err(error) => {
-                    eprintln!("could not send a shell frame: {error}");
+                    tracing::debug!(%error, "could not send a shell frame");
                     false
                 }
             }
@@ -588,7 +589,7 @@ fn kubeconfig_offers_watch(
         .follow_kubeconfig_offers(webview.label(), move |event| match channel.send(event) {
             Ok(()) => true,
             Err(error) => {
-                eprintln!("could not send a kubeconfig offer: {error}");
+                tracing::debug!(%error, "could not send a kubeconfig offer");
                 false
             }
         })
@@ -640,7 +641,7 @@ fn approvals_watch(webview: Webview, app: State<'_, App>, channel: Channel<Appro
         .follow_approvals(webview.label(), move |event| match channel.send(event) {
             Ok(()) => true,
             Err(error) => {
-                eprintln!("could not send an approval's ask: {error}");
+                tracing::debug!(%error, "could not send an approval's ask");
                 false
             }
         });
@@ -699,7 +700,7 @@ fn forwards_watch(
         .follow_forwards(webview.label(), move |event| match channel.send(event) {
             Ok(()) => true,
             Err(error) => {
-                eprintln!("could not send a forward's change: {error}");
+                tracing::debug!(%error, "could not send a forward's change");
                 false
             }
         })
@@ -719,6 +720,54 @@ fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
         })
 }
 
+/// Writes what the webview caught, or did not, to the diagnostics log under
+/// the target `twigo::webview`, which the default filter's `twigo=info` covers.
+#[tauri::command]
+fn diagnostics_log(webview: Webview, request: DiagnosticsEntry) {
+    let DiagnosticsEntry {
+        level,
+        message,
+        stack,
+        source,
+    } = request;
+    let (window, stack) = (webview.label(), stack.as_deref());
+    match level {
+        DiagnosticsLevel::Error => {
+            tracing::error!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+        DiagnosticsLevel::Warn => {
+            tracing::warn!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+        DiagnosticsLevel::Info => {
+            tracing::info!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+    }
+}
+
+/// Shows the current log file in the file manager. The opener plugin's own
+/// command stays out of the webview's reach, as `url_open` leaves it.
+#[tauri::command]
+fn log_reveal(handle: AppHandle, log: State<'_, Log>) -> Result<(), IpcError> {
+    handle
+        .opener()
+        .reveal_item_in_dir(log.path())
+        .map_err(|error| {
+            IpcError::new(
+                ErrorKind::Internal,
+                format!("could not show the log file: {error}"),
+            )
+        })
+}
+
+#[tauri::command]
+fn log_level_set(log: State<'_, Log>, request: SetLogLevel) {
+    log.set_level(match request.level {
+        LogVerbosity::Info => Level::INFO,
+        LogVerbosity::Debug => Level::DEBUG,
+        LogVerbosity::Trace => Level::TRACE,
+    });
+}
+
 fn explicit_kubeconfig() -> Option<PathBuf> {
     #[cfg(any(debug_assertions, feature = "bench"))]
     if let Some(file) = std::env::var_os(EXPLICIT_KUBECONFIG).filter(|v| !v.is_empty()) {
@@ -735,11 +784,20 @@ fn main() {
         && flag == twigo_env::DUMP_ENV
     {
         if let Err(error) = twigo_env::dump(head, tail) {
-            eprintln!("could not print the environment: {error}");
+            #[expect(
+                clippy::print_stderr,
+                reason = "the login shell reads this copy's stderr, and it never opens the log"
+            )]
+            {
+                eprintln!("could not print the environment: {error}");
+            }
             std::process::exit(1);
         }
         return;
     }
+
+    // After the `--dump-env` copy has returned, which never opens the log.
+    twigo_log::install_hook(env!("CARGO_PKG_VERSION"));
 
     let builder = tauri::Builder::default()
         // First: a second launch must hand over to the running app before any
@@ -751,7 +809,7 @@ fn main() {
                     .and_then(|()| window.show())
                     .and_then(|()| window.set_focus());
                 if let Err(error) = shown {
-                    eprintln!("could not bring the running window forward: {error}");
+                    tracing::warn!(%error, "could not bring the running window forward");
                 }
             }
         }))
@@ -764,6 +822,14 @@ fn main() {
     let builder = builder.activate_ignoring_other_apps(false);
     let app = builder
         .setup(|app| {
+            // Before `Core::new` reads the policy, the state and the trust
+            // file, so what it says of them is logged.
+            let facts = Facts::detect(
+                env!("CARGO_PKG_VERSION"),
+                option_env!("TWIGO_COMMIT"),
+                tauri::webview_version().ok(),
+            );
+            app.manage(Log::start(&app.path().app_log_dir()?, &facts));
             let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;
             app.manage(Keyboard {
                 watch: LayoutWatch::start(main),
@@ -864,6 +930,9 @@ fn main() {
             forward_remove,
             forwards_watch,
             url_open,
+            diagnostics_log,
+            log_reveal,
+            log_level_set,
         ])
         // A page that starts to load, as on a reload, has none of the
         // subscriptions of the one it replaces.
@@ -901,7 +970,7 @@ fn main() {
             let core = &app.state::<App>().core;
             core.shutdown();
             if let Err(error) = core.state.flush() {
-                eprintln!("could not save the state: {error}");
+                tracing::error!(%error, "could not save the state on exit");
             }
         }
     });

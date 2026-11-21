@@ -12,6 +12,9 @@ publish.workspace = true
 # The bench mode of bench/harness.sh: commands that write results and quit (src/bench.rs).
 bench = ["dep:objc2", "dep:serde_json"]
 
+[lints]
+workspace = true
+
 [build-dependencies]
 tauri-build.workspace = true
 

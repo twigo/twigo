@@ -67,6 +67,9 @@
     "allow-forward-resume",
     "allow-forward-remove",
     "allow-forwards-watch",
-    "allow-url-open"
+    "allow-url-open",
+    "allow-diagnostics-log",
+    "allow-log-reveal",
+    "allow-log-level-set"
   ]
 }

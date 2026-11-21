@@ -57,6 +57,9 @@ fn main() {
         "forward_remove",
         "forwards_watch",
         "url_open",
+        "diagnostics_log",
+        "log_reveal",
+        "log_level_set",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no
