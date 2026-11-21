@@ -372,6 +372,7 @@ function Open({ session }: { session: Session }) {
                   cursor={item === active}
                   selected={many ? on(item) : item === active}
                   on={on(item)}
+                  many={many}
                   onPoint={() => {
                     setCursor({ value, id: item.id });
                   }}
@@ -432,6 +433,7 @@ function Row({
   cursor,
   selected,
   on,
+  many,
   onPoint,
   onSelect,
   onToggle,
@@ -443,6 +445,8 @@ function Row({
   selected: boolean | undefined;
   /** Whether it is ticked; none for a row with no box. */
   on: boolean | undefined;
+  /** The list has rows with a box, which a row without one lines up with. */
+  many: boolean;
   onPoint: () => void;
   onSelect: () => void;
   onToggle: () => void;
@@ -469,7 +473,7 @@ function Row({
     >
       {on !== undefined && (
         <span
-          className="-ml-2 flex h-full items-center pr-0.5 pl-2"
+          className="-ml-2 flex h-full items-center pl-2"
           onClick={(event) => {
             event.stopPropagation();
             onToggle();
@@ -477,6 +481,9 @@ function Row({
         >
           <Tick on={on} />
         </span>
+      )}
+      {many && on === undefined && !item.tile && !Icon && (
+        <span aria-hidden className="w-3.5 shrink-0" />
       )}
       {item.tile && (
         <Tile
