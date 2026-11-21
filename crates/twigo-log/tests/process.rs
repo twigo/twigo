@@ -88,3 +88,97 @@ fn a_narrow_twigo_log_still_writes_the_facts_line() {
         assert_eq!(facts["fields"]["filter"], filter);
     }
 }
+
+fn messages(lines: &[Value]) -> Vec<(&str, &str)> {
+    lines
+        .iter()
+        .map(|line| {
+            (
+                line["target"].as_str().unwrap(),
+                line["fields"]["message"].as_str().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn emit() {
+    tracing::debug!(target: "twigo_core::catalog", "a debug line");
+    tracing::info!(target: "twigo_core::catalog", "an info line");
+    tracing::info!(target: "kube_client::client", "a library's info line");
+}
+
+#[test]
+fn a_valid_twigo_log_applies_and_an_invalid_one_is_said_and_the_default_applies() {
+    const TEST: &str =
+        "a_valid_twigo_log_applies_and_an_invalid_one_is_said_and_the_default_applies";
+    if let Some(directory) = child() {
+        start(&directory);
+        emit();
+        return;
+    }
+    let run = |filter: &str| {
+        let directory = tempfile::tempdir().unwrap();
+        let output = rerun(TEST, directory.path())
+            .env("TWIGO_LOG", filter)
+            .output()
+            .unwrap();
+        passed(&output);
+        lines(directory.path())
+    };
+
+    let lines = run("warn,twigo=debug");
+    assert_eq!(lines[0]["fields"]["filter"], "warn,twigo=debug");
+    assert_eq!(
+        messages(&lines)[1..],
+        [
+            ("twigo_core::catalog", "a debug line"),
+            ("twigo_core::catalog", "an info line"),
+        ]
+    );
+
+    let lines = run("twigo=loud");
+    assert_eq!(lines[0]["fields"]["filter"], "warn,twigo=info");
+    assert_eq!(
+        messages(&lines)[1..],
+        [
+            (
+                "twigo_log",
+                "TWIGO_LOG is not a filter, so the default applies"
+            ),
+            ("twigo_core::catalog", "an info line"),
+        ]
+    );
+    assert_eq!(lines[1]["level"], "WARN");
+    assert!(
+        lines[1]["fields"]["error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+    );
+}
+
+#[test]
+fn a_log_that_cannot_open_leaves_the_app_running_with_its_lines_on_stderr() {
+    const TEST: &str = "a_log_that_cannot_open_leaves_the_app_running_with_its_lines_on_stderr";
+    if let Some(directory) = child() {
+        start(&directory.join("a-file/logs"));
+        emit();
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("a-file"), "").unwrap();
+    let output = rerun(TEST, directory.path()).output().unwrap();
+    passed(&output);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("cannot be opened"), "{stderr}");
+    let lines: Vec<Value> = stderr
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    assert_eq!(
+        messages(&lines),
+        [
+            ("twigo_log::facts", "Twigo started"),
+            ("twigo_core::catalog", "an info line"),
+        ]
+    );
+}
