@@ -1184,6 +1184,7 @@ Quick-access providers are core-only in v1, as in VS Code.
 Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
+  It draws its own listbox and holds its own cursor: the input is a combobox whose `aria-activedescendant` names the row under the cursor, and a row is an option.
 - **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   A row that opens something in another space leads with that space's tile, as a `:` list does whose `@` names another space's context (4.2).
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.

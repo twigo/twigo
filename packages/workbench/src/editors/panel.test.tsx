@@ -546,7 +546,7 @@ test("Maximize Panel Size is neither listed nor run while the panel holds no edi
       workbench.quickAccess.show(">Maximize Panel");
       await Promise.resolve();
     });
-    const rows = [...document.querySelectorAll("[cmdk-item]")].map(
+    const rows = [...document.querySelectorAll("[role=option]")].map(
       (row) => row.textContent,
     );
     act(() => {
@@ -1134,7 +1134,7 @@ const LAYER_MARKUP: readonly [string, Record<string, string>][] = [
   ["an alert dialog", { role: "alertdialog" }],
   ["a menu", { role: "menu" }],
   ["a toast", { "data-sonner-toaster": "" }],
-  ["quick access", { "cmdk-root": "" }],
+  ["quick access", { "data-slot": "quick-input" }],
 ];
 
 async function dismissedAfterFocusIn(attributes: Record<string, string>) {

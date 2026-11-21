@@ -1,19 +1,13 @@
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
   HighlightedLabel,
   Kbd,
+  QuickInput,
+  QuickInputEmpty,
+  QuickInputField,
+  QuickInputGroup,
+  QuickInputList,
+  QuickInputOption,
   StatusLabel,
   Tick,
   Tile,
@@ -64,11 +58,8 @@ type Loaded =
     }
   | { readonly state: "failed"; readonly message: string };
 
-/** cmdk's own keys, which go to the keybinding service instead. */
+/** Keys that are the keybinding service's alone: unbound, they still move no caret and submit nothing. */
 const BOUND_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
-
-/** The value cmdk holds while no row is under the cursor: for an empty one it takes the first row. */
-const NO_ROW = "no-row-";
 
 interface Checks {
   readonly prefix: string;
@@ -112,7 +103,6 @@ function Open({ session }: { session: Session }) {
   const many = provider?.acceptChecked !== undefined;
   const [loaded, setLoaded] = useState<{ value: string; result: Loaded }>();
   const [selected, setSelected] = useState("");
-  const [nudge, setNudge] = useState(0);
   const [held, setChecks] = useState(noChecks(""));
   const checks = held.prefix === provider?.prefix ? held : noChecks("");
   const root = useRef<HTMLDivElement>(null);
@@ -175,9 +165,14 @@ function Open({ session }: { session: Session }) {
         ? loaded.result
         : { state: "loading" };
   const items = result.state === "ready" ? result.items : [];
-  const groups = [...new Set(items.map((item) => item.group))];
-  const ordered = groups.flatMap((group) =>
-    items.filter((item) => item.group === group),
+  const groups = [...new Set(items.map((item) => item.group))].map((group) => ({
+    group,
+    items: items.filter((item) => item.group === group),
+  }));
+  const ordered = groups.flatMap(({ items: rows }) => rows);
+  const ids = useId();
+  const rowIds = new Map(
+    ordered.map((item, index) => [item, `${ids}-${String(index)}`]),
   );
   const found = ordered.findIndex((item) => item.id === selected);
   const at =
@@ -283,7 +278,7 @@ function Open({ session }: { session: Session }) {
 
   useEffect(() => {
     root.current
-      ?.querySelectorAll("[cmdk-item]")
+      ?.querySelectorAll("[role=option]")
       [at]?.scrollIntoView({ block: "nearest" });
   }, [at]);
 
@@ -294,19 +289,8 @@ function Open({ session }: { session: Session }) {
         if (event.target === event.currentTarget) quickAccess.hide();
       }}
     >
-      <Command
+      <QuickInput
         ref={root}
-        shouldFilter={false}
-        value={active?.id ?? (many ? `${NO_ROW}${String(nudge)}` : "")}
-        // cmdk picks the first row whenever its rows or its search change, and
-        // keeps it unless the value it is given changes, so where no row is under
-        // the cursor each pick gives it a new value to hold instead.
-        onValueChange={(next) => {
-          if (many && at < 0) setNudge((before) => before + 1);
-          else setSelected(next);
-        }}
-        disablePointerSelection={many}
-        label="Quick access"
         className="absolute top-10 left-1/2 h-auto w-[min(600px,62vw)] -translate-x-1/2"
         onKeyDown={(event) => {
           if (event.key === "Escape") {
@@ -315,7 +299,7 @@ function Open({ session }: { session: Session }) {
             return;
           }
           // The keybinding service goes first, so ↑, ↓ and Enter are
-          // bindings the user may change, and cmdk leaves them alone.
+          // bindings the user may change.
           if (
             keybindings.dispatch(event.nativeEvent) ||
             BOUND_KEYS.has(event.key)
@@ -324,8 +308,11 @@ function Open({ session }: { session: Session }) {
           }
         }}
       >
-        <CommandInput
+        <QuickInputField
           ref={field}
+          controls={`${ids}-list`}
+          active={active && rowIds.get(active)}
+          aria-label="Quick access"
           // An input starts with all its value selected, as VS Code's.
           {...(ask && {
             onFocus: (event) => {
@@ -333,14 +320,14 @@ function Open({ session }: { session: Session }) {
             },
           })}
           value={value}
-          onValueChange={(next) => {
-            quickAccess.setValue(next);
+          onChange={(event) => {
+            quickAccess.setValue(event.target.value);
           }}
           placeholder={
             ask?.placeholder ?? pick?.placeholder ?? provider?.placeholder
           }
         />
-        <CommandList aria-multiselectable={many ? "true" : undefined}>
+        <QuickInputList id={`${ids}-list`} multiselectable={many}>
           {many && (
             <p role="status" className="sr-only">
               {checks.touched ? `${words(count)} selected` : ""}
@@ -356,36 +343,33 @@ function Open({ session }: { session: Session }) {
           ) : result.state === "failed" ? (
             <p className="px-3 py-3 text-xs text-error">{result.message}</p>
           ) : (
-            result.state === "ready" && <CommandEmpty>No results</CommandEmpty>
+            result.state === "ready" &&
+            items.length === 0 && <QuickInputEmpty>No results</QuickInputEmpty>
           )}
-          {groups.map((group) => (
-            <CommandGroup key={group ?? ""} heading={group}>
-              {items
-                .filter((item) => item.group === group)
-                .map((item) => (
-                  <Row
-                    key={item.id}
-                    item={item}
-                    on={on(item)}
-                    onHover={
-                      many
-                        ? () => {
-                            setSelected(item.id);
-                          }
-                        : undefined
-                    }
-                    onSelect={() => {
-                      if (on(item) !== undefined && ticking) toggle(item);
-                      else accept(item, { side: false });
-                    }}
-                    onToggle={() => {
-                      toggle(item);
-                    }}
-                  />
-                ))}
-            </CommandGroup>
+          {groups.map(({ group, items: rows }) => (
+            <QuickInputGroup key={group ?? ""} heading={group}>
+              {rows.map((item) => (
+                <Row
+                  key={item.id}
+                  id={rowIds.get(item)}
+                  item={item}
+                  selected={item === active}
+                  on={on(item)}
+                  onPoint={() => {
+                    setSelected(item.id);
+                  }}
+                  onSelect={() => {
+                    if (on(item) !== undefined && ticking) toggle(item);
+                    else accept(item, { side: false });
+                  }}
+                  onToggle={() => {
+                    toggle(item);
+                  }}
+                />
+              ))}
+            </QuickInputGroup>
           ))}
-        </CommandList>
+        </QuickInputList>
         <Footer
           provider={provider}
           moves={!ask}
@@ -399,7 +383,7 @@ function Open({ session }: { session: Session }) {
                 : provider?.acceptLabel)
           }
         />
-      </Command>
+      </QuickInput>
     </div>
   );
 }
@@ -422,38 +406,42 @@ function Asked({
 }
 
 function Row({
+  id,
   item,
+  selected,
   on,
-  onHover,
+  onPoint,
   onSelect,
   onToggle,
 }: {
+  id: string | undefined;
   item: QuickPickItem;
+  selected: boolean;
   /** Whether it is ticked; none for a row with no box. */
   on: boolean | undefined;
-  /** Where cmdk's own pointer selection is off. */
-  onHover: (() => void) | undefined;
+  onPoint: () => void;
   onSelect: () => void;
   onToggle: () => void;
 }) {
   const { platform } = useWorkbench();
   const Icon = item.icon;
   return (
-    <CommandItem
-      value={item.id}
-      onSelect={onSelect}
+    <QuickInputOption
+      id={id}
+      selected={selected}
+      onPointerMove={onPoint}
+      onClick={(event) => {
+        if (
+          on !== undefined &&
+          (platform === "mac" ? event.metaKey : event.ctrlKey)
+        ) {
+          onToggle();
+        } else {
+          onSelect();
+        }
+      }}
       className={item.tile ? "h-9" : undefined}
-      {...(onHover && { onPointerMoveCapture: onHover })}
-      {...(on !== undefined && {
-        "aria-checked": on,
-        // cmdk's own click accepts the row; the capture phase comes first.
-        onClickCapture: (event: MouseEvent<HTMLElement>) => {
-          if (platform === "mac" ? event.metaKey : event.ctrlKey) {
-            event.stopPropagation();
-            onToggle();
-          }
-        },
-      })}
+      aria-checked={on}
     >
       {on !== undefined && (
         <span
@@ -502,7 +490,7 @@ function Row({
         )}
         {item.keybinding && <Kbd>{item.keybinding}</Kbd>}
       </span>
-    </CommandItem>
+    </QuickInputOption>
   );
 }
 

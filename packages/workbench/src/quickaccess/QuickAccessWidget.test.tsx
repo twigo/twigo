@@ -44,7 +44,7 @@ const press = (code: string, init: KeyboardEventInit = {}) => {
   fireEvent.keyDown(input(), { key: code.replace(/^Key/, ""), code, ...init });
 };
 const selected = () =>
-  document.querySelector('[cmdk-item][aria-selected="true"]')?.textContent;
+  document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
 const footer = () => screen.getByLabelText("Keys").textContent;
 
 test("a pick with a source is asked for the rows of each value typed, and shows them as they come", async () => {
@@ -202,6 +202,7 @@ test("a row draws what its provider says: icon or tile, matches, description, st
   expect(space.textContent).toBe("PEprod-eu⌘1");
   expect(screen.getByText("Pods")).toBeTruthy();
   expect(screen.getByText("Open spaces")).toBeTruthy();
+  expect(screen.queryByText("No results")).toBeNull();
 });
 
 test("a state that is off draws a ring, and one that waits a filled dot", async () => {
@@ -255,6 +256,28 @@ test("↓ and ↑ move through the rows and wrap, Enter accepts, all by their bi
     { side: false },
   );
   expect(workbench.quickAccess.session).toBeUndefined();
+});
+
+test("the row under the cursor scrolls into view as the cursor moves", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(
+    provider("!", [
+      { id: "a", label: "alpha" },
+      { id: "b", label: "beta" },
+    ]).registered,
+  );
+  let scrolled: string | null = null;
+  const spy = vi
+    .spyOn(Element.prototype, "scrollIntoView")
+    .mockImplementation(function (this: Element) {
+      scrolled = this.textContent;
+    });
+  await opened(workbench, "!");
+  press("ArrowDown");
+  expect(scrolled).toBe("beta");
+  press("ArrowUp");
+  expect(scrolled).toBe("alpha");
+  spy.mockRestore();
 });
 
 test("a key the user binds instead moves, and the unbound one does not", async () => {
@@ -372,6 +395,28 @@ test("rows with a box open ticked as they say, with no row under the cursor, so 
   expect(workbench.quickAccess.session).toBeUndefined();
   expect(accept).not.toHaveBeenCalled();
   expect(acceptChecked).not.toHaveBeenCalled();
+});
+
+test("the input is a combobox on the list and names the row under the cursor, and none where no row is", async () => {
+  const workbench = await testWorkbench();
+  workbench.quickAccess.register(ticking().registered);
+  await opened(workbench, "!");
+  const list = screen.getByRole("listbox");
+  expect(input().getAttribute("aria-controls")).toBe(list.id);
+  expect(input().getAttribute("aria-autocomplete")).toBe("list");
+  expect(input().getAttribute("aria-expanded")).toBe("true");
+  expect(input().getAttribute("aria-activedescendant")).toBeNull();
+
+  press("ArrowDown");
+  press("ArrowDown");
+  const active = input().getAttribute("aria-activedescendant");
+  expect(active).toBe(rowOf("payments").id);
+  expect(document.getElementById(active ?? "")?.textContent).toBe("payments");
+  expect(list.contains(rowOf("payments"))).toBe(true);
+
+  const group = screen.getByRole("group", { name: "Selected" });
+  expect(group.contains(rowOf("payments"))).toBe(true);
+  expect(group.contains(rowOf("auth"))).toBe(false);
 });
 
 test("↓ from no row goes to the first row, and ↑ to the last", async () => {
