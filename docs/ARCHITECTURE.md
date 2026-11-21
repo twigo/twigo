@@ -1185,6 +1185,8 @@ Extensions add commands, not prefixes.
 
 - **The widget** drops from the title bar's search field, centred under the title bar and min(600 px, 62 vw) wide, as VS Code's quick input.
   It draws its own listbox and holds its own cursor: the input is a combobox whose `aria-activedescendant` names the row under the cursor, and a row is an option.
+  A value typed puts the cursor on the first row, whatever the cursor did before, and Enter before the rows of that value have come waits for them and acts on the cursor's row once they do; typing again withdraws it.
+  Where the person takes one row at a time `aria-selected` is on the cursor's row, selection following focus as the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) describes it.
 - **Rows are data** (`QuickPickItem`) that the widget draws alike for every provider: the kind's icon or a space's tile, the label with what matched the filter bold in the brand colour, a description such as the namespace in support, a state only when it is abnormal as its dot and its words in its tone, the kind at the end in quiet, and keys.
   A row that opens something in another space leads with that space's tile, as a `:` list does whose `@` names another space's context (4.2).
   Filters match as Sublime Text does (fuzzysort), so a row's highlight is what its score came from; the pods of the no-prefix provider are filtered in Rust by substring, and highlight that.
@@ -1193,12 +1195,14 @@ Extensions add commands, not prefixes.
 - **A footer of keys**: ↑↓ move, ↵ the provider's verb (Open, Run, Switch), and ⌘↵ open to the side where the provider can, which opens the editor in a new group to the right of the active one.
   Each is the binding of a `quickInput.*` command, so a key the user binds shows there.
   On the empty prefix the footer adds the prefixes whose providers name themselves for it (`>` Commands, `:` Lists, `?` Help), so a new provider shows up by registering.
-- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) with `aria-checked`, a row without one is an action, the list says `aria-multiselectable`, and a polite status says how many are ticked.
-  No row is under the cursor at the opening, until the person moves or types, so Enter at once closes with nothing changed.
+- **Rows with a box**, for a provider that takes several rows (`acceptChecked`): a row that carries `checked` draws a box (`Tick`) and says with `aria-selected` whether it is ticked, a row without one is an action and says nothing of selection, and the list says `aria-multiselectable`; a polite status says how many are ticked.
+  The cursor is the input's `aria-activedescendant` alone, since the [APG's listbox pattern](https://www.w3.org/WAI/ARIA/apg/patterns/listbox/) keeps focus apart from the selected state and indicates the selection of each option with `aria-selected` or `aria-checked`, never both.
+  No row is under the cursor at the opening, until the person moves or types a value, so Enter at once closes with nothing changed.
   Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
-  Before the first tick the footer says `Only this` on a row with a box, and the provider's own verb (`Select`) on an action row or where no row is under the cursor.
+  Before the first tick the footer says `Only this` on a row with a box, the provider's own verb (`Select`) on an action row, and `Close` where no row is under the cursor, since Enter then closes.
   The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
 - **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the namespace index lists them, the order fixed for the opening, so a tick moves no row.
+  Once text is typed `All namespaces` goes after the namespaces that match it, so the cursor, which goes to the first row, lands on the best namespace.
   Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
   A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
   The picker asks `namespaces_list` once for each opening, and a scope is written sorted and with no name twice, here, by `:` and in a list's URI, so one set of namespaces is one list URI.
