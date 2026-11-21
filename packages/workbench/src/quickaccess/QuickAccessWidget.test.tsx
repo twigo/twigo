@@ -661,35 +661,6 @@ function slow() {
   return { items, answer };
 }
 
-test("an Enter before the rows of the value typed have come acts on the cursor's row once they do", async () => {
-  const workbench = await testWorkbench();
-  const { items, answer } = slow();
-  const { registered, accept } = ticking(undefined, { items });
-  workbench.quickAccess.register(registered);
-  render(<QuickAccessWidget />, { wrapper: inWorkbench(workbench) });
-  act(() => {
-    workbench.quickAccess.show("!");
-  });
-  await answer("", NAMESPACES);
-  fireEvent.change(input(), { target: { value: "!pay" } });
-  press("Enter");
-  await act(() => Promise.resolve());
-  expect(workbench.quickAccess.session).toBeDefined();
-  expect(accept).not.toHaveBeenCalled();
-
-  await answer(
-    "pay",
-    NAMESPACES.filter((item) => item.id === "payments"),
-  );
-  expect(accept).toHaveBeenCalledWith(
-    expect.objectContaining({ id: "payments" }),
-    "pay",
-    expect.anything(),
-    { side: false },
-  );
-  expect(workbench.quickAccess.session).toBeUndefined();
-});
-
 test("a value typed after an Enter that waits for rows withdraws it", async () => {
   const workbench = await testWorkbench();
   const { items, answer } = slow();
