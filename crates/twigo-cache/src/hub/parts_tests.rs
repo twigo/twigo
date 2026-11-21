@@ -363,6 +363,18 @@ fn asked_of(fake: &Fake, names: &[String]) -> Vec<String> {
     names.iter().filter(asked).cloned().collect()
 }
 
+async fn resolved_to_two(fake: &Fake) -> Hub {
+    forty_namespaces(fake);
+    for name in ["ns-05", "ns-18"] {
+        fake.allow(Some(name), "list", "pods");
+    }
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&[])).await.unwrap();
+    let mut mirror = Mirror::default();
+    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+    hub
+}
+
 #[tokio::test(start_paused = true)]
 async fn all_namespaces_of_a_person_who_may_list_pods_in_three_of_forty_read_three_parts() {
     let fake = Fake::default();
@@ -500,19 +512,11 @@ async fn all_namespaces_when_the_namespaces_are_refused_or_nothing_is_allowed_is
 async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_resolved_again_for_the_lists_after()
  {
     let fake = Fake::default();
-    forty_namespaces(&fake);
-    for name in ["ns-05", "ns-18"] {
-        fake.allow(Some(name), "list", "pods");
-    }
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut first = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
+    let hub = resolved_to_two(&fake).await;
     let (reviews, listed) = (
         fake.count("selfsubjectaccessreviews"),
         fake.count("/api/v1/namespaces?"),
     );
-    drop(first);
 
     fake.add("namespaces", None, "ns-40");
     fake.allow(Some("ns-40"), "list", "pods");
@@ -563,16 +567,7 @@ async fn what_all_namespaces_came_to_is_read_at_once_after_five_minutes_and_reso
 #[tokio::test(start_paused = true)]
 async fn a_set_read_past_five_minutes_is_forgotten_once_the_person_may_list_cluster_wide() {
     let fake = Fake::default();
-    forty_namespaces(&fake);
-    for name in ["ns-05", "ns-18"] {
-        fake.allow(Some(name), "list", "pods");
-    }
-    let (hub, _clients) = fake.hub(Budgets::default());
-    let mut first = hub.rows(query(&[])).await.unwrap();
-    let mut mirror = Mirror::default();
-    until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
-    drop(first);
-
+    let hub = resolved_to_two(&fake).await;
     sleep(RESOLVED_FOR + Duration::from_secs(1)).await;
     fake.allow(None, "list", "pods");
     let stale = hub.rows(query(&[])).await.unwrap();
@@ -597,16 +592,7 @@ async fn a_set_read_past_five_minutes_is_forgotten_once_the_person_may_list_clus
 async fn a_renewal_that_does_not_settle_keeps_the_set_and_the_next_list_resolves_it_again() {
     for failure in ["the cluster-wide review", "the namespaces", "one review"] {
         let fake = Fake::default();
-        forty_namespaces(&fake);
-        for name in ["ns-05", "ns-18"] {
-            fake.allow(Some(name), "list", "pods");
-        }
-        let (hub, _clients) = fake.hub(Budgets::default());
-        let mut first = hub.rows(query(&[])).await.unwrap();
-        let mut mirror = Mirror::default();
-        until_shown(&mut first, &mut mirror, |m| m.names().len() == 2).await;
-        drop(first);
-
+        let hub = resolved_to_two(&fake).await;
         sleep(RESOLVED_FOR + Duration::from_secs(1)).await;
         match failure {
             "the cluster-wide review" => {
