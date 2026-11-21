@@ -305,8 +305,8 @@ Virtualized table (TanStack Virtual, fixed row height; TanStack Table for column
       The set is kept per context and resource with the clients, for 5 minutes: every list of all namespaces of that resource opened meanwhile reads it and sends no review.
       The first list after that reads it too, at once, and the hub resolves it again in the background, so a sort or a filter never starts empty; the lists opened after that show a namespace created or a binding granted since, and an open list keeps its parts.
       A set with no namespace allowed, or a refusal to list the namespaces, is kept for 30 s, as long as a review's no, so a grant shows within it and a sort or a filter inside it asks nothing.
-    - `Parts.omitted` counts the namespaces of the index that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
-    - With no namespace allowed, or the index refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
+    - `Parts.omitted` counts the namespaces the cluster lists that the parts per namespace leave out, and is 0 beside the cluster part (3.7).
+    - With no namespace allowed, or the list of namespaces refused, which is a person who may not list namespaces, "all" is the cluster part, which the cluster refuses in its own words.
       Such a person types the namespaces they read in (4.5).
     - What does not answer is no answer.
       A namespace whose review does not answer counts as allowed, as an unanswered check does in the UI (5.1): its part lists and says its own state, and the set is not kept, so the next list asks again.
@@ -1209,7 +1209,7 @@ Extensions add commands, not prefixes.
   Enter or a click takes one row alone, as every provider's rows do, until the first tick; Space (`quickInput.toggle`, 5.2), a click on a row's box or ⌘-click on the row ticks, and from then Enter applies the ticked set, the footer saying `Apply · 3 namespaces`, and a click ticks.
   Before the first tick the footer says `Only this` on a row with a box, the provider's own verb (`Select`) on an action row, and `Close` where no row is under the cursor, since Enter then closes.
   The widget keeps the ticks across the values typed, so a row the filter hides keeps its own, and selects the filter's text after a tick, so the next name replaces it.
-- **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the namespace index lists them, the order fixed for the opening, so a tick moves no row.
+- **`ns `** opens with `All namespaces` as an action row, described `current` while the scope is all and `new namespaces join` otherwise, then under Selected the space's namespaces, ticked, then the others as the cluster lists them, the order fixed for the opening, so a tick moves no row.
   Once text is typed `All namespaces` goes after the namespaces that match it, so the cursor, which goes to the first row, lands on the best namespace.
   Enter or a click on `All namespaces` empties the scope whatever is ticked, and applying with nothing ticked empties it too.
   A person who may not list namespaces sees the space's namespaces ticked and the typed text as a row when it is a namespace's name, which Space adds and an untick removes.
