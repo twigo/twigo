@@ -211,14 +211,14 @@ test("a context's mode follows the strictest of its locks, a choice over them, a
 
   const refused = expect(
     backend.invoke("command_plan", { action: "unlock", context: "staging" }),
-  ).rejects.toMatchObject({ kind: "invalidInput" });
+  ).rejects.toMatchObject({ code: "policy.not-locked" });
   const unlisted = expect(
     backend.invoke("command_plan", {
       action: "setMode",
       context: "ghost",
       mode: "guarded",
     }),
-  ).rejects.toMatchObject({ kind: "notFound" });
+  ).rejects.toMatchObject({ code: "context.not-listed" });
   await vi.advanceTimersByTimeAsync(0);
   await refused;
   await unlisted;
@@ -840,7 +840,7 @@ test("nodes, deployments and events come behind the same query view as pods", as
     )
     .catch((error: unknown) => error);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await refused).toMatchObject({ kind: "notFound" });
+  expect(await refused).toMatchObject({ code: "apply.kind-not-served" });
 });
 
 test("text matches the columns of priority 0 and those the query's choices show", async () => {
@@ -1244,13 +1244,13 @@ test("opening a context that has a space returns that space", async () => {
   expect(space.id).toBe("staging");
 });
 
-test("opening an unknown context fails with notFound", async () => {
+test("opening an unknown context fails as unlisted", async () => {
   const backend = createMockBackend();
   const failed = backend
     .invoke("space_open", "nowhere")
     .catch((e: unknown) => e);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await failed).toMatchObject({ kind: "notFound" });
+  expect(await failed).toMatchObject({ code: "context.not-listed" });
 });
 
 test("a schema comes recorded for a few kinds and is not found for the others", async () => {
@@ -1286,15 +1286,21 @@ test("a schema comes recorded for a few kinds and is not found for the others", 
     ).toBeDefined();
   }
 
-  for (const request of [
-    { space: "prod-eu", group: "apps", version: "v1", kind: "Nothing" },
-    { space: "nowhere", group: "apps", version: "v1", kind: "Deployment" },
-  ]) {
+  for (const [request, code] of [
+    [
+      { space: "prod-eu", group: "apps", version: "v1", kind: "Nothing" },
+      "openapi.no-kind",
+    ],
+    [
+      { space: "nowhere", group: "apps", version: "v1", kind: "Deployment" },
+      "space.not-found",
+    ],
+  ] as const) {
     const failed = backend
       .invoke("schema_get", request)
       .catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(0);
-    expect(await failed).toMatchObject({ kind: "notFound" });
+    expect(await failed).toMatchObject({ code });
   }
 });
 
@@ -1317,7 +1323,7 @@ test("state loads what was stored, all of a set or none", async () => {
     ])
     .catch((e: unknown) => e);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await failed).toMatchObject({ kind: "notFound" });
+  expect(await failed).toMatchObject({ code: "space.not-found" });
   expect(await call(backend.invoke("state_load", null))).toEqual({
     app: { history: "[]" },
     spaces: { "prod-eu": { namespaces: '["default"]' } },

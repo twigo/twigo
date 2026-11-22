@@ -437,7 +437,7 @@ test("forwardBlocked forbids forwards by a policy file 8 s after a forward is re
   expect(state).toMatchObject({
     state: "failed",
     error: {
-      kind: "permissions",
+      code: "policy.blocked",
       blocked: {
         context: "qa",
         mode: "read-only",
@@ -482,7 +482,7 @@ test("a start, a resume and a move that the mode refuses answer its error and ch
     }),
   );
   expect(fresh).toMatchObject({
-    kind: "permissions",
+    code: "policy.blocked",
     blocked: { class: "forward", reason: "mode", mode: "read-only" },
   });
   const wrongPort = await refused(
