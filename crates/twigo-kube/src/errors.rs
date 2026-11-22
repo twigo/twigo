@@ -8,7 +8,7 @@ use rustls::CertificateError;
 use tower::timeout::error::Elapsed;
 use twigo_ipc::{Blocked, ErrorCode, IpcError, ServerCause, ServerStatus};
 
-use crate::client::dial::{ProxyFailed, Unresolved};
+use crate::client::dial::{ProxyFailed, ProxyUnreachable, Unresolved};
 use crate::credentials::{CredentialError, OidcError, RunError};
 
 /// kube-client's reason for an answer that is no `Status`: a proxy's HTML or
@@ -186,6 +186,9 @@ fn said(cause: &(dyn std::error::Error + 'static)) -> Option<(ErrorCode, &'stati
             ErrorCode::ConnectTimeout,
             "The cluster did not answer in time",
         ));
+    }
+    if cause.is::<ProxyUnreachable>() {
+        return Some((ErrorCode::ConnectProxy, "Twigo could not reach the proxy"));
     }
     if cause.is::<ProxyFailed>() {
         return Some((

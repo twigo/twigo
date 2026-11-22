@@ -1,12 +1,13 @@
 //! The connection TLS to the API server runs over: straight to it, through
 //! an HTTP CONNECT tunnel, or through SOCKS5 (ARCHITECTURE 6.3).
 
-use std::future::Future;
+use std::convert::Infallible;
+use std::future::{Future, Ready, ready};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use http::Uri;
+use http::{HeaderValue, Uri};
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder, MaybeHttpsStream};
 use hyper_util::client::legacy::connect::dns::GaiResolver;
@@ -25,8 +26,15 @@ use super::proxy::Proxy;
 #[error("the name does not resolve")]
 pub struct Unresolved(#[source] io::Error);
 
-/// A connection that the proxy, or the way to it, did not make. hyper-util's
-/// tunnel and SOCKS errors are not nameable.
+/// A proxy that Twigo could not reach: its connection was refused or timed
+/// out, its name does not resolve, or its certificate is not trusted.
+#[derive(Debug, thiserror::Error)]
+#[error("to the proxy")]
+pub struct ProxyUnreachable(#[source] BoxError);
+
+/// A proxy that answered the tunnel or the SOCKS handshake with an error,
+/// or left it half done. hyper-util's tunnel and SOCKS errors are not
+/// nameable.
 #[derive(Debug, thiserror::Error)]
 #[error("through the proxy")]
 pub struct ProxyFailed(#[source] BoxError);
@@ -44,8 +52,16 @@ pub fn http() -> Http {
 #[derive(Clone)]
 pub enum Dialer {
     Direct(Http),
-    Tunnel(Tunnel<HttpsConnector<Http>>),
-    Socks(SocksV5<Http>),
+    Tunnel {
+        proxy: Uri,
+        to_proxy: HttpsConnector<Http>,
+        auth: Option<HeaderValue>,
+    },
+    Socks {
+        proxy: Uri,
+        to_proxy: Http,
+        auth: Option<(String, String)>,
+    },
 }
 
 impl Dialer {
@@ -55,11 +71,14 @@ impl Dialer {
         };
         let uri = with_port(proxy.uri());
         if proxy.is_socks() {
-            let mut socks = SocksV5::new(uri, http);
-            if let Some((user, password)) = proxy.intercept().raw_auth() {
-                socks = socks.with_auth(user.to_owned(), password.to_owned());
-            }
-            return Ok(Dialer::Socks(socks));
+            return Ok(Dialer::Socks {
+                proxy: uri,
+                to_proxy: http,
+                auth: proxy
+                    .intercept()
+                    .raw_auth()
+                    .map(|(user, password)| (user.to_owned(), password.to_owned())),
+            });
         }
         // client-go checks an https proxy's certificate against the
         // cluster's CA, and would give it the cluster's client certificate
@@ -71,11 +90,11 @@ impl Dialer {
             .https_or_http()
             .enable_http1()
             .wrap_connector(http);
-        let mut tunnel = Tunnel::new(uri, to_proxy);
-        if let Some(auth) = proxy.intercept().basic_auth() {
-            tunnel = tunnel.with_auth(auth.clone());
-        }
-        Ok(Dialer::Tunnel(tunnel))
+        Ok(Dialer::Tunnel {
+            proxy: uri,
+            to_proxy,
+            auth: proxy.intercept().basic_auth().cloned(),
+        })
     }
 }
 
@@ -107,8 +126,7 @@ impl Service<Uri> for Dialer {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
         match self {
             Dialer::Direct(http) => http.poll_ready(cx).map_err(Into::into),
-            Dialer::Tunnel(tunnel) => tunnel.poll_ready(cx).map_err(Into::into),
-            Dialer::Socks(socks) => socks.poll_ready(cx).map_err(Into::into),
+            Dialer::Tunnel { .. } | Dialer::Socks { .. } => Poll::Ready(Ok(())),
         }
     }
 
@@ -118,21 +136,78 @@ impl Service<Uri> for Dialer {
                 let dialling = http.call(server);
                 Box::pin(async move { Ok(Stream::Tcp(dialling.await?)) })
             }
-            Dialer::Tunnel(tunnel) => {
-                let dialling = tunnel.call(with_port(&server));
+            Dialer::Tunnel {
+                proxy,
+                to_proxy,
+                auth,
+            } => {
+                let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
                 Box::pin(async move {
-                    let tunnel = dialling.await.map_err(|error| ProxyFailed(error.into()))?;
+                    let reached = reach(to_proxy, &proxy).await?;
+                    let mut tunnel = Tunnel::new(proxy, Reached(Some(reached)));
+                    if let Some(auth) = auth {
+                        tunnel = tunnel.with_auth(auth);
+                    }
+                    let tunnel = tunnel
+                        .oneshot(with_port(&server))
+                        .await
+                        .map_err(|error| ProxyFailed(error.into()))?;
                     Ok(Stream::Tunnel(Box::new(tunnel)))
                 })
             }
-            Dialer::Socks(socks) => {
-                let dialling = socks.call(with_port(&server));
+            Dialer::Socks {
+                proxy,
+                to_proxy,
+                auth,
+            } => {
+                let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
                 Box::pin(async move {
-                    let tcp = dialling.await.map_err(|error| ProxyFailed(error.into()))?;
+                    let reached = reach(to_proxy, &proxy).await?;
+                    let mut socks = SocksV5::new(proxy, Reached(Some(reached)));
+                    if let Some((user, password)) = auth {
+                        socks = socks.with_auth(user, password);
+                    }
+                    let tcp = socks
+                        .oneshot(with_port(&server))
+                        .await
+                        .map_err(|error| ProxyFailed(error.into()))?;
                     Ok(Stream::Tcp(tcp))
                 })
             }
         }
+    }
+}
+
+/// The connection to the proxy, made apart from the tunnel or the handshake
+/// that goes over it, so a failure of either says which it was.
+async fn reach<C>(to_proxy: C, proxy: &Uri) -> Result<C::Response, ProxyUnreachable>
+where
+    C: Service<Uri>,
+    C::Error: Into<BoxError>,
+{
+    to_proxy
+        .oneshot(proxy.clone())
+        .await
+        .map_err(|error| ProxyUnreachable(error.into()))
+}
+
+/// A connector that hands over the connection already made.
+struct Reached<T>(Option<T>);
+
+impl<T> Service<Uri> for Reached<T> {
+    type Response = T;
+    type Error = Infallible;
+    type Future = Ready<Result<T, Infallible>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Infallible>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _: Uri) -> Self::Future {
+        ready(Ok(self
+            .0
+            .take()
+            .expect("a tunnel or a handshake dials once")))
     }
 }
 

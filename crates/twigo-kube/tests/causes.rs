@@ -154,11 +154,42 @@ async fn through(proxy_url: &str) -> IpcError {
     failure(&config, options).await
 }
 
+async fn socks_refusing() -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            tokio::spawn(async move {
+                let mut buffer = [0; 512];
+                let _ = tcp.read(&mut buffer).await;
+                let _ = tcp.write_all(&[5, 0]).await;
+                let _ = tcp.read(&mut buffer).await;
+                let _ = tcp.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await;
+            });
+        }
+    });
+    port
+}
+
+const UNREACHED: &str = "Twigo could not reach the proxy: ";
+const REFUSED: &str = "The proxy could not reach the cluster: ";
+
+#[tokio::test]
+async fn a_proxy_that_is_not_there() {
+    let port = closed_port().await;
+    let error = through(&format!("http://127.0.0.1:{port}")).await;
+    assert_eq!(error.code, ErrorCode::ConnectProxy);
+    assert!(error.message.starts_with(UNREACHED), "{error:?}");
+    assert!(error.message.contains("onnection refused"), "{error:?}");
+}
+
 #[tokio::test]
 async fn a_proxy_that_refuses_the_tunnel() {
     let port = replying(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
     let error = through(&format!("http://127.0.0.1:{port}")).await;
     assert_eq!(error.code, ErrorCode::ConnectProxy);
+    assert!(error.message.starts_with(REFUSED), "{error:?}");
     assert!(error.message.contains("tunnel error"), "{error:?}");
 }
 
@@ -167,6 +198,16 @@ async fn a_socks_proxy_that_is_not_there() {
     let port = closed_port().await;
     let error = through(&format!("socks5://127.0.0.1:{port}")).await;
     assert_eq!(error.code, ErrorCode::ConnectProxy);
+    assert!(error.message.starts_with(UNREACHED), "{error:?}");
+    assert!(error.message.contains("onnection refused"), "{error:?}");
+}
+
+#[tokio::test]
+async fn a_socks_proxy_that_refuses_the_connection() {
+    let port = socks_refusing().await;
+    let error = through(&format!("socks5://127.0.0.1:{port}")).await;
+    assert_eq!(error.code, ErrorCode::ConnectProxy);
+    assert!(error.message.starts_with(REFUSED), "{error:?}");
     assert!(error.message.contains("SOCKS error"), "{error:?}");
 }
 
