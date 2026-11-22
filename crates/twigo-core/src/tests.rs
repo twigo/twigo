@@ -784,12 +784,12 @@ fn mark_local(core: &Core) {
 
 #[tokio::test(start_paused = true)]
 async fn the_namespaces_of_a_cluster_that_refuses_the_connection_say_so() {
-    let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path(), UNREACHABLE);
-    core.catalog.contexts().await;
-    let space = core.state.open_space("kind-local").id;
+    let fake = twigo_cache::fake::Fake::default();
+    fake.state().refused = true;
+    let (hub, _clients) = fake.hub(twigo_kube::client::Budgets::default());
 
-    let error = core.namespaces(&space).await.unwrap_err();
+    let state = hub.namespaces("kind-local").await.unwrap_err();
+    let error = namespaces_unavailable(state);
     assert_eq!(error.code, twigo_ipc::ErrorCode::ConnectRefused);
 }
 

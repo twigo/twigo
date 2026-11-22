@@ -706,13 +706,10 @@ impl Core {
     /// time (ARCHITECTURE 3.2).
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
-        self.hub.namespaces(&context).await.map_err(|state| {
-            match state {
-                ViewState::Stale { cause: Some(cause) } => Some(cause),
-                state => state.refusal(),
-            }
-            .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
-        })
+        self.hub
+            .namespaces(&context)
+            .await
+            .map_err(namespaces_unavailable)
     }
 
     /// A list of a space's resource for a window, filtered, sorted and
@@ -1249,6 +1246,16 @@ impl Failures {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Why a read of the namespaces gave up: the last failure's cause when the
+/// hub kept one, else the refusal it ended on.
+fn namespaces_unavailable(state: ViewState) -> IpcError {
+    match state {
+        ViewState::Stale { cause: Some(cause) } => Some(cause),
+        state => state.refusal(),
+    }
+    .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
 }
 
 /// How the hub gets a context's clients: through the core, while it lives.
