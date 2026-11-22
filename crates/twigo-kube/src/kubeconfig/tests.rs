@@ -224,9 +224,10 @@ fn each_file_that_fails_says_why_by_its_code_and_quotes_nothing_of_itself() {
         "tokened",
         "users:\n- name: u\n  user:\n    token: secret-token-value\n  extra: [\n",
     );
+    let typed = write(dir.path(), "typed", "users: secret-token-value\n");
     let other = write(dir.path(), "other", "kind: Other\ncontexts: []\n");
     let first = write(dir.path(), "first", FIRST);
-    let catalog = kubectl(&[&unreadable, &broken, &tokened, &first, &other]).load();
+    let catalog = kubectl(&[&unreadable, &broken, &tokened, &typed, &first, &other]).load();
 
     assert_eq!(names(&catalog), ["kind-a"]);
     let failed: Vec<(String, ErrorCode)> = catalog
@@ -241,6 +242,7 @@ fn each_file_that_fails_says_why_by_its_code_and_quotes_nothing_of_itself() {
             (named(&unreadable), ErrorCode::KubeconfigUnreadable),
             (named(&broken), ErrorCode::KubeconfigUnparsable),
             (named(&tokened), ErrorCode::KubeconfigUnparsable),
+            (named(&typed), ErrorCode::KubeconfigUnparsable),
             (named(&other), ErrorCode::KubeconfigUnmergeable),
         ]
     );
