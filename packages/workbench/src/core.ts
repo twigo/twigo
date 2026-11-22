@@ -21,6 +21,7 @@ import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
 import { registerContextModes } from "./spaces/modeCommands";
 import { registerQuickInputCommands } from "./quickaccess/commands";
+import { registerReportCommands } from "./report/commands";
 import {
   CANCEL_COUNTDOWN,
   COUNTING_DOWN,
@@ -344,6 +345,7 @@ export function registerCore(workbench: Workbench): void {
   registerSpaceColor(workbench);
   registerContextModes(workbench);
   registerQuickInputCommands(workbench, rules);
+  registerReportCommands(workbench);
   keybindings.register("core", rules);
 
   const menubar: readonly [MenuId, string, readonly string[]][] = [

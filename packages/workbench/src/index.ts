@@ -45,6 +45,7 @@ export {
   type ErrorLike,
 } from "./errors";
 export { ErrorMessage } from "./ErrorMessage";
+export { REPORT_PROBLEM } from "./report/commands";
 export { notifyError } from "./notifyError";
 export { variant, type Variant, type VariantGroup } from "./variants";
 export type { Look, Outcome } from "./operations/service";

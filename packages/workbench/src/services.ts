@@ -17,6 +17,7 @@ import { Lists } from "./lists/service";
 import { notifyError } from "./notifyError";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
+import { ProblemReport } from "./report/service";
 import { spaceMark } from "./parts/spaceMark";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
@@ -90,6 +91,7 @@ export class Workbench {
   readonly credentials: Credentials;
   readonly operations: Operations;
   readonly approvals: Approvals;
+  readonly problemReport: ProblemReport;
 
   constructor(
     readonly backend: Backend,
@@ -157,6 +159,7 @@ export class Workbench {
       () => this.operations.confirming,
       this.spaces,
     );
+    this.problemReport = new ProblemReport(backend);
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */
