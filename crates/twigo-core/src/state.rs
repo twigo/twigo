@@ -91,6 +91,20 @@ fn object_of(uri: &str) -> Option<(Option<String>, String)> {
     }
 }
 
+/// The editors a comparison's URI opens,
+/// `diff://<space>/objects?left=<uri>&right=<uri>` or
+/// `diff://edit/<kind>?editor=<uri>` (`packages/kube/src/uri.ts`).
+fn compared(uri: &str) -> Vec<String> {
+    let query = uri
+        .strip_prefix("diff://")
+        .and_then(|rest| rest.split_once('?'))
+        .map_or("", |(_, query)| query);
+    form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| matches!(key.as_ref(), "left" | "right" | "editor"))
+        .map(|(_, uri)| uri.into_owned())
+        .collect()
+}
+
 /// The namespaces a list's URI is scoped to,
 /// `k8s-list://<space>/[<group>/]<version>/<resource>?ns=a,b`.
 fn list_scope(uri: &str) -> Vec<String> {
@@ -296,11 +310,14 @@ impl State {
                 .get(RECENT)
                 .and_then(|value| serde_json::from_str::<Vec<Recent>>(value.get()).ok());
             for editor in recent.into_iter().flatten() {
-                if let Some((namespace, name)) = object_of(&editor.uri) {
-                    named.namespaces.extend(namespace);
-                    named.objects.insert(name);
+                let compared = compared(&editor.uri);
+                for uri in std::iter::once(&editor.uri).chain(&compared) {
+                    if let Some((namespace, name)) = object_of(uri) {
+                        named.namespaces.extend(namespace);
+                        named.objects.insert(name);
+                    }
+                    named.namespaces.extend(list_scope(uri));
                 }
-                named.namespaces.extend(list_scope(&editor.uri));
             }
         }
         named
