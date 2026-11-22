@@ -1,5 +1,5 @@
 use serde_json::json;
-use twigo_ipc::{FactId, Hidden};
+use twigo_ipc::{ErrorCode, FactId, Hidden};
 
 use super::redact::{Kind, Known, Name, Redactor};
 use super::*;

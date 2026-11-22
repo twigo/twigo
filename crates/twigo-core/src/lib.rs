@@ -909,12 +909,7 @@ impl Core {
         let lines = lines
             .await
             .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))??;
-        tokio::fs::write(path, lines).await.map_err(|error| {
-            IpcError::new(
-                ErrorCode::FileUnwritten,
-                format!("could not write {}: {error}", path.display()),
-            )
-        })
+        report::write(&lines, path).await
     }
 
     /// The containers of a pod a shell can reach (ARCHITECTURE 4.6), refused

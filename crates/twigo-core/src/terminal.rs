@@ -177,13 +177,6 @@ pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
     }
 }
 
-fn written(path: &Path, error: std::io::Error) -> IpcError {
-    IpcError::new(
-        ErrorCode::FileUnwritten,
-        format!("could not write {}: {error}", path.display()),
-    )
-}
-
 impl Core {
     /// Parks a terminal of `request.context` for `window`, which starts once
     /// `shell_open` names it. Async, as a proxy terminal's endpoint serves
@@ -227,7 +220,8 @@ impl Core {
         });
         let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
         let root = &self.terminals.root;
-        let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
+        let directory =
+            Directory::create(root, made).map_err(|e| crate::errors::unwritten(root, e))?;
         let (proxy, file, kubeconfig) = match kind {
             TerminalKind::Proxy { .. } => {
                 let process = self
@@ -239,7 +233,9 @@ impl Core {
             }
             TerminalKind::Kubeconfig => {
                 let entry = &found.entries.kubeconfig().contexts[0];
-                let file = directory.kubeconfig(entry).map_err(|e| written(root, e))?;
+                let file = directory
+                    .kubeconfig(entry)
+                    .map_err(|e| crate::errors::unwritten(root, e))?;
                 let kubeconfig = std::env::join_paths(
                     std::iter::once(file.as_path())
                         .chain(sources.files().iter().map(PathBuf::as_path)),
@@ -268,7 +264,7 @@ impl Core {
                     let path = directory.path();
                     directory
                         .write(name, contents)
-                        .map_err(|e| written(path, e))?;
+                        .map_err(|e| crate::errors::unwritten(path, e))?;
                 }
                 (startup.args, startup.env)
             }

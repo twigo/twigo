@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use twigo_ipc::{ErrorCode, Fact, FactId, IpcError, OpenIssue, Report};
+use twigo_ipc::{Fact, FactId, IpcError, OpenIssue, Report};
 use twigo_kube::kubeconfig::named;
 use twigo_log::Facts;
 
@@ -30,13 +30,10 @@ pub fn file_name() -> String {
     )
 }
 
-pub async fn write(text: &str, path: &Path) -> Result<(), IpcError> {
-    tokio::fs::write(path, text).await.map_err(|error| {
-        IpcError::new(
-            ErrorCode::FileUnwritten,
-            format!("could not write {}: {error}", path.display()),
-        )
-    })
+pub async fn write(text: impl AsRef<[u8]>, path: &Path) -> Result<(), IpcError> {
+    tokio::fs::write(path, text)
+        .await
+        .map_err(|error| crate::errors::unwritten(path, error))
 }
 
 impl Core {
