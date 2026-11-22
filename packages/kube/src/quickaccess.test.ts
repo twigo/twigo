@@ -8,12 +8,7 @@ import RESOURCES from "../../protocol/src/mock/resources.json";
 import { cellTone } from "./columns";
 import { PODS } from "./kinds";
 import { registerKube } from "./register";
-import {
-  firstRows,
-  namespacesOf,
-  parseK9s,
-  resolveResource,
-} from "./quickaccess";
+import { firstRows, namespacesOf } from "./quickaccess";
 import { listUri, objectUri } from "./uri";
 
 const NOWHERE: QuickAccessContext = { lookup: () => undefined };
@@ -44,38 +39,37 @@ async function kube() {
 
 describe("the k9s grammar", () => {
   test.each([
-    ["po", { resource: "po" }],
-    ["po payments", { resource: "po", namespace: "payments" }],
+    ["po payments", "Pods", "in payments"],
     [
       "po payments /api app=web tier!=db @prod-eu",
-      {
-        resource: "po",
-        namespace: "payments",
-        text: "api",
-        labels: "app=web,tier!=db",
-        context: "prod-eu",
-      },
+      "Pods",
+      "in payments /api app=web,tier!=db @prod-eu",
     ],
-    ["  deploy   /web ", { resource: "deploy", text: "web" }],
-  ])("%s", (input, query) => {
-    expect(parseK9s(input)).toEqual(query);
+    ["  deploy   /web ", "Deployments", "/web"],
+  ])("%s", async (input, label, description) => {
+    const { run } = await kube();
+    const { items } = await run(`:${input}`);
+    expect(items).toMatchObject([{ label, description }]);
   });
 
-  test("an empty query is none", () => {
-    expect(parseK9s("  ")).toBeUndefined();
+  test("an empty query lists every resource", async () => {
+    const { run } = await kube();
+    const { items } = await run(":  ");
+    expect(items).toHaveLength(DISCOVERY.length);
   });
 
   test.each([
-    ["po", "/pods"],
-    ["pod", "/pods"],
-    ["Pod", "/pods"],
-    ["deploy", "apps/deployments"],
-    ["ev", "/events"],
-    ["crd", "apiextensions.k8s.io/customresourcedefinitions"],
-    ["netpol", "networking.k8s.io/networkpolicies"],
-  ])("%s resolves to %s on recorded discovery", (name, key) => {
-    const found = resolveResource(DISCOVERY, name);
-    expect(found && `${found.gvr.group}/${found.gvr.resource}`).toBe(key);
+    ["po", "Pods"],
+    ["pod", "Pods"],
+    ["Pod", "Pods"],
+    ["deploy", "Deployments"],
+    ["ev", "Events"],
+    ["crd", "Custom Resource Definitions"],
+    ["netpol", "Network Policies"],
+  ])("%s names %s on recorded discovery", async (name, label) => {
+    const { run } = await kube();
+    const { items } = await run(`:${name} payments`);
+    expect(items).toMatchObject([{ label }]);
   });
 });
 

@@ -197,7 +197,7 @@ export function parseExecUri(uri: string): ExecInput | undefined {
 export const PF_SCHEME = "pf";
 
 /** A port-forward as an editor (ARCHITECTURE 4.3): `pf://<space>/<forward-id>`, the id the core gave it. */
-export interface PfInput {
+interface PfInput {
   readonly space: string;
   readonly id: ForwardId;
 }
@@ -239,7 +239,7 @@ export function parseTerminalUri(uri: string): TerminalInput | undefined {
 export const UNTITLED_SCHEME = "untitled";
 
 /** A new manifest and the space it was written in (ARCHITECTURE 4.3): `untitled://<space>/manifest-<n>`, the space encoded as an object's is. */
-export interface ManifestInput {
+interface ManifestInput {
   readonly space: string;
   readonly n: number;
 }
@@ -264,7 +264,7 @@ export const DIFF_SCHEME = "diff";
  * edit, an edit's opened object against the server's now, or any two
  * objects.
  */
-export type DiffInput =
+type DiffInput =
   | {
       readonly kind: "apply" | "server";
       /** The editor whose edit it is, an object's or a new manifest's. */

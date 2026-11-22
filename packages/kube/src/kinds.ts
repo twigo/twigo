@@ -84,7 +84,7 @@ export const NAMESPACES: Gvr = {
 };
 
 /** True for the groups Kubernetes itself serves; a custom group holds a dot outside k8s.io. */
-export function isBuiltIn(gvr: Gvr): boolean {
+function isBuiltIn(gvr: Gvr): boolean {
   return !gvr.group.includes(".") || gvr.group.endsWith(".k8s.io");
 }
 
