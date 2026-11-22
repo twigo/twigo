@@ -70,7 +70,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
         destructive: true,
         consequences: Vec::new(),
         affected: Vec::new(),
-        kubectl: Some("kubectl --context kind-a delete configmaps m -n a".to_owned()),
+        command_line: Some("kubectl --context kind-a delete configmaps m -n a".to_owned()),
         doing: "Deleting config map m".to_owned(),
         previewed: None,
         run: Run::Sends(Box::new(move |progress: Progress| {
@@ -1200,7 +1200,7 @@ async fn lowering_protection_asks_for_the_name_and_the_log_records_the_change_on
     assert_eq!(plan.friction, typed);
     assert_eq!(plan.mode, Mode::ReadOnly);
     assert_eq!(plan.confirm, "Make read-write");
-    assert_eq!(plan.kubectl, None);
+    assert_eq!(plan.command_line, None);
     assert!(plan.affected.is_empty());
 
     assert_eq!(
@@ -1526,7 +1526,7 @@ async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
     let plan = plan_shell(&core, ShellKind::Shell).await.unwrap();
     assert_eq!(plan.friction, Friction::Confirm);
     assert_eq!(
-        plan.kubectl.as_deref(),
+        plan.command_line.as_deref(),
         Some(
             "kubectl --context kind-a exec -it web-1 -n shop -c app -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'"
         ),
@@ -1579,7 +1579,7 @@ async fn read_write_runs_a_shell_at_once_and_attach_takes_the_containers_stdin_a
     let attach = plan_shell(&core, ShellKind::Attach).await.unwrap();
     assert_eq!(attach.friction, Friction::AtOnce);
     assert_eq!(
-        attach.kubectl.as_deref(),
+        attach.command_line.as_deref(),
         Some("kubectl --context kind-a attach -it web-1 -n shop -c app"),
     );
     let id = parked(&core, attach.id).await;

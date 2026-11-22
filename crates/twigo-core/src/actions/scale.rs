@@ -103,7 +103,7 @@ pub(crate) async fn scale(
         doing: format!("Scaling {what} to {replicas}"),
         consequences,
         affected,
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: "scale",
         target: named,
         writes: vec![attributes],

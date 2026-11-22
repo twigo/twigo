@@ -170,7 +170,7 @@ pub(crate) async fn shell(
         destructive: false,
         consequences: read.consequences,
         affected: Vec::new(),
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         doing: read.doing,
         context,
         connection,

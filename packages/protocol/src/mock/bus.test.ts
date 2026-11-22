@@ -175,7 +175,7 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
     }),
   );
   expect(node.friction).toEqual({ kind: "typed", text: "kind-local-node-3" });
-  expect(node.kubectl).toBe(
+  expect(node.commandLine).toBe(
     "kubectl --context kind-local delete nodes kind-local-node-3",
   );
 
@@ -196,7 +196,7 @@ test("a node asks for its name typed and a deployment in a dialog", async () => 
   );
   expect(deployment.friction).toEqual({ kind: "confirm" });
   expect(deployment.confirm).toBe("Delete deployment");
-  expect(deployment.kubectl).toBe(
+  expect(deployment.commandLine).toBe(
     `kubectl --context kind-local delete deployments.apps ${deploymentOf(first)} -n ${first.namespace}`,
   );
 });
@@ -303,7 +303,7 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   });
   const up = await answered(backend.invoke("command_plan", scale(count + 2)));
   expect(up.friction).toEqual({ kind: "atOnce" });
-  expect(up.kubectl).toBe(
+  expect(up.commandLine).toBe(
     `kubectl --context kind-local scale deployments.apps ${name} --current-replicas ${String(count)} --replicas ${String(count + 2)} -n ${namespace}`,
   );
   const started = Date.now();
@@ -319,7 +319,7 @@ test("a scale runs at once, and its undo puts it back for 30 s", async () => {
   const back = await answered(
     backend.invoke("command_plan", { action: "undo", space: "kind-local" }),
   );
-  expect(back.kubectl).toBe(
+  expect(back.commandLine).toBe(
     `kubectl --context kind-local scale deployments.apps ${name} --current-replicas ${String(count + 2)} --replicas ${String(count)} -n ${namespace}`,
   );
   expect(await run(backend, back.id)).toEqual([
@@ -489,7 +489,7 @@ test("a drain cordons the node and lists the pods it evicts", async () => {
     }),
   );
   expect(plan.friction).toEqual({ kind: "confirm" });
-  expect(plan.kubectl).toBe(
+  expect(plan.commandLine).toBe(
     `kubectl --context kind-local drain ${node} --ignore-daemonsets`,
   );
   expect(plan.affected[0]?.objects.map((object) => object.name)).toContain(
@@ -637,7 +637,7 @@ test("a trigger asks in a dialog and names the job it makes", async () => {
   expect(plan.friction).toEqual({ kind: "confirm" });
   const job = /^Job (\S+) runs once/.exec(plan.consequences[0] ?? "")?.[1];
   expect(job).toMatch(/^report-manual-[bcdfghjklmnpqrstvwxz2456789]{5}$/);
-  expect(plan.kubectl).toBe(
+  expect(plan.commandLine).toBe(
     `kubectl --context kind-local create job ${job ?? ""} --from cronjob/report -n batch`,
   );
   expect(await run(backend, plan.id)).toEqual([
@@ -1305,10 +1305,10 @@ test("a plan's kubectl line and consequences say how its edit is sent", async ()
   );
   if (byPatch.state !== "ready") throw new Error("expected ready");
   const patchPlan = await planOf(backend, byPatch.id);
-  expect(patchPlan.kubectl).toContain(
+  expect(patchPlan.commandLine).toContain(
     "kubectl patch configmaps settings -n default --type=merge --field-manager=twigo-edit",
   );
-  expect(patchPlan.kubectl).not.toContain("--server-side");
+  expect(patchPlan.commandLine).not.toContain("--server-side");
   expect(patchPlan.consequences).toEqual([
     "An apply cannot express this edit, so it goes as one merge patch under field manager twigo-edit, as kubectl edit would.",
   ]);
@@ -1318,8 +1318,8 @@ test("a plan's kubectl line and consequences say how its edit is sent", async ()
   );
   if (withRemoval.state !== "ready") throw new Error("expected ready");
   const removalPlan = await planOf(backend, withRemoval.id);
-  expect(removalPlan.kubectl).toContain("--server-side");
-  expect(removalPlan.kubectl).toContain("--type=merge");
+  expect(removalPlan.commandLine).toContain("--server-side");
+  expect(removalPlan.commandLine).toContain("--type=merge");
   expect(removalPlan.consequences).toEqual([
     "Then a merge patch removes .metadata.labels.team.",
   ]);
@@ -1331,10 +1331,10 @@ test("a plan's kubectl line and consequences say how its edit is sent", async ()
     throw new Error("expected a recreate");
   }
   const recreatePlan = await planOf(backend, replaced.recreate);
-  expect(recreatePlan.kubectl).toContain(
+  expect(recreatePlan.commandLine).toContain(
     "kubectl delete configmaps settings -n default && kubectl create",
   );
-  expect(recreatePlan.kubectl).not.toContain("--server-side");
+  expect(recreatePlan.commandLine).not.toContain("--server-side");
   expect(recreatePlan.consequences).toEqual([
     "It goes, and a new one with a new uid takes its place.",
   ]);
@@ -1363,7 +1363,7 @@ test("a Job's recreate says it runs again, in its own words", async () => {
   expect(plan.consequences).toEqual([
     "It goes with its pods, and a new one with a new uid runs from the start, whatever this one finished.",
   ]);
-  expect(plan.kubectl).toContain("kubectl delete jobs.batch settings");
+  expect(plan.commandLine).toContain("kubectl delete jobs.batch settings");
 });
 
 test("the two sides of a preview lose resourceVersion and generation, as Rust's do", async () => {
@@ -1629,7 +1629,7 @@ test("an unlock asks in a dialog, and its plan has no kubectl command", async ()
     backend.invoke("command_plan", { action: "unlock", context: "prod-eu" }),
   );
   expect(plan.friction).toEqual({ kind: "confirm" });
-  expect(plan.kubectl).toBeNull();
+  expect(plan.commandLine).toBeNull();
   const nothing = await refused(
     backend.invoke("command_plan", { action: "unlock", context: "staging" }),
   );

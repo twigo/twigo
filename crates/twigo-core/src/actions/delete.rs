@@ -211,7 +211,7 @@ pub(crate) async fn delete(
         destructive: true,
         consequences,
         affected,
-        kubectl: Some(line),
+        command_line: Some(line),
         command: "delete",
         target: if several {
             format!("{what}{place}")

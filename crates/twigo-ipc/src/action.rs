@@ -131,9 +131,9 @@ pub struct Plan {
     /// The exact objects it acts on and those that follow, by what happens
     /// to them.
     pub affected: Vec<Affected>,
-    /// The kubectl command that does the same; none for what only Twigo
-    /// does, such as a change of a context's mode.
-    pub kubectl: Option<String>,
+    /// The kubectl or helm command that does the same; none for what only
+    /// Twigo does, such as a change of a context's mode.
+    pub command_line: Option<String>,
     /// What a toast or the status bar says while it counts down or runs:
     /// `Deleting pod web-1`.
     pub doing: String,

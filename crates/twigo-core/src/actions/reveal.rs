@@ -53,7 +53,7 @@ pub(crate) fn reveal(
             if binary { ", as base64" } else { "" }
         )],
         affected: Vec::new(),
-        kubectl: Some(line),
+        command_line: Some(line),
         doing: format!("Revealing {key}"),
         command: "reveal",
         target: format!("secrets/{name} in {namespace}, key {key}"),

@@ -131,7 +131,7 @@ pub(crate) async fn cordon(
         doing: format!("{doing} node {name}"),
         consequences: vec![consequence.to_owned()],
         affected: Vec::new(),
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: verb,
         target: named,
         writes: vec![attributes],

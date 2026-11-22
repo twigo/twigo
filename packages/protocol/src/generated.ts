@@ -1607,10 +1607,10 @@ consequences: Array<string>,
  */
 affected: Array<Affected>, 
 /**
- * The kubectl command that does the same; none for what only Twigo
- * does, such as a change of a context's mode.
+ * The kubectl or helm command that does the same; none for what only
+ * Twigo does, such as a change of a context's mode.
  */
-kubectl: string | null, 
+commandLine: string | null, 
 /**
  * What a toast or the status bar says while it counts down or runs:
  * `Deleting pod web-1`.

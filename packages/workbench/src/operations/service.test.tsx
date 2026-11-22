@@ -60,7 +60,7 @@ function plan(friction: Plan["friction"]): Plan {
     destructive: true,
     consequences: ["Its replica set web-5d4f replaces it."],
     affected: [],
-    kubectl: "kubectl --context dev delete pods web-1 -n default",
+    commandLine: "kubectl --context dev delete pods web-1 -n default",
     doing: "Deleting pod web-1",
   };
 }
@@ -1057,7 +1057,7 @@ test("a change that lowers protection asks for the context's name, and a wrong n
   });
   expect(workbench.operations.asking?.plan).toMatchObject({
     friction: { kind: "typed", text: "prod-eu" },
-    kubectl: null,
+    commandLine: null,
   });
   act(() => {
     workbench.operations.asking?.confirm("prod-e");

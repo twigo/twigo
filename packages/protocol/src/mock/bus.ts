@@ -705,7 +705,7 @@ export class MockBus {
         destructive: recreate,
         consequences: applyConsequences(previewed),
         affected: [],
-        kubectl: applyKubectl(previewed),
+        commandLine: applyKubectl(previewed),
         doing: `${recreate ? "Recreating" : "Applying"} ${what}`,
       },
       risk: recreate ? { kind: "lasting" } : { kind: "reviewed" },
@@ -1114,7 +1114,7 @@ export class MockBus {
         destructive: true,
         consequences,
         affected,
-        kubectl,
+        commandLine: kubectl,
         doing: `Deleting ${what}`,
       },
       risk,
@@ -1187,7 +1187,7 @@ export class MockBus {
           zero && pods.length > 0
             ? [{ title: "Its pods go", objects: pods.map(podRef) }]
             : [],
-        kubectl: line(
+        commandLine: line(
           `--current-replicas ${String(pods.length)} --replicas ${String(replicas)}`,
         ),
         doing: `Scaling ${what} to ${String(replicas)}`,
@@ -1276,7 +1276,7 @@ export class MockBus {
           pods.length > 0
             ? [{ title: "Replaces", objects: pods.map(podRef) }]
             : [],
-        kubectl: `kubectl --context ${context} rollout restart deployments.apps/${name}${inNamespace(namespace)}`,
+        commandLine: `kubectl --context ${context} rollout restart deployments.apps/${name}${inNamespace(namespace)}`,
         doing: `Restarting ${what}`,
       },
       risk: { kind: "lasting" },
@@ -1320,7 +1320,7 @@ export class MockBus {
             : "New pods can be scheduled on it again.",
         ],
         affected: [],
-        kubectl: `kubectl --context ${context} ${verb} ${name}`,
+        commandLine: `kubectl --context ${context} ${verb} ${name}`,
         doing: `${doing} node ${name}`,
       },
       risk: { kind: "reversible" },
@@ -1380,7 +1380,7 @@ export class MockBus {
           pods.length > 0
             ? [{ title: "Evicts", objects: pods.map(podRef) }]
             : [],
-        kubectl: `kubectl --context ${context} drain ${name} --ignore-daemonsets`,
+        commandLine: `kubectl --context ${context} drain ${name} --ignore-daemonsets`,
         doing: `Draining node ${name}`,
       },
       risk: { kind: "lasting" },
@@ -1439,7 +1439,7 @@ export class MockBus {
           `Job ${job} runs once from its template, beside its schedule.`,
         ],
         affected: [],
-        kubectl: `kubectl --context ${context} create job ${job} --from cronjob/${name} -n ${namespace}`,
+        commandLine: `kubectl --context ${context} create job ${job} --from cronjob/${name} -n ${namespace}`,
         doing: `Triggering cron job ${name}`,
       },
       risk: { kind: "lasting" },
@@ -1559,7 +1559,7 @@ export class MockBus {
         destructive: asked.destructive ?? asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
-        kubectl: line(suspend),
+        commandLine: line(suspend),
         doing: `${doing} ${what}`,
       },
       risk: asked.risk,
@@ -1649,7 +1649,7 @@ export class MockBus {
         destructive: asked.destructive ?? asked.risk.kind === "lasting",
         consequences: asked.consequences,
         affected: asked.affected,
-        kubectl: revert.kubectl,
+        commandLine: revert.kubectl,
         doing: revert.doing,
       },
       risk: asked.risk,
@@ -1710,7 +1710,7 @@ export class MockBus {
             : "It runs in the container with the rights of its service account.",
         ],
         affected: [],
-        kubectl: attach
+        commandLine: attach
           ? `kubectl --context ${context} attach${flags} ${pod} -n ${namespace} -c ${container}`
           : `kubectl --context ${context} exec -it ${pod} -n ${namespace} -c ${container} -- sh -c 'export TERM=xterm-256color; command -v bash >/dev/null && exec bash || exec sh'`,
         doing: `${attach ? "Attaching to" : "Opening a shell in"} ${pod}`,
@@ -1765,7 +1765,7 @@ export class MockBus {
         destructive: false,
         consequences: said.consequences,
         affected: [],
-        kubectl: null,
+        commandLine: null,
         doing: said.doing,
       },
       risk:
@@ -1811,7 +1811,7 @@ export class MockBus {
           `It shows until you hide it or close the secret${binary ? ", as base64" : ""}.`,
         ],
         affected: [],
-        kubectl: `kubectl --context ${context} get secrets ${name} -n ${namespace} -o ${template}`,
+        commandLine: `kubectl --context ${context} get secrets ${name} -n ${namespace} -o ${template}`,
         doing: `Revealing ${key}`,
       },
       risk: { kind: "reveal" },

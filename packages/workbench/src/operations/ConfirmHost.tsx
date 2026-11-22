@@ -65,7 +65,7 @@ export function ConfirmHost() {
           ...(object.namespace !== null && { detail: object.namespace }),
         })),
       }))}
-      {...(plan.kubectl !== null && { command: plan.kubectl })}
+      {...(plan.commandLine !== null && { command: plan.commandLine })}
       {...(plan.friction.kind === "typed" && { typed: plan.friction.text })}
       choices={[
         {

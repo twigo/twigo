@@ -241,12 +241,12 @@ pub async fn protect(core: &Core, request: PlanRequest) -> Result<Vec<OperationE
     run(core, &plan, typed.as_deref()).await
 }
 
-/// The plan's kubectl line, which every plan of a command to the cluster
+/// The plan's command line, which every plan of a command to the cluster
 /// has.
 pub fn line(plan: &Plan) -> &str {
-    plan.kubectl
+    plan.command_line
         .as_deref()
-        .expect("a plan of a command to the cluster has its kubectl line")
+        .expect("a plan of a command to the cluster has its command line")
 }
 
 /// The plan's kubectl line, run by a shell over `kubeconfig` only.

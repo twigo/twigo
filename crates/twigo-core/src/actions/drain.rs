@@ -201,7 +201,7 @@ pub(crate) async fn drain(core: &Core, space: &str, name: String) -> Result<Plan
         destructive: true,
         consequences,
         affected,
-        kubectl: Some(kubectl),
+        command_line: Some(kubectl),
         command: "drain",
         target: named,
         writes,
