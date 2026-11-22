@@ -17,6 +17,13 @@ import type {
 
 export interface ReleaseSnapshot {
   readonly seq: number;
+  /**
+   * Names what a page holds of the parts it shows, such as a value a person
+   * revealed: another number for another view, for the view's next revision,
+   * and for a release that went and came back, so that nothing held for one
+   * is read for another.
+   */
+  readonly epoch: number;
   readonly status: ViewState;
   /** False until a revision is listed, and once none is left. */
   readonly exists: boolean;
@@ -35,6 +42,7 @@ export interface ReleaseSnapshot {
 
 export const INITIAL_RELEASE: ReleaseSnapshot = {
   seq: 0,
+  epoch: 0,
   status: { state: "connecting" },
   exists: false,
   revision: undefined,
@@ -47,6 +55,8 @@ export const INITIAL_RELEASE: ReleaseSnapshot = {
   manifest: undefined,
   history: undefined,
 };
+
+let epochs = 0;
 
 /** What an open release's views ask for, and the revision they follow: null for the latest. */
 export interface ReleaseAsk {
@@ -65,6 +75,7 @@ export class ReleaseView {
   readonly #backend: Backend;
   readonly #listeners = new Set<() => void>();
   #snapshot = INITIAL_RELEASE;
+  #epoch = 0;
   #id: SubscriptionId | undefined;
   readonly #opened: Promise<SubscriptionId>;
   #ask: ReleaseAsk;
@@ -154,8 +165,10 @@ export class ReleaseView {
     if (this.#closed) return;
     const previous = this.#snapshot;
     const kept = batch.exists && batch.revision === previous.revision;
+    if (!kept) this.#epoch = ++epochs;
     this.#publish({
       seq: batch.seq,
+      epoch: this.#epoch,
       status: batch.status,
       exists: batch.exists,
       revision: batch.revision ?? undefined,

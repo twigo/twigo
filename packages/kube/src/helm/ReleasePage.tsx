@@ -191,8 +191,14 @@ export function ReleasePage({
       },
     },
   );
-  const revision = snapshot.revision;
-  const shown = states.shown(uri, revision);
+  const { revision, epoch } = snapshot;
+  const shown = states.shown(uri, epoch);
+  useEffect(
+    () => () => {
+      states.leave(uri, epoch);
+    },
+    [states, uri, epoch],
+  );
   const request = useMemo(
     () =>
       id &&
@@ -219,11 +225,13 @@ export function ReleasePage({
   const show = (part: HelmPart) => {
     if (revision === undefined || reveal === undefined) return;
     void reveal({ at: revision, part }).then((answer) => {
-      if (answer) states.reveal(uri, revision, { part, ...answer });
+      if (answer && latest.current.epoch === epoch) {
+        states.reveal(uri, epoch, { part, ...answer });
+      }
     });
   };
   const hide = (parts: readonly HelmPart[]) => {
-    states.hide(uri, revision, parts.map(partKey));
+    states.hide(uri, epoch, parts.map(partKey));
   };
   const onGlyph = (glyph: Glyph) => {
     if (glyph.revealed) hide([glyph.part]);
@@ -247,7 +255,7 @@ export function ReleasePage({
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
-  const latest = useRef({ text, under, show, hide });
+  const latest = useRef({ text, under, show, hide, epoch });
   const subject = JSON.stringify({
     space: release.space,
     gvr: HELM_RELEASES,
@@ -294,7 +302,7 @@ export function ReleasePage({
     filtered,
   ]);
   useEffect(() => {
-    latest.current = { text, under, show, hide };
+    latest.current = { text, under, show, hide, epoch };
   });
   useEffect(
     () =>
@@ -608,6 +616,7 @@ function Body({
         <div className="h-full min-h-48">
           <HistoryList
             uri={uri}
+            epoch={snapshot.epoch}
             lines={snapshot.history}
             latest={snapshot.latest}
             states={states}

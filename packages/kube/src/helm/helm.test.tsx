@@ -144,19 +144,31 @@ test("a status is healthy, quiet, waiting or failing as Helm's words say, and a 
   }
 });
 
-test("what a person revealed is of one revision and goes with another, with the editor's close, or with Hide", () => {
+test("what a person revealed or marked belongs to one epoch of a view, and goes with another, with the page leaving it, with the editor's close, or with Hide", () => {
   const states = new ReleaseStates();
   const part = { kind: "notes" } as const;
   const answer = { part, value: "secret", binary: false };
   states.reveal("helm://a", 2, answer);
   expect([...states.shown("helm://a", 2).values()]).toEqual([answer]);
-  expect(states.shown("helm://a", 1).size).toBe(0);
+  expect(states.shown("helm://a", 3).size).toBe(0);
   expect(states.shown("helm://b", 2).size).toBe(0);
   states.hide("helm://a", 2, [JSON.stringify(part)]);
   expect(states.shown("helm://a", 2).size).toBe(0);
+
   states.reveal("helm://a", 2, answer);
+  states.leave("helm://a", 2);
+  expect(states.shown("helm://a", 2).size).toBe(0);
+  states.reveal("helm://a", 2, answer);
+  states.leave("helm://a", 3);
+  expect(states.shown("helm://a", 2).size).toBe(1);
   states.closed("helm://a");
   expect(states.shown("helm://a", 2).size).toBe(0);
+
+  states.mark("helm://a", 2, [1, 2], true);
+  expect([...states.marks("helm://a", 2)]).toEqual([1, 2]);
+  expect(states.marks("helm://a", 3).size).toBe(0);
+  states.leave("helm://a", 2);
+  expect(states.marks("helm://a", 2).size).toBe(0);
 });
 
 test("Copy helm Command prints what helm prints for the view shown, with the context and the namespace", () => {
