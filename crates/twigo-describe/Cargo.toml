@@ -17,7 +17,5 @@ jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 twigo-ipc.workspace = true
-twigo-quantity.workspace = true
-
-[dev-dependencies]
 twigo-policy.workspace = true
+twigo-quantity.workspace = true
