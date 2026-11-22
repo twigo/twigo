@@ -11,6 +11,7 @@ pub mod connections;
 mod delete;
 mod errors;
 mod forward;
+mod helm;
 pub mod objects;
 mod proxy;
 pub mod report;
@@ -41,8 +42,9 @@ use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
     DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
-    PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
+    PlanRequest, ReleaseListQuery, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts,
+    SetWindow, ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -754,6 +756,21 @@ impl Core {
             .await?;
         self.lists
             .keep(ticket, Batcher::spawn("list", rows, spec, metrics, send))
+    }
+
+    /// The Helm releases of a space's namespaces as a list, whose batches go through `send` until
+    /// it says the window is gone, and which `list_set_window`, `list_ack` and `list_unsubscribe`
+    /// serve as any list (ARCHITECTURE 3.6).
+    pub async fn helm_list_subscribe(
+        &self,
+        window: &str,
+        query: ReleaseListQuery,
+        send: impl FnMut(ListBatch) -> bool + Send + 'static,
+    ) -> Result<SubscriptionId, IpcError> {
+        let ticket = self.lists.ticket(window);
+        let context = self.context(&query.space)?;
+        let list = helm::list(&self.hub, context, query, send).await?;
+        self.lists.keep(ticket, list)
     }
 
     /// A list or an object does not wait for the catalog to list the context, and has the
