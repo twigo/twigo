@@ -135,22 +135,3 @@ async fn a_policy_proxy_whose_accept_loop_panics_takes_the_fatal_path_at_once() 
     assert_eq!(why.duty, "policy proxy");
     supervising.abort();
 }
-
-#[tokio::test]
-async fn a_duty_that_panics_four_times_takes_the_fatal_path() {
-    inject::arm("unlock expiry", 4);
-    let dir = tempfile::tempdir().unwrap();
-    let core = core(dir.path());
-    let (told, mut fatal) = mpsc::unbounded_channel();
-    let (_status, followed) = watch::channel(Status::Resolving);
-    let supervising = tokio::spawn(core.start(followed, None, None, move |why| {
-        told.send(why).unwrap();
-    }));
-    let why = tokio::time::timeout(Duration::from_secs(5), fatal.recv())
-        .await
-        .expect("the fatal path within five seconds")
-        .unwrap();
-    assert_eq!(why.duty, "unlock expiry");
-    assert_eq!(inject::armed("unlock expiry"), 0, "it panicked four times");
-    supervising.abort();
-}

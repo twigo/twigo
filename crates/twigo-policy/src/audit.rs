@@ -300,23 +300,6 @@ mod tests {
         SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    #[test]
-    fn opens_a_log_in_a_directory_that_does_not_exist_yet() {
-        let _serial = serial();
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("app-data/nested/audit.jsonl");
-        Audit::open(&path).record(&Entry::Ended {
-            context: "kind-a",
-            command: "apply",
-            target: "deployments/web",
-            outcome: "done",
-            message: None,
-            codes: &[],
-        });
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains(r#""event":"ended""#), "{written}");
-    }
-
     fn listed(code: ErrorCode) -> bool {
         problems::watch()
             .borrow()

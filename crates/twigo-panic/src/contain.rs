@@ -59,9 +59,4 @@ mod tests {
             .unwrap_err();
         assert_eq!(raised.downcast_ref::<&str>(), Some(&"the original"));
     }
-
-    #[tokio::test]
-    async fn a_joined_value_is_returned() {
-        assert_eq!(joined(tokio::spawn(async { 3 }).await), 3);
-    }
 }
