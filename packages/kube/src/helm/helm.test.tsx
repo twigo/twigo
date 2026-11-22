@@ -64,6 +64,22 @@ test("the list draws each release as a row of Helm's columns, and says why one c
   expect(document.body.textContent).not.toContain("helm.truncated");
 });
 
+test("a release that cannot be read counts as failing in the health filter and the status bar, and its filter shows it", async () => {
+  await openList(createMockBackend("ready"), "helm-list://prod-eu");
+  const health = (name: string) =>
+    screen.getByRole("button", { name: new RegExp(`^${name}`) });
+  expect(health("Failing").textContent).toBe("Failing2");
+  expect(health("Healthy").textContent).toBe("Healthy3");
+  expect(screen.getByText("2 failing")).toBeTruthy();
+  fireEvent.click(health("Failing"));
+  await settle(4);
+  expect(
+    rows()
+      .map((row) => cellOf(row, "Name"))
+      .sort(),
+  ).toEqual(["epsilon", "trunc"]);
+});
+
 test("a refused list names the Secrets Helm keeps its releases in, and offers to choose namespaces", async () => {
   await openList(createMockBackend("forbidden"), "helm-list://prod-eu");
   expect(document.body.textContent).toContain(
@@ -132,6 +148,7 @@ test("a status is healthy, quiet, waiting or failing as Helm's words say, and a 
   expect(isQuiet("uninstalled")).toBe(true);
   expect(isQuiet("deployed")).toBe(false);
   expect(statusTone("failed")).toBe("error");
+  expect(statusTone("unreadable")).toBe("error");
   for (const word of [
     "pending-install",
     "pending-upgrade",

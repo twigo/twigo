@@ -106,13 +106,13 @@ test("every release is a row of the columns the core sends, Namespace second whe
   expect(rows.get("prod-eu/auth/stuck")?.cells[3]).toBe("pending-upgrade");
 });
 
-test("a release whose revision cannot be read keeps what its labels say and carries its code", async () => {
+test("a release whose revision cannot be read is unreadable, which counts as failing, and carries its code", async () => {
   const { rows } = await list();
   expect(rows.get("prod-eu/auth/trunc")?.cells).toEqual([
     "trunc",
     "auth",
     1,
-    "deployed",
+    "unreadable",
     null,
     null,
     null,
@@ -129,8 +129,9 @@ test("the query view counts, filters and sorts releases as it does any list", as
       (counted.last?.counts ?? []).map(({ value, count }) => [value, count]),
     ),
   ).toEqual({
-    deployed: 3,
+    deployed: 2,
     failed: 1,
+    unreadable: 1,
     uninstalled: 1,
     "pending-upgrade": 1,
   });

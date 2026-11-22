@@ -115,7 +115,7 @@ function rowOf(
   const cells: Cell[] = [
     name,
     latest.revision,
-    latest.status,
+    latest.problem === null ? latest.status : "unreadable",
     latest.chart,
     latest.appVersion,
     null,
