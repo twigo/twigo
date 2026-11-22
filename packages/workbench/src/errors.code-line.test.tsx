@@ -59,9 +59,8 @@ async function orphanRow() {
 
 test("a context's problem on a picker row says its code after the host", async () => {
   const orphan = await orphanRow();
-  expect(orphan?.description).toBe(
-    "orphan.internal:6443 · context.missing-user",
-  );
+  expect(orphan?.description).toBe("orphan.internal:6443");
+  expect(orphan?.code).toBe("context.missing-user");
   expect(orphan?.state?.label).toBe(
     'no kubeconfig defines the user "orphan-admin"',
   );

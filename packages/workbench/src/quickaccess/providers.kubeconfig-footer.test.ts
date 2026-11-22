@@ -29,6 +29,7 @@ test("kubeconfig:footer keeps the failed files out of the groups and ends the pi
   expect(last).toMatchObject({
     id: "kubeconfig:skipped",
     label: "2 kubeconfig files were skipped",
+    group: "Kubeconfig files",
   });
   expect(last?.disabled).toBeUndefined();
 
