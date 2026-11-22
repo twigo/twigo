@@ -6,6 +6,7 @@ use std::future::{Future, Ready, ready};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use http::{HeaderValue, Uri};
 use hyper::rt::{Read, ReadBufCursor, Write};
@@ -26,15 +27,23 @@ use super::proxy::Proxy;
 #[error("the name does not resolve")]
 pub struct Unresolved(#[source] io::Error);
 
-/// A proxy that Twigo could not reach: its connection was refused or timed
-/// out, its name does not resolve, or its certificate is not trusted.
+/// A proxy that Twigo could not reach: its connection was refused, its name
+/// does not resolve, its certificate is not trusted, or it did not answer the
+/// connection, the tunnel or the SOCKS handshake in time.
 #[derive(Debug, thiserror::Error)]
 #[error("to the proxy")]
 pub struct ProxyUnreachable(#[source] BoxError);
 
-/// A proxy that answered the tunnel or the SOCKS handshake with an error,
-/// or left it half done. hyper-util's tunnel and SOCKS errors are not
-/// nameable.
+/// A proxy that answered the tunnel or the SOCKS handshake with a refusal or
+/// an error, or left it half done, which says nothing of the cluster.
+/// hyper-util's tunnel and SOCKS errors are not nameable.
+#[derive(Debug, thiserror::Error)]
+#[error("refused by the proxy")]
+pub struct ProxyRefused(#[source] BoxError);
+
+/// A proxy that tried the connection to the cluster and could not make it: a
+/// SOCKS reply that says the network or the host was unreachable, the
+/// connection refused or the TTL expired.
 #[derive(Debug, thiserror::Error)]
 #[error("through the proxy")]
 pub struct ProxyFailed(#[source] BoxError);
@@ -56,16 +65,25 @@ pub enum Dialer {
         proxy: Uri,
         to_proxy: HttpsConnector<Http>,
         auth: Option<HeaderValue>,
+        hop: Option<Duration>,
     },
     Socks {
         proxy: Uri,
         to_proxy: Http,
         auth: Option<(String, String)>,
+        hop: Option<Duration>,
     },
 }
 
 impl Dialer {
-    pub fn new(http: Http, proxy: Option<&Proxy>) -> Result<Self, rustls::Error> {
+    /// `hop` is how long the connection to a proxy, with its tunnel or SOCKS
+    /// handshake, may take, the whole of it counted from its start; the
+    /// caller's own deadline over the dialer must end later.
+    pub fn new(
+        http: Http,
+        proxy: Option<&Proxy>,
+        hop: Option<Duration>,
+    ) -> Result<Self, rustls::Error> {
         let Some(proxy) = proxy else {
             return Ok(Dialer::Direct(http));
         };
@@ -78,6 +96,7 @@ impl Dialer {
                     .intercept()
                     .raw_auth()
                     .map(|(user, password)| (user.to_owned(), password.to_owned())),
+                hop,
             });
         }
         // client-go checks an https proxy's certificate against the
@@ -94,6 +113,7 @@ impl Dialer {
             proxy: uri,
             to_proxy,
             auth: proxy.intercept().basic_auth().cloned(),
+            hop,
         })
     }
 }
@@ -140,9 +160,10 @@ impl Service<Uri> for Dialer {
                 proxy,
                 to_proxy,
                 auth,
+                hop,
             } => {
                 let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
-                Box::pin(async move {
+                Box::pin(within(*hop, async move {
                     let reached = reach(to_proxy, &proxy).await?;
                     let mut tunnel = Tunnel::new(proxy, Reached(Some(reached)));
                     if let Some(auth) = auth {
@@ -151,30 +172,61 @@ impl Service<Uri> for Dialer {
                     let tunnel = tunnel
                         .oneshot(with_port(&server))
                         .await
-                        .map_err(|error| ProxyFailed(error.into()))?;
+                        .map_err(|error| ProxyRefused(error.into()))?;
                     Ok(Stream::Tunnel(Box::new(tunnel)))
-                })
+                }))
             }
             Dialer::Socks {
                 proxy,
                 to_proxy,
                 auth,
+                hop,
             } => {
                 let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
-                Box::pin(async move {
+                Box::pin(within(*hop, async move {
                     let reached = reach(to_proxy, &proxy).await?;
                     let mut socks = SocksV5::new(proxy, Reached(Some(reached)));
                     if let Some((user, password)) = auth {
                         socks = socks.with_auth(user, password);
                     }
-                    let tcp = socks
-                        .oneshot(with_port(&server))
-                        .await
-                        .map_err(|error| ProxyFailed(error.into()))?;
+                    let tcp = socks.oneshot(with_port(&server)).await.map_err(declined)?;
                     Ok(Stream::Tcp(tcp))
-                })
+                }))
             }
         }
+    }
+}
+
+/// `hop` under its deadline; a proxy that accepts and never answers runs into
+/// it, and is as good as not there.
+async fn within<T>(
+    limit: Option<Duration>,
+    hop: impl Future<Output = Result<T, BoxError>>,
+) -> Result<T, BoxError> {
+    let Some(limit) = limit else {
+        return hop.await;
+    };
+    tokio::time::timeout(limit, hop).await.unwrap_or_else(|_| {
+        Err(ProxyUnreachable(io::Error::from(io::ErrorKind::TimedOut).into()).into())
+    })
+}
+
+/// [`ProxyFailed`] for a reply that says the proxy tried the cluster and could
+/// not get there, else [`ProxyRefused`].
+///
+/// @todo: read the reply from `SocksV5Error`'s variants, not its words, once
+/// hyper-util exports it (a private module in 0.1.21).
+fn declined<E: std::error::Error + Send + Sync + 'static>(error: E) -> BoxError {
+    const TRIED: [&str; 4] = [
+        "SOCKS error: network unreachable",
+        "SOCKS error: host unreachable",
+        "SOCKS error: connection refused",
+        "SOCKS error: ttl expired",
+    ];
+    if TRIED.contains(&error.to_string().as_str()) {
+        ProxyFailed(error.into()).into()
+    } else {
+        ProxyRefused(error.into()).into()
     }
 }
 

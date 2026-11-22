@@ -413,6 +413,47 @@ async fn a_refresh_that_is_written_back_takes_back_the_problem_a_held_lock_raise
 }
 
 #[tokio::test]
+async fn the_problem_stays_while_any_user_s_tokens_are_unsaved() {
+    let _serial = UNSAVED.lock().await;
+    let first = Issuer::start("r1").await;
+    let second = Issuer::start("r1").await;
+    for issuer in [&first, &second] {
+        issuer.issued.lock().unwrap().lifetime = Some(SignedDuration::from_millis(11_500));
+    }
+    let expired = jwt(SignedDuration::from_secs(-60), 0);
+    let one = setup(&kubeconfig(&first, &expired, Some("r1")));
+    let other_file = tempfile::tempdir().unwrap();
+    let other_path = other_file.path().join("config");
+    std::fs::write(&other_path, kubeconfig(&second, &expired, Some("r1"))).unwrap();
+    let other = one
+        .registry
+        .oidc(Some(other_path.clone()), "dev", entry(&other_path));
+    std::fs::write(lock(&one.file), "").unwrap();
+    std::fs::write(lock(&other_path), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
+    one.oidc.credential().await.unwrap();
+    other.credential().await.unwrap();
+    assert!(unsaved());
+
+    std::fs::remove_file(lock(&one.file)).unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    one.oidc.credential().await.unwrap();
+    assert!(
+        std::fs::read_to_string(&one.file)
+            .unwrap()
+            .contains("refresh-token: r3")
+    );
+    assert!(
+        unsaved(),
+        "the other user's tokens are still in memory only"
+    );
+
+    std::fs::remove_file(lock(&other_path)).unwrap();
+    other.credential().await.unwrap();
+    assert!(!unsaved());
+}
+
+#[tokio::test]
 async fn the_client_s_secret_goes_in_the_form_when_the_issuer_refuses_the_header() {
     let issuer = Issuer::start("r1").await;
     issuer.issued.lock().unwrap().form_only = true;
