@@ -244,6 +244,25 @@ test("a list the credentials may not read shows – and why, never 0", async () 
   expect(screen.getByText("Kubernetes v1.33.4")).toBeTruthy();
 });
 
+test("a list that Twigo's own code stopped says so in its tile, with its code, Report… and Reopen, which counts again", async () => {
+  const { workbench, lists } = await home("listPanicked");
+  const nodes = tile("Nodes");
+  if (!nodes) throw new Error("no Nodes tile");
+  expect(nodes.textContent).toContain(
+    "Twigo hit an internal error. This view stopped.",
+  );
+  expect(carriesCode(nodes, "internal.panic")).toBe(true);
+  const execute = vi.spyOn(workbench.commands, "execute");
+  fireEvent.click(within(nodes).getByRole("button", { name: "Report…" }));
+  expect(execute.mock.calls.map(([command]) => command)).toEqual([
+    "workbench.action.reportProblem",
+  ]);
+  const before = lists.length;
+  fireEvent.click(within(nodes).getByRole("button", { name: "Reopen" }));
+  await settle();
+  expect(lists.length).toBeGreaterThan(before);
+});
+
 test("the home leaves when an editor opens and comes back when the last closes", async () => {
   const { workbench } = await home();
   expect(attention()).not.toBeNull();
