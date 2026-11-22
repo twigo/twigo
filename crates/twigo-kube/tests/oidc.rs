@@ -375,11 +375,18 @@ async fn a_held_lock_keeps_the_new_tokens_in_memory_and_the_file_as_it_was() {
     let setup = setup(&before);
     std::fs::write(lock(&setup.file), "").unwrap();
     problems::clear(ErrorCode::TokensUnsaved);
+    let events = twigo_log::capture();
     let refreshed = token(&setup.oidc.credential().await.unwrap());
     assert!(
         unsaved(),
         "the next start would ask to sign in again, which the person should know"
     );
+    let lines = events.lines();
+    let line = lines
+        .iter()
+        .find(|line| line["fields"]["message"] == "kept the refreshed oidc tokens in memory only")
+        .unwrap_or_else(|| panic!("the write-back's event in {lines:?}"));
+    assert_eq!(line["level"], "ERROR");
     assert_eq!(std::fs::read_to_string(&setup.file).unwrap(), before);
     assert!(lock(&setup.file).exists(), "another writer's lock stays");
     assert_eq!(token(&setup.oidc.credential().await.unwrap()), refreshed);

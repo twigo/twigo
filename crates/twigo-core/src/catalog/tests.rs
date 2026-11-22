@@ -343,6 +343,25 @@ fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() 
 }
 
 #[test]
+fn a_file_whose_changes_go_unseen_is_told_as_an_error_of_twigo_s_own() {
+    let file = PathBuf::from("/kube/config");
+    let sources = Sources::explicit(file.clone());
+    let failures = kubeconfig::Catalog::default()
+        .unwatched(&sources, &[(file, "the watch limit is reached".to_owned())])
+        .failures;
+    let logged = twigo_log::capture();
+    tell_failures(&[], &failures);
+    assert_eq!(
+        told(&logged),
+        [(
+            "ERROR".to_owned(),
+            "kubeconfig.unwatched".to_owned(),
+            failures[0].source.clone()
+        )]
+    );
+}
+
+#[test]
 fn a_file_that_keeps_failing_is_not_told_again_when_another_file_s_failure_changes() {
     let dir = tempfile::tempdir().unwrap();
     let (steady, changing) = (dir.path().join("steady"), dir.path().join("changing"));
