@@ -58,6 +58,7 @@ Decisions taken with the owner on 2026-11-14, after the [strategic review](revie
    No cluster connection, exec plugin, extension or watch starts until the user needs it.
 6. **No account, no telemetry by default.**
    Crash reports are opt-in.
+   A problem report is the person's to send: Twigo opens a page of their browser and sends nothing itself (4.10).
 
 ### 0.3 What the other clients teach
 
@@ -1867,6 +1868,39 @@ What a person needs when something goes wrong, and what a bug report holds, star
   `ShellEnv`, the login shell's failure and the oidc refresh's failure print names and statuses only, since an event may carry them.
   The error of a kubeconfig that does not parse quotes the lines around the fault, a token or a client key among them, so no event carries it: `twigo_core::catalog` still prints it on stderr, until the catalog reports a failed file by its path and location in the window (`TODO.md`).
   A server's message for a failed request can quote a value the person typed, so the log carries no such message.
+
+#### Report a Problem
+
+What a bug report holds, and how it leaves the machine, is Rust's to decide, since only Rust has the log as it was written.
+`report_problem`, `report_open_issue` and `report_save` are its commands, in `twigo-core`'s `report` module; no dialog or menu entry calls them yet.
+
+- **What it holds.**
+  - Facts, each with an id, a label and a value: Twigo's version and commit, the OS and its version, the architecture, the web engine and its version, the Kubernetes versions of the clusters this run asked, without their names, and the place (`file:line`) of the newest panic of this run or the previous one.
+    The person can untick the last two.
+  - The log: the last 200 records or 32 KiB of `twigo.log` and `twigo.1.log`, whichever is less, as text lines of time, level, target, message and `field=value` pairs, with a field of several lines, such as a panic's backtrace, below its line.
+  - How many names, paths, tokens, addresses and quoted values the redaction hid.
+  - Nothing else: never a kubeconfig, `state.json`, `trust.json`, the policy file or the audit log.
+- **The redaction**, in Rust, so the webview never holds the log as written, in three layers:
+  - A field of a fixed name (`context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`) becomes an alias numbered by first appearance in the report, `<context-1>`, `<namespace-2>`, and a `url` or `path` field becomes `<url>` or `<path>`.
+    A space is its context, so its alias is the context's.
+  - Every name the catalog and the state know, a context's cluster, user, server (as a URL, as host and port, and as host) and namespace and every space, and every value a field carried in this report, is aliased with the same alias where it stands in free text as a whole token, the longest first and in one pass, so an alias is never read again.
+    The objects an open page holds are not among them: a name that no field carries and no list holds reaches the report only by the fixed patterns.
+  - Fixed patterns: the home folder of the process and of the login shell becomes `~` and the account's name `<account>`, JWTs and the credentials after `Bearer` and `Basic` `<token>`, emails `<email>`, URLs `<url>`, addresses other than loopback `<address>`, and every double-quoted string `"…"`, unless it holds nothing but aliases.
+  - No hashing: a hash of `prod` or `default` is reversed by trying names, while an alias says nothing outside its report.
+- **The Kubernetes versions** are what `cluster_version` last got from each context's clients, which the window asks for the open space's context, kept with those clients, so a context whose kubeconfig changed forgets its version.
+  The report sends no request, and a context nobody opened has no version in it.
+- **What leaves the machine, and how.**
+  Twigo itself sends nothing: the person chooses a way out, and every one is theirs to press.
+  - Open Issue on GitHub: `report_open_issue` takes the ids of the facts left ticked, states them again from this run, and has the opener plugin open `…/issues/new?template=bug_report.yml` with them as its `environment` field, and a title and a description in its `description` field when the person wrote them.
+    The link stays under 6,000 characters: past that the longest fact values are cut, down to 40 characters each, then the description, and the answer says which were cut.
+    A request without a GitHub session got `302` at 7,001 characters, `500` at 7,051 and 8,001 and `414` at 8,201 (`curl -s -o /dev/null -w "%{http_code}"` on `github.com/cli/cli/issues/new?title=t&body=<n × a>`, 2026-11-22); the limit for a signed-in person was not measured.
+    The log never goes in the link: opening a link sends it to github.com and keeps it in the browser's history, so the dialog's click handler writes the log to the clipboard, where `report_open_issue` could not, and the person pastes it into the form's Logs field.
+  - Save…: `report_save` asks where, through the same dialog as a logs tab's download, and writes the text the person sees as `twigo-report-<date>.txt`, which the form's upload field takes.
+  - Copy: the text as it is, in the webview.
+- **The form.**
+  `.github/ISSUE_TEMPLATE/bug_report.yml` has one `environment` textarea, which the link fills, a `logs` textarea that says to paste what Twigo copied, an optional `upload` field for a saved report, and never asks for a kubeconfig.
+  A Rust test fails if the `environment` field is gone or renamed.
+  An issue is public, so the dialog tells the person to read the text first.
 
 ## 5. Commands, keybindings and extensions
 
