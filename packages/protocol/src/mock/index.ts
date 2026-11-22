@@ -12,6 +12,7 @@ import type {
   KeyboardLayout,
   ListBatch,
   MetricsState,
+  Report,
   RowId,
   ShellEnvironment,
   ShellKind,
@@ -106,6 +107,7 @@ import french from "./layouts/french.json";
 import german from "./layouts/german.json";
 import ukrainian from "./layouts/ukrainian.json";
 import us from "./layouts/us.json";
+import REPORT from "./report.json";
 import RESOURCES from "./resources.json";
 import {
   compileQuery,
@@ -590,10 +592,10 @@ export function createMockBackend(
     exec_review: () => auth.review(),
     exec_trust: (digests) => auth.trust(digests),
     url_open: (url) => {
-      if (!signInLink(url)) {
+      if (!openableLink(url)) {
         throw new IpcError(
           "link.refused",
-          `Twigo opens only sign-in links: ${url}`,
+          `Twigo opens only https links and http links to this computer: ${url}`,
         );
       }
       globalThis.open(url, "_blank", "noopener,noreferrer");
@@ -605,6 +607,15 @@ export function createMockBackend(
     },
     log_reveal: () => null,
     log_level_set: () => null,
+    report_problem: () => REPORT as Report,
+    report_open_issue: (request) => {
+      console.info("[report_open_issue]", request);
+      return { factsCut: [], descriptionCut: false };
+    },
+    report_save: (request) => {
+      console.info("[report_save]", request);
+      return `~/Downloads/twigo-report-${new Date().toISOString().slice(0, 10)}.txt`;
+    },
     namespaces_list: (id) => {
       space(id);
       if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {
@@ -1021,8 +1032,8 @@ export function createMockBackend(
   };
 }
 
-/** Rust's `sign_in_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
-function signInLink(url: string): boolean {
+/** Rust's `openable_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
+function openableLink(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);

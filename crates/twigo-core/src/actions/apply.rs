@@ -62,7 +62,7 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{for_view, is_mask};
+use twigo_policy::redact::{for_view, is_mask, whole_tokens_replaced};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
@@ -251,9 +251,7 @@ fn scrub(text: &str, secrets: &[String]) -> String {
     } else {
         without_quoted_object(text)
     };
-    secrets
-        .iter()
-        .fold(text, |text, value| whole_tokens_replaced(&text, value))
+    whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
 }
 
 /// `text` with the object of a `patch: Invalid value: "…"` left out.
@@ -278,26 +276,6 @@ fn without_quoted_object(text: &str) -> String {
         }
     }
     text.to_owned()
-}
-
-fn whole_tokens_replaced(text: &str, value: &str) -> String {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    let bounded_start = value.chars().next().is_some_and(word);
-    let bounded_end = value.chars().next_back().is_some_and(word);
-    let mut replaced = String::with_capacity(text.len());
-    let mut from = 0;
-    for (index, _) in text.match_indices(value) {
-        let end = index + value.len();
-        let joins_word = (bounded_start && text[..index].chars().next_back().is_some_and(word))
-            || (bounded_end && text[end..].chars().next().is_some_and(word));
-        if !joins_word {
-            replaced.push_str(&text[from..index]);
-            replaced.push_str(HIDDEN);
-            from = end;
-        }
-    }
-    replaced.push_str(&text[from..]);
-    replaced
 }
 
 /// `error` with its message scrubbed of `secrets`; for a Secret the causes

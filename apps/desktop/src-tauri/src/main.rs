@@ -25,10 +25,11 @@ use twigo_ipc::{
     Discovered, DownloadLogs, ErrorCode, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
     ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
     KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
-    NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
-    PlanRequest, ResumeForward, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellPod,
-    ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OpenedIssue,
+    OperationEvent, Plan, PlanId, PlanRequest, Report, ResumeForward, SaveReport, SchemaQuery,
+    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
+    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
+    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
@@ -525,36 +526,48 @@ async fn logs_download(
 ) -> Result<Option<String>, IpcError> {
     contained(async {
         let name = app.core.logs_file_name(webview.label(), request.id)?;
-        let (answer, picked) = tokio::sync::oneshot::channel();
-        webview
-            .dialog()
-            .file()
-            .set_parent(&webview.window())
-            .set_file_name(name)
-            .add_filter("Logs", &["log", "txt"])
-            .save_file(move |picked| {
-                // Once the command is dropped, nothing waits for the answer.
-                let _ = answer.send(picked);
-            });
-        let picked = picked.await.map_err(|error| {
-            IpcError::new(
-                ErrorCode::LogsDialogFailed,
-                format!("the save dialog failed: {error}"),
-            )
-        })?;
-        let Some(picked) = picked else {
+        let Some(path) = save_path(&webview, name, ("Logs", &["log", "txt"])).await? else {
             return Ok(None);
         };
-        let path = picked.into_path().map_err(|error| {
-            IpcError::new(
-                ErrorCode::LogsNotAFile,
-                format!("Twigo saves logs only to a file on this computer: {error}"),
-            )
-        })?;
         app.core.logs_write(webview.label(), request, &path).await?;
         Ok(Some(path.display().to_string()))
     })
     .await
+}
+
+/// None when the person cancels the dialog.
+async fn save_path(
+    webview: &Webview,
+    name: String,
+    filter: (&str, &[&str]),
+) -> Result<Option<PathBuf>, IpcError> {
+    let (answer, picked) = tokio::sync::oneshot::channel();
+    webview
+        .dialog()
+        .file()
+        .set_parent(&webview.window())
+        .set_file_name(name)
+        .add_filter(filter.0, filter.1)
+        .save_file(move |picked| {
+            // Once the command is dropped, nothing waits for the answer.
+            let _ = answer.send(picked);
+        });
+    let picked = picked.await.map_err(|error| {
+        IpcError::new(
+            ErrorCode::LogsDialogFailed,
+            format!("the save dialog failed: {error}"),
+        )
+    })?;
+    picked
+        .map(|picked| {
+            picked.into_path().map_err(|error| {
+                IpcError::new(
+                    ErrorCode::LogsNotAFile,
+                    format!("Twigo saves only to a file on this computer: {error}"),
+                )
+            })
+        })
+        .transpose()
 }
 
 #[tauri::command]
@@ -745,7 +758,7 @@ fn forwards_watch(
 
 #[tauri::command]
 fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
-    let url = twigo_core::sign_in_url(&request)?;
+    let url = twigo_core::openable_url(&request)?;
     handle
         .opener()
         .open_url(url, None::<&str>)
@@ -803,6 +816,51 @@ fn log_level_set(log: State<'_, Log>, request: SetLogLevel) {
         LogVerbosity::Debug => Level::DEBUG,
         LogVerbosity::Trace => Level::TRACE,
     });
+}
+
+#[tauri::command]
+async fn report_problem(app: State<'_, App>, log: State<'_, Log>) -> Result<Report, IpcError> {
+    contained(async { Ok(app.core.report(log.facts(), &log.files()).await) }).await
+}
+
+/// Twigo builds the link, so it goes through no `openable_url` check.
+#[tauri::command]
+async fn report_open_issue(
+    handle: AppHandle,
+    app: State<'_, App>,
+    log: State<'_, Log>,
+    request: OpenIssue,
+) -> Result<OpenedIssue, IpcError> {
+    contained(async {
+        let (url, opened) = app
+            .core
+            .report_issue(log.facts(), &log.files(), request)
+            .await;
+        handle
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|error| {
+                IpcError::new(
+                    ErrorCode::LinkOpenFailed,
+                    format!("could not open the new-issue form: {error}"),
+                )
+            })?;
+        Ok(opened)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn report_save(webview: Webview, request: SaveReport) -> Result<Option<String>, IpcError> {
+    contained(async {
+        let name = twigo_core::report::file_name();
+        let Some(path) = save_path(&webview, name, ("Report", &["txt"])).await? else {
+            return Ok(None);
+        };
+        twigo_core::report::write(&request.text, &path).await?;
+        Ok(Some(path.display().to_string()))
+    })
+    .await
 }
 
 fn explicit_kubeconfig() -> Option<PathBuf> {
@@ -991,6 +1049,9 @@ fn main() {
                 diagnostics_log,
                 log_reveal,
                 log_level_set,
+                report_problem,
+                report_open_issue,
+                report_save,
             ],
             move || fatal.run("a command panicked"),
         ))

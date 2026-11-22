@@ -34,6 +34,7 @@ kube.workspace = true
 notify-debouncer-full.workspace = true
 percent-encoding.workspace = true
 rcgen.workspace = true
+regex.workspace = true
 ring.workspace = true
 rustls = { workspace = true, features = ["ring", "std"] }
 serde.workspace = true
@@ -64,6 +65,7 @@ twigo-kube = { workspace = true, features = ["test-util"] }
 twigo-log = { workspace = true, features = ["test-util"] }
 twigo-panic = { workspace = true, features = ["inject"] }
 twigo-policy = { workspace = true, features = ["test-util"] }
+serde-saphyr.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "process", "rt", "rt-multi-thread", "test-util", "time"] }
 tower.workspace = true

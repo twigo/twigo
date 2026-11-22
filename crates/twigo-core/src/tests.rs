@@ -322,14 +322,14 @@ async fn a_plugin_that_may_ask_waits_for_the_focus() {
 }
 
 #[test]
-fn only_sign_in_links_open() {
-    assert!(sign_in_url("https://microsoft.com/devicelogin").is_ok());
-    assert!(sign_in_url("http://127.0.0.1:53712/2c9b0d6e").is_ok());
-    assert!(sign_in_url("http://localhost/callback").is_ok());
-    assert!(sign_in_url("http://example.com/login").is_err());
-    assert!(sign_in_url("http://localhost:1@example.com/").is_err());
-    assert!(sign_in_url("file:///etc/passwd").is_err());
-    assert!(sign_in_url("javascript:alert(1)").is_err());
+fn only_https_and_http_to_this_computer_open() {
+    assert!(openable_url("https://microsoft.com/devicelogin").is_ok());
+    assert!(openable_url("http://127.0.0.1:53712/2c9b0d6e").is_ok());
+    assert!(openable_url("http://localhost/callback").is_ok());
+    assert!(openable_url("http://example.com/login").is_err());
+    assert!(openable_url("http://localhost:1@example.com/").is_err());
+    assert!(openable_url("file:///etc/passwd").is_err());
+    assert!(openable_url("javascript:alert(1)").is_err());
 }
 
 #[tokio::test]

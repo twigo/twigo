@@ -16,30 +16,30 @@ body:
       description: What you did, and what you expected to happen instead.
     validations:
       required: true
-  - type: input
-    id: version
+  - type: textarea
+    id: environment
     attributes:
-      label: Twigo version
-      placeholder: e.g. 0.1.0
-    validations:
-      required: true
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating system
-      options:
-        - macOS
-        - Linux
-    validations:
-      required: true
-  - type: input
-    id: kubernetes-version
-    attributes:
-      label: Kubernetes version
-      placeholder: e.g. 1.37
+      label: Environment
+      description: |
+        Twigo fills this in when you choose Open Issue on GitHub in Help > Report a Problem…, or you can copy it from that dialog.
+      placeholder: |
+        Twigo: 0.1.0 (3f2a9c1)
+        System: Mac OS 27.2.1 (aarch64)
+        Engine: WebKit 22625.2.8.11.9
+        Kubernetes: v1.37.2
+      render: text
   - type: textarea
     id: logs
     attributes:
       label: Logs
-      description: Relevant log output (no need for backticks).
+      description: |
+        Paste what Twigo copied when you chose Open Issue on GitHub, or Copy in Help > Report a Problem….
+        Twigo hid the names, paths and tokens it knows of; read it before you submit, since an issue is public.
       render: text
+  - type: upload
+    id: report
+    attributes:
+      label: Saved report
+      description: The file that Save… in Help > Report a Problem… wrote, if you saved one.
+    validations:
+      accept: ".txt,.log"

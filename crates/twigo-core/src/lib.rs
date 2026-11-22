@@ -13,6 +13,7 @@ mod errors;
 mod forward;
 pub mod objects;
 mod proxy;
+pub mod report;
 pub mod state;
 pub mod subscriptions;
 mod terminal;
@@ -326,11 +327,9 @@ impl Core {
 
     /// The contexts the catalog lists, with what each lets through now.
     pub fn contexts(&self) -> Option<twigo_ipc::Catalog> {
-        // Out of the borrow: the policy reads the same channel for each
-        // context, and a second borrow behind a waiting writer may deadlock
-        // (tokio's `watch::Ref`).
-        let listed = self.catalog.subscribe().borrow().clone();
-        listed.map(|listed| listed.ipc(&self.policy))
+        self.catalog
+            .current()
+            .map(|listed| listed.ipc(&self.policy))
     }
 
     async fn listed(&self, context: &str) -> Result<(), IpcError> {
@@ -637,6 +636,8 @@ impl Core {
             .apiserver_version()
             .await
             .map_err(|e| twigo_kube::errors::request(&e))?;
+        self.connections
+            .note_version(context, &clients, &info.git_version);
         Ok(ClusterVersion {
             git_version: info.git_version,
         })
@@ -1176,14 +1177,15 @@ fn connect(core: Weak<Core>) -> Connect {
     })
 }
 
-/// A link the sign-in panel may open: https, or a plugin's own server on
+/// A link the person's browser may open for Twigo: https, or http to this
+/// computer, as a credential plugin's own server or a forward's port is, on
 /// localhost or 127.0.0.1, without a user part, which would name another
 /// host.
-pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
+pub fn openable_url(url: &str) -> Result<String, IpcError> {
     let refused = || {
         IpcError::new(
             twigo_ipc::ErrorCode::LinkRefused,
-            format!("Twigo opens only sign-in links: {url}"),
+            format!("Twigo opens only https links and http links to this computer: {url}"),
         )
     };
     let parsed: http::Uri = url.parse().map_err(|_| refused())?;

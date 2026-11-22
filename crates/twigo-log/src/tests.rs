@@ -9,6 +9,7 @@ fn open(directory: &Path, spec: &str) -> (Dispatch, Log) {
     let (dispatch, filter) = subscriber(BoxMakeWriter::new(file.clone()), EnvFilter::new(spec));
     let log = Log {
         path: file.path().to_owned(),
+        facts: Facts::detect("0.1.0", None, None),
         filter,
     };
     (dispatch, log)
@@ -97,7 +98,13 @@ fn a_new_launch_moves_the_previous_run_s_file_aside() {
     with_default(&dispatch, || info!(target: "twigo_core", "the first run"));
     let (dispatch, second) = open(directory.path(), DEFAULT_FILTER);
     with_default(&dispatch, || info!(target: "twigo_core", "the second run"));
+    let [current, previous] = second.files();
     assert_eq!(lines(&second)[0]["fields"]["message"], "the second run");
-    let moved = std::fs::read_to_string(directory.path().join("twigo.1.log")).unwrap();
+    assert!(
+        std::fs::read_to_string(current)
+            .unwrap()
+            .contains("the second run")
+    );
+    let moved = std::fs::read_to_string(previous).unwrap();
     assert!(moved.contains("the first run"), "{moved}");
 }

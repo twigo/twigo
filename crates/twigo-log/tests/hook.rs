@@ -37,6 +37,12 @@ fn a_panic_of_a_spawned_task_is_recorded_before_the_hook_returns() {
         location.ends_with(&format!("hook.rs:{panicking}:13")),
         "{location}"
     );
+    assert_eq!(twigo_log::panic_location(panic), Some(location));
+    let other = serde_json::json!({
+        "target": "twigo_core::state",
+        "fields": { "message": "panic", "location": "a.rs:1:1" },
+    });
+    assert_eq!(twigo_log::panic_location(&other), None);
     assert!(
         fields["task"].as_str().is_some_and(|id| !id.is_empty()),
         "{fields}"

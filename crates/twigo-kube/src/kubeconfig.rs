@@ -180,11 +180,16 @@ impl Sources {
 
     /// A file as a person names it: under the home directory, from `~`.
     pub fn named(&self, file: &Path) -> String {
-        match self.home.as_deref().map(|home| file.strip_prefix(home)) {
-            Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
-            Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
-            _ => file.display().to_string(),
-        }
+        named(self.home.as_deref(), file)
+    }
+}
+
+/// A file as a person names it: under `home`, from `~`.
+pub fn named(home: Option<&Path>, file: &Path) -> String {
+    match home.map(|home| file.strip_prefix(home)) {
+        Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        _ => file.display().to_string(),
     }
 }
 
@@ -332,6 +337,19 @@ impl Entries {
 
     pub fn kubeconfig(&self) -> Kubeconfig {
         Kubeconfig::clone(&self.config)
+    }
+
+    /// The names of the cluster and the user entries it points at.
+    pub fn names(&self) -> (Option<&str>, Option<&str>) {
+        let entry = self
+            .config
+            .contexts
+            .first()
+            .and_then(|named| named.context.as_ref());
+        (
+            entry.map(|entry| entry.cluster.as_str()),
+            entry.and_then(|entry| entry.user.as_deref()),
+        )
     }
 
     pub fn proxy_url(&self) -> Option<&str> {

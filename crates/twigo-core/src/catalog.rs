@@ -331,6 +331,14 @@ impl Catalog {
         }
     }
 
+    /// The contexts as last read, none until the sources have been, out of
+    /// the channel's borrow: a second borrow behind a waiting writer may
+    /// deadlock (tokio's `watch::Ref`), as the policy's would for each
+    /// context.
+    pub fn current(&self) -> Option<Arc<Contexts>> {
+        self.contexts.borrow().clone()
+    }
+
     /// The contexts, once the sources have been read.
     pub async fn contexts(&self) -> Arc<Contexts> {
         let mut contexts = self.subscribe();

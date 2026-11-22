@@ -9,11 +9,12 @@ use crate::{
     ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, Discovered,
     DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
     ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
-    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs,
-    OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery,
-    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
-    ShellContainers, ShellEnvironment, ShellInput, ShellMessage, ShellPod, ShellResize, Space,
-    StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenIssue,
+    OpenLogs, OpenObject, OpenShell, OpenedIssue, OperationEvent, Plan, PlanId, PlanRequest,
+    Report, ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView,
+    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
+    ShellMessage, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
+    SubscriptionId, TerminalSession,
 };
 
 pub trait Command {
@@ -470,8 +471,8 @@ impl Command for ApprovalAnswerSend {
     type Message = ();
 }
 
-/// Opens a sign-in link in the person's browser: https, or a plugin's own
-/// server on localhost or 127.0.0.1.
+/// Opens a link in the person's browser: https, or http to localhost or
+/// 127.0.0.1, as a credential plugin's own server or a forward's port is.
 pub struct UrlOpen;
 
 impl Command for UrlOpen {
@@ -510,6 +511,43 @@ impl Command for LogLevelSet {
     const NAME: &'static str = "log_level_set";
     type Request = SetLogLevel;
     type Response = ();
+    type Message = ();
+}
+
+/// The report of this run's problems, redacted: the facts for an issue and
+/// the last lines of the log (ARCHITECTURE 4.10). It reads the log and the
+/// versions the core already knows, and sends no request.
+pub struct ReportProblem;
+
+impl Command for ReportProblem {
+    const NAME: &'static str = "report_problem";
+    type Request = ();
+    type Response = Report;
+    type Message = ();
+}
+
+/// Opens the repository's new-issue form in the person's browser, with the
+/// facts they left ticked and what they wrote; with no facts it opens the bare
+/// template. The link stays under 6,000 characters, and the answer says what
+/// that cut.
+pub struct ReportOpenIssue;
+
+impl Command for ReportOpenIssue {
+    const NAME: &'static str = "report_open_issue";
+    type Request = OpenIssue;
+    type Response = OpenedIssue;
+    type Message = ();
+}
+
+/// Asks where to save the report's text, as `logs_download` asks for a logs
+/// tab's, and writes it there, named `twigo-report-<date>.txt`: the path it
+/// wrote, none when the person cancels.
+pub struct ReportSave;
+
+impl Command for ReportSave {
+    const NAME: &'static str = "report_save";
+    type Request = SaveReport;
+    type Response = Option<String>;
     type Message = ();
 }
 

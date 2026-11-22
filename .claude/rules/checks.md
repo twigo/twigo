@@ -120,6 +120,7 @@
 - `packages/protocol/src/mock/objects.json` is written by `twigo-describe`'s `overviews` test from the recorded objects: never edit it by hand.
   The same test writes `revealed.json`, the values a Reveal answers, and checks that `objects.json` holds none of them.
 - kube-apiserver keeps events an hour (`--event-ttl`), so `record_objects` records objects older than that without their events: delete the namespace `overview` first, or record only the fixtures that changed and keep the others.
+- `packages/protocol/src/mock/report.json` is what `twigo-core` renders from `crates/twigo-core/src/report/fixtures/twigo.jsonl`, lines shaped as the log writes them: `TWIGO_UPDATE_REPORT=1 cargo test -p twigo-core --lib report::tests::the_mock_answers` rewrites it, and nothing edits it by hand.
 - `packages/protocol/src/mock/layouts/*.json` are recorded by `cargo run -p twigo-keyboard --example record`: never reformat or edit them by hand.
   `UCKeyTranslate` takes the keyboard type (`LMGetKbdType`), so a Mac with another keyboard may record other characters; the committed ones come from an ANSI keyboard, type 91 (2026-10-31).
 - The live X11 test changes the X server's keymap and group, so it runs only where `TWIGO_TEST_X11_DISPLAY` equals `DISPLAY`, as under `xvfb-run`.
