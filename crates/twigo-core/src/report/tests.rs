@@ -87,6 +87,10 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
         "{text}"
     );
     assert!(
+        text.contains("could not keep the forwards of a space error=No space left on device (os error 28) space=<context-1>\n"),
+        "a space is its context\n{text}"
+    );
+    assert!(
         text.contains("127.0.0.1:8001") && text.contains("<address>"),
         "a loopback address stays, another goes\n{text}"
     );
@@ -121,7 +125,7 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
     assert_eq!(
         hidden,
         Hidden {
-            names: 10,
+            names: 11,
             paths: 3,
             tokens: 1,
             addresses: 4,
