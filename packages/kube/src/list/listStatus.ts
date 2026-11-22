@@ -6,7 +6,7 @@ import {
   type ViewState,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
-import { causeWords, type Failure } from "./errorWords";
+import { caused } from "./errorWords";
 
 export interface ListStatus {
   readonly title: string;
@@ -50,29 +50,16 @@ export function stateLabel(status: ViewState): string | undefined {
     case "queued":
       return "Waiting for a stream slot";
     case "connecting":
-      return waiting("Connecting…", "Connecting", status.cause);
+      return status.cause ? `Connecting${caused(status.cause)}` : "Connecting…";
     case "syncing":
       return `Loading · ${status.loaded.toLocaleString("en")}`;
     case "relisting":
       return "Relisting…";
     case "stale":
-      return waiting(
-        "No updates · reconnecting",
-        "No updates · reconnecting",
-        status.cause,
-      );
+      return `No updates · reconnecting${caused(status.cause)}`;
     default:
       return undefined;
   }
-}
-
-/** The words of a list that waits for its cluster, with why once the cluster has said it. */
-function waiting(
-  plain: string,
-  withCause: string,
-  cause: Failure | undefined,
-): string {
-  return cause ? `${withCause} · ${causeWords(cause)}` : plain;
 }
 
 /** The line over a list's skeleton, once its cluster has said why it does not answer; none while it only takes its time. */

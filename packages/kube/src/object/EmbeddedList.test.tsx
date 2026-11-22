@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type {
   Backend,
@@ -6,6 +13,7 @@ import type {
   ListBatch,
   ObjectRef,
   RequestOf,
+  ViewState,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { EditorShownContext } from "@twigo/workbench";
@@ -386,4 +394,41 @@ test("a list sorted by a column that has left says so in the name's header", asy
   expect(
     screen.getByRole("columnheader", { name: "Name" }).textContent,
   ).toMatch(/Sorted by CPU, descending: the column has no room at this width/);
+});
+
+const PANICKED: ViewState = {
+  state: "error",
+  error: {
+    code: "internal.panic",
+    kind: "internal",
+    message: "Twigo stopped this list on an internal error",
+  },
+};
+
+test("a list that Twigo stopped offers Reopen beside Report…, and Reopen subscribes it anew", async () => {
+  const mock = createMockBackend("ready");
+  let subscribed = 0;
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command !== "list_subscribe") {
+        return mock.subscribe(command, request, onMessage);
+      }
+      const stopped = ++subscribed === 1;
+      return mock.subscribe(command, request, (batch) => {
+        const list = batch as ListBatch;
+        onMessage(stopped ? { ...list, status: PANICKED } : list);
+      });
+    },
+  };
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
+  await settle(12);
+  expect(screen.getByText("This view stopped.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+  expect(screen.queryByRole("grid")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(12);
+  expect(subscribed).toBe(2);
+  expect(screen.getByRole("grid")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
 });

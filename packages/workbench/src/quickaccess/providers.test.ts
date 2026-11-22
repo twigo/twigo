@@ -130,6 +130,7 @@ test("ctx says a context's problem in its words on its row, and the context may 
   const found = await contexts("kubeconfigFailures");
   const orphan = found.find(({ id }) => id === "context:orphan");
   expect(orphan?.state).toMatchObject({ tone: "warn" });
+  expect(orphan?.code).toBe("context.missing-user");
   expect(orphan?.state?.label).toContain(
     'no kubeconfig defines the user "orphan-admin"',
   );

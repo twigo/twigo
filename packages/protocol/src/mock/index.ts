@@ -6,7 +6,7 @@ import type {
   ResponseOf,
   SubscriptionCommand,
 } from "../backend";
-import { IpcError, wireError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   Column,
   KeyboardLayout,
@@ -267,31 +267,25 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   dvorak,
 };
 
-const AUDIT_OFF = wireError(
-  new IpcError(
-    "audit.off",
-    "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
-  ),
+const AUDIT_OFF = wire(
+  "audit.off",
+  "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
 );
 
 /** What Rust lists when the state file was set aside and the audit log cannot open, in its words. */
 const PROBLEMS = [
-  wireError(
-    new IpcError(
-      "state.set-aside",
-      "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
-    ),
+  wire(
+    "state.set-aside",
+    "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
   ),
   AUDIT_OFF,
 ];
 
 /** What `problemsCleared` lists while the state cannot be saved, and how long until a save works, and until it fails again. */
 const UNSAVED = [
-  wireError(
-    new IpcError(
-      "state.unsaved",
-      "Twigo could not save its state, so what you change is lost when it quits",
-    ),
+  wire(
+    "state.unsaved",
+    "Twigo could not save its state, so what you change is lost when it quits",
   ),
   AUDIT_OFF,
 ];
@@ -301,9 +295,7 @@ const SAVE_WORKS_MS = 8000;
 const SHELL_TIMEOUT: ShellEnvironment = {
   state: "failed",
   shell: "/bin/zsh",
-  reason: wireError(
-    new IpcError("environment.unresolved", "did not answer in 10 s"),
-  ),
+  reason: wire("environment.unresolved", "did not answer in 10 s"),
   output: "Loading nvm…\n",
 };
 
@@ -901,12 +893,10 @@ export function createMockBackend(
         : typeof selected === "string"
           ? {
               state: "error",
-              error: wireError(
-                new IpcError("server.invalid", selected, undefined, {
-                  reason: "BadRequest",
-                  causes: [],
-                }),
-              ),
+              error: wire("server.invalid", selected, {
+                reason: "BadRequest",
+                causes: [],
+              }),
             }
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
@@ -1148,13 +1138,10 @@ const PINNED: Readonly<
   unauthorized: { state: "unauthorized" },
   error: {
     state: "error",
-    error: wireError(
-      new IpcError(
-        "server.invalid",
-        "field label not supported: spec.containers",
-        undefined,
-        { reason: "BadRequest", causes: [] },
-      ),
+    error: wire(
+      "server.invalid",
+      "field label not supported: spec.containers",
+      { reason: "BadRequest", causes: [] },
     ),
   },
 };

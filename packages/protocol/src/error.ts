@@ -56,20 +56,19 @@ export function toIpcError(error: unknown): IpcError {
       "server" in error ? (error.server as ServerStatus) : undefined,
     );
   }
-  return new IpcError("internal.ipc", messageOf(error));
+  return new IpcError(
+    "internal.ipc",
+    error instanceof Error ? error.message : String(error),
+  );
 }
 
-function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
-  }
-  return String(error);
+/** An error as Rust sends it inside a state or an event, made from its code. */
+export function wire(
+  code: ErrorCode,
+  message: string,
+  server?: ServerStatus,
+): Wire {
+  return { code, kind: ERROR_KINDS[code], message, ...(server && { server }) };
 }
 
 /** The error as Rust sends it inside a state or an event. */

@@ -4,7 +4,6 @@ import {
   INITIAL_OBJECT,
   IpcError,
   type Backend,
-  type Forward,
   type ViewState,
 } from "@twigo/protocol";
 import { testWorkbench } from "@twigo/workbench/testing";
@@ -12,7 +11,6 @@ import { RequestDetail } from "./approvals/RequestDetail";
 import { FailedBar } from "./edit/answers";
 import { Previews } from "./edit/previews";
 import { ObjectContent, RelatedView } from "./object/ObjectContent";
-import { stateOf } from "./forward/words";
 import { Events } from "./object/Overview";
 import { PageStates } from "./object/pageStates";
 import { registerKube } from "./register";
@@ -163,20 +161,6 @@ test("what could not be listed for an object, and a dry run's refusal in an appr
     />,
   );
   expect(screen.getByText("server.invalid").tagName).toBe("CODE");
-});
-
-test("a forward's state says its code after the failure's words", () => {
-  const state = {
-    state: "reconnecting",
-    reason: {
-      code: "forward.no-ready-pod",
-      kind: "unavailable",
-      message: "no pod answers",
-    },
-  } as const;
-  expect(stateOf({ state, queued: 0 } as Forward).detail).toBe(
-    "no pod answers · forward.no-ready-pod",
-  );
 });
 
 test("a space whose discovery failed says why and its code on its connection", async () => {

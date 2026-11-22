@@ -1,4 +1,4 @@
-import { IpcError, wireError } from "../error";
+import { IpcError, wire, wireError } from "../error";
 import type {
   Blocked,
   ContextAccess,
@@ -650,7 +650,7 @@ export class MockForwards {
     this.#set(live, {
       state: {
         state: "reconnecting",
-        reason: wireError(new IpcError("forward.no-ready-pod", reason)),
+        reason: wire("forward.no-ready-pod", reason),
       },
       pod: null,
       podPort: null,
@@ -722,11 +722,9 @@ export class MockForwards {
       8082,
       {
         state: "failed",
-        error: wireError(
-          new IpcError(
-            "server.not-found",
-            'deployments.apps "payments-legacy" not found',
-          ),
+        error: wire(
+          "server.not-found",
+          'deployments.apps "payments-legacy" not found',
         ),
       },
     );

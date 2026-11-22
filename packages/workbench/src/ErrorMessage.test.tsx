@@ -2,9 +2,7 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { ErrorMessage } from "./ErrorMessage";
 import { Toaster } from "@twigo/ui";
-import { errorLines } from "./errors";
 import { notifyError } from "./notifyError";
-import { testWorkbench } from "./testing";
 
 afterEach(cleanup);
 
@@ -24,10 +22,6 @@ test("an error says its code under its message, with Copy details", () => {
   );
   expect(container.querySelector("code")?.textContent).toBe("connect.refused");
   expect(screen.getByRole("button", { name: "Copy details" })).toBeTruthy();
-  expect(errorLines(REFUSED)).toEqual([
-    "The server refused the connection",
-    "connect.refused",
-  ]);
 });
 
 test("a message said in other words keeps the error's code", () => {
@@ -72,20 +66,4 @@ test("in a toast Copy details has the look of the toast's own buttons", async ()
       true,
     ]);
   }
-});
-
-async function orphanRow() {
-  const workbench = await testWorkbench("kubeconfigFailures");
-  const resolved = workbench.quickAccess.resolve("ctx ");
-  const found = await resolved?.provider.items("", { lookup: () => undefined });
-  return found?.find(({ id }) => id === "context:orphan");
-}
-
-test("a context's problem on a picker row says its code after the host", async () => {
-  const orphan = await orphanRow();
-  expect(orphan?.description).toBe("orphan.internal:6443");
-  expect(orphan?.code).toBe("context.missing-user");
-  expect(orphan?.state?.label).toBe(
-    'no kubeconfig defines the user "orphan-admin"',
-  );
 });

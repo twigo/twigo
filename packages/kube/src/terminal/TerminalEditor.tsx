@@ -9,7 +9,7 @@ import {
   type Lookup,
 } from "@twigo/workbench";
 import { parseTerminalUri } from "../uri";
-import { InternalStop } from "../xterm/InternalStop";
+import { InternalStop } from "../InternalStop";
 import { useTerminalHost } from "../xterm/useTerminalHost";
 import { internalEnd } from "../xterm/words";
 import type { KubeconfigOffers } from "./offers";

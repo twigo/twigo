@@ -867,6 +867,70 @@ test("while the object has not come, the stand-in draws what a poll brings to th
   expect(status()).toBe("Terminating");
 });
 
+const STOPPED_POD: Selected = {
+  gvr: { group: "", version: "v1", resource: "pods" },
+  kind: "Pod",
+  namespaced: true,
+  columns: [{ name: "Name", kind: "string", priority: 0 }],
+  row: {
+    id: "prod-eu/payments/payments-api-7f9c8d6b5-h8lbx",
+    created: null,
+    received: "2026-11-16T12:00:00.000Z",
+    generated: null,
+    cells: ["payments-api-7f9c8d6b5-h8lbx"],
+  },
+};
+
+async function stopped(scenario: "listPanicked" | "objectPanicked") {
+  const mock = createMockBackend(scenario);
+  const opened = { count: 0 };
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe(command, request, onMessage) {
+      if (command === "object_open") opened.count++;
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const pending = testWorkbench("ready", backend);
+  await vi.advanceTimersByTimeAsync(10);
+  const workbench = await pending;
+  render(
+    <Details
+      uri="k8s-list://prod-eu/v1/pods"
+      selected={STOPPED_POD}
+      space="prod-eu"
+      services={createServices(workbench)}
+      docked
+      onOpen={() => undefined}
+      onClose={() => undefined}
+    />,
+    { wrapper: inWorkbench(workbench) },
+  );
+  return opened;
+}
+
+test("an object that Twigo stopped before its overview came offers Reopen beside Report…, and Reopen subscribes it anew", async () => {
+  const opened = await stopped("listPanicked");
+  await settle(12);
+  expect(within(shown()).getByText("This view stopped.")).toBeTruthy();
+  expect(within(shown()).getByRole("button", { name: "Report…" })).toBeTruthy();
+  const before = opened.count;
+  fireEvent.click(within(shown()).getByRole("button", { name: "Reopen" }));
+  await settle(12);
+  expect(opened.count).toBeGreaterThan(before);
+});
+
+test("an object that Twigo stopped after its overview came offers Reopen too", async () => {
+  const opened = await stopped("objectPanicked");
+  await settle(12);
+  await act(() => vi.advanceTimersByTimeAsync(7000));
+  expect(within(shown()).getByText("This view stopped.")).toBeTruthy();
+  const before = opened.count;
+  fireEvent.click(within(shown()).getByRole("button", { name: "Reopen" }));
+  await settle(12);
+  expect(opened.count).toBeGreaterThan(before);
+});
+
 function scriptedPods(unread = false) {
   const mock = createMockBackend("ready");
   let send: ((batch: ListBatch) => void) | undefined;

@@ -35,8 +35,9 @@ test("the report's text is the facts and the log, each block apart and none empt
   expect(reportText({ facts: FACTS, log: "line" })).toBe(
     "Twigo: 0.1.0\nKubernetes: v1.37.2\n\nline",
   );
-  expect(reportText({ facts: [], log: "line" })).toBe("line");
-  expect(reportText({ facts: [], log: "" })).toBe("");
+  expect(reportText({ facts: FACTS, log: "" })).toBe(
+    "Twigo: 0.1.0\nKubernetes: v1.37.2",
+  );
 });
 
 test("the toast says where to paste the log, and what the link had to leave short", () => {

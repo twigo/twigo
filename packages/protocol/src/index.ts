@@ -84,7 +84,6 @@ export type {
   LogVerbosity,
   OpenedIssue,
   Report,
-  ServerCause,
   ServerStatus,
   ExecPlugin,
   ExecReview,

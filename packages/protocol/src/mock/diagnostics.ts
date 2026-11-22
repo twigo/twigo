@@ -1,4 +1,4 @@
-import { IpcError, wireError } from "../error";
+import { wire } from "../error";
 import type {
   Catalog,
   CatalogFailure,
@@ -40,7 +40,7 @@ export function panickedLogs(batch: LogBatch): LogBatch {
           ...container,
           stream: {
             state: "error" as const,
-            error: error(
+            error: wire(
               "internal.panic",
               "Twigo stopped this log stream on an internal error",
             ),
@@ -60,15 +60,15 @@ export const DISCOVERY_FAILS = "discoveryFails";
 export const LIST_FAILS = "listFails";
 
 const FAILURES: Readonly<Record<string, Wire>> = {
-  "prod-eu": error(
+  "prod-eu": wire(
     "connect.refused",
     "The cluster refused the connection: Connection refused (os error 61)",
   ),
-  staging: error(
+  staging: wire(
     "context.missing-user",
     'no kubeconfig defines the user "staging-admin"',
   ),
-  dev: error(
+  dev: wire(
     "credentials.plugin-failed",
     "exec: executable aws failed with exit code 255",
   ),
@@ -91,47 +91,39 @@ export function isCauseScenario(scenario: string): scenario is CauseScenario {
   return (CAUSE_SCENARIOS as readonly string[]).includes(scenario);
 }
 
-function error(
-  code: ConstructorParameters<typeof IpcError>[0],
-  message: string,
-  server?: ConstructorParameters<typeof IpcError>[3],
-): Wire {
-  return wireError(new IpcError(code, message, undefined, server));
-}
-
 /** The pinned state of each cause scenario's lists, with the cause in Twigo's sentence and the failure's own words, as the core words it. */
 export const CAUSED: Readonly<Record<CauseScenario, ViewState>> = {
   connectRefused: {
     state: "connecting",
-    cause: error(
+    cause: wire(
       "connect.refused",
       "The cluster refused the connection: Connection refused (os error 61)",
     ),
   },
   connectCertificate: {
     state: "connecting",
-    cause: error(
+    cause: wire(
       "connect.certificate",
       "The cluster's certificate cannot be verified: “34.141.62.18” certificate is not trusted: -67843",
     ),
   },
   connectLost: {
     state: "stale",
-    cause: error(
+    cause: wire(
       "connect.lost",
       "Error reading events stream: connection closed before message completed",
     ),
   },
   listPanicked: {
     state: "error",
-    error: error(
+    error: wire(
       "internal.panic",
       "Twigo stopped this list on an internal error",
     ),
   },
   serverRefuses: {
     state: "error",
-    error: error(
+    error: wire(
       "server.invalid",
       'Pod "web-7d9f" is invalid: spec.containers[0].image: Required value',
       {
@@ -176,14 +168,14 @@ export function isKubeconfigScenario(
 const FAILED_FILES: readonly CatalogFailure[] = [
   {
     source: "~/.kube/broken.yaml",
-    error: error(
+    error: wire(
       "kubeconfig.unparsable",
       "The file cannot be parsed: expected sequence start at line 7, column 10",
     ),
   },
   {
     source: "~/.kube/work/locked.yaml",
-    error: error(
+    error: wire(
       "kubeconfig.unreadable",
       "The file cannot be read: permission denied",
     ),
@@ -198,7 +190,7 @@ const WITHOUT_USER: Context = {
   server: "https://orphan.internal:6443",
   namespace: null,
   access: UNMARKED,
-  problem: error(
+  problem: wire(
     "context.missing-user",
     'no kubeconfig defines the user "orphan-admin"',
   ),

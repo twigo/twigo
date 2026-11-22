@@ -41,3 +41,7 @@ export function statusWord(error: Failure): string {
       return "Error";
   }
 }
+
+export function caused(cause: Failure | undefined): string {
+  return cause ? ` · ${causeWords(cause)}` : "";
+}

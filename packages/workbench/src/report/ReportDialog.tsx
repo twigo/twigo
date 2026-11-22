@@ -156,7 +156,6 @@ function Body({ report }: { report: Report }) {
             </LinkButton>
           </div>
           <TextArea
-            mono
             aria-label="Log"
             wrap="off"
             rows={11}

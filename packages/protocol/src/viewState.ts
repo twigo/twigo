@@ -1,4 +1,4 @@
-import { IpcError, wireError } from "./error";
+import { wire } from "./error";
 import type { IpcError as Wire, ViewState } from "./generated";
 
 export const SHOWS_ROWS: ReadonlySet<ViewState["state"]> = new Set([
@@ -55,18 +55,14 @@ export function refusal(state: ViewState): Wire | undefined;
 export function refusal(state: ViewState): Wire | undefined {
   switch (state.state) {
     case "forbidden":
-      return wireError(
-        new IpcError(
-          "server.forbidden",
-          `You may not ${state.verb} ${state.resource}.`,
-        ),
+      return wire(
+        "server.forbidden",
+        `You may not ${state.verb} ${state.resource}.`,
       );
     case "unauthorized":
-      return wireError(
-        new IpcError(
-          "server.unauthorized",
-          "The cluster does not accept the credentials.",
-        ),
+      return wire(
+        "server.unauthorized",
+        "The cluster does not accept the credentials.",
       );
     case "error":
       return state.error;

@@ -1,4 +1,4 @@
-import { IpcError, wireError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   OpenShell,
   ShellContainers,
@@ -225,13 +225,10 @@ export class MockShell {
       if (this.#scenario === "shellFailed") {
         this.#end({
           reason: "failed",
-          error: wireError(
-            new IpcError(
-              "server.forbidden",
-              'pods "web-7d9f" is forbidden: User "dev-user" cannot create resource "pods/exec" in API group "" in the namespace "default"',
-              undefined,
-              { reason: "Forbidden", causes: [] },
-            ),
+          error: wire(
+            "server.forbidden",
+            'pods "web-7d9f" is forbidden: User "dev-user" cannot create resource "pods/exec" in API group "" in the namespace "default"',
+            { reason: "Forbidden", causes: [] },
           ),
         });
         return;
@@ -239,11 +236,9 @@ export class MockShell {
       if (this.#scenario === "shellPanicked") {
         this.#end({
           reason: "failed",
-          error: wireError(
-            new IpcError(
-              "internal.panic",
-              "Twigo stopped this shell on an internal error",
-            ),
+          error: wire(
+            "internal.panic",
+            "Twigo stopped this shell on an internal error",
           ),
         });
         return;

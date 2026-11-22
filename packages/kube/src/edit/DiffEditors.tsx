@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
 import {
@@ -17,6 +17,7 @@ import { objectQuery, useObject } from "../object/useObject";
 import { parseDiffUri, parseObjectUri } from "../uri";
 import { ProblemBanner, ProblemWords } from "../ProblemBanner";
 import { isStopped, objectProblem } from "../viewProblem";
+import { useReopen } from "../useReopen";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
 import { kindOf, SECRET_NOTE, yamlOfJson } from "./object";
@@ -29,10 +30,7 @@ export function DiffEditor({
   edits,
   discovery,
 }: EditorProps & { edits: EditServices; discovery: Discovery }) {
-  const [attempt, setAttempt] = useState(0);
-  const reopen = () => {
-    setAttempt((n) => n + 1);
-  };
+  const [attempt, reopen] = useReopen();
   const input = parseDiffUri(uri);
   if (!input) {
     return <EmptyState title="Not a comparison">{uri}</EmptyState>;

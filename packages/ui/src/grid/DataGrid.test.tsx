@@ -29,7 +29,10 @@ afterAll(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function nth(elements: readonly HTMLElement[], index: number): HTMLElement {
   const element = elements[index];
@@ -611,11 +614,13 @@ test("a hovered row's icons show once the pointer rests on it, and only where th
     { id: "logs", label: "Logs", icon: Copy, run: vi.fn() },
     { id: "shell", label: "Shell", icon: Copy, run: vi.fn() },
   ];
+  const wait = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+  vi.useFakeTimers();
   grid({ columns: WITH_AGE, cell: nameOnly, inline: two });
   fireEvent.pointerEnter(rowNamed("api-2"));
-  await rest(30);
+  await wait(30);
   expect(icons("api-2")).toEqual([]);
-  await rest(40);
+  await wait(40);
   expect(icons("api-2")).toEqual(["Logs", "Shell"]);
   fireEvent.pointerLeave(rowNamed("api-2"));
   expect(icons("api-2")).toEqual([]);
@@ -630,7 +635,7 @@ test("a hovered row's icons show once the pointer rests on it, and only where th
     inline: two,
   });
   fireEvent.pointerEnter(rowNamed("api-2"));
-  await rest();
+  await wait(70);
   expect(icons("api-2")).toEqual([]);
   cleanup();
 
@@ -642,7 +647,7 @@ test("a hovered row's icons show once the pointer rests on it, and only where th
     inline: two,
   });
   fireEvent.pointerEnter(rowNamed("api-2"));
-  await rest();
+  await wait(70);
   expect(icons("api-2")).toEqual([]);
 });
 

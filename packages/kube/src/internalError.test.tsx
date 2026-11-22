@@ -197,7 +197,7 @@ test("the logs of a container that Twigo stopped say so over the lines, with Rep
   );
   await settle(12);
   expect(screen.getByText("Twigo hit an internal error.")).toBeTruthy();
-  expect(document.body.textContent).toContain("stopped.");
+  expect(document.body.textContent).toContain("The logs of e9vxn/api stopped.");
   expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
   const before = opened;
   fireEvent.click(screen.getByRole("button", { name: "Reopen" }));

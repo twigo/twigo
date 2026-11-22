@@ -9,8 +9,8 @@ import {
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import {
-  errorLines,
   errorOneLine,
+  errorText,
   useChanges,
   useWorkbench,
   type ErrorLike,
@@ -27,7 +27,7 @@ import {
 import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
-import { causeWords, statusWord, type Failure } from "./errorWords";
+import { caused, statusWord } from "./errorWords";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
 import { namespaceWords } from "./scope";
 
@@ -158,10 +158,6 @@ function describe({ state, shown, parts }: Kind): string {
   }
 }
 
-function caused(cause: Failure | undefined): string {
-  return cause ? ` · ${causeWords(cause)}` : "";
-}
-
 /** Parts by name, the first few; a part of a kind this webview does not know is counted and not named. */
 function namesOf(parts: readonly PartState[], loaded: boolean): string {
   const named = parts.flatMap(({ part, state }) =>
@@ -235,7 +231,7 @@ export function clusterEntries(
       [connection?.text, known && `Kubernetes ${known}`]
         .filter(Boolean)
         .join(" · "),
-      ...(failure ? errorLines(failure) : []),
+      failure && errorText(failure),
     ]
       .filter(Boolean)
       .join("\n");

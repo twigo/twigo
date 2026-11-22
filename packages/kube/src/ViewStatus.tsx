@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ViewState } from "@twigo/protocol";
-import { EmptyState } from "@twigo/ui";
+import { EmptyState, LinkButton } from "@twigo/ui";
 import {
   ErrorMessage,
   isInternalError,
@@ -26,6 +26,7 @@ export function ViewStatus({
   status: ViewState;
   /** What failed to load, lower case: `pods`. */
   what: string;
+  /** Retry, or Reopen for a view that Twigo stopped; `inline` draws only Reopen. */
   onRetry?: () => void;
   /** Given by a list of every namespace: where it is refused, it says so and offers to choose namespaces in place of a retry. */
   onChoose?: () => void;
@@ -48,6 +49,11 @@ export function ViewStatus({
         className="px-3"
       >
         <ErrorMessage error={shown.error} message={shown.body} />
+        {internal && onRetry && (
+          <LinkButton className="ml-2" onClick={onRetry}>
+            Reopen
+          </LinkButton>
+        )}
         {internal && <ReportLink className="ml-2" />}
       </EmptyState>
     );
