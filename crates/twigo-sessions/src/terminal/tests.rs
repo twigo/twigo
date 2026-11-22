@@ -732,7 +732,7 @@ fn ptys_opened_from_many_threads_at_once_all_open() {
 }
 
 #[test]
-fn a_write_that_fails_after_one_that_worked_starts_a_run_of_its_own() {
+fn a_write_or_a_resize_that_fails_after_one_that_worked_starts_a_run_of_its_own() {
     let logged = twigo_log::capture();
     let mut failures = Failures::default();
     let broken = || Err(std::io::ErrorKind::BrokenPipe.into());
@@ -740,6 +740,10 @@ fn a_write_that_fails_after_one_that_worked_starts_a_run_of_its_own() {
     failures.write(&broken());
     failures.write(&Ok(1));
     failures.write(&broken());
+    failures.resize(&Err::<(), _>("gone"));
+    failures.resize(&Err::<(), _>("gone"));
+    failures.resize(&Ok::<_, &str>(()));
+    failures.resize(&Err::<(), _>("gone"));
     drop(failures);
 
     let told: Vec<_> = logged
@@ -758,6 +762,9 @@ fn a_write_that_fails_after_one_that_worked_starts_a_run_of_its_own() {
             ("could not write to a terminal".to_owned(), None),
             ("more writes to a terminal failed".to_owned(), Some(1)),
             ("could not write to a terminal".to_owned(), None),
+            ("could not resize a terminal".to_owned(), None),
+            ("more resizes of a terminal failed".to_owned(), Some(1)),
+            ("could not resize a terminal".to_owned(), None),
         ]
     );
 }

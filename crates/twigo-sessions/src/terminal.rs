@@ -211,14 +211,29 @@ impl Failures {
             tracing::warn!(count, "more writes to a terminal failed");
         }
     }
+
+    /// Says how a resize went, as [`Failures::write`] does for a write.
+    fn resize<T>(&mut self, resized: &Result<T, impl std::fmt::Display>) {
+        match resized {
+            Ok(_) => self.resizes_ended(),
+            Err(error) if self.resizes.failed() => {
+                tracing::warn!(%error, "could not resize a terminal");
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn resizes_ended(&mut self) {
+        if let Some(count) = self.resizes.ended() {
+            tracing::warn!(count, "more resizes of a terminal failed");
+        }
+    }
 }
 
 impl Drop for Failures {
     fn drop(&mut self) {
         self.writes_ended();
-        if let Some(count) = self.resizes.ended() {
-            tracing::warn!(count, "more resizes of a terminal failed");
-        }
+        self.resizes_ended();
     }
 }
 
@@ -299,11 +314,7 @@ async fn run(
                         return;
                     }
                     let (cols, rows) = *size.borrow_and_update();
-                    if let Err(error) = writer.resize(Size::new(rows, cols))
-                        && failures.resizes.failed()
-                    {
-                        tracing::warn!(%error, "could not resize a terminal");
-                    }
+                    failures.resize(&writer.resize(Size::new(rows, cols)));
                 }
             }
         }
