@@ -796,7 +796,12 @@ addresses: number,
 /**
  * Double-quoted strings.
  */
-quoted: number, };
+quoted: number, 
+/**
+ * Lines of the file that were not records, which the log shows as a
+ * placeholder, never as their text.
+ */
+lines: number, };
 
 /**
  * The view's lines over time, its range aside, in equal spans from `from`

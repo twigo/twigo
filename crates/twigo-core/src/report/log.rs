@@ -98,6 +98,11 @@ pub(super) fn last_panic(files: &[PathBuf]) -> Option<Panic> {
 
 const STARTED: &str = "Twigo started";
 
+/// The writer writes only JSON objects, so a line that is not one was cut by
+/// a full disk, a kill or a power loss, and its fields would be hidden by
+/// their quotes alone, which one unbalanced quote shifts.
+const NOT_A_RECORD: &str = "<a line that is not a record>";
+
 struct Record {
     time: String,
     level: String,
@@ -107,15 +112,9 @@ struct Record {
 }
 
 impl Record {
-    fn parse(line: &str) -> Self {
+    fn parse(line: &str) -> Option<Self> {
         let Ok(Value::Object(mut record)) = serde_json::from_str(line) else {
-            return Self {
-                time: String::new(),
-                level: String::new(),
-                target: String::new(),
-                message: line.to_owned(),
-                fields: Vec::new(),
-            };
+            return None;
         };
         let mut text = |name: &str| match record.remove(name) {
             Some(Value::String(text)) => text,
@@ -130,13 +129,13 @@ impl Record {
             Some(Value::String(message)) => message,
             _ => String::new(),
         };
-        Self {
+        Some(Self {
             time,
             level,
             target,
             message,
             fields: fields.into_iter().collect(),
-        }
+        })
     }
 
     fn learned(&self) -> impl Iterator<Item = (Kind, String)> {
@@ -153,13 +152,24 @@ impl Record {
 /// A record is `<time> <LEVEL> <target> <message> <field>=<value>…`; a value
 /// of several lines follows it as a block.
 pub(super) fn render(lines: &[String], known: super::redact::Known) -> (String, twigo_ipc::Hidden) {
-    let records: Vec<Record> = lines.iter().map(|line| Record::parse(line)).collect();
-    let mut redactor = Redactor::new(known, records.iter().flat_map(Record::learned));
+    let records: Vec<Option<Record>> = lines.iter().map(|line| Record::parse(line)).collect();
+    let mut redactor = Redactor::new(known, records.iter().flatten().flat_map(Record::learned));
     let mut text = String::new();
+    let mut not_records = 0;
     for record in &records {
-        write_record(&mut text, record, &mut redactor);
+        if let Some(record) = record {
+            write_record(&mut text, record, &mut redactor);
+        } else {
+            text.push_str(NOT_A_RECORD);
+            text.push('\n');
+            not_records += 1;
+        }
     }
-    (text, redactor.hidden())
+    let hidden = twigo_ipc::Hidden {
+        lines: not_records,
+        ..redactor.hidden()
+    };
+    (text, hidden)
 }
 
 fn write_record(text: &mut String, record: &Record, redactor: &mut Redactor) {

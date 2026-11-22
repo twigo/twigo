@@ -131,8 +131,30 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
             tokens: 1,
             addresses: 4,
             quoted: 4,
+            lines: 0,
         }
     );
+}
+
+#[test]
+fn a_line_that_is_not_a_record_is_a_placeholder_and_never_its_text() {
+    let whole = record(json!({
+        "message": "the watch failed",
+        "context": "staging-us",
+        "namespace": "billing-team",
+    }));
+    let next = record(json!({ "message": "next", "context": "dev-x", "user": "carol-y" }));
+    let cut = &whole[..whole.find("billing-team").unwrap() + 7];
+    let glued = format!("{cut}{next}");
+    let (text, hidden) = rendered(&[&whole, cut, &glued, &next]);
+    assert_eq!(
+        text,
+        "2026-11-22T21:14:03Z WARN  twigo_core::state the watch failed context=<context-1> namespace=<namespace-1>\n\
+         <a line that is not a record>\n\
+         <a line that is not a record>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state next context=<context-2> user=<user-1>\n"
+    );
+    assert_eq!(hidden.lines, 2);
 }
 
 #[test]
