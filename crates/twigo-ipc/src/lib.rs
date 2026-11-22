@@ -16,6 +16,7 @@ mod keyboard;
 mod list;
 mod logs;
 mod object;
+mod report;
 mod schema;
 mod shell;
 mod space;
@@ -64,6 +65,7 @@ pub use object::{
     Related, RelatedObject, Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
     Vital,
 };
+pub use report::{Fact, FactId, Hidden, OpenIssue, OpenedIssue, Report, SaveReport};
 pub use schema::SchemaQuery;
 pub use shell::{
     OpenShell, ShellAck, ShellContainers, ShellEnd, ShellEvent, ShellInput, ShellKind,
