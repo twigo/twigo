@@ -9,7 +9,6 @@ import {
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import {
-  errorLines,
   errorOneLine,
   useChanges,
   useWorkbench,
@@ -27,7 +26,12 @@ import {
 import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
-import { causeWords, statusWord, type Failure } from "./errorWords";
+import {
+  causeWords,
+  failureLines,
+  statusWord,
+  type Failure,
+} from "./errorWords";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
 import { namespaceWords } from "./scope";
 
@@ -235,7 +239,7 @@ export function clusterEntries(
       [connection?.text, known && `Kubernetes ${known}`]
         .filter(Boolean)
         .join(" · "),
-      ...(failure ? errorLines(failure) : []),
+      ...(failure ? failureLines(failure) : []),
     ]
       .filter(Boolean)
       .join("\n");
