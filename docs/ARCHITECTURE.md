@@ -745,7 +745,7 @@ Every view header and the status bar render these states.
 A blank table is never an error state.
 
 Every failure that reaches the window is an `IpcError` with a code: a view's `error`, a cause, a refused command, a session's end, a forward's `failure`, `reconnecting` and `failed`, a plugin's failure, the login shell's environment, a dry run the server refused, a kubeconfig file's failure, a context's `problem`, the problems of Twigo's own files (4.10) and an object's unavailable events.
-What stays in words is no failure: the answers of an edit's preview (`stale` and `immutable`), the runtime's words of a container with no shell, and the kubelet's `reason` for a container that ended or waits.
+What stays in words is no failure of a request or a file: the answers of an edit's preview (`stale` and `immutable`), the runtime's words of a container with no shell, the kubelet's `reason` for a container that ended or waits, and the reason an unreadable policy file gives as the source of a mode (4.10).
 The code names the condition (`connect.refused`, `server.forbidden`), its kind is the class that retries and sign-ins branch on, and the API server's own `reason` and `causes` travel beside it as `server`, never as a code ([decision](decisions/error-codes.md)).
 
 A list reads its upstreams as parts, one per namespace or one for the cluster (`Parts`, `ListBatch.parts`):
