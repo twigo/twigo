@@ -40,6 +40,8 @@ export interface QuickPickItem {
   readonly keybinding?: string;
   /** Items group under headings in the order they come. */
   readonly group?: string;
+  /** The row says something and cannot be chosen: Enter and a click on it do nothing. */
+  readonly disabled?: boolean;
   /**
    * With `acceptChecked` on the provider: present, the row has a box and
    * starts with this tick; absent, the row is an action that Enter or a

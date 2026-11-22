@@ -26,6 +26,7 @@ import { Spaces } from "./spaces/store";
 import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
+import { variant } from "./variants";
 import { Zoom } from "./zoom";
 
 /**
@@ -101,7 +102,15 @@ export class Workbench {
       layout,
       platform,
     );
-    this.catalog = new Catalog(backend);
+    this.catalog = new Catalog(backend, (failure) => {
+      // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+      if (variant("toast") === "none") return;
+      notifyError(failure.error, {
+        lead: `${failure.source}: `,
+        warning: true,
+        key: `kubeconfig:${failure.source}`,
+      });
+    });
     this.colors = new ContextColors(this.catalog, state);
     this.spaces = new Spaces(
       backend,

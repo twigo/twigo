@@ -42,6 +42,7 @@ import {
   useChanges,
   useWorkbench,
 } from "../react";
+import { KubeconfigFailures } from "./KubeconfigFailures";
 import { PanelBoundary } from "./PanelBoundary";
 import {
   ACTIONS_PADDING,
@@ -61,8 +62,9 @@ const THEME: DockviewTheme = {
 
 /** The active space's editor groups; each space has its own layout (ARCHITECTURE 4.1, 4.2). */
 export function EditorArea() {
-  const { spaces, keys } = useWorkbench();
+  const { spaces, keys, catalog } = useWorkbench();
   useChanges(spaces.changes);
+  useChanges(catalog.changes);
   const space = spaces.active;
   const ref = useRef<HTMLDivElement>(null);
 
@@ -80,7 +82,7 @@ export function EditorArea() {
 
   return (
     <div ref={ref} className="h-full min-h-0">
-      {space && (
+      {space ? (
         <SpaceDock
           key={space.id}
           space={space.id}
@@ -89,6 +91,11 @@ export function EditorArea() {
           actions={GroupActions}
           watermark={Watermark}
         />
+      ) : (
+        catalog.list?.length === 0 &&
+        catalog.failures.length > 0 && (
+          <KubeconfigFailures failures={catalog.failures} />
+        )
       )}
     </div>
   );

@@ -200,6 +200,7 @@ function Open({ session }: { session: Session }) {
   }, [keys, toSide, many]);
 
   const accept = (item: QuickPickItem, options: AcceptOptions) => {
+    if (item.disabled) return;
     quickAccess.accept(item, options).catch((error: unknown) => {
       workbench.report(error);
     });
@@ -375,6 +376,7 @@ function Open({ session }: { session: Session }) {
         <Footer
           provider={provider}
           moves={!ask}
+          acceptable={active?.disabled !== true}
           many={many}
           acceptLabel={
             ask?.acceptLabel ??
@@ -439,6 +441,7 @@ function Row({
     <QuickInputOption
       id={id}
       cursor={cursor}
+      aria-disabled={item.disabled}
       aria-selected={many ? on : cursor}
       onPointerMove={onPoint}
       onClick={(event) => {
@@ -451,7 +454,7 @@ function Row({
           onSelect();
         }
       }}
-      className={item.tile ? "h-9" : undefined}
+      className={item.tile ? "h-9" : item.disabled ? "text-support" : undefined}
     >
       {on !== undefined && (
         <span
@@ -514,12 +517,15 @@ function Row({
 function Footer({
   provider,
   moves,
+  acceptable,
   many,
   acceptLabel,
 }: {
   provider: QuickAccessProvider | undefined;
   /** Whether it shows rows to move through; an input does not. */
   moves: boolean;
+  /** Whether Enter does anything: not on a row that cannot be chosen. */
+  acceptable: boolean;
   many: boolean;
   /** What Enter does: `Open` unless it says. */
   acceptLabel: string | undefined;
@@ -547,7 +553,9 @@ function Footer({
     >
       {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
       {toggle.length > 0 && <Hint keys={toggle}>Add or remove</Hint>}
-      {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}
+      {acceptable && accept.length > 0 && (
+        <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>
+      )}
       {side.length > 0 && <Hint keys={side}>Open to the side</Hint>}
       <span className="flex-1" />
       {prefixes.map((other) => (

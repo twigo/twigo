@@ -1,6 +1,9 @@
+import { TriangleAlert } from "lucide-react";
 import * as v from "valibot";
+import type { CatalogFailure, Context } from "@twigo/protocol";
 import { fuzzyMatch } from "@twigo/ui";
 import type { Workbench } from "../services";
+import { variant } from "../variants";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
 
 /**
@@ -122,7 +125,8 @@ export function helpProvider(workbench: Workbench): QuickAccessProvider {
  * keys, then the other contexts by the kubeconfig file that defines them.
  */
 export function spacesProvider(workbench: Workbench): QuickAccessProvider {
-  const { spaces, catalog, colors, spaceStatus, keybindings } = workbench;
+  const { spaces, catalog, colors, spaceStatus, keybindings, quickAccess } =
+    workbench;
   return {
     prefix: "ctx ",
     placeholder: "Switch to a space, or open one for a context",
@@ -170,28 +174,92 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
       for (const context of catalog.list ?? []) {
         if (own.has(context.name)) continue;
         const server = hostOf(context.server);
+        const problem = context.problem && problemOf(context.problem);
+        const description = [server, problem?.code]
+          .filter((part) => part !== undefined)
+          .join(" · ");
         files.set(context.source, [
           ...(files.get(context.source) ?? []),
           {
             id: `context:${context.name}`,
             label: context.name,
             tile: { name: context.name, color: colors.of(context.name) },
-            ...(server && { description: server }),
+            ...(description !== "" && { description }),
+            ...(problem && { state: { tone: "warn", label: problem.words } }),
             group: context.source,
           },
         ]);
       }
-      return [open, ...files.values()].flatMap((section) =>
-        filtered(section, filter),
-      );
+      // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+      const skipped = variant("kubeconfig") === "group" ? [] : catalog.failures;
+      const failed =
+        variant("kubeconfig") === "group"
+          ? catalog.failures.map((failure) => [failedRow(failure)])
+          : [];
+      return [
+        ...[open, ...files.values(), ...failed].flatMap((section) =>
+          filtered(section, filter),
+        ),
+        ...(skipped.length > 0 ? [skippedRow(skipped.length)] : []),
+      ];
     },
     async accept(item) {
+      if (item.id === SKIPPED) {
+        void quickAccess.pick(
+          "Kubeconfig files that were skipped",
+          catalog.failures.map(failedRow),
+        );
+        return;
+      }
       if (item.id.startsWith("space:")) {
         spaces.select(item.id.slice("space:".length));
         return;
       }
       await spaces.open(item.id.slice("context:".length));
     },
+  };
+}
+
+const SKIPPED = "kubeconfig:skipped";
+
+/** What a context's problem says on its row: its words, led by the code where the variant has it, and the code for the quiet words after the name. */
+function problemOf(problem: NonNullable<Context["problem"]>): {
+  words: string;
+  code: string | undefined;
+} {
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  const placement = variant("code");
+  return {
+    words:
+      placement === "inline"
+        ? `${problem.code}: ${problem.message}`
+        : problem.message,
+    code: placement === "line" ? problem.code : undefined,
+  };
+}
+
+/** A kubeconfig file that failed, as a row that cannot be chosen: its words and its code, under the file's name. */
+function failedRow({ source, error }: CatalogFailure): QuickPickItem {
+  const { words, code } = problemOf(error);
+  return {
+    id: `kubeconfig:${source}`,
+    label: words,
+    ...(code && { description: code }),
+    icon: TriangleAlert,
+    group: source,
+    disabled: true,
+  };
+}
+
+/** The line at the picker's end that says some files were skipped, and opens them. */
+function skippedRow(count: number): QuickPickItem {
+  return {
+    id: SKIPPED,
+    label:
+      count === 1
+        ? "1 kubeconfig file was skipped"
+        : `${String(count)} kubeconfig files were skipped`,
+    icon: TriangleAlert,
   };
 }
 

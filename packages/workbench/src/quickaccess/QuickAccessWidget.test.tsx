@@ -265,6 +265,32 @@ test("↓ and ↑ move through the rows and wrap, Enter accepts, all by their bi
   expect(workbench.quickAccess.session).toBeUndefined();
 });
 
+test("a row that cannot be chosen is read and ignored: Enter and a click leave quick access open, and the footer does not offer to accept it", async () => {
+  const workbench = await testWorkbench();
+  const { registered, accept } = provider("!", [
+    { id: "no", label: "Cannot be parsed", disabled: true },
+    { id: "yes", label: "kind-one" },
+  ]);
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  expect(selected()).toBe("Cannot be parsed");
+  expect(
+    screen.getByRole("option", { name: "Cannot be parsed" }),
+  ).toHaveProperty("ariaDisabled", "true");
+  expect(footer()).not.toContain("Open");
+  press("Enter");
+  fireEvent.click(screen.getByText("Cannot be parsed"));
+  await act(() => Promise.resolve());
+  expect(accept).not.toHaveBeenCalled();
+  expect(workbench.quickAccess.session).toBeDefined();
+
+  press("ArrowDown");
+  expect(footer()).toContain("Open");
+  press("Enter");
+  await act(() => Promise.resolve());
+  expect(accept).toHaveBeenCalledTimes(1);
+});
+
 test("the row under the cursor scrolls into view as the cursor moves", async () => {
   const workbench = await testWorkbench();
   workbench.quickAccess.register(
