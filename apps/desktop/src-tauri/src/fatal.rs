@@ -69,7 +69,7 @@ impl<R: Runtime> Path<R> {
             flush(&core);
             return;
         };
-        let stage = Arc::clone(&self.stage);
+        let path = self.clone();
         app.dialog()
             .message(MESSAGE)
             .title(TITLE)
@@ -80,16 +80,30 @@ impl<R: Runtime> Path<R> {
             ))
             .parent(&window)
             .show(move |restart| {
-                if !stage.answer() {
+                if !path.answered(&core, restart) {
                     return;
                 }
-                flush(&core);
                 if restart {
                     app.request_restart();
                 } else {
                     app.exit(1);
                 }
             });
+    }
+
+    /// The person's answer to the sheet, which the log keeps before the state
+    /// is written. False once Twigo is ending, when it counts for nothing.
+    fn answered(&self, core: &Core, restart: bool) -> bool {
+        if !self.stage.answer() {
+            return false;
+        }
+        if restart {
+            tracing::info!("the person chose Restart, so Twigo restarts");
+        } else {
+            tracing::info!("the person chose Quit, so Twigo quits");
+        }
+        flush(core);
+        true
     }
 
     /// Twigo is ending: an answer that comes after does nothing, so an exit
@@ -237,6 +251,54 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
         assert_eq!(core.policy.access("kind-a").unlocked_until, None);
         let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap_or_default();
         assert!(state.contains("kept"), "{state}");
+    }
+
+    #[test]
+    fn the_answer_to_the_sheet_is_logged_and_the_state_written_unless_twigo_is_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        core.state
+            .set(vec![StateEntry {
+                space: None,
+                key: "kept".to_owned(),
+                value: "1".to_owned(),
+            }])
+            .unwrap();
+        let said = |restart| {
+            let events = twigo_log::capture();
+            let path = Path::<MockRuntime>::default();
+            assert!(path.stage.ask());
+            (path.answered(&core, restart), events.lines())
+        };
+
+        let (counts, lines) = said(true);
+        assert!(counts);
+        let [line] = &lines[..] else {
+            panic!("one line for the answer: {lines:?}");
+        };
+        assert_eq!(line["target"], "twigo::fatal");
+        assert_eq!(
+            line["fields"]["message"],
+            "the person chose Restart, so Twigo restarts"
+        );
+        let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap_or_default();
+        assert!(state.contains("kept"), "{state}");
+        let (_, lines) = said(false);
+        assert_eq!(
+            lines[0]["fields"]["message"],
+            "the person chose Quit, so Twigo quits"
+        );
+
+        let events = twigo_log::capture();
+        let path = Path::<MockRuntime>::default();
+        assert!(path.stage.ask());
+        path.ending();
+        assert!(!path.answered(&core, true));
+        assert!(events.lines().is_empty());
     }
 
     #[test]
