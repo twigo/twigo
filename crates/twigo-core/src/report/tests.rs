@@ -583,3 +583,25 @@ fn the_mock_answers_the_report_rust_renders() {
         "run TWIGO_UPDATE_REPORT=1 cargo test -p twigo-core --lib report::tests::the_mock_answers"
     );
 }
+
+#[test]
+fn a_message_of_several_lines_stays_under_its_record() {
+    let (text, _) = rendered(&[&record(json!({ "message": "first\nsecond", "count": 2 }))]);
+    assert_eq!(
+        text,
+        "2026-11-22T21:14:03Z WARN  twigo_core::state first\n    second count=2\n"
+    );
+}
+
+#[tokio::test]
+async fn a_report_is_written_as_it_is_and_a_failure_says_its_code() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("twigo-report.txt");
+    super::write("what the person saw\n", &path).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "what the person saw\n"
+    );
+    let error = super::write("text", directory.path()).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::FileUnwritten);
+}
