@@ -9,7 +9,12 @@ import {
   type KeyHint,
   type StatSegment,
 } from "@twigo/ui";
-import { SpaceTile, useChanges, useWorkbench } from "@twigo/workbench";
+import {
+  ErrorMessage,
+  SpaceTile,
+  useChanges,
+  useWorkbench,
+} from "@twigo/workbench";
 import { byHealth, statusColumn, type Health } from "../columns";
 import { useClusterVersion, useResources, type Loaded } from "../discovery";
 import { PODS } from "../kinds";
@@ -347,7 +352,13 @@ function Tile({
   if (tally.state === "missing")
     return (
       <StatTile label={label} value={undefined}>
-        <span className="text-support">{tally.why}</span>
+        <span className="text-support">
+          {tally.error ? (
+            <ErrorMessage error={tally.error} message={tally.why} />
+          ) : (
+            tally.why
+          )}
+        </span>
       </StatTile>
     );
   return (

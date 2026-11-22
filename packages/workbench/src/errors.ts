@@ -38,3 +38,8 @@ export function errorLines(error: ErrorLike): string[] {
 export function errorText(error: ErrorLike): string {
   return errorLines(error).join("\n");
 }
+
+/** The error on one line, for a label or a tooltip row that has no room for a second. */
+export function errorOneLine(error: ErrorLike): string {
+  return errorLines(error).join(" · ");
+}

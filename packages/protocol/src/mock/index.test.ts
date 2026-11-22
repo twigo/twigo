@@ -617,6 +617,47 @@ test("a list whose cluster does not answer carries the failure that keeps it wai
   });
 });
 
+test("a list that ended on an internal error says so, and under discoveryFails each space's discovery fails for its own reason", async () => {
+  const panicked = await open("listPanicked");
+  expect(panicked.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "internal.panic" },
+  });
+
+  const backend = createMockBackend("discoveryFails");
+  const found: Record<string, unknown> = {};
+  for (const space of ["prod-eu", "staging", "dev"]) {
+    const opened = backend.invoke("space_open", space);
+    await vi.advanceTimersByTimeAsync(0);
+    await opened;
+    const watching = backend.subscribe("resources_watch", space, (message) => {
+      found[space] = message;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await watching;
+  }
+  const listed = createMockBackend("listFails");
+  const dev = listed.invoke("space_open", "dev");
+  await vi.advanceTimersByTimeAsync(0);
+  await dev;
+  const failing = await open("listFails", query({ space: "dev" }), listed);
+  expect(failing.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "credentials.plugin-failed" },
+  });
+  expect(
+    Object.values(found).map((message) =>
+      JSON.stringify(
+        (message as { error?: { code: string } }).error?.code ?? "ready",
+      ),
+    ),
+  ).toEqual([
+    '"connect.refused"',
+    '"context.missing-user"',
+    '"credentials.plugin-failed"',
+  ]);
+});
+
 test("the catalog names the kubeconfig files it could not read, and the context whose entry names no user", async () => {
   const catalogs = async (scenario: MockScenario) => {
     const backend = createMockBackend(scenario);
@@ -641,6 +682,23 @@ test("the catalog names the kubeconfig files it could not read, and the context 
   expect(none.contexts).toEqual([]);
   expect(none.failures).toHaveLength(2);
   expect((await catalogs("live")).failures).toEqual([]);
+});
+
+test("a context whose user no file defines is refused its lists as a request with no credentials is", async () => {
+  const backend = createMockBackend("kubeconfigFailures");
+  const opened = backend.invoke("space_open", "orphan");
+  await vi.advanceTimersByTimeAsync(0);
+  await opened;
+  const refused = await open(
+    "kubeconfigFailures",
+    query({
+      space: "orphan",
+      gvr: { group: "", version: "v1", resource: "nodes" },
+      namespaced: false,
+    }),
+    backend,
+  );
+  expect(refused.batches[0]?.status).toEqual({ state: "unauthorized" });
 });
 
 test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {

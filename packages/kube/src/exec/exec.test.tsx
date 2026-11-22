@@ -473,6 +473,31 @@ test("Restart asks again and starts a new session in the same tab", async () => 
   expect(panelTabs()).toEqual([uri]);
 });
 
+test("a shell that Twigo's own code stopped says so over the terminal, opens again with Reopen and reports with Report…", async () => {
+  const { workbench, tabs, open } = await mounted("shellPanicked");
+  await open("qa", ONE);
+  await settle(10);
+  expect(screen.getByText("Twigo hit an internal error.")).toBeTruthy();
+  expect(screen.getByText("This shell stopped.")).toBeTruthy();
+  const uri = execUri(RUNNING);
+  const tab = tabs.get(uri);
+  const run = vi.spyOn(workbench.operations, "run");
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(10);
+  expect(run).toHaveBeenCalledOnce();
+  expect(tabs.get(uri)).toBe(tab);
+  fireEvent.click(screen.getByRole("button", { name: "Report…" }));
+  await settle(4);
+  expect(workbench.problemReport.report).toBeDefined();
+});
+
+test("a shell that failed for any other reason has no banner of Twigo's", async () => {
+  const { open } = await mounted("shellFailed");
+  await open("qa", ONE);
+  await settle(10);
+  expect(screen.queryByRole("button", { name: "Report…" })).toBeNull();
+});
+
 test("a tab closed while Restart waits for its plan stays closed, and the session the plan ends with is closed", async () => {
   const { workbench, tabs, backend, open } = await mounted("shellNoShell");
   await open("qa", ONE);

@@ -73,6 +73,8 @@ export class MockAccess {
       types: KUBECONFIG_TYPES,
     },
     private readonly listed: Catalog = { contexts: CONTEXTS, failures: [] },
+    /** Why the admin's policy file cannot be read, which makes every context read-only. */
+    private readonly unreadable?: string,
   ) {}
 
   watch(onMessage: (catalog: Catalog) => void): Catalog {
@@ -178,6 +180,12 @@ export class MockAccess {
   /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
   refuse(name: string): void {
     this.#fixture(name);
+    if (this.unreadable !== undefined) {
+      throw new IpcError(
+        "policy.file-unreadable",
+        `${POLICY_FILE} cannot be read, so every context is read-only`,
+      );
+    }
     if (this.#policyFileSets(name)) {
       throw new IpcError(
         "policy.file-sets-mode",
@@ -272,6 +280,17 @@ export class MockAccess {
   ): { mode: Mode; source: ModeSource } {
     const lacks = (lock: Outlived["kind"]) =>
       gone.some(({ kind }) => kind === lock);
+    if (this.unreadable !== undefined) {
+      return {
+        mode: "read-only",
+        source: {
+          kind: "policyFile",
+          file: POLICY_FILE,
+          pattern: null,
+          reason: this.unreadable,
+        },
+      };
+    }
     if (!lacks("policyFile") && this.#policyFileSets(name)) {
       return {
         mode: "read-only",

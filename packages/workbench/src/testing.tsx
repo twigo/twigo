@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement, ReactNode } from "react";
-import { act, fireEvent } from "@testing-library/react";
+import { act, fireEvent, within } from "@testing-library/react";
 import type { Backend } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import type { Area } from "./editors/registry";
@@ -118,4 +118,12 @@ export function toastWords(message: unknown): string {
     message as ReactElement<ComponentProps<typeof ErrorMessage>>
   ).props;
   return `${lead}${error.message}`;
+}
+
+/** Whether `scope` names the code or offers it under Copy details, which every variant of `code:` does one way or the other. */
+export function carriesCode(scope: HTMLElement, code: string): boolean {
+  return (
+    scope.textContent.includes(code) ||
+    within(scope).queryByRole("button", { name: "Copy details" }) !== null
+  );
 }

@@ -1,8 +1,10 @@
 import { CircleAlert } from "lucide-react";
+import type { IpcError } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
+import { ErrorMessage } from "@twigo/workbench";
 
 /** What the window shows when the workbench could not start. */
-export function StartupFailure({ message }: { message: string }) {
+export function StartupFailure({ error }: { error: IpcError }) {
   return (
     <EmptyState
       icon={CircleAlert}
@@ -10,7 +12,9 @@ export function StartupFailure({ message }: { message: string }) {
       title="Twigo could not start"
       className="h-full"
     >
-      <p className="text-support">{message}</p>
+      <p className="text-support">
+        <ErrorMessage error={error} />
+      </p>
     </EmptyState>
   );
 }

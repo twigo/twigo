@@ -13,16 +13,55 @@ import { CONTEXTS, UNMARKED } from "./fixtures";
  * them waiting, as Rust's upstream reports it: `connectRefused` and
  * `connectCertificate` connect again, `connectLost` shows its rows with no
  * updates. `serverRefuses` is a list the API server answers with a refusal
- * that has causes, which the status carries as data.
+ * that has causes, which the status carries as data, and `listPanicked` one
+ * that ended on an internal error of Twigo's.
  */
 export const CAUSE_SCENARIOS = [
   "connectRefused",
   "connectCertificate",
   "connectLost",
   "serverRefuses",
+  "listPanicked",
 ] as const;
 
 export type CauseScenario = (typeof CAUSE_SCENARIOS)[number];
+
+/**
+ * `discoveryFails`: no space's discovery answers, each for a reason of its
+ * own, as it does when a cluster cannot be reached, a context names no user
+ * or a credential plugin fails; `listFails`: the lists of each space end in
+ * the same errors, which is how the status bar words each family of codes.
+ */
+export const DISCOVERY_FAILS = "discoveryFails";
+export const LIST_FAILS = "listFails";
+
+const FAILURES: Readonly<Record<string, Wire>> = {
+  "prod-eu": error(
+    "connect.refused",
+    "The cluster refused the connection: Connection refused (os error 61)",
+  ),
+  staging: error(
+    "context.missing-user",
+    'no kubeconfig defines the user "staging-admin"',
+  ),
+  dev: error(
+    "credentials.plugin-failed",
+    "exec: executable aws failed with exit code 255",
+  ),
+};
+
+/** Why a space's discovery fails under `discoveryFails`, none for a space that has no reason. */
+export function discoveryFailure(
+  scenario: string,
+  space: string,
+): Wire | undefined {
+  return scenario === DISCOVERY_FAILS ? FAILURES[space] : undefined;
+}
+
+/** The error a space's lists end in under `listFails`. */
+export function listFailure(scenario: string, space: string): Wire | undefined {
+  return scenario === LIST_FAILS ? FAILURES[space] : undefined;
+}
 
 export function isCauseScenario(scenario: string): scenario is CauseScenario {
   return (CAUSE_SCENARIOS as readonly string[]).includes(scenario);
@@ -42,21 +81,28 @@ export const CAUSED: Readonly<Record<CauseScenario, ViewState>> = {
     state: "connecting",
     cause: error(
       "connect.refused",
-      "The server refused the connection: Connection refused (os error 61)",
+      "The cluster refused the connection: Connection refused (os error 61)",
     ),
   },
   connectCertificate: {
     state: "connecting",
     cause: error(
       "connect.certificate",
-      "The server's certificate is not trusted: “34.141.62.18” certificate is not trusted: -67843",
+      "The cluster's certificate cannot be verified: “34.141.62.18” certificate is not trusted: -67843",
     ),
   },
   connectLost: {
     state: "stale",
     cause: error(
       "connect.lost",
-      "The connection to the server was lost: connection closed before message completed",
+      "Error reading events stream: connection closed before message completed",
+    ),
+  },
+  listPanicked: {
+    state: "error",
+    error: error(
+      "internal.panic",
+      "Twigo stopped this list on an internal error",
     ),
   },
   serverRefuses: {
@@ -108,12 +154,15 @@ const FAILED_FILES: readonly CatalogFailure[] = [
     source: "~/.kube/broken.yaml",
     error: error(
       "kubeconfig.unparsable",
-      "Cannot be parsed: unclosed bracket '[' at line 7, column 10",
+      "The file cannot be parsed: expected sequence start at line 7, column 10",
     ),
   },
   {
     source: "~/.kube/work/locked.yaml",
-    error: error("kubeconfig.unreadable", "Cannot be read: permission denied"),
+    error: error(
+      "kubeconfig.unreadable",
+      "The file cannot be read: permission denied",
+    ),
   },
 ];
 
@@ -130,6 +179,9 @@ const WITHOUT_USER: Context = {
     'no kubeconfig defines the user "orphan-admin"',
   ),
 };
+
+/** The contexts whose user no file defines: Twigo connects with no credentials, and the server refuses what they ask. */
+export const ANONYMOUS: readonly string[] = [WITHOUT_USER.name];
 
 export function catalogOf(scenario: string): Catalog {
   if (scenario === "kubeconfigAllFailed") {

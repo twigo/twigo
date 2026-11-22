@@ -18,6 +18,7 @@ import {
 import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { StateStore, Workbench, WorkbenchView } from "@twigo/workbench";
+import { carriesCode } from "@twigo/workbench/testing";
 import { byHealth } from "../columns";
 import { PODS } from "../kinds";
 import { registerKube } from "../register";
@@ -235,8 +236,10 @@ test("a list the credentials may not read shows – and why, never 0", async () 
   await home("live");
   await settle(30);
   const nodes = tile("Nodes");
-  expect(nodes?.textContent).toBe("Nodes–You may not list nodes.");
-  expect(nodes?.closest("button")).toBeNull();
+  if (!nodes) throw new Error("no Nodes tile");
+  expect(nodes.textContent).toContain("Nodes–You may not list nodes.");
+  expect(carriesCode(nodes, "server.forbidden")).toBe(true);
+  expect(nodes.closest("button")).toBeNull();
   expect(tile("Pods")?.textContent).toMatch(/^Pods5,000/);
   expect(screen.getByText("Kubernetes v1.33.4")).toBeTruthy();
 });

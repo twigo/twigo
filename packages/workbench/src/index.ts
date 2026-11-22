@@ -37,8 +37,17 @@ export type {
 } from "./quickaccess/registry";
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
-export { errorDetails, errorLines, errorText, type ErrorLike } from "./errors";
+export {
+  errorDetails,
+  errorLines,
+  errorOneLine,
+  errorText,
+  type ErrorLike,
+} from "./errors";
 export { ErrorMessage } from "./ErrorMessage";
+export { INTERNAL_ERROR, isInternalError } from "./internalError";
+export { REPORT_PROBLEM } from "./report/commands";
+export { ReportLink } from "./report/ReportLink";
 export { notifyError } from "./notifyError";
 export { variant, type Variant, type VariantGroup } from "./variants";
 export type { Look, Outcome } from "./operations/service";

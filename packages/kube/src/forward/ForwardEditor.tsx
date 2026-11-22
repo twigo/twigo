@@ -14,6 +14,9 @@ import {
 import { formatBytes } from "@twigo/utils";
 import {
   ErrorMessage,
+  INTERNAL_ERROR,
+  isInternalError,
+  ReportLink,
   useChanges,
   useWorkbench,
   type EditorProps,
@@ -202,7 +205,11 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     {
       key: "failure",
       label: "Last failure",
-      value: forward.failure?.message ?? <Quiet>None</Quiet>,
+      value: forward.failure ? (
+        <ErrorMessage error={forward.failure} />
+      ) : (
+        <Quiet>None</Quiet>
+      ),
     },
   ];
   return (
@@ -272,14 +279,18 @@ function Problem({ forward }: { forward: Forward }) {
   if (state.state !== "failed") return null;
   const { error } = state;
   const where = addressOf(forward);
+  const internal = isInternalError(error);
   const [title, tone] = error.blocked
     ? [`${error.blocked.context} is ${error.blocked.mode}`, "warn" as const]
-    : ["Failed", "error" as const];
+    : [internal ? INTERNAL_ERROR.title : "Failed", "error" as const];
   const listens = listensOn(forward).length > 0;
   return (
     <Callout tone={tone} title={title}>
       <p className="break-words">
-        <ErrorMessage error={error} />
+        <ErrorMessage
+          error={error}
+          {...(internal && { message: INTERNAL_ERROR.stopped("This forward") })}
+        />
       </p>
       <p className="text-support">
         {!listens
@@ -288,6 +299,7 @@ function Problem({ forward }: { forward: Forward }) {
             ? `It still listens on ${where} and closes every connection at once, until the mode lets forwards through.`
             : `It still listens on ${where}. Start tries it again.`}
       </p>
+      {internal && <ReportLink />}
     </Callout>
   );
 }

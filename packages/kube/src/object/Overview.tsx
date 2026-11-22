@@ -15,6 +15,7 @@ import type {
   Condition,
   DataEntry,
   EventList,
+  IpcError,
   ObjectEvent,
   ObjectRef,
   Overview as Document,
@@ -23,7 +24,7 @@ import type {
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { Button, cn, LinkButton, Section as Folding, Table } from "@twigo/ui";
-import { useChanges } from "@twigo/workbench";
+import { ErrorMessage, useChanges } from "@twigo/workbench";
 import { formatBytes } from "@twigo/utils";
 import { Containers } from "./Containers";
 import { DefaultsLink, Fields } from "./defaults";
@@ -519,7 +520,7 @@ function SecretRow({ entry, reveal }: { entry: DataEntry; reveal: Reveal }) {
 type Read =
   | { readonly state: "reading" }
   | { readonly state: "read"; readonly text: string | null }
-  | { readonly state: "failed"; readonly message: string };
+  | { readonly state: "failed"; readonly error: IpcError };
 
 function DataRow({
   entry,
@@ -539,8 +540,7 @@ function DataRow({
         if (current) setRead({ state: "read", text: text ?? null });
       },
       (error: unknown) => {
-        if (current)
-          setRead({ state: "failed", message: toIpcError(error).message });
+        if (current) setRead({ state: "failed", error: toIpcError(error) });
       },
     );
     return () => {
@@ -580,7 +580,9 @@ function DataRow({
       </button>
       {open &&
         (read.state === "failed" ? (
-          <p className="mb-1 ml-4.5 text-xs text-error">{read.message}</p>
+          <p className="mb-1 ml-4.5 text-xs text-error">
+            <ErrorMessage error={read.error} />
+          </p>
         ) : (
           <pre className="mb-1 ml-4.5 max-h-80 overflow-auto rounded-lg bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
             {read.state === "read" ? read.text : ""}
@@ -629,7 +631,11 @@ function NewestEvents({
 export function Events({ list }: { list: EventList }) {
   const { events, unavailable } = list;
   if (unavailable !== null) {
-    return <p className="text-error">{unavailable.message}</p>;
+    return (
+      <p className="text-error">
+        <ErrorMessage error={unavailable} />
+      </p>
+    );
   }
   if (events.length === 0) return <p className="text-support">No events</p>;
   return (

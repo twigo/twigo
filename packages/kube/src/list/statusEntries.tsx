@@ -10,6 +10,7 @@ import {
 import type { Tone } from "@twigo/ui";
 import {
   errorLines,
+  errorOneLine,
   useChanges,
   useWorkbench,
   type ErrorLike,
@@ -141,7 +142,7 @@ function describe({ state, shown, parts }: Kind): string {
     case "forbidden":
     case "unauthorized":
     case "error":
-      return `${where}: ${errorLines(refusal(state)).join(" · ")}`;
+      return `${where}: ${errorOneLine(refusal(state))}`;
     case "queued":
       return `${where}: ${shown ? "rows as last listed" : "no rows yet"}`;
     case "connecting":

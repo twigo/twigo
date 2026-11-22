@@ -36,9 +36,14 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import {
+  ANONYMOUS,
   CAUSE_SCENARIOS,
   CAUSED,
+  DISCOVERY_FAILS,
+  LIST_FAILS,
   catalogOf,
+  discoveryFailure,
+  listFailure,
   isCauseScenario,
   isKubeconfigScenario,
   KUBECONFIG_SCENARIOS,
@@ -144,6 +149,8 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*` that also sends `dev`'s terminal through the proxy,
+ * `policyFileUnreadable`: live lists while that file cannot be read, so every
+ * context is read-only and says why,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
@@ -170,7 +177,9 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * from an earlier run or are forbidden (`forwardBusy` and the like), or
  * while the context's Metrics API is not served, does not answer or refuses
  * the person (`metricsNone` and the like), live lists while the catalog's
- * kubeconfig files fail (`kubeconfigFailures` and the like), or `problems`:
+ * kubeconfig files fail (`kubeconfigFailures` and the like), `discoveryFails`:
+ * live lists of spaces whose discovery fails, each for a reason of its own,
+ * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
  * open. A pinned cause (`connectRefused` and the like) is a list scenario.
  */
@@ -178,6 +187,7 @@ export type MockScenario =
   | ListScenario
   | "shellTimeout"
   | "policyFile"
+  | "policyFileUnreadable"
   | "viewer"
   | "rbacNamespaces"
   | "rbacTypedNamespaces"
@@ -191,12 +201,15 @@ export type MockScenario =
   | TerminalScenario
   | ForwardScenario
   | MetricsScenario
-  | KubeconfigScenario;
+  | KubeconfigScenario
+  | typeof DISCOVERY_FAILS
+  | typeof LIST_FAILS;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
   "policyFile",
+  "policyFileUnreadable",
   "viewer",
   "rbacNamespaces",
   "rbacTypedNamespaces",
@@ -212,6 +225,8 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...METRICS_SCENARIOS,
   ...KUBECONFIG_SCENARIOS,
   ...CAUSE_SCENARIOS,
+  DISCOVERY_FAILS,
+  LIST_FAILS,
   "queued",
   "connecting",
   "syncing",
@@ -293,6 +308,7 @@ export function createMockBackend(
   const lists: ListScenario =
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
+    scenario === "policyFileUnreadable" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     scenario === "rbacTypedNamespaces" ||
@@ -306,7 +322,9 @@ export function createMockBackend(
     isTerminalScenario(scenario) ||
     isForwardScenario(scenario) ||
     isMetricsScenario(scenario) ||
-    isKubeconfigScenario(scenario)
+    isKubeconfigScenario(scenario) ||
+    scenario === DISCOVERY_FAILS ||
+    scenario === LIST_FAILS
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
@@ -317,6 +335,9 @@ export function createMockBackend(
     scenario === "policyFile",
     undefined,
     catalogOf(scenario),
+    scenario === "policyFileUnreadable"
+      ? "it is not JSON at line 3, column 1"
+      : undefined,
   );
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
@@ -848,8 +869,10 @@ export function createMockBackend(
         verb: "list",
         resource,
       };
-      const state: Exclude<ListScenario, "forbidden"> | ViewState =
-        typeof selected === "string"
+      const failed = listFailure(scenario, context);
+      const state: Exclude<ListScenario, "forbidden"> | ViewState = failed
+        ? { state: "error", error: failed }
+        : typeof selected === "string"
           ? {
               state: "error",
               error: wireError(
@@ -862,7 +885,9 @@ export function createMockBackend(
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
             ? forbidden
-            : lists;
+            : lists === "live" && ANONYMOUS.includes(context)
+              ? PINNED.unauthorized
+              : lists;
       subscriptions.set(
         id,
         new Subscription(
@@ -996,7 +1021,12 @@ export function createMockBackend(
     problems_watch: () => (scenario === "problems" ? PROBLEMS : []),
     resources_watch: (id, onMessage) => {
       space(id);
+      const failure = discoveryFailure(scenario, id);
       const send = () => {
+        if (failure) {
+          onMessage({ state: "failed", error: failure });
+          return;
+        }
         onMessage({
           state: "ready",
           cluster: `mock://${id}`,

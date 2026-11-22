@@ -83,6 +83,59 @@ test.each([
   },
 );
 
+test.each([
+  ["forbidden", "Forbidden", "You may not list pods."],
+  [
+    "unauthorized",
+    "Unauthorized",
+    "The cluster does not accept the credentials.",
+  ],
+] as const)(
+  "a %s list's cluster entry reads %s, and its tooltip carries the refusal's message",
+  async (scenario, text, message) => {
+    await openList(createMockBackend(scenario));
+    const title = entry(text)?.getAttribute("title") ?? "";
+    expect(title.split("\n")[0]).toBe(`${text} · Kubernetes v1.33.4`);
+    expect(title).toContain(message);
+  },
+);
+
+test("a part that cannot connect names its cause in the parts' tooltip", () => {
+  const cause = {
+    code: "connect.certificate",
+    kind: "unavailable",
+    message: "The server's certificate is not trusted",
+  } as const;
+  const line = partsLine({
+    count: 2,
+    unready: [
+      {
+        part: { kind: "namespace", name: "team-a" },
+        state: { state: "connecting", cause },
+        shown: false,
+      },
+    ],
+    omitted: 0,
+  });
+  expect(line?.tooltip).toBe("team-a: connecting · certificate not trusted");
+
+  const broken = partsLine({
+    count: 2,
+    unready: [
+      {
+        part: { kind: "namespace", name: "team-c" },
+        state: {
+          state: "stale",
+          cause: { ...cause, code: "connect.lost", message: "lost" },
+        },
+        shown: false,
+      },
+    ],
+    omitted: 0,
+  });
+  expect(broken?.tooltip).toBe("team-c: connecting · connection lost");
+});
+
 test("the status bar counts the active list's rows", async () => {
   await openList();
   expect(screen.getByText("5,000 pods")).toBeTruthy();

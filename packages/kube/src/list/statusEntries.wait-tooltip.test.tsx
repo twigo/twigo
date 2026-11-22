@@ -21,7 +21,7 @@ test("wait:tooltip keeps the word and the skeleton as they are, and puts the cau
   await act(() => vi.advanceTimersByTimeAsync(100));
   const word = within(screen.getByRole("contentinfo")).getByText("Connecting…");
   expect(word.closest("[title]")?.getAttribute("title")).toContain(
-    "The server refused the connection",
+    "The cluster refused the connection",
   );
   expect(within(screen.getByRole("grid")).queryByRole("status")).toBeNull();
   expect(screen.queryByText(/connection refused/)).toBeNull();

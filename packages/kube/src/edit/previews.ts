@@ -3,6 +3,7 @@ import {
   type ApplyPreviewed,
   type ApplyRequest,
   type Backend,
+  type IpcError,
   type OpenedEdit,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
@@ -17,6 +18,8 @@ export interface Subject {
 export interface Failure {
   readonly message: string;
   readonly at?: { readonly line: number; readonly column: number };
+  /** The refusal that failed the preview, with its code; a text that does not parse has none. */
+  readonly error?: IpcError;
 }
 
 export type Preview =
@@ -90,7 +93,8 @@ export class Previews {
         planning: false,
       };
     } catch (error) {
-      next = { state: "failed", message: toIpcError(error).message };
+      const ipc = toIpcError(error);
+      next = { state: "failed", message: ipc.message, error: ipc };
     }
     if (this.#asked.get(editor) !== asked) return undefined;
     return this.#set(editor, next);

@@ -468,6 +468,17 @@ test("an exec the API server refuses ends failed with its code and reason before
   expect(more).toEqual([]);
 });
 
+test("a shell that ends on an internal error of Twigo's says its code before any output", async () => {
+  const shell = await openShell("shellPanicked");
+  await vi.advanceTimersByTimeAsync(500);
+  const [, ended, ...more] = shell.messages;
+  expect(ended).toMatchObject({
+    state: "ended",
+    end: { reason: "failed", error: { code: "internal.panic" } },
+  });
+  expect(more).toEqual([]);
+});
+
 test("a lost connection ends it 8 s in, and a relock does too with the context read-only", async () => {
   const lost = await openShell("shellLost");
   await vi.advanceTimersByTimeAsync(7500);

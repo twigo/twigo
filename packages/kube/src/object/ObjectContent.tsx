@@ -7,6 +7,7 @@ import {
   type RelatedObject,
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
+import { ErrorMessage } from "@twigo/workbench";
 import { ViewStatus } from "../ViewStatus";
 import { objectProblem } from "../viewProblem";
 import { Manifest } from "../edit/Manifest";
@@ -39,6 +40,7 @@ export function ObjectContent({
   onOpen,
   onLogs,
   onEvents,
+  onReopen,
   fullPage,
 }: {
   tab: ObjectTab;
@@ -64,6 +66,7 @@ export function ObjectContent({
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
   onEvents: OverviewProps["onEvents"];
+  onReopen?: () => void;
   /** The full page, whose sections open but the Metadata. */
   fullPage?: boolean;
 }) {
@@ -96,7 +99,11 @@ export function ObjectContent({
       )}
     >
       {tab === "overview" && (
-        <Shown snapshot={snapshot} has={snapshot.overview !== undefined}>
+        <Shown
+          snapshot={snapshot}
+          has={snapshot.overview !== undefined}
+          onReopen={onReopen}
+        >
           {snapshot.overview && (
             <Overview
               overview={snapshot.overview}
@@ -122,6 +129,7 @@ export function ObjectContent({
           snapshot={snapshot}
           has={snapshot.manifest !== undefined}
           kept={kept}
+          onReopen={onReopen}
         >
           {snapshot.manifest !== undefined &&
             (yaml?.(snapshot.manifest) ?? (
@@ -130,12 +138,20 @@ export function ObjectContent({
         </Shown>
       )}
       {tab === "events" && (
-        <Shown snapshot={snapshot} has={snapshot.events !== undefined}>
+        <Shown
+          snapshot={snapshot}
+          has={snapshot.events !== undefined}
+          onReopen={onReopen}
+        >
           {snapshot.events && <Events list={snapshot.events} />}
         </Shown>
       )}
       {tab === "related" && (
-        <Shown snapshot={snapshot} has={snapshot.related !== undefined}>
+        <Shown
+          snapshot={snapshot}
+          has={snapshot.related !== undefined}
+          onReopen={onReopen}
+        >
           {snapshot.related && (
             <RelatedView related={snapshot.related} onOpen={onOpen} />
           )}
@@ -150,18 +166,26 @@ function Shown({
   snapshot,
   has,
   kept,
+  onReopen,
   children,
 }: {
   snapshot: ObjectSnapshot;
   has: boolean;
   kept?: (problem: { title: string; body: string }) => ReactNode;
+  onReopen: (() => void) | undefined;
   children: ReactNode;
 }) {
   const { status } = snapshot;
   const found = objectProblem(snapshot);
   if (found && kept) return kept(found);
   if (REFUSED.has(status.state))
-    return <ViewStatus status={status} what="the object" />;
+    return (
+      <ViewStatus
+        status={status}
+        what="the object"
+        {...(onReopen && { onRetry: onReopen })}
+      />
+    );
   if (found) return <EmptyState title="The object does not exist" />;
   if (!has)
     return (
@@ -189,7 +213,9 @@ export function RelatedView({
       ) : (
         <section aria-label="Owns">
           <h3 className="mb-1 text-xs font-semibold text-support">Owns</h3>
-          <p className="text-error">{related.unavailable.message}</p>
+          <p className="text-error">
+            <ErrorMessage error={related.unavailable} />
+          </p>
         </section>
       )}
     </div>

@@ -4,6 +4,7 @@ import { ErrorMessage } from "./ErrorMessage";
 import { Toaster } from "@twigo/ui";
 import { errorLines } from "./errors";
 import { notifyError } from "./notifyError";
+import { testWorkbench } from "./testing";
 
 beforeEach(() => {
   history.replaceState(null, "", "/?variant=code:inline");
@@ -39,5 +40,20 @@ test("a toast leads its message with the code", async () => {
   const toast = await screen.findByRole("alert");
   expect(toast.textContent).toBe(
     "Cannot open the pod: connect.refused: The server refused the connection",
+  );
+});
+
+async function orphanRow() {
+  const workbench = await testWorkbench("kubeconfigFailures");
+  const resolved = workbench.quickAccess.resolve("ctx ");
+  const found = await resolved?.provider.items("", { lookup: () => undefined });
+  return found?.find(({ id }) => id === "context:orphan");
+}
+
+test("a context's problem on a picker row leads its words with the code", async () => {
+  const orphan = await orphanRow();
+  expect(orphan?.description).toBe("orphan.internal:6443");
+  expect(orphan?.state?.label).toBe(
+    'context.missing-user: no kubeconfig defines the user "orphan-admin"',
   );
 });

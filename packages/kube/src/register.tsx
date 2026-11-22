@@ -1,5 +1,5 @@
 import { FileCode, FolderTree, GitCompare } from "lucide-react";
-import { Changes, type Workbench } from "@twigo/workbench";
+import { Changes, errorOneLine, type Workbench } from "@twigo/workbench";
 import { RequestDetail } from "./approvals/RequestDetail";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
 import { registerEdits } from "./edit/commands";
@@ -318,7 +318,7 @@ function registerSpaceStatus(
       const version = versions.get(space);
       const known = version === undefined ? {} : { version };
       if (last?.state === "failed")
-        return { tone: "error", label: last.error.message, ...known };
+        return { tone: "error", label: errorOneLine(last.error), ...known };
       if (!active)
         return {
           tone: "idle",

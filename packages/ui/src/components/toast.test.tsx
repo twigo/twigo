@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { toast } from "sonner";
 import { compile } from "tailwindcss";
@@ -50,6 +51,25 @@ test("the action runs and dismisses only its toast", () => {
   expect(dismiss).toHaveBeenCalledWith("t7");
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(dismiss).toHaveBeenCalledTimes(2);
+});
+
+test("a toast with more actions has a button for each, and the one pressed runs alone", () => {
+  vi.spyOn(toast, "dismiss").mockReturnValue("t8");
+  const reveal = vi.fn();
+  const report = vi.fn();
+  render(
+    <Toast
+      id="t8"
+      tone="warning"
+      message="The state was set aside."
+      action={{ label: "Reveal Log File", run: reveal }}
+      more={[{ label: "Report…", run: report }]}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Report…" }));
+  expect(report).toHaveBeenCalledOnce();
+  expect(reveal).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Reveal Log File" })).toBeTruthy();
 });
 
 test("a countdown says the seconds left and its Cancel runs", () => {
@@ -128,6 +148,25 @@ test("an undo's toast runs it and stays for its owner to end, as long as the und
   expect(run).toHaveBeenCalledOnce();
   expect(dismiss).not.toHaveBeenCalled();
   vi.useRealTimers();
+});
+
+test("a toast shown under a key goes when that key is dismissed, and only that one", async () => {
+  render(<Toaster />);
+  act(() => {
+    notify.warning("One", { key: "a" });
+    notify.warning("Two", { key: "b" });
+  });
+  expect(await screen.findByText("One")).toBeTruthy();
+  act(() => {
+    notify.dismiss("a");
+  });
+  await waitFor(() => {
+    expect(screen.queryByText("One")).toBeNull();
+  });
+  expect(screen.getByText("Two")).toBeTruthy();
+  act(() => {
+    notify.dismiss("b");
+  });
 });
 
 test("a choice's toast stays until its owner dismisses it, takes one answer, and shows new words under the same key", async () => {

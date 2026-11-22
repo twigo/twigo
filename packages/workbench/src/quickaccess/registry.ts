@@ -42,6 +42,8 @@ export interface QuickPickItem {
   readonly group?: string;
   /** The row says something and cannot be chosen: Enter and a click on it do nothing. */
   readonly disabled?: boolean;
+  /** What Enter does to this row, in the footer, where it is not what the provider's other rows do. */
+  readonly acceptLabel?: string;
   /**
    * With `acceptChecked` on the provider: present, the row has a box and
    * starts with this tick; absent, the row is an action that Enter or a

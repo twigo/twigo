@@ -6,7 +6,7 @@ import {
   type Resource,
   type ValueCount,
 } from "@twigo/protocol";
-import { useWorkbench } from "@twigo/workbench";
+import { useWorkbench, type ErrorLike } from "@twigo/workbench";
 import type { Loaded } from "../discovery";
 import { useListView } from "../list/useListView";
 import { viewProblem } from "../viewProblem";
@@ -14,7 +14,11 @@ import { viewProblem } from "../viewProblem";
 /** A list as the cluster's home counts it, or why it could not. */
 export type Tally =
   | { readonly state: "loading" }
-  | { readonly state: "missing"; readonly why: string }
+  | {
+      readonly state: "missing";
+      readonly why: string;
+      readonly error?: ErrorLike | undefined;
+    }
   | {
       readonly state: "counted";
       readonly resource: Resource;
@@ -65,7 +69,11 @@ export function useTally(
 
   const what = gvr.group ? `${gvr.resource}.${gvr.group}` : gvr.resource;
   if (resources.state === "failed")
-    return { state: "missing", why: resources.error.message };
+    return {
+      state: "missing",
+      why: resources.error.message,
+      error: resources.error,
+    };
   if (resources.state === "loading") return { state: "loading" };
   if (!resource)
     return { state: "missing", why: `The cluster does not serve ${what}.` };
@@ -78,6 +86,6 @@ export function useTally(
     };
   const problem = viewProblem(snapshot.status, what);
   return problem
-    ? { state: "missing", why: problem.body }
+    ? { state: "missing", why: problem.body, error: problem.error }
     : { state: "loading" };
 }

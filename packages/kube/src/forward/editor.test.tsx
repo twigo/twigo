@@ -25,7 +25,7 @@ import {
   type MockScenario,
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
-import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import { carriesCode, tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
 import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { OBJECT_SCHEME, objectUri, parseObjectUri, pfUri } from "../uri";
@@ -831,9 +831,37 @@ test("the counters say that they count since Twigo started, and each shows its o
     screen.getByText(label, { selector: "dt" }).nextSibling?.textContent;
   expect(value("Sent")).toBe("1.5 KiB since Twigo started");
   expect(value("Received")).toBe("5 MiB since Twigo started");
-  expect(value("Last failure")).toBe(
+  expect(value("Last failure")).toContain(
     "pod auth-api-1 refused the connection to port 8080",
   );
+  expect(
+    carriesCode(
+      screen.getByText("Last failure", { selector: "dt" })
+        .nextSibling as HTMLElement,
+      "forward.port-refused",
+    ),
+  ).toBe(true);
+});
+
+test("a forward that Twigo's own code stopped says so with its code, offers Start, and Report… opens the report", async () => {
+  const { workbench, start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    state: {
+      state: "failed",
+      error: {
+        code: "internal.panic",
+        kind: "internal",
+        message: "Twigo stopped this forward on an internal error",
+      },
+    },
+  }));
+  await open(await start(API, 80));
+  expect(screen.getByText("Twigo hit an internal error")).toBeTruthy();
+  expect(screen.getByText("This forward stopped.")).toBeTruthy();
+  expect(document.body.textContent).toContain("Start tries it again.");
+  fireEvent.click(screen.getByRole("button", { name: "Report…" }));
+  await later(100);
+  expect(workbench.problemReport.report).toBeDefined();
 });
 
 test("a tab whose address names another space shows nothing of that space's forward", async () => {

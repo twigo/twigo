@@ -1,5 +1,6 @@
 import { CircleAlert, FileX, KeyRound, ShieldOff } from "lucide-react";
 import { refusal, type ObjectSnapshot, type ViewState } from "@twigo/protocol";
+import { INTERNAL_ERROR, isInternalError } from "@twigo/workbench";
 
 /**
  * Why a view has no rows or object, in words, for the states that have one.
@@ -36,6 +37,15 @@ export function viewProblem(
     }
     case "error": {
       const error = refusal(status);
+      if (isInternalError(error)) {
+        return {
+          icon: CircleAlert,
+          variant: "error" as const,
+          title: INTERNAL_ERROR.title,
+          body: INTERNAL_ERROR.stopped(),
+          error,
+        };
+      }
       return {
         icon: CircleAlert,
         variant: "error" as const,

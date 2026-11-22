@@ -6,6 +6,7 @@ import {
   accessOfSpace,
   chipLabel,
   describeAccess,
+  ErrorMessage,
   setByPolicyFile,
   useChanges,
   useWorkbench,
@@ -88,7 +89,7 @@ export function FailedBar({ failure }: { failure: Failure }) {
           : "Cannot apply"
       }
     >
-      {failure.message}
+      {failure.error ? <ErrorMessage error={failure.error} /> : failure.message}
     </Banner>
   );
 }

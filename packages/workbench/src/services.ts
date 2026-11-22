@@ -1,6 +1,6 @@
 import type { Backend, KeyboardLayout } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import type { ActionGroups } from "@twigo/ui";
+import { notify, type ActionGroups } from "@twigo/ui";
 import { Approvals } from "./approvals/service";
 import { menuActions } from "./commands/actions";
 import { Menus, type MenuId } from "./commands/menus";
@@ -17,6 +17,9 @@ import { Lists } from "./lists/service";
 import { notifyError } from "./notifyError";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
+import { announceProblem } from "./problems/notice";
+import { Problems } from "./problems/service";
+import { ProblemReport } from "./report/service";
 import { spaceMark } from "./parts/spaceMark";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
@@ -28,6 +31,8 @@ import { Views } from "./views/registry";
 import { registerCore } from "./core";
 import { variant } from "./variants";
 import { Zoom } from "./zoom";
+
+const kubeconfigToast = (source: string) => `kubeconfig:${source}`;
 
 /**
  * The services of one window. Features, the workbench's own included,
@@ -88,6 +93,8 @@ export class Workbench {
   readonly credentials: Credentials;
   readonly operations: Operations;
   readonly approvals: Approvals;
+  readonly problemReport: ProblemReport;
+  readonly problems: Problems;
 
   constructor(
     readonly backend: Backend,
@@ -102,15 +109,21 @@ export class Workbench {
       layout,
       platform,
     );
-    this.catalog = new Catalog(backend, (failure) => {
-      // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-      if (variant("toast") === "none") return;
-      notifyError(failure.error, {
-        lead: `${failure.source}: `,
-        warning: true,
-        key: `kubeconfig:${failure.source}`,
-      });
-    });
+    this.catalog = new Catalog(
+      backend,
+      (failure) => {
+        // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+        if (variant("toast") === "none") return;
+        notifyError(failure.error, {
+          lead: `${failure.source}: `,
+          warning: true,
+          key: kubeconfigToast(failure.source),
+        });
+      },
+      (source) => {
+        notify.dismiss(kubeconfigToast(source));
+      },
+    );
     this.colors = new ContextColors(this.catalog, state);
     this.spaces = new Spaces(
       backend,
@@ -149,6 +162,10 @@ export class Workbench {
       () => this.operations.confirming,
       this.spaces,
     );
+    this.problemReport = new ProblemReport(backend);
+    this.problems = new Problems(backend, (problem) => {
+      announceProblem(this, problem);
+    });
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */
@@ -216,6 +233,9 @@ export async function createWorkbench(
   });
   await workbench.spaces.load();
   workbench.credentials.start().catch((error: unknown) => {
+    workbench.report(error);
+  });
+  workbench.problems.watch().catch((error: unknown) => {
     workbench.report(error);
   });
   // Rust denies every ask while no window follows them.

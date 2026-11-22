@@ -42,7 +42,7 @@ import {
   type Tone,
 } from "@twigo/ui";
 import { sameData } from "@twigo/utils";
-import { useChanges, useWorkbench } from "@twigo/workbench";
+import { errorOneLine, useChanges, useWorkbench } from "@twigo/workbench";
 import { clock, followed, logsKind, podTag, standingMatch } from "./entries";
 import type { LogsTabs } from "./state";
 
@@ -538,7 +538,7 @@ function StreamLabel({ pod }: { pod: LogPod }) {
     worst.state === "waiting"
       ? worst.reason
       : worst.state === "error"
-        ? worst.error.message
+        ? errorOneLine(worst.error)
         : null;
   return (
     <StatusLabel tone={tone} pulse={worst.state === "connecting"}>
