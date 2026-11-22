@@ -12,7 +12,7 @@ import {
 import { parseExecUri } from "../uri";
 import { InternalStop } from "../xterm/InternalStop";
 import { useTerminalHost } from "../xterm/useTerminalHost";
-import { stoppedByTwigo } from "../xterm/words";
+import { internalEnd } from "../xterm/words";
 import type { ExecTabs } from "./tabs";
 import { execTitle } from "./words";
 
@@ -77,6 +77,7 @@ export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
     );
   }
 
+  const stopped = internalEnd(status);
   return (
     <div ref={setRoot} className="flex h-full min-h-0 flex-col bg-editor">
       {status.state === "queued" && (
@@ -88,7 +89,7 @@ export function ExecEditor({ uri, tabs }: EditorProps & { tabs: ExecTabs }) {
           Close a shell to free one.
         </Banner>
       )}
-      {stoppedByTwigo(status) && <InternalStop reopen={restart} />}
+      {stopped && <InternalStop error={stopped} reopen={restart} />}
       <div ref={setContainer} className="min-h-0 flex-1 pt-1 pl-2" />
     </div>
   );

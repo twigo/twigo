@@ -4,6 +4,7 @@ import {
   errorLines,
   INTERNAL_ERROR,
   isInternalError,
+  type ErrorLike,
   type SessionState,
 } from "@twigo/workbench";
 import type { SessionStatus } from "./terminal";
@@ -108,10 +109,11 @@ export function sessionState(status: SessionStatus): SessionState {
   }
 }
 
-export function stoppedByTwigo(status: SessionStatus): boolean {
-  return (
-    status.state === "ended" &&
+/** The error that Twigo's own code ended a session with, when it did. */
+export function internalEnd(status: SessionStatus): ErrorLike | undefined {
+  return status.state === "ended" &&
     status.end.reason === "failed" &&
     isInternalError(status.end.error)
-  );
+    ? status.end.error
+    : undefined;
 }
