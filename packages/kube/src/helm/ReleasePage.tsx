@@ -671,7 +671,7 @@ function Body({
     ? {
         ...overview,
         sections: overview.sections
-          .filter(({ id }) => (OWN[id] === view) === (view !== "overview"))
+          .filter(({ id }) => (OWN[id] ?? "overview") === view)
           .map((section) =>
             view === "overview"
               ? section
