@@ -397,9 +397,29 @@ struct Shared {
     received: AtomicU64,
 }
 
+/// What a state that is an error says of itself, and its code.
+fn entered(state: &ForwardState) -> Option<(&'static str, ErrorCode)> {
+    match state {
+        ForwardState::Reconnecting { reason } => Some(("a forward is reconnecting", reason.code)),
+        ForwardState::Failed { error } => Some(("a forward failed", error.code)),
+        _ => None,
+    }
+}
+
 impl Shared {
+    /// Every change of a forward's status goes through here, which says the
+    /// one that puts it in an error, by its code.
     fn update(&self, change: impl FnOnce(&mut Status) -> bool) {
-        self.status.send_if_modified(change);
+        self.status.send_if_modified(|status| {
+            let before = entered(&status.state);
+            let changed = change(status);
+            if let Some((what, code)) = entered(&status.state)
+                && Some((what, code)) != before
+            {
+                tracing::warn!(%code, "{what}");
+            }
+            changed
+        });
     }
 
     /// The data path is gone, and its connections with it.

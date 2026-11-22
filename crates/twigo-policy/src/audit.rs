@@ -83,7 +83,13 @@ pub enum Entry<'a> {
         command: &'a str,
         target: &'a str,
         outcome: &'a str,
-        message: &'a str,
+        /// What a command that finished says, in Twigo's words.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<&'a str>,
+        /// What a command that failed says in place of a message, which may
+        /// quote a value the server refused.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
     /// A change of a context's protection: what the context was before and
     /// is after, a lock that a person's mode sets aside named in its source.
@@ -288,7 +294,8 @@ mod tests {
             command: "apply",
             target: "deployments/web",
             outcome: "done",
-            message: "",
+            message: None,
+            code: None,
         });
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains(r#""event":"ended""#), "{written}");
@@ -328,7 +335,8 @@ mod tests {
             command: "apply",
             target: "deployments/web",
             outcome: "done",
-            message: "",
+            message: None,
+            code: None,
         });
         assert!(listed(ErrorCode::AuditUnwritten));
 

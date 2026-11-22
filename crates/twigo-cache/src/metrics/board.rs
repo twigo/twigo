@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinHandle;
-use twigo_ipc::{ErrorKind, MetricsState};
+use twigo_ipc::{ErrorCode, ErrorKind, MetricsState};
+use twigo_log::Repeats;
 
 use super::fetch::{Failure, fetch};
 use super::refusals::Refusals;
@@ -475,6 +476,7 @@ impl Board {
 /// clients are rebuilt or a reader asks for the scope anew, as a new subscription restarts one.
 async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
     let mut api = board.api.clone();
+    let mut undecodable = Repeats::default();
     loop {
         again.borrow_and_update();
         let version = loop {
@@ -509,7 +511,23 @@ async fn poll(board: Arc<Board>, scope: Scope, mut again: watch::Receiver<()>) {
             fetch(&clients, board.kind, version, &scope).await
         };
         match fetched {
-            Ok(samples) => board.land(&scope, MetricsState::Ready, samples, Some(&abandoned)),
+            Ok(samples) => {
+                if let Some(followed) = undecodable.ended() {
+                    tracing::info!(context = %board.context, followed, "metrics-server's answer decodes again");
+                }
+                board.land(&scope, MetricsState::Ready, samples, Some(&abandoned));
+            }
+            Err(Failure::Undecodable) => {
+                if undecodable.failed() {
+                    tracing::error!(context = %board.context, code = %ErrorCode::AnswerUndecodable, "Twigo cannot decode metrics-server's answer");
+                }
+                board.land(
+                    &scope,
+                    MetricsState::Unavailable,
+                    Samples::default(),
+                    Some(&abandoned),
+                );
+            }
             Err(Failure::Unauthorized) => {
                 board.land(
                     &scope,

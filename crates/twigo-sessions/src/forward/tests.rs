@@ -1514,6 +1514,7 @@ async fn a_connection_that_waits_for_a_pod_ends_when_its_client_leaves() {
 #[tokio::test(start_paused = true)]
 async fn a_cluster_that_stops_answering_is_the_reason_of_a_forward_that_worked_and_of_its_connection()
  {
+    let events = twigo_log::capture();
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
     let mut forward = start(&fake, pod_target("web-1"), false, Budgets::default());
@@ -1533,6 +1534,13 @@ async fn a_cluster_that_stops_answering_is_the_reason_of_a_forward_that_worked_a
         Some(ErrorCode::ForwardClusterUnanswered)
     );
     assert_eq!(reason(&status.state), ErrorCode::ForwardClusterUnanswered);
+    let said: Vec<_> = events
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a forward is reconnecting")
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(said[0]["fields"]["code"], "forward.cluster-unanswered");
 
     fake.set_offline(false);
     let mut again = forward.client();

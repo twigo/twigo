@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    BlockReason, Environment, ErrorCode, ErrorKind, Execute, Friction, Mode, ModeSource,
+    BlockReason, Environment, ErrorCode, ErrorKind, Execute, Friction, IpcError, Mode, ModeSource,
     OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
@@ -374,6 +374,8 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     );
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "stopped");
+    assert_eq!(lines[1]["message"], "stopped");
+    assert!(lines[1].get("code").is_none());
 }
 
 #[tokio::test]
@@ -1517,6 +1519,7 @@ async fn read_only_refuses_a_shell_before_anything_is_asked_and_nothing_reaches_
 
 #[tokio::test]
 async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
+    let events = twigo_log::capture();
     let dir = tempfile::tempdir().unwrap();
     let (server, port) = Server::start();
     let core = over_server(dir.path(), port);
@@ -1551,6 +1554,16 @@ async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
     };
     assert_eq!(error.code, ErrorCode::ServerForbidden);
     core.shell_close("main", id).unwrap();
+
+    let lines = events.lines();
+    let [event] = lines
+        .iter()
+        .filter(|line| line["fields"]["message"] == "a shell ended in error")
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one event for the shell's end: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.forbidden");
 }
 
 #[tokio::test]
@@ -1720,10 +1733,47 @@ async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
     let lines = audit(dir.path());
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "failed");
+    assert_eq!(lines[1]["code"], "internal.panic");
     until("the bus lets the plan go", || {
         core.bus.inner().windows["main"].entries.is_empty()
     })
     .await;
+}
+
+#[tokio::test]
+async fn a_failed_command_s_ended_line_holds_its_code_and_none_of_the_server_s_words() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|_: Progress| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2": must be a number"#,
+            ))
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (_told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+
+    let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines = audit(dir.path());
+    assert_eq!(lines[1]["outcome"], "failed");
+    assert_eq!(lines[1]["code"], "server.invalid");
+    assert!(lines[1].get("message").is_none());
+    assert!(!text.contains("hunter2"), "{text}");
 }
 
 #[test]

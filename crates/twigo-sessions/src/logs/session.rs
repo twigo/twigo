@@ -817,6 +817,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_stream_that_panics_says_so_in_its_container_and_the_session_goes_on() {
+        let events = twigo_log::capture();
         twigo_panic::inject::arm("log stream", 1);
         let (session, mut batches) = opened(&Fake::default()).await;
         let failed = loop {
@@ -840,6 +841,13 @@ mod tests {
             !matches!(failed.0, ViewState::Error { .. }),
             "the tab is not what failed"
         );
+        let said: Vec<_> = events
+            .lines()
+            .into_iter()
+            .filter(|line| line["fields"]["message"] == "a log stream ended in error")
+            .collect();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert_eq!(said[0]["fields"]["code"], "internal.panic");
     }
 
     #[tokio::test(start_paused = true)]

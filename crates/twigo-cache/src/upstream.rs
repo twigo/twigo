@@ -766,6 +766,11 @@ where
     /// wait once it has run [`RETRY_WITHIN`], so a filter typed over many
     /// refused parts asks each at most that often.
     async fn refused(&mut self, view: ViewState) {
+        if let ViewState::Error { error } = &view
+            && self.upstream.current() != view
+        {
+            tracing::warn!(context = %self.spec.context, resource = %self.spec.resource, code = %error.code, "a list is refused");
+        }
         if matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed {
             // Before the state shows, so a subscription that sees it wakes the wait.
             let retry = self.upstream.retry.notified();

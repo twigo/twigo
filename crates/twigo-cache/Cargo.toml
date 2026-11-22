@@ -38,6 +38,7 @@ tower = { workspace = true, optional = true }
 tracing.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-log.workspace = true
 twigo-panic.workspace = true
 twigo-quantity.workspace = true
 

@@ -50,4 +50,5 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test
 tower.workspace = true
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-log = { workspace = true, features = ["test-util"] }
 twigo-panic = { workspace = true, features = ["inject"] }

@@ -1679,6 +1679,7 @@ async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_often
 
 #[tokio::test(start_paused = true)]
 async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
+    let events = twigo_log::capture();
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
@@ -1692,6 +1693,14 @@ async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
     assert!(gaps.len() >= 20, "{} tries in 120 s", gaps.len() + 1);
     let wait = Duration::from_millis(500)..=RETRY_WITHIN;
     assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
+
+    let lines = events.lines();
+    let [refused] = &lines[..] else {
+        panic!("one event for twenty tries of one refusal: {lines:?}");
+    };
+    assert_eq!(refused["level"], "WARN");
+    assert_eq!(refused["fields"]["code"], "server.not-found");
+    assert_eq!(refused["fields"]["context"], "kind-test");
 }
 
 /// Panics under the lock of the store a scope's rows are kept in.

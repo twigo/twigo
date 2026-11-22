@@ -101,6 +101,8 @@ pub struct State {
     pub not_modified: usize,
     /// Each Metrics API request waits this long before it is answered.
     pub metrics_takes: std::time::Duration,
+    /// The Metrics API answers `200` with a body that is no list of samples.
+    pub metrics_garbled: bool,
     /// A list's body arrives this long after its status and headers.
     pub body_takes: std::time::Duration,
     /// The most Metrics API requests that waited at once.
@@ -925,6 +927,9 @@ impl State {
     ) -> Response<Body> {
         if watch {
             return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
+        }
+        if self.metrics_garbled {
+            return full(StatusCode::OK, &json!("not a list"), gzip);
         }
         let name = selector.and_then(|selector| selector.strip_prefix("metadata.name="));
         let at = jiff::Timestamp::from_second(1_800_000_000 + self.requests.len() as i64)
