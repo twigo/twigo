@@ -253,12 +253,21 @@ fn plugin_code(error: &RunError) -> ErrorCode {
     }
 }
 
-/// The status a refused request answers with, as kube's
-/// `handle_api_errors` reads it, which `Client::send` leaves to its caller.
+/// The status a refused request answers with, which `Client::send` leaves to
+/// its caller. kube's `handle_api_errors` reads any JSON object as a `Status`,
+/// since each of its fields has a default, so a gateway's `{"message": …}`
+/// would come out with code 0: only a body that says its `kind` is `Status`
+/// or has a code is read as one, and any other takes the response's status.
 pub fn refused(status: StatusCode, body: &[u8]) -> kube::Error {
-    let status = serde_json::from_slice::<Status>(body).unwrap_or_else(|_| {
-        Status::failure(&String::from_utf8_lossy(body), NOT_A_STATUS).with_code(status.as_u16())
-    });
+    let status = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .filter(|json| {
+            json["kind"] == "Status" || json["code"].as_u64().is_some_and(|code| code > 0)
+        })
+        .and_then(|json| serde_json::from_value::<Status>(json).ok())
+        .unwrap_or_else(|| {
+            Status::failure(&String::from_utf8_lossy(body), NOT_A_STATUS).with_code(status.as_u16())
+        });
     kube::Error::Api(status.boxed())
 }
 
@@ -455,5 +464,21 @@ mod tests {
             answered.server.map(|server| server.reason).as_deref(),
             Some("ServiceUnavailable")
         );
+    }
+
+    #[test]
+    fn a_json_body_that_is_no_status_takes_the_responses_code_and_has_no_server_status() {
+        let gateway = request(&refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"message":"failure to get a peer from the ring-balancer"}"#,
+        ));
+        assert_eq!(gateway.code, ErrorCode::ServerUnavailable);
+        assert_eq!(gateway.server, None);
+        assert!(gateway.message.contains("ring-balancer"), "{gateway:?}");
+        let coded = request(&refused(
+            StatusCode::BAD_GATEWAY,
+            br#"{"code":409,"message":"a conflict"}"#,
+        ));
+        assert_eq!(coded.code, ErrorCode::ServerConflict);
     }
 }
