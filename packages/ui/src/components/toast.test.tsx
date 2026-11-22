@@ -53,6 +53,25 @@ test("the action runs and dismisses only its toast", () => {
   expect(dismiss).toHaveBeenCalledTimes(2);
 });
 
+test("a toast with more actions has a button for each, and the one pressed runs alone", () => {
+  vi.spyOn(toast, "dismiss").mockReturnValue("t8");
+  const reveal = vi.fn();
+  const report = vi.fn();
+  render(
+    <Toast
+      id="t8"
+      tone="warning"
+      message="The state was set aside."
+      action={{ label: "Reveal Log File", run: reveal }}
+      more={[{ label: "Report…", run: report }]}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Report…" }));
+  expect(report).toHaveBeenCalledOnce();
+  expect(reveal).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Reveal Log File" })).toBeTruthy();
+});
+
 test("a countdown says the seconds left and its Cancel runs", () => {
   vi.useFakeTimers();
   const run = vi.fn();

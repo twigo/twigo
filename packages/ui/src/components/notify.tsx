@@ -21,6 +21,8 @@ const DURATION: Readonly<Record<Tone, number>> = {
 export interface NotifyOptions {
   /** One, beside Dismiss. */
   action?: ToastAction;
+  /** Buttons after `action`, which they need. */
+  more?: readonly ToastAction[];
   /** A repeat with the same key replaces the toast instead of stacking. */
   key?: string;
   /** What it speaks about as a tile, which leads it; none for the app's own words. */
@@ -29,7 +31,7 @@ export interface NotifyOptions {
 
 const show =
   (tone: Tone) =>
-  (message: ReactNode, { action, key, tile }: NotifyOptions = {}) =>
+  (message: ReactNode, { action, more, key, tile }: NotifyOptions = {}) =>
     toast.custom(
       (id) => (
         <Toast
@@ -37,6 +39,7 @@ const show =
           tone={tone}
           message={message}
           action={action}
+          more={more}
           tile={tile}
         />
       ),
