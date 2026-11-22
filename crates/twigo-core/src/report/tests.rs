@@ -682,9 +682,13 @@ async fn a_core_hides_the_names_its_catalog_and_its_state_hold() {
     std::fs::write(
         &kubeconfig,
         "
-clusters: [{ name: prod-eu-cluster, cluster: { server: 'https://api.prod.example.com:6443' } }]
+clusters:
+- { name: prod-eu-cluster, cluster: { server: 'https://api.prod.example.com:6443' } }
+- { name: rancher, cluster: { server: 'https://rancher.example.com/k8s/clusters/c-abc12' } }
 users: [{ name: oidc-alice, user: { token: t } }]
-contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alice, namespace: payments } }]
+contexts:
+- { name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alice, namespace: payments } }
+- { name: team-a, context: { cluster: rancher, user: oidc-alice } }
 ",
     )
     .unwrap();
@@ -736,20 +740,31 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
     let log = write(
         directory.path(),
         "twigo.log",
-        [record(json!({
-            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
-        }))],
+        [
+            record(json!({
+                "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
+            })),
+            record(json!({
+                "message": "could not read the cached discovery",
+                "server": "https://rancher.example.com/k8s/clusters/c-abc12",
+            })),
+            record(json!({
+                "message": "rancher.example.com refused GET https://rancher.example.com/k8s/clusters/c-abc12/api/v1/namespaces/secret-ns/pods/web-7f9",
+            })),
+        ],
     );
     let report = core.report(&facts(None), &[log]).await;
-    assert!(
-        report.log.ends_with(
-            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
-             on <namespace-2> and Service <object-1> in <namespace-3>\n"
-        ),
-        "{}",
-        report.log
+    let time = "2026-11-22T21:14:03Z WARN  twigo_core::state";
+    assert_eq!(
+        report.log,
+        format!(
+            "{time} <server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
+             on <namespace-2> and Service <object-1> in <namespace-3>\n\
+             {time} could not read the cached discovery server=<server-2>\n\
+             {time} <server-2> refused GET <server-2>/k8s/clusters/c-abc12/api/v1/namespaces/secret-ns/pods/web-7f9\n"
+        )
     );
-    assert_eq!(report.hidden.names, 8);
+    assert_eq!(report.hidden.names, 11);
 }
 
 #[tokio::test]

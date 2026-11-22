@@ -3,6 +3,7 @@
 //! catalog and the state know where it stands in free text, and fixed
 //! patterns for what no list knows.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::LazyLock;
@@ -51,14 +52,22 @@ impl Kind {
     }
 }
 
-/// A field's value as the names are written: the clients' URL of a server
-/// that has no path ends in `/`, which the kubeconfig's does not.
-fn written(kind: Kind, value: &str) -> &str {
-    if kind == Kind::Server {
-        value.trim_end_matches('/')
-    } else {
-        value
+/// A field's value as the names are written: a server is its scheme, host
+/// and port, as the catalog gives it, while the clients' URL of a cluster ends
+/// in `/` where the kubeconfig's does not and keeps a path such as Rancher's
+/// `/k8s/clusters/<id>`.
+fn written(kind: Kind, value: &str) -> Cow<'_, str> {
+    if kind == Kind::Server
+        && let Ok(uri) = value.parse::<http::Uri>()
+        && let (Some(scheme), Some(authority)) = (uri.scheme_str(), uri.authority())
+    {
+        let port = authority
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default();
+        return Cow::Owned(format!("{scheme}://{}{port}", authority.host()));
     }
+    Cow::Borrowed(value)
 }
 
 /// A name the catalog or the state knows, which stands for `canonical`: the
@@ -126,7 +135,7 @@ impl Redactor {
             .into_iter()
             .map(|name| (name.text, name.kind, name.canonical))
             .chain(learned.into_iter().map(|(kind, value)| {
-                let value = written(kind, &value).to_owned();
+                let value = written(kind, &value).into_owned();
                 let canonical = value.clone();
                 (value, kind, canonical)
             }));
@@ -179,9 +188,9 @@ impl Redactor {
             _ => {
                 let kind = Kind::of_field(name)?;
                 let value = written(kind, value);
-                let canonical = match self.known.get(value) {
+                let canonical = match self.known.get(value.as_ref()) {
                     Some((known, canonical)) if *known == kind => canonical,
-                    _ => value,
+                    _ => value.as_ref(),
                 };
                 Some(self.aliases.of(kind, canonical))
             }
