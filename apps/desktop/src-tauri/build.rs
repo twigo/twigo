@@ -60,6 +60,9 @@ fn main() {
         "diagnostics_log",
         "log_reveal",
         "log_level_set",
+        "report_problem",
+        "report_open_issue",
+        "report_save",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

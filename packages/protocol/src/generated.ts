@@ -528,6 +528,17 @@ export type Execute = { plan: PlanId,
  */
 typed: string | null, };
 
+/**
+ * One thing the issue states about this run.
+ */
+export type Fact = { id: FactId, label: string, value: string, 
+/**
+ * Whether the person may leave it out of the issue.
+ */
+optional: boolean, };
+
+export type FactId = "twigo" | "system" | "engine" | "kubernetes" | "lastPanic";
+
 export type Field = { label: string, value: Value, 
 /**
  * It holds the cluster's default, as a pod's Restart policy Always:
@@ -768,6 +779,24 @@ sentence: Array<Span>,
  * A pod's CPU and Memory are not among them: they come with its usage.
  */
 vitals: Array<Vital>, };
+
+/**
+ * How many times the redaction hid each kind of thing in the log.
+ */
+export type Hidden = { 
+/**
+ * Contexts, clusters, servers, users, namespaces, objects, the account
+ * and emails, each as an alias.
+ */
+names: number, paths: number, tokens: number, 
+/**
+ * URLs and addresses other than loopback.
+ */
+addresses: number, 
+/**
+ * Double-quoted strings.
+ */
+quoted: number, };
 
 /**
  * The view's lines over time, its range aside, in equal spans from `from`
@@ -1396,6 +1425,17 @@ group: string, version: string, kind: string,
 namespace: string | null, name: string, };
 
 /**
+ * The new issue's form, filled with the ticked facts and what the person
+ * wrote; with no facts it is the bare template.
+ */
+export type OpenIssue = { 
+/**
+ * The ids of the facts the person left ticked: Rust states them again
+ * from this run, so only what it wrote goes in the link.
+ */
+facts: Array<FactId>, title: string | null, description: string | null, };
+
+/**
  * Rust sends nothing of the lines until the webview sets a window.
  */
 export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
@@ -1429,6 +1469,15 @@ lock: string,
  * says a later status write changed nothing.
  */
 locked?: unknown, };
+
+/**
+ * What the link left out to stay under its length: the person pastes it.
+ */
+export type OpenedIssue = { 
+/**
+ * Facts whose values were shortened.
+ */
+factsCut: Array<FactId>, descriptionCut: boolean, };
 
 /**
  * How a running plan goes, over its channel; every kind but `running` is
@@ -1570,6 +1619,18 @@ export type RelatedObject = { target: ObjectRef,
 controller: boolean, };
 
 /**
+ * What "Report a Problem" shows (ARCHITECTURE 4.10): facts for the issue and
+ * the log to paste, both redacted in Rust, which the webview never gets
+ * unredacted.
+ */
+export type Report = { facts: Array<Fact>, 
+/**
+ * The last lines of the log as text, one record each, with what a
+ * panic's record holds below it.
+ */
+log: string, hidden: Hidden, };
+
+/**
  * What the gate takes a request for (ARCHITECTURE 6.4).
  */
 export type RequestClass = "read" | "dryRun" | "write" | "secretRead" | "forward" | "exec";
@@ -1657,6 +1718,11 @@ counts: Array<ValueCount>, };
  * `context/namespace/name`, or `context/name` for cluster-scoped objects.
  */
 export type RowId = string;
+
+/**
+ * The text the person sees, to save to a file they choose.
+ */
+export type SaveReport = { text: string, };
 
 /**
  * Names a kind of the cluster a space reaches.
@@ -2051,4 +2117,7 @@ export type Commands = {
   diagnostics_log: { request: DiagnosticsEntry; response: null; message: null };
   log_reveal: { request: null; response: null; message: null };
   log_level_set: { request: SetLogLevel; response: null; message: null };
+  report_problem: { request: null; response: Report; message: null };
+  report_open_issue: { request: OpenIssue; response: OpenedIssue; message: null };
+  report_save: { request: SaveReport; response: string | null; message: null };
 };

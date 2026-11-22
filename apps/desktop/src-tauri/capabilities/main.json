@@ -70,6 +70,9 @@
     "allow-url-open",
     "allow-diagnostics-log",
     "allow-log-reveal",
-    "allow-log-level-set"
+    "allow-log-level-set",
+    "allow-report-problem",
+    "allow-report-open-issue",
+    "allow-report-save"
   ]
 }

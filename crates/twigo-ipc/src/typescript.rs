@@ -12,9 +12,10 @@ use crate::command::{
     KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe,
     ListUnsubscribe, LogLevelSet, LogReveal, LogsAck, LogsClose, LogsDownload, LogsOpen,
     LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen,
-    ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose,
-    ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput,
-    ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
+    ObjectSetParts, ObjectValues, ReportOpenIssue, ReportProblem, ReportSave, ResourcesWatch,
+    SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet, ShellEnvironmentRetry,
+    ShellEnvironmentWatch, ShellOpen, ShellSendInput, ShellSetSize, SpaceOpen, SpacesList,
+    StateLoad, StateSet, TerminalCreate, UrlOpen,
 };
 use crate::{ErrorCode, ShellEvent};
 
@@ -88,6 +89,9 @@ pub fn typescript() -> String {
     module.command::<DiagnosticsLog>();
     module.command::<LogReveal>();
     module.command::<LogLevelSet>();
+    module.command::<ReportProblem>();
+    module.command::<ReportOpenIssue>();
+    module.command::<ReportSave>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",

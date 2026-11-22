@@ -1393,6 +1393,39 @@ test("the webview's errors reach the console, which stands for the diagnostics l
   warn.mockRestore();
 });
 
+test("the report is the one Rust renders from a recorded log, and opening and saving it are logged", async () => {
+  const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  const backend = createMockBackend();
+  const settled = async <T>(answer: Promise<T>): Promise<T> => {
+    await vi.advanceTimersByTimeAsync(50);
+    return answer;
+  };
+
+  const report = await settled(backend.invoke("report_problem", null));
+  expect(report.facts.map((fact) => fact.id)).toEqual([
+    "twigo",
+    "system",
+    "engine",
+    "kubernetes",
+    "lastPanic",
+  ]);
+  expect(report.log).toContain("context=<context-1>");
+  expect(report.log).not.toContain("prod-eu");
+  expect(report.hidden.names).toBeGreaterThan(0);
+
+  const request = { facts: ["twigo" as const], title: "x", description: null };
+  expect(await settled(backend.invoke("report_open_issue", request))).toEqual({
+    factsCut: [],
+    descriptionCut: false,
+  });
+  expect(info).toHaveBeenCalledWith("[report_open_issue]", request);
+
+  const saved = await settled(backend.invoke("report_save", { text: "a" }));
+  expect(saved).toMatch(/twigo-report-\d{4}-\d{2}-\d{2}\.txt$/);
+  expect(info).toHaveBeenCalledWith("[report_save]", { text: "a" });
+  info.mockRestore();
+});
+
 test("a request runs a failed unattended plugin again, as Rust holds only a sign-in's failure", async () => {
   vi.useRealTimers();
   const backend = createMockBackend("pluginFailed");
