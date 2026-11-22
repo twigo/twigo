@@ -260,6 +260,23 @@ async function logsSession() {
   return { workbench, tabs, uri, input, session: tabs.session(uri, input) };
 }
 
+test("a tab reopened has a new session and keeps what it reads and how it shows it", async () => {
+  const { tabs, uri, input, session } = await logsSession();
+  tabs.setSource(uri, { previous: true });
+  tabs.setView(uri, { filter: "boom" });
+  tabs.update(uri, { wrap: true });
+  tabs.reopen(uri);
+  const again = tabs.session(uri, input);
+  expect(again).not.toBe(session);
+  expect(tabs.get(uri)).toMatchObject({
+    source: { previous: true },
+    view: { filter: "boom" },
+    wrap: true,
+    follow: true,
+  });
+  again.close();
+});
+
 test("a narrow tab's fields open in a row of their own from their icons", async () => {
   const { workbench, tabs, uri, input, session } = await logsSession();
   const toolbar = () => (

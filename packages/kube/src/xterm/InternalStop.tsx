@@ -1,21 +1,26 @@
 import { CircleAlert } from "lucide-react";
-import { Banner, LinkButton } from "@twigo/ui";
-import { INTERNAL_ERROR, ReportLink } from "@twigo/workbench";
+import { Banner } from "@twigo/ui";
+import { ErrorMessage, INTERNAL_ERROR, type ErrorLike } from "@twigo/workbench";
+import { StoppedActions } from "../StoppedActions";
 
-export function InternalStop({ reopen }: { reopen: () => void }) {
+export function InternalStop({
+  error,
+  reopen,
+}: {
+  error: ErrorLike;
+  reopen: () => void;
+}) {
   return (
     <Banner
       tone="error"
       icon={CircleAlert}
       title={`${INTERNAL_ERROR.title}.`}
-      action={
-        <span className="flex items-center gap-3 text-xs">
-          <LinkButton onClick={reopen}>Reopen</LinkButton>
-          <ReportLink />
-        </span>
-      }
+      action={<StoppedActions onReopen={reopen} />}
     >
-      {INTERNAL_ERROR.stopped("This shell")}
+      <ErrorMessage
+        error={error}
+        message={INTERNAL_ERROR.stopped("This shell")}
+      />
     </Banner>
   );
 }

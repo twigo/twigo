@@ -137,6 +137,25 @@ test("no problem of Twigo's own files is listed, but under the problems scenario
   ]);
 });
 
+test("under problemsCleared the state cannot be saved until a save works, and a later save fails again", async () => {
+  const sent: string[][] = [];
+  const listed = createMockBackend("problemsCleared").subscribe(
+    "problems_watch",
+    null,
+    (next) => sent.push(next.map(({ code }) => code)),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect((await listed).map(({ code }) => code)).toEqual([
+    "state.unsaved",
+    "audit.off",
+  ]);
+  expect(sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(sent).toEqual([["audit.off"]]);
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(sent).toEqual([["audit.off"], ["state.unsaved", "audit.off"]]);
+});
+
 test("a context's mode follows the strictest of its locks, a choice over them, and an unlock that ends by itself, and a context nothing marks is unmarked", async () => {
   const backend = createMockBackend();
   const seen: Context[][] = [];
@@ -1578,6 +1597,17 @@ test("the report is the one Rust renders from a recorded log, and opening and sa
     descriptionCut: false,
   });
   expect(info).toHaveBeenCalledWith("[report_open_issue]", request);
+
+  const cutting = createMockBackend("reportCut");
+  expect(await settled(cutting.invoke("report_open_issue", request))).toEqual({
+    factsCut: [],
+    descriptionCut: false,
+  });
+  expect(
+    await settled(
+      cutting.invoke("report_open_issue", { ...request, description: "long" }),
+    ),
+  ).toEqual({ factsCut: [], descriptionCut: true });
 
   const saved = await settled(backend.invoke("report_save", { text: "a" }));
   expect(saved).toMatch(/twigo-report-\d{4}-\d{2}-\d{2}\.txt$/);

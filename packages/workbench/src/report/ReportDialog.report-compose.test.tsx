@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { openReport } from "./testing";
 
@@ -50,4 +56,17 @@ test("report:compose: a title or description left empty is not sent, and what is
   expect(
     calls.find(([command]) => command === "report_open_issue")?.[1],
   ).toMatchObject({ title: null, description: "It froze." });
+});
+
+test("report:compose: a link that cut the description keeps the dialog, says so, and copies the description in a click of its own", async () => {
+  const { calls } = await openReport({}, "reportCut");
+  write("What happened", "  A long story  ");
+  fireEvent.click(screen.getByRole("button", { name: "Open Issue on GitHub" }));
+  const dialog = screen.getByRole("dialog");
+  const status = await within(dialog).findByRole("status");
+  expect(status.textContent).toContain("cut your description");
+
+  const before = calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Copy description" }));
+  expect(calls.slice(before)).toEqual([["clipboard", "A long story"]]);
 });

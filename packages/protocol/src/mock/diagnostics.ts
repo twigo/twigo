@@ -4,6 +4,7 @@ import type {
   CatalogFailure,
   Context,
   IpcError as Wire,
+  LogBatch,
   ViewState,
 } from "../generated";
 import { CONTEXTS, UNMARKED } from "./fixtures";
@@ -25,6 +26,29 @@ export const CAUSE_SCENARIOS = [
 ] as const;
 
 export type CauseScenario = (typeof CAUSE_SCENARIOS)[number];
+
+/** `logsPanicked`: live lists while every log stream of a session ends on an internal error of Twigo's. */
+export const LOGS_PANICKED = "logsPanicked";
+
+export function panickedLogs(batch: LogBatch): LogBatch {
+  return {
+    ...batch,
+    pods:
+      batch.pods?.map((pod) => ({
+        ...pod,
+        containers: pod.containers.map((container) => ({
+          ...container,
+          stream: {
+            state: "error" as const,
+            error: error(
+              "internal.panic",
+              "Twigo stopped this log stream on an internal error",
+            ),
+          },
+        })),
+      })) ?? null,
+  };
+}
 
 /**
  * `discoveryFails`: no space's discovery answers, each for a reason of its

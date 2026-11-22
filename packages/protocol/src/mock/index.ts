@@ -41,9 +41,11 @@ import {
   CAUSED,
   DISCOVERY_FAILS,
   LIST_FAILS,
+  LOGS_PANICKED,
   catalogOf,
   discoveryFailure,
   listFailure,
+  panickedLogs,
   isCauseScenario,
   isKubeconfigScenario,
   KUBECONFIG_SCENARIOS,
@@ -157,11 +159,12 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
- * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
- * RoleBindings reach only the namespace `default` and who may list
- * namespaces, so "All namespaces" has the rows of `default` with the other
- * namespaces left out and counted, and one of several namespaces has the
- * rows of `default` and every other namespace refused, or
+ * (`applyLate`), or one that ends on an internal error (`objectPanicked`), or
+ * `rbacNamespaces`: live lists for a person whose RoleBindings reach only the
+ * namespace `default` and who may list namespaces, so "All namespaces" has the
+ * rows of `default` with the other namespaces left out and counted, and one of
+ * several namespaces has the rows of `default` and every other namespace
+ * refused, or
  * `rbacTypedNamespaces`: live lists for a person bound in `default` and
  * `payments` who may not list namespaces, so the picker takes names typed,
  * "All namespaces" is refused, and a selection has the rows of those two
@@ -179,9 +182,14 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * the person (`metricsNone` and the like), live lists while the catalog's
  * kubeconfig files fail (`kubeconfigFailures` and the like), `discoveryFails`:
  * live lists of spaces whose discovery fails, each for a reason of its own,
+ * `logsPanicked`: live lists while every log stream ends on an internal error,
  * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
- * open. A pinned cause (`connectRefused` and the like) is a list scenario.
+ * open, or `problemsCleared`: live lists while the state cannot be saved until
+ * a save works 8 s later, and fails again 8 s after that, or `reportCut`: live
+ * lists while the link of an issue is too long for the description of a
+ * report, which it cuts. A pinned cause (`connectRefused` and the like) is a
+ * list scenario.
  */
 export type MockScenario =
   | ListScenario
@@ -194,6 +202,8 @@ export type MockScenario =
   | "partsQueued"
   | "protection"
   | "problems"
+  | "problemsCleared"
+  | "reportCut"
   | AuthScenario
   | EditScenario
   | ShellScenario
@@ -203,7 +213,8 @@ export type MockScenario =
   | MetricsScenario
   | KubeconfigScenario
   | typeof DISCOVERY_FAILS
-  | typeof LIST_FAILS;
+  | typeof LIST_FAILS
+  | typeof LOGS_PANICKED;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -216,6 +227,8 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "partsQueued",
   "protection",
   "problems",
+  "problemsCleared",
+  "reportCut",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
@@ -227,6 +240,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...CAUSE_SCENARIOS,
   DISCOVERY_FAILS,
   LIST_FAILS,
+  LOGS_PANICKED,
   "queued",
   "connecting",
   "syncing",
@@ -257,6 +271,13 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   dvorak,
 };
 
+const AUDIT_OFF = wireError(
+  new IpcError(
+    "audit.off",
+    "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+  ),
+);
+
 /** What Rust lists when the state file was set aside and the audit log cannot open, in its words. */
 const PROBLEMS = [
   wireError(
@@ -265,13 +286,20 @@ const PROBLEMS = [
       "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
     ),
   ),
+  AUDIT_OFF,
+];
+
+/** What `problemsCleared` lists while the state cannot be saved, and how long until a save works, and until it fails again. */
+const UNSAVED = [
   wireError(
     new IpcError(
-      "audit.off",
-      "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+      "state.unsaved",
+      "Twigo could not save its state, so what you change is lost when it quits",
     ),
   ),
+  AUDIT_OFF,
 ];
+const SAVE_WORKS_MS = 8000;
 
 /** What twigo-env reported for a `.zshrc` of `echo "Loading nvm…"; sleep 60` (2026-11-01). */
 const SHELL_TIMEOUT: ShellEnvironment = {
@@ -315,6 +343,8 @@ export function createMockBackend(
     scenario === "partsQueued" ||
     scenario === "protection" ||
     scenario === "problems" ||
+    scenario === "problemsCleared" ||
+    scenario === "reportCut" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
@@ -324,7 +354,8 @@ export function createMockBackend(
     isMetricsScenario(scenario) ||
     isKubeconfigScenario(scenario) ||
     scenario === DISCOVERY_FAILS ||
-    scenario === LIST_FAILS
+    scenario === LIST_FAILS ||
+    scenario === LOGS_PANICKED
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
@@ -631,7 +662,11 @@ export function createMockBackend(
     report_problem: () => REPORT as Report,
     report_open_issue: (request) => {
       console.info("[report_open_issue]", request);
-      return { factsCut: [], descriptionCut: false };
+      return {
+        factsCut: [],
+        descriptionCut:
+          scenario === "reportCut" && request.description !== null,
+      };
     },
     report_save: (request) => {
       console.info("[report_save]", request);
@@ -943,6 +978,9 @@ export function createMockBackend(
                 ...(isCauseScenario(scenario) && {
                   status: CAUSED[scenario],
                 }),
+                ...(scenario === "objectPanicked" && {
+                  ends: CAUSED.listPanicked,
+                }),
               },
         ),
       );
@@ -959,7 +997,11 @@ export function createMockBackend(
           view,
           context === undefined ? undefined : cluster(context),
           budget,
-          onMessage,
+          scenario === LOGS_PANICKED
+            ? (batch) => {
+                onMessage(panickedLogs(batch));
+              }
+            : onMessage,
         ),
       );
       return id;
@@ -1018,7 +1060,18 @@ export function createMockBackend(
     kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
-    problems_watch: () => (scenario === "problems" ? PROBLEMS : []),
+    problems_watch: (_request, onMessage) => {
+      if (scenario === "problemsCleared") {
+        setTimeout(() => {
+          onMessage([AUDIT_OFF]);
+        }, SAVE_WORKS_MS);
+        setTimeout(() => {
+          onMessage(UNSAVED);
+        }, 2 * SAVE_WORKS_MS);
+        return UNSAVED;
+      }
+      return scenario === "problems" ? PROBLEMS : [];
+    },
     resources_watch: (id, onMessage) => {
       space(id);
       const failure = discoveryFailure(scenario, id);

@@ -11,7 +11,7 @@ import {
 import { parseTerminalUri } from "../uri";
 import { InternalStop } from "../xterm/InternalStop";
 import { useTerminalHost } from "../xterm/useTerminalHost";
-import { stoppedByTwigo } from "../xterm/words";
+import { internalEnd } from "../xterm/words";
 import type { KubeconfigOffers } from "./offers";
 import type { TerminalTabs } from "./tabs";
 import { useKind } from "./useKind";
@@ -99,9 +99,10 @@ export function TerminalEditor({
     );
   }
 
+  const stopped = internalEnd(status);
   return (
     <div ref={setRoot} className="flex h-full min-h-0 flex-col bg-editor">
-      {stoppedByTwigo(status) && <InternalStop reopen={restart} />}
+      {stopped && <InternalStop error={stopped} reopen={restart} />}
       <div ref={setContainer} className="min-h-0 flex-1 pt-1 pl-2" />
     </div>
   );

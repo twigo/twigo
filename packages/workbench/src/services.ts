@@ -17,7 +17,7 @@ import { Lists } from "./lists/service";
 import { notifyError } from "./notifyError";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
-import { announceProblem } from "./problems/notice";
+import { announceProblem, dismissProblem } from "./problems/notice";
 import { Problems } from "./problems/service";
 import { ProblemReport } from "./report/service";
 import { spaceMark } from "./parts/spaceMark";
@@ -163,9 +163,13 @@ export class Workbench {
       this.spaces,
     );
     this.problemReport = new ProblemReport(backend);
-    this.problems = new Problems(backend, (problem) => {
-      announceProblem(this, problem);
-    });
+    this.problems = new Problems(
+      backend,
+      (problem) => {
+        announceProblem(this, problem);
+      },
+      dismissProblem,
+    );
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */

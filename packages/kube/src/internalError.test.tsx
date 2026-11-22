@@ -6,14 +6,35 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, LogBatch, ViewState } from "@twigo/protocol";
+import type { Backend, ViewState } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
+import { ENDS_MS } from "../../protocol/src/mock/edits";
+import {
+  carriesCode,
+  inWorkbench,
+  testWorkbench,
+} from "@twigo/workbench/testing";
 import { mountKube, settle, withScreenSize } from "../test/workbench";
 import { ViewStatus } from "./ViewStatus";
 import { ending } from "./xterm/words";
 
-vi.mock("./edit/YamlEditor", () => ({ default: () => <div /> }));
+vi.mock("./edit/YamlEditor", () => ({
+  default: ({
+    text,
+    onChange,
+  }: {
+    text: string;
+    onChange: (text: string) => void;
+  }) => (
+    <textarea
+      aria-label="YAML"
+      value={text}
+      onChange={(event) => {
+        onChange(event.target.value);
+      }}
+    />
+  ),
+}));
 
 withScreenSize(1000);
 
@@ -96,6 +117,49 @@ test("an object page that Twigo stopped is opened again by Reopen, which subscri
   expect(screen.getByText("Twigo hit an internal error")).toBeTruthy();
 });
 
+test("an object that Twigo stopped after its manifest came keeps the edit under its code, Report… and Reopen, and Reopen subscribes anew", async () => {
+  const mock = createMockBackend("objectPanicked");
+  let opened = 0;
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "object_open") opened++;
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(
+      "k8s://prod-eu/apps/v1/deployments/payments/payments-api",
+    );
+  });
+  await settle(12);
+  fireEvent.click(screen.getByRole("tab", { name: /^YAML/ }));
+  await settle(4);
+  const field = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "YAML",
+  });
+  fireEvent.change(field, { target: { value: "kind: Deployment\n# mine\n" } });
+  expect(screen.queryByText("Twigo hit an internal error")).toBeNull();
+
+  await settle(ENDS_MS / 50);
+  const banner = screen
+    .getByText("Twigo hit an internal error")
+    .closest<HTMLElement>("div");
+  if (!banner) throw new Error("no banner");
+  expect(banner.textContent).toContain("Your edit is kept");
+  expect(carriesCode(banner, "internal.panic")).toBe(true);
+  expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+
+  const before = opened;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(4);
+  expect(opened).toBeGreaterThan(before);
+  expect(
+    screen.getByRole<HTMLTextAreaElement>("textbox", { name: "YAML" }).value,
+  ).toBe("kind: Deployment\n# mine\n");
+});
+
 test("a session that Twigo stopped ends in the scrollback with the one wording", () => {
   const { title } = ending({
     reason: "failed",
@@ -108,29 +172,15 @@ test("a session that Twigo stopped ends in the scrollback with the one wording",
   expect(title).toBe("Twigo hit an internal error and this shell stopped.");
 });
 
-test("the logs of a container that Twigo stopped say so over the lines, with Report…", async () => {
-  const mock = createMockBackend("ready");
-  const stopped = (batch: LogBatch): LogBatch => ({
-    ...batch,
-    pods:
-      batch.pods?.map((pod) => ({
-        ...pod,
-        containers: pod.containers.map((container) => ({
-          ...container,
-          stream: { state: "error" as const, error: PANICKED },
-        })),
-      })) ?? null,
-  });
+test("the logs of a container that Twigo stopped say so over the lines, with Report… and Reopen, which opens the session anew", async () => {
+  const mock = createMockBackend("logsPanicked");
+  let opened = 0;
   const backend: Backend = {
     invoke: (command, request) => mock.invoke(command, request),
-    subscribe: (
-      command: string,
-      request: never,
-      onMessage: (batch: LogBatch) => void,
-    ) =>
-      mock.subscribe(command as "logs_open", request, (batch) => {
-        onMessage(command === "logs_open" ? stopped(batch) : batch);
-      }),
+    subscribe: (command, request, onMessage) => {
+      if (command === "logs_open") opened++;
+      return mock.subscribe(command, request, onMessage);
+    },
   };
   const workbench = await mountKube(backend);
   await act(() => workbench.spaces.open("qa"));
@@ -149,4 +199,8 @@ test("the logs of a container that Twigo stopped say so over the lines, with Rep
   expect(screen.getByText("Twigo hit an internal error:")).toBeTruthy();
   expect(document.body.textContent).toContain("stopped.");
   expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+  const before = opened;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(12);
+  expect(opened).toBeGreaterThan(before);
 });

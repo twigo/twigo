@@ -19,7 +19,7 @@ const VARIANTS = {
   toast: ["once", "none"],
   /** The report dialog: facts and log apart, one text, or those with a title and a description of what happened. */
   report: ["sections", "one-text", "compose"],
-  /** How a problem of Twigo's own files reaches the window: a notification when it first appears, or a status bar item with the count. */
+  /** How a problem of Twigo's own files reaches the window: a notification when it appears, or a status bar item with the count. */
   problems: ["notice", "status"],
 } as const;
 

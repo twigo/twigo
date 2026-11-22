@@ -59,6 +59,12 @@ export function viewProblem(
   }
 }
 
+export type ObjectProblem = NonNullable<ReturnType<typeof objectProblem>>;
+
+export function isStopped({ error }: ObjectProblem): boolean {
+  return error !== undefined && isInternalError(error);
+}
+
 /**
  * Why an open object has nothing to show, in words: the view's problem, or
  * that the object does not exist; none while it is there or still coming.

@@ -1891,7 +1891,8 @@ What a person needs when something goes wrong, and what a bug report holds, star
   `audit.unwritten` is raised only by a write that failed, not by a log that could not move aside or open anew, which loses no line, and it goes with the next line that lands; `tokens.unsaved` stays while any user's refreshed tokens are in memory only, the registry holding those users by their oidc key, and goes when the last of them is written back by a later refresh, as `state.unsaved` goes with the next save that works.
 - `problems_watch` answers the list and sends it again on every change.
   The list is the run's, not a window's: the files are read before any core exists, and the crates that fail do not know one.
-  The window follows it from the start, and raises one notification the first time each code is listed, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7); a code listed again, with other words, raises none.
+  The window follows it from the start, and raises one notification when a code joins the list, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7).
+  A code listed again with other words raises none, and a code that leaves the list takes its notification with it, so a problem that comes back is told again.
 - The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
 
 #### Report a Problem
@@ -1940,6 +1941,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   - The log is one editable monospace field, with a line that says how much the redaction hid (`Twigo hid 6 names, 2 paths and 1 token; read it before you paste`) and Reveal Log File beside it.
   - It says that the issue is public, that nothing leaves the computer until the person chooses and that Twigo itself sends nothing, and links GitHub's private reporting of a vulnerability for a security problem (`SECURITY.md`).
   - Open Issue on GitHub writes the log as the person sees it to the clipboard in its click handler, before `report_open_issue`, since WKWebView may not allow the write after an IPC round trip (not verified); then the dialog closes with a toast that says where to paste the log and what the link had to cut.
+    An answer that says the description was cut keeps the dialog open instead, with a bar that says so and where to paste the log, and Copy description there puts the whole of what the person wrote on the clipboard, in a click of its own, to paste into the form's Description (`report:compose`).
     Save… sends `report_save` the text of the facts left ticked above the log, and Copy puts the same text on the clipboard.
   - A failure of any of them shows its error in the dialog with its code, as every error does (3.7).
 
@@ -1947,7 +1949,14 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
 
 A list, an object page, a logs tab, a shell, a terminal or a forward whose task panicked ends with `internal.panic` (2.1), and its view says so in one wording, which `INTERNAL_ERROR` in `packages/workbench/src/internalError.ts` keeps: "Twigo hit an internal error" and what stopped (`This view stopped.`; a shell's or terminal's scrollback says that this shell stopped).
 It shows the code as every error does, keeps Rust's own message (`Twigo stopped this list on an internal error`) in Copy details, and offers Report…, which opens the report dialog.
-Reopen is offered where the view can open again: a list and an object page subscribe anew, and a shell or a terminal starts a new session, which it cannot resume; a forward is started again by Start, and a logs tab has no way of its own.
+Reopen is offered where the view can open again:
+
+- a list, an object page, a home tile and a comparison of objects subscribe anew, a tile reopening the home's four counts together;
+- a logs tab drops its session and opens another, keeping what it reads and how it shows it;
+- a shell or a terminal starts a new session, which it cannot resume, and its banner carries the code and Rust's message as every error does;
+- a forward is started again by Start.
+
+A view that keeps something of the item says so over it: the YAML tab keeps a held edit under a bar with the same words and offers, and a comparison of an object that stopped after its manifest came keeps its last text under one.
 
 ## 5. Commands, keybindings and extensions
 

@@ -1,5 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { IpcError, type Backend } from "@twigo/protocol";
+import { createMockBackend } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { StatusEntries } from "../parts/StatusBar";
 import { inWorkbench, testWorkbench, toastWords } from "../testing";
@@ -46,6 +48,38 @@ test("problems:notice: Report… opens the report and Reveal Log File shows the 
   const sent = invoke.mock.calls.map(([command]) => command);
   expect(sent).toContain("log_reveal");
   expect(sent).toContain("report_problem");
+});
+
+test("problems:notice: a problem that Rust clears takes its notice away, and raises it again when it returns", async () => {
+  const mock = createMockBackend("problems");
+  let send: ((next: IpcError[]) => void) | undefined;
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "problems_watch") {
+        send = onMessage;
+      }
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const warning = vi.spyOn(notify, "warning");
+  const dismiss = vi.spyOn(notify, "dismiss");
+  const workbench = await testWorkbench("problems", backend);
+  await act(() => workbench.problems.watch());
+  expect(warning).toHaveBeenCalledTimes(2);
+  const setAside = new IpcError("state.set-aside", "set aside");
+  const auditOff = new IpcError("audit.off", "off");
+
+  act(() => {
+    send?.([auditOff]);
+  });
+  expect(dismiss.mock.calls).toEqual([["problem:state.set-aside"]]);
+
+  act(() => {
+    send?.([auditOff, setAside]);
+  });
+  expect(warning).toHaveBeenCalledTimes(3);
+  expect(warning.mock.calls[2]?.[1]?.key).toBe("problem:state.set-aside");
 });
 
 test("a start with no problem raises none", async () => {

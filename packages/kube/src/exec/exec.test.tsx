@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
@@ -479,6 +480,20 @@ test("a shell that Twigo's own code stopped says so over the terminal, opens aga
   await settle(10);
   expect(screen.getByText("Twigo hit an internal error.")).toBeTruthy();
   expect(screen.getByText("This shell stopped.")).toBeTruthy();
+  const banner = screen.getByRole("button", { name: "Reopen" }).closest("div");
+  if (!banner) throw new Error("no banner");
+  expect(within(banner).getByText("internal.panic")).toBeTruthy();
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  fireEvent.click(within(banner).getByRole("button", { name: "Copy details" }));
+  expect(writeText).toHaveBeenCalledWith(
+    expect.stringContaining(
+      "Message: Twigo stopped this shell on an internal error",
+    ),
+  );
   const uri = execUri(RUNNING);
   const tab = tabs.get(uri);
   const run = vi.spyOn(workbench.operations, "run");

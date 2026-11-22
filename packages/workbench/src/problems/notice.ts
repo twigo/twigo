@@ -1,10 +1,13 @@
+import { notify } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { ErrorLike } from "../errors";
 import { notifyError } from "../notifyError";
 import { REPORT_PROBLEM, REVEAL_LOG_FILE } from "../report/commands";
 import { variant } from "../variants";
 
-/** One notification for a problem of Twigo's own files, when it first appears: what it means for the person, with the ways to look further: `problems:notice`. */
+const problemToast = (code: string) => `problem:${code}`;
+
+/** One notification for a problem of Twigo's own files, when it appears: what it means for the person, with the ways to look further: `problems:notice`. */
 export function announceProblem(
   { commands, keys }: Workbench,
   problem: ErrorLike,
@@ -16,8 +19,12 @@ export function announceProblem(
   };
   notifyError(problem, {
     warning: true,
-    key: `problem:${problem.code}`,
+    key: problemToast(problem.code),
     action: { label: "Reveal Log File", run: run(REVEAL_LOG_FILE) },
     more: [{ label: "Report…", run: run(REPORT_PROBLEM) }],
   });
+}
+
+export function dismissProblem(code: string): void {
+  notify.dismiss(problemToast(code));
 }
