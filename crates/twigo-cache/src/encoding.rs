@@ -26,14 +26,31 @@ pub fn gzipped(headers: &HeaderMap) -> bool {
         .is_some_and(|encoding| encoding.as_bytes().eq_ignore_ascii_case(b"gzip"))
 }
 
+/// The most a body reserves before it is decoded, whatever its last four bytes
+/// say: a body that inflates past it grows from there.
+const RESERVED_AT_MOST: usize = 64 << 20;
+
 /// A collected body, decoded by the response's `Content-Encoding`.
 pub fn page(headers: &HeaderMap, body: Bytes) -> io::Result<Bytes> {
     if !gzipped(headers) {
         return Ok(body);
     }
-    let mut plain = Vec::with_capacity(body.len() * 8);
-    PageDecoder::new(&body[..]).read_to_end(&mut plain)?;
-    Ok(plain.into())
+    Ok(decoded(&body)?.into())
+}
+
+/// A body's decoded bytes, in a buffer of the size its last gzip member says it
+/// inflates to, which the page keeps as long as it lives: a member ends with
+/// its input's size modulo 2^32 ([RFC 1952, 2.3.1](https://www.rfc-editor.org/rfc/rfc1952#section-2.3.1)),
+/// which the decoder checks. A body of several members grows the buffer by
+/// the rest.
+fn decoded(body: &[u8]) -> io::Result<Vec<u8>> {
+    let size = body.last_chunk().map_or(0, |size| {
+        usize::try_from(u32::from_le_bytes(*size))
+            .map_or(RESERVED_AT_MOST, |size| size.min(RESERVED_AT_MOST))
+    });
+    let mut plain = Vec::with_capacity(size);
+    PageDecoder::new(body).read_to_end(&mut plain)?;
+    Ok(plain)
 }
 
 /// A body read as it arrives, decoded by the response's `Content-Encoding`.
@@ -94,6 +111,24 @@ mod tests {
         assert_eq!(page(&HeaderMap::new(), "plain".into()).unwrap(), "plain");
         assert_eq!(page(&encoded(), gzip("page").into()).unwrap(), "page");
         assert!(page(&encoded(), "not gzip".into()).is_err());
+    }
+
+    #[test]
+    fn a_page_is_held_at_its_own_size() {
+        let text = "a page of objects ".repeat(5_000);
+        let plain = decoded(&gzip(&text)).unwrap();
+        assert_eq!(plain, text.as_bytes());
+        assert_eq!(plain.capacity(), plain.len());
+    }
+
+    #[test]
+    fn a_body_of_several_members_or_one_past_the_reservation_decodes_whole() {
+        let mut members = gzip("one, ");
+        members.extend(gzip("two"));
+        assert_eq!(decoded(&members).unwrap(), b"one, two");
+
+        let past = "\0".repeat(RESERVED_AT_MOST + 1);
+        assert_eq!(decoded(&gzip(&past)).unwrap().len(), past.len());
     }
 
     #[tokio::test]
