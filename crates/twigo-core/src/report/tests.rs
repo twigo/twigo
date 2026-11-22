@@ -196,6 +196,27 @@ fn what_no_list_knows_goes_by_its_pattern() {
     );
 }
 
+#[test]
+fn an_address_goes_beside_any_punctuation_but_not_inside_a_word() {
+    let mut redactor = Redactor::new(known(), []);
+    for (said, left) in [
+        (
+            "error dialing backend: read tcp 10.0.0.7:54321->10.0.0.8:6443: read: connection reset by peer",
+            "error dialing backend: read tcp <address>-><address>: read: connection reset by peer",
+        ),
+        ("addr:10.0.0.9:6443 refused", "addr:<address> refused"),
+        (
+            "host-10.0.0.13 and 10.0.0.14-",
+            "host-<address> and <address>-",
+        ),
+        ("via ::ffff:10.0.0.15 and ::1", "via <address> and ::1"),
+        ("pod10.0.0.16 and 10.0.0.17x", "pod10.0.0.16 and 10.0.0.17x"),
+    ] {
+        assert_eq!(redactor.text(said), left);
+    }
+    assert_eq!(redactor.hidden().addresses, 6);
+}
+
 fn write(directory: &Path, name: &str, lines: impl IntoIterator<Item = String>) -> PathBuf {
     let path = directory.join(name);
     let text: String = lines.into_iter().map(|line| format!("{line}\n")).collect();

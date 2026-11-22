@@ -219,18 +219,29 @@ impl Redactor {
     }
 
     /// Addresses other than a loopback or an unspecified one, whether they
-    /// stand bare, with a port, or in brackets.
+    /// stand bare, with a port, or in brackets; a letter, a digit or `_`
+    /// beside one makes it part of a longer word, which stays.
     fn addresses_hidden(&mut self, text: &str) -> String {
         let mut hidden = String::with_capacity(text.len());
         let mut from = 0;
         for found in ADDRESS_LIKE.find_iter(text) {
-            let candidate = found.as_str().trim_end_matches(['.', ':']);
-            let end = found.start() + candidate.len();
-            let word = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
-            let alone = !text[..found.start()].chars().next_back().is_some_and(word)
+            let mut candidate = found.as_str().trim_end_matches(['.', ':']);
+            let mut start = found.start();
+            if address(candidate).is_none() {
+                // `addr:10.0.0.9:6443` reads `:10.0.0.9:6443`, since `add` is
+                // hex; `::ffff:10.0.0.9` keeps its colons, as it parses.
+                let trimmed = candidate.trim_start_matches(':');
+                start += candidate.len() - trimmed.len();
+                candidate = trimmed;
+            }
+            let end = start + candidate.len();
+            let word = |c: char| c.is_alphanumeric() || c == '_';
+            let alone = !text[..start].chars().next_back().is_some_and(word)
                 && !text[end..].chars().next().is_some_and(word);
-            if alone && hides(candidate) {
-                hidden.push_str(&text[from..found.start()]);
+            if alone
+                && address(candidate).is_some_and(|ip| !ip.is_loopback() && !ip.is_unspecified())
+            {
+                hidden.push_str(&text[from..start]);
                 hidden.push_str("<address>");
                 from = end;
                 self.hidden.addresses += 1;
@@ -280,12 +291,12 @@ fn only_aliases(inside: &str) -> bool {
     ALIASES_ONLY.is_match(inside)
 }
 
-fn hides(candidate: &str) -> bool {
-    let address = candidate
+fn address(candidate: &str) -> Option<IpAddr> {
+    candidate
         .parse::<SocketAddr>()
         .map(|socket| socket.ip())
-        .or_else(|_| candidate.parse::<IpAddr>());
-    address.is_ok_and(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        .or_else(|_| candidate.parse::<IpAddr>())
+        .ok()
 }
 
 /// `text` with each match of `pattern` that `with` answers for replaced, and
