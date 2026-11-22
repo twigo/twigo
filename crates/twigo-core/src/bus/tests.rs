@@ -78,7 +78,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
                 *runs.lock().unwrap() += 1;
                 progress.running("Waiting for config map m to go");
                 progress.stopped().await;
-                Ok(Finished::Stopped("stopped".to_owned()))
+                Ok(Finished::stopped("stopped".to_owned()))
             })
         })),
     }
@@ -1732,7 +1732,7 @@ async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
     let lines = audit(dir.path());
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "failed");
-    assert_eq!(lines[1]["code"], "internal.panic");
+    assert_eq!(lines[1]["codes"], json!(["internal.panic"]));
     until("the bus lets the plan go", || {
         core.bus.inner().windows["main"].entries.is_empty()
     })
@@ -1770,9 +1770,145 @@ async fn a_failed_command_s_ended_line_holds_its_code_and_none_of_the_server_s_w
     let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
     let lines = audit(dir.path());
     assert_eq!(lines[1]["outcome"], "failed");
-    assert_eq!(lines[1]["code"], "server.invalid");
+    assert_eq!(lines[1]["codes"], json!(["server.invalid"]));
     assert!(lines[1].get("message").is_none());
     assert!(!text.contains("hunter2"), "{text}");
+}
+
+#[tokio::test]
+async fn a_plan_that_ends_in_error_leaves_one_event_with_its_code_and_command_and_none_of_the_server_s_words()
+ {
+    let logged = twigo_log::capture();
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|_: Progress| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2": must be a number"#,
+            ))
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (_told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the end: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.invalid");
+    assert_eq!(event["fields"]["command"], "delete");
+    assert_eq!(event["fields"]["outcome"], "failed");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
+}
+
+#[tokio::test]
+async fn a_stopped_delete_s_ended_line_holds_its_sentence_and_the_failed_codes_and_none_of_the_server_s_words()
+ {
+    let logged = twigo_log::capture();
+    let server = Scripted::start(|line, _| match line {
+        "GET /api/v1/namespaces/a/configmaps/m1 HTTP/1.1" => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"m1","namespace":"a","uid":"u-1"}}"#,
+        ),
+        "GET /api/v1/namespaces/a/configmaps/m2 HTTP/1.1" => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"m2","namespace":"a","uid":"u-2"}}"#,
+        ),
+        "DELETE /api/v1/namespaces/a/configmaps/m1 HTTP/1.1" => (
+            403,
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"admission webhook \"guard\" denied the request: the value \"hunter2\" is protected","reason":"Forbidden","code":403}"#,
+        ),
+        "DELETE /api/v1/namespaces/a/configmaps/m2 HTTP/1.1" => {
+            (200, r#"{"kind":"Status","apiVersion":"v1","status":"Success"}"#)
+        }
+        line if line.starts_with("GET /api/v1/namespaces/a/configmaps?") => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMapList","metadata":{"resourceVersion":"5"},"items":[{"metadata":{"name":"m2","namespace":"a","uid":"u-2","resourceVersion":"4"}}]}"#,
+        ),
+        _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = scripted_core(&server, dir.path()).await;
+    let request = PlanRequest::Delete {
+        space,
+        targets: vec![configmap("m1"), configmap("m2")],
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    let typed = match &plan.friction {
+        Friction::Typed { text } => Some(text.clone()),
+        _ => None,
+    };
+    let (told, send) = events();
+    let execute = Execute {
+        plan: plan.id,
+        typed,
+    };
+    core.command_execute("main", execute, send).await.unwrap();
+    until("it waits for the second to go", || {
+        told.lock().unwrap().iter().any(|event| {
+            matches!(event, OperationEvent::Running { text } if text.starts_with("Waiting for 1 of"))
+        })
+    })
+    .await;
+    core.command_cancel("main", plan.id);
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists()
+            && audit(dir.path())
+                .iter()
+                .any(|line| line["event"] == "ended")
+    })
+    .await;
+
+    let told = told.lock().unwrap();
+    let Some(OperationEvent::Stopped { text }) = told.last() else {
+        panic!("the run stopped: {told:?}");
+    };
+    assert!(
+        text.contains("hunter2"),
+        "the window keeps what the server said: {text}"
+    );
+    let file = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let ended = audit(dir.path())
+        .into_iter()
+        .find(|line| line["event"] == "ended")
+        .unwrap();
+    assert_eq!(ended["outcome"], "stopped");
+    assert_eq!(
+        ended["message"],
+        "Stopped waiting for 1 config map, which is still being deleted"
+    );
+    assert_eq!(ended["codes"], json!(["server.forbidden"]));
+    assert!(!file.contains("hunter2"), "{file}");
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the stop: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.forbidden");
+    assert_eq!(event["fields"]["outcome"], "stopped");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
 }
 
 #[test]

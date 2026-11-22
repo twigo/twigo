@@ -977,6 +977,18 @@ mod tests {
     use crate::table::Row;
 
     #[test]
+    fn a_gateways_503_with_a_json_body_is_a_wait_not_a_refusal() {
+        let error = twigo_kube::errors::refused(
+            http::StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"message":"failure to get a peer from the ring-balancer"}"#,
+        );
+        let Failure::Transient(cause) = failure(&error, "list", "pods") else {
+            panic!("a 503 is waited out");
+        };
+        assert_eq!(cause.code, ErrorCode::ServerUnavailable);
+    }
+
+    #[test]
     fn a_cause_goes_when_the_part_lists_again_and_stays_while_it_waits() {
         let upstream = Upstream::<Row>::new();
         let refused = IpcError::new(ErrorCode::ConnectRefused, "refused");

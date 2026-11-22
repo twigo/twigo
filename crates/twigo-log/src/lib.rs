@@ -192,6 +192,7 @@ fn report(path: &Path, error: &io::Error) {
     rotating::to_stderr(&Failure {
         path,
         what: "cannot be opened",
+        lost: true,
         error,
     });
 }

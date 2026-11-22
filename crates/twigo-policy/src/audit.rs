@@ -86,10 +86,11 @@ pub enum Entry<'a> {
         /// What a command that finished says, in Twigo's words.
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<&'a str>,
-        /// What a command that failed says in place of a message, which may
-        /// quote a value the server refused.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        code: Option<ErrorCode>,
+        /// What a command that failed, or a stopped one with requests that
+        /// failed, says in place of their messages, which may quote a value
+        /// the server refused.
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        codes: &'a [ErrorCode],
     },
     /// A change of a context's protection: what the context was before and
     /// is after, a lock that a person's mode sets aside named in its source.
@@ -192,13 +193,16 @@ struct Line<'a> {
 }
 
 /// The diagnostics log holds what the open file could not do, since a
-/// launched app's stderr reaches nobody.
+/// launched app's stderr reaches nobody; the window is told only of a line
+/// that was lost.
 fn unrecorded(failure: &Failure<'_>) {
     tracing::error!(path = %failure.path.display(), error = %failure.error, "the audit log {}", failure.what);
-    problems::report(IpcError::new(
-        ErrorCode::AuditUnwritten,
-        "The audit log could not be written, so some of what Twigo sent to a cluster is not recorded",
-    ));
+    if failure.lost {
+        problems::report(IpcError::new(
+            ErrorCode::AuditUnwritten,
+            "The audit log could not be written, so some of what Twigo sent to a cluster is not recorded",
+        ));
+    }
 }
 
 impl Audit {
@@ -233,7 +237,9 @@ impl Audit {
         })
         .expect("an entry serializes");
         line.push(b'\n');
-        log.append(&line);
+        if log.append(&line) {
+            problems::clear(ErrorCode::AuditUnwritten);
+        }
     }
 
     /// A request the gate let out or stopped, or the policy proxy stopped on
@@ -284,10 +290,19 @@ impl Audit {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
     use super::*;
+
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn serial() -> MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
     #[test]
     fn opens_a_log_in_a_directory_that_does_not_exist_yet() {
+        let _serial = serial();
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("app-data/nested/audit.jsonl");
         Audit::open(&path).record(&Entry::Ended {
@@ -296,7 +311,7 @@ mod tests {
             target: "deployments/web",
             outcome: "done",
             message: None,
-            code: None,
+            codes: &[],
         });
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains(r#""event":"ended""#), "{written}");
@@ -320,7 +335,8 @@ mod tests {
     }
 
     #[test]
-    fn a_log_that_cannot_move_aside_says_so_in_the_diagnostics_log_at_error() {
+    fn a_log_that_cannot_move_aside_says_so_in_the_diagnostics_log_at_error_and_loses_no_line() {
+        let _serial = serial();
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("audit.jsonl");
         std::fs::write(&path, vec![b'\n'; LIMITS.size as usize]).unwrap();
@@ -337,9 +353,14 @@ mod tests {
             target: "deployments/web",
             outcome: "done",
             message: None,
-            code: None,
+            codes: &[],
         });
-        assert!(listed(ErrorCode::AuditUnwritten));
+        assert!(!listed(ErrorCode::AuditUnwritten));
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains(r#""event":"ended""#)
+        );
 
         let [event] = &events.lines()[..] else {
             panic!("one event: {:?}", events.lines());
@@ -356,5 +377,38 @@ mod tests {
                 .as_str()
                 .is_some_and(|error| !error.is_empty())
         );
+    }
+
+    #[test]
+    fn only_a_lost_line_is_a_problem_the_window_is_told_and_until_a_line_lands() {
+        let _serial = serial();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("audit.jsonl");
+        let error = std::io::Error::other("no space left");
+        problems::clear(ErrorCode::AuditUnwritten);
+        unrecorded(&Failure {
+            path: &path,
+            what: "could not move aside",
+            lost: false,
+            error: &error,
+        });
+        assert!(!listed(ErrorCode::AuditUnwritten));
+        unrecorded(&Failure {
+            path: &path,
+            what: "could not be written",
+            lost: true,
+            error: &error,
+        });
+        assert!(listed(ErrorCode::AuditUnwritten));
+
+        Audit::open(&path).record(&Entry::Ended {
+            context: "kind-a",
+            command: "apply",
+            target: "deployments/web",
+            outcome: "done",
+            message: None,
+            codes: &[],
+        });
+        assert!(!listed(ErrorCode::AuditUnwritten));
     }
 }

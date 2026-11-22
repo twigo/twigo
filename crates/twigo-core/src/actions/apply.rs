@@ -1805,7 +1805,7 @@ impl Recreate {
             }
             tokio::select! {
                 () = progress.stopped() => {
-                    return Ok(Finished::Stopped(format!(
+                    return Ok(Finished::stopped(format!(
                         "Stopped waiting for {what}, which is still being deleted, and created nothing"
                     )));
                 }

@@ -193,6 +193,8 @@ struct State {
     /// from it, never ones it still holds after a failed write or a
     /// rejection.
     on_disk: (Option<String>, Option<String>),
+    /// Whether this user raised `tokens.unsaved`.
+    unsaved: bool,
 }
 
 impl std::fmt::Debug for Oidc {
@@ -222,6 +224,7 @@ impl Oidc {
                 spent: false,
                 reread: false,
                 retry: None,
+                unsaved: false,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -330,8 +333,12 @@ impl Oidc {
                     let mut state = self.state();
                     let refresh = rotated.or_else(|| state.on_disk.1.clone());
                     state.on_disk = (Some(written_id), refresh);
+                    if std::mem::take(&mut state.unsaved) {
+                        problems::clear(ErrorCode::TokensUnsaved);
+                    }
                 }
                 Err((origin, error)) => {
+                    self.state().unsaved = true;
                     tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
                     problems::report(IpcError::new(
                         ErrorCode::TokensUnsaved,

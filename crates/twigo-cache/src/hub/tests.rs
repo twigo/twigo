@@ -1702,6 +1702,32 @@ async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
     assert_eq!(refused["fields"]["context"], "kind-test");
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_all_namespaces_list_whose_context_has_no_clients_leaves_one_event_with_the_code() {
+    let events = twigo_log::capture();
+    let connect: Connect = Arc::new(|_context| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ContextInvalid,
+                "the certificate-authority file is gone",
+            ))
+        })
+    });
+    let hub = Hub::new(connect);
+    let mut pods = hub.rows(query(&[])).await.unwrap();
+    until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+    sleep(Duration::from_secs(120)).await;
+
+    let lines = events.lines();
+    let [refused] = &lines[..] else {
+        panic!("one event for many tries of one failure: {lines:?}");
+    };
+    assert_eq!(refused["level"], "WARN");
+    assert_eq!(refused["fields"]["code"], "context.invalid");
+    assert_eq!(refused["fields"]["context"], "kind-test");
+    assert!(!refused.to_string().contains("certificate-authority"));
+}
+
 /// Panics under the lock of the store a scope's rows are kept in.
 fn poison_store(hub: &Hub) {
     let upstream = hub

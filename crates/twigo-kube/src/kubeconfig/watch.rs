@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -63,10 +63,10 @@ impl Watch {
             dirs: HashSet::new(),
             targets: HashSet::new(),
         };
-        watched.follow(&sources);
+        let unseen = watched.follow(&sources);
         let shared = Arc::new(Mutex::new(watched));
         let weak = Arc::downgrade(&shared);
-        let mut last = sources.load();
+        let mut last = sources.load().unwatched(&sources, &unseen);
         on_change(last.clone());
         let scope = inject::Scope::current();
         std::thread::Builder::new()
@@ -77,18 +77,18 @@ impl Watch {
                 let followed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     for result in received {
                         let Some(shared) = weak.upgrade() else { return };
-                        {
+                        let unseen = {
                             let mut watched = lock(&shared);
                             if !watched.relevant(&result) {
                                 continue;
                             }
                             // Before the load, so that a file written meanwhile
                             // in a directory that has just appeared is seen.
-                            watched.follow(&sources);
-                        }
+                            watched.follow(&sources)
+                        };
                         drop(shared);
                         scope.check("kubeconfig watch");
-                        let next = sources.load();
+                        let next = sources.load().unwatched(&sources, &unseen);
                         if next != last {
                             last = next.clone();
                             on_change(next);
@@ -123,16 +123,22 @@ impl Watched {
 
     /// Watches the directories the source files need now, afresh: a
     /// directory deleted and created again is another directory to the OS,
-    /// and inotify drops the watch of a deleted one by itself.
-    fn follow(&mut self, sources: &Sources) {
-        let mut dirs = HashSet::new();
-        let mut targets = HashSet::new();
-        for file in sources.files() {
-            for (dir, target) in watched(file) {
-                targets.insert(target);
-                dirs.insert(dir);
-            }
-        }
+    /// and inotify drops the watch of a deleted one by itself. Says which
+    /// files go unseen for a directory the OS would not watch, and why.
+    fn follow(&mut self, sources: &Sources) -> Vec<(PathBuf, String)> {
+        let files: Vec<_> = sources
+            .files()
+            .iter()
+            .map(|file| (file, watched(file)))
+            .collect();
+        let dirs: HashSet<_> = files
+            .iter()
+            .flat_map(|(_, found)| found.iter().map(|(dir, _)| dir.clone()))
+            .collect();
+        let targets = files
+            .iter()
+            .flat_map(|(_, found)| found.iter().map(|(_, target)| target.clone()))
+            .collect();
         for dir in self.dirs.drain() {
             match self.debouncer.unwatch(&dir) {
                 Err(error) if !matches!(error.kind, ErrorKind::WatchNotFound) => {
@@ -141,6 +147,7 @@ impl Watched {
                 _ => {}
             }
         }
+        let mut failed = HashMap::new();
         for dir in dirs {
             match self.debouncer.watch(&dir, RecursiveMode::NonRecursive) {
                 Ok(()) => {
@@ -148,11 +155,28 @@ impl Watched {
                 }
                 Err(error) => {
                     tracing::warn!(path = %dir.display(), %error, "could not watch a directory");
+                    failed.insert(dir, error.set_paths(Vec::new()).to_string());
                 }
             }
         }
         self.targets = targets;
+        unseen(&files, &failed)
     }
+}
+
+/// The files that need a directory that could not be watched, each with why:
+/// a notify error's words name its paths, which a message never does.
+fn unseen(
+    files: &[(&PathBuf, Vec<(PathBuf, PathBuf)>)],
+    failed: &HashMap<PathBuf, String>,
+) -> Vec<(PathBuf, String)> {
+    files
+        .iter()
+        .filter_map(|(file, found)| {
+            let why = found.iter().find_map(|(dir, _)| failed.get(dir))?;
+            Some(((*file).clone(), why.clone()))
+        })
+        .collect()
 }
 
 /// Whether the events change a source file or a watched directory, or say
@@ -205,6 +229,42 @@ mod tests {
 
     fn event(kind: EventKind, path: &str) -> DebouncedEvent {
         DebouncedEvent::new(Event::new(kind).add_path(path.into()), Instant::now())
+    }
+
+    #[test]
+    fn a_file_goes_unseen_when_any_directory_it_needs_cannot_be_watched() {
+        let (plain, linked, fine) = (
+            PathBuf::from("/home/.kube/config"),
+            PathBuf::from("/home/.kube/linked"),
+            PathBuf::from("/etc/kube/config"),
+        );
+        let needs = |dirs: &[&str]| -> Vec<(PathBuf, PathBuf)> {
+            dirs.iter()
+                .map(|dir| (PathBuf::from(dir), PathBuf::from(dir).join("entry")))
+                .collect()
+        };
+        let files = [
+            (&plain, needs(&["/home/.kube"])),
+            (&linked, needs(&["/home/.kube", "/data/real"])),
+            (&fine, needs(&["/etc/kube"])),
+        ];
+        let failed = HashMap::from([
+            (PathBuf::from("/home/.kube"), "no space".to_owned()),
+            (PathBuf::from("/other"), "unused".to_owned()),
+        ]);
+        assert_eq!(
+            unseen(&files, &failed),
+            [
+                (plain.clone(), "no space".to_owned()),
+                (linked.clone(), "no space".to_owned()),
+            ]
+        );
+        let target = HashMap::from([(PathBuf::from("/data/real"), "denied".to_owned())]);
+        assert_eq!(
+            unseen(&files, &target),
+            [(linked.clone(), "denied".to_owned())]
+        );
+        assert!(unseen(&files, &HashMap::new()).is_empty());
     }
 
     #[test]

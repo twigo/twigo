@@ -156,7 +156,8 @@ impl Sources {
 
     /// What a file's failure says to the person: the file by its name, and
     /// why in words that quote nothing of it, since a parse error renders the
-    /// lines around the fault, a token among them.
+    /// lines around the fault, and names the value it found where it expected
+    /// a variant, a token among them: a parse failure says its place only.
     fn failure(&self, file: &Path, error: &KubeconfigError) -> CatalogFailure {
         let (code, message) = match error {
             KubeconfigError::ReadConfig(error, _) => (
@@ -165,7 +166,14 @@ impl Sources {
             ),
             KubeconfigError::Parse(error) => (
                 ErrorCode::KubeconfigUnparsable,
-                format!("The file cannot be parsed: {}", error.without_snippet()),
+                match error.location() {
+                    Some(at) => format!(
+                        "The file cannot be parsed at line {}, column {}",
+                        at.line(),
+                        at.column()
+                    ),
+                    None => "The file cannot be parsed".to_owned(),
+                },
             ),
             error => (
                 ErrorCode::KubeconfigUnmergeable,
@@ -211,15 +219,15 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// The catalog with a failure for each of `sources`' files, which
-    /// `error` kept from being watched.
-    pub fn unwatched(mut self, sources: &Sources, error: &dyn std::fmt::Display) -> Self {
-        for file in sources.files() {
+    /// The catalog with a failure for each of `files`, whose changes go
+    /// unseen for the reason it names.
+    pub fn unwatched(mut self, sources: &Sources, files: &[(PathBuf, String)]) -> Self {
+        for (file, why) in files {
             self.failures.push(CatalogFailure {
                 source: sources.named(file),
                 error: IpcError::new(
                     ErrorCode::KubeconfigUnwatched,
-                    format!("Changes to the file go unseen: {error}"),
+                    format!("Changes to the file go unseen: {why}"),
                 ),
             });
         }

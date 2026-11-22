@@ -39,7 +39,8 @@ fn sorted(catalog: kubeconfig::Catalog) -> (Vec<kubeconfig::Context>, Vec<Catalo
 }
 
 /// Says what changed in the failures since the last read, one line for each
-/// file: a failure that holds is not said again.
+/// file: a failure that holds is not said again, a changed one is said as it
+/// is, and a file is said to fail no longer once none of its failures is left.
 fn tell_failures(before: &[CatalogFailure], now: &[CatalogFailure]) {
     for failure in now.iter().filter(|failure| !before.contains(failure)) {
         tracing::warn!(
@@ -49,7 +50,10 @@ fn tell_failures(before: &[CatalogFailure], now: &[CatalogFailure]) {
             failure.error.message
         );
     }
-    for failure in before.iter().filter(|failure| !now.contains(failure)) {
+    for failure in before
+        .iter()
+        .filter(|failure| now.iter().all(|now| now.source != failure.source))
+    {
         tracing::info!(path = %failure.source, code = %failure.error.code, "the file no longer fails");
     }
 }
@@ -264,7 +268,14 @@ impl Catalog {
         };
         match Watch::start(sources.clone(), publish.clone(), wrote, on_panic) {
             Ok(watch) => *followed = Some(watch),
-            Err(error) => publish(sources.load().unwatched(&sources, &error)),
+            Err(error) => {
+                let unseen: Vec<_> = sources
+                    .files()
+                    .iter()
+                    .map(|file| (file.clone(), error.to_string()))
+                    .collect();
+                publish(sources.load().unwatched(&sources, &unseen));
+            }
         }
     }
 

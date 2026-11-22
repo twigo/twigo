@@ -27,12 +27,17 @@ pub struct Failure<'a> {
     /// What could not be done and what follows, to read after the file's
     /// name: `could not be written`.
     pub what: &'static str,
+    /// Whether a line was lost: only a write that fails loses one, a move
+    /// aside or a reopen that fails leaves the lines going to a file.
+    pub lost: bool,
     pub error: &'a io::Error,
 }
 
 impl fmt::Display for Failure<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { path, what, error } = self;
+        let Self {
+            path, what, error, ..
+        } = self;
         write!(f, "the log {} {what}: {error}", path.display())
     }
 }
@@ -73,8 +78,10 @@ struct Inner {
     size: u64,
     limits: Limits,
     failed: Failed,
-    /// Whether the failure under way was said.
+    /// Whether the failure under way was said, and whether the one said lost
+    /// a line.
     said: bool,
+    said_lost: bool,
 }
 
 impl Rotating {
@@ -102,6 +109,7 @@ impl Rotating {
             failed(&Failure {
                 path,
                 what: "could not move aside, so this run appends to it",
+                lost: false,
                 error: &error,
             });
         }
@@ -120,6 +128,7 @@ impl Rotating {
                 limits,
                 failed,
                 said: false,
+                said_lost: false,
             })),
         }
     }
@@ -129,9 +138,10 @@ impl Rotating {
         &self.path
     }
 
-    /// Appends `bytes` with one write, so a line is never split.
-    pub fn append(&self, bytes: &[u8]) {
-        self.state().append(bytes);
+    /// Appends `bytes` with one write, so a line is never split, and says
+    /// whether they reached the file.
+    pub fn append(&self, bytes: &[u8]) -> bool {
+        self.state().append(bytes)
     }
 
     /// As [`append`](Self::append), but gives up when the lock stays taken
@@ -196,11 +206,12 @@ impl Inner {
                 self.size += size;
                 if self.in_place {
                     self.said = false;
+                    self.said_lost = false;
                 }
                 true
             }
             Err(error) => {
-                self.fail("could not be written", &error);
+                self.fail("could not be written", true, &error);
                 false
             }
         }
@@ -215,7 +226,7 @@ impl Inner {
         if !matches!(std::fs::exists(&self.path), Ok(false))
             && let Err(error) = shift(&self.path, self.limits.kept)
         {
-            self.fail("could not move aside", &error);
+            self.fail("could not move aside", false, &error);
             return;
         }
         self.in_place = false;
@@ -234,19 +245,25 @@ impl Inner {
             }
             Err(error) => self.fail(
                 "could not be opened anew, so this line goes to the one that left its place",
+                false,
                 &error,
             ),
         }
     }
 
-    fn fail(&mut self, what: &'static str, error: &io::Error) {
-        if !std::mem::replace(&mut self.said, true) {
+    fn fail(&mut self, what: &'static str, lost: bool, error: &io::Error) {
+        // A failure is said once, but one that loses a line is said though
+        // one that did not came before it.
+        if !self.said || (lost && !self.said_lost) {
             (self.failed)(&Failure {
                 path: &self.path,
                 what,
+                lost,
                 error,
             });
         }
+        self.said = true;
+        self.said_lost |= lost;
     }
 }
 
@@ -360,6 +377,41 @@ mod tests {
         }
         assert_eq!(lines(&path), ["l7"]);
         assert_eq!(lines(&taken), ["l1", "l2", "l3", "l4", "l5", "l6"]);
+    }
+
+    #[test]
+    fn a_move_aside_that_fails_loses_no_line_and_a_write_that_fails_after_it_is_said_as_lost() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("log.jsonl");
+        let taken = home.path().join("log.1.jsonl");
+        std::fs::create_dir(&taken).unwrap();
+        std::fs::write(taken.join("kept"), "").unwrap();
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let rotating = Rotating::open(&path, Limits { size: 9, kept: 1 }, {
+            let said = Arc::clone(&said);
+            move |failure: &Failure<'_>| said.lock().unwrap().push((failure.what, failure.lost))
+        })
+        .unwrap();
+        for line in ["l1\n", "l2\n", "l3\n", "l4\n"] {
+            assert!(rotating.append(line.as_bytes()));
+        }
+        assert_eq!(*said.lock().unwrap(), [("could not move aside", false)]);
+
+        {
+            let mut inner = rotating.state();
+            inner.file = File::open(&path).unwrap();
+            inner.size = 9;
+        }
+        assert!(!rotating.append(b"l5\n"));
+        assert!(!rotating.append(b"l6\n"));
+        assert_eq!(
+            *said.lock().unwrap(),
+            [
+                ("could not move aside", false),
+                ("could not move aside", false),
+                ("could not be written", true),
+            ]
+        );
     }
 
     #[test]

@@ -225,9 +225,23 @@ fn each_file_that_fails_says_why_by_its_code_and_quotes_nothing_of_itself() {
         "users:\n- name: u\n  user:\n    token: secret-token-value\n  extra: [\n",
     );
     let typed = write(dir.path(), "typed", "users: secret-token-value\n");
+    let variant = write(
+        dir.path(),
+        "variant",
+        "users:\n- name: u\n  user:\n    exec:\n      apiVersion: client.authentication.k8s.io/v1\n      command: aws\n      interactiveMode: secret-token-value\n",
+    );
     let other = write(dir.path(), "other", "kind: Other\ncontexts: []\n");
     let first = write(dir.path(), "first", FIRST);
-    let catalog = kubectl(&[&unreadable, &broken, &tokened, &typed, &first, &other]).load();
+    let catalog = kubectl(&[
+        &unreadable,
+        &broken,
+        &tokened,
+        &typed,
+        &variant,
+        &first,
+        &other,
+    ])
+    .load();
 
     assert_eq!(names(&catalog), ["kind-a"]);
     let failed: Vec<(String, ErrorCode)> = catalog
@@ -243,11 +257,16 @@ fn each_file_that_fails_says_why_by_its_code_and_quotes_nothing_of_itself() {
             (named(&broken), ErrorCode::KubeconfigUnparsable),
             (named(&tokened), ErrorCode::KubeconfigUnparsable),
             (named(&typed), ErrorCode::KubeconfigUnparsable),
+            (named(&variant), ErrorCode::KubeconfigUnparsable),
             (named(&other), ErrorCode::KubeconfigUnmergeable),
         ]
     );
     let parse = &catalog.failures[2].error.message;
     assert!(parse.contains("line 5, column"), "{parse}");
+    assert_eq!(
+        catalog.failures[4].error.message,
+        "The file cannot be parsed at line 7, column 24"
+    );
     for failure in &catalog.failures {
         let message = &failure.error.message;
         assert!(!message.contains("secret-token-value"), "{message}");
@@ -265,7 +284,12 @@ fn files_whose_changes_go_unseen_fail_by_a_code_of_their_own() {
     let list =
         std::env::join_paths([home.join(".kube/config"), PathBuf::from("/etc/kube")]).unwrap();
     let sources = Sources::kubectl(Some(&list), Some(home));
-    let catalog = Catalog::default().unwatched(&sources, &"too many open files");
+    let unseen: Vec<_> = sources
+        .files()
+        .iter()
+        .map(|file| (file.clone(), "too many open files".to_owned()))
+        .collect();
+    let catalog = Catalog::default().unwatched(&sources, &unseen);
     let failed: Vec<(&str, ErrorCode)> = catalog
         .failures
         .iter()

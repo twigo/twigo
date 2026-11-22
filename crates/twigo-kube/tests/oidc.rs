@@ -358,8 +358,18 @@ async fn a_token_kubectl_got_meanwhile_is_taken_rather_than_refreshed() {
     assert!(issuer.grants().is_empty());
 }
 
+static UNSAVED: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn unsaved() -> bool {
+    problems::watch()
+        .borrow()
+        .iter()
+        .any(|problem| problem.code == ErrorCode::TokensUnsaved)
+}
+
 #[tokio::test]
 async fn a_held_lock_keeps_the_new_tokens_in_memory_and_the_file_as_it_was() {
+    let _serial = UNSAVED.lock().await;
     let issuer = Issuer::start("r1").await;
     let before = kubeconfig(&issuer, &jwt(SignedDuration::from_secs(-60), 0), Some("r1"));
     let setup = setup(&before);
@@ -367,16 +377,39 @@ async fn a_held_lock_keeps_the_new_tokens_in_memory_and_the_file_as_it_was() {
     problems::clear(ErrorCode::TokensUnsaved);
     let refreshed = token(&setup.oidc.credential().await.unwrap());
     assert!(
-        problems::watch()
-            .borrow()
-            .iter()
-            .any(|problem| problem.code == ErrorCode::TokensUnsaved),
+        unsaved(),
         "the next start would ask to sign in again, which the person should know"
     );
     assert_eq!(std::fs::read_to_string(&setup.file).unwrap(), before);
     assert!(lock(&setup.file).exists(), "another writer's lock stays");
     assert_eq!(token(&setup.oidc.credential().await.unwrap()), refreshed);
     assert_eq!(issuer.grants().len(), 1);
+}
+
+#[tokio::test]
+async fn a_refresh_that_is_written_back_takes_back_the_problem_a_held_lock_raised() {
+    let _serial = UNSAVED.lock().await;
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    issuer.issued.lock().unwrap().lifetime = Some(SignedDuration::from_millis(11_500));
+    std::fs::write(lock(&setup.file), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
+    setup.oidc.credential().await.unwrap();
+    assert!(unsaved());
+
+    std::fs::remove_file(lock(&setup.file)).unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    setup.oidc.credential().await.unwrap();
+    assert!(!unsaved());
+    assert!(
+        std::fs::read_to_string(&setup.file)
+            .unwrap()
+            .contains("refresh-token: r3")
+    );
 }
 
 #[tokio::test]

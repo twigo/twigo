@@ -529,23 +529,26 @@ impl Core {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
                 undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
             });
-            let (event, outcome, message, code) = match ended {
+            let (event, outcome, message, codes) = match ended {
                 Ok(finished) => {
-                    let (event, outcome, message) = finished.told(undo_until);
-                    (event, outcome, Some(message), None)
+                    let (event, outcome, message, codes) = finished.told(undo_until);
+                    (event, outcome, Some(message), codes)
                 }
                 Err(error) => {
                     let code = error.code;
-                    (OperationEvent::Failed { error }, "failed", None, Some(code))
+                    (OperationEvent::Failed { error }, "failed", None, vec![code])
                 }
             };
+            if let Some(code) = codes.first() {
+                tracing::info!(%context, command, outcome, %code, "a command ended in error");
+            }
             policy.audit().record(&Entry::Ended {
                 context: &context,
                 command,
                 target: &target,
                 outcome,
                 message: message.as_deref(),
-                code,
+                codes: &codes,
             });
             progress.tell(event);
             bus.ended(&window, request.plan);
