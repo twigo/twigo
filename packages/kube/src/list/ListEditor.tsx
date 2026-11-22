@@ -6,10 +6,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import { CircleAlert } from "lucide-react";
-import type { Resource } from "@twigo/protocol";
+import { isHelmList, type Resource } from "@twigo/protocol";
 import { ActionBar, EmptyState, GridSkeleton, useWidth } from "@twigo/ui";
 import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
 import { Details } from "../Details";
+import { ReleaseDetails } from "../helm/ReleaseEditor";
 import { canShell } from "../exec/kinds";
 import { canForward } from "../forward/kinds";
 import {
@@ -23,7 +24,7 @@ import { cellsOf, LIST_URI, objectOf, objectOfRow } from "../selection";
 import { servedAs, useResources } from "../discovery";
 import { pluralTitle } from "../kinds";
 import type { ListServices } from "../services";
-import { parseListUri, type ListInput } from "../uri";
+import { helmUri, parseListUri, type ListInput } from "../uri";
 import { ViewStatus } from "../ViewStatus";
 import { ResourceGrid } from "./ResourceGrid";
 
@@ -264,22 +265,42 @@ function Loaded({
           </div>
         )}
       </div>
-      {open && selected && (
-        <Details
-          uri={uri}
-          selected={selected}
-          space={input.space}
-          services={services}
-          docked={docked}
-          onOpen={(object) => {
-            editors.pin(uri);
-            editors.open(object);
-          }}
-          onClose={() => {
-            setOpen(false);
-          }}
-        />
-      )}
+      {open &&
+        selected &&
+        (isHelmList(input.gvr) ? (
+          <ReleaseDetails
+            uri={uri}
+            release={{
+              space: input.space,
+              namespace: objectOf(selected).namespace ?? "",
+              name: objectOf(selected).name,
+            }}
+            services={services}
+            docked={docked}
+            onOpen={(release) => {
+              editors.pin(uri);
+              editors.open(helmUri(release));
+            }}
+            onClose={() => {
+              setOpen(false);
+            }}
+          />
+        ) : (
+          <Details
+            uri={uri}
+            selected={selected}
+            space={input.space}
+            services={services}
+            docked={docked}
+            onOpen={(object) => {
+              editors.pin(uri);
+              editors.open(object);
+            }}
+            onClose={() => {
+              setOpen(false);
+            }}
+          />
+        ))}
     </div>
   );
 }

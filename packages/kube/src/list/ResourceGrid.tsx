@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Columns3 } from "lucide-react";
 import {
+  isHelmList,
   REFUSED,
   SHOWS_ROWS,
   type ListQuery,
@@ -39,6 +40,7 @@ import {
   columnRule,
   HEALTH,
   healthValues,
+  problemOf,
   rowFinished,
   rowTone,
   statusColumn,
@@ -207,6 +209,7 @@ function Grid({
     (column) =>
       column.name === "Name" ||
       (column.name !== grouping?.column &&
+        !column.rule.problem &&
         (preset.columns[column.name] ?? column.priority === 0)),
   );
   const sorted = shown?.sort;
@@ -426,10 +429,19 @@ function Grid({
               quickAccess.show("ns ");
             },
           })}
+        {...(isHelmList(gvr) && {
+          releases: {
+            where:
+              query.namespaces.length === 0
+                ? "this cluster"
+                : query.namespaces.join(", "),
+          },
+        })}
       />
     );
 
   const Icon = kindIcon(gvr);
+  const things = isHelmList(gvr) ? "Helm releases" : title.toLowerCase();
   const filtered = text !== "" || picked !== undefined;
   const scope = resource.namespaced ? query.namespaces : [];
   const narrowed = scope.length > 0;
@@ -468,6 +480,7 @@ function Grid({
             tone={tone}
             alarmed={alarmed}
             finished={finished}
+            problem={problemOf(gvr, snapshot.columns, row)}
           />
         );
       }}
@@ -489,7 +502,10 @@ function Grid({
       onActivate={onActivate}
       onOpen={(_, row) => {
         select(row);
-        void commands.execute("k8s.resource.openEditor", lookup);
+        void commands.execute(
+          isHelmList(gvr) ? "helm.release.open" : "k8s.resource.openEditor",
+          lookup,
+        );
       }}
       marked={selection.marks(uri)}
       onMark={(ids, marked) => {
@@ -527,7 +543,10 @@ function Grid({
           keepOpen
           actions={[
             snapshot.columns
-              .filter((column) => column.name !== "Name")
+              .filter(
+                (column) =>
+                  column.name !== "Name" && !columnRule(gvr, column).problem,
+              )
               .map((column) => ({
                 id: column.name,
                 label: column.name,
@@ -556,7 +575,7 @@ function Grid({
         filtered ? (
           <EmptyState
             icon={Icon}
-            title={`No matching ${title.toLowerCase()} in ${where}`}
+            title={`No matching ${things} in ${where}`}
             action={{
               label: "Clear filters",
               onClick: () => {
@@ -566,19 +585,19 @@ function Grid({
             }}
             className="py-16"
           >
-            <p>No {title.toLowerCase()} match the filters.</p>
+            <p>No {things} match the filters.</p>
           </EmptyState>
         ) : (
           <EmptyState
             icon={Icon}
-            title={`No ${title.toLowerCase()} in ${where}`}
+            title={`No ${things} in ${where}`}
             className="py-16"
           >
             <p>
               {leavesOut(snapshot.parts)
                 ? "The namespaces that are not ready are left out; the status bar says which."
                 : snapshot.parts.omitted > 0
-                  ? `Nothing of this kind exists in them, and these credentials may not list ${title.toLowerCase()} in the other ${String(snapshot.parts.omitted)}.`
+                  ? `Nothing of this kind exists in them, and these credentials may not list ${isHelmList(gvr) ? "Secrets" : things} in the other ${String(snapshot.parts.omitted)}.`
                   : narrowed
                     ? "Nothing of this kind exists in these namespaces."
                     : "Nothing of this kind exists in the space."}

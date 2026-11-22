@@ -55,7 +55,7 @@ describe("the k9s grammar", () => {
   test("an empty query lists every resource", async () => {
     const { run } = await kube();
     const { items } = await run(":  ");
-    expect(items).toHaveLength(DISCOVERY.length);
+    expect(items).toHaveLength(DISCOVERY.length + 1);
   });
 
   test.each([
@@ -97,6 +97,22 @@ test(": opens the list that the query names", async () => {
     "k8s-list://prod-eu/v1/pods?ns=payments&q=api&l=app%3Dweb",
     { side: false },
   );
+});
+
+test(":helm opens the list of releases, with the namespace and text words of any list, and has no label word", async () => {
+  const { workbench, run } = await kube();
+  const open = vi
+    .spyOn(workbench.editors, "open")
+    .mockImplementation(() => undefined);
+  const query = await run(":helm payments /api");
+  expect(query.items).toMatchObject([
+    { label: "Helm Releases", description: "in payments /api" },
+  ]);
+  await query.accept();
+  expect(open).toHaveBeenCalledWith("helm-list://prod-eu?ns=payments&q=api", {
+    side: false,
+  });
+  expect((await run(":helm payments app=web")).items).toEqual([]);
 });
 
 test.each([

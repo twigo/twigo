@@ -395,8 +395,7 @@ export class MockRelease {
       release && shown !== null && !revision
         ? wire("helm.revision-gone", gone(shown).message)
         : (revision?.problem ?? null);
-    const readable =
-      revision && revision.problem === null ? revision : undefined;
+    const readable = revision?.problem === null ? revision : undefined;
     this.#onMessage({
       seq: ++this.#seq,
       status: { state: "ready" },

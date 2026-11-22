@@ -1,4 +1,12 @@
-import type { ForwardId, Gvr, LogTarget } from "@twigo/protocol";
+import {
+  HELM_RELEASES,
+  isHelmList,
+  type ComparedPart,
+  type ForwardId,
+  type Gvr,
+  type LogTarget,
+  type ReleaseRef,
+} from "@twigo/protocol";
 import { scopeNames } from "@twigo/workbench";
 import type { Health } from "./columns";
 
@@ -21,6 +29,13 @@ const HEALTHS: readonly Health[] = ["ok", "warn", "error"];
 
 export const LIST_SCHEME = "k8s-list";
 
+/**
+ * The Helm releases of a space as a list (ARCHITECTURE 4.4):
+ * `helm-list://<space>?ns=a,b&q=text&h=error`, a list of the same shape as a
+ * resource's, whose resource is `HELM_RELEASES`.
+ */
+export const HELM_LIST_SCHEME = "helm-list";
+
 export function listUri({
   space,
   gvr,
@@ -29,10 +44,6 @@ export function listUri({
   labels,
   health,
 }: ListInput): string {
-  const path = [gvr.group, gvr.version, gvr.resource]
-    .filter((part) => part !== "")
-    .map(encodeURIComponent)
-    .join("/");
   const query = new URLSearchParams();
   if (namespaces && namespaces.length > 0)
     query.set("ns", scopeNames(namespaces).join(","));
@@ -40,27 +51,87 @@ export function listUri({
   if (labels) query.set("l", labels);
   if (health) query.set("h", health);
   const search = query.toString();
+  if (isHelmList(gvr)) {
+    return `${HELM_LIST_SCHEME}://${encodeURIComponent(space)}${search ? `?${search}` : ""}`;
+  }
+  const path = [gvr.group, gvr.version, gvr.resource]
+    .filter((part) => part !== "")
+    .map(encodeURIComponent)
+    .join("/");
   return `${LIST_SCHEME}://${encodeURIComponent(space)}/${path}${search ? `?${search}` : ""}`;
 }
 
 export function parseListUri(uri: string): ListInput | undefined {
   const url = new URL(uri);
+  if (url.protocol === `${HELM_LIST_SCHEME}:`) {
+    if (url.host === "" || url.pathname !== "") return undefined;
+    return listFilters(url, decodeURIComponent(url.host), HELM_RELEASES);
+  }
   if (url.protocol !== `${LIST_SCHEME}:`) return undefined;
   const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
   const [group, version, resource] =
     parts.length === 2 ? ["", ...parts] : parts.length === 3 ? parts : [];
   if (group === undefined || !version || !resource) return undefined;
+  return listFilters(url, decodeURIComponent(url.host), {
+    group,
+    version,
+    resource,
+  });
+}
+
+function listFilters(url: URL, space: string, gvr: Gvr): ListInput {
   const ns = url.searchParams.get("ns");
   const text = url.searchParams.get("q");
   const labels = url.searchParams.get("l");
   const health = HEALTHS.find((h) => h === url.searchParams.get("h"));
   return {
-    space: decodeURIComponent(url.host),
-    gvr: { group, version, resource },
+    space,
+    gvr,
     ...(ns && { namespaces: ns.split(",").filter(Boolean) }),
     ...(text && { text }),
     ...(labels && { labels }),
     ...(health && { health }),
+  };
+}
+
+/**
+ * One Helm release as an editor (ARCHITECTURE 4.3):
+ * `helm://<space>/<namespace>/<release>`, `?revision=N` for one that is not
+ * the latest.
+ */
+export interface ReleaseInput {
+  readonly space: string;
+  readonly namespace: string;
+  readonly name: string;
+  readonly revision?: number;
+}
+
+export const HELM_SCHEME = "helm";
+
+export function helmUri({
+  space,
+  namespace,
+  name,
+  revision,
+}: ReleaseInput): string {
+  const path = [namespace, name].map(encodeURIComponent).join("/");
+  return `${HELM_SCHEME}://${encodeURIComponent(space)}/${path}${revision === undefined ? "" : `?revision=${String(revision)}`}`;
+}
+
+export function parseHelmUri(uri: string): ReleaseInput | undefined {
+  const url = new URL(uri);
+  if (url.protocol !== `${HELM_SCHEME}:`) return undefined;
+  const parts = url.pathname.split("/").slice(1).map(decodeURIComponent);
+  const [namespace = "", name = ""] = parts;
+  if (parts.length !== 2 || !namespace || !name || url.host === "")
+    return undefined;
+  const revision = url.searchParams.get("revision");
+  return {
+    space: decodeURIComponent(url.host),
+    namespace,
+    name,
+    ...(revision !== null &&
+      /^[1-9]\d*$/.test(revision) && { revision: Number(revision) }),
   };
 }
 
@@ -259,6 +330,8 @@ export function parseUntitledUri(uri: string): ManifestInput | undefined {
 
 export const DIFF_SCHEME = "diff";
 
+const PARTS: readonly ComparedPart[] = ["values", "defaults", "manifest"];
+
 /**
  * What a `diff://` editor compares (ARCHITECTURE 4.3): the dry-run of an
  * edit, an edit's opened object against the server's now, or any two
@@ -275,15 +348,36 @@ type DiffInput =
       readonly space: string;
       readonly left: string;
       readonly right: string;
+    }
+  | {
+      /** Two revisions of a Helm release, masked, with a masked value that changed marked. */
+      readonly kind: "release";
+      readonly release: ReleaseRef;
+      readonly from: number;
+      readonly to: number;
+      readonly part: ComparedPart;
     };
 
 export function diffUri(input: DiffInput): string {
   const query = new URLSearchParams(
     input.kind === "objects"
       ? { left: input.left, right: input.right }
-      : { editor: input.editor },
+      : input.kind === "release"
+        ? {
+            namespace: input.release.namespace,
+            name: input.release.name,
+            from: String(input.from),
+            to: String(input.to),
+            part: input.part,
+          }
+        : { editor: input.editor },
   );
-  const host = input.kind === "objects" ? input.space : "edit";
+  const host =
+    input.kind === "objects"
+      ? input.space
+      : input.kind === "release"
+        ? input.release.space
+        : "edit";
   return `${DIFF_SCHEME}://${encodeURIComponent(host)}/${input.kind}?${query.toString()}`;
 }
 
@@ -299,6 +393,27 @@ export function parseDiffUri(uri: string): DiffInput | undefined {
   const right = url.searchParams.get("right");
   if (kind === "objects" && left && right) {
     return { kind, space: decodeURIComponent(url.host), left, right };
+  }
+  const { searchParams: query } = url;
+  const [namespace, name, from, to] = ["namespace", "name", "from", "to"].map(
+    (key) => query.get(key),
+  );
+  const part = PARTS.find((each) => each === query.get("part"));
+  if (
+    kind === "release" &&
+    namespace &&
+    name &&
+    part &&
+    /^[1-9]\d*$/.test(from ?? "") &&
+    /^[1-9]\d*$/.test(to ?? "")
+  ) {
+    return {
+      kind,
+      release: { space: decodeURIComponent(url.host), namespace, name },
+      from: Number(from),
+      to: Number(to),
+      part,
+    };
   }
   return undefined;
 }

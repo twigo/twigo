@@ -18,6 +18,7 @@ import { parseDiffUri, parseObjectUri } from "../uri";
 import { ProblemBanner, ProblemWords } from "../ProblemBanner";
 import { isStopped, objectProblem } from "../viewProblem";
 import { useReopen } from "../useReopen";
+import { ReleaseDiff } from "../helm/ReleaseDiff";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
 import { kindOf, SECRET_NOTE, yamlOfJson } from "./object";
@@ -46,6 +47,15 @@ export function DiffEditor({
           discovery={discovery}
           editor={input.editor}
           onReopen={reopen}
+        />
+      );
+    case "release":
+      return (
+        <ReleaseDiff
+          release={input.release}
+          from={input.from}
+          to={input.to}
+          part={input.part}
         />
       );
     case "objects":

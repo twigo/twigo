@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  isHelmList,
   ListView,
   lowerAscii,
   REFUSED,
@@ -12,6 +13,7 @@ import {
   type Row,
 } from "@twigo/protocol";
 import { fuzzyMatch, type TextRange } from "@twigo/ui";
+import { HELM_RESOURCE } from "./helm/status";
 import {
   ALL_NAMESPACES,
   filtered,
@@ -128,7 +130,10 @@ export function listProvider(
     async items(filter) {
       const space = spaces.active;
       if (!space) return [];
-      const resources = await discovery.resources(space.id);
+      const resources = [
+        ...(await discovery.resources(space.id)),
+        HELM_RESOURCE,
+      ];
       const query = parseK9s(filter);
       if (!query) {
         return resources.map((resource) => titled(resource));
@@ -151,6 +156,8 @@ export function listProvider(
       }
       const resource = resolveResource(resources, query.resource);
       if (!resource) return [];
+      // A release has no labels of its own to select by.
+      if (isHelmList(resource.gvr) && query.labels !== undefined) return [];
       const namespaces =
         query.namespace === undefined
           ? undefined
@@ -183,7 +190,10 @@ export function listProvider(
     async accept(item, filter, _context, options) {
       const space = spaces.active;
       if (!space) return;
-      const resources = await discovery.resources(space.id);
+      const resources = [
+        ...(await discovery.resources(space.id)),
+        HELM_RESOURCE,
+      ];
       const query = parseK9s(filter);
       const typed = query && /\s/.test(filter.trim()) ? query : undefined;
       const resource = typed

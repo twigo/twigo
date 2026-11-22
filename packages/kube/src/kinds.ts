@@ -22,6 +22,7 @@ import {
   Puzzle,
   Scale,
   Server,
+  ShipWheel,
   Shield,
   ShieldCheck,
   ShieldHalf,
@@ -32,7 +33,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { Gvr } from "@twigo/protocol";
+import { isHelmList, type Gvr } from "@twigo/protocol";
 
 /** Lucide icons for the built-in kinds, by resource (ARCHITECTURE 4.9). */
 export const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
@@ -64,6 +65,7 @@ export const KIND_ICONS: Readonly<Record<string, LucideIcon>> = {
   leases: TimerReset,
   events: Zap,
   customresourcedefinitions: Puzzle,
+  helm: ShipWheel,
 };
 
 /** Custom resources, whose groups always hold a dot, get the generic icon. */
@@ -73,6 +75,7 @@ export function kindIcon(gvr: Gvr): LucideIcon {
 
 /** The key of `KIND_ICONS` for a resource; custom resources have none. */
 export function iconKey(gvr: Gvr): string {
+  if (isHelmList(gvr)) return "helm";
   return isBuiltIn(gvr) ? gvr.resource : "";
 }
 
