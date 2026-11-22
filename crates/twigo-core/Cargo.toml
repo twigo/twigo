@@ -48,6 +48,7 @@ tracing.workspace = true
 twigo-cache.workspace = true
 twigo-describe.workspace = true
 twigo-env.workspace = true
+twigo-helm.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-log.workspace = true
@@ -58,6 +59,7 @@ twigo-quantity.workspace = true
 twigo-sessions.workspace = true
 
 [dev-dependencies]
+flate2.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "server"] }
 twigo-core = { workspace = true, features = ["test-util"] }
 twigo-cache = { workspace = true, features = ["test-util"] }

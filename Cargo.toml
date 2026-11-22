@@ -27,6 +27,7 @@ twigo-cache = { path = "crates/twigo-cache" }
 twigo-core = { path = "crates/twigo-core" }
 twigo-describe = { path = "crates/twigo-describe" }
 twigo-env = { path = "crates/twigo-env" }
+twigo-helm = { path = "crates/twigo-helm" }
 twigo-ipc = { path = "crates/twigo-ipc" }
 twigo-keyboard = { path = "crates/twigo-keyboard" }
 twigo-kube = { path = "crates/twigo-kube" }

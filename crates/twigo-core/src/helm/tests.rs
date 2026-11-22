@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use serde_json::json;
 use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
@@ -13,34 +15,14 @@ use twigo_ipc::{
 };
 use twigo_kube::client::{Budgets, Clients};
 
+use super::testing::secret_name;
 use super::*;
 
-const PREFIX: &str = "sh.helm.release.v1";
-
-fn secret_name(release: &str, version: u32) -> String {
-    format!("{PREFIX}.{release}.v{version}")
-}
-
 fn revision(fake: &Fake, namespace: &str, release: &str, version: u32, status: &str) {
-    fake.put(
-        "",
-        "secrets",
-        Some(namespace),
-        json!({
-            "kind": "PartialObjectMetadata",
-            "apiVersion": "meta.k8s.io/v1",
-            "metadata": {
-                "name": secret_name(release, version),
-                "namespace": namespace,
-                "uid": format!("{namespace}-{release}-{version}"),
-                "labels": {
-                    "owner": "helm",
-                    "name": release,
-                    "version": version.to_string(),
-                    "status": status,
-                },
-            },
-        }),
+    testing::put(
+        fake,
+        &testing::release(namespace, release, version, status),
+        status,
     );
 }
 
@@ -173,6 +155,7 @@ impl Rig {
 #[tokio::test(start_paused = true)]
 async fn the_release_secrets_are_followed_by_helms_label_as_metadata() {
     let mut rig = Rig::over(&["a", "b"], |fake| {
+        fake.state().gets_take = Duration::from_secs(3600);
         revision(fake, "a", "app", 1, "deployed");
     })
     .await;
@@ -420,4 +403,175 @@ async fn a_list_of_releases_that_panics_ends_with_a_batch_that_says_so() {
     };
     assert_eq!(error.code, ErrorCode::InternalPanic);
     assert!(last.window.is_none() && last.upserts.is_empty());
+}
+
+impl Rig {
+    async fn until(&mut self, what: &str, done: impl Fn(&Seen) -> bool) {
+        let reached = async {
+            while !done(&self.seen) {
+                let batch = self.next().await;
+                self.seen.apply(batch);
+            }
+        };
+        let within = tokio::time::timeout(Duration::from_secs(600), reached).await;
+        assert!(
+            within.is_ok(),
+            "{what} not within ten minutes; the list shows {:?}",
+            self.seen.table()
+        );
+    }
+}
+
+impl Seen {
+    fn of(&self, namespace: &str, name: &str) -> Option<&Row> {
+        self.rows
+            .get(&RowId(format!("kind-test/{namespace}/{name}")))
+            .filter(|row| self.ids.contains(&row.id))
+    }
+
+    /// The text of a row's cell, `-` for none.
+    fn text(&self, namespace: &str, name: &str, column: &str) -> String {
+        match self
+            .of(namespace, name)
+            .and_then(|row| self.cell(row, column))
+        {
+            Some(Cell::Text(text)) => text.clone(),
+            Some(Cell::Int(number)) => number.to_string(),
+            _ => "-".to_owned(),
+        }
+    }
+
+    fn charted(&self, namespace: &str, name: &str) -> bool {
+        self.text(namespace, name, "Chart") != "-"
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_fills_once_its_newest_revision_is_decoded() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "superseded");
+        let mut newest = testing::release("a", "app", 2, "deployed");
+        newest["chart"]["metadata"]["appVersion"] = json!("2.7");
+        testing::put(fake, &newest, "pending-upgrade");
+    })
+    .await;
+    rig.until("the chart", |seen| seen.charted("a", "app"))
+        .await;
+
+    let row = rig.seen.of("a", "app").unwrap();
+    assert_eq!(rig.seen.text("a", "app", "Revision"), "2");
+    assert_eq!(
+        rig.seen.text("a", "app", "Status"),
+        "deployed",
+        "the payload's"
+    );
+    assert_eq!(rig.seen.text("a", "app", "Chart"), "demo-1.2.0");
+    assert_eq!(rig.seen.text("a", "app", "App Version"), "2.7");
+    assert_eq!(rig.seen.text("a", "app", "Problem"), "-");
+    assert_eq!(
+        row.created.as_deref(),
+        Some("2026-11-02T10:00:00Z"),
+        "Updated counts from last_deployed"
+    );
+    assert_eq!(testing::gets(&rig.fake, "a", "app", 2), 1);
+    assert_eq!(
+        testing::gets(&rig.fake, "a", "app", 1),
+        0,
+        "only the newest"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_revision_is_fetched_once_and_the_old_one_not_again() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+    })
+    .await;
+    rig.until("revision 1's chart", |seen| {
+        seen.text("a", "app", "Chart") == "demo-1.1.0"
+    })
+    .await;
+
+    revision(&rig.fake, "a", "app", 2, "deployed");
+    rig.until("revision 2's chart", |seen| {
+        seen.text("a", "app", "Chart") == "demo-1.2.0"
+    })
+    .await;
+    revision(&rig.fake, "a", "app", 1, "superseded");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(testing::gets(&rig.fake, "a", "app", 2), 1);
+    assert_eq!(testing::gets(&rig.fake, "a", "app", 1), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_broken_release_secret_keeps_its_row_with_its_problem_while_the_others_fill() {
+    let mut rig = Rig::over(&["a"], |fake| {
+        revision(fake, "a", "app", 1, "deployed");
+        let whole = testing::encoded(&testing::release("a", "cut", 3, "failed"));
+        let gzip = STANDARD.decode(&whole).unwrap();
+        let cut = STANDARD.encode(&gzip[..gzip.len() / 2]);
+        testing::put_payload(fake, "a", "cut", 3, "failed", cut.as_bytes());
+    })
+    .await;
+    rig.until("both decoded", |seen| {
+        seen.charted("a", "app") && seen.text("a", "cut", "Problem") != "-"
+    })
+    .await;
+
+    assert_eq!(
+        rig.seen.text("a", "cut", "Problem"),
+        ErrorCode::HelmTruncated.wire()
+    );
+    for (column, label) in [("Name", "cut"), ("Revision", "3"), ("Status", "failed")] {
+        assert_eq!(rig.seen.text("a", "cut", column), label, "{column}");
+    }
+    for column in ["Chart", "App Version"] {
+        assert_eq!(rig.seen.text("a", "cut", column), "-", "{column}");
+    }
+    assert_eq!(rig.seen.of("a", "cut").unwrap().created, None);
+    assert_eq!(rig.seen.text("a", "app", "Chart"), "demo-1.1.0");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_decode_that_panics_marks_its_row_alone() {
+    twigo_panic::inject::arm(fetch::DECODE, 1);
+    let mut rig = Rig::over(&["a"], three).await;
+    let names = ["web", "api", "db"];
+    rig.until("every row decoded", |seen| {
+        names
+            .iter()
+            .all(|name| seen.charted("a", name) || seen.text("a", name, "Problem") != "-")
+    })
+    .await;
+
+    let panicked: Vec<&str> = names
+        .into_iter()
+        .filter(|name| rig.seen.text("a", name, "Problem") == ErrorCode::InternalPanic.wire())
+        .collect();
+    assert_eq!(panicked.len(), 1, "{:?}", rig.seen.table());
+    assert_eq!(rig.seen.status, Some(ViewState::Ready), "the list goes on");
+    assert_eq!(
+        names
+            .iter()
+            .filter(|name| rig.seen.charted("a", name))
+            .count(),
+        2
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_more_than_four_release_secrets_are_fetched_at_once() {
+    let names: Vec<String> = (0..10).map(|index| format!("r{index}")).collect();
+    let mut rig = Rig::over(&["a"], |fake| {
+        fake.state().gets_take = Duration::from_secs(1);
+        for name in &names {
+            revision(fake, "a", name, 1, "deployed");
+        }
+    })
+    .await;
+    rig.until("every row decoded", |seen| {
+        names.iter().all(|name| seen.charted("a", name))
+    })
+    .await;
+    assert_eq!(rig.fake.state().gets_overlap, 4);
 }
