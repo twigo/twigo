@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { errorDetails } from "./errors";
+import { errorDetails, errorOneLine, errorText } from "./errors";
 
 test("Copy details carries the code, the message, and the reason and causes the API server gave", () => {
   expect(
@@ -41,4 +41,10 @@ test("an error the API server did not answer has no server lines, and an empty r
       server: { reason: "", causes: [] },
     }),
   ).toBe("Code: server.other\nMessage: x");
+});
+
+test("an error as text says its message, then its code, on two lines or on one", () => {
+  const refused = { code: "connect.refused", message: "refused" } as const;
+  expect(errorText(refused)).toBe("refused\nconnect.refused");
+  expect(errorOneLine(refused)).toBe("refused · connect.refused");
 });

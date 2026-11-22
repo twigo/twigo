@@ -1,7 +1,6 @@
 import type { ShellEnd } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import {
-  errorLines,
   INTERNAL_ERROR,
   isInternalError,
   type ErrorLike,
@@ -44,19 +43,15 @@ export function ending(end: ShellEnd): Ending {
         label: "No shell",
         tone: "warn",
       };
-    case "failed": {
-      const [title = "", ...more] = errorLines(
-        isInternalError(end.error)
-          ? { code: end.error.code, message: INTERNAL_ERROR.shell }
-          : end.error,
-      );
+    case "failed":
       return {
-        title,
-        ...(more.length > 0 && { detail: more.join("\n") }),
+        title: isInternalError(end.error)
+          ? INTERNAL_ERROR.shell
+          : end.error.message,
+        detail: end.error.code,
         label: "Failed",
         tone: "error",
       };
-    }
     case "connectionLost":
       return {
         title: "The connection was lost. A shell cannot be resumed.",

@@ -21,16 +21,12 @@ export function errorDetails({ code, message, server }: ErrorLike): string {
   return lines.join("\n");
 }
 
-/** The error as plain lines, for a tooltip or a terminal: its message, then its code. */
-export function errorLines(error: ErrorLike): string[] {
-  return [error.message, error.code];
-}
-
-export function errorText(error: ErrorLike): string {
-  return errorLines(error).join("\n");
+/** The error as plain text, for a tooltip or a terminal: its message, then its code on a line of its own. */
+export function errorText({ message, code }: ErrorLike): string {
+  return `${message}\n${code}`;
 }
 
 /** The error on one line, for a label or a tooltip row that has no room for a second. */
-export function errorOneLine(error: ErrorLike): string {
-  return errorLines(error).join(" · ");
+export function errorOneLine({ message, code }: ErrorLike): string {
+  return `${message} · ${code}`;
 }

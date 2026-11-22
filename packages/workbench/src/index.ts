@@ -39,7 +39,6 @@ export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
 export {
   errorDetails,
-  errorLines,
   errorOneLine,
   errorText,
   type ErrorLike,
