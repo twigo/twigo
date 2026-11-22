@@ -2163,6 +2163,17 @@ async fn a_relock_ends_an_exec_class_answer_without_an_upgrade_and_leaves_a_read
 }
 
 #[tokio::test]
+async fn an_exec_class_answer_whose_relock_watch_panics_ends() {
+    twigo_panic::inject::arm("proxy relock", 1);
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let (node, _node) = held_open(&process, "/api/v1/nodes/n/proxy/logs").await;
+    assert!(ends(node).await, "a watch that cannot wait fails closed");
+}
+
+#[tokio::test]
 async fn a_relock_leaves_a_write_s_answer_and_a_forward_s_that_read_only_allows() {
     let fake = Fake::start().await;
     let dir = tempfile::tempdir().unwrap();
