@@ -10,7 +10,7 @@ use twigo_ipc::{ErrorCode, HelmPart, IpcError, SubscriptionId, ValueStep};
 use twigo_policy::friction::Risk;
 use twigo_policy::redact::{secret_value, values};
 
-use super::kubectl;
+use super::shell_line;
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
 use crate::helm::Showing;
@@ -37,7 +37,7 @@ pub(crate) fn reveal(
     } else {
         format!(r#"go-template={{{{index .data "{key}" | base64decode}}}}"#)
     };
-    let line = kubectl(&[
+    let line = shell_line(&[
         "kubectl",
         "--context",
         &context,
@@ -128,7 +128,7 @@ pub(crate) fn reveal_helm(
                 line.extend(["--template", &template]);
             }
         }
-        kubectl(&line)
+        shell_line(&line)
     };
     let command_line = match &part {
         HelmPart::Values {

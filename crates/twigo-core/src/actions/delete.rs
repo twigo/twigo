@@ -18,7 +18,9 @@ use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
 
 use super::dependents::{Deleted, dependents};
-use super::{Target, clients_for, counted, get, kind_words, kubectl, object_ref, plural, sentence};
+use super::{
+    Target, clients_for, counted, get, kind_words, object_ref, plural, sentence, shell_line,
+};
 use crate::Core;
 use crate::bus::{self, Finished, Planned, Progress};
 
@@ -264,7 +266,7 @@ fn kubectl_lines(
             if let Some(namespace) = namespace {
                 words.extend(["-n", namespace]);
             }
-            kubectl(&words)
+            shell_line(&words)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(lines.join("; "))

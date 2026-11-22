@@ -109,7 +109,7 @@ impl Target {
         if let Some(namespace) = &self.namespace {
             line.extend(["-n", namespace]);
         }
-        kubectl(&line)
+        shell_line(&line)
     }
 
     /// What the gate reads of a request of `method` to its path, or to one
@@ -308,8 +308,8 @@ pub(crate) fn sentence(text: &str) -> String {
     })
 }
 
-/// A kubectl command line, each word quoted as a POSIX shell reads it.
-pub(crate) fn kubectl(words: &[&str]) -> Result<String, IpcError> {
+/// A command line, each word quoted as a POSIX shell reads it.
+pub(crate) fn shell_line(words: &[&str]) -> Result<String, IpcError> {
     shlex::try_join(words.iter().copied()).map_err(|error| {
         IpcError::new(
             ErrorCode::ActionUnquotable,
@@ -356,11 +356,11 @@ mod tests {
     #[test]
     fn a_kubectl_line_quotes_only_what_a_shell_would_split() {
         assert_eq!(
-            kubectl(&["kubectl", "--context", "kind-a", "delete", "pods", "web-1"]).unwrap(),
+            shell_line(&["kubectl", "--context", "kind-a", "delete", "pods", "web-1"]).unwrap(),
             "kubectl --context kind-a delete pods web-1"
         );
         assert_eq!(
-            kubectl(&[
+            shell_line(&[
                 "kubectl",
                 "--context",
                 "my cluster",

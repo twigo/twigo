@@ -64,7 +64,7 @@ use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
 use super::{
-    ATTEMPTS, Target, attributes, clients_for, get, kind_words, kubectl, lost, sentence, write,
+    ATTEMPTS, Target, attributes, clients_for, get, kind_words, lost, sentence, shell_line, write,
 };
 use crate::Core;
 use crate::bus::{self, Finished, Planned, Previewed, Progress};
@@ -1121,7 +1121,7 @@ fn recreation(
     ];
     let kind_name = target.resource.name();
     let delete = target.kubectl(&["delete", &kind_name, &target.name])?;
-    let printf = kubectl(&["printf", "%s", &body.to_string()])?;
+    let printf = shell_line(&["printf", "%s", &body.to_string()])?;
     let create = target.kubectl(&["create", "--field-manager", FIELD_MANAGER, "-f", "-"])?;
     Ok(Prepared {
         context: target.context.clone(),
@@ -1163,7 +1163,7 @@ fn apply_line(
         } else {
             format!(
                 "{} | {line}",
-                kubectl(&["printf", "%s", &config.to_string()])?
+                shell_line(&["printf", "%s", &config.to_string()])?
             )
         });
     }
