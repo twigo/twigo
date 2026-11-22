@@ -1507,11 +1507,18 @@ where
 /// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
     let mut backoff = backoff();
+    let mut told = None;
     let resolved = loop {
         let waiting = match hub.resolve(&query).await {
             Ok(resolved) => break resolved,
             Err(waiting) => waiting,
         };
+        if let ViewState::Error { error } = &waiting
+            && told.as_ref() != Some(error)
+        {
+            tracing::warn!(context = %query.context, code = %error.code, "a list cannot get its context's clients");
+            told = Some(error.clone());
+        }
         {
             let Some(subscription) = subscription.upgrade() else {
                 return;
