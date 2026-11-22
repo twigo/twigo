@@ -9,7 +9,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use http::header::{ACCEPT, ACCEPT_ENCODING};
-use http::{Request, StatusCode};
+use http::{HeaderMap, Request, StatusCode};
 use http_body_util::BodyExt;
 use kube::client::Body;
 use serde::Deserialize;
@@ -36,13 +36,31 @@ pub(crate) async fn decoded<T: Send + 'static>(
     name: &str,
     decode: fn(&Stored<'_>) -> Result<T, IpcError>,
 ) -> Result<T, IpcError> {
-    let body = fetched(clients, namespace, name).await?;
-    twigo_panic::contain(DECODE, twigo_panic::blocking(move || read(body, decode)))
+    let (headers, body) = fetched(clients, namespace, name).await?;
+    let read = move || {
+        read(
+            encoding::page(&headers, body).map_err(|_| damaged())?,
+            decode,
+        )
+    };
+    twigo_panic::contain(DECODE, twigo_panic::blocking(read))
         .await
         .unwrap_or_else(|_| Err(IpcError::panicked("reading this revision")))
 }
 
-async fn fetched(clients: &Clients, namespace: &str, name: &str) -> Result<Bytes, IpcError> {
+fn damaged() -> IpcError {
+    IpcError::new(
+        ErrorCode::AnswerUndecodable,
+        "the server's gzip of the Secret is damaged",
+    )
+}
+
+/// The Secret's response as it came, its gzip not yet undone.
+async fn fetched(
+    clients: &Clients,
+    namespace: &str,
+    name: &str,
+) -> Result<(HeaderMap, Bytes), IpcError> {
     let secrets = Resource {
         group: String::new(),
         version: "v1".to_owned(),
@@ -62,19 +80,16 @@ async fn fetched(clients: &Clients, namespace: &str, name: &str) -> Result<Bytes
         .map_err(failed)?
         .into_parts();
     let body = body.collect().await.map_err(failed)?.to_bytes();
-    let body = encoding::page(&parts.headers, body).map_err(|_| {
-        IpcError::new(
-            ErrorCode::AnswerUndecodable,
-            "the server's gzip of the Secret is damaged",
-        )
-    })?;
     match parts.status {
-        status if status.is_success() => Ok(body),
+        status if status.is_success() => Ok((parts.headers, body)),
         StatusCode::NOT_FOUND => Err(IpcError::new(
             ErrorCode::HelmRevisionGone,
             format!("Helm no longer keeps the revision in {name}"),
         )),
-        status => Err(failed(twigo_kube::errors::refused(status, &body))),
+        status => {
+            let body = encoding::page(&parts.headers, body).map_err(|_| damaged())?;
+            Err(failed(twigo_kube::errors::refused(status, &body)))
+        }
     }
 }
 
