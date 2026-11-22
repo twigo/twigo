@@ -7,6 +7,7 @@ import {
   type Forward,
   type ViewState,
 } from "@twigo/protocol";
+import { testWorkbench } from "@twigo/workbench/testing";
 import { RequestDetail } from "./approvals/RequestDetail";
 import { FailedBar } from "./edit/answers";
 import { Previews } from "./edit/previews";
@@ -14,6 +15,7 @@ import { ObjectContent, RelatedView } from "./object/ObjectContent";
 import { stateOf } from "./forward/words";
 import { Events } from "./object/Overview";
 import { PageStates } from "./object/pageStates";
+import { registerKube } from "./register";
 import { ViewStatus } from "./ViewStatus";
 import { ending } from "./xterm/words";
 
@@ -175,4 +177,16 @@ test("code:line: a forward's state says its code after the failure's words", () 
   expect(stateOf({ state, queued: 0 } as Forward).detail).toBe(
     "no pod answers · forward.no-ready-pod",
   );
+});
+
+test("code:line: a space whose discovery failed says why and its code on its connection", async () => {
+  const workbench = await testWorkbench("discoveryFails");
+  registerKube(workbench);
+  await vi.waitFor(() => {
+    expect(workbench.spaceStatus.get("prod-eu")).toEqual({
+      tone: "error",
+      label:
+        "The cluster refused the connection: Connection refused (os error 61) · connect.refused",
+    });
+  });
 });

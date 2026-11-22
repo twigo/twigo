@@ -56,16 +56,20 @@ import { Vitals } from "./Vitals";
  * YAML view is shown or an edit is held, and its usage, for a kind that has
  * one, while the Overview is shown in a visible window.
  */
-export function ObjectEditor({
-  uri,
-  discovery,
-  overviews,
-  pages,
-  tabs,
-  edits,
-  capabilities,
-  fullPages,
-}: EditorProps & {
+export function ObjectEditor(props: ObjectEditorProps) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <ObjectPage
+      key={attempt}
+      {...props}
+      onReopen={() => {
+        setAttempt((n) => n + 1);
+      }}
+    />
+  );
+}
+
+type ObjectEditorProps = EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
   pages: PageStates;
@@ -74,7 +78,19 @@ export function ObjectEditor({
   capabilities: Capabilities;
   /** What the person chose in the full page's sections, apart from the inspector's. */
   fullPages: OverviewStates;
-}) {
+};
+
+function ObjectPage({
+  uri,
+  discovery,
+  overviews,
+  pages,
+  tabs,
+  edits,
+  capabilities,
+  fullPages,
+  onReopen,
+}: ObjectEditorProps & { onReopen: () => void }) {
   const workbench = useWorkbench();
   const { backend, editors, commands, keys, menus, catalog, spaces, colors } =
     workbench;
@@ -290,6 +306,7 @@ export function ObjectEditor({
               onEvents={() => {
                 tabs.set(uri, "events");
               }}
+              onReopen={onReopen}
               fullPage={wide}
               yaml={(json) => (
                 <YamlTab

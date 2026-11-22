@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { ViewState } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
-import { ErrorMessage } from "@twigo/workbench";
+import { ErrorMessage, isInternalError, ReportLink } from "@twigo/workbench";
 import { viewProblem } from "./viewProblem";
 
 /**
@@ -28,11 +28,12 @@ export function ViewStatus({
   inline?: boolean;
 }): ReactNode {
   const everyNamespace = onChoose !== undefined && status.state === "forbidden";
-  const retry = everyNamespace
-    ? { label: "Choose namespaces", onClick: onChoose }
-    : onRetry && { label: "Retry", onClick: onRetry };
   const shown = viewProblem(status, what, everyNamespace);
   if (!shown) return null;
+  const internal = isInternalError(shown.error);
+  const retry = everyNamespace
+    ? { label: "Choose namespaces", onClick: onChoose }
+    : onRetry && { label: internal ? "Reopen" : "Retry", onClick: onRetry };
   if (inline) {
     return (
       <EmptyState
@@ -42,6 +43,7 @@ export function ViewStatus({
         className="px-3"
       >
         <ErrorMessage error={shown.error} message={shown.body} />
+        {internal && <ReportLink className="ml-2" />}
       </EmptyState>
     );
   }
@@ -60,6 +62,7 @@ export function ViewStatus({
           className="justify-center"
         />
       </p>
+      {internal && <ReportLink />}
     </EmptyState>
   );
 }

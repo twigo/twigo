@@ -843,6 +843,27 @@ test("the counters say that they count since Twigo started, and each shows its o
   ).toBe(true);
 });
 
+test("a forward that Twigo's own code stopped says so with its code, offers Start, and Report… opens the report", async () => {
+  const { workbench, start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    state: {
+      state: "failed",
+      error: {
+        code: "internal.panic",
+        kind: "internal",
+        message: "Twigo stopped this forward on an internal error",
+      },
+    },
+  }));
+  await open(await start(API, 80));
+  expect(screen.getByText("Twigo hit an internal error")).toBeTruthy();
+  expect(screen.getByText("This forward stopped.")).toBeTruthy();
+  expect(document.body.textContent).toContain("Start tries it again.");
+  fireEvent.click(screen.getByRole("button", { name: "Report…" }));
+  await later(100);
+  expect(workbench.problemReport.report).toBeDefined();
+});
+
 test("a tab whose address names another space shows nothing of that space's forward", async () => {
   const { workbench, start } = await mounted();
   const forward = await start(API, 80);

@@ -1,6 +1,11 @@
 import type { ShellEnd } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { errorLines, type SessionState } from "@twigo/workbench";
+import {
+  errorLines,
+  INTERNAL_ERROR,
+  isInternalError,
+  type SessionState,
+} from "@twigo/workbench";
 import type { SessionStatus } from "./terminal";
 
 /** What a tab says of an ending, in the tab and once in the scrollback (ARCHITECTURE 4.6). */
@@ -39,7 +44,11 @@ export function ending(end: ShellEnd): Ending {
         tone: "warn",
       };
     case "failed": {
-      const [title = "", ...more] = errorLines(end.error);
+      const [title = "", ...more] = errorLines(
+        isInternalError(end.error)
+          ? { code: end.error.code, message: INTERNAL_ERROR.shell }
+          : end.error,
+      );
       return {
         title,
         ...(more.length > 0 && { detail: more.join("\n") }),
@@ -97,4 +106,13 @@ export function sessionState(status: SessionStatus): SessionState {
     case "ended":
       return ending(status.end).tone === "error" ? "failed" : "ended";
   }
+}
+
+/** Whether Twigo's own code stopped the session, which the tab says apart from a failure of the cluster's. */
+export function stoppedByTwigo(status: SessionStatus): boolean {
+  return (
+    status.state === "ended" &&
+    status.end.reason === "failed" &&
+    isInternalError(status.end.error)
+  );
 }

@@ -21,6 +21,9 @@ import {
 } from "@twigo/ui";
 import {
   ErrorMessage,
+  INTERNAL_ERROR,
+  isInternalError,
+  ReportLink,
   useChanges,
   useListRegistration,
   useWorkbench,
@@ -222,21 +225,39 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
           The lines show the last filter and search that worked.
         </Banner>
       )}
-      {failed[0] && (
+      {failed[0] &&
+        (isInternalError(failed[0].error) ? (
+          <Banner
+            tone="error"
+            icon={CircleAlert}
+            title={`${INTERNAL_ERROR.title}:`}
+            action={<ReportLink />}
+          >
+            <ErrorMessage
+              error={failed[0].error}
+              message={INTERNAL_ERROR.stopped(`The logs of ${failed[0].name}`)}
+            />
+          </Banner>
+        ) : (
+          <Banner
+            tone="error"
+            icon={CircleAlert}
+            title={
+              failed.length === 1
+                ? `Cannot read the logs of ${failed[0].name}:`
+                : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
+            }
+          >
+            <ErrorMessage error={failed[0].error} />
+          </Banner>
+        ))}
+      {problem && total > 0 && (
         <Banner
           tone="error"
-          icon={CircleAlert}
-          title={
-            failed.length === 1
-              ? `Cannot read the logs of ${failed[0].name}:`
-              : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
-          }
+          icon={problem.icon}
+          title={`${problem.title}.`}
+          {...(isInternalError(problem.error) && { action: <ReportLink /> })}
         >
-          <ErrorMessage error={failed[0].error} />
-        </Banner>
-      )}
-      {problem && total > 0 && (
-        <Banner tone="error" icon={problem.icon} title={`${problem.title}.`}>
           <ErrorMessage error={problem.error} message={problem.body} /> The
           lines read so far stay.
         </Banner>
