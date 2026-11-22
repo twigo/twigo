@@ -50,7 +50,11 @@ test("Open Issue puts the log as the person sees it on the clipboard before it a
   fireEvent.change(field, {
     target: { value: `${(field as HTMLTextAreaElement).value}\nand my note` },
   });
+  const before = calls.length;
   click("Open Issue on GitHub");
+  expect(calls.slice(before)).toEqual([
+    ["clipboard", (field as HTMLTextAreaElement).value],
+  ]);
   await screen.findByText(/paste it into Logs/);
   const order = calls.map(([command]) => command);
   expect(order.indexOf("clipboard")).toBeGreaterThan(-1);
