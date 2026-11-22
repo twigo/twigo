@@ -1,6 +1,8 @@
 //! What the webview may see of an object (ARCHITECTURE 3.6): managedFields
 //! stay in Rust, and so do a Secret's values until a Reveal.
 
+use std::borrow::Cow;
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
@@ -75,9 +77,7 @@ impl Entry<'_> {
     /// no base64, which the API server never serves and only a release's
     /// manifest can hold, shows the size its length would decode to.
     pub fn bytes(&self) -> u64 {
-        let Some(text) = self.value.as_str() else {
-            return 0;
-        };
+        let text = self.text();
         match self.field {
             Field::Data => {
                 let padding = text
@@ -89,6 +89,18 @@ impl Entry<'_> {
                 ((text.len() - padding) * 3 / 4) as u64
             }
             Field::StringData => text.len() as u64,
+        }
+    }
+}
+
+impl<'a> Entry<'a> {
+    /// The value's text: a string's, none for null, and the JSON of any
+    /// other value, which only a release's manifest can hold.
+    pub fn text(&self) -> Cow<'a, str> {
+        match self.value {
+            Value::String(text) => Cow::Borrowed(text),
+            Value::Null => Cow::Borrowed(""),
+            other => Cow::Owned(other.to_string()),
         }
     }
 }
@@ -124,22 +136,33 @@ pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcErro
             "only a Secret's values are revealed".to_owned(),
         ));
     }
-    let encoded = object["data"][key].as_str().ok_or_else(|| {
-        IpcError::new(
-            ErrorCode::SecretNoKey,
-            format!("the Secret has no key {key}"),
-        )
-    })?;
-    let bytes = STANDARD.decode(encoded).map_err(|error| {
-        IpcError::new(
-            ErrorCode::AnswerUndecodable,
-            format!("the value of {key} is no base64: {error}"),
-        )
-    })?;
-    Ok(match String::from_utf8(bytes) {
-        Ok(text) => (text, false),
-        Err(_) => (encoded.to_owned(), true),
-    })
+    value_of(object, key)
+}
+
+/// A Secret's value of `key` as [`secret_value`] gives it: `stringData`'s,
+/// which the server writes over `data`, else `data`'s decoded, or as written
+/// when it is no base64, which only a release's manifest can hold.
+pub(crate) fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
+    let entry = entries(secret)
+        .filter(|entry| entry.key == key)
+        .last()
+        .ok_or_else(|| {
+            IpcError::new(
+                ErrorCode::SecretNoKey,
+                format!("the Secret has no key {key}"),
+            )
+        })?;
+    let text = entry.text();
+    if entry.field == Field::StringData {
+        return Ok((text.into_owned(), false));
+    }
+    Ok(
+        match STANDARD.decode(text.as_bytes()).map(String::from_utf8) {
+            Ok(Ok(decoded)) => (decoded, false),
+            Ok(Err(_)) => (text.into_owned(), true),
+            Err(_) => (text.into_owned(), false),
+        },
+    )
 }
 
 /// `text` with each of `names` that stands in it as a whole token replaced by
@@ -327,6 +350,18 @@ mod tests {
         assert_eq!(value, ("MIIBCgKCAQEA/w==".to_owned(), true));
         let missing = secret_value(&secret, "token").unwrap_err();
         assert_eq!(missing.code, ErrorCode::SecretNoKey);
+        let written = serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "both": "aHVudGVyMg==", "bad": "not base64!" },
+            "stringData": { "both": "typed", "token": "s3cret" },
+        });
+        let value = secret_value(&written, "token").unwrap();
+        assert_eq!(value, ("s3cret".to_owned(), false));
+        let value = secret_value(&written, "both").unwrap();
+        assert_eq!(value, ("typed".to_owned(), false), "stringData wins");
+        let value = secret_value(&written, "bad").unwrap();
+        assert_eq!(value, ("not base64!".to_owned(), false));
         let config = serde_json::json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
