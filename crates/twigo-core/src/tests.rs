@@ -34,6 +34,22 @@ async fn names(core: &Core, wanted: &[&str]) {
 }
 
 #[tokio::test]
+async fn a_test_s_core_fails_the_test_on_a_panic_nobody_armed() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (_status, followed) = watch::channel(Status::Resolving);
+    let started = core.start_for_tests(followed, None);
+    core.reporter.panicked("state writer");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(started)));
+    assert!(dropped.is_err(), "the drop fails the test");
+}
+
+#[tokio::test]
 async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     let dir = tempfile::tempdir().unwrap();
     let process = dir.path().join("process");
@@ -56,7 +72,7 @@ async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     );
     core.state.open_space("kind-process");
     let (status, followed) = watch::channel(Status::Resolving);
-    core.start_for_tests(followed, None);
+    let _duties = core.start_for_tests(followed, None);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
@@ -146,7 +162,7 @@ impl Plugins {
             .unwrap_or(0)
     }
 
-    async fn core(&self) -> (Arc<Core>, tempfile::TempDir) {
+    async fn core(&self) -> (Started, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();
         let core = Core::new(
             data.path(),
@@ -156,7 +172,7 @@ impl Plugins {
         let env = Arc::new(ShellEnv::from_iter(Vec::<(OsString, OsString)>::new()));
         let (_status, followed) = watch::channel(Status::Resolved(env));
         let explicit = self.kubeconfig();
-        core.start_for_tests(followed, Some(explicit));
+        let core = core.start_for_tests(followed, Some(explicit));
         core.catalog.contexts().await;
         (core, data)
     }
@@ -699,13 +715,12 @@ async fn logs_of_a_kind_without_pods_or_an_unknown_space_are_refused() {
 
 /// A running core over the kubeconfig `text`, whose cluster nothing listens
 /// on, so a request that reaches the network fails as unavailable.
-fn running(dir: &Path, text: &str) -> Arc<Core> {
+fn running(dir: &Path, text: &str) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    core.start_for_tests(followed, Some(kubeconfig));
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 const UNREACHABLE: &str = "

@@ -1000,9 +1000,8 @@ impl Core {
     }
 
     /// Restores the forwards, then runs the app-wide duties, each as a task
-    /// of its own under a supervisor (ARCHITECTURE 2.1), until the fatal
-    /// path has run. The caller spawns what this returns, and keeps its
-    /// handle.
+    /// of its own under a supervisor (ARCHITECTURE 2.1). The caller spawns
+    /// what this returns, and keeps its handle.
     ///
     /// The duties follow the catalog's sources and the login shell's proxy
     /// variables, tell the state store and the connections which contexts the
@@ -1010,8 +1009,9 @@ impl Core {
     /// the unlocks that run out, recheck the forwards when a mode or the
     /// catalog changes, and, where `network` is given, retire connections on
     /// wake and on a network change. A duty that panics starts again, at most
-    /// three times in five minutes; past that, and for a thread of the
-    /// core's that cannot go on, `fatal` is called. In the explicit mode
+    /// three times in five minutes; past that, for a thread of the core's
+    /// that cannot go on, and for a panic of the supervisor's own task,
+    /// `fatal` is called, and the other duties go on. In the explicit mode
     /// (ARCHITECTURE 5.5) `explicit` is the only source; otherwise the
     /// sources come from the login shell's environment, as `status` follows
     /// it, read again whenever it is resolved.
@@ -1020,8 +1020,42 @@ impl Core {
         status: watch::Receiver<Status>,
         explicit: Option<PathBuf>,
         network: Option<fn() -> twigo_netmon::Watch>,
-        fatal: impl Fn(Fatal) + Send + 'static,
+        fatal: impl Fn(Fatal) + Send + Sync + 'static,
     ) -> impl Future<Output = ()> + Send + 'static {
+        self.supervise(self.supervisor(status, explicit, network, fatal))
+    }
+
+    /// [`Core::start`] on the runtime, without the network, for tests.
+    #[cfg(feature = "test-util")]
+    pub fn start_for_tests(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+    ) -> Started {
+        let failures = Failures::default();
+        let mut supervisor = self.supervisor(status, explicit, None, {
+            let failures = failures.clone();
+            move |fatal| failures.push(fatal.to_string())
+        });
+        supervisor.unarmed({
+            let failures = failures.clone();
+            move |duty| failures.push(format!("{duty} panicked, and nothing armed it"))
+        });
+        Started {
+            core: Arc::clone(self),
+            duties: tokio::spawn(self.supervise(supervisor)),
+            failures,
+        }
+    }
+
+    /// The supervisor of the core's duties, which have not started yet.
+    fn supervisor(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+        network: Option<fn() -> twigo_netmon::Watch>,
+        fatal: impl Fn(Fatal) + Send + Sync + 'static,
+    ) -> Supervisor {
         let reports = self
             .reports
             .lock()
@@ -1059,6 +1093,14 @@ impl Core {
         });
         let core = Arc::clone(self);
         supervisor.thread("state writer", move || core.state.can_write());
+        supervisor
+    }
+
+    /// Restores the forwards, then runs `supervisor`.
+    fn supervise(
+        self: &Arc<Self>,
+        supervisor: Supervisor,
+    ) -> impl Future<Output = ()> + Send + 'static {
         let core = Arc::clone(self);
         async move {
             // Once: a panic here ends the forwards' commands, which wait for
@@ -1071,17 +1113,6 @@ impl Core {
             }
             supervisor.run().await;
         }
-    }
-
-    /// [`Core::start`] on the runtime, without the network, for tests: a duty
-    /// that panics past the limit panics the task this returns.
-    #[cfg(feature = "test-util")]
-    pub fn start_for_tests(
-        self: &Arc<Self>,
-        status: watch::Receiver<Status>,
-        explicit: Option<PathBuf>,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(self.start(status, explicit, None, |fatal| panic!("{fatal}")))
     }
 
     /// Adds a duty that runs `run` on this core, again after each panic.
@@ -1149,6 +1180,59 @@ impl Core {
         while written.changed().await.is_ok() {
             self.terminals.refresh_offers().await;
         }
+    }
+}
+
+/// A core whose duties run for a test ([`Core::start_for_tests`]): dropping
+/// it ends them, and fails the test where a duty panicked with nothing armed
+/// or could not be kept.
+#[cfg(feature = "test-util")]
+#[must_use = "dropping it ends the core's duties"]
+pub struct Started {
+    core: Arc<Core>,
+    duties: tokio::task::JoinHandle<()>,
+    failures: Failures,
+}
+
+#[cfg(feature = "test-util")]
+impl std::ops::Deref for Started {
+    type Target = Arc<Core>;
+
+    fn deref(&self) -> &Arc<Core> {
+        &self.core
+    }
+}
+
+#[cfg(feature = "test-util")]
+impl Drop for Started {
+    fn drop(&mut self) {
+        self.duties.abort();
+        let failures = self.failures.take();
+        if !failures.is_empty() && !std::thread::panicking() {
+            panic!("the core's duties failed: {}", failures.join("; "));
+        }
+    }
+}
+
+/// What a test's supervisor saw that fails the test.
+#[cfg(feature = "test-util")]
+#[derive(Clone, Default)]
+struct Failures(Arc<Mutex<Vec<String>>>);
+
+#[cfg(feature = "test-util")]
+impl Failures {
+    fn push(&self, failure: String) {
+        self.lock().push(failure);
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.lock())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

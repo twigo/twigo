@@ -150,9 +150,10 @@ impl State {
         });
         let (wake, woken) = mpsc::channel();
         let writer = Arc::clone(&inner);
+        let scope = inject::Scope::current();
         std::thread::Builder::new()
             .name("state-writer".into())
-            .spawn(move || writer.write_after(delay, &woken))
+            .spawn(move || writer.write_after(delay, &woken, scope))
             .expect("the state writer thread starts");
         Self { inner, wake }
     }
@@ -372,12 +373,12 @@ impl Inner {
     /// The writer thread: once woken, waits [`WRITE_DELAY`], then writes
     /// everything changed so far. Ends with the store. A write that panics
     /// is told to the reporter and leaves the changes for the next one.
-    fn write_after(&self, delay: Duration, woken: &Receiver<()>) {
+    fn write_after(&self, delay: Duration, woken: &Receiver<()>, scope: inject::Scope) {
         while woken.recv().is_ok() {
             std::thread::sleep(delay);
             self.scheduled.store(false, Ordering::Release);
             let written = catch_unwind(AssertUnwindSafe(|| {
-                inject::check("state writer");
+                scope.check("state writer");
                 self.write()
             }));
             match written {

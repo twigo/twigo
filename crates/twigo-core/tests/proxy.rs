@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-use twigo_core::{Core, ProxyProcess};
+use twigo_core::{Core, ProxyProcess, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
@@ -373,7 +373,7 @@ contexts:{kind_a}
 
 /// A core over the kubeconfig `config` in `dir`, of two contexts on the
 /// fake server, which the person marked Local.
-async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
+async fn core(dir: &Path, fake: &Fake) -> Started {
     let core = unmarked(dir, fake).await;
     for context in ["kind-a", "kind-b"] {
         core.policy
@@ -384,7 +384,7 @@ async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
 }
 
 /// [`core`], with its contexts marked by nobody.
-async fn unmarked(dir: &Path, fake: &Fake) -> Arc<Core> {
+async fn unmarked(dir: &Path, fake: &Fake) -> Started {
     let kubeconfig = dir.join("config");
     let server = format!("http://{}", fake.address);
     std::fs::write(&kubeconfig, self::kubeconfig(&server, KIND_A)).unwrap();
@@ -392,7 +392,7 @@ async fn unmarked(dir: &Path, fake: &Fake) -> Arc<Core> {
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    core.start_for_tests(followed, Some(kubeconfig));
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     core
 }

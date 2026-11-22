@@ -445,7 +445,7 @@ contexts: [{ name: kind-c, context: { cluster: c } }]
             &dir.path().join("policy.json"),
         );
         let (_status, followed) = tokio::sync::watch::channel(twigo_env::Status::Resolving);
-        core.start_for_tests(followed, Some(kubeconfig));
+        let _duties = core.start_for_tests(followed, Some(kubeconfig));
         core.catalog.contexts().await;
         core.policy
             .set_environment("kind-c", Some(Environment::Production))

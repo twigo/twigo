@@ -14,6 +14,7 @@ use twigo_env::ShellEnv;
 use twigo_ipc::{ErrorCode, ErrorKind, Gvr, Mode};
 
 use super::*;
+use crate::Started;
 use crate::state::State;
 
 const KUBECONFIG: &str = "
@@ -127,15 +128,14 @@ fn keep(dir: &Path, saved: &Saved) {
     state.flush().unwrap();
 }
 
-fn running(dir: &Path) -> Arc<Core> {
+fn running(dir: &Path) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    core.start_for_tests(followed, Some(kubeconfig));
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 fn listed(core: &Core) -> Vec<Forward> {
@@ -366,7 +366,7 @@ impl Api {
     }
 }
 
-fn running_over(dir: &Path, api: &Api) -> Arc<Core> {
+fn running_over(dir: &Path, api: &Api) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(
         &kubeconfig,
@@ -377,8 +377,7 @@ fn running_over(dir: &Path, api: &Api) -> Arc<Core> {
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    core.start_for_tests(followed, Some(kubeconfig));
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 #[tokio::test]
@@ -1023,7 +1022,7 @@ async fn stays_restored(core: &Core) {
     assert_eq!(listed(core)[0].state, ForwardState::Restored);
 }
 
-async fn restored_without_its_context(dir: &Path) -> Arc<Core> {
+async fn restored_without_its_context(dir: &Path) -> Started {
     keep(
         dir,
         &Saved {
@@ -1318,7 +1317,7 @@ async fn the_state_keeps_what_the_table_holds_when_two_commands_race() {
     }
 }
 
-async fn a_forward_that_carried_bytes() -> (tempfile::TempDir, Arc<Core>, Forward, u16) {
+async fn a_forward_that_carried_bytes() -> (tempfile::TempDir, Started, Forward, u16) {
     let api = Api::serving_pod().await;
     let dir = tempfile::tempdir().unwrap();
     keep(dir.path(), &Saved::default());
@@ -1456,7 +1455,7 @@ async fn a_follower_that_came_before_the_restore_learns_of_the_forwards() {
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    core.start_for_tests(followed, Some(kubeconfig));
+    let _duties = core.start_for_tests(followed, Some(kubeconfig));
 
     let mut learned = Vec::new();
     until("both forwards are announced", || {
@@ -2083,7 +2082,7 @@ fn states_of(seen: &mpsc::Receiver<ForwardEvent>) -> Vec<ForwardState> {
         .collect()
 }
 
-async fn failed_for_a_credential(api: &Api, dir: &Path) -> (Arc<Core>, ForwardId) {
+async fn failed_for_a_credential(api: &Api, dir: &Path) -> (Started, ForwardId) {
     keep(dir, &Saved::default());
     let core = running_over(dir, api);
     core.catalog.contexts().await;
@@ -2603,7 +2602,7 @@ async fn a_sign_in_that_gets_a_credential_proves_a_forward_failed_for_its_creden
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    core.start_for_tests(followed, Some(kubeconfig));
+    let _duties = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
     core.trust_plugins(vec![review.plugins[0].plugin.digest.clone()])
@@ -2749,7 +2748,7 @@ async fn a_forward_restored_before_the_catalog_has_loaded_waits_and_the_check_af
         &dir.path().join("policy.json"),
     );
     let (status, followed) = watch::channel(twigo_env::Status::Resolving);
-    core.start_for_tests(followed, None);
+    let _duties = core.start_for_tests(followed, None);
     assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
@@ -2836,7 +2835,7 @@ fn runs_of(dir: &Path, name: &str) -> usize {
 
 const TOKEN: &str = r#"printf '{"status":{"token":"t"}}'"#;
 
-async fn signing_in_to(dir: &Path, api: &Api, contexts: &[(&str, &str)]) -> Arc<Core> {
+async fn signing_in_to(dir: &Path, api: &Api, contexts: &[(&str, &str)]) -> Started {
     let state = State::open(dir.join("state.json"));
     for (context, _) in contexts {
         state.open_space(context);
@@ -2870,7 +2869,7 @@ async fn signing_in_to(dir: &Path, api: &Api, contexts: &[(&str, &str)]) -> Arc<
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    core.start_for_tests(followed, Some(kubeconfig));
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
     core.trust_plugins(

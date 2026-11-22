@@ -2,7 +2,6 @@
 //! what is on the server after it, field by field.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use k8s_openapi::api::core::v1::{ConfigMap, Secret};
 use k8s_openapi::apiextensions_apiserver::pkg::apis::apiextensions::v1::CustomResourceDefinition;
@@ -10,7 +9,7 @@ use kube::api::PostParams;
 use kube::config::Kubeconfig;
 use kube::{Api, Config};
 use serde_json::{Value, json};
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_ipc::{
     ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, BlockReason, ErrorKind, Mode,
     OpenedEdit, Plan, PlanRequest, PreviewId, ResourceRef,
@@ -918,7 +917,7 @@ async fn count_requests(cluster: &Cluster, user: &str, rule: Value) {
     .await;
 }
 
-async fn acting_as(cluster: &Cluster, dir: &Path, user: &str) -> (Arc<Core>, kube::Client) {
+async fn acting_as(cluster: &Cluster, dir: &Path, user: &str) -> (Started, kube::Client) {
     let mut kubeconfig = Kubeconfig::read_from(&cluster.path).unwrap();
     for named in &mut kubeconfig.auth_infos {
         if let Some(info) = &mut named.auth_info {

@@ -16,7 +16,7 @@ use twigo_policy::friction::Risk;
 
 use super::{Finished, Planned, Previewed, Progress, Run};
 use crate::actions::Prepared;
-use crate::{Core, ShellFrame};
+use crate::{Core, ShellFrame, Started};
 
 const KUBECONFIG: &str = "
 clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
@@ -26,11 +26,11 @@ contexts:
   context: { cluster: c, user: u }
 ";
 
-async fn running(dir: &Path) -> Arc<Core> {
+async fn running(dir: &Path) -> Started {
     marked(running_with(dir, KUBECONFIG)).await
 }
 
-async fn marked(core: Arc<Core>) -> Arc<Core> {
+async fn marked(core: Started) -> Started {
     core.catalog.contexts().await;
     core.policy
         .set_environment("kind-a", Some(Environment::Local))
@@ -38,13 +38,12 @@ async fn marked(core: Arc<Core>) -> Arc<Core> {
     core
 }
 
-fn running_with(dir: &Path, text: &str) -> Arc<Core> {
+fn running_with(dir: &Path, text: &str) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    core.start_for_tests(followed, Some(kubeconfig));
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 /// How many times the plan's run ran.
@@ -707,7 +706,7 @@ async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_it
     );
 }
 
-async fn scripted_core(server: &Scripted, dir: &Path) -> (Arc<Core>, String) {
+async fn scripted_core(server: &Scripted, dir: &Path) -> (Started, String) {
     let core = marked(running_with(
         dir,
         &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
@@ -1079,7 +1078,7 @@ impl Server {
     }
 }
 
-fn over_server(dir: &Path, port: u16) -> Arc<Core> {
+fn over_server(dir: &Path, port: u16) -> Started {
     running_with(
         dir,
         &format!(
