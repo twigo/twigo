@@ -6,6 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -241,31 +242,18 @@ impl Redactor {
     }
 
     /// Addresses other than a loopback or an unspecified one, whether they
-    /// stand bare, with a port, or in brackets; a letter, a digit or `_`
-    /// beside one makes it part of a longer word, which stays.
+    /// stand bare, with a port, or in brackets.
     fn addresses_hidden(&mut self, text: &str) -> String {
         let mut hidden = String::with_capacity(text.len());
         let mut from = 0;
-        for found in ADDRESS_LIKE.find_iter(text) {
-            let mut candidate = found.as_str().trim_end_matches(['.', ':']);
-            let mut start = found.start();
-            if address(candidate).is_none() {
-                // `addr:10.0.0.9:6443` reads `:10.0.0.9:6443`, since `add` is
-                // hex; `::ffff:10.0.0.9` keeps its colons, as it parses.
-                let trimmed = candidate.trim_start_matches(':');
-                start += candidate.len() - trimmed.len();
-                candidate = trimmed;
-            }
-            let end = start + candidate.len();
-            let word = |c: char| c.is_alphanumeric() || c == '_';
-            let alone = !text[..start].chars().next_back().is_some_and(word)
-                && !text[end..].chars().next().is_some_and(word);
-            if alone
-                && address(candidate).is_some_and(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        for run in ADDRESS_LIKE.find_iter(text) {
+            if let Some((range, ip)) = address_in(text, run.range())
+                && !ip.is_loopback()
+                && !ip.is_unspecified()
             {
-                hidden.push_str(&text[from..start]);
+                hidden.push_str(&text[from..range.start]);
                 hidden.push_str("<address>");
-                from = end;
+                from = range.end;
                 self.hidden.addresses += 1;
             }
         }
@@ -325,6 +313,51 @@ fn address(candidate: &str) -> Option<IpAddr> {
         .map(|socket| socket.ip())
         .or_else(|_| candidate.parse::<IpAddr>())
         .ok()
+}
+
+/// The longest address in `run`, a run of the characters an address is
+/// spelled with. It may start after any `:`, `[` or `.` of the run, as in
+/// `node:10.0.0.21` and `[10.0.0.30]`, and end before up to three trailing
+/// `]`, `:` and `.`, as `fd00::` is an address and `10.0.0.1:6443:` is not.
+fn address_in(text: &str, run: Range<usize>) -> Option<(Range<usize>, IpAddr)> {
+    let trailing = text[run.clone()]
+        .bytes()
+        .rev()
+        .take(3)
+        .take_while(|byte| matches!(byte, b']' | b':' | b'.'))
+        .count();
+    for start in run.clone().filter(|&start| !joined_before(text, start)) {
+        for end in (start.max(run.end - trailing)..=run.end).rev() {
+            if !joined_after(text, end)
+                && let Some(ip) = address(&text[start..end])
+            {
+                return Some((start..end, ip));
+            }
+        }
+    }
+    None
+}
+
+fn is_word(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Whether what starts at `at` is part of a longer word or number: a word
+/// character before it, the tail of a dotted number (`22625.2.8.11.9` holds the
+/// four numbers `2.8.11.9`), or a `:` that follows another, as Go spells a
+/// port of every address in `:::8080`.
+fn joined_before(text: &str, at: usize) -> bool {
+    let mut before = text[..at].chars().rev();
+    match before.next() {
+        Some(c) if is_word(c) => true,
+        Some('.') => before.next().is_some_and(|c| c.is_ascii_digit()),
+        Some(':') => text[at..].starts_with(':'),
+        _ => false,
+    }
+}
+
+fn joined_after(text: &str, at: usize) -> bool {
+    text[at..].chars().next().is_some_and(is_word)
 }
 
 /// `text` with each match of `pattern` that `with` answers for replaced, and

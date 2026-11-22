@@ -262,10 +262,34 @@ fn an_address_goes_beside_any_punctuation_but_not_inside_a_word() {
         ),
         ("via ::ffff:10.0.0.15 and ::1", "via <address> and ::1"),
         ("pod10.0.0.16 and 10.0.0.17x", "pod10.0.0.16 and 10.0.0.17x"),
+        (
+            "endpoints [10.0.0.28:8080 10.0.0.29:8080] and [10.0.0.41:8080, 10.0.0.42:8080]",
+            "endpoints [<address> <address>] and [<address>, <address>]",
+        ),
+        (
+            "[10.0.0.30], [fd00::31] and dial tcp [fd00::36]:443: i/o timeout",
+            "[<address>], [<address>] and dial tcp <address>: i/o timeout",
+        ),
+        (
+            "node:10.0.0.21 via:10.0.0.24 remote:10.0.0.25:443 id:fd00::34",
+            "node:<address> via:<address> remote:<address> id:<address>",
+        ),
+        (
+            "app.10.0.0.32.sslip.io and ...10.0.0.33",
+            "app.<address>.sslip.io and ...<address>",
+        ),
+        (
+            "service CIDR fd00:10:96::/112, 10.96.0.0/12 and 2001:db8::",
+            "service CIDR <address>/112, <address>/12 and <address>",
+        ),
+        (
+            "listen tcp :::8080 and WebKit 22625.2.8.11.9, 1.2.3.4.5, std::fmt::Display",
+            "listen tcp :::8080 and WebKit 22625.2.8.11.9, 1.2.3.4.5, std::fmt::Display",
+        ),
     ] {
         assert_eq!(redactor.text(said), left);
     }
-    assert_eq!(redactor.hidden().addresses, 6);
+    assert_eq!(redactor.hidden().addresses, 22);
 }
 
 #[test]
