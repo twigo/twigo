@@ -10,7 +10,7 @@ import {
   type Lookup,
 } from "@twigo/workbench";
 import { parseExecUri } from "../uri";
-import { InternalStop } from "../xterm/InternalStop";
+import { InternalStop } from "../InternalStop";
 import { useTerminalHost } from "../xterm/useTerminalHost";
 import { internalEnd } from "../xterm/words";
 import type { ExecTabs } from "./tabs";

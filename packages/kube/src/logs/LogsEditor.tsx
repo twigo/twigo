@@ -21,13 +21,13 @@ import {
 } from "@twigo/ui";
 import {
   ErrorBanner,
-  INTERNAL_ERROR,
   isInternalError,
   useChanges,
   useListRegistration,
   useWorkbench,
   type EditorProps,
 } from "@twigo/workbench";
+import { InternalStop } from "../InternalStop";
 import { StoppedActions } from "../StoppedActions";
 import { useNow } from "../useNow";
 import { parseLogsUri } from "../uri";
@@ -229,13 +229,10 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       )}
       {failed[0] &&
         (isInternalError(failed[0].error) ? (
-          <ErrorBanner
-            tone="error"
-            icon={CircleAlert}
-            title={`${INTERNAL_ERROR.title}.`}
-            action={<StoppedActions onReopen={reopen} />}
+          <InternalStop
             error={failed[0].error}
-            message={INTERNAL_ERROR.stopped(`The logs of ${failed[0].name}`)}
+            reopen={reopen}
+            what={`The logs of ${failed[0].name}`}
           />
         ) : (
           <ErrorBanner
