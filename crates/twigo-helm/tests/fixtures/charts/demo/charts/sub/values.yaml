@@ -1,0 +1,6 @@
+greeting: hello from sub
+subOnly: a default only the subchart has
+exported:
+  answer: 42
+global:
+  region: sub-default

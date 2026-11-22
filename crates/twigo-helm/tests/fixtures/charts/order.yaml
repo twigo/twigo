@@ -1,0 +1,23 @@
+item9: a
+item10: b
+Zeta: c
+alpha: d
+_under: e
+"10": f
+"9": g
+"-dash": h
+a.b: i
+multi: |
+  line one
+  line two
+empty: ""
+float: 1.50
+big: 12345678901234567890
+yes: "yes"
+on: true
+date: 2026-11-22
+nested:
+  list:
+    - name: x
+      value: 1
+    - name: y

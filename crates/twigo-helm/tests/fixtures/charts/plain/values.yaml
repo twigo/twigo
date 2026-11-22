@@ -1,0 +1,7 @@
+message: hello
+ports:
+  - 80
+  - 443
+nested:
+  level1:
+    level2: deep

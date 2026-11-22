@@ -1,0 +1,14 @@
+# User-supplied values for revision 1 of release alpha.
+zz: user key that sorts last
+database:
+  password: user-password-r1
+removeMe: null
+image:
+  tag: "1.1"
+extra:
+  - one
+  - two
+global:
+  region: us-east
+sub:
+  subOnly: null

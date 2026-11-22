@@ -1,0 +1,67 @@
+---
+# Source: demo/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alpha-db
+  labels:
+    app.kubernetes.io/name: demo
+    app.kubernetes.io/instance: alpha
+    helm.sh/chart: demo-0.1.0
+type: Opaque
+stringData:
+  host: "db.example"
+  password: "user-password-r1"
+data:
+  token: "dG9rZW4tZm9yLWFscGhh"
+
+---
+# Source: demo/charts/sub/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alpha-sub
+data:
+  greeting: "hello from parent"
+  subOnly: 
+  region: "us-east"
+
+---
+# Source: demo/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alpha-config
+  labels:
+    app.kubernetes.io/name: demo
+    app.kubernetes.io/instance: alpha
+    helm.sh/chart: demo-0.1.0
+data:
+  replicas: "2"
+  image: "registry.example/demo:1.1"
+  region: "us-east"
+  fromSub: "42"
+  app.toml: |
+    [server]
+    listen = "0.0.0.0:8080"
+    
+
+---
+# Source: demo/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: alpha-svc
+  labels:
+    app.kubernetes.io/name: demo
+    app.kubernetes.io/instance: alpha
+    helm.sh/chart: demo-0.1.0
+spec:
+  selector:
+    app.kubernetes.io/instance: alpha
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+

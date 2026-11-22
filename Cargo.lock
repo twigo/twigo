@@ -6123,6 +6123,15 @@ version = "0.1.0"
 [[package]]
 name = "twigo-helm"
 version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "flate2",
+ "jiff",
+ "serde",
+ "serde_json",
+ "twigo-ipc",
+ "twigo-policy",
+]
 
 [[package]]
 name = "twigo-ipc"

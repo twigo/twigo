@@ -1,0 +1,4 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Release {{ .Release.Name }} is at revision {{ .Release.Revision }} in {{ .Release.Namespace }}.
+The image is {{ .Values.image.repository }}:{{ .Values.image.tag }}.

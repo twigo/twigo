@@ -1,0 +1,5 @@
+# User-supplied values for revision 2 of release alpha.
+database:
+  password: user-password-r2
+image:
+  tag: "1.2"
