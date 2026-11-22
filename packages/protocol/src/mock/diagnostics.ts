@@ -113,7 +113,10 @@ const FAILED_FILES: readonly CatalogFailure[] = [
   },
   {
     source: "~/.kube/work/locked.yaml",
-    error: error("kubeconfig.unreadable", "The file cannot be read: permission denied"),
+    error: error(
+      "kubeconfig.unreadable",
+      "The file cannot be read: permission denied",
+    ),
   },
 ];
 

@@ -37,7 +37,7 @@ test("a file that reads well again takes its warning away, and the one still fai
     invoke: (command, request) => mock.invoke(command, request),
     subscribe: (command, request, onMessage) => {
       if (command === "contexts_watch") {
-        send = onMessage as (next: Catalog) => void;
+        send = onMessage;
       }
       return mock.subscribe(command, request, onMessage);
     },
