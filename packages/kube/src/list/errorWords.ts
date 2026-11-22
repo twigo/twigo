@@ -1,5 +1,4 @@
 import type { ErrorCode, ServerStatus } from "@twigo/protocol";
-import { errorLines, variant, type ErrorLike } from "@twigo/workbench";
 
 export interface Failure {
   readonly code: ErrorCode;
@@ -26,10 +25,8 @@ export function causeWords({ code, server }: Failure): string {
   return CAUSES[code] ?? reasonOf(server) ?? code;
 }
 
-/** The status bar's word for a list that failed: by the code's family, as kubectl names what refused, or the code itself. */
+/** The status bar's word for a list that failed: by the code's family, as kubectl names what refused. */
 export function statusWord(error: Failure): string {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  if (variant("status") === "code") return error.code;
   switch (error.code.slice(0, error.code.indexOf("."))) {
     case "connect":
       return "Unreachable";
@@ -43,10 +40,4 @@ export function statusWord(error: Failure): string {
     default:
       return "Error";
   }
-}
-
-/** The lines of a tooltip that says a failure: its message, and its code unless the status word is the code already. */
-export function failureLines(error: ErrorLike): string[] {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  return variant("status") === "code" ? [error.message] : errorLines(error);
 }

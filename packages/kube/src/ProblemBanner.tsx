@@ -5,7 +5,7 @@ import { ErrorBanner, ErrorMessage } from "@twigo/workbench";
 import { StoppedActions } from "./StoppedActions";
 import { isStopped, type ObjectProblem } from "./viewProblem";
 
-/** An object's problem in words with its code as the variant says; an object that is gone has none. */
+/** An object's problem in words with its code under them; an object that is gone has none. */
 export function ProblemWords({ problem }: { problem: ObjectProblem }) {
   return problem.error ? (
     <ErrorMessage error={problem.error} message={problem.body} />

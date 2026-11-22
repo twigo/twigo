@@ -18,7 +18,7 @@ afterEach(() => {
 const entry = (text: string) =>
   within(screen.getByRole("contentinfo")).getByText(text).closest("[title]");
 
-test("status:family, the default, says an error by its code's family", () => {
+test("the status bar says an error by its code's family", () => {
   expect(
     [
       { code: "connect.refused" },

@@ -9,6 +9,7 @@ import {
 } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
 import {
+  errorLines,
   errorOneLine,
   useChanges,
   useWorkbench,
@@ -26,12 +27,7 @@ import {
 import { singularTitle } from "../kinds";
 import type { ListServices } from "../services";
 import { parseListUri } from "../uri";
-import {
-  causeWords,
-  failureLines,
-  statusWord,
-  type Failure,
-} from "./errorWords";
+import { causeWords, statusWord, type Failure } from "./errorWords";
 import { stateLabel, type ListStatus, type ListStatuses } from "./listStatus";
 import { namespaceWords } from "./scope";
 
@@ -48,7 +44,7 @@ const CONNECTION: Readonly<
   unauthorized: { tone: "error", text: "Unauthorized" },
 };
 
-/** The status bar's word and tone for a state; an error says its own word, as the variant has it. */
+/** The status bar's word and tone for a state; an error says the word of its code's family. */
 function connectionOf(state: ViewState): { tone: Tone; text: string } {
   return state.state === "error"
     ? { tone: "error", text: statusWord(state.error) }
@@ -239,7 +235,7 @@ export function clusterEntries(
       [connection?.text, known && `Kubernetes ${known}`]
         .filter(Boolean)
         .join(" · "),
-      ...(failure ? failureLines(failure) : []),
+      ...(failure ? errorLines(failure) : []),
     ]
       .filter(Boolean)
       .join("\n");

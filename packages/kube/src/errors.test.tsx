@@ -40,7 +40,7 @@ const REFUSED: ViewState = {
   },
 };
 
-test("code:line, the default: an empty state says its code under the message, and Copy details copies it with the server's causes", () => {
+test("an empty state says its code under the message, and Copy details copies it with the server's causes", () => {
   const writeText = vi.fn(() => Promise.resolve());
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -61,7 +61,7 @@ test("code:line, the default: an empty state says its code under the message, an
   );
 });
 
-test("code:line: a refusal that is no error of the server's has its code too, and a session ends with the code on its own line", () => {
+test("a refusal that is no error of the server's has its code too, and a session ends with the code on its own line", () => {
   render(
     <ViewStatus
       status={{ state: "forbidden", verb: "list", resource: "pods" }}
@@ -78,7 +78,7 @@ test("code:line: a refusal that is no error of the server's has its code too, an
   expect([title, detail]).toEqual(["no exec", "server.forbidden"]);
 });
 
-test("code:line: an object that cannot be read says its code under the message too", () => {
+test("an object that cannot be read says its code under the message too", () => {
   const { error } = REFUSED;
   render(
     <ObjectContent
@@ -101,7 +101,7 @@ test("code:line: an object that cannot be read says its code under the message t
   expect(screen.getByText("server.invalid")).toBeTruthy();
 });
 
-test("code:line: the bar over a dry run the server refused says its code under the message", async () => {
+test("the bar over a dry run the server refused says its code under the message", async () => {
   const refusal = new IpcError(
     "server.invalid",
     "ConfigMap settings is invalid",
@@ -130,7 +130,7 @@ test("code:line: the bar over a dry run the server refused says its code under t
   expect(screen.getByRole("button", { name: "Copy details" })).toBeTruthy();
 });
 
-test("code:line: what could not be listed for an object, and a dry run's refusal in an approval, say their codes", () => {
+test("what could not be listed for an object, and a dry run's refusal in an approval, say their codes", () => {
   const unavailable = {
     code: "server.forbidden",
     kind: "forbidden",
@@ -165,7 +165,7 @@ test("code:line: what could not be listed for an object, and a dry run's refusal
   expect(screen.getByText("server.invalid").tagName).toBe("CODE");
 });
 
-test("code:line: a forward's state says its code after the failure's words", () => {
+test("a forward's state says its code after the failure's words", () => {
   const state = {
     state: "reconnecting",
     reason: {
@@ -179,7 +179,7 @@ test("code:line: a forward's state says its code after the failure's words", () 
   );
 });
 
-test("code:line: a space whose discovery failed says why and its code on its connection", async () => {
+test("a space whose discovery failed says why and its code on its connection", async () => {
   const workbench = await testWorkbench("discoveryFails");
   registerKube(workbench);
   await vi.waitFor(() => {
