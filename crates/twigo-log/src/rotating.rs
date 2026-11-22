@@ -64,7 +64,6 @@ type Failed = Arc<dyn Fn(&Failure<'_>) + Send + Sync>;
 /// Cloning gives another handle to the same file.
 #[derive(Clone)]
 pub struct Rotating {
-    path: Arc<Path>,
     inner: Arc<Mutex<Inner>>,
 }
 
@@ -119,7 +118,6 @@ impl Rotating {
 
     fn of(path: &Path, file: File, size: u64, limits: Limits, failed: Failed) -> Self {
         Self {
-            path: path.into(),
             inner: Arc::new(Mutex::new(Inner {
                 path: path.to_owned(),
                 file,
@@ -131,11 +129,6 @@ impl Rotating {
                 said_lost: false,
             })),
         }
-    }
-
-    /// The file being written, `<name>.<ext>`.
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     /// Appends `bytes` with one write, so a line is never split, and says
