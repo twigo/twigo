@@ -6,7 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { Backend, LogBatch, ViewState } from "@twigo/protocol";
+import type { Backend, ViewState } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { ENDS_MS } from "../../protocol/src/mock/edits";
 import {
@@ -173,30 +173,13 @@ test("a session that Twigo stopped ends in the scrollback with the one wording",
 });
 
 test("the logs of a container that Twigo stopped say so over the lines, with Report… and Reopen, which opens the session anew", async () => {
-  const mock = createMockBackend("ready");
-  const stopped = (batch: LogBatch): LogBatch => ({
-    ...batch,
-    pods:
-      batch.pods?.map((pod) => ({
-        ...pod,
-        containers: pod.containers.map((container) => ({
-          ...container,
-          stream: { state: "error" as const, error: PANICKED },
-        })),
-      })) ?? null,
-  });
+  const mock = createMockBackend("logsPanicked");
   let opened = 0;
   const backend: Backend = {
     invoke: (command, request) => mock.invoke(command, request),
-    subscribe: (
-      command: string,
-      request: never,
-      onMessage: (batch: LogBatch) => void,
-    ) => {
+    subscribe: (command, request, onMessage) => {
       if (command === "logs_open") opened++;
-      return mock.subscribe(command as "logs_open", request, (batch) => {
-        onMessage(command === "logs_open" ? stopped(batch) : batch);
-      });
+      return mock.subscribe(command, request, onMessage);
     },
   };
   const workbench = await mountKube(backend);

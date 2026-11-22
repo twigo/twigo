@@ -41,9 +41,11 @@ import {
   CAUSED,
   DISCOVERY_FAILS,
   LIST_FAILS,
+  LOGS_PANICKED,
   catalogOf,
   discoveryFailure,
   listFailure,
+  panickedLogs,
   isCauseScenario,
   isKubeconfigScenario,
   KUBECONFIG_SCENARIOS,
@@ -180,6 +182,7 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * the person (`metricsNone` and the like), live lists while the catalog's
  * kubeconfig files fail (`kubeconfigFailures` and the like), `discoveryFails`:
  * live lists of spaces whose discovery fails, each for a reason of its own,
+ * `logsPanicked`: live lists while every log stream ends on an internal error,
  * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
  * open, or `reportCut`: live lists while the link of an issue is too long for
@@ -207,7 +210,8 @@ export type MockScenario =
   | MetricsScenario
   | KubeconfigScenario
   | typeof DISCOVERY_FAILS
-  | typeof LIST_FAILS;
+  | typeof LIST_FAILS
+  | typeof LOGS_PANICKED;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -232,6 +236,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...CAUSE_SCENARIOS,
   DISCOVERY_FAILS,
   LIST_FAILS,
+  LOGS_PANICKED,
   "queued",
   "connecting",
   "syncing",
@@ -330,7 +335,8 @@ export function createMockBackend(
     isMetricsScenario(scenario) ||
     isKubeconfigScenario(scenario) ||
     scenario === DISCOVERY_FAILS ||
-    scenario === LIST_FAILS
+    scenario === LIST_FAILS ||
+    scenario === LOGS_PANICKED
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
@@ -972,7 +978,11 @@ export function createMockBackend(
           view,
           context === undefined ? undefined : cluster(context),
           budget,
-          onMessage,
+          scenario === LOGS_PANICKED
+            ? (batch) => {
+                onMessage(panickedLogs(batch));
+              }
+            : onMessage,
         ),
       );
       return id;
