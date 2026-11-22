@@ -29,11 +29,13 @@ export type CauseScenario = (typeof CAUSE_SCENARIOS)[number];
 /**
  * `discoveryFails`: no space's discovery answers, each for a reason of its
  * own, as it does when a cluster cannot be reached, a context names no user
- * or a credential plugin fails.
+ * or a credential plugin fails; `listFails`: the lists of each space end in
+ * the same errors, which is how the status bar words each family of codes.
  */
 export const DISCOVERY_FAILS = "discoveryFails";
+export const LIST_FAILS = "listFails";
 
-const DISCOVERY_FAILURES: Readonly<Record<string, Wire>> = {
+const FAILURES: Readonly<Record<string, Wire>> = {
   "prod-eu": error(
     "connect.refused",
     "The cluster refused the connection: Connection refused (os error 61)",
@@ -53,7 +55,12 @@ export function discoveryFailure(
   scenario: string,
   space: string,
 ): Wire | undefined {
-  return scenario === DISCOVERY_FAILS ? DISCOVERY_FAILURES[space] : undefined;
+  return scenario === DISCOVERY_FAILS ? FAILURES[space] : undefined;
+}
+
+/** The error a space's lists end in under `listFails`. */
+export function listFailure(scenario: string, space: string): Wire | undefined {
+  return scenario === LIST_FAILS ? FAILURES[space] : undefined;
 }
 
 export function isCauseScenario(scenario: string): scenario is CauseScenario {

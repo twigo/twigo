@@ -636,6 +636,15 @@ test("a list that ended on an internal error says so, and under discoveryFails e
     await vi.advanceTimersByTimeAsync(0);
     await watching;
   }
+  const listed = createMockBackend("listFails");
+  const dev = listed.invoke("space_open", "dev");
+  await vi.advanceTimersByTimeAsync(0);
+  await dev;
+  const failing = await open("listFails", query({ space: "dev" }), listed);
+  expect(failing.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "credentials.plugin-failed" },
+  });
   expect(
     Object.values(found).map((message) =>
       JSON.stringify(

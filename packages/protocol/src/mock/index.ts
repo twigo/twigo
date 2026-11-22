@@ -40,8 +40,10 @@ import {
   CAUSE_SCENARIOS,
   CAUSED,
   DISCOVERY_FAILS,
+  LIST_FAILS,
   catalogOf,
   discoveryFailure,
+  listFailure,
   isCauseScenario,
   isKubeconfigScenario,
   KUBECONFIG_SCENARIOS,
@@ -200,7 +202,8 @@ export type MockScenario =
   | ForwardScenario
   | MetricsScenario
   | KubeconfigScenario
-  | typeof DISCOVERY_FAILS;
+  | typeof DISCOVERY_FAILS
+  | typeof LIST_FAILS;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -223,6 +226,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...KUBECONFIG_SCENARIOS,
   ...CAUSE_SCENARIOS,
   DISCOVERY_FAILS,
+  LIST_FAILS,
   "queued",
   "connecting",
   "syncing",
@@ -319,7 +323,8 @@ export function createMockBackend(
     isForwardScenario(scenario) ||
     isMetricsScenario(scenario) ||
     isKubeconfigScenario(scenario) ||
-    scenario === DISCOVERY_FAILS
+    scenario === DISCOVERY_FAILS ||
+    scenario === LIST_FAILS
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
@@ -864,8 +869,10 @@ export function createMockBackend(
         verb: "list",
         resource,
       };
-      const state: Exclude<ListScenario, "forbidden"> | ViewState =
-        typeof selected === "string"
+      const failed = listFailure(scenario, context);
+      const state: Exclude<ListScenario, "forbidden"> | ViewState = failed
+        ? { state: "error", error: failed }
+        : typeof selected === "string"
           ? {
               state: "error",
               error: wireError(
