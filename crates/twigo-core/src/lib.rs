@@ -327,11 +327,9 @@ impl Core {
 
     /// The contexts the catalog lists, with what each lets through now.
     pub fn contexts(&self) -> Option<twigo_ipc::Catalog> {
-        // Out of the borrow: the policy reads the same channel for each
-        // context, and a second borrow behind a waiting writer may deadlock
-        // (tokio's `watch::Ref`).
-        let listed = self.catalog.subscribe().borrow().clone();
-        listed.map(|listed| listed.ipc(&self.policy))
+        self.catalog
+            .current()
+            .map(|listed| listed.ipc(&self.policy))
     }
 
     async fn listed(&self, context: &str) -> Result<(), IpcError> {

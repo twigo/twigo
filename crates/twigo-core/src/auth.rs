@@ -71,7 +71,7 @@ impl Core {
                 format!("could not save the trusted plugins: {error}"),
             )
         })?;
-        let listed = self.catalog.subscribe().borrow().clone();
+        let listed = self.catalog.current();
         let programs: HashMap<String, String> = listed
             .iter()
             .flat_map(|contexts| contexts.iter())
