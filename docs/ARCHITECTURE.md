@@ -177,22 +177,28 @@ Everything NATS-specific goes.
 VS Code runs a main process, renderers, extension hosts (Node, web worker, remote), a shared process and a pty host.
 Most of that exists because of Node: it isolates crashes and JS event loops.
 Twigo has one Rust process.
-A tokio task that panics does not take the process down, and no panic goes unseen or leaves a part waiting: Twigo contains it where it happens, as [a decision](decisions/panics.md) records.
+A tokio task that panics does not take the process down: Twigo contains it where it happens, as [a decision](decisions/panics.md) records.
 The hook of `twigo-log` records every panic first (4.10).
 
 - **The app-wide duties** run as tasks of their own under one supervisor, which `Core::start` builds: the catalog's sources, the contexts seen, the terminals' offers, the end of unlocks, the forwards' modes and the network.
-  A duty that panics starts again, at most three times in five minutes, and logs it with its name and task id; past that, or when a thread of the core that cannot go on panics (the state writer once its lock is poisoned), or when the policy proxy's accept loop panics, which no restart brings back for the kubeconfigs that name its address, the fatal path runs.
-  The kubeconfig watch and the state writer are threads, and report to the same supervisor.
+  A duty that panics starts again, at most three times in five minutes, and logs it with its name and task id; past that, or when a thread of the core that cannot go on panics (the state writer once its lock is poisoned), or when the policy proxy's accept loop panics, which no restart brings back for the kubeconfigs that name its address, the fatal path runs, and the other duties go on.
+  The kubeconfig watch and the state writer are threads, and report to the same supervisor; a start of the watch that panics counts as another panic of it, and a panic of the supervisor's own task takes the fatal path.
 - **An item**, a list, an open object, a logs tab, a pod shell, a terminal or a forward, ends where it panicked and is not started again: its owner sends the end the item already has, with the code `internal.panic`, which is a list's last batch in the state `error`, an object's or a logs tab's error, `Failed` for a shell or a terminal, and `failed` for a forward, which the person can resume.
+  A logs tab's download asked of a session that panicked answers `internal.panic`.
   A hub upstream that panicked ends `Failed`, so the next list that holds it starts it, and a store a panic poisoned is emptied before that.
+  An exec or a port-forward through the policy proxy ends when its context relocks, and when the wait for that relock panics.
 - **A plan** whose run panics ends `Failed` with `internal.panic`, its `ended` line in the audit log says `failed`, and its bus entry and undo go free.
   A plan is never retried, since a write must not go out twice.
 - **A command** that is async answers `internal.panic`.
   A sync one runs inside Tauri's own handler, which on macOS is called from wry's `extern "C"` URL scheme handler, so a panic there aborted the process (`SIGABRT`, exit 134, in a probe on macOS 27.2.1 with Tauri 2.12.7, 2026-11-21); the invoke handler now runs under `catch_unwind`, and a panic takes the fatal path.
-- **The fatal path** writes the log, then shows a native dialog, since the webview may be what the panic broke, that says Twigo must restart, with Restart and Quit.
-  Restart asks Tauri to restart; spaces and forwards come back as they do at any start.
+  So do the page-load and window callbacks, after whose panic tao would stop the app with no `RunEvent::Exit`, so with no flush of the state.
+- **The fatal path** writes the log, ends every unlock at once, so that the windows, the sessions and the audit log hear each end as at its time, and asks in a native dialog, since the webview may be what the panic broke, whether to restart or quit.
+  The dialog is a sheet on Twigo's focused window, or its main one, which blocks that window and ends with it; only where no window exists is it the system's own alert.
+  Either answer writes the state first, and Restart asks Tauri to restart: spaces and forwards come back as they do at any start.
+  An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
 - **A joined task's panic** goes on as it was (`twigo_panic::joined`), so the hook records it once.
-- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, in a build with the `inject` feature of `twigo-panic`, which a release build never has: the names are the duties above, `list`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `hub upstream`, `plan run`, `command`, `policy proxy`, and the threads `state writer` and `kubeconfig watch`.
+- **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
+- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are the duties above, `supervisor`, `forward restore`, `list`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
 
 A wasmtime trap ends the extension call, not the app.
 Each webview is already a separate OS process managed by the system.
@@ -2493,7 +2499,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - `protection`: a change of protection a plan made or an unmarked ask's answer gave, with what changed, the context's access before and after, a lock the person's mode sets aside in its source, and the friction it went through or the process, as an approval names it; that line alone, in place of the bus's `confirmed` and `ended`.
   - `catalog`: a change of a context's mode, source or type that no command made, with its access before and after, as the catalog publishes the read that made it, before anything reads that read: a kubeconfig edited, a provider's lock that came or went, a source that listed the context or stopped listing it.
     The catalog's first read is no change, and the policy file, read once as the app starts (4.8), changes nothing while it runs; a context that moves to another cluster keeps its mode, source and type, so only the end of its unlock is noted.
-  - `relocked`: an unlock that ended by a relock, by its time, or as the context named another cluster or none.
+  - `relocked`: an unlock that ended by a relock, by its time, as the context named another cluster or none, or as Twigo met an error it cannot go on from (2.1).
   - `trusted`: a plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
 
   The log names targets, never a value, so the actors of M3 only add their name.
