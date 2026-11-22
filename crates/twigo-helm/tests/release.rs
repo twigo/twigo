@@ -324,6 +324,45 @@ fn two_revisions_compare_with_what_changed_marked() {
     }
 }
 
+/// The page of revision 1 of `release`, a release's JSON, stored as Helm
+/// stores it.
+fn built(release: &Json) -> Page {
+    let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
+    gzip.write_all(release.to_string().as_bytes()).unwrap();
+    let encoded = STANDARD.encode(gzip.finish().unwrap()).into_bytes();
+    let name = release["name"].as_str().unwrap();
+    let labels: BTreeMap<String, String> = [("owner", "helm"), ("name", name), ("version", "1")]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+    page(&Stored {
+        name: &format!("sh.helm.release.v1.{name}.v1"),
+        namespace: "default",
+        kind: "helm.sh/release.v1",
+        labels: &labels,
+        release: Some(&encoded),
+    })
+    .ok()
+    .unwrap()
+}
+
+#[test]
+fn an_uninstall_that_has_not_ended_says_so() {
+    let release = serde_json::json!({
+        "name": "leaving",
+        "version": 1,
+        "info": { "status": "uninstalling", "description": "Deletion in progress (or silently failed)" },
+    });
+    let leaving = shown(&built(&release), None);
+    let Block::Diagnostics { findings } = &leaving.sections[0].blocks[0] else {
+        panic!("the findings");
+    };
+    assert_eq!(
+        (findings[0].tone, findings[0].title.as_str()),
+        (Tone::Warning, "The uninstall has not ended")
+    );
+}
+
 #[test]
 fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
     let release = serde_json::json!({
@@ -340,23 +379,7 @@ fn a_hook_s_secret_is_masked_and_scrubbed_from_the_notes() {
             "last_run": { "phase": "Succeeded" },
         }],
     });
-    let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
-    gzip.write_all(release.to_string().as_bytes()).unwrap();
-    let encoded = STANDARD.encode(gzip.finish().unwrap()).into_bytes();
-    let labels: BTreeMap<String, String> =
-        [("owner", "helm"), ("name", "hooked"), ("version", "1")]
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value.to_owned()))
-            .collect();
-    let hooked = page(&Stored {
-        name: "sh.helm.release.v1.hooked.v1",
-        namespace: "default",
-        kind: "helm.sh/release.v1",
-        labels: &labels,
-        release: Some(&encoded),
-    })
-    .ok()
-    .unwrap();
+    let hooked = built(&release);
     assert_eq!(hooked.notes().text, "The key is <hidden>.");
     assert_eq!(
         hooked.hooks(),
