@@ -210,8 +210,8 @@ async fn an_untrusted_plugin_never_runs_and_a_changed_one_asks_again() {
     );
     assert_eq!(plugins.runs(), 1);
 
-    plugins.write(1, &["--profile", "other"]);
     let mut contexts = core.catalog.subscribe();
+    plugins.write(1, &["--profile", "other"]);
     contexts.changed().await.unwrap();
     let refused = core.cluster_version("kind-0").await.unwrap_err();
     assert_eq!(
