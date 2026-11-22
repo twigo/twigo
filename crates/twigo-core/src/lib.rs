@@ -1175,10 +1175,15 @@ impl Core {
         }
     }
 
+    /// Makes the offers anew at its start, so that a start after a panic
+    /// redoes the refresh that panicked, and at each write of the files.
     async fn follow_offers(&self) {
         let mut written = self.catalog.written();
-        while written.changed().await.is_ok() {
+        loop {
             self.terminals.refresh_offers().await;
+            if written.changed().await.is_err() {
+                return;
+            }
         }
     }
 }
