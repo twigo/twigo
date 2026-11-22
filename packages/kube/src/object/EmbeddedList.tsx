@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ComponentProps } from "react";
 import {
   REFUSED,
   SHOWS_ROWS,
@@ -38,6 +38,7 @@ import { readsMetrics } from "../list/metrics";
 import { whereWords } from "../list/scope";
 import { useListView } from "../list/useListView";
 import { objectOf } from "../selection";
+import { useReopen } from "../useReopen";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
 import type { OverviewStates } from "./overviewStates";
@@ -63,13 +64,21 @@ const FRAME_BORDER = 2;
  * a row opening its object. As its width falls its columns leave in the
  * order a list's do (4.4).
  */
-export function EmbeddedList({
+export function EmbeddedList(
+  props: Omit<ComponentProps<typeof Embedded>, "onReopen">,
+) {
+  const [key, reopen] = useReopen();
+  return <Embedded key={key} {...props} onReopen={reopen} />;
+}
+
+function Embedded({
   list,
   space,
   states,
   kind,
   id,
   onOpen,
+  onReopen,
 }: {
   list: Spec;
   space: string;
@@ -79,6 +88,7 @@ export function EmbeddedList({
   /** Its section's, which keys its state. */
   id: string;
   onOpen: (target: ObjectRef) => void;
+  onReopen: () => void;
 }) {
   const { backend, spaces } = useWorkbench();
   const register = useListRegistration(EMBEDDED_KEYS, ["peek", "filter"]);
@@ -179,7 +189,14 @@ export function EmbeddedList({
     });
   };
   if (REFUSED.has(snapshot.status.state))
-    return <ViewStatus status={snapshot.status} what={gvr.resource} inline />;
+    return (
+      <ViewStatus
+        status={snapshot.status}
+        what={gvr.resource}
+        onRetry={onReopen}
+        inline
+      />
+    );
   const Icon = kindIcon(gvr);
   const loading = !SHOWS_ROWS.has(snapshot.status.state);
   if (!loading && snapshot.total === 0)
