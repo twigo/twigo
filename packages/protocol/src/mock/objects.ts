@@ -23,7 +23,12 @@ import {
   type Node,
   type Pod,
 } from "./cluster";
-import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
+import {
+  ENDS_MS,
+  FIRST_CHANGE_MS,
+  NEXT_CHANGE_MS,
+  type MockEdits,
+} from "./edits";
 import { headed } from "./header";
 import { cardOf, named } from "./pods";
 import { CRASH_LINE as LAST_LINE } from "./logs";
@@ -108,6 +113,8 @@ export interface EditBinding {
   readonly change?: "server" | "status";
   /** A state that a scenario pins the object in, whatever the cluster says. */
   readonly status?: ViewState;
+  /** How the subscription ends after `ENDS_MS`: the status says why, and what the object showed stays. */
+  readonly ends?: ViewState;
 }
 
 /**
@@ -146,6 +153,7 @@ export class MockObject {
   #parts: ObjectParts;
   readonly #status: ViewState;
   #seq = 0;
+  #ended = false;
 
   constructor(
     query: ObjectQuery,
@@ -226,6 +234,7 @@ export class MockObject {
       this.#send(parts);
     }, 0);
     if (binding) this.#follow(binding);
+    if (binding?.ends) this.#endIn(binding.ends);
     this.#followScrapes();
     if (metrics) {
       this.#stops.push(
@@ -317,6 +326,27 @@ export class MockObject {
     next(FIRST_CHANGE_MS);
   }
 
+  /** Ends the subscription as Rust's last batch does: the status says why, `exists` holds, and no part comes again. */
+  #endIn(ends: ViewState): void {
+    const timer = setTimeout(() => {
+      this.#ended = true;
+      this.#seq += 1;
+      this.#onMessage({
+        seq: this.#seq,
+        status: ends,
+        exists: true,
+        overview: null,
+        manifest: null,
+        events: null,
+        related: null,
+        usage: null,
+      });
+    }, ENDS_MS);
+    this.#stops.push(() => {
+      clearTimeout(timer);
+    });
+  }
+
   /** Stops following and changing. */
   close(): void {
     for (const stop of this.#stops) stop();
@@ -378,6 +408,7 @@ export class MockObject {
   }
 
   #send(parts: ObjectParts): void {
+    if (this.#ended) return;
     const usage = parts.usage ? this.#usage() : null;
     if (
       parts.usage &&

@@ -157,11 +157,12 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
- * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
- * RoleBindings reach only the namespace `default` and who may list
- * namespaces, so "All namespaces" has the rows of `default` with the other
- * namespaces left out and counted, and one of several namespaces has the
- * rows of `default` and every other namespace refused, or
+ * (`applyLate`), or one that ends on an internal error (`objectPanicked`), or
+ * `rbacNamespaces`: live lists for a person whose RoleBindings reach only the
+ * namespace `default` and who may list namespaces, so "All namespaces" has the
+ * rows of `default` with the other namespaces left out and counted, and one of
+ * several namespaces has the rows of `default` and every other namespace
+ * refused, or
  * `rbacTypedNamespaces`: live lists for a person bound in `default` and
  * `payments` who may not list namespaces, so the picker takes names typed,
  * "All namespaces" is refused, and a selection has the rows of those two
@@ -951,6 +952,9 @@ export function createMockBackend(
                 }),
                 ...(isCauseScenario(scenario) && {
                   status: CAUSED[scenario],
+                }),
+                ...(scenario === "objectPanicked" && {
+                  ends: CAUSED.listPanicked,
                 }),
               },
         ),
