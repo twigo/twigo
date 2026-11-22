@@ -3044,8 +3044,6 @@ async fn a_sign_in_that_fails_proves_nothing() {
     assert!(failed_with(&core, |error| error.kind == ErrorKind::Unauthorized).is_some());
 }
 
-/// A core whose supervisor gave `duty` up and told the fatal path, which the
-/// test then takes itself.
 async fn given_up(dir: &Path, duty: &str) -> Arc<Core> {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
