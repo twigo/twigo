@@ -273,7 +273,7 @@ function Stated({
   on: boolean;
   onChange: (on: boolean) => void;
 }) {
-  if (!fact.optional) return fact.value;
+  if (!fact.optional) return <span className="pl-5.5">{fact.value}</span>;
   return (
     <label className="flex cursor-pointer items-start gap-2">
       <input
