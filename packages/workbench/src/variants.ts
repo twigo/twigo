@@ -1,7 +1,8 @@
 // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
 
 /**
- * The live variants of how errors show, chosen by `?variant=` in the mock's
+ * The live variants of how errors show and how Twigo's own problems are
+ * reported, chosen by `?variant=` in the mock's
  * URL: `?variant=code:inline,status:code`. A group the URL does not name
  * takes its first variant, the recommended one.
  */
@@ -16,6 +17,10 @@ const VARIANTS = {
   kubeconfig: ["group", "footer"],
   /** Whether a newly failing kubeconfig file raises a toast once. */
   toast: ["once", "none"],
+  /** The report dialog: facts and log apart, one text, or those with a title and a description of what happened. */
+  report: ["sections", "one-text", "compose"],
+  /** How a problem of Twigo's own files reaches the window: a notification when it first appears, or a status bar item with the count. */
+  problems: ["notice", "status"],
 } as const;
 
 export type VariantGroup = keyof typeof VARIANTS;

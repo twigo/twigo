@@ -6,6 +6,7 @@ import { useChanges, useWorkbench } from "../react";
 import type { Location, SideBar } from "../views/registry";
 import { ReviewDialog, TrustDialog } from "./credentials/TrustDialog";
 import { ApprovalHost } from "../approvals/ApprovalHost";
+import { ReportDialog } from "../report/ReportDialog";
 import { ConfirmHost } from "../operations/ConfirmHost";
 import { EditorArea } from "./EditorArea";
 import { PanelBoundary, PartCrash } from "./PanelBoundary";
@@ -184,6 +185,7 @@ export function Shell() {
       <TrustDialog />
       <ConfirmHost />
       <ApprovalHost />
+      <ReportDialog />
       <Toaster clearance={maximized ? 0 : panelHeight} ceiling={TITLE_BAR} />
     </div>
   );
