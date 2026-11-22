@@ -46,7 +46,7 @@ test("Reveal Log File shows the file, and Cancel closes the dialog without sendi
 
 test("Open Issue puts the log as the person sees it on the clipboard before it asks Rust, then closes and says where to paste it", async () => {
   const { calls } = await openReport();
-  const field = screen.getByRole("textbox", { name: /^(Log|Report)$/ });
+  const field = screen.getByRole("textbox", { name: "Log" });
   fireEvent.change(field, {
     target: { value: `${(field as HTMLTextAreaElement).value}\nand my note` },
   });
@@ -141,11 +141,7 @@ test("Open Issue states the facts left ticked and no more, and copies the log al
   expect(log.startsWith("2026-11-22T21:14:00Z INFO")).toBe(true);
   expect(
     calls.find(([command]) => command === "report_open_issue")?.[1],
-  ).toEqual({
-    facts: ["twigo", "system", "engine", "lastPanic"],
-    title: null,
-    description: null,
-  });
+  ).toEqual({ facts: ["twigo", "system", "engine", "lastPanic"] });
 });
 
 test("Save and Copy carry the facts left ticked above the log", async () => {

@@ -40,37 +40,26 @@ export function hiddenWords({
     : `Twigo hid ${listed(parts)}; read it before you paste.`;
 }
 
-/** The text the report is saved and copied as: the facts it states, what the person wrote of it, then the log. */
+/** The text the report is saved and copied as: the facts it states, then the log. */
 export function reportText({
   facts,
-  title = "",
-  description = "",
   log,
 }: {
   facts: readonly Fact[];
-  title?: string;
-  description?: string;
   log: string;
 }): string {
-  return [
-    facts.map(({ label, value }) => `${label}: ${value}`).join("\n"),
-    [title.trim(), description.trim()].filter((part) => part !== "").join("\n"),
-    log,
-  ]
+  return [facts.map(({ label, value }) => `${label}: ${value}`).join("\n"), log]
     .filter((block) => block !== "")
     .join("\n\n");
 }
 
 export function openedWords(
-  { factsCut, descriptionCut }: OpenedIssue,
+  { factsCut }: OpenedIssue,
   facts: readonly Fact[],
 ): string {
-  const cut = [
-    ...factsCut.map(
-      (id) => `shortened ${facts.find((fact) => fact.id === id)?.label ?? id}`,
-    ),
-    ...(descriptionCut ? ["cut your description"] : []),
-  ];
+  const cut = factsCut.map(
+    (id) => `shortened ${facts.find((fact) => fact.id === id)?.label ?? id}`,
+  );
   const said = "The log is on your clipboard: paste it into Logs.";
   return cut.length === 0
     ? said

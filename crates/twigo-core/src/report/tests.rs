@@ -602,35 +602,28 @@ fn fact(id: FactId, label: &str, value: &str) -> twigo_ipc::Fact {
 
 #[test]
 fn the_link_is_the_bare_template_without_facts_and_carries_what_was_ticked() {
-    let (bare, cut) = issue::link(&[], None, None);
+    let (bare, cut) = issue::link(&[]);
     assert_eq!(
         bare,
         "https://github.com/twigo/twigo/issues/new?template=bug_report.yml"
     );
-    assert!(cut.facts_cut.is_empty() && !cut.description_cut);
+    assert!(cut.facts_cut.is_empty());
 
     let facts = [
         fact(FactId::Twigo, "Twigo", "0.1.0 (3f2a9c1)"),
         fact(FactId::Kubernetes, "Kubernetes", "v1.37.2, v1.33.4"),
     ];
-    let (url, _) = issue::link(&facts, Some(" It crashes "), Some("Open a space"));
+    let (url, _) = issue::link(&facts);
     assert_eq!(
         url,
         "https://github.com/twigo/twigo/issues/new?template=bug_report.yml\
-         &title=It%20crashes\
-         &environment=Twigo%3A%200%2E1%2E0%20%283f2a9c1%29%0AKubernetes%3A%20v1%2E37%2E2%2C%20v1%2E33%2E4\
-         &description=Open%20a%20space"
-    );
-    let (url, _) = issue::link(&facts, Some("  "), Some(""));
-    assert!(
-        !url.contains("title=") && !url.contains("description="),
-        "{url}"
+         &environment=Twigo%3A%200%2E1%2E0%20%283f2a9c1%29%0AKubernetes%3A%20v1%2E37%2E2%2C%20v1%2E33%2E4"
     );
 }
 
 #[test]
-fn a_link_past_the_budget_cuts_the_longest_facts_first_and_then_the_description() {
-    let versions = (0..150)
+fn a_link_past_the_budget_cuts_the_longest_fact_down_to_what_fits() {
+    let versions = (0..300)
         .map(|n| format!("v1.{n}.0-eks-2d5f260"))
         .collect::<Vec<_>>()
         .join(", ");
@@ -639,26 +632,16 @@ fn a_link_past_the_budget_cuts_the_longest_facts_first_and_then_the_description(
         fact(FactId::Kubernetes, "Kubernetes", &versions),
     ];
 
-    let (url, cut) = issue::link(&facts, None, Some(&"a".repeat(3000)));
-    assert!(url.len() <= 6000, "{}", url.len());
+    let (url, cut) = issue::link(&facts);
+    assert!(url.len() <= 6000 && url.len() > 5000, "{}", url.len());
     assert_eq!(cut.facts_cut, [FactId::Kubernetes]);
-    assert!(
-        !cut.description_cut,
-        "the description was whole while a fact could still be cut"
-    );
-    assert!(url.contains(&"a".repeat(3000)));
     assert!(
         url.contains("Twigo%3A%200%2E1%2E0%20%283f2a9c1%29"),
         "a short fact stays whole"
     );
-
-    let (url, cut) = issue::link(&facts, None, Some(&"b".repeat(20_000)));
-    assert!(url.len() <= 6000 && url.len() > 5000, "{}", url.len());
-    assert!(cut.description_cut);
-    assert_eq!(cut.facts_cut, [FactId::Kubernetes]);
     assert!(
         url.ends_with("%E2%80%A6"),
-        "the description ends with an ellipsis"
+        "the cut value ends with an ellipsis"
     );
 }
 
@@ -679,10 +662,9 @@ fn the_form_the_link_fills_has_the_fields_it_names() {
             .find(|field| field["id"] == id)
             .unwrap_or_else(|| panic!("the template has no field {id}"))
     };
-    for id in [issue::ENVIRONMENT, issue::DESCRIPTION] {
-        assert_eq!(field(id)["type"], "textarea", "{id}");
-    }
-    assert_eq!(field(issue::ENVIRONMENT)["attributes"]["render"], "text");
+    let environment = field(issue::ENVIRONMENT);
+    assert_eq!(environment["type"], "textarea");
+    assert_eq!(environment["attributes"]["render"], "text");
 }
 
 #[test]
@@ -823,17 +805,7 @@ async fn only_the_facts_left_ticked_go_in_the_link() {
         &directory.path().join("policy.json"),
     );
     let run = facts(None);
-    let ask = |ticked: Vec<FactId>| {
-        core.report_issue(
-            &run,
-            &[],
-            OpenIssue {
-                facts: ticked,
-                title: None,
-                description: None,
-            },
-        )
-    };
+    let ask = |ticked: Vec<FactId>| core.report_issue(&run, &[], OpenIssue { facts: ticked });
     let (url, _) = ask(vec![FactId::Engine, FactId::Kubernetes]).await;
     assert!(
         url.contains("Engine%3A") && !url.contains("Twigo%3A"),

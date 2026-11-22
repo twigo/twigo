@@ -1924,8 +1924,8 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   The report sends no request, and a context nobody opened has no version in it.
 - **What leaves the machine, and how.**
   Twigo itself sends nothing: the person chooses a way out, and every one is theirs to press.
-  - Open Issue on GitHub: `report_open_issue` takes the ids of the facts left ticked, states them again from this run, and has the opener plugin open `…/issues/new?template=bug_report.yml` with them as its `environment` field, and a title and a description in its `description` field when the person wrote them.
-    The link stays under 6,000 characters: past that the longest fact values are cut, down to 40 characters each, then the description, and the answer says which were cut.
+  - Open Issue on GitHub: `report_open_issue` takes the ids of the facts left ticked, states them again from this run, and has the opener plugin open `…/issues/new?template=bug_report.yml` with them as its `environment` field.
+    The link stays under 6,000 characters: past that the longest fact values are cut, down to 40 characters each, and the answer says which were cut.
     A request without a GitHub session got `302` at 7,001 characters, `500` at 7,051 and 8,001 and `414` at 8,201 (`curl -s -o /dev/null -w "%{http_code}"` on `github.com/cli/cli/issues/new?title=t&body=<n × a>`, 2026-11-22); the limit for a signed-in person was not measured.
     The log never goes in the link: opening a link sends it to github.com and keeps it in the browser's history, so the dialog's click handler writes the log to the clipboard, where `report_open_issue` could not, and the person pastes it into the form's Logs field.
   - Save…: `report_save` asks where, through the same dialog as a logs tab's download, and writes the text the person sees as `twigo-report-<date>.txt`, which the form's upload field takes.
@@ -1941,7 +1941,6 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   - The log is one editable monospace field, with a line that says how much the redaction hid (`Twigo hid 6 names, 2 paths and 1 token; read it before you paste`) and Reveal Log File beside it.
   - It says that the issue is public, that nothing leaves the computer until the person chooses and that Twigo itself sends nothing, and links GitHub's private reporting of a vulnerability for a security problem (`SECURITY.md`).
   - Open Issue on GitHub writes the log as the person sees it to the clipboard in its click handler, before `report_open_issue`, since WKWebView may not allow the write after an IPC round trip (not verified); then the dialog closes with a toast that says where to paste the log and what the link had to cut.
-    An answer that says the description was cut keeps the dialog open instead, with a bar that says so and where to paste the log, and Copy description there puts the whole of what the person wrote on the clipboard, in a click of its own, to paste into the form's Description (`report:compose`).
     Save… sends `report_save` the text of the facts left ticked above the log, and Copy puts the same text on the clipboard.
   - A failure of any of them shows its error in the dialog with its code, as every error does (3.7).
 

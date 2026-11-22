@@ -1431,15 +1431,15 @@ group: string, version: string, kind: string,
 namespace: string | null, name: string, };
 
 /**
- * The new issue's form, filled with the ticked facts and what the person
- * wrote; with no facts it is the bare template.
+ * The new issue's form, filled with the ticked facts; with no facts it is
+ * the bare template.
  */
 export type OpenIssue = { 
 /**
  * The ids of the facts the person left ticked: Rust states them again
  * from this run, so only what it wrote goes in the link.
  */
-facts: Array<FactId>, title: string | null, description: string | null, };
+facts: Array<FactId>, };
 
 /**
  * Rust sends nothing of the lines until the webview sets a window.
@@ -1477,13 +1477,13 @@ lock: string,
 locked?: unknown, };
 
 /**
- * What the link left out to stay under its length: the person pastes it.
+ * What the link left out to stay under its length.
  */
 export type OpenedIssue = { 
 /**
  * Facts whose values were shortened.
  */
-factsCut: Array<FactId>, descriptionCut: boolean, };
+factsCut: Array<FactId>, };
 
 /**
  * How a running plan goes, over its channel; every kind but `running` is

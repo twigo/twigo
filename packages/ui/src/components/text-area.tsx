@@ -4,19 +4,6 @@ import { cn } from "../lib/cn";
 const FIELD =
   "rounded-md bg-well px-2 text-xs text-content outline-none placeholder:text-support hover:bg-well-hover focus:shadow-[inset_0_0_0_1px_var(--ring)]";
 
-export function TextField({ className, ...props }: ComponentProps<"input">) {
-  return (
-    <input
-      autoComplete="off"
-      autoCapitalize="off"
-      autoCorrect="off"
-      spellCheck={false}
-      {...props}
-      className={cn(FIELD, "h-7", className)}
-    />
-  );
-}
-
 export function TextArea({
   mono = false,
   className,

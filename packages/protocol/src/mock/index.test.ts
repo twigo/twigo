@@ -1591,23 +1591,11 @@ test("the report is the one Rust renders from a recorded log, and opening and sa
   expect(report.log).not.toContain("prod-eu");
   expect(report.hidden.names).toBeGreaterThan(0);
 
-  const request = { facts: ["twigo" as const], title: "x", description: null };
+  const request = { facts: ["twigo" as const] };
   expect(await settled(backend.invoke("report_open_issue", request))).toEqual({
     factsCut: [],
-    descriptionCut: false,
   });
   expect(info).toHaveBeenCalledWith("[report_open_issue]", request);
-
-  const cutting = createMockBackend("reportCut");
-  expect(await settled(cutting.invoke("report_open_issue", request))).toEqual({
-    factsCut: [],
-    descriptionCut: false,
-  });
-  expect(
-    await settled(
-      cutting.invoke("report_open_issue", { ...request, description: "long" }),
-    ),
-  ).toEqual({ factsCut: [], descriptionCut: true });
 
   const saved = await settled(backend.invoke("report_save", { text: "a" }));
   expect(saved).toMatch(/twigo-report-\d{4}-\d{2}-\d{2}\.txt$/);
