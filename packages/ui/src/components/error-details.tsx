@@ -40,7 +40,7 @@ export function ErrorDetails({
   return (
     <span
       className={cn(
-        "flex flex-wrap items-center gap-x-2.5 text-left leading-5",
+        "mt-1 flex flex-wrap items-center gap-x-3 text-left font-normal",
         className,
       )}
     >
