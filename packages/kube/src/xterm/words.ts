@@ -109,7 +109,6 @@ export function sessionState(status: SessionStatus): SessionState {
   }
 }
 
-/** The error that Twigo's own code ended a session with, when it did. */
 export function internalEnd(status: SessionStatus): ErrorLike | undefined {
   return status.state === "ended" &&
     status.end.reason === "failed" &&

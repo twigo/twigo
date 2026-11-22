@@ -25,7 +25,6 @@ export function announceProblem(
   });
 }
 
-/** A problem that Rust no longer lists takes its notification with it. */
 export function dismissProblem(code: string): void {
   notify.dismiss(problemToast(code));
 }

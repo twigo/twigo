@@ -61,7 +61,6 @@ export function viewProblem(
 
 export type ObjectProblem = NonNullable<ReturnType<typeof objectProblem>>;
 
-/** Whether Twigo's own code stopped what the problem is about. */
 export function isStopped({ error }: ObjectProblem): boolean {
   return error !== undefined && isInternalError(error);
 }

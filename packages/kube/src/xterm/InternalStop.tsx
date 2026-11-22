@@ -3,7 +3,6 @@ import { Banner } from "@twigo/ui";
 import { ErrorMessage, INTERNAL_ERROR, type ErrorLike } from "@twigo/workbench";
 import { StoppedActions } from "../StoppedActions";
 
-/** A shell or a terminal that Twigo's own code stopped: its code and Rust's message in Copy details, Reopen and Report…. */
 export function InternalStop({
   error,
   reopen,

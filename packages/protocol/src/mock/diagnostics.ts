@@ -30,7 +30,6 @@ export type CauseScenario = (typeof CAUSE_SCENARIOS)[number];
 /** `logsPanicked`: live lists while every log stream of a session ends on an internal error of Twigo's. */
 export const LOGS_PANICKED = "logsPanicked";
 
-/** A logs batch with each container's stream ended as Rust ends one whose task panicked. */
 export function panickedLogs(batch: LogBatch): LogBatch {
   return {
     ...batch,
