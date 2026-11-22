@@ -1099,6 +1099,33 @@ async fn the_log_records_each_unlock_s_end_and_why() {
 }
 
 #[test]
+fn the_fatal_path_ends_every_unlock_at_once_and_the_log_says_so() {
+    let (_dir, path, policy) = audited_policy(Metadata {
+        read_only: true,
+        ..NOTHING
+    });
+    policy.unlock("c").unwrap();
+    policy.unlock("d").unwrap();
+    let mut changes = policy.changes();
+    changes.borrow_and_update();
+
+    policy.end_unlocks();
+    assert_eq!(policy.access("c").mode, Mode::ReadOnly);
+    assert_eq!(policy.access("d").mode, Mode::ReadOnly);
+    assert!(changes.has_changed().unwrap());
+    let mut ended: Vec<_> = audited(&path)
+        .iter()
+        .filter(|line| line["event"] == "relocked")
+        .map(|line| (line["context"].clone(), line["by"].clone()))
+        .collect();
+    ended.sort_by_key(|(context, _)| context.to_string());
+    assert_eq!(
+        ended,
+        [("c", "fatal"), ("d", "fatal")].map(|(context, by)| (context.into(), by.into()))
+    );
+}
+
+#[test]
 fn the_log_records_what_a_change_of_the_catalog_did_to_a_context_s_access_once() {
     let locked = Metadata {
         read_only: true,

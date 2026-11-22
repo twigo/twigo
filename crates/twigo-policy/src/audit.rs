@@ -92,8 +92,9 @@ pub enum Entry<'a> {
         by: By<'a>,
     },
     /// An unlock ended before a person changed the context: by a relock
-    /// (`command`), by its time (`time`), or as the context named another
-    /// cluster (`moved`) or none (`unlisted`).
+    /// (`command`), by its time (`time`), as the context named another
+    /// cluster (`moved`) or none (`unlisted`), or as Twigo met an error it
+    /// cannot go on from (`fatal`).
     Relocked { context: &'a str, by: &'a str },
     /// What the catalog says of a context changed its mode, its source or
     /// its type, with no command: its kubeconfig was edited, its provider's

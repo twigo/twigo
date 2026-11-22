@@ -2,7 +2,7 @@
 //! anew for every request, so a change reaches clients already built.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use jiff::{SignedDuration, Timestamp};
@@ -749,6 +749,28 @@ impl Policy {
             self.changed();
         }
         self.relocked(context, ended.then_some("command"));
+    }
+
+    /// Ends every unlock now, as the fatal path does before it asks, so
+    /// that nothing outlives one while Twigo waits for the person: the
+    /// windows, the sessions and the audit log hear each end as at its time.
+    /// It takes the lock back from a panic, since ending an unlock only takes
+    /// access away.
+    pub fn end_unlocks(&self) {
+        let ended: Vec<String> = {
+            let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+            let ended: Vec<String> = held.unlocks.keys().cloned().collect();
+            for context in &ended {
+                held.end_unlock(context);
+            }
+            ended
+        };
+        if !ended.is_empty() {
+            self.changed();
+        }
+        for context in &ended {
+            self.relocked(context, Some("fatal"));
+        }
     }
 
     /// Records what a change of the catalog did to `context`, which no
