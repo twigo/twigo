@@ -1777,8 +1777,53 @@ async fn a_failed_command_s_ended_line_holds_its_code_and_none_of_the_server_s_w
 }
 
 #[tokio::test]
+async fn a_plan_that_ends_in_error_leaves_one_event_with_its_code_and_command_and_none_of_the_server_s_words()
+ {
+    let logged = twigo_log::capture();
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|_: Progress| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2": must be a number"#,
+            ))
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (_told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the end: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.invalid");
+    assert_eq!(event["fields"]["command"], "delete");
+    assert_eq!(event["fields"]["outcome"], "failed");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
+}
+
+#[tokio::test]
 async fn a_stopped_delete_s_ended_line_holds_its_sentence_and_the_failed_codes_and_none_of_the_server_s_words()
  {
+    let logged = twigo_log::capture();
     let server = Scripted::start(|line, _| match line {
         "GET /api/v1/namespaces/a/configmaps/m1 HTTP/1.1" => (
             200,
@@ -1854,6 +1899,17 @@ async fn a_stopped_delete_s_ended_line_holds_its_sentence_and_the_failed_codes_a
     );
     assert_eq!(ended["codes"], json!(["server.forbidden"]));
     assert!(!file.contains("hunter2"), "{file}");
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the stop: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.forbidden");
+    assert_eq!(event["fields"]["outcome"], "stopped");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
 }
 
 #[test]

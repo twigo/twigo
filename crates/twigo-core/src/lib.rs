@@ -539,6 +539,9 @@ impl Core {
                     (OperationEvent::Failed { error }, "failed", None, vec![code])
                 }
             };
+            if let Some(code) = codes.first() {
+                tracing::info!(%context, command, outcome, %code, "a command ended in error");
+            }
             policy.audit().record(&Entry::Ended {
                 context: &context,
                 command,
