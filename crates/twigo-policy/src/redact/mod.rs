@@ -1,44 +1,163 @@
-//! What the webview may see of an object (ARCHITECTURE 3.6): managedFields
-//! stay in Rust, and so do a Secret's values until a Reveal.
+//! What the webview may see of an object and of a Helm release
+//! (ARCHITECTURE 3.6): managedFields stay in Rust, and so do a Secret's
+//! values, a release's values and the Secrets of its manifest until a
+//! Reveal, while texts that may quote them are scrubbed of them.
+
+use std::borrow::Cow;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{ErrorCode, IpcError};
 
+mod held;
+pub mod manifest;
+mod scrub;
+pub mod values;
+
+pub use held::{Held, Size};
+pub use scrub::{HIDDEN, revealed_text, scrub, scrubbed, scrubbed_text, secret_values};
+
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
-/// The object as a view shows it: managedFields dropped, and for a Secret
-/// each value replaced by its size and the last-applied annotation dropped.
+/// The object as a view shows it: managedFields dropped, for a Secret each
+/// value replaced by its size and the last-applied annotation dropped, and
+/// for a ConfigMap that holds a Helm release its `release` replaced by its
+/// size.
 pub fn for_view(mut object: Value) -> Value {
-    let secret = object["apiVersion"] == "v1" && object["kind"] == "Secret";
-    if let Some(metadata) = object["metadata"].as_object_mut() {
+    if let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) {
         metadata.remove("managedFields");
-        if secret
-            && let Some(annotations) = metadata
-                .get_mut("annotations")
-                .and_then(Value::as_object_mut)
-        {
-            annotations.remove(LAST_APPLIED);
-        }
     }
-    if secret {
-        for (field, encoded) in [("data", true), ("stringData", false)] {
-            let Some(values) = object.get_mut(field).and_then(Value::as_object_mut) else {
-                continue;
-            };
-            for value in values.values_mut() {
-                let bytes = match value.as_str() {
-                    Some(text) if encoded => STANDARD.decode(text).map_or(0, |bytes| bytes.len()),
-                    Some(text) => text.len(),
-                    None => 0,
-                };
-                *value = Value::String(format!("<{bytes} bytes>"));
-            }
-        }
+    if object["apiVersion"] == "v1" && object["kind"] == "Secret" {
+        mask_secret(&mut object);
+    } else if holds_helm_release(&object)
+        && let Some(release) = object
+            .get_mut("data")
+            .and_then(|data| data.get_mut("release"))
+    {
+        *release = Value::String(mask(release.as_str().map_or(0, str::len) as u64));
     }
     object
+}
+
+/// Whether `object` is a ConfigMap that Helm's ConfigMap driver keeps a
+/// release in, whose `release` holds the release's values and manifest as
+/// a Secret's would.
+pub fn holds_helm_release(object: &Value) -> bool {
+    object["apiVersion"] == "v1"
+        && object["kind"] == "ConfigMap"
+        && object["metadata"]["labels"]["owner"] == "helm"
+}
+
+/// A Secret with each value replaced by its size and the last-applied
+/// annotation dropped.
+fn mask_secret(secret: &mut Value) {
+    mask_secret_with(secret, |_| false);
+}
+
+/// [`mask_secret`], each value that `changed` picks reading
+/// `<N bytes, changed>`.
+fn mask_secret_with(secret: &mut Value, changed: impl Fn(&Entry<'_>) -> bool) {
+    let masks: Vec<(Field, String, String)> = entries(secret)
+        .map(|entry| {
+            let bytes = entry.bytes();
+            let mask = if changed(&entry) {
+                format!("<{bytes} bytes, changed>")
+            } else {
+                mask(bytes)
+            };
+            (entry.field, entry.key.to_owned(), mask)
+        })
+        .collect();
+    for (field, key, mask) in masks {
+        secret[field.name()][key] = Value::String(mask);
+    }
+    if let Some(annotations) = secret
+        .get_mut("metadata")
+        .and_then(|metadata| metadata.get_mut("annotations"))
+        .and_then(Value::as_object_mut)
+    {
+        annotations.remove(LAST_APPLIED);
+    }
+}
+
+fn mask(bytes: u64) -> String {
+    format!("<{bytes} bytes>")
+}
+
+/// Where a Secret keeps a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    /// In base64.
+    Data,
+    /// As text, which the server writes over `data`.
+    StringData,
+}
+
+impl Field {
+    pub fn name(self) -> &'static str {
+        match self {
+            Field::Data => "data",
+            Field::StringData => "stringData",
+        }
+    }
+}
+
+/// One value of a Secret, which has no `Debug`, as it would print the value.
+#[derive(Clone, Copy)]
+pub struct Entry<'a> {
+    pub field: Field,
+    pub key: &'a str,
+    pub value: &'a Value,
+}
+
+impl Entry<'_> {
+    /// Its size in bytes. A value of `data` counts the bytes its base64
+    /// stands for, from its length and padding, never decoded: one that is
+    /// no base64, which the API server never serves and only a release's
+    /// manifest can hold, shows the size its length would decode to.
+    pub fn bytes(&self) -> u64 {
+        let text = self.text();
+        match self.field {
+            Field::Data => {
+                let padding = text
+                    .bytes()
+                    .rev()
+                    .take(2)
+                    .filter(|&byte| byte == b'=')
+                    .count();
+                ((text.len() - padding) * 3 / 4) as u64
+            }
+            Field::StringData => text.len() as u64,
+        }
+    }
+}
+
+impl<'a> Entry<'a> {
+    /// The value's text: a string's, none for null, and the JSON of any
+    /// other value, which only a release's manifest can hold.
+    pub fn text(&self) -> Cow<'a, str> {
+        match self.value {
+            Value::String(text) => Cow::Borrowed(text),
+            Value::Null => Cow::Borrowed(""),
+            other => Cow::Owned(other.to_string()),
+        }
+    }
+}
+
+/// A Secret's values: those of `data`, then those of `stringData`, each in
+/// the order of its keys.
+pub fn entries(secret: &Value) -> impl Iterator<Item = Entry<'_>> {
+    [Field::Data, Field::StringData]
+        .into_iter()
+        .flat_map(move |field| {
+            secret[field.name()]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(move |(key, value)| Entry { field, key, value })
+        })
 }
 
 /// Whether `text` reads as what [`for_view`] puts in place of a Secret's
@@ -58,22 +177,33 @@ pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcErro
             "only a Secret's values are revealed".to_owned(),
         ));
     }
-    let encoded = object["data"][key].as_str().ok_or_else(|| {
-        IpcError::new(
-            ErrorCode::SecretNoKey,
-            format!("the Secret has no key {key}"),
-        )
-    })?;
-    let bytes = STANDARD.decode(encoded).map_err(|error| {
-        IpcError::new(
-            ErrorCode::AnswerUndecodable,
-            format!("the value of {key} is no base64: {error}"),
-        )
-    })?;
-    Ok(match String::from_utf8(bytes) {
-        Ok(text) => (text, false),
-        Err(_) => (encoded.to_owned(), true),
-    })
+    value_of(object, key)
+}
+
+/// A Secret's value of `key` as [`secret_value`] gives it: `stringData`'s,
+/// which the server writes over `data`, else `data`'s decoded, or as written
+/// when it is no base64, which only a release's manifest can hold.
+fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
+    let entry = entries(secret)
+        .filter(|entry| entry.key == key)
+        .last()
+        .ok_or_else(|| {
+            IpcError::new(
+                ErrorCode::SecretNoKey,
+                format!("the Secret has no key {key}"),
+            )
+        })?;
+    let text = entry.text();
+    if entry.field == Field::StringData {
+        return Ok((text.into_owned(), false));
+    }
+    Ok(
+        match STANDARD.decode(text.as_bytes()).map(String::from_utf8) {
+            Ok(Ok(decoded)) => (decoded, false),
+            Ok(Err(_)) => (text.into_owned(), true),
+            Err(_) => (text.into_owned(), false),
+        },
+    )
 }
 
 /// `text` with each of `names` that stands in it as a whole token replaced by
@@ -173,6 +303,25 @@ mod tests {
     }
 
     #[test]
+    fn a_value_counts_what_its_base64_stands_for_without_decoding_it() {
+        let shown = for_view(json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "one": "aA==", "two": "aGk=", "three": "aGkh", "empty": "", "bad": "not base64!" },
+        }));
+        assert_eq!(
+            shown["data"],
+            json!({
+                "one": "<1 bytes>",
+                "two": "<2 bytes>",
+                "three": "<3 bytes>",
+                "empty": "<0 bytes>",
+                "bad": "<8 bytes>",
+            })
+        );
+    }
+
+    #[test]
     fn a_mask_is_only_what_a_view_writes_for_a_value() {
         for mask in ["<7 bytes>", "<0 bytes>", "<12345 bytes>"] {
             assert!(is_mask(mask), "{mask}");
@@ -242,6 +391,18 @@ mod tests {
         assert_eq!(value, ("MIIBCgKCAQEA/w==".to_owned(), true));
         let missing = secret_value(&secret, "token").unwrap_err();
         assert_eq!(missing.code, ErrorCode::SecretNoKey);
+        let written = serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "both": "aHVudGVyMg==", "bad": "not base64!" },
+            "stringData": { "both": "typed", "token": "s3cret" },
+        });
+        let value = secret_value(&written, "token").unwrap();
+        assert_eq!(value, ("s3cret".to_owned(), false));
+        let value = secret_value(&written, "both").unwrap();
+        assert_eq!(value, ("typed".to_owned(), false), "stringData wins");
+        let value = secret_value(&written, "bad").unwrap();
+        assert_eq!(value, ("not base64!".to_owned(), false));
         let config = serde_json::json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",

@@ -1,0 +1,11 @@
+---
+# Source: plain/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beta-plain
+data:
+  message: "hi-from-v3"
+  ports: "80,443"
+  deep: "deep"
+

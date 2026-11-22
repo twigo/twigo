@@ -1,0 +1,3 @@
+NOTES:
+Log in as admin with the password epsilon-password-r2.
+

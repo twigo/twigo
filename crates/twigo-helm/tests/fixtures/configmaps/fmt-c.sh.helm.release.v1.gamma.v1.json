@@ -1,0 +1,21 @@
+{
+    "apiVersion": "v1",
+    "data": {
+        "release": "H4sIAAAAAAAC/5RU227bOBD9FWL2YV8kV6Jva77VbuII6SZo4vqidVHQIiWz5kUrUr4k8L8vKDVO22AXWICA6cOZ4ZzhOXoGTRUHAgVVikIAQucGyDPkorLuK+OlNCfOgACO8CCM4xDjGY5IPCQx7uDuAPdTCEDS/xHMuM0qUTphNBBItHVUSpQZVUruOARgHXW1BQK2LnllOeMMzgFkW1o535vijjLqqN9/b7+UVGgIYM8r29bFnW6n9+a296ipgkyOaCnmbTTaxwE6VMI5rlFuKjQ7iML8btENlwoxnhnGK5SLo6srbgN0EG6LtEF397Orx447OgjgtRoQ2McNUv6AjDwDabIdEF1LGYDjqpTUcQvkrwuNC/guMzoXhaJl50SV9DwawrBajsu5mp8yLPebb6Zg365uKZZ1+sEUn/CoTpXUs8X1YaJiyabXu9XyYXtfmCKZ9rebxedBcuOGyaT/mC6OcrW8kx93DV7ky8hl0+OWLnq36fQ6Ws3MbTIZu3R597RaMHkvxkN+el/P1bVli/nTRxXLrHu3TfHnIp+Mj2wxitLH8Sj/ZIrkZrzP9MNTmzP+e4NlnUwSm4gf8nUbk9wcimw537Np04O/c5cu5oe39/Vl1n2Q6aRv02UqNx+u6s10jtPF4fRrDQhAGeaE4m+l2CV40OnGvag/HIy6KZy/BLCnsua2VZa1tPBpWy6lgQA0t85L+hkk33MZX3YYCDDOSzifAyhN5fxD/hEFvV73yzkAm225oi+P3f57bSqKojhs1iyKSLO8M3IhuX3J+S8KcWeAe0McD3rDtLFGo5afGQgd0vAiIx+lqBY5tw4IhGG41r+hR1NXGSeosc+7f1PfWr+qm6B9vNY7oRlBkybqT1qu9YslyVoj5MVMUPNFCZvKa305+94fQetfGlyDP24G6Q/bSbagH7PH/K9H1j85PQ4a99iSZp52rlyYtfaTp6+Ku61hQMBaCud/BgDvsSJg7gQAAA=="
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+        "creationTimestamp": "2026-11-22T20:17:12Z",
+        "labels": {
+            "modifiedAt": "1795378632",
+            "name": "gamma",
+            "owner": "helm",
+            "status": "superseded",
+            "version": "1"
+        },
+        "name": "sh.helm.release.v1.gamma.v1",
+        "namespace": "fmt-c",
+        "resourceVersion": "1877",
+        "uid": "3658eb92-b964-4a24-a371-bd41959c0544"
+    }
+}

@@ -1,0 +1,12 @@
+---
+# Source: failing/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: epsilon-credentials
+type: Opaque
+data:
+  password: "ZXBzaWxvbi1wYXNzd29yZC1yMg=="
+  extra: "not base64!"
+
+

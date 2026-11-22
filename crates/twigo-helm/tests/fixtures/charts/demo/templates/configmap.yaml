@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels:
+    {{- include "demo.labels" . | nindent 4 }}
+data:
+  replicas: {{ .Values.replicaCount | quote }}
+  image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  region: {{ .Values.global.region | quote }}
+  fromSub: {{ .Values.fromSub.answer | quote }}
+  app.toml: |
+{{ .Files.Get "files/app.toml" | indent 4 }}

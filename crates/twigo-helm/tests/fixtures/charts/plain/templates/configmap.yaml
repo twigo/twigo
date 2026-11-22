@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-plain
+data:
+  message: {{ .Values.message | quote }}
+  ports: {{ join "," .Values.ports | quote }}
+  deep: {{ .Values.nested.level1.level2 | quote }}

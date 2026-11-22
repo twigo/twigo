@@ -1,0 +1,24 @@
+---
+# Source: demo/templates/hook-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alpha-hook
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  revision: "2"
+
+---
+# Source: demo/templates/tests/test-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alpha-test
+  annotations:
+    "helm.sh/hook": test
+data:
+  check: "a test hook that is stored but never run here"
+
