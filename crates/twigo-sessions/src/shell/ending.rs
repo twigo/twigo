@@ -85,8 +85,6 @@ mod tests {
         }
     }
 
-    /// The 500 the table's statuses carry, as a request that the server
-    /// answers 500 to is told.
     fn failed(json: &str) -> ShellEnd {
         let status = status(json);
         ShellEnd::Failed {

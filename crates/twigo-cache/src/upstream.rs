@@ -936,14 +936,12 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
 #[derive(Clone)]
 pub(crate) enum Failure {
     Gone,
-    /// What may pass, with the failure that says so.
     Transient(IpcError),
     Refused(ViewState),
     Unauthorized,
 }
 
 impl Failure {
-    /// The failure that may pass, if this is one.
     pub(crate) fn cause(self) -> Option<IpcError> {
         match self {
             Failure::Transient(cause) => Some(cause),

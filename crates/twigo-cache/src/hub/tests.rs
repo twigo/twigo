@@ -19,7 +19,6 @@ pub(super) fn forbidden() -> ViewState {
     }
 }
 
-/// The code of the failure that a waiting state waits out.
 pub(super) fn waits_on(state: &ViewState) -> Option<ErrorCode> {
     match state {
         ViewState::Connecting { cause } | ViewState::Stale { cause } => {

@@ -1410,12 +1410,10 @@ async fn a_refusal_ends_the_connections_and_a_restart_starts_over() {
 
 const UNANSWERED: &str = "the cluster does not answer";
 
-/// The code of a forward's last failure.
 fn failed_as(status: &Status) -> Option<ErrorCode> {
     status.failure.as_ref().map(|failure| failure.code)
 }
 
-/// The words of a forward's last failure.
 fn said(status: &Status) -> Option<&str> {
     status
         .failure

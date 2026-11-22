@@ -397,7 +397,6 @@ struct Shared {
     received: AtomicU64,
 }
 
-/// What a state that is an error says of itself, and its code.
 fn entered(state: &ForwardState) -> Option<(&'static str, ErrorCode)> {
     match state {
         ForwardState::Reconnecting { reason } => Some(("a forward is reconnecting", reason.code)),

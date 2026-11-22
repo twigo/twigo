@@ -35,7 +35,6 @@ async fn closed_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-/// Accepts connections, reads what comes and answers `reply`, then closes.
 async fn replying(reply: &'static [u8]) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();

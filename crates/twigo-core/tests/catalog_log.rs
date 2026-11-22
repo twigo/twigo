@@ -11,7 +11,6 @@ use tracing::{Event, Level, Metadata, Subscriber};
 use twigo_core::catalog::Catalog;
 use twigo_kube::kubeconfig::Sources;
 
-/// The level, `code` and `path` of each event it hears.
 #[derive(Clone, Default)]
 struct Heard(Arc<Mutex<Vec<(Level, String, String)>>>);
 

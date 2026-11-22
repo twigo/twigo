@@ -321,7 +321,6 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
     }
 }
 
-/// Why the policy file at `path` cannot be read, as the window is told.
 fn reason_of(file: PolicyFile) -> String {
     let policy = Policy::new(file, |_| Some(NOTHING), Choices::default(), Audit::off());
     match policy.access("anything").source {
