@@ -1,7 +1,6 @@
 //! What the app does when Twigo cannot go on, and how a command meets a panic
 //! (ARCHITECTURE 2.1).
 
-use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -10,7 +9,6 @@ use tauri::ipc::Invoke;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use twigo_core::Core;
-use twigo_ipc::IpcError;
 
 const TITLE: &str = "Twigo must restart";
 const MESSAGE: &str = "Twigo ran into an internal error that it cannot recover from.\n\nWhat happened is in its log. Restart brings back your spaces and your forwards.";
@@ -71,7 +69,7 @@ impl<R: Runtime> Path<R> {
             flush(&core);
             return;
         };
-        let stage = Arc::clone(&self.stage);
+        let path = self.clone();
         app.dialog()
             .message(MESSAGE)
             .title(TITLE)
@@ -82,16 +80,30 @@ impl<R: Runtime> Path<R> {
             ))
             .parent(&window)
             .show(move |restart| {
-                if !stage.answer() {
+                if !path.answered(&core, restart) {
                     return;
                 }
-                flush(&core);
                 if restart {
                     app.request_restart();
                 } else {
                     app.exit(1);
                 }
             });
+    }
+
+    /// The person's answer to the sheet, which the log keeps before the state
+    /// is written. False once Twigo is ending, when it counts for nothing.
+    fn answered(&self, core: &Core, restart: bool) -> bool {
+        if !self.stage.answer() {
+            return false;
+        }
+        if restart {
+            tracing::info!("the person chose Restart, so Twigo restarts");
+        } else {
+            tracing::info!("the person chose Quit, so Twigo quits");
+        }
+        flush(core);
+        true
     }
 
     /// Twigo is ending: an answer that comes after does nothing, so an exit
@@ -182,57 +194,12 @@ pub fn flush(core: &Core) {
     }
 }
 
-/// An async command that answers `internal.panic` where it would otherwise
-/// leave the webview's promise pending for good, since Tauri answers only
-/// once the command's future ends.
-pub async fn contained<T>(
-    command: impl Future<Output = Result<T, IpcError>>,
-) -> Result<T, IpcError> {
-    let answered = twigo_panic::contain("command", command)
-        .await
-        .unwrap_or_else(|_| Err(IpcError::panicked("this command")));
-    if let Err(error) = &answered {
-        tracing::info!(code = %error.code, "a command answered an error");
-    }
-    answered
-}
-
 #[cfg(test)]
 mod tests {
     use tauri::test::{MockRuntime, mock_app};
-    use twigo_ipc::{ErrorCode, Mode, StateEntry};
+    use twigo_ipc::{Mode, StateEntry};
 
     use super::*;
-
-    #[tokio::test]
-    async fn an_async_command_that_panics_answers_internal_panic() {
-        let answered: Result<u8, IpcError> = contained(async { panic!("a command's bug") }).await;
-        assert_eq!(answered.unwrap_err().code, ErrorCode::InternalPanic);
-        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
-        let refused: Result<u8, IpcError> =
-            contained(async { Err(IpcError::new(ErrorCode::SpaceNotFound, "no")) }).await;
-        assert_eq!(refused.unwrap_err().code, ErrorCode::SpaceNotFound);
-    }
-
-    #[tokio::test]
-    async fn a_command_that_answers_an_error_leaves_one_line_with_its_code_and_none_of_its_words() {
-        let events = twigo_log::capture();
-        let refused: Result<u8, IpcError> = contained(async {
-            Err(IpcError::new(
-                ErrorCode::ServerInvalid,
-                r#"Invalid value: "hunter2""#,
-            ))
-        })
-        .await;
-        assert!(refused.is_err());
-        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
-        let lines = events.lines();
-        let [event] = &lines[..] else {
-            panic!("one event for one error: {lines:?}");
-        };
-        assert_eq!(event["fields"]["code"], "server.invalid");
-        assert!(!event.to_string().contains("hunter2"), "{event}");
-    }
 
     #[test]
     fn a_panic_on_the_main_thread_takes_the_fatal_path() {
@@ -284,6 +251,54 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
         assert_eq!(core.policy.access("kind-a").unlocked_until, None);
         let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap_or_default();
         assert!(state.contains("kept"), "{state}");
+    }
+
+    #[test]
+    fn the_answer_to_the_sheet_is_logged_and_the_state_written_unless_twigo_is_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        core.state
+            .set(vec![StateEntry {
+                space: None,
+                key: "kept".to_owned(),
+                value: "1".to_owned(),
+            }])
+            .unwrap();
+        let said = |restart| {
+            let events = twigo_log::capture();
+            let path = Path::<MockRuntime>::default();
+            assert!(path.stage.ask());
+            (path.answered(&core, restart), events.lines())
+        };
+
+        let (counts, lines) = said(true);
+        assert!(counts);
+        let [line] = &lines[..] else {
+            panic!("one line for the answer: {lines:?}");
+        };
+        assert_eq!(line["target"], "twigo::fatal");
+        assert_eq!(
+            line["fields"]["message"],
+            "the person chose Restart, so Twigo restarts"
+        );
+        let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap_or_default();
+        assert!(state.contains("kept"), "{state}");
+        let (_, lines) = said(false);
+        assert_eq!(
+            lines[0]["fields"]["message"],
+            "the person chose Quit, so Twigo quits"
+        );
+
+        let events = twigo_log::capture();
+        let path = Path::<MockRuntime>::default();
+        assert!(path.stage.ask());
+        path.ending();
+        assert!(!path.answered(&core, true));
+        assert!(events.lines().is_empty());
     }
 
     #[test]

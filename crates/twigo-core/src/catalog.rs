@@ -12,7 +12,7 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
-use twigo_ipc::{CatalogFailure, IpcError};
+use twigo_ipc::{CatalogFailure, ErrorCode, IpcError};
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
 use twigo_panic::Reporter;
 use twigo_policy::{Metadata, Policy, TypeLock};
@@ -41,14 +41,25 @@ fn sorted(catalog: kubeconfig::Catalog) -> (Vec<kubeconfig::Context>, Vec<Catalo
 /// Says what changed in the failures since the last read, one line for each
 /// file: a failure that holds is not said again, a changed one is said as it
 /// is, and a file is said to fail no longer once none of its failures is left.
+/// A file the person broke is a warning; one that Twigo cannot watch is Twigo's
+/// own failure, an error.
 fn tell_failures(before: &[CatalogFailure], now: &[CatalogFailure]) {
     for failure in now.iter().filter(|failure| !before.contains(failure)) {
-        tracing::warn!(
-            path = %failure.source,
-            code = %failure.error.code,
-            "{}",
-            failure.error.message
-        );
+        if failure.error.code == ErrorCode::KubeconfigUnwatched {
+            tracing::error!(
+                path = %failure.source,
+                code = %failure.error.code,
+                "{}",
+                failure.error.message
+            );
+        } else {
+            tracing::warn!(
+                path = %failure.source,
+                code = %failure.error.code,
+                "{}",
+                failure.error.message
+            );
+        }
     }
     for failure in before
         .iter()

@@ -1,8 +1,17 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { ErrorMessage } from "./ErrorMessage";
 import { Toaster } from "@twigo/ui";
 import { notifyError } from "./notifyError";
+import { inWorkbench, testWorkbench } from "./testing";
 
 afterEach(cleanup);
 
@@ -66,4 +75,29 @@ test("in a toast Copy details has the look of the toast's own buttons", async ()
       true,
     ]);
   }
+});
+
+test("a toast of Twigo's own error says it in Twigo's words, led by what it belongs to, and offers Report…", async () => {
+  const workbench = await testWorkbench();
+  render(<Toaster />, { wrapper: inWorkbench(workbench) });
+  act(() => {
+    notifyError(
+      {
+        code: "internal.panic",
+        message: "Twigo stopped this forward on an internal error",
+      },
+      { lead: "web → 8080 failed: " },
+    );
+  });
+  const toast = (
+    await screen.findByText(/Twigo hit an internal error/)
+  ).closest<HTMLElement>("[role=alert]");
+  if (!toast) throw new Error("no toast");
+  expect(toast.textContent).toBe(
+    "web → 8080 failed: Twigo hit an internal errorinternal.panicCopy detailsReport…",
+  );
+  fireEvent.click(within(toast).getByRole("button", { name: "Report…" }));
+  await waitFor(() => {
+    expect(workbench.problemReport.report).toBeDefined();
+  });
 });

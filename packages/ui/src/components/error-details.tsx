@@ -15,16 +15,25 @@ export function ErrorDetails({
   code,
   copy,
   notice = false,
+  onReport,
   className,
 }: {
   code: string;
   /** What Copy details puts on the clipboard. */
   copy: string;
-  /** Inside a notice, whose own buttons are brand text on a plate: so is Copy details. */
+  /** Inside a notice, whose own buttons are brand text on a plate: so are the buttons here. */
   notice?: boolean;
+  /** Where the error is Twigo's own, a button after Copy details that reports it. */
+  onReport?: () => void;
   className?: string;
 }) {
   const [result, onCopy] = useCopy(copy);
+  const button = cn(
+    "rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]",
+    notice
+      ? "px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10"
+      : "text-xs text-support underline-offset-2 hover:text-content hover:underline",
+  );
   return (
     <span
       className={cn(
@@ -38,16 +47,15 @@ export function ErrorDetails({
       <button
         type="button"
         onClick={onCopy}
-        className={cn(
-          "rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]",
-          notice
-            ? "px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10"
-            : "text-xs text-support underline-offset-2 hover:text-content hover:underline",
-          result === "failed" && "text-error",
-        )}
+        className={cn(button, result === "failed" && "text-error")}
       >
         {LABEL[result]}
       </button>
+      {onReport && (
+        <button type="button" onClick={onReport} className={button}>
+          Report…
+        </button>
+      )}
     </span>
   );
 }

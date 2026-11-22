@@ -360,7 +360,7 @@ impl Oidc {
                     self.unsaved.remove(&self.key);
                 }
                 Err((origin, error)) => {
-                    tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
+                    tracing::error!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
                     self.unsaved.add(&self.key);
                 }
             }

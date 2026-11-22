@@ -1,5 +1,8 @@
+import type { ComponentProps } from "react";
 import { ErrorDetails } from "@twigo/ui";
 import { errorDetails, type ErrorLike } from "./errors";
+import { isInternalError } from "./internalError";
+import { useReport } from "./report/useReport";
 
 interface CodeProps {
   error: ErrorLike;
@@ -7,16 +10,28 @@ interface CodeProps {
   className?: string;
 }
 
-/** What goes under an error's message: its code as a quiet line, and Copy details. */
+/**
+ * What goes under an error's message: its code as a quiet line, and Copy
+ * details. In a notice, Twigo's own error offers Report… beside them, since a
+ * toast has no banner to carry it (ARCHITECTURE 4.10).
+ */
 export function ErrorCode({ error, notice = false, className }: CodeProps) {
-  return (
-    <ErrorDetails
-      code={error.code}
-      copy={errorDetails(error)}
-      notice={notice}
-      {...(className && { className })}
-    />
+  const details = {
+    code: error.code,
+    copy: errorDetails(error),
+    notice,
+    ...(className && { className }),
+  };
+  return notice && isInternalError(error) ? (
+    <ReportableDetails {...details} />
+  ) : (
+    <ErrorDetails {...details} />
   );
+}
+
+function ReportableDetails(details: ComponentProps<typeof ErrorDetails>) {
+  const report = useReport();
+  return <ErrorDetails {...details} onReport={report} />;
 }
 
 /**

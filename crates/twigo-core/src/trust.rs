@@ -113,7 +113,7 @@ fn read(path: &Path) -> Trusted {
 /// Trusts nothing rather than guess, and asks for the review again.
 fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> Trusted {
     let aside = path.with_extension("json.unreadable");
-    tracing::warn!(path = %path.display(), %reason, "the trusted plugins cannot be read, so they move to a file of their name with .unreadable");
+    tracing::error!(path = %path.display(), %reason, "the trusted plugins cannot be read, so they move to a file of their name with .unreadable");
     if let Err(error) = std::fs::rename(path, &aside) {
         tracing::error!(path = %path.display(), %error, "could not move the trusted plugins aside");
     }
@@ -134,6 +134,7 @@ mod tests {
         let path = dir.path().join("trust.json");
         std::fs::write(&path, "{ not json").unwrap();
         problems::clear(ErrorCode::TrustSetAside);
+        let log = twigo_log::capture();
         let trust = Trust::open(path);
         assert!(!trust.current().trusts("any"));
         assert!(
@@ -142,6 +143,12 @@ mod tests {
                 .iter()
                 .any(|problem| problem.code == ErrorCode::TrustSetAside)
         );
+        let levels: Vec<_> = log
+            .lines()
+            .into_iter()
+            .map(|line| line["level"].clone())
+            .collect();
+        assert_eq!(levels, ["ERROR"]);
     }
 
     #[test]

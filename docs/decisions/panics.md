@@ -22,7 +22,7 @@ Decided 2026-11-21.
 - **A command**: an async one runs through `contained()` and answers `internal.panic`.
   The invoke handler runs under `catch_unwind`, and a panic of a sync command takes the fatal path.
   The panic is caught around the generated handler, not through the fields of Tauri's `Invoke`, which Tauri marks as not stable.
-- **The fatal path** writes the log, ends every unlock at once (the audit log's `relocked` line says `fatal`), rechecks every forward against its mode and closes every forward where that recheck panics (`Core::fail_closed`), then shows a native dialog through `tauri-plugin-dialog` that says Twigo must restart, with Restart and Quit; either answer writes the state, and Restart calls `AppHandle::request_restart`.
+- **The fatal path** writes the log, ends every unlock at once (the audit log's `relocked` line says `fatal`), rechecks every forward against its mode and closes every forward where that recheck panics (`Core::fail_closed`), then shows a native dialog through `tauri-plugin-dialog` that says Twigo must restart, with Restart and Quit; either answer leaves a line in the log and writes the state, and Restart calls `AppHandle::request_restart`.
   It is native because the webview may be what the panic broke.
   It is a sheet on Twigo's focused window, or its main one, given as the dialog's parent; where no window is left the fatal path writes the state and shows nothing, and the exit under way goes on.
   An answer that comes once Twigo has begun to end does nothing.
