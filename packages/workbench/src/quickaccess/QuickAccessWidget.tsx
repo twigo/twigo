@@ -385,7 +385,6 @@ function Open({ session }: { session: Session }) {
           acceptable={active?.disabled !== true}
           many={many}
           acceptLabel={
-            active?.acceptLabel ??
             ask?.acceptLabel ??
             (pick
               ? "Select"
