@@ -148,6 +148,7 @@ function ServerDiff({
       edits.copies.see(editor, live, statusSubresource);
     }
   }, [edits.copies, editor, live, statusSubresource]);
+  const baseIsSecret = useMemo(() => isSecret(base), [base]);
   const original = useMemo(
     () => (base === undefined ? undefined : yamlOfJson(base)),
     [base],
@@ -195,7 +196,7 @@ function ServerDiff({
           <EditActions edits={edits} uri={editor} menus={["edit/server"]} />
         }
       >
-        {isSecret(base) && SECRET_NOTE}
+        {baseIsSecret && SECRET_NOTE}
       </Banner>
       <div className="min-h-0 flex-1">
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
@@ -243,10 +244,14 @@ function ObjectsDiff({
         ? [{ name: names[side] ?? "", problem }]
         : [],
   );
+  const secret = useMemo(
+    () => isSecret(original.manifest) || isSecret(modified.manifest),
+    [original.manifest, modified.manifest],
+  );
   const note = [
     missing.length === 0 &&
       "Both as they are on the server, followed while this is open.",
-    (isSecret(original.manifest) || isSecret(modified.manifest)) && SECRET_NOTE,
+    secret && SECRET_NOTE,
   ]
     .filter(Boolean)
     .join(" ");
