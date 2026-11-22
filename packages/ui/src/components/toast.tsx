@@ -44,7 +44,6 @@ interface ToastProps {
   tone: Tone;
   message: ReactNode;
   action: ToastAction | undefined;
-  /** Buttons after `action`, which they need. */
   more?: readonly ToastAction[];
   tile?: ReactNode;
 }

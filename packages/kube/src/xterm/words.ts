@@ -108,7 +108,6 @@ export function sessionState(status: SessionStatus): SessionState {
   }
 }
 
-/** Whether Twigo's own code stopped the session, which the tab says apart from a failure of the cluster's. */
 export function stoppedByTwigo(status: SessionStatus): boolean {
   return (
     status.state === "ended" &&

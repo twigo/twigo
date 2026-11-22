@@ -3,6 +3,7 @@ import {
   toIpcError,
   type Fact,
   type FactId,
+  type IpcError,
   type Report,
 } from "@twigo/protocol";
 import {
@@ -69,7 +70,7 @@ function Body({ report }: { report: Report }) {
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [error, setError] = useState<ReturnType<typeof toIpcError>>();
+  const [error, setError] = useState<IpcError>();
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -263,7 +264,6 @@ function Body({ report }: { report: Report }) {
   );
 }
 
-/** A fact the issue states, with a tick where the person may leave it out. */
 function Stated({
   fact,
   on,

@@ -13,7 +13,6 @@ export class ProblemReport {
 
   constructor(private readonly backend: Backend) {}
 
-  /** The report the dialog shows, none while it is closed. */
   get report(): Report | undefined {
     return this.#report;
   }

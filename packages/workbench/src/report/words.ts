@@ -11,7 +11,6 @@ function listed(items: readonly string[]): string {
     : `${items.slice(0, -1).join(", ")} and ${last}`;
 }
 
-/** What the redaction hid in the log, as the line under it says. */
 export function hiddenWords({
   names,
   paths,
@@ -56,7 +55,6 @@ export function reportText({
     .join("\n\n");
 }
 
-/** What the toast after Open Issue says: where the log is, and what the link had to leave short. */
 export function openedWords(
   { factsCut, descriptionCut }: OpenedIssue,
   facts: readonly Fact[],

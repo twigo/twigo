@@ -66,7 +66,6 @@ export function ObjectContent({
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
   onEvents: OverviewProps["onEvents"];
-  /** Opens the page again, which a view that Twigo stopped on an internal error offers. */
   onReopen?: () => void;
   /** The full page, whose sections open but the Metadata. */
   fullPage?: boolean;

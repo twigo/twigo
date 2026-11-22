@@ -75,8 +75,8 @@ export function logWebviewErrors(backend: Pick<Backend, "invoke">): {
 
 /**
  * A thrown value as the log takes it. An `IpcError` is logged by its code,
- * since its message can quote what the API server said of a request (P6), and
- * V8 puts that message at the head of its stack.
+ * since its message can quote what the API server said of a request, and V8
+ * puts that message at the head of its stack.
  */
 function describe(reason: unknown): { message: string; stack: string } {
   if (reason instanceof IpcError) {

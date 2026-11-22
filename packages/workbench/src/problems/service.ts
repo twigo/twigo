@@ -23,7 +23,6 @@ export class Problems {
     return this.#list;
   }
 
-  /** Whether the status bar's popover of them is open: `problems:status`. */
   get open(): boolean {
     return this.#open;
   }

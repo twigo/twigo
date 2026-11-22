@@ -4,7 +4,6 @@ import { cn } from "../lib/cn";
 const FIELD =
   "rounded-md bg-well px-2 text-xs text-content outline-none placeholder:text-support hover:bg-well-hover focus:shadow-[inset_0_0_0_1px_var(--ring)]";
 
-/** A one-line field on its well; the caller names it with `aria-label` or a `label`. */
 export function TextField({ className, ...props }: ComponentProps<"input">) {
   return (
     <input
@@ -18,7 +17,6 @@ export function TextField({ className, ...props }: ComponentProps<"input">) {
   );
 }
 
-/** A several-line field on its well, for text that is read and edited as it is: its lines do not wrap unless the caller says so. */
 export function TextArea({
   mono = false,
   className,

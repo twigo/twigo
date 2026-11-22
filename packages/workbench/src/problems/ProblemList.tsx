@@ -3,7 +3,6 @@ import { ErrorMessage } from "../ErrorMessage";
 import { useWorkbench } from "../react";
 import { REPORT_PROBLEM, REVEAL_LOG_FILE } from "../report/commands";
 
-/** What the status bar's popover shows: the problems in Rust's words, and the ways to look further. */
 export function ProblemList() {
   const { problems, commands, keys } = useWorkbench();
   const run = (command: string) => {
