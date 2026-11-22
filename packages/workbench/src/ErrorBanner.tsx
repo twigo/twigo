@@ -14,7 +14,6 @@ export function ErrorBanner({
   ...banner
 }: Omit<ComponentProps<typeof Banner>, "children" | "detail"> & {
   error: ErrorLike;
-  /** Says the error in other words than its own. */
   message?: string;
   children?: ReactNode;
 }) {

@@ -36,7 +36,6 @@ export function Banner({
   icon: LucideIcon;
   title: ReactNode;
   children?: ReactNode;
-  /** A line under the text, such as an error's code. */
   detail?: ReactNode;
   /** A button at its end. */
   action?: ReactNode;

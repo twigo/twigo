@@ -9,7 +9,6 @@ function useReport() {
   };
 }
 
-/** Report… as a link, for a line of text. */
 export function ReportLink({ className }: { className?: string }) {
   const report = useReport();
   return (
@@ -19,7 +18,6 @@ export function ReportLink({ className }: { className?: string }) {
   );
 }
 
-/** Report… as a button, beside the one that reopens what Twigo stopped. */
 export function ReportButton() {
   const report = useReport();
   return (

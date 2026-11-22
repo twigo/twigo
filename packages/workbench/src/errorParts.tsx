@@ -7,7 +7,6 @@ export interface ErrorMessageProps {
   error: ErrorLike;
   message?: string;
   lead?: string;
-  /** The message is in a notice, which gives Copy details the look of its own buttons. */
   notice?: boolean;
   className?: string;
 }
