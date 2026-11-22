@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 import { cn, EmptyState } from "@twigo/ui";
 
@@ -28,8 +28,7 @@ export class PanelBoundary extends Component<Props, State> {
     return { error };
   }
 
-  override componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error(`${this.props.label} crashed`, error, info.componentStack);
+  override componentDidCatch(error: Error) {
     this.props.onCrash?.(error);
   }
 
