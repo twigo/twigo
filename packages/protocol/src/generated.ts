@@ -229,8 +229,8 @@ export type BusyWhy = "inUse" | "notPermitted";
  */
 export type Catalog = { contexts: Array<Context>, 
 /**
- * The kubeconfig files that exist and could not be read or merged,
- * whose contexts are missing.
+ * Files that exist but could not be read or merged, whose contexts are
+ * missing, and files whose changes go unseen.
  */
 failures: Array<CatalogFailure>, };
 

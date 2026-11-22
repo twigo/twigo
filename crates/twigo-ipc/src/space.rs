@@ -17,8 +17,8 @@ pub struct Space {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Catalog {
     pub contexts: Vec<Context>,
-    /// The kubeconfig files that exist and could not be read or merged,
-    /// whose contexts are missing.
+    /// Files that exist but could not be read or merged, whose contexts are
+    /// missing, and files whose changes go unseen.
     pub failures: Vec<CatalogFailure>,
 }
 

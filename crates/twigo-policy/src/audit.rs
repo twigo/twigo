@@ -4,8 +4,8 @@
 //! the UI's writes, of every command a person confirmed and how it ended,
 //! and of every answer to a process's ask but a type that marks its context.
 //! It names what was asked and where, never a value or a token. Past
-//! [`LIMIT`] it moves to `audit.1.jsonl`, the older ones up by one, and
-//! [`KEPT`] of them stay.
+//! `LIMITS.size` it moves to `audit.1.jsonl`, the older ones up by one, and
+//! `LIMITS.kept` of them stay.
 //!
 //! It also records each change of a context's protection, a command's, the
 //! type an unmarked ask's answer gave, or the catalog's, each unlock's end,
