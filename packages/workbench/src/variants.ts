@@ -15,6 +15,8 @@ export interface Variants {
   readonly mask: "token" | "pill" | "tree";
 }
 
+const DEFAULTS: Variants = { helm: "explorer", tabs: "four", mask: "token" };
+
 const FAMILIES: { readonly [F in keyof Variants]: readonly Variants[F][] } = {
   helm: ["explorer", "sidebar", "view"],
   tabs: ["four", "split", "page"],
@@ -30,6 +32,6 @@ export function variants(
   );
   const pick = <F extends keyof Variants>(family: F): Variants[F] =>
     FAMILIES[family].find((name) => asked.has(`${family}:${name}`)) ??
-    (FAMILIES[family][0] as Variants[F]);
+    DEFAULTS[family];
   return { helm: pick("helm"), tabs: pick("tabs"), mask: pick("mask") };
 }

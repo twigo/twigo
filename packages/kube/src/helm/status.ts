@@ -39,7 +39,7 @@ export const IN_FLIGHT_RELEASE =
   /^(uninstalling|pending-install|pending-upgrade|pending-rollback)$/;
 
 /** What a row says in place of its status when its latest revision cannot be read, by the code the core carries in its Problem. */
-export const PROBLEMS: Readonly<
+const PROBLEMS: Readonly<
   Record<string, { readonly word: string; readonly why: string }>
 > = {
   "helm.not-a-release": {

@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
+import { HELM_RELEASES } from "@twigo/protocol";
 import {
+  diffUri,
   execUri,
+  helmUri,
+  parseDiffUri,
+  parseHelmUri,
   listUri,
   objectUri,
   pfUri,
@@ -189,4 +194,37 @@ test.each([
   "k8s://prod-eu/7",
 ])("%s is not a port-forward's URI", (uri) => {
   expect(parsePfUri(uri)).toBeUndefined();
+});
+
+test("a Helm list and a release are their own URIs, which read back as written", () => {
+  const list = { space: "prod-eu", gvr: HELM_RELEASES, namespaces: ["a", "b"] };
+  expect(listUri(list)).toBe("helm-list://prod-eu?ns=a%2Cb");
+  expect(parseListUri(listUri(list))).toEqual(list);
+  expect(listUri({ space: "dev+qa", gvr: HELM_RELEASES })).toBe(
+    "helm-list://dev%2Bqa",
+  );
+  const release = { space: "prod-eu", namespace: "payments", name: "api" };
+  expect(helmUri(release)).toBe("helm://prod-eu/payments/api");
+  expect(helmUri({ ...release, revision: 4 })).toBe(
+    "helm://prod-eu/payments/api?revision=4",
+  );
+  expect(parseHelmUri(helmUri({ ...release, revision: 4 }))).toEqual({
+    ...release,
+    revision: 4,
+  });
+  expect(parseHelmUri("helm://prod-eu/payments/api?revision=0")).toEqual(
+    release,
+  );
+  expect(parseHelmUri("helm://prod-eu/payments")).toBeUndefined();
+  const diff = {
+    kind: "release" as const,
+    release,
+    from: 3,
+    to: 4,
+    part: "defaults" as const,
+  };
+  expect(parseDiffUri(diffUri(diff))).toEqual(diff);
+  expect(
+    parseDiffUri("diff://prod-eu/release?namespace=a&name=b&from=1&to=2"),
+  ).toBe(undefined);
 });

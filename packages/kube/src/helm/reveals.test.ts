@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { HelmPart, ReleaseManifest } from "@twigo/protocol";
 import HELM from "../../../protocol/src/mock/helm.json";
 import { yamlOfJson, yamlOfObject } from "../edit/object";
+import { documentsOf } from "./documents";
 import {
   hiddenCount,
   manifestOf,
@@ -153,4 +154,24 @@ describe("a manifest", () => {
     ]);
     expect(after.text.split("\n")[9]).toContain("token: <5 bytes>");
   });
+});
+
+test("the documents of a manifest are listed by the file their Source comment names, as Helm splits them at its --- lines", () => {
+  const text = [
+    "---",
+    "# Source: a/one.yaml",
+    "kind: A",
+    "---",
+    "",
+    "---",
+    "kind: B",
+    "---",
+    "# Source: a/three.yaml",
+    "kind: C",
+  ].join("\n");
+  expect(documentsOf(text)).toEqual([
+    { name: "a/one.yaml", from: 2, to: 3 },
+    { name: "Document 3", from: 7, to: 7 },
+    { name: "a/three.yaml", from: 9, to: 10 },
+  ]);
 });

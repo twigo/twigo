@@ -115,11 +115,9 @@ export function valueGlyphs(
   const outline = outlineOf(text);
   const lines = text.split("\n");
   const glyphs: Glyph[] = [];
-  const revealed = new Set<string>();
   for (const { part } of shown.values()) {
     if (part.kind !== "values" || part.defaults !== defaults) continue;
     const at = entryAt(outline, part.path);
-    revealed.add(partKey(part));
     glyphs.push({
       line: at ? at.entry.from : 1,
       part,
@@ -132,7 +130,6 @@ export function valueGlyphs(
     const line = index + 1;
     const path = stepsOf(pathAtLine(outline, line));
     const part: HelmPart = { kind: "values", defaults, path: [...path] };
-    if (revealed.has(partKey(part))) return;
     glyphs.push({
       line,
       part,
