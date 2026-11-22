@@ -1830,6 +1830,7 @@ It lives in `packages/ui`: the tokens, and primitives that draw every recurring 
   - copy buttons out of the Tab order;
   - a pill keeps the list's word and takes the core's finding tone where the list's rule calls that word healthy, as for a rollout past its deadline;
   - labels as lines, a pending pod's sentence as it is, shares from 10,000 % as `>9999%`, and no step of its own for the mock's fidelity.
+- **Settled with the owner** on 2026-11-22, from live variants on the mock (3.7, 4.10): an error's code as a quiet line under its message with Copy details, the status bar's word for a list that failed by the code's family, a waiting list's cause beside "Connecting", the kubeconfig files that fail as a group of the space picker, a toast once per launch for a file that fails, Twigo's own failing files as a notification, and the report dialog with its facts and its log apart.
 
 ### 4.10 Diagnostics
 
