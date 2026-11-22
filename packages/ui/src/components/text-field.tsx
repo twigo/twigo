@@ -31,8 +31,8 @@ export function TextArea({
       {...props}
       className={cn(
         FIELD,
-        "resize-none py-1.5 leading-5",
-        mono && "font-mono text-2xs",
+        "resize-none rounded-lg py-2 leading-5",
+        mono && "font-mono text-prose",
         className,
       )}
     />
