@@ -436,8 +436,11 @@ contexts:
         );
         assert!(connections.versions().is_empty());
         connections.note_version("kind-a", &a, "v1.37.2");
-        connections.note_version("kind-b", &b, "v1.37.2");
-        assert_eq!(connections.versions().len(), 1, "a version counts once");
+        connections.note_version("kind-b", &b, "v1.33.4");
+        assert_eq!(
+            connections.versions().into_iter().collect::<Vec<_>>(),
+            ["v1.33.4", "v1.37.2"]
+        );
 
         connections.note_version("kind-b", &a, "v1.99.0");
         assert!(
@@ -451,10 +454,10 @@ contexts:
         );
         let after = load(dir.path());
         connections.keep(&after.contexts);
-        connections.note_version("kind-a", &a, "v1.33.4");
+        connections.note_version("kind-a", &a, "v1.40.0");
         assert_eq!(
             connections.versions().into_iter().collect::<Vec<_>>(),
-            ["v1.37.2"],
+            ["v1.33.4"],
             "kind-a's clients were replaced, so what they asked is gone and what they ask now is not kept"
         );
     }
