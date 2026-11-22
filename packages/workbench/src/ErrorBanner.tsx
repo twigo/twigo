@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Banner } from "@twigo/ui";
-import { errorParts } from "./ErrorMessage";
+import { errorParts } from "./errorParts";
 import type { ErrorLike } from "./errors";
 
 /**
