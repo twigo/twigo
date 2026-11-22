@@ -633,6 +633,8 @@ impl Core {
             .apiserver_version()
             .await
             .map_err(|e| twigo_kube::errors::request(&e))?;
+        self.connections
+            .note_version(context, &clients, &info.git_version);
         Ok(ClusterVersion {
             git_version: info.git_version,
         })
