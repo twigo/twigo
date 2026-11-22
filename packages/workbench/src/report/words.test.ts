@@ -2,7 +2,14 @@ import { expect, test } from "vitest";
 import type { Fact } from "@twigo/protocol";
 import { hiddenWords, openedWords, reportText } from "./words";
 
-const NONE = { names: 0, paths: 0, tokens: 0, addresses: 0, quoted: 0 };
+const NONE = {
+  names: 0,
+  paths: 0,
+  tokens: 0,
+  addresses: 0,
+  quoted: 0,
+  lines: 0,
+};
 
 test("what the redaction hid is counted in the person's words, singular where it is one, and nothing is said of what it did not hide", () => {
   expect(hiddenWords({ ...NONE, names: 6, paths: 2, tokens: 1 })).toBe(
@@ -10,6 +17,9 @@ test("what the redaction hid is counted in the person's words, singular where it
   );
   expect(hiddenWords({ ...NONE, quoted: 1 })).toBe(
     "Twigo hid 1 quoted string; read it before you paste.",
+  );
+  expect(hiddenWords({ ...NONE, lines: 2 })).toBe(
+    "Twigo hid 2 lines that are not records; read it before you paste.",
   );
   expect(hiddenWords(NONE)).toBe(
     "Twigo found nothing to hide; read it before you paste.",

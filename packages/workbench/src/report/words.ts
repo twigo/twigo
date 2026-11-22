@@ -17,6 +17,7 @@ export function hiddenWords({
   tokens,
   addresses,
   quoted,
+  lines,
 }: Hidden): string {
   const parts = [
     { count: names, one: "name", many: "names" },
@@ -24,6 +25,11 @@ export function hiddenWords({
     { count: tokens, one: "token", many: "tokens" },
     { count: addresses, one: "address", many: "addresses" },
     { count: quoted, one: "quoted string", many: "quoted strings" },
+    {
+      count: lines,
+      one: "line that is not a record",
+      many: "lines that are not records",
+    },
   ]
     .filter(({ count }) => count > 0)
     .map(
