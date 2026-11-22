@@ -85,6 +85,9 @@ struct Inner {
     scheduled: AtomicBool,
     /// Told when the writer thread's write panics.
     reporter: OnceLock<Reporter>,
+    /// The last write failed and said so as a problem, which this store takes
+    /// back when a write works.
+    unsaved: AtomicBool,
 }
 
 struct Data {
@@ -148,6 +151,7 @@ impl State {
             written: Mutex::new(0),
             scheduled: AtomicBool::new(false),
             reporter: OnceLock::new(),
+            unsaved: AtomicBool::new(false),
         });
         let (wake, woken) = mpsc::channel();
         let writer = Arc::clone(&inner);
@@ -382,9 +386,14 @@ impl Inner {
                 self.write()
             }));
             match written {
-                Ok(Ok(())) => problems::clear(ErrorCode::StateUnsaved),
+                Ok(Ok(())) => {
+                    if self.unsaved.swap(false, Ordering::AcqRel) {
+                        problems::clear(ErrorCode::StateUnsaved);
+                    }
+                }
                 Ok(Err(error)) => {
                     tracing::error!(path = %self.path.display(), %error, "could not save the state");
+                    self.unsaved.store(true, Ordering::Release);
                     problems::report(IpcError::new(
                         ErrorCode::StateUnsaved,
                         "Twigo could not save its state, so what you change is lost when it quits",
