@@ -820,7 +820,11 @@ test("the counters say that they count since Twigo started, and each shows its o
     ...forward,
     sent: 1536,
     received: 5 * 1024 * 1024,
-    failure: "pod auth-api-1 refused the connection to port 8080",
+    failure: {
+      code: "forward.port-refused",
+      kind: "unavailable",
+      message: "pod auth-api-1 refused the connection to port 8080",
+    },
   }));
   await open(await start(API, 80));
   const value = (label: string) =>

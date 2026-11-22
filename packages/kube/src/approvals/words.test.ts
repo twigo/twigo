@@ -22,7 +22,14 @@ test("every reason a write has no diff is told in a sentence a person reads", ()
     { reason: "subresource" },
     { reason: "aggregated" },
     { reason: "unverified" },
-    { reason: "refused", message: 'admission webhook "x" refused it' },
+    {
+      reason: "refused",
+      error: {
+        code: "server.invalid",
+        kind: "invalidInput",
+        message: 'admission webhook "x" refused it',
+      },
+    },
     { reason: "notAResource" },
   ];
   const told = reasons.map((reason) => noDiffWords(reason));

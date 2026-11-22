@@ -88,7 +88,7 @@ const PINNED: &[(ErrorCode, &str, ErrorKind)] = &[
     (OpenapiNoKind, "openapi.no-kind", NotFound),
     (OpenapiNotListed, "openapi.not-listed", NotFound),
     (OpenapiUnreadable, "openapi.unreadable", Unavailable),
-    (ExecFailed, "exec.failed", Unavailable),
+    (EnvironmentUnresolved, "environment.unresolved", Internal),
     (ForwardNotFound, "forward.not-found", NotFound),
     (ForwardInvalidPort, "forward.invalid-port", InvalidInput),
     (ForwardNoPort, "forward.no-port", InvalidInput),

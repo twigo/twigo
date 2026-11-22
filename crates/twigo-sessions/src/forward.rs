@@ -170,7 +170,7 @@ pub struct Status {
     pub queued: u32,
     pub sent: u64,
     pub received: u64,
-    pub failure: Option<String>,
+    pub failure: Option<IpcError>,
 }
 
 impl Status {
@@ -823,17 +823,14 @@ impl Supervisor {
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 match fault {
                     Fault::Fatal(error) => self.fail(error),
                     // That pod is avoided: the proof chooses again.
                     Fault::Left { .. } => {}
-                    Fault::Port(words) => {
-                        let refused = IpcError::new(ErrorCode::ForwardPortRefused, words);
-                        self.unreachable(refused.into(), true);
-                    }
+                    Fault::Port(refused) => self.unreachable(refused.into(), true),
                     Fault::NoPod(error) => self.unreachable(error.into(), true),
                     Fault::Transient(cause) => self.unreachable(cause, true),
                     Fault::Lost => self.pause(),
@@ -873,10 +870,10 @@ impl Supervisor {
         });
     }
 
-    fn failure(&mut self, words: String) {
+    fn failure(&mut self, error: IpcError) {
         self.failed_after = self.accepted;
         self.shared.update(|status| {
-            status.failure = Some(words);
+            status.failure = Some(error);
             true
         });
     }
@@ -956,8 +953,8 @@ impl Supervisor {
                 }
             }
             Report::Failed(number, fault) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 if number > self.cut {
                     self.ended(fault);

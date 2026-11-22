@@ -23,7 +23,7 @@ pub fn request(error: &kube::Error) -> IpcError {
         return blocked.clone().into();
     }
     let (code, message) = match error {
-        kube::Error::Api(status) => (server_code(status.code), api_message(status, error)),
+        kube::Error::Api(status) => return Said::from(&**status).refused(),
         kube::Error::Auth(_) => (ErrorCode::CredentialsUnusable, error.to_string()),
         kube::Error::Service(inner) if let Some(error) = find::<CredentialError>(&**inner) => {
             let (CredentialError::Run(run) | CredentialError::SignInFailed(run)) = error;
@@ -43,13 +43,89 @@ pub fn request(error: &kube::Error) -> IpcError {
         }
         _ => (ErrorCode::InternalRequest, error.to_string()),
     };
-    let refused = IpcError::new(code, message);
-    match error {
-        kube::Error::Api(status) if status.reason != NOT_A_STATUS => {
-            refused.with_server(server(status))
+    IpcError::new(code, message)
+}
+
+/// What a `Status` says, as either of its two types carries it: kube's, which
+/// a request's refusal comes as, and k8s-openapi's, which an exec's end
+/// carries over its channel.
+struct Said {
+    code: u16,
+    message: String,
+    reason: String,
+    causes: Vec<ServerCause>,
+}
+
+impl Said {
+    /// The error for it: the server's own words and `server` as data, which a
+    /// body that was no `Status` has none of.
+    fn refused(self) -> IpcError {
+        let is_status = self.reason != NOT_A_STATUS;
+        let message = match (
+            self.message.is_empty(),
+            self.reason.is_empty() || !is_status,
+        ) {
+            (false, _) => self.message,
+            (true, false) => self.reason.clone(),
+            (true, true) => format!("the server answered {}", self.code),
+        };
+        let refused = IpcError::new(server_code(self.code), message);
+        if !is_status {
+            return refused;
         }
-        _ => refused,
+        refused.with_server(ServerStatus {
+            reason: self.reason,
+            causes: self.causes,
+        })
     }
+}
+
+impl From<&Status> for Said {
+    fn from(status: &Status) -> Self {
+        Self {
+            code: status.code,
+            message: status.message.clone(),
+            reason: status.reason.clone(),
+            causes: status
+                .details
+                .iter()
+                .flat_map(|details| &details.causes)
+                .map(|cause| ServerCause {
+                    reason: cause.reason.clone(),
+                    field: cause.field.clone(),
+                    message: cause.message.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&k8s_openapi::apimachinery::pkg::apis::meta::v1::Status> for Said {
+    fn from(status: &k8s_openapi::apimachinery::pkg::apis::meta::v1::Status) -> Self {
+        Self {
+            code: status
+                .code
+                .and_then(|code| u16::try_from(code).ok())
+                .unwrap_or_default(),
+            message: status.message.clone().unwrap_or_default(),
+            reason: status.reason.clone().unwrap_or_default(),
+            causes: status
+                .details
+                .iter()
+                .flat_map(|details| details.causes.iter().flatten())
+                .map(|cause| ServerCause {
+                    reason: cause.reason.clone().unwrap_or_default(),
+                    field: cause.field.clone().unwrap_or_default(),
+                    message: cause.message.clone().unwrap_or_default(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The error an exec's `Status` ends in, as a request's refusal is read.
+pub fn exec(status: &k8s_openapi::apimachinery::pkg::apis::meta::v1::Status) -> IpcError {
+    Said::from(status).refused()
 }
 
 fn server_code(status: u16) -> ErrorCode {
@@ -62,14 +138,6 @@ fn server_code(status: u16) -> ErrorCode {
         408 | 504 => ErrorCode::ServerTimeout,
         429 | 500..=599 => ErrorCode::ServerUnavailable,
         _ => ErrorCode::ServerOther,
-    }
-}
-
-fn api_message(status: &Status, error: &kube::Error) -> String {
-    if status.message.is_empty() {
-        error.to_string()
-    } else {
-        status.message.clone()
     }
 }
 
@@ -179,22 +247,6 @@ fn plugin_code(error: &RunError) -> ErrorCode {
         RunError::NotFound(_) => ErrorCode::CredentialsPluginMissing,
         RunError::Cancelled(_) => ErrorCode::CredentialsPluginCancelled,
         _ => ErrorCode::CredentialsPluginFailed,
-    }
-}
-
-fn server(status: &Status) -> ServerStatus {
-    ServerStatus {
-        reason: status.reason.clone(),
-        causes: status
-            .details
-            .iter()
-            .flat_map(|details| &details.causes)
-            .map(|cause| ServerCause {
-                reason: cause.reason.clone(),
-                field: cause.field.clone(),
-                message: cause.message.clone(),
-            })
-            .collect(),
     }
 }
 

@@ -381,7 +381,8 @@ async fn bytes_pass_both_ways_and_are_counted_and_a_refused_port_closes_its_conn
             status.failure.is_some() && status.connections == 1
         })
         .await;
-    assert_eq!(status.failure.as_deref(), Some(text));
+    assert_eq!(said(&status), Some(text));
+    assert_eq!(failed_as(&status), Some(ErrorCode::ForwardPortRefused));
     assert_eq!(status.state, ForwardState::Ready);
 
     first.write_all(b"again").await.unwrap();
@@ -935,7 +936,7 @@ async fn a_port_nobody_listens_on_fails_a_forward_that_never_worked() {
             error: IpcError::new(ErrorCode::ForwardPortRefused, text)
         }
     );
-    assert_eq!(status.failure.as_deref(), Some(text));
+    assert_eq!(said(&status), Some(text));
 }
 
 #[tokio::test(start_paused = true)]
@@ -1409,6 +1410,19 @@ async fn a_refusal_ends_the_connections_and_a_restart_starts_over() {
 
 const UNANSWERED: &str = "the cluster does not answer";
 
+/// The code of a forward's last failure.
+fn failed_as(status: &Status) -> Option<ErrorCode> {
+    status.failure.as_ref().map(|failure| failure.code)
+}
+
+/// The words of a forward's last failure.
+fn said(status: &Status) -> Option<&str> {
+    status
+        .failure
+        .as_ref()
+        .map(|failure| failure.message.as_str())
+}
+
 fn is_failed(state: &ForwardState) -> bool {
     matches!(state, ForwardState::Failed { .. })
 }
@@ -1513,7 +1527,11 @@ async fn a_cluster_that_stops_answering_is_the_reason_of_a_forward_that_worked_a
     let status = forward
         .until("the connection gave up", |status| status.failure.is_some())
         .await;
-    assert_eq!(status.failure.as_deref(), Some(UNANSWERED));
+    assert_eq!(said(&status), Some(UNANSWERED));
+    assert_eq!(
+        failed_as(&status),
+        Some(ErrorCode::ForwardClusterUnanswered)
+    );
     assert_eq!(reason(&status.state), ErrorCode::ForwardClusterUnanswered);
 
     fake.set_offline(false);
@@ -1657,7 +1675,7 @@ async fn refuse_a_port(forward: &mut Harness) -> String {
     refused.error.send(text.to_owned()).unwrap();
     forward
         .until("the refusal is the failure", |status| {
-            status.failure.as_deref() == Some(text)
+            said(status) == Some(text)
         })
         .await;
     text.to_owned()
@@ -1684,7 +1702,7 @@ async fn a_failure_goes_when_a_connection_opened_after_it_carries_bytes_and_not_
     let status = forward.status.borrow().clone();
     assert_eq!(status.state, ForwardState::Ready);
     assert_eq!(
-        status.failure.as_deref(),
+        said(&status),
         Some(text.as_str()),
         "a connection opened before it, or one that carried nothing, leaves it"
     );
@@ -1738,7 +1756,7 @@ async fn the_error_channel_s_text_ends_the_connection_after_what_the_pod_sent_is
     let status = forward
         .until("the text is the failure", |status| status.failure.is_some())
         .await;
-    assert_eq!(status.failure.as_deref(), Some(text));
+    assert_eq!(said(&status), Some(text));
     drop(pod.io);
 }
 
@@ -2000,7 +2018,7 @@ async fn a_connection_that_finds_no_stream_slot_for_the_hub_says_so() {
         .until("the connection gave up", |status| status.failure.is_some())
         .await;
     assert_eq!(
-        status.failure.as_deref(),
+        said(&status),
         Some("waiting for a stream slot of this context")
     );
     assert_eq!(reason(&status.state), ErrorCode::ForwardWaitingForSlot);
@@ -2731,7 +2749,7 @@ async fn a_person_s_start_whose_only_pod_behind_a_service_answers_404_fails_afte
         status.state
     );
     assert_eq!(
-        status.failure.as_deref(),
+        said(&status),
         Some("the upgrade to web-a was refused with 404")
     );
     assert_eq!(
@@ -2807,7 +2825,7 @@ async fn a_failed_forward_takes_no_state_from_a_connection_that_reported_as_it_f
     let status = forward.status.borrow().clone();
     assert_eq!(status.state, ForwardState::Failed { error: refusal });
     assert_eq!(
-        status.failure.as_deref(),
+        said(&status),
         Some("the upgrade to web-1 was refused with 404"),
         "the failure follows its own rule"
     );
@@ -2858,7 +2876,7 @@ async fn a_404_for_the_only_pod_behind_a_service_avoids_it_for_the_backoff_s_lon
     comes_and_leaves(&mut forward).await;
     let status = forward.status.borrow().clone();
     assert_eq!(reason(&status.state), ErrorCode::ServerNotFound);
-    assert_eq!(status.failure.as_deref(), Some(LEFT_A));
+    assert_eq!(said(&status), Some(LEFT_A));
 
     forward.pods.allow("web-a");
     tokio::time::sleep_until(refused + Duration::from_secs(15)).await;
@@ -2972,7 +2990,7 @@ async fn a_connection_s_404_for_one_pod_behind_a_service_leaves_the_forward_read
     client.write_all(b"x").await.unwrap();
     assert_eq!(forward.next().await.pod, "web-b", "the connection goes on");
     let status = forward.status.borrow().clone();
-    assert_eq!(status.failure.as_deref(), Some(LEFT_A));
+    assert_eq!(said(&status), Some(LEFT_A));
     assert_eq!(status.pod.as_deref(), Some("web-b"));
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(forward.status.borrow().state, ForwardState::Ready);
@@ -3402,7 +3420,7 @@ async fn a_connection_whose_pods_answer_404_slowly_ends_with_the_first_404_after
     );
     let status = forward
         .until("it says why", |status| {
-            status.failure.as_deref() == Some("the upgrade to web-c was refused with 404")
+            said(status) == Some("the upgrade to web-c was refused with 404")
         })
         .await;
     assert_eq!(status.state, ForwardState::Ready);

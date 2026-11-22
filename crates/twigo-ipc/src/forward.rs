@@ -150,7 +150,7 @@ pub struct Forward {
     /// after not being so: a pod's port that refused, a pod whose upgrade
     /// answered 404, no pod to go to within the wait, a cluster that did not
     /// answer.
-    pub failure: Option<String>,
+    pub failure: Option<IpcError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

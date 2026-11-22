@@ -6,7 +6,7 @@ import type {
   ResponseOf,
   SubscriptionCommand,
 } from "../backend";
-import { IpcError } from "../error";
+import { IpcError, wireError } from "../error";
 import type {
   Column,
   KeyboardLayout,
@@ -227,7 +227,9 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
 const SHELL_TIMEOUT: ShellEnvironment = {
   state: "failed",
   shell: "/bin/zsh",
-  reason: "did not answer in 10 s",
+  reason: wireError(
+    new IpcError("environment.unresolved", "did not answer in 10 s"),
+  ),
   output: "Loading nvm…\n",
 };
 

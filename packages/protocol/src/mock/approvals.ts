@@ -1,4 +1,4 @@
-import { IpcError } from "../error";
+import { IpcError, wireError } from "../error";
 import type {
   AnswerApproval,
   ApprovalAsk,
@@ -220,8 +220,12 @@ function drafts(): Record<string, Draft> {
         kind: "unknown",
         reason: {
           reason: "refused",
-          message:
-            'admission webhook "policy.example.com" does not support dry run',
+          error: wireError(
+            new IpcError(
+              "server.invalid",
+              'admission webhook "policy.example.com" does not support dry run',
+            ),
+          ),
         },
         body: JSON.stringify({
           spec: { rules: [{ host: "shop.example.com" }] },

@@ -197,7 +197,7 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     {
       key: "failure",
       label: "Last failure",
-      value: forward.failure ?? <Quiet>None</Quiet>,
+      value: forward.failure?.message ?? <Quiet>None</Quiet>,
     },
   ];
   return (

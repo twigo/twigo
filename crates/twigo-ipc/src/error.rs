@@ -189,7 +189,7 @@ error_codes! {
     OpenapiNotListed = "openapi.not-listed", NotFound;
     OpenapiUnreadable = "openapi.unreadable", Unavailable;
 
-    ExecFailed = "exec.failed", Unavailable;
+    EnvironmentUnresolved = "environment.unresolved", Internal;
 
     // Port forwards.
     ForwardNotFound = "forward.not-found", NotFound;
