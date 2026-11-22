@@ -181,7 +181,9 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * live lists of spaces whose discovery fails, each for a reason of its own,
  * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
- * open. A pinned cause (`connectRefused` and the like) is a list scenario.
+ * open, or `reportCut`: live lists while the link of an issue is too long for
+ * the description of a report, which it cuts. A pinned cause (`connectRefused`
+ * and the like) is a list scenario.
  */
 export type MockScenario =
   | ListScenario
@@ -194,6 +196,7 @@ export type MockScenario =
   | "partsQueued"
   | "protection"
   | "problems"
+  | "reportCut"
   | AuthScenario
   | EditScenario
   | ShellScenario
@@ -216,6 +219,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "partsQueued",
   "protection",
   "problems",
+  "reportCut",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
@@ -315,6 +319,7 @@ export function createMockBackend(
     scenario === "partsQueued" ||
     scenario === "protection" ||
     scenario === "problems" ||
+    scenario === "reportCut" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
@@ -631,7 +636,11 @@ export function createMockBackend(
     report_problem: () => REPORT as Report,
     report_open_issue: (request) => {
       console.info("[report_open_issue]", request);
-      return { factsCut: [], descriptionCut: false };
+      return {
+        factsCut: [],
+        descriptionCut:
+          scenario === "reportCut" && request.description !== null,
+      };
     },
     report_save: (request) => {
       console.info("[report_save]", request);
