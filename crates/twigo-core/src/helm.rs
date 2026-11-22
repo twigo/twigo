@@ -1,15 +1,21 @@
-//! Helm releases as a list (ARCHITECTURE 3.6): the Secrets Helm keeps them
-//! in, followed through the hub by Helm's own label, and one row a release.
+//! Helm releases (ARCHITECTURE 3.6): the Secrets Helm keeps them in,
+//! followed through the hub by Helm's own label, as a list of one row a
+//! release, an open release's revisions, and two revisions compared.
 
 mod fetch;
+mod release;
 mod releases;
 
 use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Hub, Query, Resource, RowFormat};
 use twigo_cache::request::Selectors;
 use twigo_cache::view::Spec;
-use twigo_ipc::{Gvr, IpcError, ListBatch, ListQuery, ReleaseListQuery};
+use twigo_ipc::{
+    CompareRevisions, ComparedRevisions, Gvr, IpcError, ListBatch, ListQuery, OpenRelease,
+    ReleaseBatch, ReleaseListQuery,
+};
 
+pub(crate) use release::{Opened, Showing};
 use releases::Releases;
 
 /// The seam of a list of releases, as `TWIGO_PANIC` names it.
@@ -74,6 +80,50 @@ pub(crate) async fn list(
         None,
         send,
     ))
+}
+
+/// The release `request` opens in `context`, whose batches go through
+/// `send` until it says the window is gone.
+pub(crate) async fn open(
+    hub: &Hub,
+    context: String,
+    request: OpenRelease,
+    send: impl FnMut(ReleaseBatch) -> bool + Send + 'static,
+) -> Result<Opened, IpcError> {
+    let OpenRelease {
+        release,
+        revision,
+        parts,
+    } = request;
+    let secrets = hub
+        .rows(secrets(context.clone(), vec![release.namespace.clone()]))
+        .await?;
+    let target = release::Target {
+        hub: hub.clone(),
+        context,
+        namespace: release.namespace,
+        name: release.name,
+    };
+    Ok(Opened::spawn(target, secrets, revision, parts, send))
+}
+
+/// Two revisions of a release in `context`, each fetched and decoded, then
+/// masked for a comparison on the blocking pool.
+pub(crate) async fn compare(
+    hub: &Hub,
+    context: &str,
+    request: CompareRevisions,
+) -> Result<ComparedRevisions, IpcError> {
+    let clients = hub.clients(context).await?;
+    let namespace = &request.release.namespace;
+    let [from, to] = [request.from, request.to]
+        .map(|revision| fetch::secret_name(&request.release.name, revision));
+    let (from, to) = futures::try_join!(
+        fetch::decoded(&clients, namespace, &from, twigo_helm::page),
+        fetch::decoded(&clients, namespace, &to, twigo_helm::page),
+    )?;
+    let part = request.part;
+    Ok(twigo_panic::blocking(move || twigo_helm::compared(&from, &to, part)).await)
 }
 
 #[cfg(test)]

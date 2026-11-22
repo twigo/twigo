@@ -23,7 +23,7 @@ use twigo_cache::meta::Meta;
 use twigo_cache::store::RowKey;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_helm::Summary;
-use twigo_ipc::ErrorCode;
+use twigo_ipc::{ErrorCode, Printed};
 
 use super::fetch;
 
@@ -204,13 +204,13 @@ fn belongs(meta: &Meta) -> (Release, Option<u32>) {
 /// One version of a revision's Secret: Helm writes a revision again, whole,
 /// when its status changes, which may change its description too.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Stamp {
+pub(super) struct Stamp {
     uid: Option<Box<str>>,
     resource_version: Box<str>,
 }
 
 impl Stamp {
-    fn of(meta: &Meta) -> Self {
+    pub(super) fn of(meta: &Meta) -> Self {
         Self {
             uid: meta.uid.clone(),
             resource_version: meta.resource_version.clone(),
@@ -219,7 +219,7 @@ impl Stamp {
 }
 
 /// A revision's summary, or the code that keeps it from being read.
-type Decoded = Result<Summary, ErrorCode>;
+pub(super) type Decoded = Result<Summary, ErrorCode>;
 
 /// A newest revision that wants its decode.
 struct Unread {
@@ -370,7 +370,7 @@ impl Held {
 /// A release's cells, from its newest revision's Secret and that revision
 /// decoded, if it is; and when the revision was deployed, which Updated
 /// counts from.
-fn cells(
+pub(super) fn cells(
     name: &str,
     revision: Option<u32>,
     secret: &Meta,
@@ -429,6 +429,25 @@ fn cells(
         problem,
     ]);
     (cells, created)
+}
+
+/// A release's cells as an overview's header prints them: every column but
+/// Updated, which the header's `created` holds, and empty for a cell
+/// without a value.
+pub(super) fn printed(cells: &[Cell]) -> Vec<Printed> {
+    COLUMNS
+        .iter()
+        .zip(cells)
+        .filter(|(column, _)| **column != UPDATED)
+        .map(|(column, cell)| Printed {
+            column: (*column).to_owned(),
+            value: match cell {
+                Cell::Int(number) => number.to_string(),
+                Cell::Text(text) => text.to_string(),
+                _ => String::new(),
+            },
+        })
+        .collect()
 }
 
 /// The decodes under way, which end with the list.

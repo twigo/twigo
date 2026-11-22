@@ -53,7 +53,7 @@ pub fn revealed(values: &Held<Box<RawValue>>, path: &[ValueStep]) -> Result<Stri
 }
 
 /// A path as people read it: `image.tag`, `extra[1]`.
-fn shown(path: &[ValueStep]) -> String {
+pub fn shown(path: &[ValueStep]) -> String {
     let mut text = String::new();
     for step in path {
         match step {

@@ -1,14 +1,19 @@
-//! Shows a value of an open Secret (ARCHITECTURE 3.6, 6.4): it leaves Rust
-//! only as the Reveal runs, read from the Secret as last listed then, and
-//! nothing is sent to the cluster.
+//! Shows a value of an open Secret, or a part of the revision an open Helm
+//! release shows (ARCHITECTURE 3.6, 6.4): it leaves Rust only as the Reveal
+//! runs, read then from the Secret as last listed or from the revision's
+//! page the editor holds, and nothing is sent to the cluster.
 
-use twigo_ipc::{ErrorCode, IpcError, SubscriptionId};
+use std::sync::Arc;
+
+use twigo_helm::Page;
+use twigo_ipc::{ErrorCode, HelmPart, IpcError, SubscriptionId, ValueStep};
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::secret_value;
+use twigo_policy::redact::{secret_value, values};
 
 use super::kubectl;
 use crate::Core;
 use crate::bus::{self, Finished, Planned};
+use crate::helm::Showing;
 
 pub(crate) fn reveal(
     core: &Core,
@@ -78,3 +83,207 @@ pub(crate) fn reveal(
         })),
     })
 }
+
+/// Plans with the revision the release shows, and refuses at the plan and
+/// at the run once it shows another.
+pub(crate) fn reveal_helm(
+    core: &Core,
+    window: &str,
+    release: SubscriptionId,
+    revision: u32,
+    part: HelmPart,
+) -> Result<Planned, IpcError> {
+    let (context, namespace, name, showing) = core.releases.with(window, release, |opened| {
+        (
+            opened.context().to_owned(),
+            opened.namespace().to_owned(),
+            opened.name().to_owned(),
+            opened.showing(),
+        )
+    })?;
+    let connection = core.policy.connection(&context);
+    let page = shown(&showing, revision)?;
+    let (value, binary) = page.revealed(&part)?;
+    let words = Words::of(&part, &page);
+    let release_words = format!("release {name} (revision {revision}) in {namespace}");
+    let get = |verb: &str| {
+        let revision = revision.to_string();
+        let mut line = vec![
+            "helm",
+            "get",
+            verb,
+            &name,
+            "-n",
+            &namespace,
+            "--kube-context",
+            &context,
+            "--revision",
+            &revision,
+        ];
+        let template;
+        match verb {
+            "values" => line.extend(["-o", "json"]),
+            _ => {
+                template = format!("{{{{index .Release.Config {}}}}}", index_of(&part));
+                line.extend(["--template", &template]);
+            }
+        }
+        kubectl(&line)
+    };
+    let command_line = match &part {
+        HelmPart::Values {
+            defaults: false,
+            path,
+        } if path.is_empty() => Some(get("values")?),
+        HelmPart::Values {
+            defaults: false, ..
+        } if prints_as_go_does(&value) => Some(get("all")?),
+        _ => None,
+    };
+    let (this, window) = (core.this.clone(), window.to_owned());
+    Ok(Planned {
+        question: format!("Reveal {} of {release_words} from {context}?", words.what),
+        confirm: "Reveal".to_owned(),
+        destructive: false,
+        consequences: vec![format!(
+            "It shows until you hide it, close the release or show another revision{}.",
+            if binary { ", as base64" } else { "" }
+        )],
+        affected: Vec::new(),
+        command_line,
+        doing: format!("Revealing {}", words.what),
+        command: "reveal",
+        target: format!(
+            "release {name} in {namespace}, revision {revision}, {}",
+            words.place
+        ),
+        writes: Vec::new(),
+        context,
+        connection,
+        space: None,
+        risk: Risk::Reveal,
+        previewed: None,
+        run: bus::Run::Sends(Box::new(move |_| {
+            Box::pin(async move {
+                // Read as it runs, from the revision the editor shows then.
+                let core = this
+                    .upgrade()
+                    .ok_or_else(|| IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting"))?;
+                let showing = core
+                    .releases
+                    .with(&window, release, |opened| opened.showing())?;
+                let (value, binary) = shown(&showing, revision)?.revealed(&part)?;
+                Ok(Finished::Revealed { value, binary })
+            })
+        })),
+    })
+}
+
+/// The page of `revision`, refused unless the release shows it.
+fn shown(showing: &Showing, revision: u32) -> Result<Arc<Page>, IpcError> {
+    match showing.now() {
+        Some((shown, page)) if shown == revision => Ok(page),
+        _ => Err(IpcError::new(
+            ErrorCode::ActionObjectChanged,
+            format!("the release no longer shows revision {revision}, so Twigo revealed nothing"),
+        )),
+    }
+}
+
+/// How a plan names a part: in its question, and in the audit log's
+/// target, which name the place and never the value.
+struct Words {
+    what: String,
+    place: String,
+}
+
+impl Words {
+    fn of(part: &HelmPart, page: &Page) -> Self {
+        let (what, place) = match part {
+            HelmPart::Values { defaults, path } if path.is_empty() => {
+                if *defaults {
+                    ("the chart's defaults".to_owned(), "defaults".to_owned())
+                } else {
+                    ("the values".to_owned(), "values".to_owned())
+                }
+            }
+            HelmPart::Values { defaults, path } => {
+                let path = values::shown(path);
+                if *defaults {
+                    (format!("the default {path}"), format!("defaults {path}"))
+                } else {
+                    (path.clone(), format!("values {path}"))
+                }
+            }
+            HelmPart::Secret {
+                document,
+                items,
+                key,
+            } => {
+                let secret = page
+                    .manifest()
+                    .secrets
+                    .into_iter()
+                    .find(|secret| secret.document == *document && secret.items == *items)
+                    .map(|secret| secret.name)
+                    .unwrap_or_default();
+                (
+                    format!("{key} of secret {secret} in the manifest"),
+                    format!("manifest secrets/{secret} key {key}"),
+                )
+            }
+            HelmPart::Document { document } => (
+                format!("document {document} of the manifest"),
+                format!("manifest document {document}"),
+            ),
+            HelmPart::Notes => ("the notes".to_owned(), "notes".to_owned()),
+            HelmPart::Description => ("the description".to_owned(), "description".to_owned()),
+        };
+        Self { what, place }
+    }
+}
+
+/// Whether Go's template prints a leaf of the values as Twigo reveals it: a
+/// string or a boolean, since Helm reads every number as a float, which Go
+/// prints in exponent form from a million on, and prints null as
+/// `<no value>`.
+fn prints_as_go_does(value: &str) -> bool {
+    value.starts_with('"') || value == "true" || value == "false"
+}
+
+/// The arguments of `index` that reach a path's leaf from
+/// `.Release.Config`: keys as Go strings, list indexes as numbers.
+fn index_of(part: &HelmPart) -> String {
+    let HelmPart::Values { path, .. } = part else {
+        return String::new();
+    };
+    path.iter()
+        .map(|step| match step {
+            ValueStep::Key(key) => go_string(key),
+            ValueStep::Index(index) => index.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `text` as a Go string literal.
+fn go_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for c in text.chars() {
+        match c {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            c if c.is_control() => quoted.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+#[cfg(test)]
+mod tests;

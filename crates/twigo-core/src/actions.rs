@@ -26,7 +26,7 @@ use http::Method;
 use http::header::CONTENT_TYPE;
 pub(crate) use protection::{protection, refused};
 pub(crate) use restart::restart;
-pub(crate) use reveal::reveal;
+pub(crate) use reveal::{reveal, reveal_helm};
 pub(crate) use scale::scale;
 use serde_json::Value;
 pub(crate) use shell::{containers, shell};

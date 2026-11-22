@@ -15,7 +15,7 @@ use twigo_ipc::{
 };
 use twigo_kube::client::{Budgets, Clients};
 
-use super::testing::secret_name;
+use super::fetch::secret_name;
 use super::*;
 
 fn revision(fake: &Fake, namespace: &str, release: &str, version: u32, status: &str) {

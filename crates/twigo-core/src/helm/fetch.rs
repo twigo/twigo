@@ -22,6 +22,12 @@ use twigo_kube::client::Clients;
 /// The seam of one revision's decode, as `TWIGO_PANIC` names it.
 pub(crate) const DECODE: &str = "helm decode";
 
+/// The name Helm gives the Secret of a release's revision
+/// ([`makeKey`](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/storage.go#L327-L329)).
+pub(crate) fn secret_name(release: &str, revision: u32) -> String {
+    format!("sh.helm.release.v1.{release}.v{revision}")
+}
+
 /// The revision the Secret `name` of `namespace` holds, read by `decode`;
 /// `helm.revision-gone` once the Secret is gone.
 pub(crate) async fn decoded<T: Send + 'static>(
