@@ -108,7 +108,7 @@ export default function MaskedText({
     }
     const masked = model.getLinesContent().flatMap((content, index) =>
       [...content.matchAll(new RegExp(MASK, "g"))].map(
-        ({ index: from = 0, 0: found }) => ({
+        ({ index: from, 0: found }) => ({
           range: {
             startLineNumber: index + 1,
             startColumn: from + 1,

@@ -55,9 +55,9 @@ const MaskedText = lazy(() => import("./MaskedText"));
 
 const KIND = "Helm release";
 
-const TABS: {
-  readonly [V in "four" | "split"]: readonly [ReleaseTab, string][];
-} = {
+const TABS: Readonly<
+  Record<"four" | "split", readonly (readonly [ReleaseTab, string])[]>
+> = {
   four: [
     ["overview", "Overview"],
     ["values", "Values"],
