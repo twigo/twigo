@@ -730,7 +730,7 @@ test("a hovered row's verb that another resource as a whole refuses draws disabl
   );
 });
 
-test("a hovered row is asked about only while its icons show: never where the list leaves them no room, as beside docked details, and no more once the pointer leaves", async () => {
+async function askedDeployments() {
   const workbench = await openInStaging(
     "ready",
     "k8s-list://staging/apps/v1/deployments",
@@ -747,7 +747,11 @@ test("a hovered row is asked about only while its icons show: never where the li
       query.checks.some((check) => check.name === name),
     ).length;
   };
+  return { asked, rows, named };
+}
 
+test("a hovered row is asked about while its icons show, and again once a refusal's hold ends", async () => {
+  const { rows, named } = await askedDeployments();
   const hovered = rows()[2];
   if (!hovered) throw new Error("a list of deployments");
   fireEvent.pointerEnter(hovered);
@@ -756,10 +760,22 @@ test("a hovered row is asked about only while its icons show: never where the li
   expect(named(hovered)).toBe(1);
   await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS));
   expect(named(hovered)).toBe(2);
-  fireEvent.pointerLeave(hovered);
-  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS * 3));
-  expect(named(hovered)).toBe(2);
+});
 
+test("a row the pointer has left is asked about no more", async () => {
+  const { rows, named } = await askedDeployments();
+  const hovered = rows()[2];
+  if (!hovered) throw new Error("a list of deployments");
+  fireEvent.pointerEnter(hovered);
+  await settle(2);
+  expect(named(hovered)).toBe(1);
+  fireEvent.pointerLeave(hovered);
+  await act(() => vi.advanceTimersByTimeAsync(REFUSED_MS * 2));
+  expect(named(hovered)).toBe(1);
+});
+
+test("a hovered row is never asked about where the list leaves its icons no room, as beside docked details", async () => {
+  const { asked, rows } = await askedDeployments();
   fireEvent.click(rows()[0] ?? document.body);
   await settle(8);
   expect(
