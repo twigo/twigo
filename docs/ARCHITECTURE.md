@@ -1901,7 +1901,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   - Facts, each with an id, a label and a value: Twigo's version and commit, the OS and its version, the architecture, the web engine and its version, the Kubernetes versions of the clusters this run asked, without their names, and the place (`file:line`) of the newest panic of this run or the previous one.
     The person can untick the last two.
   - The log: the last 200 records or 32 KiB of `twigo.log` and `twigo.1.log`, whichever is less, as text lines of time, level, target, message and `field=value` pairs, with a field of several lines, such as a panic's backtrace, below its line.
-    A record counts for at most 8 KiB of the window and is cut there, at a line and its backtrace first, with the bytes it left out said, so one long record never leaves the log empty.
+    A record counts for at most 8 KiB of the window, so four fit however long they are, and its text is cut at that size, at a line and a panic's backtrace before its message, with the bytes it left out said, so one long record never leaves the log empty.
     A line that is not a record, which a full disk or a kill leaves torn, shows as `<a line that is not a record>`, never as its text.
   - How many names, paths, tokens, addresses and quoted values the redaction hid, and how many lines it showed as a placeholder.
   - Nothing else: never a kubeconfig, `state.json`, `trust.json`, the policy file or the audit log.
@@ -1909,11 +1909,13 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   - A field of a fixed name (`context`, `space`, `cluster`, `server`, `user`, `namespace`, `object`) becomes an alias numbered by first appearance in the report, `<context-1>`, `<namespace-2>`, and a `url` or `path` field becomes `<url>` or `<path>`.
     A space is its context, so its alias is the context's.
   - Every name the catalog and the state know, and every value a field carried in this report, is aliased with the same alias where it stands in free text as a whole token, the longest first and in one pass, so an alias is never read again.
-    The catalog's are each context's name, cluster, user, namespace and server (as a URL, as host and port, and as host, except that a loopback server is not known by its bare host, which is also every forward's address), and the state's are every space, the namespaces each space is on, and the namespaces and names of its saved forwards' targets.
-    A server's URL is one name whether a field writes it with a trailing `/` or the kubeconfig does not.
+    The catalog's are each context's name, cluster, user, namespace and server (as a URL, as host and port, and as host, except that a loopback server is not known by its bare host, which is also every forward's address), and the state's are every space, the namespaces each space is on, and the namespaces and names of its saved forwards' targets and of its recent editors' objects and lists.
+    A server is its scheme, host and port wherever a field or the text writes it, so a URL with a trailing `/` or a path (Rancher's `/k8s/clusters/<id>`) is the same server as the kubeconfig's, and what follows its alias in a URL goes with it.
     A name shorter than three characters is aliased where a field carries it and stays in free text, where it would garble the words around it.
-    The objects an open page holds are not among them, but for the saved forwards' targets: a name that no field carries and no list holds reaches the report only by the fixed patterns.
+    The rows of a list are not among them, nor are objects that no saved forward or recent editor (a space keeps 20) names: a name that no field carries and no list holds reaches the report only by the fixed patterns.
   - Fixed patterns: the home folder of the process and of the login shell becomes `~` and the account's name `<account>`, JWTs and the credentials after `Bearer` and `Basic` `<token>` (a word of lowercase letters only after them is prose, as in `Basic information`, and stays), emails `<email>`, URLs `<url>`, addresses other than loopback `<address>`, and every double-quoted string `"…"`, unless it holds nothing but aliases.
+    An address is found bare, with a port, in brackets, in a list, after a word and a colon (`node:10.0.0.21`) or a dot, and as a prefix (`fd00:10:96::/112`).
+    What a letter, a digit or `_` joins to a word (`pod10.0.0.16`) stays, and so do the tail of a longer dotted number (`2.8.11.9` of WebKit's `22625.2.8.11.9`), a time, a port and a version of three parts; a four-part number up to 255 (`1.0.0.1`) and a serial of eight hex groups go as addresses.
   - No hashing: a hash of `prod` or `default` is reversed by trying names, while an alias says nothing outside its report.
 - **The Kubernetes versions** are what `cluster_version` last got from each context's clients, which the window asks for the open space's context, kept with those clients, so a context whose kubeconfig changed forgets its version.
   The report sends no request, and a context nobody opened has no version in it.

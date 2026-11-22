@@ -172,14 +172,17 @@ fn a_server_is_one_alias_as_the_discovery_writes_it_and_as_the_catalog_and_the_t
             "message": "could not cache the discovery",
             "server": "https://10.9.9.9:6443/",
         })),
-        &record(json!({ "message": "refused", "error": "dialing https://10.9.9.9:6443/x" })),
+        &record(json!({
+            "message": "refused",
+            "error": "dialing https://10.9.9.9:6443/api/v1/namespaces/secret-ns/pods/web-7f9. Then 10.0.0.1:6443/healthz, \"https://10.0.0.1:6443/\"",
+        })),
     ]);
     assert_eq!(
         text,
         "2026-11-22T21:14:03Z WARN  twigo_core::state could not read the cached discovery error=x server=<server-1>\n\
          2026-11-22T21:14:03Z WARN  twigo_core::state refused error=rejected by <server-1>\n\
          2026-11-22T21:14:03Z WARN  twigo_core::state could not cache the discovery server=<server-2>\n\
-         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>/x\n"
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>. Then <server-1>, \"<server-1>\"\n"
     );
 }
 
@@ -259,10 +262,34 @@ fn an_address_goes_beside_any_punctuation_but_not_inside_a_word() {
         ),
         ("via ::ffff:10.0.0.15 and ::1", "via <address> and ::1"),
         ("pod10.0.0.16 and 10.0.0.17x", "pod10.0.0.16 and 10.0.0.17x"),
+        (
+            "endpoints [10.0.0.28:8080 10.0.0.29:8080] and [10.0.0.41:8080, 10.0.0.42:8080]",
+            "endpoints [<address> <address>] and [<address>, <address>]",
+        ),
+        (
+            "[10.0.0.30], [fd00::31] and dial tcp [fd00::36]:443: i/o timeout",
+            "[<address>], [<address>] and dial tcp <address>: i/o timeout",
+        ),
+        (
+            "node:10.0.0.21 via:10.0.0.24 remote:10.0.0.25:443 id:fd00::34",
+            "node:<address> via:<address> remote:<address> id:<address>",
+        ),
+        (
+            "app.10.0.0.32.sslip.io and ...10.0.0.33",
+            "app.<address>.sslip.io and ...<address>",
+        ),
+        (
+            "service CIDR fd00:10:96::/112, 10.96.0.0/12 and 2001:db8::",
+            "service CIDR <address>/112, <address>/12 and <address>",
+        ),
+        (
+            "listen tcp :::8080 and WebKit 22625.2.8.11.9, 1.2.3.4.5, std::fmt::Display",
+            "listen tcp :::8080 and WebKit 22625.2.8.11.9, 1.2.3.4.5, std::fmt::Display",
+        ),
     ] {
         assert_eq!(redactor.text(said), left);
     }
-    assert_eq!(redactor.hidden().addresses, 6);
+    assert_eq!(redactor.hidden().addresses, 22);
 }
 
 #[test]
@@ -348,6 +375,28 @@ fn the_last_lines_reach_into_the_previous_file_and_stop_at_200_or_32_kib() {
 }
 
 #[test]
+fn four_long_records_share_the_window_and_a_fifth_takes_the_oldest() {
+    let directory = tempfile::tempdir().unwrap();
+    let long = |number: usize, length: usize| {
+        let head = record(json!({ "message": format!("record {number}"), "error": "" }));
+        record(json!({
+            "message": format!("record {number}"),
+            "error": "x".repeat(length - head.len()),
+        }))
+    };
+    for length in [8192, 9000, 100_000] {
+        let lines: Vec<String> = (0..5).map(|number| long(number, length)).collect();
+        assert!(lines.iter().all(|line| line.len() == length));
+        let file = write(directory.path(), "twigo.log", lines.clone());
+        assert_eq!(
+            log::tail(std::slice::from_ref(&file)),
+            lines[1..],
+            "records of {length} bytes"
+        );
+    }
+}
+
+#[test]
 fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
     let directory = tempfile::tempdir().unwrap();
     let frames: Vec<String> = (0..2000)
@@ -365,7 +414,7 @@ fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
             "message": "panic",
             "backtrace": frames.join("\n"),
             "location": "crates/a.rs:1:1",
-            "payload": "bug",
+            "payload": "assertion `left == right` failed\n  left: 3\n right: 4",
         },
         "target": "twigo_log::panic",
     })
@@ -390,10 +439,20 @@ fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
     );
     let at = lines
         .iter()
-        .position(|line| line.ends_with("location=crates/a.rs:1:1 payload=bug"))
+        .position(|line| line.ends_with("location=crates/a.rs:1:1"))
         .expect("the panic's own line stays whole");
-    assert_eq!(lines[at + 1], "    backtrace:");
-    let (notice, kept) = lines[at + 2..].split_last().unwrap();
+    assert_eq!(
+        lines[at + 1..at + 6],
+        [
+            "    payload:",
+            "      assertion `left == right` failed",
+            "        left: 3",
+            "       right: 4",
+            "    backtrace:",
+        ],
+        "the message stays and the backtrace is cut first"
+    );
+    let (notice, kept) = lines[at + 6..].split_last().unwrap();
     assert!(
         notice.starts_with("    … ") && notice.ends_with(" bytes of this record cut"),
         "{notice}"
@@ -650,9 +709,13 @@ async fn a_core_hides_the_names_its_catalog_and_its_state_hold() {
     std::fs::write(
         &kubeconfig,
         "
-clusters: [{ name: prod-eu-cluster, cluster: { server: 'https://api.prod.example.com:6443' } }]
+clusters:
+- { name: prod-eu-cluster, cluster: { server: 'https://api.prod.example.com:6443' } }
+- { name: rancher, cluster: { server: 'https://rancher.example.com/k8s/clusters/c-abc12' } }
 users: [{ name: oidc-alice, user: { token: t } }]
-contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alice, namespace: payments } }]
+contexts:
+- { name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alice, namespace: payments } }
+- { name: team-a, context: { cluster: rancher, user: oidc-alice } }
 ",
     )
     .unwrap();
@@ -662,12 +725,23 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
         &directory.path().join("policy.json"),
     );
     core.state.open_space("gone-context");
+    let entry = |key: &str, value: &str| twigo_ipc::StateEntry {
+        space: Some("gone-context".to_owned()),
+        key: key.to_owned(),
+        value: value.to_owned(),
+    };
     core.state
-        .set(vec![twigo_ipc::StateEntry {
-            space: Some("gone-context".to_owned()),
-            key: "namespaces".to_owned(),
-            value: r#"["billing-eu"]"#.to_owned(),
-        }])
+        .set(vec![
+            entry("namespaces", r#"["billing-eu"]"#),
+            entry(
+                "recent",
+                r#"[
+                    { "uri": "k8s://gone-context//v1/pods/treasury/ledger-7d9f8b-x2x9k", "title": "ledger-7d9f8b-x2x9k" },
+                    { "uri": "k8s://gone-context/rbac.authorization.k8s.io/v1/clusterroles/system%3Anode-proxier", "title": "system:node-proxier" },
+                    { "uri": "k8s-list://gone-context/v1/pods?ns=audit-eu%2Cstock-eu", "title": "Pods" }
+                ]"#,
+            ),
+        ])
         .unwrap();
     let saved = serde_json::from_value(json!({ "forwards": [{
         "id": 1,
@@ -704,20 +778,35 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
     let log = write(
         directory.path(),
         "twigo.log",
-        [record(json!({
-            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
-        }))],
+        [
+            record(json!({
+                "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
+            })),
+            record(json!({
+                "message": "could not read the cached discovery",
+                "server": "https://rancher.example.com/k8s/clusters/c-abc12",
+            })),
+            record(json!({
+                "message": "rancher.example.com refused GET https://rancher.example.com/k8s/clusters/c-abc12/api/v1/namespaces/secret-ns/pods/web-7f9",
+            })),
+            record(json!({
+                "message": "Pod ledger-7d9f8b-x2x9k in treasury is not ready, nor is system:node-proxier or a pod of audit-eu and stock-eu",
+            })),
+        ],
     );
     let report = core.report(&facts(None), &[log]).await;
-    assert!(
-        report.log.ends_with(
-            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
-             on <namespace-2> and Service <object-1> in <namespace-3>\n"
-        ),
-        "{}",
-        report.log
+    let time = "2026-11-22T21:14:03Z WARN  twigo_core::state";
+    assert_eq!(
+        report.log,
+        format!(
+            "{time} <server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
+             on <namespace-2> and Service <object-1> in <namespace-3>\n\
+             {time} could not read the cached discovery server=<server-2>\n\
+             {time} <server-2> refused GET <server-2>\n\
+             {time} Pod <object-2> in <namespace-4> is not ready, nor is <object-3> or a pod of <namespace-5> and <namespace-6>\n"
+        )
     );
-    assert_eq!(report.hidden.names, 8);
+    assert_eq!(report.hidden.names, 16);
 }
 
 #[tokio::test]
