@@ -12,7 +12,7 @@ test("no variant is the recommended of each family, and a named one is read what
     tabs: "page",
     mask: "tree",
   });
-  expect(variants("?variant=tabs:nonsense,helm:sidebar")).toEqual({
+  expect(variants("?variant=tabs:nonsense,mask:pill,helm:sidebar")).toEqual({
     helm: "sidebar",
     tabs: "four",
     mask: "token",

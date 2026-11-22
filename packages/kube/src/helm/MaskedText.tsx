@@ -1,36 +1,12 @@
 import { useEffect, useRef } from "react";
 import { useEditorShown } from "@twigo/workbench";
-import { editor, languages, textOptions, Uri } from "../edit/monaco";
+import { useWorkbench } from "@twigo/workbench";
+import { editor, textOptions, Uri } from "../edit/monaco";
 import { documentsOf } from "./documents";
 import { MASK, type Glyph } from "./reveals";
 
-/** The scheme of the models of a release's texts, whose documents `@` lists. */
+/** The scheme of the models of a release's texts. */
 const MODELS = "twigo-helm";
-
-languages.registerDocumentSymbolProvider(
-  { language: "yaml", scheme: MODELS },
-  {
-    provideDocumentSymbols: (model) =>
-      documentsOf(model.getValue()).map(({ name, from, to }) => ({
-        name,
-        detail: "",
-        kind: languages.SymbolKind.File,
-        tags: [],
-        range: {
-          startLineNumber: from,
-          startColumn: 1,
-          endLineNumber: to,
-          endColumn: 1,
-        },
-        selectionRange: {
-          startLineNumber: from,
-          startColumn: 1,
-          endLineNumber: from,
-          endColumn: 1,
-        },
-      })),
-  },
-);
 
 /**
  * A release's text, read-only YAML, with its masked values in the quiet role
@@ -43,20 +19,26 @@ export default function MaskedText({
   text,
   glyphs,
   onGlyph,
+  symbols,
+  onCursor,
 }: {
   /** Names the model: one text, one model. */
   readonly id: string;
   readonly text: string;
   readonly glyphs: readonly Glyph[];
   readonly onGlyph: (glyph: Glyph) => void;
+  /** The editor whose `@` lists the documents of the text, as a manifest's does. */
+  readonly symbols?: string | undefined;
+  readonly onCursor?: ((line: number) => void) | undefined;
 }) {
+  const { editors } = useWorkbench();
   const shown = useEditorShown();
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<editor.IStandaloneCodeEditor>(undefined);
   const marks = useRef<editor.IEditorDecorationsCollection>(undefined);
-  const latest = useRef({ text, glyphs, onGlyph });
+  const latest = useRef({ text, glyphs, onGlyph, onCursor });
   useEffect(() => {
-    latest.current = { text, glyphs, onGlyph };
+    latest.current = { text, glyphs, onGlyph, onCursor };
   });
   const place = useRef<editor.ICodeEditorViewState | null>(null);
   useEffect(() => {
@@ -87,7 +69,33 @@ export default function MaskedText({
       const found = latest.current.glyphs.find((each) => each.line === line);
       if (found) latest.current.onGlyph(found);
     });
+    const moved = instance.onDidChangeCursorPosition(({ position }) => {
+      latest.current.onCursor?.(position.lineNumber);
+    });
+    const act = (revealed: boolean) => (ed: editor.ICodeEditor) => {
+      const line = ed.getPosition()?.lineNumber;
+      const found = latest.current.glyphs.find(
+        (each) => each.line === line && each.revealed === revealed,
+      );
+      if (found) latest.current.onGlyph(found);
+    };
+    const actions = [
+      instance.addAction({
+        id: "twigo.helm.reveal",
+        label: "Reveal Value",
+        contextMenuGroupId: "navigation",
+        run: act(false),
+      }),
+      instance.addAction({
+        id: "twigo.helm.hide",
+        label: "Hide Value",
+        contextMenuGroupId: "navigation",
+        run: act(true),
+      }),
+    ];
     return () => {
+      for (const action of actions) action.dispose();
+      moved.dispose();
       click.dispose();
       place.current = instance.saveViewState();
       instance.dispose();
@@ -135,5 +143,21 @@ export default function MaskedText({
       })),
     ]);
   }, [text, glyphs, shown]);
+  useEffect(() => {
+    const instance = view.current;
+    if (!symbols || !shown || !instance) return;
+    return editors.publishSymbols(
+      symbols,
+      documentsOf(text).map(({ name, from }) => ({
+        label: name,
+        detail: `line ${String(from)}`,
+        reveal: () => {
+          instance.revealLineNearTop(from);
+          instance.setPosition({ lineNumber: from, column: 1 });
+          instance.focus();
+        },
+      })),
+    );
+  }, [editors, symbols, shown, text]);
   return <div ref={host} className="h-full w-full" />;
 }

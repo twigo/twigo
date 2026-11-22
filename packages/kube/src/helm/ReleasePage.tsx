@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 import {
@@ -29,7 +29,13 @@ import { yamlOfObject } from "../edit/object";
 import { ObjectHeader } from "../object/ObjectHeader";
 import { Overview } from "../object/Overview";
 import { TONE } from "../object/tone";
-import { OBJECT_SUBJECT } from "../object/pageStates";
+import { ObjectViews } from "../object/ObjectViews";
+import {
+  OBJECT_FILTERED,
+  OBJECT_SUBJECT,
+  OBJECT_URI,
+  useFiltered,
+} from "../object/pageStates";
 import { useReveal } from "../object/reveal";
 import { refUri } from "../object/useObject";
 import { useHeader } from "../object/useHeader";
@@ -48,7 +54,8 @@ import {
   type Glyph,
   type Shown,
 } from "./reveals";
-import type { Plate, ReleaseTab } from "./states";
+import type { Plate, ReleaseTab, TextState } from "./states";
+import { ValuesTree } from "./ValuesTree";
 import { useRelease } from "./useRelease";
 
 const MaskedText = lazy(() => import("./MaskedText"));
@@ -91,7 +98,18 @@ function withNotes(overview: Document, notes: string): Document {
     summary: [],
     tone: null,
     fold: "folded",
-    blocks: [],
+    blocks: [
+      {
+        type: "fields",
+        fields: [
+          {
+            label: "Notes",
+            value: { type: "text", text: notes },
+            default: false,
+          },
+        ],
+      },
+    ],
   };
   const at = overview.sections.findIndex(({ id }) => id === "helm.diagnostics");
   return {
@@ -205,6 +223,27 @@ export function ReleasePage({
     usage: undefined,
   });
   const [element, setElement] = useState<HTMLElement | null>(null);
+  const [text, setText] = useState<TextState>();
+  const notesShown =
+    shown.get(partKey({ kind: "notes" }))?.value ?? snapshot.notes?.text ?? "";
+  // What the Overview shows, which the page's filter reads: the split variant keeps the notes, the hooks and the objects in views of their own.
+  const shownOverview = useMemo(
+    () =>
+      snapshot.overview &&
+      (layout === "split"
+        ? {
+            ...snapshot.overview,
+            sections: snapshot.overview.sections.filter(
+              ({ id }) => OWN[id] === undefined,
+            ),
+          }
+        : withNotes(snapshot.overview, notesShown)),
+    [snapshot.overview, layout, notesShown],
+  );
+  const filterable = layout !== "page" && tab === "overview";
+  const filtered = useFiltered(services.pages, uri) && filterable;
+  const under = text?.glyphs.find((each) => each.line === text.line);
+  const latest = useRef({ text, under, show, hide });
   const subject = JSON.stringify({
     space: release.space,
     gvr: HELM_RELEASES,
@@ -223,10 +262,58 @@ export function ReleasePage({
     scope.set("resource.namespaced", true);
     scope.set(HELM_TAB, layout === "page" ? "page" : tab);
     scope.set(HELM_REVISION, revision === undefined ? "" : String(revision));
+    scope.set("helm.page", uri);
+    scope.set("helm.canReveal", under !== undefined && !under.revealed);
+    scope.set("helm.canHide", under?.revealed === true);
+    scope.set(
+      "helm.canRevealAll",
+      (text?.hidden ?? 0) > 0 && text?.whole !== undefined,
+    );
+    scope.set("helm.canHideAll", (text?.revealed.length ?? 0) > 0);
+    scope.set("pageFocus", filterable);
+    scope.set(OBJECT_URI, filterable ? uri : undefined);
+    scope.set(OBJECT_FILTERED, filtered);
     return () => {
       scope.dispose();
     };
-  }, [keys, element, subject, layout, tab, revision]);
+  }, [
+    keys,
+    element,
+    subject,
+    layout,
+    tab,
+    revision,
+    uri,
+    under,
+    text,
+    filterable,
+    filtered,
+  ]);
+  useEffect(() => {
+    latest.current = { text, under, show, hide };
+  });
+  useEffect(
+    () =>
+      states.register(uri, {
+        reveal: () => {
+          const { under: at, show: run } = latest.current;
+          if (at && !at.revealed) run(at.part);
+        },
+        hide: () => {
+          const { under: at, hide: run } = latest.current;
+          if (at?.revealed) run([at.part]);
+        },
+        revealAll: () => {
+          const { text: now, show: run } = latest.current;
+          if (now?.whole) run(now.whole);
+        },
+        hideAll: () => {
+          const { text: now, hide: run } = latest.current;
+          if (now) run(now.revealed);
+        },
+      }),
+    [states, uri],
+  );
   const resources = useResources(services.discovery, release.space);
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
@@ -253,6 +340,7 @@ export function ReleasePage({
       }}
       services={services}
       onGlyph={onGlyph}
+      onText={setText}
       onReveal={show}
       onHide={hide}
       onOpen={open}
@@ -337,14 +425,20 @@ export function ReleasePage({
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {layout !== "page" && (
-          <TabBar
-            label="Views of the release"
-            tabs={TABS[layout].map(([value, label]) => ({ value, label }))}
-            value={tab}
+          <ObjectViews
+            tab={tab}
+            tabs={TABS[layout].map(([id, title]) => ({ id, title }))}
+            snapshot={{
+              overview: shownOverview,
+              events: undefined,
+              usage: undefined,
+            }}
             onChange={(next) => {
               states.setTab(uri, next);
             }}
-            className="w-full shadow-[inset_0_-1px_0_var(--border-subtle)]"
+            pages={services.pages}
+            uri={uri}
+            kind={KIND}
           />
         )}
         {(layout === "page" || tab === "overview") && (
@@ -445,6 +539,7 @@ function Body({
   revealed,
   services,
   onGlyph,
+  onText,
   onReveal,
   onHide,
   onOpen,
@@ -452,6 +547,7 @@ function Body({
   revisionMenu,
   split,
 }: {
+  onText: (state: TextState | undefined) => void;
   view: ReleaseTab;
   uri: string;
   release: ReleaseInput;
@@ -488,6 +584,7 @@ function Body({
           shown={shown}
           states={states}
           onGlyph={onGlyph}
+          onText={onText}
           onReveal={onReveal}
           onHide={onHide}
         />
@@ -499,6 +596,7 @@ function Body({
           manifest={snapshot.manifest}
           shown={shown}
           onGlyph={onGlyph}
+          onText={onText}
         />
       ) : null;
     case "history":
@@ -570,7 +668,19 @@ function Body({
         }}
       />
     ),
-    "helm.notes": notesText,
+    "helm.notes": (
+      <RevealControl
+        hidden={notesHidden}
+        revealed={revealed.notes}
+        what="the notes"
+        onReveal={() => {
+          onReveal({ kind: "notes" });
+        }}
+        onHide={() => {
+          onHide([{ kind: "notes" }]);
+        }}
+      />
+    ),
   };
   return (
     <Overview
@@ -619,17 +729,41 @@ function Scrubbed({
         text={text}
         className="text-prose whitespace-pre-line text-content"
       />
-      {(hidden || revealed) && (
-        <div className="text-xs text-support">
-          {revealed ? (
-            <LinkButton onClick={onHide}>Hide {what}</LinkButton>
-          ) : (
-            <>
-              A value of the release's Secrets is hidden here.{" "}
-              <LinkButton onClick={onReveal}>Reveal {what}</LinkButton>
-            </>
-          )}
-        </div>
+      <RevealControl
+        hidden={hidden}
+        revealed={revealed}
+        what={what}
+        onReveal={onReveal}
+        onHide={onHide}
+      />
+    </div>
+  );
+}
+
+/** What a scrubbed text offers: a Reveal where a value of the revision's Secrets was taken out, and Hide once it is shown. */
+function RevealControl({
+  hidden,
+  revealed,
+  what,
+  onReveal,
+  onHide,
+}: {
+  hidden: boolean;
+  revealed: boolean;
+  what: string;
+  onReveal: () => void;
+  onHide: () => void;
+}) {
+  if (!hidden && !revealed) return null;
+  return (
+    <div className="text-xs text-support">
+      {revealed ? (
+        <LinkButton onClick={onHide}>Hide {what}</LinkButton>
+      ) : (
+        <>
+          A value of the release's Secrets is hidden here.{" "}
+          <LinkButton onClick={onReveal}>Reveal {what}</LinkButton>
+        </>
       )}
     </div>
   );
@@ -671,6 +805,7 @@ function ValuesView({
   shown,
   states,
   onGlyph,
+  onText,
   onReveal,
   onHide,
 }: {
@@ -679,12 +814,15 @@ function ValuesView({
   shown: ReadonlyMap<string, Shown>;
   states: ListServices["releases"];
   onGlyph: (glyph: Glyph) => void;
+  onText: (state: TextState | undefined) => void;
   onReveal: (part: HelmPart) => void;
   onHide: (parts: readonly HelmPart[]) => void;
 }) {
   useChanges(states.changes);
   const plate: Plate = states.plate(uri);
   const defaults = plate === "defaults";
+  // @todo: drop this read once the owner has chosen how a masked value looks (mask:token, mask:tree), keeping the choice's branch
+  const tree = variants().mask === "tree" && states.form(uri) === "tree";
   const own = useMemo(
     () =>
       new Map(
@@ -697,13 +835,27 @@ function ValuesView({
   );
   const json = defaults ? values.defaults : values.user;
   const masked = useMemo(() => JSON.parse(json) as unknown, [json]);
-  const text = useMemo(() => yamlOfObject(spliced(masked, own)), [masked, own]);
+  const document = useMemo(() => spliced(masked, own), [masked, own]);
+  const text = useMemo(() => yamlOfObject(document), [document]);
   const glyphs = useMemo(
     () => valueGlyphs(text, defaults, own),
     [text, defaults, own],
   );
   const hidden = hiddenCount(text);
   const whole: HelmPart = { kind: "values", defaults, path: [] };
+  const [line, setLine] = useState(1);
+  useEffect(() => {
+    onText({
+      glyphs,
+      line,
+      hidden,
+      revealed: [...own.values()].map(({ part }) => part),
+      whole,
+    });
+    return () => {
+      onText(undefined);
+    };
+  }, [onText, glyphs, line, hidden, own, defaults]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <TabBar
@@ -718,6 +870,20 @@ function ValuesView({
         }}
         className="w-full shadow-[inset_0_-1px_0_var(--border-subtle)]"
       />
+      {variants().mask === "tree" && (
+        <TabBar
+          label="How the values read"
+          tabs={[
+            { value: "tree" as const, label: "Tree" },
+            { value: "yaml" as const, label: "YAML" },
+          ]}
+          value={states.form(uri)}
+          onChange={(next) => {
+            states.setForm(uri, next);
+          }}
+          className="w-full shadow-[inset_0_-1px_0_var(--border-subtle)]"
+        />
+      )}
       {masked === null ? (
         <EmptyState icon={CircleAlert} title="No values were set">
           This revision was installed with the chart's defaults.
@@ -755,15 +921,25 @@ function ValuesView({
               </>
             )}
           </Bar>
-          <div className="min-h-0 flex-1">
-            <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
-              <MaskedText
-                id={`${uri}/${plate}`}
-                text={text}
-                glyphs={glyphs}
+          <div className="min-h-0 flex-1 overflow-auto">
+            {tree ? (
+              <ValuesTree
+                document={document}
+                defaults={defaults}
+                shown={own}
                 onGlyph={onGlyph}
               />
-            </Suspense>
+            ) : (
+              <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
+                <MaskedText
+                  id={`${uri}/${plate}`}
+                  text={text}
+                  glyphs={glyphs}
+                  onGlyph={onGlyph}
+                  onCursor={setLine}
+                />
+              </Suspense>
+            )}
           </div>
         </>
       )}
@@ -776,17 +952,34 @@ function ManifestView({
   manifest,
   shown,
   onGlyph,
+  onText,
 }: {
   uri: string;
   manifest: Parameters<typeof manifestOf>[0];
   shown: ReadonlyMap<string, Shown>;
   onGlyph: (glyph: Glyph) => void;
+  onText: (state: TextState | undefined) => void;
 }) {
   const { text, glyphs } = useMemo(
     () => manifestOf(manifest, shown),
     [manifest, shown],
   );
   const hidden = hiddenCount(text);
+  const [line, setLine] = useState(1);
+  useEffect(() => {
+    onText({
+      glyphs,
+      line,
+      hidden,
+      revealed: [...shown.values()]
+        .map(({ part }) => part)
+        .filter(({ kind }) => kind === "secret" || kind === "document"),
+      whole: undefined,
+    });
+    return () => {
+      onText(undefined);
+    };
+  }, [onText, glyphs, line, hidden, shown]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <Bar>
@@ -805,6 +998,8 @@ function ManifestView({
             text={text}
             glyphs={glyphs}
             onGlyph={onGlyph}
+            onCursor={setLine}
+            symbols={uri}
           />
         </Suspense>
       </div>

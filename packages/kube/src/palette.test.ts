@@ -45,6 +45,13 @@ async function withEveryEnablement() {
   workbench.keys.set("list.uri", "helm-list://dev");
   workbench.keys.set("helm.revision", 2);
   for (const key of [
+    "helm.canReveal",
+    "helm.canHide",
+    "helm.canRevealAll",
+    "helm.canHideAll",
+  ])
+    workbench.keys.set(key, true);
+  for (const key of [
     "resource.forward",
     "forward",
     "forward.running",
@@ -75,7 +82,11 @@ const KINDS = [
     kind: "CronJob",
     commands: /^k8s\.(cronjob\.|resource\.(suspend|resume)$)/,
   },
-  { group: "helm.sh", kind: "HelmRelease", commands: /^helm\.release\./ },
+  {
+    group: "helm.sh",
+    kind: "HelmRelease",
+    commands: /^helm\.(release|values?)\./,
+  },
 ] as const;
 
 test("every registered command appears in the palette", async () => {

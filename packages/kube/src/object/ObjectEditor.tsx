@@ -40,7 +40,7 @@ import {
   useFiltered,
   type PageStates,
 } from "./pageStates";
-import type { ObjectTabs } from "./tabs";
+import { OBJECT_TABS, type ObjectTabs } from "./tabs";
 import { useSecretReveal } from "./reveal";
 import { hasUsage } from "./figures";
 import { objectQuery, refResource, refUri, useObject } from "./useObject";
@@ -274,6 +274,7 @@ function ObjectPage({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ObjectViews
           tab={tab}
+          tabs={OBJECT_TABS}
           snapshot={snapshot}
           onChange={(next) => {
             tabs.set(uri, next);

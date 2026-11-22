@@ -1,5 +1,7 @@
 import {
   Copy,
+  Eye,
+  EyeOff,
   GitCompare,
   History,
   ShipWheel,
@@ -71,7 +73,7 @@ export function helmCommand(
  */
 export function registerHelm(
   workbench: Workbench,
-  { selection }: Pick<ListServices, "selection">,
+  { selection, releases }: Pick<ListServices, "selection" | "releases">,
 ): void {
   const { commands, menus, editors, keybindings, spaces } = workbench;
   const copy = async (text: string) => {
@@ -217,6 +219,60 @@ export function registerHelm(
       when: `${HELM} && ${HELM_REVISION} > 1`,
       enablement: `${HELM} && ${HELM_REVISION} > 1`,
     },
+  );
+
+  /** Reveal and Hide on the page a person is looking at, the eye's verbs: in the palette, and in the More menu where they apply to the whole text. */
+  const eye = (
+    id: string,
+    title: string,
+    icon: LucideIcon,
+    verb: "reveal" | "hide" | "revealAll" | "hideAll",
+    key: string,
+    more: boolean,
+  ) => {
+    commands.register({
+      id,
+      title,
+      category: "Helm",
+      icon,
+      enablement: key,
+      run: (_args, lookup) => {
+        const uri = lookup("helm.page");
+        if (typeof uri === "string") releases.act(uri, verb);
+      },
+    });
+    if (more) {
+      menus.append("resource/details", {
+        command: id,
+        group: "3_reveal",
+        when: key,
+      });
+    }
+  };
+  eye(
+    "helm.value.reveal",
+    "Reveal Value",
+    Eye,
+    "reveal",
+    "helm.canReveal",
+    false,
+  );
+  eye("helm.value.hide", "Hide Value", EyeOff, "hide", "helm.canHide", false);
+  eye(
+    "helm.values.revealAll",
+    "Reveal All Values",
+    Eye,
+    "revealAll",
+    "helm.canRevealAll",
+    true,
+  );
+  eye(
+    "helm.values.hideAll",
+    "Hide All Values",
+    EyeOff,
+    "hideAll",
+    "helm.canHideAll",
+    true,
   );
 
   const compare = (

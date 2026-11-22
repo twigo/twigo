@@ -12,7 +12,7 @@ export interface Variants {
   /** The release editor's views. */
   readonly tabs: "four" | "split" | "page";
   /** How a masked value looks. */
-  readonly mask: "token" | "pill" | "tree";
+  readonly mask: "token" | "tree";
 }
 
 const DEFAULTS: Variants = { helm: "explorer", tabs: "four", mask: "token" };
@@ -20,7 +20,7 @@ const DEFAULTS: Variants = { helm: "explorer", tabs: "four", mask: "token" };
 const FAMILIES: { readonly [F in keyof Variants]: readonly Variants[F][] } = {
   helm: ["explorer", "sidebar", "view"],
   tabs: ["four", "split", "page"],
-  mask: ["token", "pill", "tree"],
+  mask: ["token", "tree"],
 };
 
 /** @todo: remove the variants the owner did not choose once he has chosen at the checkpoint */

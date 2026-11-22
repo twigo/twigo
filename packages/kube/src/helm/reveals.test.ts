@@ -175,3 +175,70 @@ test("the documents of a manifest are listed by the file their Source comment na
     { name: "a/three.yaml", from: 9, to: 10 },
   ]);
 });
+
+describe("a Secret inside a List's items", () => {
+  const manifest: ReleaseManifest = {
+    text: [
+      "---",
+      "# Source: a/list.yaml",
+      "apiVersion: v1",
+      "items:",
+      "  - kind: Secret",
+      "    metadata:",
+      "      name: first",
+      "    stringData:",
+      "      token: <5 bytes>",
+      "  - kind: Secret",
+      "    metadata:",
+      "      name: second",
+      "    stringData:",
+      "      token: <7 bytes>",
+      "      other: <3 bytes>",
+      "kind: List",
+      "",
+    ].join("\n"),
+    secrets: [
+      {
+        document: 0,
+        items: [0],
+        name: "first",
+        namespace: null,
+        line: 2,
+        entries: [{ key: "token", bytes: 5, binary: false }],
+      },
+      {
+        document: 0,
+        items: [1],
+        name: "second",
+        namespace: null,
+        line: 2,
+        entries: [
+          { key: "token", bytes: 7, binary: false },
+          { key: "other", bytes: 3, binary: false },
+        ],
+      },
+    ],
+    unread: [],
+  };
+
+  test("each item's keys have an eye on their own line, addressed through items", () => {
+    const { glyphs } = manifestOf(manifest, shown());
+    expect(glyphs.map(({ line, part }) => [line, part])).toEqual([
+      [9, { kind: "secret", document: 0, items: [0], key: "token" }],
+      [14, { kind: "secret", document: 0, items: [1], key: "token" }],
+      [15, { kind: "secret", document: 0, items: [1], key: "other" }],
+    ]);
+  });
+
+  test("a key revealed is written in its own item's line, and no other item's", () => {
+    const answer: Shown = {
+      part: { kind: "secret", document: 0, items: [1], key: "token" },
+      value: "s3cret",
+      binary: false,
+    };
+    const { text } = manifestOf(manifest, shown(answer));
+    expect(text).toContain("      token: <5 bytes>");
+    expect(text).toContain("      token: s3cret");
+    expect(text).toContain("      other: <3 bytes>");
+  });
+});

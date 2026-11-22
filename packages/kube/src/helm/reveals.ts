@@ -164,6 +164,46 @@ function scalar(value: string): string {
     : JSON.stringify(value);
 }
 
+const indentOf = (line: string): number => /^ */.exec(line)?.[0].length ?? 0;
+
+/**
+ * The lines of the item a path through `items` names, inside the lines of a
+ * document: each step finds the `items:` of what it stands in, then the
+ * dashes at the indent of its first line, and takes the one at the step.
+ */
+function itemRange(
+  lines: readonly string[],
+  from: number,
+  to: number,
+  items: readonly number[],
+): readonly [number, number] | undefined {
+  let start = from;
+  let limit = to;
+  for (const index of items) {
+    const at = lines.findIndex(
+      (line, i) => i >= start && i < limit && /^\s*items:\s*$/.test(line),
+    );
+    if (at < 0) return undefined;
+    const indent = indentOf(lines[at + 1] ?? "");
+    const dash = new RegExp(`^ {${String(indent)}}- `);
+    const starts: number[] = [];
+    let stop = limit;
+    for (let i = at + 1; i < limit; i++) {
+      const line = lines[i] ?? "";
+      if (line.trim() !== "" && indentOf(line) < indent) {
+        stop = i;
+        break;
+      }
+      if (dash.test(line)) starts.push(i);
+    }
+    const first = starts[index];
+    if (first === undefined) return undefined;
+    start = first;
+    limit = starts[index + 1] ?? stop;
+  }
+  return [start, limit];
+}
+
 /**
  * A manifest with what was revealed put in place, and the eyes of its lines.
  * A Secret's key is the line `key: <N bytes>` in the document the core gives
@@ -186,9 +226,13 @@ export function manifestOf(
     | { kind: "document"; line: number; part: HelmPart; name: string };
   const edits: Edit[] = [];
   for (const secret of manifest.secrets) {
-    if (secret.items.length > 0) continue;
-    const from = secret.line - 1;
-    const to = end(from);
+    const document = secret.line - 1;
+    const range =
+      secret.items.length === 0
+        ? ([document, end(document)] as const)
+        : itemRange(lines, document, end(document), secret.items);
+    if (!range) continue;
+    const [from, to] = range;
     for (const { key } of secret.entries) {
       const found = lines
         .slice(from, to)
@@ -201,7 +245,12 @@ export function manifestOf(
         kind: "key",
         line,
         key,
-        part: { kind: "secret", document: secret.document, items: [], key },
+        part: {
+          kind: "secret",
+          document: secret.document,
+          items: [...secret.items],
+          key,
+        },
         name: `${key} of ${secret.name}`,
       });
     }

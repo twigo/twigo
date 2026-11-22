@@ -11,14 +11,12 @@ import "monaco-editor/features/codeAction/register";
 import "monaco-editor/features/comment/register";
 import "monaco-editor/features/contextmenu/register";
 import "monaco-editor/features/diffEditor/register";
-import "monaco-editor/features/documentSymbols/register";
 import "monaco-editor/features/find/register";
 import "monaco-editor/features/folding/register";
 import "monaco-editor/features/gotoError/register";
 import "monaco-editor/features/hover/register";
 import "monaco-editor/features/linesOperations/register";
 import "monaco-editor/features/multicursor/register";
-import "monaco-editor/features/quickOutline/register";
 import "monaco-editor/features/readOnlyMessage/register";
 import "monaco-editor/features/suggest/register";
 // @todo: drop this import once `features/suggest/register` imports it: 0.57's
@@ -86,7 +84,7 @@ export function setSchema(
   return yaml.update({ schemas: [...schemas.values()] });
 }
 
-export { editor, KeyCode, languages, MarkerSeverity, Uri };
+export { editor, KeyCode, MarkerSeverity, Uri };
 
 const FONT_SIZE = 13;
 

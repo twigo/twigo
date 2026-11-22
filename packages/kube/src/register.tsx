@@ -1,11 +1,17 @@
 import { FileCode, FolderTree, GitCompare, ShipWheel } from "lucide-react";
-import { Changes, errorOneLine, type Workbench } from "@twigo/workbench";
+import {
+  Changes,
+  errorOneLine,
+  variants,
+  type Workbench,
+} from "@twigo/workbench";
 import { RequestDetail } from "./approvals/RequestDetail";
 import { Explorer, EXPLORER_VIEW } from "./explorer/Explorer";
 import { registerEdits } from "./edit/commands";
 import { DiffEditor } from "./edit/DiffEditors";
 import { ManifestEditor } from "./edit/ManifestEditor";
 import { registerHelm } from "./helm/commands";
+import { HelmView } from "./helm/HelmView";
 import { ReleaseEditor } from "./helm/ReleaseEditor";
 import { Home } from "./home/Home";
 import { ListIcon, ObjectIcon } from "./KindIcon";
@@ -89,6 +95,31 @@ export function registerKube(workbench: Workbench): void {
     container: "kube.explorer",
     component: ({ space }) => <Explorer services={services} space={space} />,
   });
+  // @todo: drop this read once the owner has chosen where Helm goes (helm:explorer, helm:sidebar, helm:view), keeping the choice's branch
+  const placement = variants().helm;
+  if (placement === "sidebar") {
+    views.registerContainer({
+      id: "kube.helm",
+      title: "Helm",
+      icon: ShipWheel,
+      location: "sidebar",
+      order: 2,
+    });
+    views.registerView({
+      id: "kube.helm.releases",
+      title: "Releases",
+      container: "kube.helm",
+      component: ({ space }) => <HelmView space={space} />,
+    });
+  } else if (placement === "view") {
+    views.registerView({
+      id: "kube.helm.releases",
+      title: "Helm releases",
+      container: "kube.explorer",
+      order: 1,
+      component: ({ space }) => <HelmView space={space} />,
+    });
+  }
   views.registerStatusBarItem({
     id: "kube.cluster",
     alignment: "left",

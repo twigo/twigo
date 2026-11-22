@@ -1,5 +1,6 @@
 import { Changes } from "@twigo/workbench";
-import { partKey, type Shown } from "./reveals";
+import type { HelmPart } from "@twigo/protocol";
+import { partKey, type Glyph, type Shown } from "./reveals";
 
 /** The views of a release: the recommended four, and the ones the split variant adds. */
 export type ReleaseTab =
@@ -13,6 +14,27 @@ export type ReleaseTab =
 
 /** Which of a revision's two values documents is shown: the person's, or the chart's defaults. */
 export type Plate = "user" | "defaults";
+
+/** What a page's text view shows, for the commands that reveal and hide: its eyes, the line the cursor is on, how many values are hidden and which parts are shown. */
+export interface TextState {
+  readonly glyphs: readonly Glyph[];
+  readonly line: number;
+  readonly hidden: number;
+  readonly revealed: readonly HelmPart[];
+  /** The part that reveals the whole text, none for a manifest. */
+  readonly whole: HelmPart | undefined;
+}
+
+/** What the commands Reveal and Hide do on a page. */
+export interface PageActions {
+  reveal(): void;
+  hide(): void;
+  revealAll(): void;
+  hideAll(): void;
+}
+
+/** How the values read: as rows of key paths, or as their YAML. */
+export type Form = "tree" | "yaml";
 
 interface Reveals {
   readonly revision: number | undefined;
@@ -34,6 +56,30 @@ export class ReleaseStates {
   readonly #plates = new Map<string, Plate>();
   readonly #marks = new Map<string, ReadonlySet<number>>();
   readonly #reveals = new Map<string, Reveals>();
+  readonly #forms = new Map<string, Form>();
+  readonly #actions = new Map<string, PageActions>();
+
+  form(uri: string): Form {
+    return this.#forms.get(uri) ?? "tree";
+  }
+
+  setForm(uri: string, form: Form): void {
+    if (this.form(uri) === form) return;
+    this.#forms.set(uri, form);
+    this.changes.emit();
+  }
+
+  /** A page says what Reveal and Hide do on it while it shows. */
+  register(uri: string, actions: PageActions): () => void {
+    this.#actions.set(uri, actions);
+    return () => {
+      if (this.#actions.get(uri) === actions) this.#actions.delete(uri);
+    };
+  }
+
+  act(uri: string, verb: keyof PageActions): void {
+    this.#actions.get(uri)?.[verb]();
+  }
 
   tab(uri: string): ReleaseTab {
     return this.#tabs.get(uri) ?? "overview";
@@ -100,5 +146,6 @@ export class ReleaseStates {
     this.#plates.delete(uri);
     this.#marks.delete(uri);
     this.#reveals.delete(uri);
+    this.#forms.delete(uri);
   }
 }

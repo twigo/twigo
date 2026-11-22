@@ -18,6 +18,7 @@ import { noContainerRuns } from "./object/noContainerRuns";
 import { ObjectHeader } from "./object/ObjectHeader";
 import { LABEL_COLUMN, ObjectContent } from "./object/ObjectContent";
 import { ObjectViews } from "./object/ObjectViews";
+import { OBJECT_TABS } from "./object/tabs";
 import { Vitals } from "./object/Vitals";
 import { useHeader } from "./object/useHeader";
 import { foundTone } from "./object/verdict";
@@ -219,6 +220,7 @@ function Panel({
       />
       <ObjectViews
         tab={tab}
+        tabs={OBJECT_TABS}
         snapshot={snapshot}
         onChange={(next) => {
           states.setDetailsTab(uri, next);
