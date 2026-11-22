@@ -39,6 +39,12 @@ pub fn scrubbed_text(text: &Held<String>, values: &Held<Vec<String>>) -> Scrubbe
     }
 }
 
+/// A release's notes or a revision's description, whole, for a Reveal;
+/// None where it is empty.
+pub fn revealed_text(text: &Held<String>) -> Option<String> {
+    (!text.0.is_empty()).then(|| text.0.clone())
+}
+
 impl Held<Vec<String>> {
     /// The values of both.
     pub fn joined(mut self, other: Self) -> Self {

@@ -16,7 +16,7 @@ mod scrub;
 pub mod values;
 
 pub use held::{Held, Size};
-pub use scrub::{HIDDEN, scrub, scrubbed, scrubbed_text, secret_values};
+pub use scrub::{HIDDEN, revealed_text, scrub, scrubbed, scrubbed_text, secret_values};
 
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
