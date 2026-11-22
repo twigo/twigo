@@ -9,7 +9,7 @@ use kube::Config;
 use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, DnType, IsCa, KeyPair};
 use rustls::pki_types::PrivateKeyDer;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 use twigo_ipc::{ErrorCode, ErrorKind, IpcError};
 use twigo_kube::client::{Clients, Gate, Options, ProxyEnv, proxy_for};
@@ -154,26 +154,46 @@ async fn through(proxy_url: &str) -> IpcError {
     failure(&config, options).await
 }
 
-async fn socks_refusing() -> u16 {
+async fn accepting<Serving>(serve: impl Fn(TcpStream) -> Serving + Send + 'static) -> u16
+where
+    Serving: std::future::Future<Output = ()> + Send + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {
-            let (mut tcp, _) = listener.accept().await.unwrap();
-            tokio::spawn(async move {
-                let mut buffer = [0; 512];
-                let _ = tcp.read(&mut buffer).await;
-                let _ = tcp.write_all(&[5, 0]).await;
-                let _ = tcp.read(&mut buffer).await;
-                let _ = tcp.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]).await;
-            });
+            let (tcp, _) = listener.accept().await.unwrap();
+            tokio::spawn(serve(tcp));
         }
     });
     port
 }
 
+async fn socks_replying(reply: u8) -> u16 {
+    accepting(move |mut tcp| async move {
+        let mut buffer = [0; 512];
+        let _ = tcp.read(&mut buffer).await;
+        let _ = tcp.write_all(&[5, 0]).await;
+        let _ = tcp.read(&mut buffer).await;
+        let _ = tcp.write_all(&[5, reply, 0, 1, 0, 0, 0, 0, 0, 0]).await;
+    })
+    .await
+}
+
+async fn socks_refusing_credentials() -> u16 {
+    accepting(|mut tcp| async move {
+        let mut buffer = [0; 512];
+        let _ = tcp.read(&mut buffer).await;
+        let _ = tcp.write_all(&[5, 2]).await;
+        let _ = tcp.read(&mut buffer).await;
+        let _ = tcp.write_all(&[1, 1]).await;
+    })
+    .await
+}
+
 const UNREACHED: &str = "Twigo could not reach the proxy: ";
-const REFUSED: &str = "The proxy could not reach the cluster: ";
+const DECLINED: &str = "The proxy did not open the connection to the cluster: ";
+const FAILED: &str = "The proxy could not reach the cluster: ";
 
 #[tokio::test]
 async fn a_proxy_that_is_not_there() {
@@ -185,12 +205,20 @@ async fn a_proxy_that_is_not_there() {
 }
 
 #[tokio::test]
-async fn a_proxy_that_refuses_the_tunnel() {
-    let port = replying(b"HTTP/1.1 502 Bad Gateway\r\n\r\n").await;
-    let error = through(&format!("http://127.0.0.1:{port}")).await;
-    assert_eq!(error.code, ErrorCode::ConnectProxy);
-    assert!(error.message.starts_with(REFUSED), "{error:?}");
-    assert!(error.message.contains("tunnel error"), "{error:?}");
+async fn a_proxy_that_answers_the_tunnel_with_a_refusal_did_not_open_it() {
+    for (reply, inner) in [
+        (
+            b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n".as_slice(),
+            "proxy authorization required",
+        ),
+        (b"HTTP/1.1 403 Forbidden\r\n\r\n".as_slice(), "unsuccessful"),
+    ] {
+        let port = replying(reply).await;
+        let error = through(&format!("http://127.0.0.1:{port}")).await;
+        assert_eq!(error.code, ErrorCode::ConnectProxy);
+        assert!(error.message.starts_with(DECLINED), "{error:?}");
+        assert!(error.message.contains(inner), "{error:?}");
+    }
 }
 
 #[tokio::test]
@@ -203,12 +231,35 @@ async fn a_socks_proxy_that_is_not_there() {
 }
 
 #[tokio::test]
-async fn a_socks_proxy_that_refuses_the_connection() {
-    let port = socks_refusing().await;
-    let error = through(&format!("socks5://127.0.0.1:{port}")).await;
+async fn a_socks_reply_says_whether_the_proxy_tried_the_cluster() {
+    for (reply, tried, inner) in [
+        (3, true, "network unreachable"),
+        (4, true, "host unreachable"),
+        (5, true, "connection refused"),
+        (6, true, "ttl expired"),
+        (1, false, "general server failure"),
+        (2, false, "connection not allowed"),
+        (7, false, "command not supported"),
+    ] {
+        let port = socks_replying(reply).await;
+        let error = through(&format!("socks5://127.0.0.1:{port}")).await;
+        assert_eq!(error.code, ErrorCode::ConnectProxy);
+        let start = if tried { FAILED } else { DECLINED };
+        assert!(error.message.starts_with(start), "{error:?}");
+        assert!(error.message.ends_with(inner), "{error:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_socks_proxy_that_refuses_the_credentials_did_not_open_the_connection() {
+    let port = socks_refusing_credentials().await;
+    let error = through(&format!("socks5://twigo:wrong@127.0.0.1:{port}")).await;
     assert_eq!(error.code, ErrorCode::ConnectProxy);
-    assert!(error.message.starts_with(REFUSED), "{error:?}");
-    assert!(error.message.contains("SOCKS error"), "{error:?}");
+    assert!(error.message.starts_with(DECLINED), "{error:?}");
+    assert!(
+        error.message.contains("credentials not accepted"),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]

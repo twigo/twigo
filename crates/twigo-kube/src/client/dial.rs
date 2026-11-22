@@ -32,9 +32,16 @@ pub struct Unresolved(#[source] io::Error);
 #[error("to the proxy")]
 pub struct ProxyUnreachable(#[source] BoxError);
 
-/// A proxy that answered the tunnel or the SOCKS handshake with an error,
-/// or left it half done. hyper-util's tunnel and SOCKS errors are not
-/// nameable.
+/// A proxy that answered the tunnel or the SOCKS handshake with a refusal or
+/// an error, or left it half done, which says nothing of the cluster.
+/// hyper-util's tunnel and SOCKS errors are not nameable.
+#[derive(Debug, thiserror::Error)]
+#[error("refused by the proxy")]
+pub struct ProxyRefused(#[source] BoxError);
+
+/// A proxy that tried the connection to the cluster and could not make it: a
+/// SOCKS reply that says the network or the host was unreachable, the
+/// connection refused or the TTL expired.
 #[derive(Debug, thiserror::Error)]
 #[error("through the proxy")]
 pub struct ProxyFailed(#[source] BoxError);
@@ -151,7 +158,7 @@ impl Service<Uri> for Dialer {
                     let tunnel = tunnel
                         .oneshot(with_port(&server))
                         .await
-                        .map_err(|error| ProxyFailed(error.into()))?;
+                        .map_err(|error| ProxyRefused(error.into()))?;
                     Ok(Stream::Tunnel(Box::new(tunnel)))
                 })
             }
@@ -167,14 +174,30 @@ impl Service<Uri> for Dialer {
                     if let Some((user, password)) = auth {
                         socks = socks.with_auth(user, password);
                     }
-                    let tcp = socks
-                        .oneshot(with_port(&server))
-                        .await
-                        .map_err(|error| ProxyFailed(error.into()))?;
+                    let tcp = socks.oneshot(with_port(&server)).await.map_err(declined)?;
                     Ok(Stream::Tcp(tcp))
                 })
             }
         }
+    }
+}
+
+/// [`ProxyFailed`] for a reply that says the proxy tried the cluster and could
+/// not get there, else [`ProxyRefused`].
+///
+/// @todo: read the reply from `SocksV5Error`'s variants, not its words, once
+/// hyper-util exports it (a private module in 0.1.21).
+fn declined<E: std::error::Error + Send + Sync + 'static>(error: E) -> BoxError {
+    const TRIED: [&str; 4] = [
+        "SOCKS error: network unreachable",
+        "SOCKS error: host unreachable",
+        "SOCKS error: connection refused",
+        "SOCKS error: ttl expired",
+    ];
+    if TRIED.contains(&error.to_string().as_str()) {
+        ProxyFailed(error.into()).into()
+    } else {
+        ProxyRefused(error.into()).into()
     }
 }
 
