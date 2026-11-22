@@ -52,24 +52,21 @@ pub struct Hidden {
     pub lines: u32,
 }
 
-/// The new issue's form, filled with the ticked facts and what the person
-/// wrote; with no facts it is the bare template.
+/// The new issue's form, filled with the ticked facts; with no facts it is
+/// the bare template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct OpenIssue {
     /// The ids of the facts the person left ticked: Rust states them again
     /// from this run, so only what it wrote goes in the link.
     pub facts: Vec<FactId>,
-    pub title: Option<String>,
-    pub description: Option<String>,
 }
 
-/// What the link left out to stay under its length: the person pastes it.
+/// What the link left out to stay under its length.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenedIssue {
     /// Facts whose values were shortened.
     pub facts_cut: Vec<FactId>,
-    pub description_cut: bool,
 }
 
 /// The text the person sees, to save to a file they choose.

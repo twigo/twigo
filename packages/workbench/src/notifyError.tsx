@@ -3,9 +3,9 @@ import { ErrorMessage } from "./ErrorMessage";
 import type { ErrorLike } from "./errors";
 
 /**
- * A toast for an error, with its code as the variant says. A repeat of the
- * same words replaces the toast, so the key is the lead and the message, never
- * the code.
+ * A toast for an error, with its code under the message. A repeat of the same
+ * words replaces the toast, so the key is the lead and the message, never the
+ * code.
  */
 export function notifyError(
   error: ErrorLike,

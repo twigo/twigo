@@ -136,6 +136,23 @@ test("ctx says a context's problem in its words on its row, and the context may 
   expect(orphan?.disabled).toBeUndefined();
 });
 
+test("ctx lists a file that failed as a group of its own with one row that cannot be chosen, under its name from ~", async () => {
+  const found = await contexts("kubeconfigFailures");
+  const broken = found.filter(({ group }) => group === "~/.kube/broken.yaml");
+  expect(broken).toEqual([
+    expect.objectContaining({
+      label:
+        "The file cannot be parsed: expected sequence start at line 7, column 10",
+      code: "kubeconfig.unparsable",
+      iconTone: "warn",
+      disabled: true,
+    }),
+  ]);
+  expect(
+    found.find(({ group }) => group === "~/.kube/work/locked.yaml"),
+  ).toMatchObject({ code: "kubeconfig.unreadable", disabled: true });
+});
+
 test("ctx of a catalog that lost no file has no row that cannot be chosen, and a good file's rows say no problem", async () => {
   const found = await contexts("live");
   expect(found.some(({ disabled }) => disabled)).toBe(false);

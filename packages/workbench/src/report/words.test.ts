@@ -31,28 +31,19 @@ const FACTS: Fact[] = [
   { id: "kubernetes", label: "Kubernetes", value: "v1.37.2", optional: true },
 ];
 
-test("the report's text is the facts, what the person wrote and the log, each block apart and none empty", () => {
+test("the report's text is the facts and the log, each block apart and none empty", () => {
   expect(reportText({ facts: FACTS, log: "line" })).toBe(
     "Twigo: 0.1.0\nKubernetes: v1.37.2\n\nline",
   );
-  expect(
-    reportText({
-      facts: [],
-      title: " Stops ",
-      description: "It froze.",
-      log: "line",
-    }),
-  ).toBe("Stops\nIt froze.\n\nline");
+  expect(reportText({ facts: [], log: "line" })).toBe("line");
   expect(reportText({ facts: [], log: "" })).toBe("");
 });
 
 test("the toast says where to paste the log, and what the link had to leave short", () => {
-  expect(openedWords({ factsCut: [], descriptionCut: false }, FACTS)).toBe(
+  expect(openedWords({ factsCut: [] }, FACTS)).toBe(
     "The log is on your clipboard: paste it into Logs.",
   );
-  expect(
-    openedWords({ factsCut: ["kubernetes"], descriptionCut: true }, FACTS),
-  ).toBe(
-    "The log is on your clipboard: paste it into Logs. The link was too long, so Twigo shortened Kubernetes and cut your description.",
+  expect(openedWords({ factsCut: ["kubernetes"] }, FACTS)).toBe(
+    "The log is on your clipboard: paste it into Logs. The link was too long, so Twigo shortened Kubernetes.",
   );
 });

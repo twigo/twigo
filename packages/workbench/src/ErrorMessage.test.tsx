@@ -13,7 +13,7 @@ const REFUSED = {
   message: "The server refused the connection",
 } as const;
 
-test("code:line, the default, puts the code under the message with Copy details", () => {
+test("an error says its code under its message, with Copy details", () => {
   const { container } = render(
     <p>
       <ErrorMessage error={REFUSED} />

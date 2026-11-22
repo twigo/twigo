@@ -1,5 +1,4 @@
 import type { ErrorCode, ServerStatus } from "@twigo/protocol";
-import { variant } from "./variants";
 
 /** What an error shows of itself, which a wire error and an `IpcError` both have. */
 export interface ErrorLike {
@@ -22,17 +21,9 @@ export function errorDetails({ code, message, server }: ErrorLike): string {
   return lines.join("\n");
 }
 
-/** The error as plain lines, for a tooltip or a terminal, with its code where the variant puts it. */
+/** The error as plain lines, for a tooltip or a terminal: its message, then its code. */
 export function errorLines(error: ErrorLike): string[] {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  switch (variant("code")) {
-    case "line":
-      return [error.message, error.code];
-    case "inline":
-      return [`${error.code}: ${error.message}`];
-    case "copy":
-      return [error.message];
-  }
+  return [error.message, error.code];
 }
 
 export function errorText(error: ErrorLike): string {

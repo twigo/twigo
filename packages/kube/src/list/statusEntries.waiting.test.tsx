@@ -14,7 +14,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("wait:inline, the default: a list that cannot connect says why in the status bar and over its skeleton", async () => {
+test("a list that cannot connect says why in the status bar and over its skeleton", async () => {
   await openList(createMockBackend("connectRefused"));
   await act(() => vi.advanceTimersByTimeAsync(100));
   const bar = within(screen.getByRole("contentinfo")).getByText(
@@ -34,7 +34,7 @@ test("wait:inline, the default: a list that cannot connect says why in the statu
   expect(screen.getAllByRole("row").length).toBeLessThanOrEqual(1);
 });
 
-test("wait:inline: a list that lost its connection keeps its rows and says why beside the word", async () => {
+test("a list that lost its connection keeps its rows and says why beside the word", async () => {
   await openList(createMockBackend("connectLost"));
   await settle(4);
   expect(
@@ -43,7 +43,7 @@ test("wait:inline: a list that lost its connection keeps its rows and says why b
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
 });
 
-test("wait:inline: a list that waits with no cause says only that it does", async () => {
+test("a list that waits with no cause says only that it does", async () => {
   await openList(createMockBackend("connecting"));
   expect(
     within(screen.getByRole("contentinfo")).getByText("Connecting…"),

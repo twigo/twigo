@@ -5,7 +5,7 @@ import {
   type ValueCount,
   type ViewState,
 } from "@twigo/protocol";
-import { Changes, variant } from "@twigo/workbench";
+import { Changes } from "@twigo/workbench";
 import { causeWords, type Failure } from "./errorWords";
 
 export interface ListStatus {
@@ -66,24 +66,18 @@ export function stateLabel(status: ViewState): string | undefined {
   }
 }
 
-/** The words of a list that waits for its cluster, with why where the variant says it there. */
+/** The words of a list that waits for its cluster, with why once the cluster has said it. */
 function waiting(
   plain: string,
   withCause: string,
   cause: Failure | undefined,
 ): string {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  return cause && variant("wait") === "inline"
-    ? `${withCause} · ${causeWords(cause)}`
-    : plain;
+  return cause ? `${withCause} · ${causeWords(cause)}` : plain;
 }
 
 /** The line over a list's skeleton, once its cluster has said why it does not answer; none while it only takes its time. */
 export function waitingLine(status: ViewState): string | undefined {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  return variant("wait") === "inline" &&
-    status.state === "connecting" &&
-    status.cause
+  return status.state === "connecting" && status.cause
     ? stateLabel(status)
     : undefined;
 }

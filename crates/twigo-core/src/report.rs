@@ -52,9 +52,8 @@ impl Core {
         )
     }
 
-    /// The link of the new-issue form for the facts the person left ticked
-    /// and what they wrote, which stays under 6,000 characters, and what it
-    /// left out to.
+    /// The link of the new-issue form for the facts the person left ticked,
+    /// which stays under 6,000 characters, and what it left out to.
     pub async fn report_issue(
         &self,
         facts: &Facts,
@@ -67,11 +66,7 @@ impl Core {
             tokio::task::spawn_blocking(move || {
                 let mut stated = stated(&facts, &files, &versions, &known.homes);
                 stated.retain(|fact| request.facts.contains(&fact.id));
-                issue::link(
-                    &stated,
-                    request.title.as_deref(),
-                    request.description.as_deref(),
-                )
+                issue::link(&stated)
             })
             .await,
         )

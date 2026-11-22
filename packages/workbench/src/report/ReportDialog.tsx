@@ -18,13 +18,11 @@ import {
   notify,
   PropertyList,
   TextArea,
-  TextField,
   type Property,
 } from "@twigo/ui";
 import { ErrorMessage } from "../ErrorMessage";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { REVEAL_LOG_FILE } from "./commands";
-import { variant } from "../variants";
 import { hiddenWords, openedWords, reportText, SECURITY_URL } from "./words";
 
 /**
@@ -58,32 +56,16 @@ export function ReportDialog() {
 function Body({ report }: { report: Report }) {
   const workbench = useWorkbench();
   const { backend, commands, keys, problemReport } = workbench;
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  const shape = variant("report");
   const [ticked, setTicked] = useState<ReadonlySet<FactId>>(
     () => new Set(report.facts.map(({ id }) => id)),
   );
-  const [log, setLog] = useState(
-    shape === "one-text"
-      ? reportText({ facts: report.facts, log: report.log })
-      : report.log,
-  );
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [log, setLog] = useState(report.log);
   const [error, setError] = useState<IpcError>();
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState<"text" | "description">();
-  const [cut, setCut] = useState<string>();
+  const [copied, setCopied] = useState(false);
 
   const stated = report.facts.filter(({ id }) => ticked.has(id));
-  const whole = shape === "one-text";
-  const text = whole
-    ? log
-    : reportText({
-        facts: stated,
-        ...(shape === "compose" && { title, description }),
-        log,
-      });
+  const text = reportText({ facts: stated, log });
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
     setError(undefined);
@@ -100,24 +82,13 @@ function Body({ report }: { report: Report }) {
     // Written in the click's own turn: WKWebView may not allow it after an
     // IPC round trip (not verified).
     const written = navigator.clipboard.writeText(log);
-    setCut(undefined);
     void run(async () => {
       await written;
       const opened = await backend.invoke("report_open_issue", {
-        facts: whole ? [] : stated.map(({ id }) => id),
-        title: shape === "compose" && title.trim() !== "" ? title.trim() : null,
-        description:
-          shape === "compose" && description.trim() !== ""
-            ? description.trim()
-            : null,
+        facts: stated.map(({ id }) => id),
       });
-      const words = openedWords(opened, report.facts);
-      if (opened.descriptionCut) {
-        setCut(words);
-        return;
-      }
       problemReport.close();
-      notify.info(words, { key: "report:opened" });
+      notify.info(openedWords(opened, report.facts), { key: "report:opened" });
     });
   };
 
@@ -128,12 +99,12 @@ function Body({ report }: { report: Report }) {
     });
   };
 
-  const copy = (what: "text" | "description", words: string) => {
+  const copy = () => {
     void run(async () => {
-      await navigator.clipboard.writeText(words);
-      setCopied(what);
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
       setTimeout(() => {
-        setCopied(undefined);
+        setCopied(false);
       }, 1500);
     });
   };
@@ -165,76 +136,15 @@ function Body({ report }: { report: Report }) {
         below. Nothing leaves this computer until you choose, and Twigo itself
         sends nothing.
       </DialogDescription>
-      {cut !== undefined && (
-        <div role="status" className="mt-3">
-          <Callout tone="warn" title={cut}>
-            <p className="text-xs text-support">
-              Paste the log first, then copy your description here and paste the
-              rest of it into Description.
-            </p>
-            <div>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  copy("description", description.trim());
-                }}
-              >
-                {copied === "description" ? "Copied" : "Copy description"}
-              </Button>
-            </div>
-          </Callout>
-        </div>
-      )}
       <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-auto">
-        {shape === "compose" && (
-          <>
-            <div className="grid gap-1">
-              <label className="text-label text-support" htmlFor="report-title">
-                Title
-              </label>
-              <TextField
-                id="report-title"
-                value={title}
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                }}
-              />
-            </div>
-            <div className="grid gap-1">
-              <label
-                className="text-label text-support"
-                htmlFor="report-description"
-              >
-                What happened
-              </label>
-              <TextArea
-                id="report-description"
-                rows={3}
-                value={description}
-                onChange={(event) => {
-                  setDescription(event.target.value);
-                }}
-              />
-            </div>
-          </>
-        )}
-        {!whole && (
-          <section aria-label="In the issue" className="grid gap-1">
-            <h3 className="text-2xs font-semibold text-support">
-              In the issue
-            </h3>
-            <PropertyList items={facts} />
-          </section>
-        )}
-        <section
-          aria-label={whole ? "Report" : "For you to paste"}
-          className="grid gap-1"
-        >
+        <section aria-label="In the issue" className="grid gap-1">
+          <h3 className="text-2xs font-semibold text-support">In the issue</h3>
+          <PropertyList items={facts} />
+        </section>
+        <section aria-label="For you to paste" className="grid gap-1">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-2xs font-semibold text-support">
-              {whole ? "Report" : "For you to paste"}
+              For you to paste
             </h3>
             <LinkButton
               className="text-xs"
@@ -247,9 +157,9 @@ function Body({ report }: { report: Report }) {
           </div>
           <TextArea
             mono
-            aria-label={whole ? "Report" : "Log"}
+            aria-label="Log"
             wrap="off"
-            rows={whole ? 16 : 11}
+            rows={11}
             value={log}
             onChange={(event) => {
               setLog(event.target.value);
@@ -286,15 +196,8 @@ function Body({ report }: { report: Report }) {
         <Button size="sm" variant="outline" disabled={busy} onClick={save}>
           Save…
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy}
-          onClick={() => {
-            copy("text", text);
-          }}
-        >
-          {copied === "text" ? "Copied" : "Copy"}
+        <Button size="sm" variant="outline" disabled={busy} onClick={copy}>
+          {copied ? "Copied" : "Copy"}
         </Button>
         <Button size="sm" disabled={busy} onClick={openIssue}>
           Open Issue on GitHub

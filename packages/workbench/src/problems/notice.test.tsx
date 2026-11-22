@@ -1,18 +1,16 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { IpcError, type Backend } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
-import { StatusEntries } from "../parts/StatusBar";
-import { inWorkbench, testWorkbench, toastWords } from "../testing";
-import { useProblemEntries } from "./ProblemsEntry";
+import { testWorkbench, toastWords } from "../testing";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-test("problems:notice, the default: each problem raises one warning, in Rust's words, keyed by its code, with Reveal Log File and Report…", async () => {
+test("each problem raises one warning, in Rust's words, keyed by its code, with Reveal Log File and Report…", async () => {
   const warning = vi.spyOn(notify, "warning");
   const workbench = await testWorkbench("problems");
   await act(() => workbench.problems.watch());
@@ -25,16 +23,7 @@ test("problems:notice, the default: each problem raises one warning, in Rust's w
   expect(warning.mock.calls[1]?.[1]?.key).toBe("problem:audit.off");
 });
 
-test("problems:notice: the status bar counts nothing", async () => {
-  const workbench = await testWorkbench("problems");
-  render(<StatusEntries useEntries={useProblemEntries} />, {
-    wrapper: inWorkbench(workbench),
-  });
-  await act(() => workbench.problems.watch());
-  expect(screen.queryByText("2 problems")).toBeNull();
-});
-
-test("problems:notice: Report… opens the report and Reveal Log File shows the file", async () => {
+test("Report… opens the report and Reveal Log File shows the file", async () => {
   const warning = vi.spyOn(notify, "warning");
   const workbench = await testWorkbench("problems");
   const invoke = vi.spyOn(workbench.backend, "invoke");
@@ -50,7 +39,7 @@ test("problems:notice: Report… opens the report and Reveal Log File shows the 
   expect(sent).toContain("report_problem");
 });
 
-test("problems:notice: a problem that Rust clears takes its notice away, and raises it again when it returns", async () => {
+test("a problem that Rust clears takes its notice away, and raises it again when it returns", async () => {
   const mock = createMockBackend("problems");
   let send: ((next: IpcError[]) => void) | undefined;
   const backend: Backend = {
