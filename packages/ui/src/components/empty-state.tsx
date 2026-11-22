@@ -74,7 +74,7 @@ export function EmptyState({
       )}
       {title && <p className="font-medium text-content">{title}</p>}
       {children}
-      {(action || secondary) && (
+      {(action ?? secondary) && (
         <div className="mt-1 flex items-center gap-2">
           {action && (
             <Button variant="outline" size="sm" onClick={action.onClick}>
