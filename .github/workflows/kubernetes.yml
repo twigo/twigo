@@ -8,6 +8,7 @@ on:
       - rust-toolchain.toml
       - crates/twigo-cache/**
       - crates/twigo-core/**
+      - crates/twigo-helm/**
       - crates/twigo-kube/**
       - crates/twigo-policy/**
       - crates/twigo-sessions/**
@@ -60,6 +61,12 @@ jobs:
           curl -fsSLo kind https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64
           echo "aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  kind" | sha256sum -c
           sudo install kind /usr/local/bin/kind
+      - name: Install helm, which the Helm live test runs
+        run: |
+          curl -fsSLo helm.tar.gz https://get.helm.sh/helm-v4.3.2-linux-amd64.tar.gz
+          echo "d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983  helm.tar.gz" | sha256sum -c
+          tar -xzf helm.tar.gz linux-amd64/helm
+          sudo install linux-amd64/helm /usr/local/bin/helm
       - name: Install zsh, which the terminal's live tests run
         run: |
           sudo apt-get update
