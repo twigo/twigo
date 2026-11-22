@@ -3,17 +3,14 @@ import type { Workbench } from "../services";
 import type { ErrorLike } from "../errors";
 import { notifyError } from "../notifyError";
 import { REPORT_PROBLEM, REVEAL_LOG_FILE } from "../report/commands";
-import { variant } from "../variants";
 
 const problemToast = (code: string) => `problem:${code}`;
 
-/** One notification for a problem of Twigo's own files, when it appears: what it means for the person, with the ways to look further: `problems:notice`. */
+/** One notification for a problem of Twigo's own files, when it appears: what it means for the person, with the ways to look further. */
 export function announceProblem(
   { commands, keys }: Workbench,
   problem: ErrorLike,
 ): void {
-  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-  if (variant("problems") !== "notice") return;
   const run = (command: string) => () => {
     void commands.execute(command, keys.lookup(null));
   };

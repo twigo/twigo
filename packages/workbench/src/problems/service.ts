@@ -1,5 +1,4 @@
 import type { Backend } from "@twigo/protocol";
-import { Changes } from "../changes";
 import type { ErrorLike } from "../errors";
 
 /**
@@ -7,10 +6,8 @@ import type { ErrorLike } from "../errors";
  * the list is the run's and changes as a report of a code replaces its last.
  */
 export class Problems {
-  readonly changes = new Changes();
   #list: readonly ErrorLike[] = [];
   #listed = false;
-  #open = false;
 
   /** `announce` is told of each problem whose code the list did not hold before, `cleared` of each code it holds no more, so a problem that returns is told again. */
   constructor(
@@ -21,15 +18,6 @@ export class Problems {
 
   get list(): readonly ErrorLike[] {
     return this.#list;
-  }
-
-  get open(): boolean {
-    return this.#open;
-  }
-
-  setOpen(open: boolean): void {
-    this.#open = open;
-    this.changes.emit();
   }
 
   async watch(): Promise<void> {
@@ -50,7 +38,6 @@ export class Problems {
     const now = new Set(list.map(({ code }) => code));
     this.#listed = true;
     this.#list = list;
-    this.changes.emit();
     for (const problem of list) {
       if (!before.has(problem.code)) this.announce(problem);
     }
