@@ -1,7 +1,6 @@
 //! What the app does when Twigo cannot go on, and how a command meets a panic
 //! (ARCHITECTURE 2.1).
 
-use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -10,7 +9,6 @@ use tauri::ipc::Invoke;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use twigo_core::Core;
-use twigo_ipc::IpcError;
 
 const TITLE: &str = "Twigo must restart";
 const MESSAGE: &str = "Twigo ran into an internal error that it cannot recover from.\n\nWhat happened is in its log. Restart brings back your spaces and your forwards.";
@@ -182,57 +180,12 @@ pub fn flush(core: &Core) {
     }
 }
 
-/// An async command that answers `internal.panic` where it would otherwise
-/// leave the webview's promise pending for good, since Tauri answers only
-/// once the command's future ends.
-pub async fn contained<T>(
-    command: impl Future<Output = Result<T, IpcError>>,
-) -> Result<T, IpcError> {
-    let answered = twigo_panic::contain("command", command)
-        .await
-        .unwrap_or_else(|_| Err(IpcError::panicked("this command")));
-    if let Err(error) = &answered {
-        tracing::info!(code = %error.code, "a command answered an error");
-    }
-    answered
-}
-
 #[cfg(test)]
 mod tests {
     use tauri::test::{MockRuntime, mock_app};
-    use twigo_ipc::{ErrorCode, Mode, StateEntry};
+    use twigo_ipc::{Mode, StateEntry};
 
     use super::*;
-
-    #[tokio::test]
-    async fn an_async_command_that_panics_answers_internal_panic() {
-        let answered: Result<u8, IpcError> = contained(async { panic!("a command's bug") }).await;
-        assert_eq!(answered.unwrap_err().code, ErrorCode::InternalPanic);
-        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
-        let refused: Result<u8, IpcError> =
-            contained(async { Err(IpcError::new(ErrorCode::SpaceNotFound, "no")) }).await;
-        assert_eq!(refused.unwrap_err().code, ErrorCode::SpaceNotFound);
-    }
-
-    #[tokio::test]
-    async fn a_command_that_answers_an_error_leaves_one_line_with_its_code_and_none_of_its_words() {
-        let events = twigo_log::capture();
-        let refused: Result<u8, IpcError> = contained(async {
-            Err(IpcError::new(
-                ErrorCode::ServerInvalid,
-                r#"Invalid value: "hunter2""#,
-            ))
-        })
-        .await;
-        assert!(refused.is_err());
-        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
-        let lines = events.lines();
-        let [event] = &lines[..] else {
-            panic!("one event for one error: {lines:?}");
-        };
-        assert_eq!(event["fields"]["code"], "server.invalid");
-        assert!(!event.to_string().contains("hunter2"), "{event}");
-    }
 
     #[test]
     fn a_panic_on_the_main_thread_takes_the_fatal_path() {

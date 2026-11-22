@@ -7,6 +7,7 @@ mod fatal;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,8 +36,6 @@ use twigo_ipc::{
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
 
-use fatal::contained;
-
 /// The explicit mode's kubeconfig (ARCHITECTURE 5.5): the only source of
 /// contexts, of which only `kind-*` and `kwok-*` count. Debug and bench
 /// builds only.
@@ -57,6 +56,19 @@ fn sent(channel: &str, result: tauri::Result<()>) -> bool {
     result
         .inspect_err(|error| tracing::debug!(channel, %error, "could not send to the webview"))
         .is_ok()
+}
+
+/// An async command that answers `internal.panic` where it would otherwise
+/// leave the webview's promise pending for good, since Tauri answers only
+/// once the command's future ends.
+async fn contained<T>(command: impl Future<Output = Result<T, IpcError>>) -> Result<T, IpcError> {
+    let answered = twigo_panic::contain("command", command)
+        .await
+        .unwrap_or_else(|_| Err(IpcError::panicked("this command")));
+    if let Err(error) = &answered {
+        tracing::info!(code = %error.code, "a command answered an error");
+    }
+    answered
 }
 
 /// The layout watch and one subscription per webview, which a reload
@@ -1127,5 +1139,42 @@ fn window_event(window: &tauri::Window, event: &WindowEvent) {
                 .expect("subscriptions lock")
                 .remove(window.label());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_async_command_that_panics_answers_internal_panic() {
+        let answered: Result<u8, IpcError> = contained(async { panic!("a command's bug") }).await;
+        assert_eq!(answered.unwrap_err().code, ErrorCode::InternalPanic);
+        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
+        let refused: Result<u8, IpcError> =
+            contained(async { Err(IpcError::new(ErrorCode::SpaceNotFound, "no")) }).await;
+        assert_eq!(refused.unwrap_err().code, ErrorCode::SpaceNotFound);
+    }
+
+    #[tokio::test]
+    async fn a_command_that_answers_an_error_leaves_one_line_of_the_commands_with_its_code_and_none_of_its_words()
+     {
+        let events = twigo_log::capture();
+        let refused: Result<u8, IpcError> = contained(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2""#,
+            ))
+        })
+        .await;
+        assert!(refused.is_err());
+        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
+        let lines = events.lines();
+        let [event] = &lines[..] else {
+            panic!("one event for one error: {lines:?}");
+        };
+        assert_eq!(event["target"], "twigo");
+        assert_eq!(event["fields"]["code"], "server.invalid");
+        assert!(!event.to_string().contains("hunter2"), "{event}");
     }
 }
