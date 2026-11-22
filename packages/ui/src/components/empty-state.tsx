@@ -16,6 +16,7 @@ export function EmptyState({
   action,
   secondary,
   kbd,
+  role,
   className,
   children,
 }: {
@@ -28,12 +29,15 @@ export function EmptyState({
   /** Beside `action` and after it, such as a button to report the problem. */
   secondary?: React.ReactNode;
   kbd?: string;
+  /** `status` for a line that says what is going on, which a screen reader reads out as it comes. */
+  role?: "status";
   className?: string;
   children?: React.ReactNode;
 }) {
   if (density === "inline") {
     return (
       <p
+        role={role}
         className={cn(
           "flex items-start gap-1.5 px-2 py-3 text-xs leading-5",
           variant === "error" ? "text-error" : "text-support",

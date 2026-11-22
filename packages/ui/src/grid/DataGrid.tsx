@@ -21,6 +21,7 @@ import {
   type Action,
   type ActionGroups,
 } from "../components/actions";
+import { EmptyState } from "../components/empty-state";
 import { Skeleton } from "../components/skeleton";
 import { fitWidth } from "./fit";
 import { HeaderCell, MarkBox } from "./header";
@@ -762,9 +763,11 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
       {loading ? (
         <>
           {waiting && (
-            <p role="status" className="px-3 py-2 text-xs text-support">
-              {waiting}
-            </p>
+            <div style={{ paddingLeft: marking ? MARK_WIDTH : 0 }}>
+              <EmptyState density="inline" role="status">
+                {waiting}
+              </EmptyState>
+            </div>
           )}
           <SkeletonRows
             template={template}
