@@ -6,7 +6,7 @@ import {
   accessOfSpace,
   chipLabel,
   describeAccess,
-  ErrorMessage,
+  ErrorBanner,
   setByPolicyFile,
   useChanges,
   useWorkbench,
@@ -79,17 +79,19 @@ export function AnswerView({
 }
 
 export function FailedBar({ failure }: { failure: Failure }) {
-  return (
-    <Banner
+  const title = failure.at
+    ? `Line ${String(failure.at.line)}, column ${String(failure.at.column)}`
+    : "Cannot apply";
+  return failure.error ? (
+    <ErrorBanner
       tone="error"
       icon={CircleAlert}
-      title={
-        failure.at
-          ? `Line ${String(failure.at.line)}, column ${String(failure.at.column)}`
-          : "Cannot apply"
-      }
-    >
-      {failure.error ? <ErrorMessage error={failure.error} /> : failure.message}
+      title={title}
+      error={failure.error}
+    />
+  ) : (
+    <Banner tone="error" icon={CircleAlert} title={title}>
+      {failure.message}
     </Banner>
   );
 }

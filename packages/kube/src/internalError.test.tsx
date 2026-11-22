@@ -140,12 +140,12 @@ test("an object that Twigo stopped after its manifest came keeps the edit under 
     name: "YAML",
   });
   fireEvent.change(field, { target: { value: "kind: Deployment\n# mine\n" } });
-  expect(screen.queryByText("Twigo hit an internal error")).toBeNull();
+  expect(screen.queryByText("Twigo hit an internal error.")).toBeNull();
 
   await settle(ENDS_MS / 50);
   const banner = screen
-    .getByText("Twigo hit an internal error")
-    .closest<HTMLElement>("div");
+    .getByText("Twigo hit an internal error.")
+    .closest<HTMLElement>("[data-tone]");
   if (!banner) throw new Error("no banner");
   expect(banner.textContent).toContain("Your edit is kept");
   expect(carriesCode(banner, "internal.panic")).toBe(true);
@@ -196,7 +196,7 @@ test("the logs of a container that Twigo stopped say so over the lines, with Rep
     }),
   );
   await settle(12);
-  expect(screen.getByText("Twigo hit an internal error:")).toBeTruthy();
+  expect(screen.getByText("Twigo hit an internal error.")).toBeTruthy();
   expect(document.body.textContent).toContain("stopped.");
   expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
   const before = opened;

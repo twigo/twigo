@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 import type { ViewState } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
-import { ErrorMessage, isInternalError, ReportLink } from "@twigo/workbench";
+import {
+  ErrorMessage,
+  isInternalError,
+  ReportButton,
+  ReportLink,
+} from "@twigo/workbench";
 import { viewProblem } from "./viewProblem";
 
 /**
@@ -53,7 +58,7 @@ export function ViewStatus({
       variant={shown.variant}
       title={shown.title}
       {...(retry && { action: retry })}
-      {...(internal && { secondary: <ReportLink /> })}
+      {...(internal && { secondary: <ReportButton /> })}
       className="flex-1 py-16"
     >
       <p className="max-w-md">
