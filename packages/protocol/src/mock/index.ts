@@ -147,6 +147,8 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*` that also sends `dev`'s terminal through the proxy,
+ * `policyFileUnreadable`: live lists while that file cannot be read, so every
+ * context is read-only and says why,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
@@ -183,6 +185,7 @@ export type MockScenario =
   | ListScenario
   | "shellTimeout"
   | "policyFile"
+  | "policyFileUnreadable"
   | "viewer"
   | "rbacNamespaces"
   | "rbacTypedNamespaces"
@@ -203,6 +206,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
   "policyFile",
+  "policyFileUnreadable",
   "viewer",
   "rbacNamespaces",
   "rbacTypedNamespaces",
@@ -300,6 +304,7 @@ export function createMockBackend(
   const lists: ListScenario =
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
+    scenario === "policyFileUnreadable" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     scenario === "rbacTypedNamespaces" ||
@@ -325,6 +330,9 @@ export function createMockBackend(
     scenario === "policyFile",
     undefined,
     catalogOf(scenario),
+    scenario === "policyFileUnreadable"
+      ? "it is not JSON at line 3, column 1"
+      : undefined,
   );
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,

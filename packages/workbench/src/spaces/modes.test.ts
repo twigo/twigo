@@ -311,6 +311,18 @@ test("marking a context sets its default mode and its colour", async () => {
   expect(colors.source("qa")).toBe("chosen");
 });
 
+test("a policy file that cannot be read makes every context read-only, and each says why in the file's reason", async () => {
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("policyFileUnreadable"),
+  );
+  const access = workbench.catalog.find("dev")?.access;
+  expect(access?.mode).toBe("read-only");
+  expect(access && describeAccess(access)).toBe(
+    "/Library/Application Support/Twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
+  );
+});
+
 test("a policy file's entry cannot be changed and says who set it", async () => {
   const error = vi.spyOn(notify, "error");
   const workbench = await testWorkbench(
