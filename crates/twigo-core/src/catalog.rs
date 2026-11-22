@@ -318,6 +318,10 @@ impl Catalog {
         }
     }
 
+    pub fn current(&self) -> Option<Arc<Contexts>> {
+        self.contexts.borrow().clone()
+    }
+
     /// The contexts, once the sources have been read.
     pub async fn contexts(&self) -> Arc<Contexts> {
         let mut contexts = self.subscribe();

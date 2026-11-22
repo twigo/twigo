@@ -298,6 +298,19 @@ impl Entries {
         Kubeconfig::clone(&self.config)
     }
 
+    /// The names of the cluster and the user entries it points at.
+    pub fn names(&self) -> (Option<&str>, Option<&str>) {
+        let entry = self
+            .config
+            .contexts
+            .first()
+            .and_then(|named| named.context.as_ref());
+        (
+            entry.map(|entry| entry.cluster.as_str()),
+            entry.and_then(|entry| entry.user.as_deref()),
+        )
+    }
+
     pub fn proxy_url(&self) -> Option<&str> {
         let cluster = self.config.clusters.first()?.cluster.as_ref()?;
         cluster.proxy_url.as_deref()

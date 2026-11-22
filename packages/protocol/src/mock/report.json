@@ -1,0 +1,42 @@
+{
+  "facts": [
+    {
+      "id": "twigo",
+      "label": "Twigo",
+      "value": "0.1.0 (3f2a9c1)",
+      "optional": false
+    },
+    {
+      "id": "system",
+      "label": "System",
+      "value": "Mac OS 27.2.1 (aarch64)",
+      "optional": false
+    },
+    {
+      "id": "engine",
+      "label": "Engine",
+      "value": "WebKit 22625.2.8.11.9",
+      "optional": false
+    },
+    {
+      "id": "kubernetes",
+      "label": "Kubernetes",
+      "value": "v1.33.4-eks-2d5f260, v1.37.2",
+      "optional": true
+    },
+    {
+      "id": "lastPanic",
+      "label": "Last panic",
+      "value": "crates/twigo-core/src/lib.rs:503:9 (this run)",
+      "optional": true
+    }
+  ],
+  "log": "2026-11-22T21:14:00Z INFO  twigo_log::facts Twigo started arch=aarch64 commit=3f2a9c1d4e5b60718293a4b5c6d7e8f901234567 engine=WebKit engine_version=22625.2.8.11.9 filter=warn,twigo=info os=Mac OS os_version=27.2.1 version=0.1.0\n2026-11-22T21:14:02Z WARN  twigo_cache::discovery could not read the cached discovery error=No such file or directory (os error 2) server=<server-1>\n2026-11-22T21:14:03Z INFO  twigo_core::connections the route moved, so the connections were retired context=<context-1>\n2026-11-22T21:14:04Z WARN  twigo_kube::openapi could not read a cached OpenAPI document error=invalid type: null, expected a string at line 1 column 4 url=<url>\n2026-11-22T21:14:05Z WARN  twigo_cache::hub the watch of deployments failed context=<context-2> error=connection refused namespace=<namespace-1>\n2026-11-22T21:14:05Z WARN  twigo_kube::credentials::oidc kept the rejected oidc token, since its refresh failed error=the issuer answered 400 user=<user-1>\n2026-11-22T21:14:06Z ERROR twigo_core::state could not save the state error=Permission denied (os error 13) path=<path>\n2026-11-22T21:14:07Z WARN  twigo_env could not stop the process group command=~/.local/bin/aws-iam-authenticator error=No such process (os error 3)\n2026-11-22T21:14:08Z WARN  twigo_kube::client a request was refused error=Bearer <token> was rejected by <server-1>, retried against 127.0.0.1:8001 and <address> server=<server-1>\n2026-11-22T21:14:09Z ERROR twigo::webview Error: pods is forbidden: User \"<email>\" cannot list resource \"…\" in API group \"…\" in the namespace \"<namespace-2>\" source=unhandledrejection window=main\n    stack:\n      Error: pods is forbidden\n          at list (<url>)\n          at async refresh (<url>)\n2026-11-22T21:14:10Z ERROR twigo_panic::supervisor a duty panicked, so it starts again duty=unlock expiry id=14 of=3 restart=1\n2026-11-22T21:14:11Z ERROR twigo_log::panic panic location=crates/twigo-core/src/lib.rs:503:9 payload=called `Result::unwrap()` on an `Err` value: ReadConfig(Os { code: 2, kind: NotFound, message: \"…\" }, \"…\") task=17 thread=tokio-runtime-worker version=0.1.0\n    backtrace:\n         0: std::backtrace::Backtrace::force_capture\n         1: twigo_log::panic::record\n         2: twigo_log::install_hook::{{closure}}\n         3: std::panicking::panic_with_hook\n         4: std::panicking::panic_handler::{{closure}}\n         5: core::result::unwrap_failed\n         6: twigo_core::catalog::Catalog::follow\n         7: <core::pin::Pin<P> as core::future::future::Future>::poll\n         8: tokio::runtime::task::core::Core<T,S>::poll\n2026-11-22T21:14:11Z ERROR twigo_panic::supervisor a duty cannot be kept, so Twigo must restart duty=kubeconfig watch\n",
+  "hidden": {
+    "names": 10,
+    "paths": 3,
+    "tokens": 1,
+    "addresses": 4,
+    "quoted": 4
+  }
+}

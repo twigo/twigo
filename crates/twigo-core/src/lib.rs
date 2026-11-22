@@ -13,6 +13,7 @@ mod errors;
 mod forward;
 pub mod objects;
 mod proxy;
+pub mod report;
 pub mod state;
 pub mod subscriptions;
 mod terminal;
