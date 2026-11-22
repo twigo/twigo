@@ -5,6 +5,7 @@ import { useWorkbench, type EditorProps } from "@twigo/workbench";
 import type { ListServices } from "../services";
 import { DetailsFrame, DWELL_MS } from "../Details";
 import { helmUri, parseHelmUri, type ReleaseInput } from "../uri";
+import { useReopen } from "../useReopen";
 import { ReleasePage } from "./ReleasePage";
 
 /**
@@ -17,9 +18,11 @@ export function ReleaseEditor({
 }: EditorProps & { services: ListServices }) {
   const { editors } = useWorkbench();
   const input = useMemo(() => parseHelmUri(uri), [uri]);
+  const [attempt, reopen] = useReopen();
   if (!input) return <EmptyState title="Not a release">{uri}</EmptyState>;
   return (
     <ReleasePage
+      key={attempt}
       uri={uri}
       release={input}
       services={services}
@@ -36,6 +39,7 @@ export function ReleaseEditor({
         editors.pin(uri);
         editors.open(helmUri({ ...input, revision }));
       }}
+      onReopen={reopen}
     />
   );
 }
@@ -58,6 +62,7 @@ export function ReleaseDetails({
   onClose: () => void;
 }) {
   const key = `${release.space}/${release.namespace}/${release.name}`;
+  const [attempt, reopen] = useReopen();
   const [rested, setRested] = useState<string>();
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -75,7 +80,7 @@ export function ReleaseDetails({
     >
       {rested === key && (
         <ReleasePage
-          key={key}
+          key={`${key}#${String(attempt)}`}
           uri={uri}
           release={release}
           services={services}
@@ -106,6 +111,7 @@ export function ReleaseDetails({
           onOpenRevision={(revision) => {
             onOpen({ ...release, revision });
           }}
+          onReopen={reopen}
         />
       )}
     </DetailsFrame>

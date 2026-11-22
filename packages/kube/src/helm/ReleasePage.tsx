@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 import {
   HELM_RELEASES,
+  REFUSED,
   type HelmPart,
   type ObjectRef,
   type Overview as Document,
@@ -43,6 +44,7 @@ import { Prose } from "../object/values";
 import { Vitals } from "../object/Vitals";
 import type { ListServices } from "../services";
 import type { ReleaseInput } from "../uri";
+import { ViewStatus } from "../ViewStatus";
 import { HistoryList } from "./HistoryList";
 import { HELM_REVISION, HELM_TAB } from "./keys";
 import {
@@ -152,6 +154,8 @@ export interface ReleasePageProps {
   readonly controls: (run: (command: string) => void) => ReactNode;
   /** Opens a revision in an editor of its own. */
   readonly onOpenRevision: (revision: number) => void;
+  /** Opens the release anew, where Twigo stopped it or could not open it. */
+  readonly onReopen: () => void;
 }
 
 /**
@@ -167,6 +171,7 @@ export function ReleasePage({
   services,
   controls,
   onOpenRevision,
+  onReopen,
 }: ReleasePageProps) {
   const workbench = useWorkbench();
   const { backend, keys, menus } = workbench;
@@ -457,7 +462,14 @@ export function ReleasePage({
           <Vitals cells={strip} verdict={verdict} />
         )}
         <div className="min-h-0 flex-1 overflow-auto [--label-column:112px]">
-          {!exists ? (
+          {REFUSED.has(snapshot.status.state) ? (
+            <ViewStatus
+              status={snapshot.status}
+              what="the release"
+              onRetry={onReopen}
+              releases={{ where: release.namespace }}
+            />
+          ) : !exists ? (
             <EmptyState icon={CircleAlert} title="This release is gone">
               Helm no longer keeps any revision of {release.name} in{" "}
               {release.namespace}.

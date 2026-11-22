@@ -8,6 +8,7 @@ import type {
   ReleaseListQuery,
   ReleaseParts,
 } from "../generated";
+import { ENDS_MS } from "./edits";
 import { createMockBackend, type MockScenario } from "./index";
 
 beforeEach(() => {
@@ -241,6 +242,63 @@ test("a release that cannot be read says why and has no parts", async () => {
   expect(batches[0]?.overview).toBeNull();
   expect(batches[0]?.values).toBeNull();
   expect(batches[0]?.history?.[0]?.problem?.code).toBe("helm.truncated");
+});
+
+test("an open release follows its namespace's scenario: a refused one sends no part and says why, and objectPanicked ends the editor after what it showed", async () => {
+  const refused = await open(
+    null,
+    ALL,
+    "alpha",
+    "payments",
+    createMockBackend("rbacNamespaces"),
+  );
+  expect(refused.batches).toHaveLength(1);
+  expect(refused.batches[0]).toMatchObject({
+    status: { state: "forbidden", verb: "list", resource: "secrets" },
+    exists: false,
+    revision: null,
+    latest: null,
+    problem: null,
+    overview: null,
+    values: null,
+    history: null,
+  });
+  const allowed = await open(
+    null,
+    ALL,
+    "alpha",
+    "default",
+    createMockBackend("rbacNamespaces"),
+  );
+  expect(allowed.batches[0]).toMatchObject({
+    status: { state: "ready" },
+    exists: true,
+    revision: 1,
+  });
+
+  const panicking = await open(
+    null,
+    ALL,
+    "alpha",
+    "payments",
+    createMockBackend("objectPanicked"),
+  );
+  expect(panicking.batches).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(ENDS_MS);
+  const last = panicking.batches[panicking.batches.length - 1];
+  expect(last).toMatchObject({
+    status: { state: "error", error: { code: "internal.panic" } },
+    exists: true,
+    revision: 2,
+    latest: 2,
+    problem: null,
+    overview: null,
+    values: null,
+    manifest: null,
+    history: null,
+  });
+  await panicking.set(1, ALL);
+  expect(panicking.batches[panicking.batches.length - 1]).toBe(last);
 });
 
 test("a comparison marks a masked value that changed on both sides, whichever way round it is asked", async () => {

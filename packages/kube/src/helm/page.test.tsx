@@ -7,7 +7,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend, ReleaseBatch } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
+import { ENDS_MS } from "../../../protocol/src/mock/edits";
 import {
   mountKube,
   openList,
@@ -32,6 +33,15 @@ afterEach(() => {
 
 const release = (name: string, namespace = "payments") =>
   helmUri({ space: "prod-eu", namespace, name });
+
+async function open(uri: string, scenario: MockScenario = "ready") {
+  const workbench = await mountKube(createMockBackend(scenario));
+  act(() => {
+    workbench.editors.open(uri);
+  });
+  await settle(8);
+  return workbench;
+}
 
 const page = (name: string) =>
   screen.getByRole("region", { name: `Helm release ${name}` });
@@ -156,4 +166,60 @@ test("what was revealed does not come back when the release is uninstalled and i
   await settle(3);
   expect(page("epsilon").textContent).toContain("Reveal the notes");
   expect(page("epsilon").textContent).not.toContain("epsilon-password-r2");
+});
+
+test("a release in a namespace whose Secrets the person may not list says so, naming them, where one they may list shows whole", async () => {
+  const workbench = await open(release("alpha"), "rbacNamespaces");
+  expect(page("alpha").textContent).toContain(
+    "These credentials may not list Secrets in payments, which Helm keeps its releases in.",
+  );
+  expect(page("alpha").textContent).not.toContain("This release is gone");
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+
+  act(() => {
+    workbench.editors.open(release("alpha", "default"));
+  });
+  await settle(8);
+  expect(
+    screen.getAllByRole("region", { name: "Helm release alpha" }),
+  ).toHaveLength(1);
+  expect(page("alpha").textContent).toContain("Chart version");
+  expect(page("alpha").textContent).not.toContain("Access denied");
+});
+
+test("a release that is still connecting shows a placeholder, neither gone nor refused", async () => {
+  await open(release("alpha"), "connecting");
+  expect(page("alpha").textContent).not.toContain("This release is gone");
+  expect(page("alpha").textContent).not.toContain("Access denied");
+  expect(page("alpha").textContent).not.toContain("Chart version");
+});
+
+test("a release editor that Twigo stopped says so with Report… and Reopen, which opens it anew", async () => {
+  const mock = createMockBackend("objectPanicked");
+  let opened = 0;
+  const backend: Backend = {
+    invoke: (command, request) => mock.invoke(command, request),
+    subscribe: (command, request, onMessage) => {
+      if (command === "helm_release_open") opened++;
+      return mock.subscribe(command, request, onMessage);
+    },
+  };
+  const workbench = await mountKube(backend);
+  act(() => {
+    workbench.editors.open(release("alpha"));
+  });
+  await settle(8);
+  expect(page("alpha").textContent).toContain("Chart version");
+  expect(screen.queryByText("Twigo hit an internal error")).toBeNull();
+
+  await settle(ENDS_MS / 50);
+  expect(screen.getByText("Twigo hit an internal error")).toBeTruthy();
+  expect(page("alpha").textContent).toContain("This view stopped.");
+  expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+
+  const before = opened;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(8);
+  expect(opened).toBeGreaterThan(before);
+  expect(page("alpha").textContent).toContain("Chart version");
 });

@@ -18,9 +18,12 @@ import type {
   RevisionLine,
   Scrubbed,
   SetReleaseView,
+  ViewState,
 } from "../generated";
 import { HELM_RELEASES } from "../helm";
+import { SHOWS_ROWS } from "../viewState";
 import type { Cluster } from "./cluster";
+import { ENDS_MS } from "./edits";
 import HELM from "./helm.json";
 import REVEALED from "./helm-revealed.json";
 import type { MockKind, MockRow } from "./kinds";
@@ -305,6 +308,14 @@ export function revealWords(
   }
 }
 
+/** What a scenario does to an open release, whatever the cluster says. */
+export interface ReleaseBinding {
+  /** The state its namespace's Secrets are in: a refusal or a wait sends no part, as the core's first batch does. */
+  readonly status?: ViewState;
+  /** How the editor ends after `ENDS_MS`: the status says why, and what it showed stays. */
+  readonly ends?: ViewState;
+}
+
 /**
  * An open release of the mock backend: the recorded revisions of the release
  * under its name, the revision asked for or the latest, with each part sent
@@ -313,23 +324,34 @@ export function revealWords(
 export class MockRelease {
   readonly #release: Recorded | undefined;
   readonly #onMessage: (batch: ReleaseBatch) => void;
+  readonly #status: ViewState;
   #asked: number | null;
   #parts: ReleaseParts;
   #seq = 0;
   #closed = false;
+  #ended = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     readonly ref: ReleaseRef,
     { revision, parts }: Pick<OpenRelease, "revision" | "parts">,
     onMessage: (batch: ReleaseBatch) => void,
+    binding: ReleaseBinding = {},
   ) {
     this.#release = recordedRelease(ref);
     this.#asked = revision;
     this.#parts = parts;
     this.#onMessage = onMessage;
+    this.#status = binding.status ?? { state: "ready" };
     setTimeout(() => {
       this.#send(parts);
     }, 0);
+    const { ends } = binding;
+    if (ends) {
+      this.#timer = setTimeout(() => {
+        this.#end(ends);
+      }, ENDS_MS);
+    }
   }
 
   /** The revision the parts are of: the one asked for, else the latest. */
@@ -384,11 +406,49 @@ export class MockRelease {
 
   close(): void {
     this.#closed = true;
+    clearTimeout(this.#timer);
+  }
+
+  /** Ends the editor as the core's last batch does: it changes nothing but the state, and no part comes again. */
+  #end(ends: ViewState): void {
+    if (this.#closed) return;
+    this.#ended = true;
+    this.#onMessage({
+      seq: ++this.#seq,
+      status: ends,
+      exists: this.#release !== undefined,
+      revision: this.shown,
+      latest: this.#release?.latest.revision ?? null,
+      problem: null,
+      overview: null,
+      notes: null,
+      description: null,
+      values: null,
+      manifest: null,
+      history: null,
+    });
   }
 
   #send(changed: ReleaseParts): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#ended) return;
     const release = this.#release;
+    if (!SHOWS_ROWS.has(this.#status.state)) {
+      this.#onMessage({
+        seq: ++this.#seq,
+        status: this.#status,
+        exists: false,
+        revision: null,
+        latest: null,
+        problem: null,
+        overview: null,
+        notes: null,
+        description: null,
+        values: null,
+        manifest: null,
+        history: null,
+      });
+      return;
+    }
     const shown = this.shown;
     const revision = this.revision(shown);
     const problem =
@@ -398,7 +458,7 @@ export class MockRelease {
     const readable = revision?.problem === null ? revision : undefined;
     this.#onMessage({
       seq: ++this.#seq,
-      status: { state: "ready" },
+      status: this.#status,
       exists: release !== undefined,
       revision: shown,
       latest: release?.latest.revision ?? null,
