@@ -185,9 +185,11 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * `logsPanicked`: live lists while every log stream ends on an internal error,
  * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
- * open, or `reportCut`: live lists while the link of an issue is too long for
- * the description of a report, which it cuts. A pinned cause (`connectRefused`
- * and the like) is a list scenario.
+ * open, or `problemsCleared`: live lists while the state cannot be saved until
+ * a save works 8 s later, and fails again 8 s after that, or `reportCut`: live
+ * lists while the link of an issue is too long for the description of a
+ * report, which it cuts. A pinned cause (`connectRefused` and the like) is a
+ * list scenario.
  */
 export type MockScenario =
   | ListScenario
@@ -200,6 +202,7 @@ export type MockScenario =
   | "partsQueued"
   | "protection"
   | "problems"
+  | "problemsCleared"
   | "reportCut"
   | AuthScenario
   | EditScenario
@@ -224,6 +227,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "partsQueued",
   "protection",
   "problems",
+  "problemsCleared",
   "reportCut",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
@@ -267,6 +271,13 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   dvorak,
 };
 
+const AUDIT_OFF = wireError(
+  new IpcError(
+    "audit.off",
+    "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+  ),
+);
+
 /** What Rust lists when the state file was set aside and the audit log cannot open, in its words. */
 const PROBLEMS = [
   wireError(
@@ -275,13 +286,20 @@ const PROBLEMS = [
       "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
     ),
   ),
+  AUDIT_OFF,
+];
+
+/** What `problemsCleared` lists while the state cannot be saved, and how long until a save works, and until it fails again. */
+const UNSAVED = [
   wireError(
     new IpcError(
-      "audit.off",
-      "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+      "state.unsaved",
+      "Twigo could not save its state, so what you change is lost when it quits",
     ),
   ),
+  AUDIT_OFF,
 ];
+const SAVE_WORKS_MS = 8000;
 
 /** What twigo-env reported for a `.zshrc` of `echo "Loading nvm…"; sleep 60` (2026-11-01). */
 const SHELL_TIMEOUT: ShellEnvironment = {
@@ -325,6 +343,7 @@ export function createMockBackend(
     scenario === "partsQueued" ||
     scenario === "protection" ||
     scenario === "problems" ||
+    scenario === "problemsCleared" ||
     scenario === "reportCut" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
@@ -1041,7 +1060,18 @@ export function createMockBackend(
     kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
-    problems_watch: () => (scenario === "problems" ? PROBLEMS : []),
+    problems_watch: (_request, onMessage) => {
+      if (scenario === "problemsCleared") {
+        setTimeout(() => {
+          onMessage([AUDIT_OFF]);
+        }, SAVE_WORKS_MS);
+        setTimeout(() => {
+          onMessage(UNSAVED);
+        }, 2 * SAVE_WORKS_MS);
+        return UNSAVED;
+      }
+      return scenario === "problems" ? PROBLEMS : [];
+    },
     resources_watch: (id, onMessage) => {
       space(id);
       const failure = discoveryFailure(scenario, id);
