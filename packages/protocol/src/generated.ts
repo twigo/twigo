@@ -1861,8 +1861,9 @@ contexts: Array<string>, };
  */
 export type RevisionLine = { revision: number, 
 /**
- * Helm's word, from the label, so known before the revision is decoded:
- * `deployed`, `superseded`, `failed`, `pending-upgrade`…
+ * Helm's word: `deployed`, `superseded`, `failed`, `pending-upgrade`…,
+ * the label's until the revision is decoded, then the release's, which
+ * `helm history` prints where the two differ.
  */
 status: string, 
 /**

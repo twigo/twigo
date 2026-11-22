@@ -181,8 +181,9 @@ pub struct UnreadDocument {
 #[serde(rename_all = "camelCase")]
 pub struct RevisionLine {
     pub revision: u32,
-    /// Helm's word, from the label, so known before the revision is decoded:
-    /// `deployed`, `superseded`, `failed`, `pending-upgrade`…
+    /// Helm's word: `deployed`, `superseded`, `failed`, `pending-upgrade`…,
+    /// the label's until the revision is decoded, then the release's, which
+    /// `helm history` prints where the two differ.
     pub status: String,
     /// RFC 3339, `info.last_deployed`; null until decoded.
     pub updated: Option<String>,
