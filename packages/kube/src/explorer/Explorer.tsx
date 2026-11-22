@@ -24,15 +24,7 @@ const DEFAULT_OPEN = ["Workloads"];
  * preview, a double click keeps it; a kind whose list is open shows its
  * rows and its worst health. The open sections are kept per space.
  */
-export function Explorer({ services }: { services: ListServices }) {
-  const { spaces } = useWorkbench();
-  useChanges(spaces.changes);
-  const space = spaces.active;
-  if (!space) return null;
-  return <SpaceExplorer key={space.id} services={services} space={space.id} />;
-}
-
-function SpaceExplorer({
+export function Explorer({
   services,
   space,
 }: {

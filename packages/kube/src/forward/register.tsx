@@ -104,7 +104,9 @@ export function registerForwards(
     id: FORWARDS_VIEW,
     title: "Port forwards",
     container: FORWARDS_CONTAINER,
-    component: () => <ForwardsView forwards={forwards} />,
+    component: ({ space }) => (
+      <ForwardsView forwards={forwards} space={space} />
+    ),
   });
   views.registerStatusBarItem({
     id: "kube.forwards",

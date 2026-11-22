@@ -82,7 +82,7 @@ export function registerKube(workbench: Workbench): void {
     id: EXPLORER_VIEW,
     title: "Resources",
     container: "kube.explorer",
-    component: () => <Explorer services={services} />,
+    component: ({ space }) => <Explorer services={services} space={space} />,
   });
   views.registerStatusBarItem({
     id: "kube.cluster",

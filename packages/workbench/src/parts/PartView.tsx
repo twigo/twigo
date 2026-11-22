@@ -71,12 +71,17 @@ export function PartView({ location }: { location: SideBar }) {
         >
           <p>Move a view here with View › Move View… or the command palette.</p>
         </EmptyState>
-      ) : shown.length === 1 && shown[0] ? (
-        <ViewBody view={shown[0]} />
+      ) : space && shown.length === 1 && shown[0] ? (
+        <ViewBody view={shown[0]} space={space.id} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {shown.map((view) => (
-            <ViewSection key={view.id} view={view} lookup={lookup} />
+            <ViewSection
+              key={view.id}
+              view={view}
+              lookup={lookup}
+              space={space?.id ?? ""}
+            />
           ))}
         </div>
       )}
@@ -84,19 +89,27 @@ export function PartView({ location }: { location: SideBar }) {
   );
 }
 
-function ViewBody({ view }: { view: View }) {
+function ViewBody({ view, space }: { view: View; space: string }) {
   const Component = view.component;
   return (
     <div className="min-h-0 flex-1">
       <PanelBoundary label={view.title}>
-        <Component />
+        <Component key={space} space={space} />
       </PanelBoundary>
     </div>
   );
 }
 
 /** One of several views in a container: a header that folds it, VS Code's pane view. */
-function ViewSection({ view, lookup }: { view: View; lookup: Lookup }) {
+function ViewSection({
+  view,
+  lookup,
+  space,
+}: {
+  view: View;
+  lookup: Lookup;
+  space: string;
+}) {
   const [open, setOpen] = useState(true);
   return (
     <Section
@@ -109,7 +122,7 @@ function ViewSection({ view, lookup }: { view: View; lookup: Lookup }) {
       actions={<ViewActions view={view} lookup={lookup} />}
       className={cn("border-t border-border-subtle", open && "min-h-0 flex-1")}
     >
-      <ViewBody view={view} />
+      <ViewBody view={view} space={space} />
     </Section>
   );
 }
