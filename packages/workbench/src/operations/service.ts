@@ -12,6 +12,7 @@ import { toIpcError } from "@twigo/protocol";
 import { notify, type ToastAction } from "@twigo/ui";
 import { Changes } from "../changes";
 import type { ContextKeys } from "../contextkey/service";
+import { notifyError } from "../notifyError";
 import { spaceMark } from "../parts/spaceMark";
 import type { Spaces } from "../spaces/store";
 import { unlockAction } from "./unlock";
@@ -308,10 +309,9 @@ export class Operations {
    * a policy file's lock or a context no source lists does not.
    */
   #fail(error: unknown, space: string | undefined, action?: ToastAction): void {
-    const { message, blocked } = toIpcError(error);
-    notify.error(message, {
-      key: message,
-      tile: this.#tile(space, blocked?.context),
+    const ipc = toIpcError(error);
+    notifyError(ipc, {
+      tile: this.#tile(space, ipc.blocked?.context),
       ...(action && { action }),
     });
   }

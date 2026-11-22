@@ -235,9 +235,7 @@ test("a list the credentials may not read shows – and why, never 0", async () 
   await home("live");
   await settle(30);
   const nodes = tile("Nodes");
-  expect(nodes?.textContent).toBe(
-    "Nodes–These credentials may not list nodes.",
-  );
+  expect(nodes?.textContent).toBe("Nodes–You may not list nodes.");
   expect(nodes?.closest("button")).toBeNull();
   expect(tile("Pods")?.textContent).toMatch(/^Pods5,000/);
   expect(screen.getByText("Kubernetes v1.33.4")).toBeTruthy();

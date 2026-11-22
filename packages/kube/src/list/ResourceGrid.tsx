@@ -49,7 +49,7 @@ import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
 import { ViewStatus } from "../ViewStatus";
-import { leavesOut } from "./listStatus";
+import { leavesOut, waitingLine } from "./listStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
@@ -563,6 +563,7 @@ function Grid({
         </ActionDropdown>
       }
       loading={!SHOWS_ROWS.has(snapshot.status.state)}
+      waiting={waitingLine(snapshot.status)}
       empty={
         filtered ? (
           <EmptyState

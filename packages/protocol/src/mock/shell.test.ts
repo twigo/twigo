@@ -453,6 +453,21 @@ test("a container with no shell ends in its runtime's words before any output", 
   expect(more).toEqual([]);
 });
 
+test("an exec the API server refuses ends failed with its code and reason before any output", async () => {
+  const shell = await openShell("shellFailed");
+  await vi.advanceTimersByTimeAsync(500);
+  const [connecting, ended, ...more] = shell.messages;
+  expect(connecting).toEqual({ state: "connecting" });
+  expect(ended).toMatchObject({
+    state: "ended",
+    end: {
+      reason: "failed",
+      error: { code: "server.forbidden", server: { reason: "Forbidden" } },
+    },
+  });
+  expect(more).toEqual([]);
+});
+
 test("a lost connection ends it 8 s in, and a relock does too with the context read-only", async () => {
   const lost = await openShell("shellLost");
   await vi.advanceTimersByTimeAsync(7500);

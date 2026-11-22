@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ViewState } from "@twigo/protocol";
 import { EmptyState } from "@twigo/ui";
+import { ErrorMessage } from "@twigo/workbench";
 import { viewProblem } from "./viewProblem";
 
 /**
@@ -40,7 +41,7 @@ export function ViewStatus({
         icon={shown.icon}
         className="px-3"
       >
-        {shown.body}
+        <ErrorMessage error={shown.error} message={shown.body} />
       </EmptyState>
     );
   }
@@ -52,7 +53,13 @@ export function ViewStatus({
       {...(retry && { action: retry })}
       className="flex-1 py-16"
     >
-      <p className="max-w-md">{shown.body}</p>
+      <p className="max-w-md">
+        <ErrorMessage
+          error={shown.error}
+          message={shown.body}
+          className="justify-center"
+        />
+      </p>
     </EmptyState>
   );
 }

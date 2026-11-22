@@ -72,6 +72,7 @@ export class MockAccess {
       readOnly: KUBECONFIG_READ_ONLY,
       types: KUBECONFIG_TYPES,
     },
+    private readonly listed: Catalog = { contexts: CONTEXTS, failures: [] },
   ) {}
 
   watch(onMessage: (catalog: Catalog) => void): Catalog {
@@ -89,7 +90,7 @@ export class MockAccess {
   }
 
   setEnvironment(name: string, environment: Environment | null): void {
-    fixture(name);
+    this.#fixture(name);
     this.#unlocks.delete(name);
     this.#environments.set(name, environment);
     this.#changes(name);
@@ -119,26 +120,26 @@ export class MockAccess {
 
   /** An admin's policy file makes a running context read-only, which nothing in the app can change or unlock. */
   lockByFile(name: string): void {
-    fixture(name);
+    this.#fixture(name);
     this.#filed.add(name);
     this.#unlocks.delete(name);
     this.#emit();
   }
 
   liftFile(name: string): void {
-    fixture(name);
+    this.#fixture(name);
     this.#filed.delete(name);
     this.#emit();
   }
 
   /** What a context lets through now. */
   of(name: string): ContextAccess {
-    return this.#access(fixture(name));
+    return this.#access(this.#fixture(name));
   }
 
   /** What a context would let through once `change` is made, an unlock it does not make ended. */
   would(name: string, change: Change): ContextAccess {
-    return this.#access(fixture(name), change);
+    return this.#access(this.#fixture(name), change);
   }
 
   /**
@@ -150,7 +151,7 @@ export class MockAccess {
     gone: readonly Outlived[],
     change?: Change,
   ): ContextAccess {
-    return this.#access(fixture(name), change, gone);
+    return this.#access(this.#fixture(name), change, gone);
   }
 
   /** How many times a choice or an unlock changed what a context lets through: a plan holds only while this stays. */
@@ -160,7 +161,7 @@ export class MockAccess {
 
   /** The locks that hold a context and can go: the policy file, its kubeconfig's `readOnly`, then its kubeconfig's type. The mock has no provider's lock. */
   locks(name: string): Outlived[] {
-    fixture(name);
+    this.#fixture(name);
     return [
       ...(this.#policyFileSets(name)
         ? [{ kind: "policyFile" as const, file: POLICY_FILE }]
@@ -176,7 +177,7 @@ export class MockAccess {
 
   /** Refuses what a policy file holds, as the gate does a change of its contexts' mode. */
   refuse(name: string): void {
-    fixture(name);
+    this.#fixture(name);
     if (this.#policyFileSets(name)) {
       throw new IpcError(
         "policy.file-sets-mode",
@@ -189,15 +190,32 @@ export class MockAccess {
     this.#changed.set(name, (this.#changed.get(name) ?? 0) + 1);
   }
 
+  has(name: string): boolean {
+    return this.listed.contexts.some((context) => context.name === name);
+  }
+
+  #fixture(name: string): Context {
+    const context = this.listed.contexts.find(
+      (candidate) => candidate.name === name,
+    );
+    if (!context) {
+      throw new IpcError(
+        "context.not-listed",
+        `no source lists the context ${name}`,
+      );
+    }
+    return context;
+  }
+
   #list(): Context[] {
-    return CONTEXTS.map((context) => ({
+    return this.listed.contexts.map((context) => ({
       ...context,
       access: this.#access(context),
     }));
   }
 
   #catalog(): Catalog {
-    return { contexts: this.#list(), failures: [] };
+    return { contexts: this.#list(), failures: [...this.listed.failures] };
   }
 
   #emit(): void {
@@ -318,15 +336,4 @@ function strictest(
         : best,
     undefined,
   );
-}
-
-function fixture(name: string): Context {
-  const context = CONTEXTS.find((candidate) => candidate.name === name);
-  if (!context) {
-    throw new IpcError(
-      "context.not-listed",
-      `no source lists the context ${name}`,
-    );
-  }
-  return context;
 }

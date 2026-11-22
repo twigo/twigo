@@ -6,7 +6,7 @@ import { notify } from "@twigo/ui";
 import { registerCore } from "../core";
 import { Workbench } from "../services";
 import { StateStore } from "../state/store";
-import { confirmAsking, testWorkbench } from "../testing";
+import { confirmAsking, testWorkbench, toastWords } from "../testing";
 import {
   RELOCK_CONTEXT,
   SET_CONTEXT_ENVIRONMENT,
@@ -322,7 +322,7 @@ test("a policy file's entry cannot be changed and says who set it", async () => 
   expect(catalog.find("prod-eu")?.access.mode).toBe("read-only");
   expect(error).toHaveBeenCalledTimes(2);
   for (const [message] of error.mock.calls) {
-    expect(message).toContain("prod-*");
+    expect(toastWords(message)).toContain("prod-*");
   }
 });
 

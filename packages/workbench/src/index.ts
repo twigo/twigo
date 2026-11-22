@@ -37,6 +37,10 @@ export type {
 } from "./quickaccess/registry";
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
+export { errorDetails, errorLines, errorText, type ErrorLike } from "./errors";
+export { ErrorMessage } from "./ErrorMessage";
+export { notifyError } from "./notifyError";
+export { variant, type Variant, type VariantGroup } from "./variants";
 export type { Look, Outcome } from "./operations/service";
 export { canUnlock, unlockAction } from "./operations/unlock";
 export { StateStore } from "./state/store";

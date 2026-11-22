@@ -68,5 +68,9 @@ test("anything else, such as Tauri's unknown-command string or an unknown code, 
   expect(toIpcError("Command spaces_list not found").code).toBe("internal.ipc");
   expect(toIpcError(new Error("boom")).message).toBe("boom");
   const unknown = toIpcError({ code: "made.up", message: "no" });
-  expect([unknown.code, unknown.kind]).toEqual(["internal.ipc", "internal"]);
+  expect([unknown.code, unknown.kind, unknown.message]).toEqual([
+    "internal.ipc",
+    "internal",
+    "no",
+  ]);
 });

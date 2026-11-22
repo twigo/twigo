@@ -12,7 +12,7 @@ import {
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
-import { inWorkbench, testWorkbench } from "../testing";
+import { inWorkbench, testWorkbench, toastWords } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
@@ -263,7 +263,7 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   expect(commands(sent)).toEqual(["command_plan"]);
   expect(report).not.toHaveBeenCalled();
   const [message, options] = error.mock.calls[0] ?? [];
-  expect(message).toBe(refused.message);
+  expect(toastWords(message)).toBe(refused.message);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
 
@@ -1029,7 +1029,7 @@ test("a change that lowers protection asks for the context's name, and a wrong n
     workbench.operations.asking?.confirm("prod-e");
   });
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(error.mock.calls[0]?.[0]).toBe("type prod-eu to confirm");
+  expect(toastWords(error.mock.calls[0]?.[0])).toBe("type prod-eu to confirm");
   expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
 });
 

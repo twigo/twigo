@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, Copy, ExternalLink, KeyRound, Loader2 } from "lucide-react";
 import type { ExecPlugin } from "@twigo/protocol";
 import { Button } from "@twigo/ui";
+import { ErrorMessage } from "../../ErrorMessage";
 import { useWorkbench } from "../../react";
 import { hints, plain, remedy } from "./output";
 import type { Shown } from "./useSignIn";
@@ -48,7 +49,9 @@ export function SignInBody({
 
       {failed ? (
         <div className="mt-3 space-y-2">
-          <p className="text-error">{status.error.message}</p>
+          <p className="text-error">
+            <ErrorMessage error={status.error} />
+          </p>
           {fix && (
             <p>
               Run <code className="font-mono">{fix}</code> in a terminal, then
