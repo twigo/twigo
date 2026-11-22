@@ -468,17 +468,13 @@ impl Run {
             .map(|error| error.message.as_str())
             .collect::<Vec<_>>()
             .join("; ");
-        let stopped = || {
-            let mut told = format!(
+        let stopped = || Finished::Stopped {
+            text: format!(
                 "Stopped draining node {name}, which stays cordoned; it evicted {} of {}",
                 uids.len(),
                 counted(total, "pod")
-            );
-            if !failed.is_empty() {
-                told.push_str("; ");
-                told.push_str(&failures);
-            }
-            Finished::Stopped(told)
+            ),
+            failed: failed.iter().copied().cloned().collect(),
         };
         if progress.stopping() {
             return Ok(stopped());

@@ -395,8 +395,16 @@ impl Run {
                 (gone, replaced, failed)
             },
         );
-        let besides = self.besides(gone, &replaced, &failed);
-        let deleted = format!("{}{besides}", self.told(waiting.len(), failed.len()));
+        let besides = self.besides(gone, &replaced);
+        let refused = self.refused(&failed);
+        let deleted = format!(
+            "{}{besides}{}",
+            self.told(waiting.len(), failed.len()),
+            refused
+                .iter()
+                .map(|error| format!("; {}", error.message))
+                .collect::<String>()
+        );
         let finish = |text: String| match failed.first() {
             Some((_, error)) => Err(IpcError::new(error.code, text)),
             None => Ok(Finished::Done(text)),
@@ -439,9 +447,12 @@ impl Run {
                 counted(left, &self.kind)
             };
             let are = if left == 1 { "is" } else { "are" };
-            Finished::Stopped(format!(
-                "Stopped waiting for {still}, which {are} still being deleted{besides}"
-            ))
+            Finished::Stopped {
+                text: format!(
+                    "Stopped waiting for {still}, which {are} still being deleted{besides}"
+                ),
+                failed: refused.clone(),
+            }
         };
         let mut followed = match watched {
             Ok(followed) => followed,
@@ -514,7 +525,7 @@ impl Run {
 
     /// What else happened to them, each after a semicolon: `; 1 was
     /// already gone`.
-    fn besides(&self, gone: usize, replaced: &[&str], failed: &[(&str, &IpcError)]) -> String {
+    fn besides(&self, gone: usize, replaced: &[&str]) -> String {
         let mut told = String::new();
         if gone > 0 {
             let was = if gone == 1 { "was" } else { "were" };
@@ -533,10 +544,21 @@ impl Run {
                 if replaced.len() == 1 { "it" } else { "them" }
             ));
         }
-        for (name, error) in failed {
-            told.push_str(&format!("; {} {name}: {}", self.kind, error.message));
-        }
         told
+    }
+
+    /// The deletes the server refused, each with the object's name before
+    /// its words, which may quote a value.
+    fn refused(&self, failed: &[(&str, &IpcError)]) -> Vec<IpcError> {
+        failed
+            .iter()
+            .map(|(name, error)| {
+                IpcError::new(
+                    error.code,
+                    format!("{} {name}: {}", self.kind, error.message),
+                )
+            })
+            .collect()
     }
 }
 

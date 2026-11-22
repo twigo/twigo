@@ -92,7 +92,13 @@ pub(crate) enum Finished {
         text: String,
         revert: Box<Revert>,
     },
-    Stopped(String),
+    /// Stopped by the person. `failed` holds the requests that failed
+    /// before: their messages quote the server, so the window is told them
+    /// after `text` and the audit log records their codes alone.
+    Stopped {
+        text: String,
+        failed: Vec<IpcError>,
+    },
     Revealed {
         value: String,
         binary: bool,
@@ -106,6 +112,13 @@ pub(crate) enum Finished {
 }
 
 impl Finished {
+    pub(crate) fn stopped(text: String) -> Self {
+        Self::Stopped {
+            text,
+            failed: Vec::new(),
+        }
+    }
+
     /// What puts it back, if it can be undone.
     pub(crate) fn revert(&self) -> Option<Revert> {
         match self {
@@ -115,8 +128,12 @@ impl Finished {
     }
 
     /// The event that tells it, with when its undo ends, and what the
-    /// audit log says of it, which never holds a value.
-    pub(crate) fn told(self, undo_until: Option<i64>) -> (OperationEvent, &'static str, String) {
+    /// audit log says of it: its outcome, Twigo's sentence, which never holds
+    /// a value, and the codes of the requests that failed.
+    pub(crate) fn told(
+        self,
+        undo_until: Option<i64>,
+    ) -> (OperationEvent, &'static str, String, Vec<ErrorCode>) {
         match self {
             Finished::Done(text) | Finished::Undoable { text, .. } => (
                 OperationEvent::Done {
@@ -125,21 +142,36 @@ impl Finished {
                 },
                 "done",
                 text,
+                Vec::new(),
             ),
-            Finished::Stopped(text) => (
-                OperationEvent::Stopped { text: text.clone() },
-                "stopped",
-                text,
-            ),
+            Finished::Stopped { text, failed } => {
+                let mut codes = Vec::new();
+                for error in &failed {
+                    if !codes.contains(&error.code) {
+                        codes.push(error.code);
+                    }
+                }
+                let told = failed.iter().fold(text.clone(), |told, error| {
+                    format!("{told}; {}", error.message)
+                });
+                (
+                    OperationEvent::Stopped { text: told },
+                    "stopped",
+                    text,
+                    codes,
+                )
+            }
             Finished::Revealed { value, binary } => (
                 OperationEvent::Revealed { value, binary },
                 "done",
                 "revealed".to_owned(),
+                Vec::new(),
             ),
             Finished::Session { id, tty, stdin } => (
                 OperationEvent::Session { id, tty, stdin },
                 "done",
                 "opened".to_owned(),
+                Vec::new(),
             ),
         }
     }
