@@ -16,6 +16,7 @@ use hyper_util::client::legacy::connect::proxy::{SocksV5, Tunnel};
 use hyper_util::client::legacy::connect::{Connected, Connection, HttpConnector};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
+use tokio::time::Instant;
 use tower::util::MapErr;
 use tower::{BoxError, Service, ServiceExt};
 
@@ -156,18 +157,22 @@ impl Service<Uri> for Dialer {
                 hop,
             } => {
                 let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
-                Box::pin(within(*hop, async move {
-                    let reached = reach(to_proxy, &proxy).await?;
+                let deadline = hop.map(|limit| Instant::now() + limit);
+                Box::pin(async move {
+                    let reached = until(deadline, reach(to_proxy, &proxy), unreached).await?;
                     let mut tunnel = Tunnel::new(proxy, Reached(Some(reached)));
                     if let Some(auth) = auth {
                         tunnel = tunnel.with_auth(auth);
                     }
-                    let tunnel = tunnel
-                        .oneshot(with_port(&server))
-                        .await
-                        .map_err(|error| ProxyRefused(error.into()))?;
+                    let opened = async {
+                        tunnel
+                            .oneshot(with_port(&server))
+                            .await
+                            .map_err(|error| ProxyRefused(error.into()))
+                    };
+                    let tunnel = until(deadline, opened, refused).await?;
                     Ok(Stream::Tunnel(Box::new(tunnel)))
-                }))
+                })
             }
             Dialer::Socks {
                 proxy,
@@ -176,35 +181,51 @@ impl Service<Uri> for Dialer {
                 hop,
             } => {
                 let (proxy, to_proxy, auth) = (proxy.clone(), to_proxy.clone(), auth.clone());
-                Box::pin(within(*hop, async move {
-                    let reached = reach(to_proxy, &proxy).await?;
+                let deadline = hop.map(|limit| Instant::now() + limit);
+                Box::pin(async move {
+                    let reached = until(deadline, reach(to_proxy, &proxy), unreached).await?;
                     let mut socks = SocksV5::new(proxy, Reached(Some(reached)));
                     if let Some((user, password)) = auth {
                         socks = socks.with_auth(user, password);
                     }
-                    let tcp = socks
-                        .oneshot(with_port(&server))
-                        .await
-                        .map_err(|error| ProxyRefused(error.into()))?;
+                    let opened = async {
+                        socks
+                            .oneshot(with_port(&server))
+                            .await
+                            .map_err(|error| ProxyRefused(error.into()))
+                    };
+                    let tcp = until(deadline, opened, refused).await?;
                     Ok(Stream::Tcp(tcp))
-                }))
+                })
             }
         }
     }
 }
 
-/// `hop` under its deadline; a proxy that accepts and never answers runs into
-/// it, and is as good as not there.
-async fn within<T>(
-    limit: Option<Duration>,
-    hop: impl Future<Output = Result<T, BoxError>>,
+/// `step` of the hop until the hop's deadline, which a run-out tells as
+/// `ran_out` says: no connection to the proxy is a proxy not reached, while a
+/// proxy that took the connection and has not opened the tunnel may still be
+/// waiting on the cluster, since it answers only once it has tried it.
+async fn until<T, E: Into<BoxError>>(
+    deadline: Option<Instant>,
+    step: impl Future<Output = Result<T, E>>,
+    ran_out: fn(BoxError) -> BoxError,
 ) -> Result<T, BoxError> {
-    let Some(limit) = limit else {
-        return hop.await;
+    let answered = match deadline {
+        Some(deadline) => tokio::time::timeout_at(deadline, step)
+            .await
+            .map_err(|_| ran_out(io::Error::from(io::ErrorKind::TimedOut).into()))?,
+        None => step.await,
     };
-    tokio::time::timeout(limit, hop).await.unwrap_or_else(|_| {
-        Err(ProxyUnreachable(io::Error::from(io::ErrorKind::TimedOut).into()).into())
-    })
+    answered.map_err(Into::into)
+}
+
+fn unreached(error: BoxError) -> BoxError {
+    ProxyUnreachable(error).into()
+}
+
+fn refused(error: BoxError) -> BoxError {
+    ProxyRefused(error).into()
 }
 
 /// The connection to the proxy, made apart from the tunnel or the handshake

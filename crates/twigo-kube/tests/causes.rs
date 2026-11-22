@@ -271,7 +271,7 @@ async fn a_socks_proxy_that_refuses_the_credentials_did_not_open_the_connection(
 }
 
 #[tokio::test]
-async fn a_proxy_that_accepts_and_never_answers_is_not_reached_whatever_it_speaks() {
+async fn a_proxy_that_takes_the_connection_and_never_answers_did_not_open_it_in_time() {
     for scheme in ["http", "socks5"] {
         let port = silent().await;
         let error = through_within(
@@ -280,7 +280,8 @@ async fn a_proxy_that_accepts_and_never_answers_is_not_reached_whatever_it_speak
         )
         .await;
         assert_eq!(error.code, ErrorCode::ConnectProxy, "{scheme}: {error:?}");
-        assert!(error.message.starts_with(UNREACHED), "{scheme}: {error:?}");
+        assert!(error.message.starts_with(DECLINED), "{scheme}: {error:?}");
+        assert!(error.message.contains("timed out"), "{scheme}: {error:?}");
     }
 }
 
