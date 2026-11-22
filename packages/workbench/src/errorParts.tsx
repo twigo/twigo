@@ -7,6 +7,8 @@ export interface ErrorMessageProps {
   error: ErrorLike;
   message?: string;
   lead?: string;
+  /** The message is in a notice, which gives Copy details the look of its own buttons. */
+  notice?: boolean;
   className?: string;
 }
 
@@ -19,6 +21,7 @@ export function errorParts({
   error,
   message = error.message,
   lead = "",
+  notice = false,
   className,
 }: ErrorMessageProps): { words: ReactNode; details: ReactNode } {
   // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
@@ -46,6 +49,7 @@ export function errorParts({
       <ErrorDetails
         code={placement === "line" ? error.code : undefined}
         copy={errorDetails(error)}
+        notice={notice}
         {...(className && { className })}
       />
     ),

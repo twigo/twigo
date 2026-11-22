@@ -19,11 +19,14 @@ const LABEL = {
 export function ErrorDetails({
   code,
   copy,
+  notice = false,
   className,
 }: {
   code?: string | undefined;
   /** What Copy details puts on the clipboard; without it there is no button. */
   copy?: string | undefined;
+  /** Inside a notice, whose own buttons are brand text on a plate: so is Copy details. */
+  notice?: boolean;
   className?: string;
 }) {
   const [result, setResult] = useState<Result>("idle");
@@ -63,7 +66,10 @@ export function ErrorDetails({
             );
           }}
           className={cn(
-            "rounded-sm text-xs text-support underline-offset-2 outline-none hover:text-content hover:underline focus-visible:shadow-[var(--focus-ring)]",
+            "rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]",
+            notice
+              ? "px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10"
+              : "text-xs text-support underline-offset-2 hover:text-content hover:underline",
             result === "failed" && "text-error",
           )}
         >
