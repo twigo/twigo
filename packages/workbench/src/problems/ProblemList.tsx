@@ -3,6 +3,8 @@ import { ErrorMessage } from "../ErrorMessage";
 import { useWorkbench } from "../react";
 import { REPORT_PROBLEM, REVEAL_LOG_FILE } from "../report/commands";
 
+export const PROBLEMS_TITLE = "What Twigo could not do with its own files";
+
 export function ProblemList() {
   const { problems, commands, keys } = useWorkbench();
   const run = (command: string) => {
@@ -10,15 +12,14 @@ export function ProblemList() {
     void commands.execute(command, keys.lookup(null));
   };
   return (
-    <div className="grid gap-2">
-      <ul className="grid gap-2">
-        {problems.list.map((problem) => (
-          <li key={problem.code}>
-            <ErrorMessage error={problem} />
-          </li>
-        ))}
-      </ul>
-      <div className="flex justify-end gap-2">
+    <>
+      <p className="text-body font-semibold text-content">{PROBLEMS_TITLE}</p>
+      {problems.list.map((problem) => (
+        <p key={problem.code} className="mt-1 text-support">
+          <ErrorMessage error={problem} />
+        </p>
+      ))}
+      <div className="mt-3 flex justify-end gap-2">
         <Button
           size="sm"
           variant="ghost"
@@ -37,6 +38,6 @@ export function ProblemList() {
           Report…
         </Button>
       </div>
-    </div>
+    </>
   );
 }

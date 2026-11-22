@@ -16,6 +16,7 @@ export function EmptyState({
   action,
   secondary,
   kbd,
+  role,
   className,
   children,
 }: {
@@ -25,15 +26,17 @@ export function EmptyState({
   density?: "hero" | "inline";
   title?: string;
   action?: { label: string; onClick: () => void; icon?: LucideIcon };
-  /** Beside `action` and after it, such as a link to report the problem. */
+  /** Beside `action` and after it, such as a button to report the problem. */
   secondary?: React.ReactNode;
   kbd?: string;
+  role?: "status";
   className?: string;
   children?: React.ReactNode;
 }) {
   if (density === "inline") {
     return (
       <p
+        role={role}
         className={cn(
           "flex items-start gap-1.5 px-2 py-3 text-xs leading-5",
           variant === "error" ? "text-error" : "text-support",
@@ -70,18 +73,17 @@ export function EmptyState({
       )}
       {title && <p className="font-medium text-content">{title}</p>}
       {children}
-      {action && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-1"
-          onClick={action.onClick}
-        >
-          {ActionIcon && <ActionIcon />}
-          {action.label}
-        </Button>
+      {(action ?? secondary) && (
+        <div className="mt-1 flex items-center gap-2">
+          {action && (
+            <Button variant="outline" size="sm" onClick={action.onClick}>
+              {ActionIcon && <ActionIcon />}
+              {action.label}
+            </Button>
+          )}
+          {secondary}
+        </div>
       )}
-      {secondary}
       {kbd && <Kbd className="mt-1">{kbd}</Kbd>}
     </div>
   );

@@ -1,5 +1,5 @@
 import type { ErrorCode, ServerStatus } from "@twigo/protocol";
-import { variant } from "@twigo/workbench";
+import { errorLines, variant, type ErrorLike } from "@twigo/workbench";
 
 export interface Failure {
   readonly code: ErrorCode;
@@ -43,4 +43,10 @@ export function statusWord(error: Failure): string {
     default:
       return "Error";
   }
+}
+
+/** The lines of a tooltip that says a failure: its message, and its code unless the status word is the code already. */
+export function failureLines(error: ErrorLike): string[] {
+  // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+  return variant("status") === "code" ? [error.message] : errorLines(error);
 }

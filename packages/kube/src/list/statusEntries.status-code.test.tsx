@@ -16,11 +16,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("status:code says an error by its code, and the tooltip still has the message", async () => {
+test("status:code says an error by its code, and the tooltip has the message and names the code once", async () => {
   await openList(createMockBackend("error"));
   const bar = within(screen.getByRole("contentinfo"));
   const entry = bar.getByText("server.invalid").closest("[title]");
-  expect(entry?.getAttribute("title")).toContain(
-    "field label not supported: spec.containers",
-  );
+  const title = entry?.getAttribute("title") ?? "";
+  expect(title).toContain("field label not supported: spec.containers");
+  expect(title.match(/server\.invalid/g)).toHaveLength(1);
 });

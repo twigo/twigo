@@ -20,7 +20,7 @@ import {
   useWidth,
 } from "@twigo/ui";
 import {
-  ErrorMessage,
+  ErrorBanner,
   INTERNAL_ERROR,
   isInternalError,
   useChanges,
@@ -217,29 +217,28 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         </Banner>
       )}
       {snapshot.refused && (
-        <Banner tone="error" icon={CircleAlert} title="Not applied:">
-          <ErrorMessage
-            error={snapshot.refused}
-            message={`${snapshot.refused.message}.`}
-          />{" "}
+        <ErrorBanner
+          tone="error"
+          icon={CircleAlert}
+          title="Not applied:"
+          error={snapshot.refused}
+          message={`${snapshot.refused.message}.`}
+        >
           The lines show the last filter and search that worked.
-        </Banner>
+        </ErrorBanner>
       )}
       {failed[0] &&
         (isInternalError(failed[0].error) ? (
-          <Banner
+          <ErrorBanner
             tone="error"
             icon={CircleAlert}
-            title={`${INTERNAL_ERROR.title}:`}
+            title={`${INTERNAL_ERROR.title}.`}
             action={<StoppedActions onReopen={reopen} />}
-          >
-            <ErrorMessage
-              error={failed[0].error}
-              message={INTERNAL_ERROR.stopped(`The logs of ${failed[0].name}`)}
-            />
-          </Banner>
+            error={failed[0].error}
+            message={INTERNAL_ERROR.stopped(`The logs of ${failed[0].name}`)}
+          />
         ) : (
-          <Banner
+          <ErrorBanner
             tone="error"
             icon={CircleAlert}
             title={
@@ -247,22 +246,22 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
                 ? `Cannot read the logs of ${failed[0].name}:`
                 : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
             }
-          >
-            <ErrorMessage error={failed[0].error} />
-          </Banner>
+            error={failed[0].error}
+          />
         ))}
       {problem && total > 0 && (
-        <Banner
+        <ErrorBanner
           tone="error"
           icon={problem.icon}
           title={`${problem.title}.`}
           {...(isInternalError(problem.error) && {
             action: <StoppedActions onReopen={reopen} />,
           })}
+          error={problem.error}
+          message={problem.body}
         >
-          <ErrorMessage error={problem.error} message={problem.body} /> The
-          lines read so far stay.
-        </Banner>
+          The lines read so far stay.
+        </ErrorBanner>
       )}
       {status.state === "queued" && (
         <Banner

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
+  cn,
   HighlightedLabel,
   Kbd,
   QuickInput,
@@ -168,6 +169,7 @@ function Open({ session }: { session: Session }) {
         ? loaded.result
         : { state: "loading" };
   const items = result.state === "ready" ? result.items : [];
+  const tiled = items.some((item) => item.tile !== undefined);
   const groups = [...new Set(items.map((item) => item.group))].map((group) => ({
     group,
     items: items.filter((item) => item.group === group),
@@ -361,6 +363,7 @@ function Open({ session }: { session: Session }) {
                   cursor={item === active}
                   on={on(item)}
                   many={many}
+                  tiled={tiled}
                   onPoint={() => {
                     setCursor({ value, id: item.id });
                   }}
@@ -423,6 +426,7 @@ function Row({
   cursor,
   on,
   many,
+  tiled,
   onPoint,
   onSelect,
   onToggle,
@@ -434,12 +438,23 @@ function Row({
   on: boolean | undefined;
   /** The list has rows with a box, which a row without one lines up with. */
   many: boolean;
+  /** The list has rows with a tile, which a row without one stands as tall as, and puts its icon where the tile is. */
+  tiled: boolean;
   onPoint: () => void;
   onSelect: () => void;
   onToggle: () => void;
 }) {
   const { platform } = useWorkbench();
   const Icon = item.icon;
+  const icon = Icon && (
+    <Icon
+      aria-hidden
+      className={cn(
+        "size-3.5",
+        item.iconTone === "warn" ? "text-warn-foreground" : "text-support",
+      )}
+    />
+  );
   return (
     // Among rows to tick, `aria-selected` says what is ticked, never where the cursor is.
     <QuickInputOption
@@ -458,7 +473,7 @@ function Row({
           onSelect();
         }
       }}
-      className={item.tile ? "h-9" : item.disabled ? "text-support" : undefined}
+      className={cn(tiled && "h-9", item.disabled && "text-support")}
     >
       {on !== undefined && (
         <span
@@ -481,16 +496,24 @@ function Row({
           size="sm"
         />
       )}
-      {Icon && <Icon aria-hidden className="size-3.5 text-support" />}
-      <HighlightedLabel
-        text={item.label}
-        ranges={item.matches ?? []}
-        className="min-w-0"
-      />
-      {item.description && (
-        <span className="min-w-0 shrink-[3] truncate text-xs text-support">
-          {item.description}
-        </span>
+      {icon &&
+        (tiled ? (
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            {icon}
+          </span>
+        ) : (
+          icon
+        ))}
+      <span className="min-w-0 truncate">
+        <HighlightedLabel text={item.label} ranges={item.matches ?? []} />
+        {item.description && (
+          <span className="ml-2 text-xs text-support">{item.description}</span>
+        )}
+      </span>
+      {item.code && (
+        <code className="shrink-0 font-mono text-2xs text-quiet">
+          {item.code}
+        </code>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2 text-xs text-support">
         {item.state && (

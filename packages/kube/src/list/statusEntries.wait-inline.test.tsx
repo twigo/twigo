@@ -30,7 +30,7 @@ test("wait:inline, the default: a list that cannot connect says why in the statu
       "connect.refused",
     ].join("\n"),
   );
-  expect(line.getAttribute("role")).toBe("status");
+  expect(line.closest("p")?.getAttribute("role")).toBe("status");
   expect(screen.getAllByRole("row").length).toBeLessThanOrEqual(1);
 });
 

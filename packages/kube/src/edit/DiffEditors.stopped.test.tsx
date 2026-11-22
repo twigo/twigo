@@ -73,11 +73,13 @@ test("a diff against the server whose object Twigo stopped says so over what it 
   const { workbench, opened, end } = await stopped(
     diffUri({ kind: "server", editor: POD }),
   );
-  expect(screen.queryByText("Twigo hit an internal error")).toBeNull();
+  expect(screen.queryByText("Twigo hit an internal error.")).toBeNull();
 
   await end();
   expect(screen.getByTestId("diff")).toBeTruthy();
-  const banner = screen.getByText("Twigo hit an internal error").closest("div");
+  const banner = screen
+    .getByText("Twigo hit an internal error.")
+    .closest<HTMLElement>("[data-tone]");
   if (!banner) throw new Error("no banner");
   expect(banner.textContent).toContain("as it was last seen");
   expect(carriesCode(banner, "internal.panic")).toBe(true);

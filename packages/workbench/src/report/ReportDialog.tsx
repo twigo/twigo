@@ -46,7 +46,7 @@ export function ReportDialog() {
       }}
     >
       <DialogContent
-        className="top-[6%] flex max-h-[88vh] max-w-2xl flex-col p-4"
+        className="flex max-h-[calc(82%-24px)] max-w-[880px] flex-col p-4"
         onCloseAutoFocus={returnFocus}
       >
         <Body report={report} />
@@ -187,38 +187,42 @@ function Body({ report }: { report: Report }) {
           </Callout>
         </div>
       )}
-      <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-auto pr-1">
+      <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-auto">
         {shape === "compose" && (
-          <div className="grid gap-1.5">
-            <label className="text-label text-support" htmlFor="report-title">
-              Title
-            </label>
-            <TextField
-              id="report-title"
-              value={title}
-              onChange={(event) => {
-                setTitle(event.target.value);
-              }}
-            />
-            <label
-              className="text-label text-support"
-              htmlFor="report-description"
-            >
-              What happened
-            </label>
-            <TextArea
-              id="report-description"
-              rows={3}
-              value={description}
-              onChange={(event) => {
-                setDescription(event.target.value);
-              }}
-            />
-          </div>
+          <>
+            <div className="grid gap-1">
+              <label className="text-label text-support" htmlFor="report-title">
+                Title
+              </label>
+              <TextField
+                id="report-title"
+                value={title}
+                onChange={(event) => {
+                  setTitle(event.target.value);
+                }}
+              />
+            </div>
+            <div className="grid gap-1">
+              <label
+                className="text-label text-support"
+                htmlFor="report-description"
+              >
+                What happened
+              </label>
+              <TextArea
+                id="report-description"
+                rows={3}
+                value={description}
+                onChange={(event) => {
+                  setDescription(event.target.value);
+                }}
+              />
+            </div>
+          </>
         )}
         {!whole && (
-          <section aria-label="In the issue" className="grid gap-1.5">
-            <h3 className="text-label font-semibold text-support">
+          <section aria-label="In the issue" className="grid gap-1">
+            <h3 className="text-2xs font-semibold text-support">
               In the issue
             </h3>
             <PropertyList items={facts} />
@@ -226,10 +230,10 @@ function Body({ report }: { report: Report }) {
         )}
         <section
           aria-label={whole ? "Report" : "For you to paste"}
-          className="grid gap-1.5"
+          className="grid gap-1"
         >
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-label font-semibold text-support">
+            <h3 className="text-2xs font-semibold text-support">
               {whole ? "Report" : "For you to paste"}
             </h3>
             <LinkButton
@@ -309,18 +313,18 @@ function Stated({
   on: boolean;
   onChange: (on: boolean) => void;
 }) {
-  if (!fact.optional) return <span className="pl-5.5">{fact.value}</span>;
+  if (!fact.optional) return <span className="block pl-6">{fact.value}</span>;
   return (
-    <label className="flex cursor-pointer items-start gap-2">
+    <label className="relative block cursor-pointer pl-6">
       <input
         type="checkbox"
-        className="mt-1 accent-brand"
+        className="absolute top-px left-0 size-4 accent-brand"
         checked={on}
         onChange={(event) => {
           onChange(event.target.checked);
         }}
       />
-      <span className="min-w-0 break-words">{fact.value}</span>
+      {fact.value}
     </label>
   );
 }

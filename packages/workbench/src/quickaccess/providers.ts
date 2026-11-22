@@ -175,16 +175,14 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
         if (own.has(context.name)) continue;
         const server = hostOf(context.server);
         const problem = context.problem && problemOf(context.problem);
-        const description = [server, problem?.code]
-          .filter((part) => part !== undefined)
-          .join(" · ");
         files.set(context.source, [
           ...(files.get(context.source) ?? []),
           {
             id: `context:${context.name}`,
             label: context.name,
             tile: { name: context.name, color: colors.of(context.name) },
-            ...(description !== "" && { description }),
+            ...(server && { description: server }),
+            ...(problem?.code && { code: problem.code }),
             ...(problem && { state: { tone: "warn", label: problem.words } }),
             group: context.source,
           },
@@ -247,8 +245,9 @@ function failedRow({ source, error }: CatalogFailure): QuickPickItem {
   return {
     id: `kubeconfig:${source}`,
     label: words,
-    ...(code && { description: code }),
+    ...(code && { code }),
     icon: TriangleAlert,
+    iconTone: "warn",
     group: source,
     disabled: true,
   };
@@ -263,6 +262,8 @@ function skippedRow(count: number): QuickPickItem {
         ? "1 kubeconfig file was skipped"
         : `${String(count)} kubeconfig files were skipped`,
     icon: TriangleAlert,
+    iconTone: "warn",
+    group: "Kubeconfig files",
     acceptLabel: "Show",
   };
 }

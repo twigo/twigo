@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
 import {
-  ReportLink,
+  ReportButton,
   useChanges,
   useEditorShown,
   useWorkbench,
@@ -173,7 +173,7 @@ function ServerDiff({
         title={problem.title}
         {...(isStopped(problem) && {
           action: { label: "Reopen", onClick: onReopen },
-          secondary: <ReportLink />,
+          secondary: <ReportButton />,
         })}
       >
         <ProblemWords problem={problem} />
@@ -279,7 +279,7 @@ function ObjectsDiff({
             title="Nothing to compare"
             {...(missing.some(({ problem }) => isStopped(problem)) && {
               action: { label: "Reopen", onClick: onReopen },
-              secondary: <ReportLink />,
+              secondary: <ReportButton />,
             })}
           >
             {missing.map(({ name, problem }) => (

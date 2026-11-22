@@ -61,8 +61,10 @@ export function viewProblem(
 
 export type ObjectProblem = NonNullable<ReturnType<typeof objectProblem>>;
 
-export function isStopped({ error }: ObjectProblem): boolean {
-  return error !== undefined && isInternalError(error);
+export function isStopped(
+  problem: ObjectProblem,
+): problem is ObjectProblem & { error: NonNullable<ObjectProblem["error"]> } {
+  return problem.error !== undefined && isInternalError(problem.error);
 }
 
 /**

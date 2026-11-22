@@ -22,13 +22,11 @@ export function KubeconfigFailures({
       <p className="max-w-md">
         Twigo lists the contexts again when a file changes.
       </p>
-      <ul className="mt-2 grid max-w-xl gap-3 text-left">
+      <ul className="mt-2 grid max-w-xl gap-3">
         {failures.map(({ source, error }) => (
-          <li key={source} className="grid gap-0.5">
-            <span className="font-mono text-label text-content">{source}</span>
-            <span className="text-body">
-              <ErrorMessage error={error} />
-            </span>
+          <li key={source}>
+            <span className="block font-mono text-content">{source}</span>
+            <ErrorMessage error={error} className="justify-center" />
           </li>
         ))}
       </ul>

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { TriangleAlert } from "lucide-react";
+import { CircleAlert, TriangleAlert } from "lucide-react";
 import { Banner } from "@twigo/ui";
-import { ErrorMessage } from "@twigo/workbench";
+import { ErrorBanner, ErrorMessage } from "@twigo/workbench";
 import { StoppedActions } from "./StoppedActions";
 import { isStopped, type ObjectProblem } from "./viewProblem";
 
@@ -16,8 +16,8 @@ export function ProblemWords({ problem }: { problem: ObjectProblem }) {
 
 /**
  * Over what a view still shows of an object that stopped or is gone, why it
- * did, with Reopen and Report… where Twigo's own code stopped it. `lead`
- * names the object when the view holds several.
+ * did, with Reopen and Report… where Twigo's own code stopped it, which is
+ * an error. `lead` names the object when the view holds several.
  */
 export function ProblemBanner({
   problem,
@@ -30,15 +30,23 @@ export function ProblemBanner({
   onReopen?: (() => void) | undefined;
   children?: ReactNode;
 }) {
+  const title = `${lead}${problem.title}.`;
+  if (isStopped(problem)) {
+    return (
+      <ErrorBanner
+        tone="error"
+        icon={CircleAlert}
+        title={title}
+        action={<StoppedActions onReopen={onReopen} />}
+        error={problem.error}
+        message={problem.body}
+      >
+        {children}
+      </ErrorBanner>
+    );
+  }
   return (
-    <Banner
-      tone="warn"
-      icon={TriangleAlert}
-      title={`${lead}${problem.title}`}
-      {...(isStopped(problem) && {
-        action: <StoppedActions onReopen={onReopen} />,
-      })}
-    >
+    <Banner tone="warn" icon={TriangleAlert} title={title}>
       <ProblemWords problem={problem} /> {children}
     </Banner>
   );

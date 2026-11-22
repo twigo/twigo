@@ -19,12 +19,13 @@ test("kubeconfig:group, the default: a file that failed is a group of its own wi
     expect.objectContaining({
       label:
         "The file cannot be parsed: expected sequence start at line 7, column 10",
-      description: "kubeconfig.unparsable",
+      code: "kubeconfig.unparsable",
+      iconTone: "warn",
       disabled: true,
     }),
   ]);
   expect(
     found.find(({ group }) => group === "~/.kube/work/locked.yaml"),
-  ).toMatchObject({ description: "kubeconfig.unreadable", disabled: true });
+  ).toMatchObject({ code: "kubeconfig.unreadable", disabled: true });
   expect(found.some(({ id }) => id === "kubeconfig:skipped")).toBe(false);
 });

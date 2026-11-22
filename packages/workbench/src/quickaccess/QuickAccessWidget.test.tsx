@@ -291,6 +291,33 @@ test("a row that cannot be chosen is read and ignored: Enter and a click leave q
   expect(accept).toHaveBeenCalledTimes(1);
 });
 
+test("among rows with a tile a row with an icon stands as tall, with its code after its words", async () => {
+  const workbench = await testWorkbench();
+  const tile = { name: "kind-one", color: undefined };
+  const { registered } = provider("!", [
+    { id: "ctx", label: "kind-one", tile },
+    {
+      id: "bad",
+      label: "Cannot be parsed",
+      icon: Box,
+      iconTone: "warn",
+      code: "kubeconfig.unparsable",
+      disabled: true,
+    },
+  ]);
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  const [tiled, failed] = screen.getAllByRole("option");
+  expect(tiled?.className).toContain("h-9");
+  expect(failed?.className).toContain("h-9");
+  expect(failed?.querySelector("code")?.textContent).toBe(
+    "kubeconfig.unparsable",
+  );
+  expect(failed?.querySelector("svg")?.getAttribute("class")).toContain(
+    "text-warn-foreground",
+  );
+});
+
 test("a row that says what Enter does says it in the footer in place of its provider's word", async () => {
   const workbench = await testWorkbench();
   const { registered } = provider(

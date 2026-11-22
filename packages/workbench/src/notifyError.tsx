@@ -16,7 +16,7 @@ export function notifyError(
   }: NotifyOptions & { lead?: string; warning?: boolean } = {},
 ): void {
   (warning ? notify.warning : notify.error)(
-    <ErrorMessage error={error} lead={lead} />,
+    <ErrorMessage error={error} lead={lead} notice />,
     { key: `${lead}${error.message}`, ...options },
   );
 }
