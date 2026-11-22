@@ -23,12 +23,12 @@ import {
   ErrorMessage,
   INTERNAL_ERROR,
   isInternalError,
-  ReportLink,
   useChanges,
   useListRegistration,
   useWorkbench,
   type EditorProps,
 } from "@twigo/workbench";
+import { StoppedActions } from "../StoppedActions";
 import { useNow } from "../useNow";
 import { parseLogsUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
@@ -46,10 +46,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const { keys, lists, platform } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseLogsUri(uri), [uri]);
-  const session = useMemo(
-    () => (input ? tabs.session(uri, input) : undefined),
-    [input, tabs, uri],
-  );
+  const session = input ? tabs.session(uri, input) : undefined;
   const snapshot = useSyncExternalStore(
     session?.subscribe ?? NO_SUBSCRIBE,
     () => session?.getSnapshot(),
@@ -145,6 +142,9 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     ),
   );
   const problem = viewProblem(status, "logs");
+  const reopen = () => {
+    tabs.reopen(uri);
+  };
   const narrowed = viewNarrows(tab.view);
 
   const span: HistogramSpan | undefined =
@@ -231,7 +231,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
             tone="error"
             icon={CircleAlert}
             title={`${INTERNAL_ERROR.title}:`}
-            action={<ReportLink />}
+            action={<StoppedActions onReopen={reopen} />}
           >
             <ErrorMessage
               error={failed[0].error}
@@ -256,7 +256,9 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
           tone="error"
           icon={problem.icon}
           title={`${problem.title}.`}
-          {...(isInternalError(problem.error) && { action: <ReportLink /> })}
+          {...(isInternalError(problem.error) && {
+            action: <StoppedActions onReopen={reopen} />,
+          })}
         >
           <ErrorMessage error={problem.error} message={problem.body} /> The
           lines read so far stay.
@@ -272,7 +274,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         </Banner>
       )}
       {problem && total === 0 ? (
-        <ViewStatus status={status} what="logs" />
+        <ViewStatus
+          status={status}
+          what="logs"
+          {...(isInternalError(problem.error) && { onRetry: reopen })}
+        />
       ) : (
         // The list stays mounted under what covers it, since its window is
         // what asks Rust for the lines.

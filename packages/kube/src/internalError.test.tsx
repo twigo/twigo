@@ -172,7 +172,7 @@ test("a session that Twigo stopped ends in the scrollback with the one wording",
   expect(title).toBe("Twigo hit an internal error and this shell stopped.");
 });
 
-test("the logs of a container that Twigo stopped say so over the lines, with Report…", async () => {
+test("the logs of a container that Twigo stopped say so over the lines, with Report… and Reopen, which opens the session anew", async () => {
   const mock = createMockBackend("ready");
   const stopped = (batch: LogBatch): LogBatch => ({
     ...batch,
@@ -185,16 +185,19 @@ test("the logs of a container that Twigo stopped say so over the lines, with Rep
         })),
       })) ?? null,
   });
+  let opened = 0;
   const backend: Backend = {
     invoke: (command, request) => mock.invoke(command, request),
     subscribe: (
       command: string,
       request: never,
       onMessage: (batch: LogBatch) => void,
-    ) =>
-      mock.subscribe(command as "logs_open", request, (batch) => {
+    ) => {
+      if (command === "logs_open") opened++;
+      return mock.subscribe(command as "logs_open", request, (batch) => {
         onMessage(command === "logs_open" ? stopped(batch) : batch);
-      }),
+      });
+    },
   };
   const workbench = await mountKube(backend);
   await act(() => workbench.spaces.open("qa"));
@@ -213,4 +216,8 @@ test("the logs of a container that Twigo stopped say so over the lines, with Rep
   expect(screen.getByText("Twigo hit an internal error:")).toBeTruthy();
   expect(document.body.textContent).toContain("stopped.");
   expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+  const before = opened;
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(12);
+  expect(opened).toBeGreaterThan(before);
 });
