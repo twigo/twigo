@@ -29,7 +29,6 @@ import { Spaces } from "./spaces/store";
 import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
-import { variant } from "./variants";
 import { Zoom } from "./zoom";
 
 const kubeconfigToast = (source: string) => `kubeconfig:${source}`;
@@ -112,8 +111,6 @@ export class Workbench {
     this.catalog = new Catalog(
       backend,
       (failure) => {
-        // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-        if (variant("toast") === "none") return;
         notifyError(failure.error, {
           lead: `${failure.source}: `,
           warning: true,

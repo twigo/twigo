@@ -9,7 +9,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("toast:once, the default: each kubeconfig file that fails raises one warning, led by its name, with its code", async () => {
+test("each kubeconfig file that fails raises one warning, led by its name, with its code", async () => {
   const warning = vi.spyOn(notify, "warning");
   await testWorkbench("kubeconfigFailures");
   await act(() => Promise.resolve());
