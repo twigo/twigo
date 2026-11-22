@@ -21,16 +21,33 @@ pub use scrub::{HIDDEN, revealed_text, scrub, scrubbed, scrubbed_text, secret_va
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
-/// The object as a view shows it: managedFields dropped, and for a Secret
-/// each value replaced by its size and the last-applied annotation dropped.
+/// The object as a view shows it: managedFields dropped, for a Secret each
+/// value replaced by its size and the last-applied annotation dropped, and
+/// for a ConfigMap that holds a Helm release its `release` replaced by its
+/// size.
 pub fn for_view(mut object: Value) -> Value {
     if let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) {
         metadata.remove("managedFields");
     }
     if object["apiVersion"] == "v1" && object["kind"] == "Secret" {
         mask_secret(&mut object);
+    } else if holds_helm_release(&object)
+        && let Some(release) = object
+            .get_mut("data")
+            .and_then(|data| data.get_mut("release"))
+    {
+        *release = Value::String(mask(release.as_str().map_or(0, str::len) as u64));
     }
     object
+}
+
+/// Whether `object` is a ConfigMap that Helm's ConfigMap driver keeps a
+/// release in, whose `release` holds the release's values and manifest as
+/// a Secret's would.
+pub fn holds_helm_release(object: &Value) -> bool {
+    object["apiVersion"] == "v1"
+        && object["kind"] == "ConfigMap"
+        && object["metadata"]["labels"]["owner"] == "helm"
 }
 
 /// A Secret with each value replaced by its size and the last-applied
