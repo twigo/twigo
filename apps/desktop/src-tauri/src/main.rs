@@ -23,15 +23,16 @@ use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, DiagnosticsLevel,
-    Discovered, DownloadLogs, ErrorCode, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
-    ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
-    KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
-    NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
-    PlanId, PlanRequest, ReleaseListQuery, Report, ResumeForward, SaveReport, SchemaQuery,
-    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
-    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
-    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    ApprovalEvent, Catalog, ClusterVersion, CompareRevisions, ComparedRevisions, ContextAuth,
+    DiagnosticsEntry, DiagnosticsLevel, Discovered, DownloadLogs, ErrorCode, ExecReview, Execute,
+    Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget, GetValues,
+    IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
+    LogBatch, LogVerbosity, NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenRelease,
+    OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery, Report,
+    ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetReleaseView, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
+    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
+    TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
@@ -441,6 +442,54 @@ async fn helm_list_subscribe(
             .await
     })
     .await
+}
+
+#[tauri::command]
+async fn helm_release_open(
+    webview: Webview,
+    app: State<'_, App>,
+    request: OpenRelease,
+    channel: Channel<ReleaseBatch>,
+) -> Result<SubscriptionId, IpcError> {
+    contained(async {
+        app.core
+            .helm_release_open(webview.label(), request, move |batch| {
+                sent("a release batch", channel.send(batch))
+            })
+            .await
+    })
+    .await
+}
+
+#[tauri::command]
+fn helm_release_set_view(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SetReleaseView,
+) -> Result<(), IpcError> {
+    app.core.helm_release_set_view(webview.label(), request)
+}
+
+#[tauri::command]
+fn helm_release_ack(webview: Webview, app: State<'_, App>, request: Ack) -> Result<(), IpcError> {
+    app.core.helm_release_ack(webview.label(), request)
+}
+
+#[tauri::command]
+fn helm_release_close(
+    webview: Webview,
+    app: State<'_, App>,
+    request: SubscriptionId,
+) -> Result<(), IpcError> {
+    app.core.helm_release_close(webview.label(), request)
+}
+
+#[tauri::command]
+async fn helm_compare(
+    app: State<'_, App>,
+    request: CompareRevisions,
+) -> Result<ComparedRevisions, IpcError> {
+    contained(async { app.core.helm_compare(request).await }).await
 }
 
 #[tauri::command]
@@ -1040,6 +1089,11 @@ fn main() {
             list_ack,
             list_unsubscribe,
             helm_list_subscribe,
+            helm_release_open,
+            helm_release_set_view,
+            helm_release_ack,
+            helm_release_close,
+            helm_compare,
             object_open,
             object_set_parts,
             object_ack,
