@@ -382,6 +382,33 @@ fn running_over(dir: &Path, api: &Api) -> Arc<Core> {
 }
 
 #[tokio::test]
+async fn a_forward_restored_on_a_busy_port_leaves_one_event_with_its_code() {
+    let logged = twigo_log::capture();
+    let dir = tempfile::tempdir().unwrap();
+    let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let held_port = held.local_addr().unwrap().port();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 7070, held_port, true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = running(dir.path());
+    forward_state(&core, 1).await;
+
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a forward failed")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the forward: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "forward.port-in-use");
+}
+
+#[tokio::test]
 async fn forwards_that_ran_listen_again_at_a_start_and_wait_for_their_first_connection() {
     let dir = tempfile::tempdir().unwrap();
     let (running_port, stopped_port) = (free(), free());

@@ -257,6 +257,9 @@ impl Forward {
                 (Phase::Failed(lift), ForwardState::Failed { error }, None)
             }
         };
+        if let Some((what, code)) = entered(&state) {
+            tracing::warn!(%code, "{what}");
+        }
         let (status, status_rx) = watch::channel(Status::new(state));
         let (control, control_rx) = mpsc::unbounded_channel();
         let (reports, reports_rx) = mpsc::unbounded_channel();

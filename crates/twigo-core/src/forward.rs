@@ -1050,6 +1050,9 @@ impl Core {
                 Err(error) => entry.unbound = Some(error),
             }
         }
+        if let Some(error) = &entry.unbound {
+            tracing::warn!(code = %error.code, "a forward failed");
+        }
         table.entries.insert(id.0, entry);
         table.changed(id);
     }

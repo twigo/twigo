@@ -1257,6 +1257,31 @@ async fn a_target_that_is_gone_fails_the_forward_with_its_name() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_forward_restored_under_a_refusal_leaves_one_event_with_its_code() {
+    let logged = twigo_log::capture();
+    let fake = Fake::default();
+    let (hub, _renew) = fake.renewing(Budgets::default());
+    let (pods, _served) = Pods::new();
+    let (sockets, accepted) = mpsc::unbounded_channel::<Socket>();
+    let refusal = IpcError::new(ErrorCode::PolicyBlocked, "the context is read-only");
+    let _forward = Forward::spawn_with(
+        hub,
+        pod_target("web-1"),
+        (sockets, accepted),
+        None,
+        Begin::Refused(refusal),
+        Arc::new(pods),
+    );
+
+    let lines = logged.lines();
+    let [event] = &lines[..] else {
+        panic!("one event for the forward: {lines:?}");
+    };
+    assert_eq!(event["fields"]["message"], "a forward failed");
+    assert_eq!(event["fields"]["code"], "policy.blocked");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_lifted_refusal_returns_any_forward_to_waiting_and_asks_nothing() {
     let fake = Fake::default();
     fake.put("pods", pod_json("web-1", true, &[("http", 8080)]));
