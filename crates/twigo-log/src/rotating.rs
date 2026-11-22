@@ -194,7 +194,9 @@ impl Inner {
         match self.file.write_all(bytes) {
             Ok(()) => {
                 self.size += size;
-                self.said = false;
+                if self.in_place {
+                    self.said = false;
+                }
                 true
             }
             Err(error) => {
