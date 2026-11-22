@@ -738,7 +738,7 @@ contexts:
                 r#"[
                     { "uri": "k8s://gone-context//v1/pods/treasury/ledger-7d9f8b-x2x9k", "title": "ledger-7d9f8b-x2x9k" },
                     { "uri": "k8s://gone-context/rbac.authorization.k8s.io/v1/clusterroles/system%3Anode-proxier", "title": "system:node-proxier" },
-                    { "uri": "k8s-list://gone-context//v1/pods", "title": "Pods" }
+                    { "uri": "k8s-list://gone-context/v1/pods?ns=audit-eu%2Cstock-eu", "title": "Pods" }
                 ]"#,
             ),
         ])
@@ -790,7 +790,7 @@ contexts:
                 "message": "rancher.example.com refused GET https://rancher.example.com/k8s/clusters/c-abc12/api/v1/namespaces/secret-ns/pods/web-7f9",
             })),
             record(json!({
-                "message": "Pod ledger-7d9f8b-x2x9k in treasury is not ready, nor is system:node-proxier",
+                "message": "Pod ledger-7d9f8b-x2x9k in treasury is not ready, nor is system:node-proxier or a pod of audit-eu and stock-eu",
             })),
         ],
     );
@@ -803,10 +803,10 @@ contexts:
              on <namespace-2> and Service <object-1> in <namespace-3>\n\
              {time} could not read the cached discovery server=<server-2>\n\
              {time} <server-2> refused GET <server-2>\n\
-             {time} Pod <object-2> in <namespace-4> is not ready, nor is <object-3>\n"
+             {time} Pod <object-2> in <namespace-4> is not ready, nor is <object-3> or a pod of <namespace-5> and <namespace-6>\n"
         )
     );
-    assert_eq!(report.hidden.names, 14);
+    assert_eq!(report.hidden.names, 16);
 }
 
 #[tokio::test]

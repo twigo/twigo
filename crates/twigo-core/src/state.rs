@@ -91,6 +91,20 @@ fn object_of(uri: &str) -> Option<(Option<String>, String)> {
     }
 }
 
+/// The namespaces a list's URI is scoped to,
+/// `k8s-list://<space>/[<group>/]<version>/<resource>?ns=a,b`.
+fn list_scope(uri: &str) -> Vec<String> {
+    let query = uri
+        .strip_prefix("k8s-list://")
+        .and_then(|rest| rest.split_once('?'))
+        .map_or("", |(_, query)| query);
+    form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key == "ns")
+        .flat_map(|(_, names)| names.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no space {0:?}")]
@@ -258,8 +272,8 @@ impl State {
     }
 
     /// The namespaces the spaces are on, and the namespaces and the names of
-    /// their saved forwards' targets and of the objects of their recent
-    /// editors, as far as they read back.
+    /// their saved forwards' targets and of their recent editors, as far as
+    /// they read back.
     pub(crate) fn named(&self) -> Named {
         let data = self.inner.lock();
         let mut named = Named::default();
@@ -281,13 +295,12 @@ impl State {
                 .state
                 .get(RECENT)
                 .and_then(|value| serde_json::from_str::<Vec<Recent>>(value.get()).ok());
-            for (namespace, name) in recent
-                .into_iter()
-                .flatten()
-                .filter_map(|editor| object_of(&editor.uri))
-            {
-                named.namespaces.extend(namespace);
-                named.objects.insert(name);
+            for editor in recent.into_iter().flatten() {
+                if let Some((namespace, name)) = object_of(&editor.uri) {
+                    named.namespaces.extend(namespace);
+                    named.objects.insert(name);
+                }
+                named.namespaces.extend(list_scope(&editor.uri));
             }
         }
         named
