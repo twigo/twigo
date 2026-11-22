@@ -70,13 +70,24 @@ pub struct Entry<'a> {
 }
 
 impl Entry<'_> {
-    /// Its size in bytes, as the Secret holds it.
+    /// Its size in bytes. A value of `data` counts the bytes its base64
+    /// stands for, from its length and padding, never decoded: one that is
+    /// no base64, which the API server never serves and only a release's
+    /// manifest can hold, shows the size its length would decode to.
     pub fn bytes(&self) -> u64 {
         let Some(text) = self.value.as_str() else {
             return 0;
         };
         match self.field {
-            Field::Data => STANDARD.decode(text).map_or(0, |bytes| bytes.len() as u64),
+            Field::Data => {
+                let padding = text
+                    .bytes()
+                    .rev()
+                    .take(2)
+                    .filter(|&byte| byte == b'=')
+                    .count();
+                ((text.len() - padding) * 3 / 4) as u64
+            }
             Field::StringData => text.len() as u64,
         }
     }
@@ -225,6 +236,25 @@ mod tests {
             json!({ "team": "payments" })
         );
         assert!(shown["metadata"].get("managedFields").is_none());
+    }
+
+    #[test]
+    fn a_value_counts_what_its_base64_stands_for_without_decoding_it() {
+        let shown = for_view(json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": { "one": "aA==", "two": "aGk=", "three": "aGkh", "empty": "", "bad": "not base64!" },
+        }));
+        assert_eq!(
+            shown["data"],
+            json!({
+                "one": "<1 bytes>",
+                "two": "<2 bytes>",
+                "three": "<3 bytes>",
+                "empty": "<0 bytes>",
+                "bad": "<8 bytes>",
+            })
+        );
     }
 
     #[test]
