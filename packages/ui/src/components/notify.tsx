@@ -108,4 +108,8 @@ export const notify = {
   countdown,
   undoable,
   choice,
+  /** Takes away the toast shown under `key`, if it is still there. */
+  dismiss: (key: string) => {
+    toast.dismiss(key);
+  },
 };

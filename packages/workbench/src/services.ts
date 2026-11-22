@@ -1,6 +1,6 @@
 import type { Backend, KeyboardLayout } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
-import type { ActionGroups } from "@twigo/ui";
+import { notify, type ActionGroups } from "@twigo/ui";
 import { Approvals } from "./approvals/service";
 import { menuActions } from "./commands/actions";
 import { Menus, type MenuId } from "./commands/menus";
@@ -28,6 +28,8 @@ import { Views } from "./views/registry";
 import { registerCore } from "./core";
 import { variant } from "./variants";
 import { Zoom } from "./zoom";
+
+const kubeconfigToast = (source: string) => `kubeconfig:${source}`;
 
 /**
  * The services of one window. Features, the workbench's own included,
@@ -102,15 +104,21 @@ export class Workbench {
       layout,
       platform,
     );
-    this.catalog = new Catalog(backend, (failure) => {
-      // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-      if (variant("toast") === "none") return;
-      notifyError(failure.error, {
-        lead: `${failure.source}: `,
-        warning: true,
-        key: `kubeconfig:${failure.source}`,
-      });
-    });
+    this.catalog = new Catalog(
+      backend,
+      (failure) => {
+        // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
+        if (variant("toast") === "none") return;
+        notifyError(failure.error, {
+          lead: `${failure.source}: `,
+          warning: true,
+          key: kubeconfigToast(failure.source),
+        });
+      },
+      (source) => {
+        notify.dismiss(kubeconfigToast(source));
+      },
+    );
     this.colors = new ContextColors(this.catalog, state);
     this.spaces = new Spaces(
       backend,

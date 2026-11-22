@@ -12,11 +12,12 @@ export class Catalog {
   #contexts: readonly Context[] | undefined;
   #failures: readonly CatalogFailure[] = [];
 
-  /** `announce` is told of each file that fails and did not before. */
+  /** `announce` is told of each file that fails and did not before, `recovered` of each that fails no more. */
   constructor(
     private readonly backend: Backend,
     private readonly announce: (failure: CatalogFailure) => void = () =>
       undefined,
+    private readonly recovered: (source: string) => void = () => undefined,
   ) {}
 
   /** Undefined until the catalog's sources have been read. */
@@ -48,11 +49,15 @@ export class Catalog {
 
   #set({ contexts, failures }: Listed): void {
     const before = new Set(this.#failures.map(({ source }) => source));
+    const now = new Set(failures.map(({ source }) => source));
     this.#contexts = contexts;
     this.#failures = failures;
     this.changes.emit();
     for (const failure of failures) {
       if (!before.has(failure.source)) this.announce(failure);
+    }
+    for (const source of before) {
+      if (!now.has(source)) this.recovered(source);
     }
   }
 }

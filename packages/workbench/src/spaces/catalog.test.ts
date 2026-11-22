@@ -110,3 +110,27 @@ test("a file that fails is announced once, again only after it has been read wel
   send?.({ contexts: TWO, failures: [failing("~/.kube/a.yaml")] });
   expect(announce).toHaveBeenCalledTimes(3);
 });
+
+test("a file that fails no more is told as recovered, once, and one that never failed is not", async () => {
+  let send: ((next: Listed) => void) | undefined;
+  const fake = {
+    invoke: vi.fn(),
+    subscribe: vi.fn((_command: string, _request: unknown, on: typeof send) => {
+      send = on;
+      return Promise.resolve({
+        contexts: ONE,
+        failures: [failing("~/.kube/a.yaml"), failing("~/.kube/b.yaml")],
+      });
+    }),
+  } as unknown as Backend;
+  const recovered = vi.fn();
+  const catalog = new Catalog(fake, undefined, recovered);
+  await catalog.watch();
+  expect(recovered).not.toHaveBeenCalled();
+
+  send?.({ contexts: TWO, failures: [failing("~/.kube/b.yaml")] });
+  expect(recovered.mock.calls).toEqual([["~/.kube/a.yaml"]]);
+
+  send?.({ contexts: ONE, failures: [failing("~/.kube/b.yaml")] });
+  expect(recovered).toHaveBeenCalledTimes(1);
+});

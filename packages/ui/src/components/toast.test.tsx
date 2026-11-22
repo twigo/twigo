@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { toast } from "sonner";
 import { compile } from "tailwindcss";
@@ -128,6 +129,25 @@ test("an undo's toast runs it and stays for its owner to end, as long as the und
   expect(run).toHaveBeenCalledOnce();
   expect(dismiss).not.toHaveBeenCalled();
   vi.useRealTimers();
+});
+
+test("a toast shown under a key goes when that key is dismissed, and only that one", async () => {
+  render(<Toaster />);
+  act(() => {
+    notify.warning("One", { key: "a" });
+    notify.warning("Two", { key: "b" });
+  });
+  expect(await screen.findByText("One")).toBeTruthy();
+  act(() => {
+    notify.dismiss("a");
+  });
+  await waitFor(() => {
+    expect(screen.queryByText("One")).toBeNull();
+  });
+  expect(screen.getByText("Two")).toBeTruthy();
+  act(() => {
+    notify.dismiss("b");
+  });
 });
 
 test("a choice's toast stays until its owner dismisses it, takes one answer, and shows new words under the same key", async () => {
