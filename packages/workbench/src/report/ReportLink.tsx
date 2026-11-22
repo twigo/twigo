@@ -1,13 +1,5 @@
 import { Button, LinkButton } from "@twigo/ui";
-import { useWorkbench } from "../react";
-import { REPORT_PROBLEM } from "./commands";
-
-function useReport() {
-  const { commands, keys } = useWorkbench();
-  return () => {
-    void commands.execute(REPORT_PROBLEM, keys.lookup(null));
-  };
-}
+import { useReport } from "./useReport";
 
 export function ReportLink({ className }: { className?: string }) {
   const report = useReport();

@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -311,6 +318,33 @@ test("a run that fails says so, led by the tile of the space it ran in", async (
   await expect(outcome).resolves.toEqual({ state: "failed" });
   expect(report).not.toHaveBeenCalled();
   expect(said("was replaced")).toMatch(/^DEpod web-1 was replaced/);
+});
+
+test("a run that ends in an internal error says it in Twigo's words and offers Report…, which opens the report", async () => {
+  const error = {
+    code: "internal.panic" as const,
+    kind: "internal" as const,
+    message: "Twigo stopped this run on an internal error",
+  };
+  const { workbench, outcome } = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "failed", error }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(said("Twigo hit an internal error")).toMatch(
+    /^DETwigo hit an internal errorinternal\.panicCopy detailsReport…$/,
+  );
+  expect(workbench.problemReport.report).toBeUndefined();
+  const toast = screen
+    .getAllByRole("alert")
+    .find((each) => each.textContent.includes("internal error"));
+  fireEvent.click(
+    within(toast ?? document.body).getByRole("button", { name: "Report…" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  expect(workbench.problemReport.report).toBeDefined();
 });
 
 test("a second countdown of the same object replaces the first, and ⌘Z cancels only outside a text field", async () => {
