@@ -32,7 +32,7 @@ pub(super) fn tail(files: &[PathBuf]) -> Vec<String> {
             .rev()
             .filter(|line| !line.is_empty())
         {
-            let size = line.len().min(RECORD) + 1;
+            let size = (line.len() + 1).min(RECORD);
             if newest_first.len() == LINES || bytes + size > BYTES {
                 break 'files;
             }

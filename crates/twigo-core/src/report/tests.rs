@@ -348,6 +348,28 @@ fn the_last_lines_reach_into_the_previous_file_and_stop_at_200_or_32_kib() {
 }
 
 #[test]
+fn four_long_records_share_the_window_and_a_fifth_takes_the_oldest() {
+    let directory = tempfile::tempdir().unwrap();
+    let long = |number: usize, length: usize| {
+        let head = record(json!({ "message": format!("record {number}"), "error": "" }));
+        record(json!({
+            "message": format!("record {number}"),
+            "error": "x".repeat(length - head.len()),
+        }))
+    };
+    for length in [8192, 9000, 100_000] {
+        let lines: Vec<String> = (0..5).map(|number| long(number, length)).collect();
+        assert!(lines.iter().all(|line| line.len() == length));
+        let file = write(directory.path(), "twigo.log", lines.clone());
+        assert_eq!(
+            log::tail(std::slice::from_ref(&file)),
+            lines[1..],
+            "records of {length} bytes"
+        );
+    }
+}
+
+#[test]
 fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
     let directory = tempfile::tempdir().unwrap();
     let frames: Vec<String> = (0..2000)
