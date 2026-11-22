@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use tauri::ipc::Invoke;
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use twigo_core::Core;
 use twigo_ipc::IpcError;
@@ -17,17 +17,35 @@ const MESSAGE: &str = "Twigo ran into an internal error that it cannot recover f
 const RESTART: &str = "Restart";
 const QUIT: &str = "Quit";
 
-/// The fatal path: it ends every unlock, so that none outlives its end while
-/// Twigo waits for the person, then asks in a native dialog, since the
-/// webview may be what the panic broke, whether to restart or quit.
-#[derive(Clone, Default)]
-pub struct Path {
-    ready: Arc<OnceLock<(AppHandle, Arc<Core>)>>,
+/// The fatal path: it fails closed ([`Core::fail_closed`]), so that no unlock
+/// and no forward outlives what the mode allows while Twigo waits for the
+/// person, then asks in a native dialog, since the webview may be what the
+/// panic broke, whether to restart or quit.
+pub struct Path<R: Runtime = Wry> {
+    ready: Arc<OnceLock<(AppHandle<R>, Arc<Core>)>>,
     stage: Arc<Stage>,
 }
 
-impl Path {
-    pub fn ready(&self, app: &AppHandle, core: &Arc<Core>) {
+impl<R: Runtime> Default for Path<R> {
+    fn default() -> Self {
+        Self {
+            ready: Arc::default(),
+            stage: Arc::default(),
+        }
+    }
+}
+
+impl<R: Runtime> Clone for Path<R> {
+    fn clone(&self) -> Self {
+        Self {
+            ready: Arc::clone(&self.ready),
+            stage: Arc::clone(&self.stage),
+        }
+    }
+}
+
+impl<R: Runtime> Path<R> {
+    pub fn ready(&self, app: &AppHandle<R>, core: &Arc<Core>) {
         let _ = self.ready.set((app.clone(), Arc::clone(core)));
     }
 
@@ -37,41 +55,43 @@ impl Path {
         if !self.stage.ask() {
             return;
         }
-        tracing::error!(why, "Twigo cannot go on, so it asks to restart");
+        tracing::error!(why, "Twigo cannot go on");
         let Some((app, core)) = self.ready.get().cloned() else {
             return;
         };
-        if catch_unwind(AssertUnwindSafe(|| core.policy.end_unlocks())).is_err() {
-            tracing::error!("could not end the unlocks, which panicked");
-        }
-        let mut dialog = app
-            .dialog()
+        core.fail_closed();
+        // Tauri forgets a window before its `Destroyed` handlers run, and
+        // ends once the last is gone (tauri 2.12.7 `on_window_close`,
+        // tauri-runtime-wry 2.12.5 `TaoWindowEvent::Destroyed`). A dialog
+        // without a parent would be the system's alert, which outlives
+        // Twigo and can answer with its first button though nobody clicked
+        // (rfd 0.17.2, `CFUserNotificationDisplayAlert`).
+        let Some(window) = window(&app) else {
+            tracing::warn!("no window is left to ask in, so Twigo ends without asking");
+            flush(&core);
+            return;
+        };
+        let stage = Arc::clone(&self.stage);
+        app.dialog()
             .message(MESSAGE)
             .title(TITLE)
             .kind(MessageDialogKind::Error)
             .buttons(MessageDialogButtons::OkCancelCustom(
                 RESTART.to_owned(),
                 QUIT.to_owned(),
-            ));
-        // A sheet goes with its window and blocks it. Without one the alert
-        // is the system's, which outlives Twigo and can answer with its
-        // first button though nobody clicked (rfd 0.17.2,
-        // `CFUserNotificationDisplayAlert`).
-        if let Some(window) = window(&app) {
-            dialog = dialog.parent(&window);
-        }
-        let stage = Arc::clone(&self.stage);
-        dialog.show(move |restart| {
-            if !stage.answer() {
-                return;
-            }
-            flush(&core);
-            if restart {
-                app.request_restart();
-            } else {
-                app.exit(1);
-            }
-        });
+            ))
+            .parent(&window)
+            .show(move |restart| {
+                if !stage.answer() {
+                    return;
+                }
+                flush(&core);
+                if restart {
+                    app.request_restart();
+                } else {
+                    app.exit(1);
+                }
+            });
     }
 
     /// Twigo is ending: an answer that comes after does nothing, so an exit
@@ -84,8 +104,8 @@ impl Path {
     /// is handled, so Tauri sends no answer of its own.
     pub fn guarded_handler(
         &self,
-        handler: impl Fn(Invoke) -> bool + Send + Sync + 'static,
-    ) -> impl Fn(Invoke) -> bool + Send + Sync + 'static {
+        handler: impl Fn(Invoke<R>) -> bool + Send + Sync + 'static,
+    ) -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
         let fatal = self.clone();
         move |invoke| {
             fatal
@@ -108,7 +128,7 @@ impl Path {
 }
 
 /// Twigo's focused window, its main one, or any.
-fn window(app: &AppHandle) -> Option<WebviewWindow> {
+fn window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     let windows = app.webview_windows();
     windows
         .values()
@@ -179,7 +199,8 @@ pub async fn contained<T>(
 
 #[cfg(test)]
 mod tests {
-    use twigo_ipc::ErrorCode;
+    use tauri::test::{MockRuntime, mock_app};
+    use twigo_ipc::{ErrorCode, Mode, StateEntry};
 
     use super::*;
 
@@ -215,14 +236,54 @@ mod tests {
 
     #[test]
     fn a_panic_on_the_main_thread_takes_the_fatal_path() {
-        let path = Path::default();
+        let path = Path::<MockRuntime>::default();
         assert_eq!(path.guarded("a command panicked", || 3), Some(3));
         assert!(path.stage.ask(), "nothing asked yet");
 
-        let path = Path::default();
+        let path = Path::<MockRuntime>::default();
         let panicked = path.guarded("a command panicked", || -> u8 { panic!("a command's bug") });
         assert_eq!(panicked, None);
         assert!(!path.stage.ask(), "it asked");
+    }
+
+    #[test]
+    fn with_no_window_left_the_fatal_path_fails_closed_writes_the_state_and_asks_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        let kubeconfig = dir.path().join("config");
+        std::fs::write(
+            &kubeconfig,
+            "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+contexts: [{ name: kind-a, context: { cluster: c } }]
+",
+        )
+        .unwrap();
+        core.catalog
+            .follow(twigo_core::catalog::sources(Some(kubeconfig), None, None));
+        core.policy
+            .set_mode("kind-a", Some(Mode::ReadOnly))
+            .unwrap();
+        core.policy.unlock("kind-a").unwrap();
+        core.state
+            .set(vec![StateEntry {
+                space: None,
+                key: "kept".to_owned(),
+                value: "1".to_owned(),
+            }])
+            .unwrap();
+        let app = mock_app();
+        let path = Path::default();
+        path.ready(app.handle(), &core);
+
+        path.run("a window event panicked");
+        assert_eq!(core.policy.access("kind-a").unlocked_until, None);
+        let state = std::fs::read_to_string(dir.path().join("state.json")).unwrap_or_default();
+        assert!(state.contains("kept"), "{state}");
     }
 
     #[test]

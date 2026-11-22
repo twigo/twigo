@@ -5941,6 +5941,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
+ "tempfile",
  "tokio",
  "tracing",
  "twigo-core",
@@ -5950,6 +5951,7 @@ dependencies = [
  "twigo-log",
  "twigo-netmon",
  "twigo-panic",
+ "twigo-policy",
 ]
 
 [[package]]

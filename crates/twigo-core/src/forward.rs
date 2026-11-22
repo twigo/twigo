@@ -7,7 +7,7 @@ mod ports;
 mod saved;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -463,9 +463,11 @@ impl Forwards {
     }
 
     /// Closes every port and connection, and the table: what the state says
-    /// ran stays, as no command saves, binds or starts after it.
+    /// ran stays, as no command saves, binds or starts after it. It takes
+    /// the table back from a panic, which the fatal path's recheck may have
+    /// left it in.
     pub(crate) fn shutdown(&self) {
-        let mut table = self.table();
+        let mut table = self.table.lock().unwrap_or_else(PoisonError::into_inner);
         table.closed = true;
         for entry in table.entries.values_mut() {
             entry.stop();
@@ -526,6 +528,7 @@ impl Forwards {
     /// once that passes.
     pub(crate) fn recheck(&self) {
         let mut table = self.table();
+        twigo_panic::inject::check("forward recheck");
         for entry in table.entries.values_mut() {
             entry.check(&self.checks);
         }

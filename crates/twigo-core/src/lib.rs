@@ -22,6 +22,7 @@ mod usage;
 
 use std::collections::HashSet;
 use std::future::Future;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -195,6 +196,24 @@ impl Core {
         self.credentials.shutdown();
         self.shells.each(terminal::Shell::quit);
         self.forwards.shutdown();
+    }
+
+    /// What the fatal path does before it asks, since the duty that would
+    /// may be the one that died: ends every unlock, then fails each forward
+    /// whose mode now refuses it, and where that recheck panics closes every
+    /// forward as a quit does. A panic of one step is logged, and the next
+    /// goes on.
+    pub fn fail_closed(&self) {
+        if catch_unwind(AssertUnwindSafe(|| self.policy.end_unlocks())).is_err() {
+            tracing::error!("could not end the unlocks, which panicked");
+        }
+        if catch_unwind(AssertUnwindSafe(|| self.forwards.recheck())).is_ok() {
+            return;
+        }
+        tracing::error!("could not recheck the forwards, which panicked, so every forward stops");
+        if catch_unwind(AssertUnwindSafe(|| self.forwards.shutdown())).is_err() {
+            tracing::error!("could not stop the forwards, which panicked");
+        }
     }
 
     /// The context's clients, once the catalog and the login shell's
