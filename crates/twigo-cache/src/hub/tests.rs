@@ -55,7 +55,7 @@ pub(super) fn query(namespaces: &[&str]) -> Query {
             .iter()
             .map(|&namespace| namespace.to_owned())
             .collect(),
-        field_selector: None,
+        selectors: Selectors::default(),
     }
 }
 
@@ -511,6 +511,42 @@ async fn a_namespace_named_twice_gets_one_part() {
     assert_eq!(drained(twice.drain()), (true, vec!["p1".to_owned()], 0));
 }
 
+fn labelled(selector: &str) -> Query {
+    Query {
+        selectors: Selectors {
+            field: None,
+            label: Some(selector.to_owned()),
+        },
+        ..query(&["a"])
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn subscriptions_share_an_upstream_only_with_the_same_selectors_and_the_server_gets_them() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(labelled("owner=mine")).await.unwrap();
+    let mut same = hub.rows(labelled("owner=mine")).await.unwrap();
+    let mut other = hub.rows(labelled("owner=other")).await.unwrap();
+    for subscription in [&mut first, &mut same, &mut other] {
+        ready(subscription).await;
+    }
+    assert_eq!(hub.subscribers("pods"), 3);
+    assert_eq!(
+        hub.scopes(),
+        [namespace("a"), namespace("a")],
+        "two upstreams for three subscriptions"
+    );
+    let (mine, other) = (
+        fake.count("/pods?labelSelector=owner%3Dmine"),
+        fake.count("/pods?labelSelector=owner%3Dother"),
+    );
+    assert!(mine > 0, "the selector is in the request's query");
+    assert_eq!(mine, other, "the same selector asks once, not twice");
+    assert_eq!(fake.count("/pods?"), mine + other, "no request without one");
+}
+
 #[tokio::test(start_paused = true)]
 async fn more_than_four_namespaces_watch_cluster_wide_only_if_the_person_may_list() {
     let five = ["a", "b", "c", "d", "e"];
@@ -830,7 +866,7 @@ async fn stamped_as_it_arrives(streaming: bool) {
         resource: pods(),
         format: Format::Metadata,
         scope: namespace("a"),
-        field_selector: None,
+        selectors: Selectors::default(),
     };
     let upstream = Arc::new(Upstream::<Row>::new());
     let mut state = upstream.state();

@@ -24,6 +24,7 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use twigo_cache::hub::{Query, Resource, RowFormat};
+use twigo_cache::request::Selectors;
 use twigo_core::{Core, ProxyProcess, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{AnswerApproval, ApprovalAnswer, ApprovalEvent, Environment, Mode, ViewState};
@@ -665,7 +666,7 @@ async fn sixteen_watches_fill_the_proxy_and_a_get_waits_on_429s_until_one_ends()
             },
             format: RowFormat::Table,
             namespaces: vec![cluster.namespace.clone()],
-            field_selector: None,
+            selectors: Selectors::default(),
         })
         .await
         .unwrap();

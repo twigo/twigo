@@ -10,6 +10,7 @@ use std::sync::Arc;
 use kube::Config;
 use kube::config::{KubeConfigOptions, Kubeconfig};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
+use twigo_cache::request::Selectors;
 use twigo_ipc::ViewState;
 use twigo_kube::client::{Clients, Gate, Options};
 
@@ -60,7 +61,7 @@ async fn main() {
             },
             format: RowFormat::Table,
             namespaces: vec![namespace.clone()],
-            field_selector: None,
+            selectors: Selectors::default(),
         })
         .await
         .unwrap();

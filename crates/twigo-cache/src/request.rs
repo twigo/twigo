@@ -41,13 +41,28 @@ impl Format {
     }
 }
 
+/// What the server filters a collection by: part of an upstream's identity,
+/// since each pair of selectors is a different set of objects.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Selectors {
+    pub field: Option<String>,
+    pub label: Option<String>,
+}
+
+impl Selectors {
+    pub const NONE: &'static Selectors = &Selectors {
+        field: None,
+        label: None,
+    };
+}
+
 /// A collection as an upstream watches it.
 #[derive(Debug, Clone, Copy)]
 pub struct Collection<'a> {
     /// Such as `/api/v1/namespaces/default/pods`.
     pub path: &'a str,
     pub format: Format,
-    pub field_selector: Option<&'a str>,
+    pub selectors: &'a Selectors,
 }
 
 impl<'a> Collection<'a> {
@@ -55,7 +70,7 @@ impl<'a> Collection<'a> {
         Collection {
             path,
             format: Format::Table,
-            field_selector: None,
+            selectors: Selectors::NONE,
         }
     }
 
@@ -70,8 +85,11 @@ impl<'a> Collection<'a> {
             }
             Format::Metadata => {}
         }
-        if let Some(selector) = self.field_selector {
+        if let Some(selector) = &self.selectors.field {
             query.append_pair("fieldSelector", selector);
+        }
+        if let Some(selector) = &self.selectors.label {
+            query.append_pair("labelSelector", selector);
         }
         query
     }
@@ -198,7 +216,7 @@ mod tests {
         let namespaces = Collection {
             path: "/api/v1/namespaces",
             format: Format::Metadata,
-            field_selector: None,
+            selectors: Selectors::NONE,
         };
         assert_eq!(
             list(&namespaces, 500, None).headers()[ACCEPT],
@@ -208,10 +226,14 @@ mod tests {
             watch(&namespaces, WatchFrom::ResourceVersion("7"), 290).headers()[ACCEPT],
             ACCEPT_METADATA
         );
+        let selectors = Selectors {
+            field: Some("metadata.name=p".to_owned()),
+            label: None,
+        };
         let pod = Collection {
             path: "/api/v1/namespaces/a/pods",
             format: Format::Object,
-            field_selector: Some("metadata.name=p"),
+            selectors: &selectors,
         };
         let request = watch(&pod, WatchFrom::ResourceVersion("7"), 290);
         assert_eq!(
@@ -219,5 +241,26 @@ mod tests {
             "/api/v1/namespaces/a/pods?includeObject=Object&fieldSelector=metadata.name%3Dp&watch=true&allowWatchBookmarks=true&timeoutSeconds=290&resourceVersion=7"
         );
         assert_eq!(request.headers()[ACCEPT], ACCEPT_TABLE);
+    }
+
+    #[test]
+    fn a_label_selector_goes_beside_the_field_selector_in_the_list_and_the_watch() {
+        let selectors = Selectors {
+            field: Some("metadata.name=p".to_owned()),
+            label: Some("owner=helm".to_owned()),
+        };
+        let secrets = Collection {
+            path: "/api/v1/namespaces/a/secrets",
+            format: Format::Metadata,
+            selectors: &selectors,
+        };
+        assert_eq!(
+            list(&secrets, 500, None).uri(),
+            "/api/v1/namespaces/a/secrets?fieldSelector=metadata.name%3Dp&labelSelector=owner%3Dhelm&limit=500"
+        );
+        assert_eq!(
+            watch(&secrets, WatchFrom::ResourceVersion("7"), 290).uri(),
+            "/api/v1/namespaces/a/secrets?fieldSelector=metadata.name%3Dp&labelSelector=owner%3Dhelm&watch=true&allowWatchBookmarks=true&timeoutSeconds=290&resourceVersion=7"
+        );
     }
 }

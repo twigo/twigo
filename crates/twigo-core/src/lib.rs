@@ -34,6 +34,7 @@ use twigo_cache::batcher::Batcher;
 use twigo_cache::discovery::{Followed, Followers, Resources};
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
 use twigo_cache::metrics::{Kind, Opening, Poller};
+use twigo_cache::request::Selectors;
 use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
@@ -745,7 +746,10 @@ impl Core {
                 },
                 format: RowFormat::Table,
                 namespaces: query.namespaces,
-                field_selector: query.field_selector,
+                selectors: Selectors {
+                    field: query.field_selector,
+                    label: None,
+                },
             })
             .await?;
         self.lists

@@ -17,6 +17,7 @@ use crate::discovery::{Followed, Followers};
 use crate::fake::{Fake, fingerprint};
 use crate::hub::{Hub, LINGER, Query, Resource, RowFormat};
 use crate::metrics::{FIRST_ANSWER, Kind, Poller};
+use crate::request::Selectors;
 
 fn polls(fake: &Fake, namespace: &str) -> usize {
     fake.count(&format!(
@@ -217,7 +218,7 @@ fn rows(namespaces: &[&str]) -> Query {
         },
         format: RowFormat::Table,
         namespaces: namespaces.iter().map(|name| (*name).to_owned()).collect(),
-        field_selector: None,
+        selectors: Selectors::default(),
     }
 }
 

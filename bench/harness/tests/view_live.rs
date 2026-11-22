@@ -25,6 +25,7 @@ use kube::{Api, Config};
 use tokio::sync::mpsc;
 use twigo_cache::batcher::Batcher;
 use twigo_cache::hub::{Connect, Delta, Hub, Query, Resource, RowFormat};
+use twigo_cache::request::Selectors;
 use twigo_cache::view::{QueryView, Spec};
 use twigo_ipc::{Cell, Gvr, ListBatch, ListQuery, Parts, Row, RowId, Sort, ViewState};
 use twigo_kube::client::{Clients, Gate, Options};
@@ -70,7 +71,7 @@ fn hub_query(context: &str) -> Query {
         },
         format: RowFormat::Table,
         namespaces: vec![NAMESPACE.to_owned()],
-        field_selector: None,
+        selectors: Selectors::default(),
     }
 }
 

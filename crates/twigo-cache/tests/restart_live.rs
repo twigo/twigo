@@ -13,6 +13,7 @@ use kube::config::{KubeConfigOptions, Kubeconfig};
 use kube::{Api, Config};
 use serde_json::json;
 use twigo_cache::hub::{Connect, Hub, Query, Resource, RowFormat};
+use twigo_cache::request::Selectors;
 use twigo_ipc::ViewState;
 use twigo_kube::client::{Clients, Gate, Options};
 
@@ -111,7 +112,7 @@ async fn an_api_server_restart_leaves_the_rows_after_a_stale_spell() {
             },
             format: RowFormat::Table,
             namespaces: vec![ns.clone()],
-            field_selector: None,
+            selectors: Selectors::default(),
         })
         .await
         .unwrap();

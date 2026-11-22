@@ -16,7 +16,7 @@ use twigo_cache::batcher::FLUSH;
 use twigo_cache::hub::{Delta, Hub, Query, Resource, RowFormat, Subscription};
 use twigo_cache::metrics::{Kind, Opening, Reader, Sample, Scope, Update};
 use twigo_cache::object::Object;
-use twigo_cache::request::field_value;
+use twigo_cache::request::{Selectors, field_value};
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
@@ -977,7 +977,7 @@ async fn owned_of(hub: &Hub, target: &Target, object: &Value) -> Vec<(Owned, Sub
             },
             format: RowFormat::Metadata,
             namespaces: vec![namespace.clone()],
-            field_selector: None,
+            selectors: Selectors::default(),
         };
         if let Ok(subscription) = hub.rows(query).await {
             held.push((*owned, subscription));

@@ -266,6 +266,7 @@ mod tests {
     use super::*;
     use crate::fake::Fake;
     use crate::hub::{Hub, Query, Resource, RowFormat};
+    use crate::request::Selectors;
 
     struct Rig {
         fake: Fake,
@@ -304,7 +305,7 @@ mod tests {
                 },
                 format: RowFormat::Metadata,
                 namespaces: namespaces.clone(),
-                field_selector: None,
+                selectors: Selectors::default(),
             })
             .await
             .unwrap();

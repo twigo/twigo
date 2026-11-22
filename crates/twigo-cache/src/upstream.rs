@@ -29,7 +29,7 @@ use twigo_kube::client::{Clients, Waiting};
 use crate::cluster::{Cluster, REFUSED_FOR};
 use crate::decode::{Decode, DecodeError, Event};
 use crate::encoding;
-use crate::request::{self, Collection, Format, WatchFrom};
+use crate::request::{self, Collection, Format, Selectors, WatchFrom};
 use crate::store::{Item, Items, Store};
 
 /// Items per list page.
@@ -73,7 +73,7 @@ pub(crate) struct Spec {
     pub version: String,
     pub path: String,
     pub format: Format,
-    pub field_selector: Option<String>,
+    pub selectors: Selectors,
     /// How a 403 names it: `pods`, or `deployments.apps`.
     pub resource: String,
 }
@@ -798,7 +798,7 @@ where
         Collection {
             path: &self.spec.path,
             format: self.spec.format,
-            field_selector: self.spec.field_selector.as_deref(),
+            selectors: &self.spec.selectors,
         }
     }
 }

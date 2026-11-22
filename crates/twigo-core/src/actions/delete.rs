@@ -13,7 +13,7 @@ use http::Method;
 use kube::api::{DeleteParams, Preconditions, PropagationPolicy};
 use serde_json::Value;
 use twigo_cache::hub::{Query, Resource, RowFormat};
-use twigo_cache::request::field_value;
+use twigo_cache::request::{Selectors, field_value};
 use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ResourceRef};
 use twigo_policy::friction::Risk;
 
@@ -437,7 +437,10 @@ impl Run {
                 resource: self.resource.clone(),
                 format: RowFormat::Metadata,
                 namespaces,
-                field_selector,
+                selectors: Selectors {
+                    field: field_selector,
+                    label: None,
+                },
             })
             .await;
         let stopped = |left: usize| {

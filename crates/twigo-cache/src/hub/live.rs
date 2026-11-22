@@ -258,7 +258,7 @@ impl Live {
             },
             format: RowFormat::Table,
             namespaces: namespaces.iter().map(|&name| name.to_owned()).collect(),
-            field_selector: None,
+            selectors: Selectors::default(),
         }
     }
 }
@@ -336,7 +336,7 @@ async fn a_watch_resumed_from_a_compacted_version_relists() {
         resource: live.query(&[]).resource,
         format: Format::Table,
         scope: Scope::Namespace(namespace.clone()),
-        field_selector: None,
+        selectors: Selectors::default(),
     };
     let env = || Env {
         connect: Arc::clone(&hub.inner.connect),
