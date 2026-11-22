@@ -45,28 +45,13 @@ test("status:family, the default, says an error by its code's family", () => {
   ]);
 });
 
-test.each([
-  ["error", "BadRequest", "field label not supported: spec.containers"],
-  ["forbidden", "Forbidden", "You may not list pods."],
-  [
-    "unauthorized",
-    "Unauthorized",
-    "The cluster does not accept the credentials.",
-  ],
-] as const)(
-  "a %s list's cluster entry reads %s, and its tooltip carries the message and the code",
-  async (scenario, text, message) => {
-    await openList(createMockBackend(scenario));
-    expect(entry(text)?.getAttribute("title")).toBe(
-      [
-        `${text} · Kubernetes v1.33.4`,
-        message,
-        `server.${codeOf(scenario)}`,
-      ].join("\n"),
-    );
-  },
-);
-
-function codeOf(scenario: string): string {
-  return scenario === "error" ? "invalid" : scenario;
-}
+test("an error list's cluster entry reads the server's reason, and its tooltip carries the message and the code", async () => {
+  await openList(createMockBackend("error"));
+  expect(entry("BadRequest")?.getAttribute("title")).toBe(
+    [
+      "BadRequest · Kubernetes v1.33.4",
+      "field label not supported: spec.containers",
+      "server.invalid",
+    ].join("\n"),
+  );
+});

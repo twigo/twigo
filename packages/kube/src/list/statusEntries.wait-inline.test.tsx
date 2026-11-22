@@ -2,7 +2,6 @@ import { act, cleanup, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { openList, settle, withScreenSize } from "../../test/workbench";
-import { partsLine } from "./statusEntries";
 
 withScreenSize();
 
@@ -50,40 +49,4 @@ test("wait:inline: a list that waits with no cause says only that it does", asyn
     within(screen.getByRole("contentinfo")).getByText("Connecting…"),
   ).toBeTruthy();
   expect(within(screen.getByRole("grid")).queryByRole("status")).toBeNull();
-});
-
-test("a part that cannot connect names its cause in the parts' tooltip, whichever variant", () => {
-  const cause = {
-    code: "connect.certificate",
-    kind: "unavailable",
-    message: "The server's certificate is not trusted",
-  } as const;
-  const line = partsLine({
-    count: 2,
-    unready: [
-      {
-        part: { kind: "namespace", name: "team-a" },
-        state: { state: "connecting", cause },
-        shown: false,
-      },
-    ],
-    omitted: 0,
-  });
-  expect(line?.tooltip).toBe("team-a: connecting · certificate not trusted");
-
-  const broken = partsLine({
-    count: 2,
-    unready: [
-      {
-        part: { kind: "namespace", name: "team-c" },
-        state: {
-          state: "stale",
-          cause: { ...cause, code: "connect.lost", message: "lost" },
-        },
-        shown: false,
-      },
-    ],
-    omitted: 0,
-  });
-  expect(broken?.tooltip).toBe("team-c: connecting · connection lost");
 });

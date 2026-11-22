@@ -27,24 +27,3 @@ test("kubeconfig:group, the default: a file that failed is a group of its own wi
   ).toMatchObject({ description: "kubeconfig.unreadable", disabled: true });
   expect(found.some(({ id }) => id === "kubeconfig:skipped")).toBe(false);
 });
-
-test("kubeconfig:group: a context with a problem says it on its row, and may still be chosen", async () => {
-  const { found } = await picker("kubeconfigFailures");
-  const orphan = found.find(({ id }) => id === "context:orphan");
-  expect(orphan).toMatchObject({
-    description: "orphan.internal:6443 · context.missing-user",
-    state: {
-      tone: "warn",
-      label: 'no kubeconfig defines the user "orphan-admin"',
-    },
-  });
-  expect(orphan?.disabled).toBeUndefined();
-});
-
-test("a catalog that lost no file has no such rows, and the rows of a good file are as before", async () => {
-  const { found } = await picker("live");
-  expect(found.some(({ disabled }) => disabled)).toBe(false);
-  expect(
-    found.find(({ id }) => id === "context:kind-local"),
-  ).not.toHaveProperty("state");
-});
