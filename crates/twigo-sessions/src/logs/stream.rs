@@ -22,7 +22,7 @@ use kube::api::LogParams;
 use serde_json::Value;
 use tokio::sync::watch;
 use twigo_cache::hub::{Hub, backoff};
-use twigo_ipc::{ErrorKind, IpcError, LogSource, Since, StreamState};
+use twigo_ipc::{ErrorCode, ErrorKind, IpcError, LogSource, Since, StreamState};
 use twigo_kube::client::{Clients, Waiting};
 
 use crate::logs::buffer::{Kind, Origin};
@@ -472,7 +472,7 @@ impl Reader {
             let Some(id) = status.as_ref().and_then(Status::previous) else {
                 send(Event::State(StreamState::Error {
                     error: IpcError::new(
-                        ErrorKind::NotFound,
+                        ErrorCode::LogsNoPrevious,
                         format!("{} has no previous instance", self.stream.origin.container),
                     ),
                 }));
@@ -591,7 +591,7 @@ impl Reader {
                 Ok(request) => request,
                 Err(error) => {
                     return Outcome::Failed(IpcError::new(
-                        ErrorKind::Internal,
+                        ErrorCode::InternalRequest,
                         format!("could not build the log request: {error}"),
                     ));
                 }
@@ -662,7 +662,10 @@ impl Reader {
             let parsed = line::parse(&buffer);
             // With timestamps every line the container wrote has its time.
             let Some(at) = parsed.at else {
-                return Outcome::Unreadable(IpcError::new(ErrorKind::Unavailable, parsed.text));
+                return Outcome::Unreadable(IpcError::new(
+                    ErrorCode::LogsStreamFailed,
+                    parsed.text,
+                ));
             };
             if before.is_some_and(|before| at >= before) {
                 break;
@@ -1554,7 +1557,7 @@ mod tests {
     fn unreadable(state: Option<StreamState>) -> bool {
         matches!(
             state,
-            Some(StreamState::Error { error }) if error.message.starts_with("failed to try resolving symlinks")
+            Some(StreamState::Error { error }) if error.code == ErrorCode::LogsStreamFailed
         )
     }
 
@@ -1595,7 +1598,7 @@ mod tests {
         assert!(
             matches!(
                 followed.state(),
-                Some(StreamState::Error { error }) if error.kind == ErrorKind::NotFound
+                Some(StreamState::Error { error }) if error.code == ErrorCode::LogsNoPrevious
             ),
             "{:?}",
             followed.state()

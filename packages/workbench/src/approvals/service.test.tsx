@@ -19,7 +19,7 @@ import {
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { notify } from "@twigo/ui";
 import { ConfirmHost } from "../operations/ConfirmHost";
-import { inWorkbench, testWorkbench } from "../testing";
+import { carriesCode, inWorkbench, testWorkbench } from "../testing";
 import { ApprovalHost } from "./ApprovalHost";
 import { ASK_GUARD_MS } from "./service";
 
@@ -320,18 +320,25 @@ test("Escape denies, and focus starts on Deny, so a stray Enter allows nothing",
 });
 
 test("a refused answer shows its words in the dialog, which stays, and the next try goes through", async () => {
-  const { raise, control, answers } = await broker();
+  const { workbench, raise, control, answers } = await broker();
   raise(DELETE);
   fireEvent.change(screen.getByLabelText("Type prod-eu to confirm"), {
     target: { value: "prod-eu" },
   });
-  control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
+  control.refuse = new IpcError(
+    "confirm.name-mismatch",
+    "type prod-eu to confirm",
+  );
   choose("Allow delete");
   await waitFor(() => {
     expect(screen.getByRole("alert").textContent).toContain(
       "type prod-eu to confirm",
     );
   });
+  expect(workbench.approvals.failure?.code).toBe("confirm.name-mismatch");
+  expect(carriesCode(screen.getByRole("alert"), "confirm.name-mismatch")).toBe(
+    true,
+  );
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(button("Allow delete").hasAttribute("disabled")).toBe(false);
 
@@ -347,7 +354,10 @@ function refusedDelete(control: Awaited<ReturnType<typeof broker>>["control"]) {
   fireEvent.change(screen.getByLabelText("Type prod-eu to confirm"), {
     target: { value: "prod-eu" },
   });
-  control.refuse = new IpcError("invalidInput", "type prod-eu to confirm");
+  control.refuse = new IpcError(
+    "confirm.name-mismatch",
+    "type prod-eu to confirm",
+  );
   choose("Allow delete");
   return waitFor(() => {
     expect(screen.getByRole("alert").textContent).toContain(
@@ -431,7 +441,7 @@ test("an ask withdrawn while its answer is on its way closes the dialog, and the
   expect(warning).not.toHaveBeenCalled();
 
   control.refuse = new IpcError(
-    "notFound",
+    "approval.gone",
     "the process no longer waits for this answer",
   );
   release();

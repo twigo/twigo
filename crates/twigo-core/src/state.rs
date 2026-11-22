@@ -7,19 +7,23 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use atomic_write_file::AtomicWriteFile;
 use jiff::{SignedDuration, Timestamp};
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use twigo_ipc::{ForwardId, Space, StateEntry, StateSnapshot};
+use twigo_ipc::{ErrorCode, ForwardId, IpcError, Space, StateEntry, StateSnapshot};
+use twigo_log::problems;
+use twigo_panic::{Reporter, inject};
 use twigo_policy::Choices;
 
 use crate::forward::Saved;
@@ -54,6 +58,67 @@ const LAST_FORWARD: &str = "forwards/last";
 
 const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
 
+/// The webview's key for the namespaces a space is on
+/// (`packages/workbench/src/spaces/store.ts`), which the problem report
+/// hides by name.
+const NAMESPACES: &str = "namespaces";
+
+/// The webview's key for the editors a space opened, as `{ uri, title }`
+/// (`packages/workbench/src/editors/recent.ts`).
+const RECENT: &str = "recent";
+
+#[derive(Debug, Default)]
+pub(crate) struct Named {
+    pub namespaces: BTreeSet<String>,
+    pub objects: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+struct Recent {
+    uri: String,
+}
+
+/// The namespace and the name of the object that an editor's URI opens,
+/// `k8s://<space>/<group>/<version>/<resource>[/<namespace>]/<name>`
+/// (`packages/kube/src/uri.ts`), each segment percent-encoded.
+fn object_of(uri: &str) -> Option<(Option<String>, String)> {
+    let decoded = |segment: &str| percent_decode_str(segment).decode_utf8_lossy().into_owned();
+    let segments: Vec<&str> = uri.strip_prefix("k8s://")?.split('/').collect();
+    match segments.as_slice() {
+        [_, _, _, _, name] => Some((None, decoded(name))),
+        [_, _, _, _, namespace, name] => Some((Some(decoded(namespace)), decoded(name))),
+        _ => None,
+    }
+}
+
+/// The editors a comparison's URI opens,
+/// `diff://<space>/objects?left=<uri>&right=<uri>` or
+/// `diff://edit/<kind>?editor=<uri>` (`packages/kube/src/uri.ts`).
+fn compared(uri: &str) -> Vec<String> {
+    let query = uri
+        .strip_prefix("diff://")
+        .and_then(|rest| rest.split_once('?'))
+        .map_or("", |(_, query)| query);
+    form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| matches!(key.as_ref(), "left" | "right" | "editor"))
+        .map(|(_, uri)| uri.into_owned())
+        .collect()
+}
+
+/// The namespaces a list's URI is scoped to,
+/// `k8s-list://<space>/[<group>/]<version>/<resource>?ns=a,b`.
+fn list_scope(uri: &str) -> Vec<String> {
+    let query = uri
+        .strip_prefix("k8s-list://")
+        .and_then(|rest| rest.split_once('?'))
+        .map_or("", |(_, query)| query);
+    form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key == "ns")
+        .flat_map(|(_, names)| names.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("no space {0:?}")]
@@ -80,6 +145,11 @@ struct Inner {
     /// one.
     written: Mutex<u64>,
     scheduled: AtomicBool,
+    /// Told when the writer thread's write panics.
+    reporter: OnceLock<Reporter>,
+    /// The last write failed and said so as a problem, which this store takes
+    /// back when a write works.
+    unsaved: AtomicBool,
 }
 
 struct Data {
@@ -142,12 +212,15 @@ impl State {
             data: Mutex::new(Data { file, version: 0 }),
             written: Mutex::new(0),
             scheduled: AtomicBool::new(false),
+            reporter: OnceLock::new(),
+            unsaved: AtomicBool::new(false),
         });
         let (wake, woken) = mpsc::channel();
         let writer = Arc::clone(&inner);
+        let scope = inject::Scope::current();
         std::thread::Builder::new()
             .name("state-writer".into())
-            .spawn(move || writer.write_after(delay, &woken))
+            .spawn(move || writer.write_after(delay, &woken, scope))
             .expect("the state writer thread starts");
         Self { inner, wake }
     }
@@ -180,7 +253,7 @@ impl State {
             return Choices::default();
         };
         serde_json::from_str(value.get()).unwrap_or_else(|error| {
-            eprintln!("could not read the contexts' modes from the state: {error}");
+            tracing::warn!(%error, "could not read the contexts' modes from the state");
             Choices::default()
         })
     }
@@ -205,11 +278,49 @@ impl State {
         value
             .map(|value| {
                 serde_json::from_str(value.get()).unwrap_or_else(|error| {
-                    eprintln!("could not read the forwards of {space} from the state: {error}");
+                    tracing::warn!(space, %error, "could not read the forwards of a space from the state");
                     Saved::default()
                 })
             })
             .unwrap_or_default()
+    }
+
+    /// The namespaces the spaces are on, and the namespaces and the names of
+    /// their saved forwards' targets and of their recent editors, as far as
+    /// they read back.
+    pub(crate) fn named(&self) -> Named {
+        let data = self.inner.lock();
+        let mut named = Named::default();
+        for record in &data.file.spaces {
+            let chosen = record
+                .state
+                .get(NAMESPACES)
+                .and_then(|value| serde_json::from_str::<Vec<String>>(value.get()).ok());
+            named.namespaces.extend(chosen.into_iter().flatten());
+            let saved = record
+                .state
+                .get(FORWARDS)
+                .and_then(|value| serde_json::from_str::<Saved>(value.get()).ok());
+            for forward in saved.into_iter().flat_map(|saved| saved.forwards) {
+                named.namespaces.insert(forward.target.namespace);
+                named.objects.insert(forward.target.name);
+            }
+            let recent = record
+                .state
+                .get(RECENT)
+                .and_then(|value| serde_json::from_str::<Vec<Recent>>(value.get()).ok());
+            for editor in recent.into_iter().flatten() {
+                let compared = compared(&editor.uri);
+                for uri in std::iter::once(&editor.uri).chain(&compared) {
+                    if let Some((namespace, name)) = object_of(uri) {
+                        named.namespaces.extend(namespace);
+                        named.objects.insert(name);
+                    }
+                    named.namespaces.extend(list_scope(uri));
+                }
+            }
+        }
+        named
     }
 
     /// Replaces a space's forwards, unless the space is gone.
@@ -337,6 +448,19 @@ impl State {
         self.inner.write()
     }
 
+    /// Tells `reporter` when a write of the writer thread panics, which the
+    /// thread goes on after.
+    pub(crate) fn report_to(&self, reporter: Reporter) {
+        // Once: the core that opened the store is the one that reports.
+        let _ = self.inner.reporter.set(reporter);
+    }
+
+    /// Whether the writer thread can go on after a panic: not once the state
+    /// lock is poisoned, since nothing else saves.
+    pub(crate) fn can_write(&self) -> bool {
+        !self.inner.data.is_poisoned()
+    }
+
     fn changed(&self, data: &mut Data) {
         data.version += 1;
         if !self.inner.scheduled.swap(true, Ordering::AcqRel) {
@@ -352,22 +476,42 @@ impl Inner {
     }
 
     /// The writer thread: once woken, waits [`WRITE_DELAY`], then writes
-    /// everything changed so far. Ends with the store.
-    fn write_after(&self, delay: Duration, woken: &Receiver<()>) {
+    /// everything changed so far. Ends with the store. A write that panics
+    /// is told to the reporter and leaves the changes for the next one.
+    fn write_after(&self, delay: Duration, woken: &Receiver<()>, scope: inject::Scope) {
         while woken.recv().is_ok() {
             std::thread::sleep(delay);
             self.scheduled.store(false, Ordering::Release);
-            if let Err(error) = self.write() {
-                eprintln!(
-                    "could not save the state to {}: {error}",
-                    self.path.display()
-                );
+            let written = catch_unwind(AssertUnwindSafe(|| {
+                scope.check("state writer");
+                self.write()
+            }));
+            match written {
+                Ok(Ok(())) => {
+                    if self.unsaved.swap(false, Ordering::AcqRel) {
+                        problems::clear(ErrorCode::StateUnsaved);
+                    }
+                }
+                Ok(Err(error)) => {
+                    tracing::error!(path = %self.path.display(), %error, "could not save the state");
+                    self.unsaved.store(true, Ordering::Release);
+                    problems::report(IpcError::new(
+                        ErrorCode::StateUnsaved,
+                        "Twigo could not save its state, so what you change is lost when it quits",
+                    ));
+                }
+                Err(_) => {
+                    if let Some(reporter) = self.reporter.get() {
+                        reporter.panicked("state writer");
+                    }
+                }
             }
         }
     }
 
     fn write(&self) -> io::Result<()> {
-        let mut written = self.written.lock().expect("state write lock");
+        // Its number holds no invariant a panic could break.
+        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
         let (version, json) = {
             let data = self.lock();
             if data.version == *written {
@@ -415,14 +559,14 @@ fn read(path: &Path) -> File {
 
 fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
     let aside = path.with_extension("json.unreadable");
-    eprintln!(
-        "the state in {} cannot be read ({reason}); it moves to {}",
-        path.display(),
-        aside.display()
-    );
+    tracing::error!(path = %path.display(), %reason, "the state cannot be read, so it moves to a file of its name with .unreadable");
     if let Err(error) = std::fs::rename(path, &aside) {
-        eprintln!("could not move the state aside: {error}");
+        tracing::error!(path = %path.display(), %error, "could not move the state aside");
     }
+    problems::report(IpcError::new(
+        ErrorCode::StateSetAside,
+        "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+    ));
     File {
         version: VERSION,
         ..File::default()
@@ -431,11 +575,11 @@ fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
 
 impl From<&Error> for twigo_ipc::IpcError {
     fn from(error: &Error) -> Self {
-        let kind = match error {
-            Error::NoSpace(_) => twigo_ipc::ErrorKind::NotFound,
-            Error::Reserved(_) => twigo_ipc::ErrorKind::Permissions,
-            Error::NotJson { .. } => twigo_ipc::ErrorKind::InvalidInput,
+        let code = match error {
+            Error::NoSpace(_) => twigo_ipc::ErrorCode::SpaceNotFound,
+            Error::Reserved(_) => twigo_ipc::ErrorCode::StateReserved,
+            Error::NotJson { .. } => twigo_ipc::ErrorCode::StateNotJson,
         };
-        Self::new(kind, error.to_string())
+        Self::new(code, error.to_string())
     }
 }

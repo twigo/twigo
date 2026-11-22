@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use http::StatusCode;
 use tokio::time::{Instant, sleep};
-use twigo_ipc::ViewState;
+use twigo_ipc::{ErrorCode, ViewState};
 use twigo_kube::client::{Actor, Budgets, Class};
 
 use super::*;
@@ -16,6 +16,15 @@ pub(super) fn forbidden() -> ViewState {
     ViewState::Forbidden {
         verb: "watch".to_owned(),
         resource: "pods".to_owned(),
+    }
+}
+
+pub(super) fn waits_on(state: &ViewState) -> Option<ErrorCode> {
+    match state {
+        ViewState::Connecting { cause } | ViewState::Stale { cause } => {
+            cause.as_ref().map(|cause| cause.code)
+        }
+        _ => None,
     }
 }
 
@@ -568,7 +577,7 @@ async fn failures_back_off_from_half_a_second_to_five_and_events_reset_it() {
     fake.state().unavailable = 1;
     fake.state().requests.clear();
     fake.end_watches();
-    until(&mut pods, |state| *state == ViewState::Stale).await;
+    until(&mut pods, |state| matches!(state, ViewState::Stale { .. })).await;
     ready(&mut pods).await;
     let after = gaps(&fake);
     assert_eq!(after.len(), 1);
@@ -1245,7 +1254,7 @@ async fn rejected_credentials_wait_to_be_subscribed_again() {
     let mut again = hub.rows(query(&["a"])).await.unwrap();
     assert_eq!(
         again.state(),
-        ViewState::Connecting,
+        ViewState::Connecting { cause: None },
         "not the failure it retries"
     );
     ready(&mut again).await;
@@ -1293,7 +1302,9 @@ async fn whole_rows_wait_for_a_whole_list() {
     fake.state().unavailable = usize::MAX;
     let mut dead = hub.rows(query(&["c"])).await.unwrap();
     let started = Instant::now();
-    assert_eq!(dead.whole().await.unwrap_err(), ViewState::Stale);
+    let failed = dead.whole().await.unwrap_err();
+    assert!(matches!(failed, ViewState::Stale { .. }), "{failed:?}");
+    assert_eq!(waits_on(&failed), Some(ErrorCode::ServerUnavailable));
     assert!(started.elapsed() >= 2 * RETRY_WITHIN);
 
     fake.state().unavailable = 0;
@@ -1361,7 +1372,11 @@ async fn a_name_that_can_be_no_path_segment_is_refused() {
     let (hub, _clients) = Fake::default().hub(Budgets::default());
     for name in ["a/pods", "a%2Fb", "..", ""] {
         let refused = hub.rows(query(&[name])).await.err().unwrap();
-        assert_eq!(refused.kind, twigo_ipc::ErrorKind::InvalidInput, "{name:?}");
+        assert_eq!(
+            refused.code,
+            twigo_ipc::ErrorCode::InternalRequest,
+            "{name:?}"
+        );
     }
     assert!(hub.scopes().is_empty());
 }
@@ -1407,7 +1422,15 @@ fn names_stay_in_their_segment() {
 fn parts_combine_into_their_least_ready_state() {
     let syncing = |loaded| ViewState::Syncing { loaded };
     assert_eq!(
-        combine([ViewState::Ready, syncing(2), syncing(3), ViewState::Stale].into_iter()),
+        combine(
+            [
+                ViewState::Ready,
+                syncing(2),
+                syncing(3),
+                ViewState::Stale { cause: None }
+            ]
+            .into_iter()
+        ),
         syncing(5)
     );
     assert_eq!(
@@ -1578,7 +1601,9 @@ async fn the_namespaces_count_their_10_s_from_the_first_failure_and_never_cut_a_
         .no_endpoints
         .insert("/api/v1/namespaces".into());
     let answered = tokio::time::timeout(Duration::from_secs(60), hub.namespaces("kind-test"));
-    assert_eq!(answered.await.expect("it gives up"), Err(ViewState::Stale));
+    let gave_up = answered.await.expect("it gives up").unwrap_err();
+    assert!(matches!(gave_up, ViewState::Stale { .. }), "{gave_up:?}");
+    assert_eq!(waits_on(&gave_up), Some(ErrorCode::ServerUnavailable));
     assert!(
         (18..19).contains(&started.elapsed().as_secs()),
         "10 s after the slot came free at 8 s, not after the call: {:?}",
@@ -1653,6 +1678,7 @@ async fn new_subscriptions_make_a_refused_part_try_again_within_5_s_and_no_often
 
 #[tokio::test(start_paused = true)]
 async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
+    let events = twigo_log::capture();
     let fake = Fake::default();
     fake.add("pods", Some("a"), "p1");
     fake.streams("", Streams::Status(StatusCode::NOT_FOUND));
@@ -1666,4 +1692,115 @@ async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
     assert!(gaps.len() >= 20, "{} tries in 120 s", gaps.len() + 1);
     let wait = Duration::from_millis(500)..=RETRY_WITHIN;
     assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
+
+    let lines = events.lines();
+    let [refused] = &lines[..] else {
+        panic!("one event for twenty tries of one refusal: {lines:?}");
+    };
+    assert_eq!(refused["level"], "WARN");
+    assert_eq!(refused["fields"]["code"], "server.not-found");
+    assert_eq!(refused["fields"]["context"], "kind-test");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_all_namespaces_list_whose_context_has_no_clients_leaves_one_event_with_the_code() {
+    let events = twigo_log::capture();
+    let connect: Connect = Arc::new(|_context| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ContextInvalid,
+                "the certificate-authority file is gone",
+            ))
+        })
+    });
+    let hub = Hub::new(connect);
+    let mut pods = hub.rows(query(&[])).await.unwrap();
+    until(&mut pods, |state| matches!(state, ViewState::Error { .. })).await;
+    sleep(Duration::from_secs(120)).await;
+
+    let lines = events.lines();
+    let [refused] = &lines[..] else {
+        panic!("one event for many tries of one failure: {lines:?}");
+    };
+    assert_eq!(refused["level"], "WARN");
+    assert_eq!(refused["fields"]["code"], "context.invalid");
+    assert_eq!(refused["fields"]["context"], "kind-test");
+    assert!(!refused.to_string().contains("certificate-authority"));
+}
+
+/// Panics under the lock of the store a scope's rows are kept in.
+fn poison_store(hub: &Hub) {
+    let upstream = hub
+        .inner
+        .registry()
+        .entries
+        .values()
+        .next()
+        .expect("one upstream")
+        .upstream::<Row>();
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        upstream.store.items(|_| panic!("a reader's bug"));
+    }));
+    assert!(poisoned.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_panics_as_it_joins_does_not_keep_a_subscriber_of_the_scope() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut first).await;
+    poison_store(&hub);
+    let joined =
+        futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(hub.rows(query(&["a"]))))
+            .await;
+    assert!(joined.is_err());
+    assert_eq!(hub.subscribers("pods"), 1, "the first list's alone");
+}
+
+fn error_code(state: &ViewState) -> Option<twigo_ipc::ErrorCode> {
+    match state {
+        ViewState::Error { error } => Some(error.code),
+        _ => None,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_whose_upstream_panics_says_error_and_a_new_list_starts_it_again() {
+    twigo_panic::inject::arm("hub upstream", 1);
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    until(&mut first, |state| error_code(state).is_some()).await;
+    assert_eq!(
+        error_code(&first.state()),
+        Some(twigo_ipc::ErrorCode::InternalPanic)
+    );
+    sleep(Duration::from_secs(600)).await;
+    assert!(
+        error_code(&first.state()).is_some(),
+        "nothing starts it by itself"
+    );
+
+    let mut second = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut second).await;
+    assert_eq!(names(&second), ["p1"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panic_under_the_stores_lock_does_not_poison_the_lists_after_it() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut first).await;
+    twigo_panic::inject::arm("store lock", 1);
+    fake.add("pods", Some("a"), "p2");
+    until(&mut first, |state| error_code(state).is_some()).await;
+
+    let mut second = hub.rows(query(&["a"])).await.unwrap();
+    until_rows(&mut second, &["p1", "p2"]).await;
+    ready(&mut second).await;
 }

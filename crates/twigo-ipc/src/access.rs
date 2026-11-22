@@ -45,10 +45,15 @@ pub enum Environment {
 pub enum ModeSource {
     /// The admin's file, which the UI cannot change or unlock. `pattern` is
     /// the entry that matched the context; none when the file cannot be
-    /// read, which locks every context.
+    /// read, which locks every context, and `reason` says why in words that
+    /// quote nothing of it: the kind of the read's failure, or where it does
+    /// not parse.
     PolicyFile {
         file: String,
         pattern: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        reason: Option<String>,
     },
     /// No source lists it now, so nothing says what it lets through.
     Unlisted,
@@ -204,10 +209,12 @@ fn write_source(f: &mut fmt::Formatter<'_>, source: &ModeSource) -> fmt::Result 
         ModeSource::PolicyFile {
             file,
             pattern: Some(pattern),
+            ..
         } => write!(f, " by {pattern} in {file}"),
         ModeSource::PolicyFile {
             file,
             pattern: None,
+            ..
         } => write!(f, " because {file} cannot be read"),
         ModeSource::User { .. } => write!(f, " by your choice"),
         ModeSource::Kubeconfig => write!(f, " by its kubeconfig"),

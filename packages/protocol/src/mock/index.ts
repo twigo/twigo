@@ -6,12 +6,13 @@ import type {
   ResponseOf,
   SubscriptionCommand,
 } from "../backend";
-import { IpcError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   Column,
   KeyboardLayout,
   ListBatch,
   MetricsState,
+  Report,
   RowId,
   ShellEnvironment,
   ShellKind,
@@ -34,6 +35,23 @@ import {
   type AuthScenario,
 } from "./auth";
 import { Cluster } from "./cluster";
+import {
+  ANONYMOUS,
+  CAUSE_SCENARIOS,
+  CAUSED,
+  DISCOVERY_FAILS,
+  LIST_FAILS,
+  LOGS_PANICKED,
+  catalogOf,
+  discoveryFailure,
+  listFailure,
+  panickedLogs,
+  isCauseScenario,
+  isKubeconfigScenario,
+  KUBECONFIG_SCENARIOS,
+  type CauseScenario,
+  type KubeconfigScenario,
+} from "./diagnostics";
 import {
   FORWARD_SCENARIOS,
   isForwardScenario,
@@ -84,7 +102,6 @@ import {
 } from "./terminal";
 import { recordedSchema } from "./schemas";
 import {
-  CONTEXTS,
   FORBIDDEN,
   NAMESPACES,
   POD_COUNT,
@@ -97,6 +114,7 @@ import french from "./layouts/french.json";
 import german from "./layouts/german.json";
 import ukrainian from "./layouts/ukrainian.json";
 import us from "./layouts/us.json";
+import REPORT from "./report.json";
 import RESOURCES from "./resources.json";
 import {
   compileQuery,
@@ -127,23 +145,26 @@ export { SCRAPE_MS } from "./metrics";
  * `live` connects, syncs and then changes pods every second, and refuses
  * the lists `FORBIDDEN` names; any other value pins that state.
  */
-type ListScenario = "live" | ViewState["state"];
+type ListScenario = "live" | ViewState["state"] | CauseScenario;
 
 /**
  * A list scenario, `shellTimeout`: live lists while the login shell's
  * environment timed out, `policyFile`: live lists with an admin's policy
  * file over `prod-*` that also sends `dev`'s terminal through the proxy,
+ * `policyFileUnreadable`: live lists while that file cannot be read, so every
+ * context is read-only and says why,
  * `viewer`: live lists for a person who may only read, `protection`: live
  * lists with `qa`, which nobody marked, and `analytics`, whose kubeconfig says
  * read-only and which the person made read-write, open on the rail,
  * or a pinned state of prod-eu's credentials, or what `apply_preview` answers
  * to an edit (`applyConflicts`), or an open object that changes on its own
  * (`serverChange`, `statusChange`), or one that an apply leaves late
- * (`applyLate`), or `rbacNamespaces`: live lists for a person whose
- * RoleBindings reach only the namespace `default` and who may list
- * namespaces, so "All namespaces" has the rows of `default` with the other
- * namespaces left out and counted, and one of several namespaces has the
- * rows of `default` and every other namespace refused, or
+ * (`applyLate`), or one that ends on an internal error (`objectPanicked`), or
+ * `rbacNamespaces`: live lists for a person whose RoleBindings reach only the
+ * namespace `default` and who may list namespaces, so "All namespaces" has the
+ * rows of `default` with the other namespaces left out and counted, and one of
+ * several namespaces has the rows of `default` and every other namespace
+ * refused, or
  * `rbacTypedNamespaces`: live lists for a person bound in `default` and
  * `payments` who may not list namespaces, so the picker takes names typed,
  * "All namespaces" is refused, and a selection has the rows of those two
@@ -158,34 +179,52 @@ type ListScenario = "live" | ViewState["state"];
  * or while port-forwards are busy, lose their pod, fail, queue, come back
  * from an earlier run or are forbidden (`forwardBusy` and the like), or
  * while the context's Metrics API is not served, does not answer or refuses
- * the person (`metricsNone` and the like).
+ * the person (`metricsNone` and the like), live lists while the catalog's
+ * kubeconfig files fail (`kubeconfigFailures` and the like), `discoveryFails`:
+ * live lists of spaces whose discovery fails, each for a reason of its own,
+ * `logsPanicked`: live lists while every log stream ends on an internal error,
+ * or `problems`:
+ * live lists while Twigo's saved state was set aside and its audit log cannot
+ * open, or `problemsCleared`: live lists while the state cannot be saved until
+ * a save works 8 s later, and fails again 8 s after that. A pinned cause
+ * (`connectRefused` and the like) is a list scenario.
  */
 export type MockScenario =
   | ListScenario
   | "shellTimeout"
   | "policyFile"
+  | "policyFileUnreadable"
   | "viewer"
   | "rbacNamespaces"
   | "rbacTypedNamespaces"
   | "partsQueued"
   | "protection"
+  | "problems"
+  | "problemsCleared"
   | AuthScenario
   | EditScenario
   | ShellScenario
   | ApprovalScenario
   | TerminalScenario
   | ForwardScenario
-  | MetricsScenario;
+  | MetricsScenario
+  | KubeconfigScenario
+  | typeof DISCOVERY_FAILS
+  | typeof LIST_FAILS
+  | typeof LOGS_PANICKED;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
   "shellTimeout",
   "policyFile",
+  "policyFileUnreadable",
   "viewer",
   "rbacNamespaces",
   "rbacTypedNamespaces",
   "partsQueued",
   "protection",
+  "problems",
+  "problemsCleared",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
@@ -193,6 +232,11 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...TERMINAL_SCENARIOS,
   ...FORWARD_SCENARIOS,
   ...METRICS_SCENARIOS,
+  ...KUBECONFIG_SCENARIOS,
+  ...CAUSE_SCENARIOS,
+  DISCOVERY_FAILS,
+  LIST_FAILS,
+  LOGS_PANICKED,
   "queued",
   "connecting",
   "syncing",
@@ -223,11 +267,35 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   dvorak,
 };
 
+const AUDIT_OFF = wire(
+  "audit.off",
+  "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+);
+
+/** What Rust lists when the state file was set aside and the audit log cannot open, in its words. */
+const PROBLEMS = [
+  wire(
+    "state.set-aside",
+    "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+  ),
+  AUDIT_OFF,
+];
+
+/** What `problemsCleared` lists while the state cannot be saved, and how long until a save works, and until it fails again. */
+const UNSAVED = [
+  wire(
+    "state.unsaved",
+    "Twigo could not save its state, so what you change is lost when it quits",
+  ),
+  AUDIT_OFF,
+];
+const SAVE_WORKS_MS = 8000;
+
 /** What twigo-env reported for a `.zshrc` of `echo "Loading nvm…"; sleep 60` (2026-11-01). */
 const SHELL_TIMEOUT: ShellEnvironment = {
   state: "failed",
   shell: "/bin/zsh",
-  reason: "did not answer in 10 s",
+  reason: wire("environment.unresolved", "did not answer in 10 s"),
   output: "Loading nvm…\n",
 };
 
@@ -256,25 +324,39 @@ export function createMockBackend(
   const lists: ListScenario =
     scenario === "shellTimeout" ||
     scenario === "policyFile" ||
+    scenario === "policyFileUnreadable" ||
     scenario === "viewer" ||
     scenario === "rbacNamespaces" ||
     scenario === "rbacTypedNamespaces" ||
     scenario === "partsQueued" ||
     scenario === "protection" ||
+    scenario === "problems" ||
+    scenario === "problemsCleared" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
     isApprovalScenario(scenario) ||
     isTerminalScenario(scenario) ||
     isForwardScenario(scenario) ||
-    isMetricsScenario(scenario)
+    isMetricsScenario(scenario) ||
+    isKubeconfigScenario(scenario) ||
+    scenario === DISCOVERY_FAILS ||
+    scenario === LIST_FAILS ||
+    scenario === LOGS_PANICKED
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
     isMetricsScenario(scenario) ? scenario : undefined,
   );
   const auth = new MockAuth(pinsAuth ? scenario : undefined);
-  const access = new MockAccess(scenario === "policyFile");
+  const access = new MockAccess(
+    scenario === "policyFile",
+    undefined,
+    catalogOf(scenario),
+    scenario === "policyFileUnreadable"
+      ? "it is not JSON at line 3, column 1"
+      : undefined,
+  );
   const approvals = new MockApprovals(
     isApprovalScenario(scenario) ? scenario : undefined,
     access,
@@ -314,7 +396,7 @@ export function createMockBackend(
 
   const space = (id: string) => {
     const found = spaces.find((candidate) => candidate.id === id);
-    if (!found) throw new IpcError("notFound", `no space ${id}`);
+    if (!found) throw new IpcError("space.not-found", `no space ${id}`);
     return found;
   };
 
@@ -336,7 +418,8 @@ export function createMockBackend(
 
   const subscription = (id: number) => {
     const found = subscriptions.get(id);
-    if (!found) throw new IpcError("notFound", `no subscription ${id}`);
+    if (!found)
+      throw new IpcError("subscription.not-found", `no subscription ${id}`);
     return found;
   };
 
@@ -347,7 +430,8 @@ export function createMockBackend(
   >();
   const shellOf = (id: number) => {
     const found = shells.get(id);
-    if (!found) throw new IpcError("notFound", `no session ${id}`);
+    if (!found)
+      throw new IpcError("subscription.not-found", `no session ${id}`);
     return found;
   };
   const terminals = new Map<
@@ -364,12 +448,19 @@ export function createMockBackend(
     const parked = terminals.get(id);
     if (parked) {
       if (!parked.terminal) {
-        throw new IpcError("conflict", `session ${id} has not opened`);
+        throw new IpcError(
+          "subscription.not-found",
+          `session ${id} has not opened`,
+        );
       }
       return parked.terminal;
     }
     const { shell } = shellOf(id);
-    if (!shell) throw new IpcError("conflict", `session ${id} has not opened`);
+    if (!shell)
+      throw new IpcError(
+        "subscription.not-found",
+        `session ${id} has not opened`,
+      );
     return shell;
   };
 
@@ -378,14 +469,19 @@ export function createMockBackend(
       (candidate) =>
         candidate.namespace === namespace && candidate.name === name,
     );
-    if (!pod) throw new IpcError("notFound", `pods "${name}" not found`);
+    if (!pod)
+      throw new IpcError("server.not-found", `pods "${name}" not found`);
     return shellContainers(pod, shellScenario);
   };
 
   const objects = new Map<number, MockObject>();
   const object = (id: number) => {
     const found = objects.get(id);
-    if (!found) throw new IpcError("notFound", `no object subscription ${id}`);
+    if (!found)
+      throw new IpcError(
+        "subscription.not-found",
+        `no object subscription ${id}`,
+      );
     return found;
   };
 
@@ -446,7 +542,10 @@ export function createMockBackend(
     secret: (id) => {
       const context = objectContexts.get(id);
       if (context === undefined) {
-        throw new IpcError("notFound", `no object subscription ${id}`);
+        throw new IpcError(
+          "subscription.not-found",
+          `no object subscription ${id}`,
+        );
       }
       return { context, ...object(id).names };
     },
@@ -465,7 +564,11 @@ export function createMockBackend(
   const logs = new Map<number, MockLogs>();
   const log = (id: number) => {
     const found = logs.get(id);
-    if (!found) throw new IpcError("notFound", `no logs subscription ${id}`);
+    if (!found)
+      throw new IpcError(
+        "subscription.not-found",
+        `no logs subscription ${id}`,
+      );
     return found;
   };
   /** The cluster's followed logs go to the sessions in the order they opened (ARCHITECTURE 3.2). */
@@ -501,8 +604,11 @@ export function createMockBackend(
           scenario !== "viewer" || ["get", "list", "watch"].includes(verb),
       ),
     space_open: (name) => {
-      if (!CONTEXTS.some((context) => context.name === name)) {
-        throw new IpcError("notFound", `no source lists the context ${name}`);
+      if (!access.has(name)) {
+        throw new IpcError(
+          "context.not-listed",
+          `no source lists the context ${name}`,
+        );
       }
       const open = spaces.find(
         (candidate) =>
@@ -515,7 +621,8 @@ export function createMockBackend(
     },
     cluster_version: (name) => {
       const version = VERSIONS[name];
-      if (!version) throw new IpcError("notFound", `no context ${name}`);
+      if (!version)
+        throw new IpcError("context.not-listed", `no context ${name}`);
       auth.check(name);
       return { gitVersion: version };
     },
@@ -524,19 +631,34 @@ export function createMockBackend(
     exec_review: () => auth.review(),
     exec_trust: (digests) => auth.trust(digests),
     url_open: (url) => {
-      if (!signInLink(url)) {
+      if (!openableLink(url)) {
         throw new IpcError(
-          "invalidInput",
-          `Twigo opens only sign-in links: ${url}`,
+          "link.refused",
+          `Twigo opens only https links and http links to this computer: ${url}`,
         );
       }
       globalThis.open(url, "_blank", "noopener,noreferrer");
       return null;
     },
+    diagnostics_log: ({ level, message, stack, source }) => {
+      console[level](`[${source}] ${message}`, stack ?? "");
+      return null;
+    },
+    log_reveal: () => null,
+    log_level_set: () => null,
+    report_problem: () => REPORT as Report,
+    report_open_issue: (request) => {
+      console.info("[report_open_issue]", request);
+      return null;
+    },
+    report_save: (request) => {
+      console.info("[report_save]", request);
+      return `~/Downloads/twigo-report-${new Date().toISOString().slice(0, 10)}.txt`;
+    },
     namespaces_list: (id) => {
       space(id);
       if (lists === "forbidden" || scenario === "rbacTypedNamespaces") {
-        throw new IpcError("forbidden", "you may not list namespaces");
+        throw new IpcError("server.forbidden", "You may not list namespaces.");
       }
       return [...NAMESPACES].sort();
     },
@@ -545,7 +667,7 @@ export function createMockBackend(
       const schema = recordedSchema(group, version, kind);
       if (schema === undefined) {
         throw new IpcError(
-          "notFound",
+          "openapi.no-kind",
           `the cluster's OpenAPI for ${group}/${version} has no kind ${kind}`,
         );
       }
@@ -571,7 +693,10 @@ export function createMockBackend(
         try {
           JSON.parse(value);
         } catch {
-          throw new IpcError("invalidInput", `the value of ${key} is not JSON`);
+          throw new IpcError(
+            "state.not-json",
+            `the value of ${key} is not JSON`,
+          );
         }
       }
       for (const { space: id, key, value } of entries) {
@@ -608,7 +733,7 @@ export function createMockBackend(
     shell_containers: ({ space: id, namespace, pod }) => {
       const [context] = space(id).contexts;
       if (context === undefined) {
-        throw new IpcError("notFound", `space ${id} has no context`);
+        throw new IpcError("context.not-listed", `space ${id} has no context`);
       }
       return containersOf(context, namespace, pod);
     },
@@ -721,13 +846,16 @@ export function createMockBackend(
     list_subscribe: (query, onMessage) => {
       const [context] = space(query.space).contexts;
       if (context === undefined) {
-        throw new IpcError("notFound", `space ${query.space} has no context`);
+        throw new IpcError(
+          "context.not-listed",
+          `space ${query.space} has no context`,
+        );
       }
       const { group, version, resource } = query.gvr;
       const kind = KINDS[`${group}/${version}/${resource}`];
       if (!kind) {
         throw new IpcError(
-          "notFound",
+          "apply.kind-not-served",
           `the mock backend serves only pods, nodes, deployments, jobs and events, not ${resource}`,
         );
       }
@@ -759,16 +887,23 @@ export function createMockBackend(
         verb: "list",
         resource,
       };
-      const state: Exclude<ListScenario, "forbidden"> | ViewState =
-        typeof selected === "string"
+      const failed = listFailure(scenario, context);
+      const state: Exclude<ListScenario, "forbidden"> | ViewState = failed
+        ? { state: "error", error: failed }
+        : typeof selected === "string"
           ? {
               state: "error",
-              error: { kind: "invalidInput", message: selected },
+              error: wire("server.invalid", selected, {
+                reason: "BadRequest",
+                causes: [],
+              }),
             }
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
             ? forbidden
-            : lists;
+            : lists === "live" && ANONYMOUS.includes(context)
+              ? PINNED.unauthorized
+              : lists;
       subscriptions.set(
         id,
         new Subscription(
@@ -821,6 +956,12 @@ export function createMockBackend(
                 ...(scenario === "statusChange" && {
                   change: "status" as const,
                 }),
+                ...(isCauseScenario(scenario) && {
+                  status: CAUSED[scenario],
+                }),
+                ...(scenario === "objectPanicked" && {
+                  ends: CAUSED.listPanicked,
+                }),
               },
         ),
       );
@@ -837,7 +978,11 @@ export function createMockBackend(
           view,
           context === undefined ? undefined : cluster(context),
           budget,
-          onMessage,
+          scenario === LOGS_PANICKED
+            ? (batch) => {
+                onMessage(panickedLogs(batch));
+              }
+            : onMessage,
         ),
       );
       return id;
@@ -846,7 +991,10 @@ export function createMockBackend(
       const parked = terminals.get(open.id);
       if (parked) {
         if (parked.terminal) {
-          throw new IpcError("conflict", `session ${open.id} opened already`);
+          throw new IpcError(
+            "session.started",
+            `session ${open.id} opened already`,
+          );
         }
         parked.terminal = new MockTerminal(
           {
@@ -870,7 +1018,10 @@ export function createMockBackend(
       }
       const found = shellOf(open.id);
       if (found.shell) {
-        throw new IpcError("conflict", `session ${open.id} opened already`);
+        throw new IpcError(
+          "session.started",
+          `session ${open.id} opened already`,
+        );
       }
       const [context] = space(found.target.space).contexts;
       found.shell = new MockShell(
@@ -890,9 +1041,26 @@ export function createMockBackend(
     kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
+    problems_watch: (_request, onMessage) => {
+      if (scenario === "problemsCleared") {
+        setTimeout(() => {
+          onMessage([AUDIT_OFF]);
+        }, SAVE_WORKS_MS);
+        setTimeout(() => {
+          onMessage(UNSAVED);
+        }, 2 * SAVE_WORKS_MS);
+        return UNSAVED;
+      }
+      return scenario === "problems" ? PROBLEMS : [];
+    },
     resources_watch: (id, onMessage) => {
       space(id);
+      const failure = discoveryFailure(scenario, id);
       const send = () => {
+        if (failure) {
+          onMessage({ state: "failed", error: failure });
+          return;
+        }
         onMessage({
           state: "ready",
           cluster: `mock://${id}`,
@@ -928,8 +1096,8 @@ export function createMockBackend(
   };
 }
 
-/** Rust's `sign_in_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
-function signInLink(url: string): boolean {
+/** Rust's `openable_url` rule: https, or http to localhost or 127.0.0.1, without a user part; WHATWG's URL parser may read an unusual link otherwise than Rust's. */
+function openableLink(url: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -966,13 +1134,15 @@ const PINNED: Readonly<
   ready: { state: "ready" },
   relisting: { state: "relisting" },
   stale: { state: "stale" },
+  ...CAUSED,
   unauthorized: { state: "unauthorized" },
   error: {
     state: "error",
-    error: {
-      kind: "unavailable",
-      message: "dial tcp 10.0.0.1:6443: connect: connection refused",
-    },
+    error: wire(
+      "server.invalid",
+      "field label not supported: spec.containers",
+      { reason: "BadRequest", causes: [] },
+    ),
   },
 };
 

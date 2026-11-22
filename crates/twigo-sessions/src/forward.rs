@@ -36,14 +36,15 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_cache::hub::{Hub, Resource, backoff};
-use twigo_ipc::{ErrorKind, ForwardState, Gvr, IpcError};
+use twigo_ipc::{ErrorCode, ForwardState, Gvr, IpcError};
+use twigo_panic::contain;
 
 use crate::pods::Reach;
 use cause::{Cause, Lift};
 use connect::{Connect, Kube};
 use connection::Fault;
 use pick::{Chosen, Known, Pick};
-use watching::{UNANSWERED_YET, Watching};
+use watching::{Watching, unanswered_yet};
 
 use listen::{Accepting, Socket, Sockets};
 
@@ -119,7 +120,7 @@ impl Target {
             .find(|(group, resource, ..)| *group == gvr.group && *resource == gvr.resource)
             .ok_or_else(|| {
                 IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ForwardUnsupportedTarget,
                     format!(
                         "{} cannot be forwarded to: a forward reaches a pod, a Service, or the pods of a Deployment, ReplicaSet, StatefulSet or DaemonSet",
                         crate::pods::resource_name(&gvr.group, &gvr.resource)
@@ -128,7 +129,7 @@ impl Target {
             })?;
         if namespace.is_empty() {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::InternalRequest,
                 format!("{name} names no namespace"),
             ));
         }
@@ -170,7 +171,7 @@ pub struct Status {
     pub queued: u32,
     pub sent: u64,
     pub received: u64,
-    pub failure: Option<String>,
+    pub failure: Option<IpcError>,
 }
 
 impl Status {
@@ -256,6 +257,9 @@ impl Forward {
                 (Phase::Failed(lift), ForwardState::Failed { error }, None)
             }
         };
+        if let Some((what, code)) = entered(&state) {
+            tracing::warn!(%code, "{what}");
+        }
         let (status, status_rx) = watch::channel(Status::new(state));
         let (control, control_rx) = mpsc::unbounded_channel();
         let (reports, reports_rx) = mpsc::unbounded_channel();
@@ -285,14 +289,28 @@ impl Forward {
             failed_after: 0,
             cut: 0,
         };
+        let task = tokio::spawn({
+            let shared = Arc::clone(&shared);
+            async move {
+                if contain("forward", supervisor.run()).await.is_err() {
+                    shared.fail_for_good(IpcError::panicked("this forward"));
+                }
+            }
+        });
         Self {
             shared,
             status: status_rx,
             control,
             sockets: sender,
-            task: tokio::spawn(supervisor.run()),
+            task,
             accepting,
         }
+    }
+
+    /// Its data path ended on a panic, which no command starts again: the
+    /// forward is to be stopped, or resumed as a new one.
+    pub fn ended(&self) -> bool {
+        self.task.is_finished()
     }
 
     pub fn status(&self) -> watch::Receiver<Status> {
@@ -382,9 +400,39 @@ struct Shared {
     received: AtomicU64,
 }
 
+fn entered(state: &ForwardState) -> Option<(&'static str, ErrorCode)> {
+    match state {
+        ForwardState::Reconnecting { reason } => Some(("a forward is reconnecting", reason.code)),
+        ForwardState::Failed { error } => Some(("a forward failed", error.code)),
+        _ => None,
+    }
+}
+
 impl Shared {
+    /// Every change of a forward's status goes through here, which says the
+    /// one that puts it in an error, by its code.
     fn update(&self, change: impl FnOnce(&mut Status) -> bool) {
-        self.status.send_if_modified(change);
+        self.status.send_if_modified(|status| {
+            let before = entered(&status.state);
+            let changed = change(status);
+            if let Some((what, code)) = entered(&status.state)
+                && Some((what, code)) != before
+            {
+                tracing::warn!(%code, "{what}");
+            }
+            changed
+        });
+    }
+
+    /// The data path is gone, and its connections with it.
+    fn fail_for_good(&self, error: IpcError) {
+        self.end.send_modify(|ends| *ends += 1);
+        self.update(|status| {
+            status.state = ForwardState::Failed { error };
+            status.connections = 0;
+            status.queued = 0;
+            true
+        });
     }
 
     fn pick(&self) -> std::sync::MutexGuard<'_, Pick> {
@@ -430,11 +478,11 @@ impl Shared {
         self.pick().failed(key, Instant::now());
     }
 
-    /// The upgrade to a pod behind a Service or a workload answered 404, in
-    /// `words`: whether another pod is left, which the status names then.
-    fn left(&self, key: &str, words: String) -> bool {
+    /// The upgrade to a pod behind a Service or a workload answered 404, as
+    /// `error`: whether another pod is left, which the status names then.
+    fn left(&self, key: &str, error: IpcError) -> bool {
         let now = Instant::now();
-        self.pick().left(key, words, now);
+        self.pick().left(key, error, now);
         matches!(self.choose(now), Chosen::Pod(_))
     }
 
@@ -609,7 +657,14 @@ impl Supervisor {
                 Some(control) = self.control.recv() => self.control(control),
                 Some(report) = self.reports.recv() => self.report(report),
                 Some(socket) = self.sockets.recv() => self.accepted(socket),
-                Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.publish(),
+                Some(ended) = self.tasks.join_next(), if !self.tasks.is_empty() => {
+                    if let Err(error) = ended
+                        && error.is_panic()
+                    {
+                        tracing::error!(context = %self.shared.config.context, "a connection of a forward panicked, so it ended");
+                    }
+                    self.publish();
+                }
                 opened = ready(&mut self.opening) => self.opened(opened),
                 () = changed(&mut self.watching) => self.look(),
                 proved = probed(&mut self.proof) => self.proved(proved),
@@ -823,16 +878,15 @@ impl Supervisor {
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 match fault {
                     Fault::Fatal(error) => self.fail(error),
                     // That pod is avoided: the proof chooses again.
                     Fault::Left { .. } => {}
-                    Fault::Port(words) | Fault::NoPod(words) => {
-                        self.unreachable(IpcError::new(ErrorKind::Unavailable, words).into(), true);
-                    }
+                    Fault::Port(refused) => self.unreachable(refused.into(), true),
+                    Fault::NoPod(error) => self.unreachable(error.into(), true),
                     Fault::Transient(cause) => self.unreachable(cause, true),
                     Fault::Lost => self.pause(),
                 }
@@ -871,10 +925,10 @@ impl Supervisor {
         });
     }
 
-    fn failure(&mut self, words: String) {
+    fn failure(&mut self, error: IpcError) {
         self.failed_after = self.accepted;
         self.shared.update(|status| {
-            status.failure = Some(words);
+            status.failure = Some(error);
             true
         });
     }
@@ -895,7 +949,7 @@ impl Supervisor {
             self.fail(cause);
             return;
         }
-        self.reconnecting(cause.into_error().message);
+        self.reconnecting(cause.into_error());
         if retry {
             self.pause();
         }
@@ -905,7 +959,7 @@ impl Supervisor {
     /// a person's proof is under way, which ends by itself. The space's
     /// proof ends with this result, and the forward goes on proving only
     /// while it has connections.
-    fn reconnecting(&mut self, reason: String) {
+    fn reconnecting(&mut self, reason: IpcError) {
         if self.phase == Phase::Starting {
             return;
         }
@@ -954,8 +1008,8 @@ impl Supervisor {
                 }
             }
             Report::Failed(number, fault) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 if number > self.cut {
                     self.ended(fault);
@@ -969,12 +1023,13 @@ impl Supervisor {
         match fault {
             Fault::Fatal(error) => self.fail(error),
             Fault::Port(_) | Fault::Left { alone: false, .. } => {}
-            Fault::NoPod(why) | Fault::Left { words: why, .. } => self.reconnecting(why),
+            Fault::NoPod(why) | Fault::Left { error: why, .. } => self.reconnecting(why),
             Fault::Transient(cause) if cause.is_gone() => self.fail(cause),
-            Fault::Transient(cause) => self.reconnecting(cause.into_error().message),
-            Fault::Lost => {
-                self.reconnecting("the connection to the cluster was lost".to_owned());
-            }
+            Fault::Transient(cause) => self.reconnecting(cause.into_error()),
+            Fault::Lost => self.reconnecting(IpcError::new(
+                ErrorCode::ConnectLost,
+                "the connection to the cluster was lost",
+            )),
         }
     }
 
@@ -990,10 +1045,10 @@ impl Supervisor {
             proof.no_pod_by = None;
             let why = match self.shared.pick().choose(now) {
                 Chosen::None(why) | Chosen::Unknown(Some(why)) => why,
-                Chosen::Unknown(None) => UNANSWERED_YET.to_owned(),
+                Chosen::Unknown(None) => unanswered_yet(),
                 Chosen::Pod(_) | Chosen::Fault(_) | Chosen::Refused(_) => return,
             };
-            self.unreachable(IpcError::new(ErrorKind::Unavailable, why).into(), false);
+            self.unreachable(why.into(), false);
         }
     }
 

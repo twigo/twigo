@@ -9,6 +9,10 @@ members = [
     "crates/*",
 ]
 
+[workspace.lints.clippy]
+print_stderr = "deny"
+print_stdout = "deny"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
@@ -26,7 +30,9 @@ twigo-env = { path = "crates/twigo-env" }
 twigo-ipc = { path = "crates/twigo-ipc" }
 twigo-keyboard = { path = "crates/twigo-keyboard" }
 twigo-kube = { path = "crates/twigo-kube" }
+twigo-log = { path = "crates/twigo-log" }
 twigo-netmon = { path = "crates/twigo-netmon" }
+twigo-panic = { path = "crates/twigo-panic" }
 twigo-policy = { path = "crates/twigo-policy" }
 twigo-quantity = { path = "crates/twigo-quantity" }
 twigo-sessions = { path = "crates/twigo-sessions" }
@@ -74,6 +80,7 @@ objc2 = "0.6.5"
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFArray", "CFData", "CFDictionary", "CFNotificationCenter", "CFString"] }
 objc2-io-kit = { version = "0.3.2", default-features = false, features = ["dispatch2", "libc", "pwr_mgt", "std"] }
 objc2-system-configuration = { version = "0.3.2", default-features = false, features = ["SCDynamicStore", "SCDynamicStoreKey", "SCSchemaDefinitions", "dispatch2", "std"] }
+os_info = { version = "3.15.0", default-features = false }
 percent-encoding = "2.3.2"
 pty-process = { version = "0.5.4", features = ["async"] }
 rcgen = "0.14.10"
@@ -98,6 +105,9 @@ tokio = "1.54.1"
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring"] }
 tokio-util = "0.7.20"
 tower = { version = "0.5.3", features = ["timeout", "util"] }
+tracing = "0.1.44"
+tracing-log = { version = "0.2.0", default-features = false, features = ["log-tracer", "std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt", "json", "smallvec", "std", "tracing-log"] }
 ts-rs = "12.0.1"
 wayland-client = "0.31.15"
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }

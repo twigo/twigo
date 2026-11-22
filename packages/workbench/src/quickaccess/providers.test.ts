@@ -119,6 +119,49 @@ test("ctx says each open space's connection, the version alone while connected",
   ]);
 });
 
+async function contexts(scenario: Parameters<typeof testWorkbench>[0]) {
+  const workbench = await testWorkbench(scenario);
+  const resolved = workbench.quickAccess.resolve("ctx ");
+  if (!resolved) throw new Error("no ctx provider");
+  return resolved.provider.items(resolved.filter, NOWHERE);
+}
+
+test("ctx says a context's problem in its words on its row, and the context may still be chosen", async () => {
+  const found = await contexts("kubeconfigFailures");
+  const orphan = found.find(({ id }) => id === "context:orphan");
+  expect(orphan?.state).toMatchObject({ tone: "warn" });
+  expect(orphan?.code).toBe("context.missing-user");
+  expect(orphan?.state?.label).toContain(
+    'no kubeconfig defines the user "orphan-admin"',
+  );
+  expect(orphan?.disabled).toBeUndefined();
+});
+
+test("ctx lists a file that failed as a group of its own with one row that cannot be chosen, under its name from ~", async () => {
+  const found = await contexts("kubeconfigFailures");
+  const broken = found.filter(({ group }) => group === "~/.kube/broken.yaml");
+  expect(broken).toEqual([
+    expect.objectContaining({
+      label:
+        "The file cannot be parsed: expected sequence start at line 7, column 10",
+      code: "kubeconfig.unparsable",
+      iconTone: "warn",
+      disabled: true,
+    }),
+  ]);
+  expect(
+    found.find(({ group }) => group === "~/.kube/work/locked.yaml"),
+  ).toMatchObject({ code: "kubeconfig.unreadable", disabled: true });
+});
+
+test("ctx of a catalog that lost no file has no row that cannot be chosen, and a good file's rows say no problem", async () => {
+  const found = await contexts("live");
+  expect(found.some(({ disabled }) => disabled)).toBe(false);
+  expect(
+    found.find(({ id }) => id === "context:kind-local"),
+  ).not.toHaveProperty("state");
+});
+
 test("ctx keeps its sections in order as it filters, best first in each", async () => {
   const { provider } = await items("ctx ");
   const found = await provider.items("l", NOWHERE);

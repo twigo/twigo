@@ -67,7 +67,7 @@ use kube::client::Body;
 use kube::core::GroupVersionKind;
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 use crate::errors;
 
@@ -106,11 +106,11 @@ impl From<&Error> for IpcError {
     fn from(error: &Error) -> Self {
         match error {
             Error::Request(error) => errors::request(error),
-            Error::NotListed(_) => IpcError::new(ErrorKind::NotFound, error.to_string()),
-            Error::Address(_)
-            | Error::Unverified(_)
-            | Error::Changing(_)
-            | Error::Decode { .. } => IpcError::new(ErrorKind::Unavailable, error.to_string()),
+            Error::NotListed(_) => IpcError::new(ErrorCode::OpenapiNotListed, error.to_string()),
+            Error::Address(_) | Error::Unverified(_) | Error::Changing(_) => {
+                IpcError::new(ErrorCode::OpenapiUnreadable, error.to_string())
+            }
+            Error::Decode { .. } => IpcError::new(ErrorCode::AnswerUndecodable, error.to_string()),
         }
     }
 }
@@ -159,9 +159,7 @@ impl Document {
             let url = listed(client, &path).await?;
             if let Some(document) = fetch(client, cache, &url).await? {
                 let parsed =
-                    tokio::task::spawn_blocking(move || serde_json::from_slice::<Whole>(&document))
-                        .await
-                        .expect("reading a document does not panic");
+                    twigo_panic::blocking(move || serde_json::from_slice::<Whole>(&document)).await;
                 return parsed
                     .map(|whole| Self {
                         schemas: whole.components.schemas,
@@ -245,17 +243,16 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
 
     let stored = {
         let (cache, url, hash) = (cache.clone(), url.to_owned(), hash.clone());
-        tokio::task::spawn_blocking(move || {
+        twigo_panic::blocking(move || {
             let document = cache.load(&url)?.filter(|document| names(&hash, document));
             Ok::<_, std::io::Error>(document)
         })
         .await
-        .expect("reading a file does not panic")
     };
     match stored {
         Ok(Some(document)) => return Ok(Some(document)),
         Ok(None) => {}
-        Err(error) => eprintln!("could not read the cached OpenAPI document {url}: {error}"),
+        Err(error) => tracing::warn!(url, %error, "could not read a cached OpenAPI document"),
     }
 
     let (status, document) = get(client, uri).await?;
@@ -267,12 +264,10 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
     }
     let stored = {
         let (cache, url, document) = (cache.clone(), url.to_owned(), document.clone());
-        tokio::task::spawn_blocking(move || cache.store(&url, &document))
-            .await
-            .expect("writing a file does not panic")
+        twigo_panic::blocking(move || cache.store(&url, &document)).await
     };
     if let Err(error) = stored {
-        eprintln!("could not cache the OpenAPI document {url}: {error}");
+        tracing::warn!(url, %error, "could not cache an OpenAPI document");
     }
     Ok(Some(document))
 }

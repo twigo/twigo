@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigNames, KubeconfigOffer,
+    AnswerKubeconfigOffer, ErrorCode, IpcError, KubeconfigNames, KubeconfigOffer,
     KubeconfigOfferAnswer, KubeconfigOfferEvent, KubeconfigOfferId, SubscriptionId,
 };
 use twigo_kube::kubeconfig::{Appended, Names, Outcome, Sources, WriteError, Written, append};
@@ -233,17 +233,17 @@ impl Offers {
         let id = answer.id;
         let mut state = self.state();
         let Some(held) = state.offers.get_mut(&id.0).filter(|held| held.shown) else {
-            return Err(IpcError::new(ErrorKind::NotFound, "this offer is gone"));
+            return Err(IpcError::new(ErrorCode::OfferGone, "this offer is gone"));
         };
         if *held.source.window != *window {
             return Err(IpcError::new(
-                ErrorKind::Forbidden,
+                ErrorCode::OfferOtherWindow,
                 "another window has this offer",
             ));
         }
         if held.answering {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::OfferAnswering,
                 "this offer is being answered",
             ));
         }
@@ -256,7 +256,7 @@ impl Offers {
                 KubeconfigOfferAnswer::Dismiss => ("dismissed".to_owned(), "what it holds"),
             };
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::OfferChanged,
                 format!(
                     "Nothing was {done}: the offer changed after it was shown to you, and now \
                      says {now}."
@@ -327,7 +327,7 @@ impl Offers {
                     ", so nothing in the offer would move now"
                 };
                 Err(IpcError::new(
-                    ErrorKind::Conflict,
+                    ErrorCode::OfferChanged,
                     format!(
                         "Nothing was moved into {target}: your kubeconfig files changed since the \
                          offer was made, and a move would now also leave out {}{then}.",
@@ -407,7 +407,7 @@ impl State {
             .written
             .outcome(held.source.sources.files())
             .unwrap_or_else(|error| {
-                eprintln!("could not tell what a move of an offer leaves out: {error}");
+                tracing::warn!(%error, "could not tell what a move of an offer leaves out");
                 Outcome {
                     moves: names.clone(),
                     left_out: Names::default(),
@@ -507,12 +507,14 @@ impl Answering {
         let source = &self.source;
         let (target, files) = (&source.target, source.sources.files());
         append(target, files, &self.written, &self.left_out).map_err(|error| {
-            let kind = match error {
-                WriteError::Locked(_) => ErrorKind::Conflict,
-                WriteError::Io(_) | WriteError::Parse(_) => ErrorKind::Internal,
+            let code = match error {
+                WriteError::Locked(_) => ErrorCode::OfferLocked,
+                WriteError::Io(_) | WriteError::Parse { .. } | WriteError::NoMapping => {
+                    ErrorCode::OfferUnmoved
+                }
             };
             IpcError::new(
-                kind,
+                code,
                 format!("could not move the entries into {}: {error}", self.target),
             )
         })
@@ -521,6 +523,8 @@ impl Answering {
 
 #[cfg(test)]
 mod tests {
+    use twigo_ipc::ErrorKind;
+
     use super::*;
 
     const FIRST: &str = "clusters:\n- name: a\n  cluster:\n    server: https://a\n";

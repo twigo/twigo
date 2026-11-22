@@ -24,7 +24,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
-use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, IpcError, ShellEnd, ShellEvent};
+use twigo_log::Repeats;
+use twigo_panic::contain;
 
 use crate::flow::{FRAME_MAX, Flow};
 use crate::shell::{Frame, INPUT_QUEUE};
@@ -103,7 +105,7 @@ impl Terminal {
         let parked = self.parked.lock().expect("terminal lock").take();
         let Some(Parked { spec, commands }) = parked else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::SessionStarted,
                 "this terminal has started already",
             ));
         };
@@ -112,7 +114,7 @@ impl Terminal {
             Ok(spawned) => spawned,
             Err(error) => {
                 let error = IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::TerminalStartFailed,
                     format!("could not start {}: {error}", spec.program.display()),
                 );
                 send(Frame::Event(ShellEvent::Ended {
@@ -126,8 +128,19 @@ impl Terminal {
         let task = tokio::spawn({
             let hangup = Arc::clone(&hangup);
             async move {
-                if send(Frame::Event(ShellEvent::Running)) {
-                    run(pty, slave, &hangup, commands, send).await;
+                if !send(Frame::Event(ShellEvent::Running)) {
+                    return;
+                }
+                if contain("terminal", run(pty, slave, &hangup, commands, &mut send))
+                    .await
+                    .is_err()
+                {
+                    hangup.hang_up(Then::Kill);
+                    send(Frame::Event(ShellEvent::Ended {
+                        end: ShellEnd::Failed {
+                            error: IpcError::panicked("this terminal"),
+                        },
+                    }));
                 }
             }
         });
@@ -173,6 +186,57 @@ impl Drop for Terminal {
     }
 }
 
+/// The failures of a session after the first of each kind, said when it ends.
+#[derive(Default)]
+struct Failures {
+    writes: Repeats,
+    resizes: Repeats,
+}
+
+impl Failures {
+    /// Says how a write went: the first failure of a run when it happens, and
+    /// how many followed it once a write works again.
+    fn write(&mut self, written: &std::io::Result<usize>) {
+        match written {
+            Ok(_) => self.writes_ended(),
+            Err(error) if self.writes.failed() => {
+                tracing::warn!(%error, "could not write to a terminal");
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn writes_ended(&mut self) {
+        if let Some(count) = self.writes.ended() {
+            tracing::warn!(count, "more writes to a terminal failed");
+        }
+    }
+
+    /// Says how a resize went, as [`Failures::write`] does for a write.
+    fn resize<T>(&mut self, resized: &Result<T, impl std::fmt::Display>) {
+        match resized {
+            Ok(_) => self.resizes_ended(),
+            Err(error) if self.resizes.failed() => {
+                tracing::warn!(%error, "could not resize a terminal");
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn resizes_ended(&mut self) {
+        if let Some(count) = self.resizes.ended() {
+            tracing::warn!(count, "more resizes of a terminal failed");
+        }
+    }
+}
+
+impl Drop for Failures {
+    fn drop(&mut self) {
+        self.writes_ended();
+        self.resizes_ended();
+    }
+}
+
 /// Runs the program until it exits: output goes out by [`Flow`], and input
 /// and resizes stay live while output is stopped. Then what the pty still
 /// holds goes out, as flow allows, until a read would block or [`DRAIN`]
@@ -194,6 +258,7 @@ async fn run(
     let mut buffer = vec![0; FRAME_MAX];
     let mut seen_acks = *acks.borrow_and_update();
     let mut writing: Vec<u8> = Vec::new();
+    let mut failures = Failures::default();
     // Twigo holds a slave of its own, so the end of the output is the exit,
     // never a read's end.
     let mut readable = true;
@@ -237,21 +302,19 @@ async fn run(
                     Some(data) => writing = data,
                     None => return,
                 },
-                written = writer.write(&writing), if !writing.is_empty() => match written {
-                    Ok(n) => { writing.drain(..n); }
-                    Err(error) => {
-                        eprintln!("could not write to a terminal: {error}");
-                        writing.clear();
+                written = writer.write(&writing), if !writing.is_empty() => {
+                    failures.write(&written);
+                    match written {
+                        Ok(n) => { writing.drain(..n); }
+                        Err(_) => writing.clear(),
                     }
-                },
+                }
                 changed = size.changed() => {
                     if changed.is_err() {
                         return;
                     }
                     let (cols, rows) = *size.borrow_and_update();
-                    if let Err(error) = writer.resize(Size::new(rows, cols)) {
-                        eprintln!("could not resize a terminal: {error}");
-                    }
+                    failures.resize(&writer.resize(Size::new(rows, cols)));
                 }
             }
         }
@@ -260,7 +323,7 @@ async fn run(
         Ok(status) => ending(status),
         Err(error) => ShellEnd::Failed {
             error: IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::TerminalWaitFailed,
                 format!("could not learn how the shell ended: {error}"),
             ),
         },

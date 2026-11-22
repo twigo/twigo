@@ -1,4 +1,4 @@
-import { IpcError } from "../error";
+import { IpcError, wireError } from "../error";
 import type {
   Affected,
   ApplyPreviewed,
@@ -493,7 +493,7 @@ export class MockBus {
     const { space, opened, edited } = request;
     const context = this.host.context(space);
     if (context === undefined)
-      throw new IpcError("notFound", `no space ${space}`);
+      throw new IpcError("space.not-found", `no space ${space}`);
     const object = edited as {
       readonly apiVersion?: string;
       readonly kind?: string;
@@ -532,7 +532,7 @@ export class MockBus {
     if (opened && live) {
       const refused = (what: string, named: unknown, target: unknown) =>
         new IpcError(
-          "invalidInput",
+          "apply.wrong-target",
           `the edit names ${what} ${JSON.stringify(named)}, but it is an edit of ${JSON.stringify(target)}`,
         );
       const other = (["apiVersion", "kind"] as const).find(
@@ -556,7 +556,7 @@ export class MockBus {
       object.metadata?.namespace === undefined &&
       served?.namespaced === true
     ) {
-      throw new IpcError("invalidInput", `${name} names no namespace`);
+      throw new IpcError("internal.request", `${name} names no namespace`);
     }
     const what = `${kind.toLowerCase()} ${name}`;
     const group = opened?.target.gvr.group ?? "";
@@ -684,7 +684,10 @@ export class MockBus {
   #apply(space: string, preview: number): Planned {
     const previewed = this.#previews.get(preview);
     if (previewed === undefined) {
-      throw new IpcError("notFound", `no preview ${preview} waits to apply`);
+      throw new IpcError(
+        "bus.not-waiting",
+        `no preview ${preview} waits to apply`,
+      );
     }
     const { step, context, target, what, edited, resource } = previewed;
     const recreate = step === "recreate";
@@ -773,14 +776,15 @@ export class MockBus {
     onMessage: (event: OperationEvent) => void,
   ): null {
     const waiting = this.#waiting.get(id);
-    if (!waiting) throw new IpcError("notFound", `no plan ${id} waits to run`);
+    if (!waiting)
+      throw new IpcError("bus.not-waiting", `no plan ${id} waits to run`);
     this.#waiting.delete(id);
     const { planned, friction, since } = waiting;
     const { context } = planned.plan;
     const access = this.host.access(context);
     if (!covers(friction, frictionOf(planned.risk, context, access))) {
       throw new IpcError(
-        "conflict",
+        "action.mode-changed",
         `${context} is ${access.mode} now, which asks for more than you confirmed, so Twigo sent nothing`,
       );
     }
@@ -788,10 +792,13 @@ export class MockBus {
       friction.kind === "countdown" &&
       Date.now() - since < friction.seconds * 1000
     ) {
-      throw new IpcError("invalidInput", "the countdown has not ended");
+      throw new IpcError("confirm.countdown", "the countdown has not ended");
     }
     if (friction.kind === "typed" && typed !== friction.text) {
-      throw new IpcError("invalidInput", `type ${friction.text} to confirm`);
+      throw new IpcError(
+        "confirm.name-mismatch",
+        `type ${friction.text} to confirm`,
+      );
     }
     this.#authorize(context, access, planned);
     planned.stands?.();
@@ -833,7 +840,7 @@ export class MockBus {
         if (!(error instanceof IpcError)) throw error;
         tell({
           state: "failed",
-          error: { kind: error.kind, message: error.message },
+          error: wireError(error),
         });
       }
     }, 0);
@@ -868,7 +875,7 @@ export class MockBus {
       ? `nobody has said what ${context} is yet`
       : `${context} is read-only${setBy(access.source)}`;
     throw new IpcError(
-      "permissions",
+      "policy.blocked",
       `${why}, so Twigo did not send ${write.verb} ${write.target}`,
       blocked,
     );
@@ -878,7 +885,7 @@ export class MockBus {
   #context(space: string, write: Write): string {
     const context = this.host.context(space);
     if (context === undefined)
-      throw new IpcError("notFound", `no space ${space}`);
+      throw new IpcError("space.not-found", `no space ${space}`);
     this.#authorize(context, this.host.access(context), { write });
     return context;
   }
@@ -888,14 +895,17 @@ export class MockBus {
     const pods = namespace === null ? [] : cluster.podsOf(namespace, name);
     const emptied = cluster.emptied.has(`${namespace ?? ""}/${name}`);
     if (pods.length === 0 && !emptied) {
-      throw new IpcError("notFound", `deployments.apps "${name}" not found`);
+      throw new IpcError(
+        "server.not-found",
+        `deployments.apps "${name}" not found`,
+      );
     }
     return pods;
   }
 
   #delete(space: string, targets: readonly ResourceRef[]): Planned {
     const [first] = targets;
-    if (!first) throw new IpcError("invalidInput", "nothing to delete");
+    if (!first) throw new IpcError("action.no-target", "nothing to delete");
     const { group, resource } = first.gvr;
     const namespaceOf = (target: ResourceRef) =>
       target.namespaced ? target.namespace : null;
@@ -910,13 +920,13 @@ export class MockBus {
     const kind = KINDS[`${group}/${resource}`];
     if (!kind) {
       throw new IpcError(
-        "notFound",
+        "apply.kind-not-served",
         `the mock backend deletes only pods, nodes, deployments, jobs and cron jobs, not ${resource}`,
       );
     }
     const cluster = this.host.cluster(context);
     const gone = (name: string) =>
-      new IpcError("notFound", `${kind.name} "${name}" not found`);
+      new IpcError("server.not-found", `${kind.name} "${name}" not found`);
     const objects: ObjectRef[] = [];
     const following: ObjectRef[] = [];
     /** Whether each object is still there, and what removes it. */
@@ -1037,7 +1047,7 @@ export class MockBus {
     }
     const [shown] = kept;
     if (!shown) {
-      throw missing ?? new IpcError("invalidInput", "nothing to delete");
+      throw missing ?? new IpcError("action.no-target", "nothing to delete");
     }
     const several = kept.length > 1;
     const namespaces = new Set(
@@ -1149,7 +1159,7 @@ export class MockBus {
     const context = this.#context(space, write);
     if (target.gvr.resource !== "deployments") {
       throw new IpcError(
-        "notFound",
+        "apply.kind-not-served",
         `the mock backend scales only deployments, not ${target.gvr.resource}`,
       );
     }
@@ -1158,7 +1168,7 @@ export class MockBus {
     const what = `deployment ${name}`;
     if (pods.length === replicas) {
       throw new IpcError(
-        "invalidInput",
+        "action.no-change",
         `${capital(what)} has ${String(replicas)} replicas already`,
       );
     }
@@ -1198,7 +1208,7 @@ export class MockBus {
         }
         if (from !== pods.length) {
           throw new IpcError(
-            "conflict",
+            "action.object-changed",
             `${capital(what)} has ${String(from)} replicas now, not the ${String(pods.length)} Twigo asked about, so it scaled nothing`,
           );
         }
@@ -1246,7 +1256,7 @@ export class MockBus {
     const context = this.#context(space, write);
     if (target.gvr.resource !== "deployments") {
       throw new IpcError(
-        "notFound",
+        "apply.kind-not-served",
         `the mock backend restarts only deployments, not ${target.gvr.resource}`,
       );
     }
@@ -1286,10 +1296,11 @@ export class MockBus {
     const context = this.#context(space, write);
     const cluster = this.host.cluster(context);
     const node = cluster.nodes.find((candidate) => candidate.name === name);
-    if (!node) throw new IpcError("notFound", `nodes "${name}" not found`);
+    if (!node)
+      throw new IpcError("server.not-found", `nodes "${name}" not found`);
     const already = `Node ${name} is ${unschedulable ? "cordoned already" : "not cordoned"}`;
     if (cordoned(node) === unschedulable) {
-      throw new IpcError("invalidInput", already);
+      throw new IpcError("action.no-change", already);
     }
     const words = (cordon: boolean) =>
       cordon
@@ -1317,7 +1328,7 @@ export class MockBus {
       space,
       run: (tell) => {
         if (!cluster.nodes.includes(node)) {
-          throw new IpcError("notFound", `nodes "${name}" not found`);
+          throw new IpcError("server.not-found", `nodes "${name}" not found`);
         }
         if (cordoned(node) === unschedulable) {
           tell({ state: "done", text: already, undoUntil: null });
@@ -1350,7 +1361,7 @@ export class MockBus {
     const context = this.#context(space, write);
     const cluster = this.host.cluster(context);
     if (!cluster.nodes.some((node) => node.name === name)) {
-      throw new IpcError("notFound", `nodes "${name}" not found`);
+      throw new IpcError("server.not-found", `nodes "${name}" not found`);
     }
     const pods = cluster.pods.filter((pod) => pod.node === name);
     const total = counted(pods.length, "pod");
@@ -1377,7 +1388,7 @@ export class MockBus {
       space,
       run: (tell, live) => {
         if (!cluster.nodes.some((node) => node.name === name)) {
-          throw new IpcError("notFound", `nodes "${name}" not found`);
+          throw new IpcError("server.not-found", `nodes "${name}" not found`);
         }
         cluster.cordon(name, true);
         this.host.changed();
@@ -1408,7 +1419,10 @@ export class MockBus {
         (cronJob) => cronJob.namespace === namespace && cronJob.name === name,
       )
     ) {
-      throw new IpcError("notFound", `cronjobs.batch "${name}" not found`);
+      throw new IpcError(
+        "server.not-found",
+        `cronjobs.batch "${name}" not found`,
+      );
     }
     const serial = ++this.#jobs;
     const suffix = Array.from({ length: 5 }, (_, i) =>
@@ -1438,7 +1452,10 @@ export class MockBus {
               cronJob.namespace === namespace && cronJob.name === name,
           )
         ) {
-          throw new IpcError("notFound", `cronjobs.batch "${name}" not found`);
+          throw new IpcError(
+            "server.not-found",
+            `cronjobs.batch "${name}" not found`,
+          );
         }
         cluster.trigger(namespace, name, job, Date.now());
         this.host.changed();
@@ -1461,7 +1478,10 @@ export class MockBus {
     };
     const context = this.#context(space, write);
     if (resource !== "jobs" && resource !== "cronjobs") {
-      throw new IpcError("invalidInput", "Twigo suspends jobs and cron jobs");
+      throw new IpcError(
+        "action.unsupported-kind",
+        "Twigo suspends jobs and cron jobs",
+      );
     }
     const cluster = this.host.cluster(context);
     const list: (CronJob | Job)[] =
@@ -1472,17 +1492,20 @@ export class MockBus {
     );
     const kind = resource === "jobs" ? "job" : "cron job";
     if (!found) {
-      throw new IpcError("notFound", `${resource}.batch "${name}" not found`);
+      throw new IpcError(
+        "server.not-found",
+        `${resource}.batch "${name}" not found`,
+      );
     }
     const what = `${kind} ${name}`;
     const already = `${capital(what)} is ${suspend ? "suspended already" : "not suspended"}`;
     if (found.suspend === suspend) {
-      throw new IpcError("invalidInput", already);
+      throw new IpcError("action.no-change", already);
     }
     const ended = () => "completed" in found && found.completed !== null;
     const nothing = () =>
       new IpcError(
-        "invalidInput",
+        "action.no-change",
         `${capital(what)} has completed, so there is nothing to ${suspend ? "suspend" : "resume"}`,
       );
     if (ended()) throw nothing();
@@ -1545,7 +1568,7 @@ export class MockBus {
       run: (tell) => {
         if (!list.includes(found)) {
           throw new IpcError(
-            "notFound",
+            "server.not-found",
             `${resource}.batch "${name}" not found`,
           );
         }
@@ -1566,7 +1589,7 @@ export class MockBus {
               if (suspend && resource === "cronjobs") return RESUMES;
               if (suspend || resource !== "jobs") return AT_ONCE;
               const why = left();
-              if (why) throw new IpcError("conflict", why);
+              if (why) throw new IpcError("action.kept-changing", why);
               return stopping();
             },
             left: resource === "jobs" ? left : undefined,
@@ -1611,7 +1634,10 @@ export class MockBus {
   #undo(space: string): Planned {
     const slot = this.#undos.get(space);
     if (!slot || Date.now() >= slot.until) {
-      throw new IpcError("notFound", "nothing in this space can be undone now");
+      throw new IpcError(
+        "undo.nothing",
+        "nothing in this space can be undone now",
+      );
     }
     const { id, revert } = slot;
     const asked = revert.asks();
@@ -1632,13 +1658,13 @@ export class MockBus {
         const live = this.#undos.get(space);
         if (live?.id !== id || Date.now() >= live.until) {
           throw new IpcError(
-            "conflict",
+            "undo.ended",
             "the undo ended before it ran, so Twigo put nothing back",
           );
         }
         this.#undos.delete(space);
         const why = revert.left?.();
-        if (why) throw new IpcError("conflict", why);
+        if (why) throw new IpcError("action.object-changed", why);
         revert.put();
         this.host.changed();
         tell({ state: "done", text: revert.done, undoUntil: null });
@@ -1661,7 +1687,7 @@ export class MockBus {
         .containers.includes(container)
     ) {
       throw new IpcError(
-        "notFound",
+        "shell.no-container",
         `container ${container} does not run in pod ${pod}`,
       );
     }
@@ -1725,7 +1751,7 @@ export class MockBus {
       before.unlockedUntil === null
     ) {
       throw new IpcError(
-        "invalidInput",
+        "policy.not-locked",
         `${context} is ${before.mode}, so there is nothing to unlock`,
       );
     }
@@ -1755,7 +1781,7 @@ export class MockBus {
           protection.changes(context) !== changes
         ) {
           throw new IpcError(
-            "conflict",
+            "policy.changed",
             `what ${context} lets through changed since Twigo asked, so Twigo changed nothing`,
           );
         }

@@ -11,6 +11,11 @@ publish.workspace = true
 [features]
 # The bench mode of bench/harness.sh: commands that write results and quit (src/bench.rs).
 bench = ["dep:objc2", "dep:serde_json"]
+# `TWIGO_PANIC=<name>` makes the duty or item of that name panic each time it runs, for the check build.
+inject = ["twigo-panic/inject"]
+
+[lints]
+workspace = true
 
 [build-dependencies]
 tauri-build.workspace = true
@@ -23,11 +28,20 @@ tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
 tauri-plugin-window-state.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+tracing.workspace = true
 twigo-core.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-keyboard.workspace = true
+twigo-log.workspace = true
 twigo-netmon.workspace = true
+twigo-panic.workspace = true
+
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }
+tempfile.workspace = true
+twigo-log = { workspace = true, features = ["test-util"] }
+twigo-policy = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, optional = true }

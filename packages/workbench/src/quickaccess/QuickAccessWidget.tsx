@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
+  cn,
   HighlightedLabel,
   Kbd,
   QuickInput,
@@ -12,7 +13,8 @@ import {
   Tick,
   Tile,
 } from "@twigo/ui";
-import { toIpcError } from "@twigo/protocol";
+import { toIpcError, type IpcError } from "@twigo/protocol";
+import { ErrorMessage } from "../ErrorMessage";
 import { PanelBoundary } from "../parts/PanelBoundary";
 import { initials } from "../parts/spaceBadge";
 import { useChanges, useWorkbench } from "../react";
@@ -56,7 +58,7 @@ type Loaded =
       readonly items: readonly QuickPickItem[];
       readonly notice?: string;
     }
-  | { readonly state: "failed"; readonly message: string };
+  | { readonly state: "failed"; readonly error: IpcError };
 
 /** Keys that are the keybinding service's alone: unbound, they still move no caret and submit nothing. */
 const BOUND_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
@@ -149,7 +151,7 @@ function Open({ session }: { session: Session }) {
         if (live) {
           setLoaded({
             value,
-            result: { state: "failed", message: toIpcError(error).message },
+            result: { state: "failed", error: toIpcError(error) },
           });
         }
       },
@@ -167,6 +169,7 @@ function Open({ session }: { session: Session }) {
         ? loaded.result
         : { state: "loading" };
   const items = result.state === "ready" ? result.items : [];
+  const tiled = items.some((item) => item.tile !== undefined);
   const groups = [...new Set(items.map((item) => item.group))].map((group) => ({
     group,
     items: items.filter((item) => item.group === group),
@@ -200,6 +203,7 @@ function Open({ session }: { session: Session }) {
   }, [keys, toSide, many]);
 
   const accept = (item: QuickPickItem, options: AcceptOptions) => {
+    if (item.disabled) return;
     quickAccess.accept(item, options).catch((error: unknown) => {
       workbench.report(error);
     });
@@ -342,7 +346,9 @@ function Open({ session }: { session: Session }) {
           {ask ? (
             <Asked message={ask.validate(value)} prompt={ask.prompt} />
           ) : result.state === "failed" ? (
-            <p className="px-3 py-3 text-xs text-error">{result.message}</p>
+            <p className="px-3 py-3 text-xs text-error">
+              <ErrorMessage error={result.error} />
+            </p>
           ) : (
             result.state === "ready" &&
             items.length === 0 && <QuickInputEmpty>No results</QuickInputEmpty>
@@ -357,6 +363,7 @@ function Open({ session }: { session: Session }) {
                   cursor={item === active}
                   on={on(item)}
                   many={many}
+                  tiled={tiled}
                   onPoint={() => {
                     setCursor({ value, id: item.id });
                   }}
@@ -375,6 +382,7 @@ function Open({ session }: { session: Session }) {
         <Footer
           provider={provider}
           moves={!ask}
+          acceptable={active?.disabled !== true}
           many={many}
           acceptLabel={
             ask?.acceptLabel ??
@@ -417,6 +425,7 @@ function Row({
   cursor,
   on,
   many,
+  tiled,
   onPoint,
   onSelect,
   onToggle,
@@ -428,17 +437,29 @@ function Row({
   on: boolean | undefined;
   /** The list has rows with a box, which a row without one lines up with. */
   many: boolean;
+  /** The list has rows with a tile, which a row without one stands as tall as, and puts its icon where the tile is. */
+  tiled: boolean;
   onPoint: () => void;
   onSelect: () => void;
   onToggle: () => void;
 }) {
   const { platform } = useWorkbench();
   const Icon = item.icon;
+  const icon = Icon && (
+    <Icon
+      aria-hidden
+      className={cn(
+        "size-3.5",
+        item.iconTone === "warn" ? "text-warn-foreground" : "text-support",
+      )}
+    />
+  );
   return (
     // Among rows to tick, `aria-selected` says what is ticked, never where the cursor is.
     <QuickInputOption
       id={id}
       cursor={cursor}
+      aria-disabled={item.disabled}
       aria-selected={many ? on : cursor}
       onPointerMove={onPoint}
       onClick={(event) => {
@@ -451,7 +472,7 @@ function Row({
           onSelect();
         }
       }}
-      className={item.tile ? "h-9" : undefined}
+      className={cn(tiled && "h-9", item.disabled && "text-support")}
     >
       {on !== undefined && (
         <span
@@ -474,16 +495,24 @@ function Row({
           size="sm"
         />
       )}
-      {Icon && <Icon aria-hidden className="size-3.5 text-support" />}
-      <HighlightedLabel
-        text={item.label}
-        ranges={item.matches ?? []}
-        className="min-w-0"
-      />
-      {item.description && (
-        <span className="min-w-0 shrink-[3] truncate text-xs text-support">
-          {item.description}
-        </span>
+      {icon &&
+        (tiled ? (
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            {icon}
+          </span>
+        ) : (
+          icon
+        ))}
+      <span className="min-w-0 truncate">
+        <HighlightedLabel text={item.label} ranges={item.matches ?? []} />
+        {item.description && (
+          <span className="ml-2 text-xs text-support">{item.description}</span>
+        )}
+      </span>
+      {item.code && (
+        <code className="shrink-0 font-mono text-2xs text-quiet">
+          {item.code}
+        </code>
       )}
       <span className="ml-auto flex shrink-0 items-center gap-2.5 pl-2 text-xs text-support">
         {item.state && (
@@ -514,12 +543,15 @@ function Row({
 function Footer({
   provider,
   moves,
+  acceptable,
   many,
   acceptLabel,
 }: {
   provider: QuickAccessProvider | undefined;
   /** Whether it shows rows to move through; an input does not. */
   moves: boolean;
+  /** Whether Enter does anything: not on a row that cannot be chosen. */
+  acceptable: boolean;
   many: boolean;
   /** What Enter does: `Open` unless it says. */
   acceptLabel: string | undefined;
@@ -547,7 +579,9 @@ function Footer({
     >
       {moves && move.length > 0 && <Hint keys={move}>Move</Hint>}
       {toggle.length > 0 && <Hint keys={toggle}>Add or remove</Hint>}
-      {accept.length > 0 && <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>}
+      {acceptable && accept.length > 0 && (
+        <Hint keys={accept}>{acceptLabel ?? "Open"}</Hint>
+      )}
       {side.length > 0 && <Hint keys={side}>Open to the side</Hint>}
       <span className="flex-1" />
       {prefixes.map((other) => (

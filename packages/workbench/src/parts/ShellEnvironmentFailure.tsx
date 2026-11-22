@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ShellEnvironment } from "@twigo/protocol";
 import { Button } from "@twigo/ui";
+import { ErrorMessage } from "../ErrorMessage";
 import { useWorkbench } from "../react";
 import {
   RETRY_SHELL_ENVIRONMENT,
@@ -17,7 +18,12 @@ export function ShellEnvironmentFailure({ failed }: { failed: Failed }) {
         {SHELL_ENVIRONMENT_TITLE}
       </p>
       <p className="mt-1 text-support">
-        <span className="font-mono">{failed.shell}</span> {failed.reason}, so
+        <ErrorMessage
+          error={failed.reason}
+          message={`${failed.shell} ${failed.reason.message}`}
+        />
+      </p>
+      <p className="mt-1 text-support">
         Twigo runs tools with its own environment. Credential plugins on your
         shell's <span className="font-mono">PATH</span>, such as kubelogin or
         aws, may not be found.

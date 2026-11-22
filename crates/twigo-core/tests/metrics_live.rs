@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use kube::config::Kubeconfig;
 use tokio::sync::{mpsc, watch};
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     Ack, Cell, Column, Discovered, Gvr, ListBatch, ListQuery, MetricsState, ObjectBatch,
@@ -37,20 +37,14 @@ fn cluster() -> (PathBuf, String) {
     (path, context)
 }
 
-fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Arc<Core>, String) {
+fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Started, String) {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let space = core.state.open_space(context).id;
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        let kubeconfig = kubeconfig.to_owned();
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
+    let kubeconfig = kubeconfig.to_owned();
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     (core, space)
 }
 

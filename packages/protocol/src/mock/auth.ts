@@ -1,4 +1,4 @@
-import { IpcError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   ContextAuth,
   ExecPlugin,
@@ -167,7 +167,10 @@ export class MockAuth {
       case "pluginFailed":
         prod.fails = {
           state: "failed",
-          error: "exec: executable aws failed with exit code 255",
+          error: wire(
+            "credentials.plugin-failed",
+            "exec: executable aws failed with exit code 255",
+          ),
           output: AWS_SSO_EXPIRED,
           installHint: null,
         };
@@ -225,7 +228,10 @@ export class MockAuth {
     clearTimeout(entry.timer);
     entry.status = {
       state: "failed",
-      error: `exec: ${entry.plugin.command} was cancelled`,
+      error: wire(
+        "credentials.plugin-cancelled",
+        `exec: ${entry.plugin.command} was cancelled`,
+      ),
       output: entry.status.output,
       installHint: null,
     };
@@ -249,7 +255,7 @@ export class MockAuth {
       this.signIn(context);
     }
     throw new IpcError(
-      "unauthorized",
+      "credentials.plugin-failed",
       `${auth.plugin.command} gave no credential yet`,
     );
   }
@@ -288,7 +294,7 @@ export class MockAuth {
     const entry = this.#entries.get(context);
     if (!entry) {
       throw new IpcError(
-        "notFound",
+        "context.no-plugin",
         `the context "${context}" has no credential plugin`,
       );
     }
@@ -299,7 +305,7 @@ export class MockAuth {
     const entry = this.#entry(context);
     if (!this.#trusted.has(entry.plugin.digest)) {
       throw new IpcError(
-        "unauthorized",
+        "credentials.untrusted",
         `Twigo runs ${entry.plugin.command} for the context "${context}" only once you trust it`,
       );
     }

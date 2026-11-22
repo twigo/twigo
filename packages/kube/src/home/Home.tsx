@@ -9,12 +9,21 @@ import {
   type KeyHint,
   type StatSegment,
 } from "@twigo/ui";
-import { SpaceTile, useChanges, useWorkbench } from "@twigo/workbench";
+import {
+  ErrorMessage,
+  INTERNAL_ERROR,
+  isInternalError,
+  SpaceTile,
+  useChanges,
+  useWorkbench,
+} from "@twigo/workbench";
 import { byHealth, statusColumn, type Health } from "../columns";
 import { useClusterVersion, useResources, type Loaded } from "../discovery";
 import { PODS } from "../kinds";
 import type { ListServices } from "../services";
 import { recentRow } from "../quickaccess";
+import { StoppedActions } from "../StoppedActions";
+import { useReopen } from "../useReopen";
 import { listUri } from "../uri";
 import { exactly, podStatusWords, unit, type Attention } from "./attention";
 import { useTally, type Tally } from "./useTally";
@@ -34,12 +43,19 @@ const WARNING = "Warning";
  * cluster's counts, each opening its list filtered, what needs attention,
  * and the keys that open things. Rust counts every list; none sends rows.
  */
-export function Home({
+export function Home(props: { space: string; services: ListServices }) {
+  const [key, reopen] = useReopen();
+  return <HomeCounts key={key} {...props} onReopen={reopen} />;
+}
+
+function HomeCounts({
   space: id,
   services,
+  onReopen,
 }: {
   space: string;
   services: ListServices;
+  onReopen: () => void;
 }) {
   const { spaces, editors } = useWorkbench();
   useChanges(spaces.changes);
@@ -179,6 +195,7 @@ export function Home({
         >
           <Tile
             label="Nodes"
+            onReopen={onReopen}
             tally={nodes}
             onOpen={open(nodes, notReady > 0 ? { health: "error" } : {})}
           >
@@ -192,6 +209,7 @@ export function Home({
           </Tile>
           <Tile
             label="Pods"
+            onReopen={onReopen}
             tally={pods}
             segments={[
               { tone: "error", value: failing },
@@ -219,6 +237,7 @@ export function Home({
           </Tile>
           <Tile
             label="Deployments"
+            onReopen={onReopen}
             tally={deployments}
             onOpen={open(deployments, short > 0 ? { health: "warn" } : {})}
           >
@@ -232,6 +251,7 @@ export function Home({
           </Tile>
           <Tile
             label="Warning events"
+            onReopen={onReopen}
             tally={events}
             value={warnings}
             onOpen={open(
@@ -334,6 +354,7 @@ function Tile({
   value,
   segments,
   onOpen,
+  onReopen,
   children,
 }: {
   label: string;
@@ -342,14 +363,29 @@ function Tile({
   value?: number;
   segments?: readonly StatSegment[];
   onOpen: (() => void) | undefined;
+  onReopen: () => void;
   children: ReactNode;
 }) {
-  if (tally.state === "missing")
+  if (tally.state === "missing") {
+    const stopped = tally.error !== undefined && isInternalError(tally.error);
     return (
       <StatTile label={label} value={undefined}>
-        <span className="text-support">{tally.why}</span>
+        <span className="text-support">
+          {tally.error ? (
+            <ErrorMessage
+              error={tally.error}
+              message={
+                stopped ? `${INTERNAL_ERROR.title}. ${tally.why}` : tally.why
+              }
+            />
+          ) : (
+            tally.why
+          )}
+        </span>
+        {stopped && <StoppedActions onReopen={onReopen} />}
       </StatTile>
     );
+  }
   return (
     <StatTile
       label={label}

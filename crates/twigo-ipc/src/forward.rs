@@ -150,7 +150,7 @@ pub struct Forward {
     /// after not being so: a pod's port that refused, a pod whose upgrade
     /// answered 404, no pod to go to within the wait, a cluster that did not
     /// answer.
-    pub failure: Option<String>,
+    pub failure: Option<IpcError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -178,7 +178,7 @@ pub enum ForwardState {
     /// when no other is left. It looks again while it has connections, and
     /// at the next one.
     Reconnecting {
-        reason: String,
+        reason: IpcError,
     },
     /// Still listening, unless its local port was held when it was restored
     /// (`addresses` is then empty). Its connections end and what it accepts is

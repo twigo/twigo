@@ -2,6 +2,7 @@
 //! command line they were given, which their POSIX syntax can `eval`.
 
 use std::os::unix::fs::PermissionsExt;
+use std::sync::Arc;
 use std::time::Duration as StdDuration;
 
 use nix::errno::Errno;
@@ -256,4 +257,48 @@ fn a_terminal_s_utf_8_locale_is_one_the_system_has() {
     } else {
         assert_eq!(locale, "C.UTF-8");
     }
+}
+
+#[tokio::test]
+async fn debug_prints_the_names_of_the_variables_and_never_their_values() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "export AWS_SECRET_ACCESS_KEY=hunter2; eval \"$4\"");
+    let env = fakes.resolve(&shell).await.expect("an environment");
+    let printed = format!("{env:?}");
+    assert!(printed.contains("AWS_SECRET_ACCESS_KEY"), "{printed}");
+    assert!(!printed.contains("hunter2"), "{printed}");
+}
+
+#[tokio::test]
+async fn a_failure_s_debug_leaves_out_what_the_shell_printed() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "echo 'export TOKEN=hunter2'; exit 3");
+    let failure = fakes.resolve(&shell).await.expect_err("no environment");
+    assert!(failure.output.contains("hunter2"));
+    let failed = Arc::new(failure);
+    let status = Status::Failed {
+        env: Arc::new(ShellEnv::from_process()),
+        failure: Arc::clone(&failed),
+    };
+    let printed = format!("{failed:?} {status:?}");
+    assert!(!printed.contains("hunter2"), "{printed}");
+}
+
+#[tokio::test]
+async fn a_shell_that_gave_no_environment_reaches_the_window_with_its_code() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "exit 3");
+    let failure = fakes.resolve(&shell).await.expect_err("no environment");
+    let status = Status::Failed {
+        env: Arc::new(ShellEnv::from_process()),
+        failure: Arc::new(failure),
+    };
+    let twigo_ipc::ShellEnvironment::Failed { reason, .. } = (&status).into() else {
+        panic!("the status failed");
+    };
+    assert_eq!(reason.code, twigo_ipc::ErrorCode::EnvironmentUnresolved);
+    assert!(
+        reason.message.starts_with("printed no environment"),
+        "{reason:?}"
+    );
 }

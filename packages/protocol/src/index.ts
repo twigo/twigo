@@ -67,6 +67,8 @@ export type {
   Column,
   ColumnKind,
   ColumnValues,
+  Catalog,
+  CatalogFailure,
   Context,
   ClusterVersion,
   ContextAuth,
@@ -74,7 +76,14 @@ export type {
   Discovered,
   EnvVar,
   EventList,
+  ErrorCode,
   ErrorKind,
+  Fact,
+  FactId,
+  Hidden,
+  LogVerbosity,
+  Report,
+  ServerStatus,
   ExecPlugin,
   ExecReview,
   Grouping,
@@ -159,7 +168,13 @@ export type {
   ViewState,
 } from "./generated";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
-export { leastReady, readiness, REFUSED, SHOWS_ROWS } from "./viewState";
+export {
+  leastReady,
+  readiness,
+  REFUSED,
+  refusal,
+  SHOWS_ROWS,
+} from "./viewState";
 export type { ServedMetrics, ShownUsage } from "./metrics";
 export {
   CLUSTER_STREAMS,

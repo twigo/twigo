@@ -5,6 +5,7 @@ import {
   type ConfirmChoice,
   type Property,
 } from "@twigo/ui";
+import { ErrorMessage } from "../ErrorMessage";
 import { ContextBadge } from "../operations/ContextBadge";
 import {
   environmentChoices,
@@ -144,7 +145,9 @@ function AskDialog({
           : []
       }
       {...(ask.typed && { typed: ask.context })}
-      {...(failure !== undefined && { error: failure })}
+      {...(failure !== undefined && {
+        error: <ErrorMessage error={failure} />,
+      })}
       wide={details?.wide(ask.detail) ?? false}
       busy={answering}
       guardMs={ASK_GUARD_MS}

@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
+use twigo_ipc::{ErrorCode, IpcError};
+use twigo_log::problems;
 
 /// Bumped when the file's shape changes; a file of another version is set
 /// aside, and nothing is trusted.
@@ -63,7 +65,9 @@ impl Trust {
         let mut next = self.current();
         next.digests.extend(digests);
         next.reviewed = true;
-        self.write(&next.digests)?;
+        self.write(&next.digests).inspect_err(|error| {
+            tracing::error!(path = %self.path.display(), %error, "could not save the trusted plugins");
+        })?;
         self.trusted.send_replace(next);
         Ok(())
     }
@@ -109,13 +113,60 @@ fn read(path: &Path) -> Trusted {
 /// Trusts nothing rather than guess, and asks for the review again.
 fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> Trusted {
     let aside = path.with_extension("json.unreadable");
-    eprintln!(
-        "the trusted plugins in {} cannot be read ({reason}); they move to {}",
-        path.display(),
-        aside.display()
-    );
+    tracing::error!(path = %path.display(), %reason, "the trusted plugins cannot be read, so they move to a file of their name with .unreadable");
     if let Err(error) = std::fs::rename(path, &aside) {
-        eprintln!("could not move the trusted plugins aside: {error}");
+        tracing::error!(path = %path.display(), %error, "could not move the trusted plugins aside");
     }
+    problems::report(IpcError::new(
+        ErrorCode::TrustSetAside,
+        "Twigo could not read the list of plugins you trusted, so it trusts none and asks again",
+    ));
     Trusted::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_list_set_aside_is_a_problem_for_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        problems::clear(ErrorCode::TrustSetAside);
+        let log = twigo_log::capture();
+        let trust = Trust::open(path);
+        assert!(!trust.current().trusts("any"));
+        assert!(
+            problems::watch()
+                .borrow()
+                .iter()
+                .any(|problem| problem.code == ErrorCode::TrustSetAside)
+        );
+        let levels: Vec<_> = log
+            .lines()
+            .into_iter()
+            .map(|line| line["level"].clone())
+            .collect();
+        assert_eq!(levels, ["ERROR"]);
+    }
+
+    #[test]
+    fn a_list_that_cannot_be_saved_says_so_in_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("a-file");
+        std::fs::write(&blocked, "").unwrap();
+        let trust = Trust::open(blocked.join("trust.json"));
+        let log = twigo_log::capture();
+
+        assert!(trust.trust(["digest".to_owned()]).is_err());
+
+        let errors: Vec<_> = log
+            .lines()
+            .into_iter()
+            .filter(|line| line["level"] == "ERROR")
+            .map(|line| line["fields"]["message"].clone())
+            .collect();
+        assert_eq!(errors, ["could not save the trusted plugins"]);
+    }
 }

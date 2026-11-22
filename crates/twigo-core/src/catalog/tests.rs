@@ -1,5 +1,7 @@
 use std::fs;
 
+use twigo_ipc::ErrorCode;
+
 use super::*;
 
 const CONFIG: &str = "
@@ -31,6 +33,7 @@ async fn contexts_come_by_order_then_by_name() {
         .contexts()
         .await
         .ipc(&Policy::open())
+        .contexts
         .into_iter()
         .map(|c| c.name)
         .collect();
@@ -54,9 +57,9 @@ contexts: [{ name: kind-a, context: { cluster: c, namespace: payments } }]
     .unwrap();
     let catalog = Catalog::default();
     catalog.follow(Sources::explicit(file.clone()));
-    let contexts = catalog.contexts().await.ipc(&Policy::open());
+    let listed = catalog.contexts().await.ipc(&Policy::open());
     assert_eq!(
-        contexts,
+        listed.contexts,
         [twigo_ipc::Context {
             name: "kind-a".to_owned(),
             color: None,
@@ -64,8 +67,83 @@ contexts: [{ name: kind-a, context: { cluster: c, namespace: payments } }]
             server: Some("https://kind:6443".to_owned()),
             access: Policy::open().access("kind-a"),
             namespace: Some("payments".to_owned()),
+            problem: None,
         }]
     );
+    assert!(listed.failures.is_empty());
+}
+
+#[tokio::test]
+async fn a_context_whose_entries_are_missing_says_so_with_its_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(
+        &file,
+        "
+contexts:
+  - name: kind-gone
+    context: { cluster: gone, user: u }
+  - name: kind-userless
+    context: { cluster: c, user: nobody }
+  - name: kind-empty
+clusters:
+  - name: c
+    cluster: { server: 'https://kind:6443' }
+users:
+  - name: u
+",
+    )
+    .unwrap();
+    let catalog = Catalog::default();
+    catalog.follow(Sources::explicit(file));
+    let listed = catalog.contexts().await.ipc(&Policy::open());
+    let problems: Vec<(&str, Option<ErrorCode>)> = listed
+        .contexts
+        .iter()
+        .map(|context| {
+            (
+                context.name.as_str(),
+                context.problem.as_ref().map(|problem| problem.code),
+            )
+        })
+        .collect();
+    assert_eq!(
+        problems,
+        [
+            ("kind-empty", Some(ErrorCode::ContextEmpty)),
+            ("kind-gone", Some(ErrorCode::ContextMissingCluster)),
+            ("kind-userless", Some(ErrorCode::ContextMissingUser)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_file_that_fails_reaches_the_webview_beside_the_contexts_of_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = dir.path().join("good");
+    let broken = dir.path().join("broken");
+    fs::write(&good, CONFIG).unwrap();
+    fs::write(
+        &broken,
+        "users:\n- name: u\n  user: { token: hunter2 }\n  extra: [\n",
+    )
+    .unwrap();
+    let list = std::env::join_paths([&broken, &good]).unwrap();
+    let catalog = Catalog::default();
+    catalog.follow(Sources::kubectl(Some(&list), None));
+
+    let listed = catalog.contexts().await.ipc(&Policy::open());
+    assert_eq!(listed.contexts.len(), 5);
+    let failed: Vec<(&str, ErrorCode)> = listed
+        .failures
+        .iter()
+        .map(|failure| (failure.source.as_str(), failure.error.code))
+        .collect();
+    assert_eq!(
+        failed,
+        [(broken.to_str().unwrap(), ErrorCode::KubeconfigUnparsable)]
+    );
+    assert!(!listed.failures[0].error.message.contains("hunter2"));
 }
 
 #[test]
@@ -188,4 +266,129 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
     let quiet =
         tokio::time::timeout(std::time::Duration::from_secs(1), fingerprint.changed()).await;
     assert!(quiet.is_err(), "the first read is no change");
+}
+
+fn told(logged: &twigo_log::Captured) -> Vec<(String, String, String)> {
+    logged
+        .lines()
+        .iter()
+        .map(|line| {
+            let text = |value: &serde_json::Value| value.as_str().unwrap_or_default().to_owned();
+            (
+                text(&line["level"]),
+                text(&line["fields"]["code"]),
+                text(&line["fields"]["path"]),
+            )
+        })
+        .collect()
+}
+
+/// Stops the watch, so a file the test changes next is read by its own
+/// `follow` on the test's thread, which is the one the capture sees.
+fn unfollow(catalog: &Catalog) {
+    catalog.followed.lock().unwrap().take();
+}
+
+#[test]
+fn a_failing_file_is_logged_when_its_failure_starts_and_ends_and_not_at_each_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(&file, "contexts: [unclosed").unwrap();
+    let sources = Sources::explicit(file.clone());
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    catalog.follow(sources.clone());
+    catalog.follow(sources.clone());
+    unfollow(&catalog);
+    fs::write(&file, "contexts: []").unwrap();
+    catalog.follow(sources);
+    let (code, path) = ("kubeconfig.unparsable", file.display().to_string());
+    assert_eq!(
+        told(&logged),
+        [
+            ("WARN".to_owned(), code.to_owned(), path.clone()),
+            ("INFO".to_owned(), code.to_owned(), path),
+        ]
+    );
+}
+
+#[test]
+fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(&file, "contexts: [unclosed").unwrap();
+    let sources = Sources::explicit(file.clone());
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    unfollow(&catalog);
+    fs::remove_file(&file).unwrap();
+    fs::create_dir(&file).unwrap();
+    catalog.follow(sources.clone());
+    unfollow(&catalog);
+    fs::remove_dir(&file).unwrap();
+    fs::write(&file, "contexts: []").unwrap();
+    catalog.follow(sources);
+    let path = file.display().to_string();
+    let line = |level: &str, code: &str| (level.to_owned(), code.to_owned(), path.clone());
+    assert_eq!(
+        told(&logged),
+        [
+            line("WARN", "kubeconfig.unparsable"),
+            line("WARN", "kubeconfig.unreadable"),
+            line("INFO", "kubeconfig.unreadable"),
+        ]
+    );
+}
+
+#[test]
+fn a_file_whose_changes_go_unseen_is_told_as_an_error_of_twigo_s_own() {
+    let file = PathBuf::from("/kube/config");
+    let sources = Sources::explicit(file.clone());
+    let failures = kubeconfig::Catalog::default()
+        .unwatched(&sources, &[(file, "the watch limit is reached".to_owned())])
+        .failures;
+    let logged = twigo_log::capture();
+    tell_failures(&[], &failures);
+    assert_eq!(
+        told(&logged),
+        [(
+            "ERROR".to_owned(),
+            "kubeconfig.unwatched".to_owned(),
+            failures[0].source.clone()
+        )]
+    );
+}
+
+#[test]
+fn a_file_that_keeps_failing_is_not_told_again_when_another_file_s_failure_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (steady, changing) = (dir.path().join("steady"), dir.path().join("changing"));
+    fs::write(&steady, "contexts: [unclosed").unwrap();
+    fs::write(&changing, "contexts: [unclosed").unwrap();
+    let list = std::env::join_paths([&steady, &changing]).unwrap();
+    let sources = Sources::kubectl(Some(&list), None);
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    unfollow(&catalog);
+    fs::remove_file(&changing).unwrap();
+    fs::create_dir(&changing).unwrap();
+    catalog.follow(sources);
+    let line = |code: &str, path: &Path| {
+        (
+            "WARN".to_owned(),
+            code.to_owned(),
+            path.display().to_string(),
+        )
+    };
+    assert_eq!(
+        told(&logged),
+        [
+            line("kubeconfig.unparsable", &steady),
+            line("kubeconfig.unparsable", &changing),
+            line("kubeconfig.unreadable", &changing),
+        ]
+    );
 }

@@ -3,6 +3,8 @@
  * has an opened object change on its own: `?scenario=applyConflicts` and the
  * like. Any other scenario answers a changed edit as ready. `applyLate`
  * leaves an applied object after the plan is done, as a watch may deliver it.
+ * `objectPanicked` ends an open object's subscription on an internal error of
+ * Twigo's, which the object keeps what it showed through.
  */
 export type EditScenario =
   | "applyUnchanged"
@@ -15,7 +17,8 @@ export type EditScenario =
   | "applyMergePatch"
   | "serverChange"
   | "statusChange"
-  | "applyLate";
+  | "applyLate"
+  | "objectPanicked";
 
 export const EDIT_SCENARIOS: readonly EditScenario[] = [
   "applyUnchanged",
@@ -29,6 +32,7 @@ export const EDIT_SCENARIOS: readonly EditScenario[] = [
   "serverChange",
   "statusChange",
   "applyLate",
+  "objectPanicked",
 ];
 
 export function isEditScenario(scenario: string): scenario is EditScenario {
@@ -52,6 +56,9 @@ type Fields = Record<string, unknown>;
 /** How long an open object waits before it changes on its own, then between changes. */
 export const FIRST_CHANGE_MS = 4000;
 export const NEXT_CHANGE_MS = 12_000;
+
+/** How long an open object lives before `objectPanicked` ends it. */
+export const ENDS_MS = 6000;
 
 /** How long after its plan is done `applyLate` leaves an applied object. */
 export const APPLIED_LAG_MS = 1500;

@@ -4,7 +4,7 @@
 mod auth;
 mod connections;
 mod counter;
-mod dial;
+pub(crate) mod dial;
 mod identity;
 pub(crate) mod idp;
 mod proxy;
@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use hyper_rustls::{FixedServerNameResolver, HttpsConnectorBuilder};
 use hyper_timeout::TimeoutConnector;
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::connect::Connect;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use kube::client::{Body, ConfigExt};
 use kube::{Client, Config};
@@ -401,6 +401,12 @@ fn cluster(config: &Config) -> String {
     }
 }
 
+/// The URL a [`Clients::cluster`] starts with, which is how a log names a
+/// cluster: what follows only tells clusters of one address apart.
+pub fn cluster_url(cluster: &str) -> &str {
+    cluster.split_once(' ').map_or(cluster, |(url, _)| url)
+}
+
 /// The config without what kube would get credentials from itself: the
 /// exec plugin, which Twigo runs, the auth provider when Twigo gets its
 /// credential, and the gcp one's `cmd-path`, refused with the azure one as
@@ -453,7 +459,7 @@ fn connector(
     proxy: Option<&Proxy>,
     identity: Option<&Arc<Identity>>,
 ) -> Result<TimeoutConnector<hyper_rustls::HttpsConnector<Dialer>>, Error> {
-    let mut http = HttpConnector::new();
+    let mut http = dial::http();
     http.enforce_http(false);
     http.set_connect_timeout(config.connect_timeout);
     http.set_keepalive(Some(TCP_KEEPALIVE));
@@ -474,13 +480,19 @@ fn connector(
             ServerName::try_from(name.clone())?,
         ));
     }
-    let dialer = Dialer::new(http, proxy)?;
+    let dialer = Dialer::new(http, proxy, config.connect_timeout)?;
     let https = match alpn {
         Alpn::Both => https.enable_all_versions().wrap_connector(dialer),
         Alpn::Http1 => https.enable_http1().wrap_connector(dialer),
     };
     let mut connector = TimeoutConnector::new(https);
-    connector.set_connect_timeout(config.connect_timeout);
+    // Through a proxy the connection is two legs, each given the connect
+    // timeout: the dialer's hop to the proxy ends first, so a proxy that does
+    // not answer is told as the proxy's, and TLS to the cluster keeps its time.
+    connector.set_connect_timeout(config.connect_timeout.map(|timeout| match proxy {
+        Some(_) => timeout.saturating_mul(2),
+        None => timeout,
+    }));
     connector.set_write_timeout(config.write_timeout);
     // No read timeout: it would time the whole multiplexed connection, so a
     // quiet cluster would cut every watch.
@@ -539,5 +551,8 @@ mod tests {
             "https://192.168.49.2:8443/ as b.example trusting the system's roots"
         );
         assert!(with(Some(vec![b"ca-1".to_vec()]), true).ends_with("trusting any certificate"));
+        for cluster in [first.as_str(), &cluster(&named)] {
+            assert_eq!(cluster_url(cluster), "https://192.168.49.2:8443/");
+        }
     }
 }

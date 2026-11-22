@@ -1,4 +1,4 @@
-import { IpcError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   OpenShell,
   ShellContainers,
@@ -14,8 +14,10 @@ import { containerNames, containerOf, type Pod } from "./cluster";
 /**
  * Pins what a shell does: `shellQueued` waits for a place among the
  * cluster's sessions, `shellNoShell` finds no shell in the container,
- * `shellLost` loses its connection and `shellRelocked` its context's write
- * mode a while after it opens, `shellOneContainer` runs one container in
+ * `shellFailed` is refused by the API server, `shellPanicked` ends on an
+ * internal error of Twigo's, `shellLost` loses its
+ * connection and `shellRelocked` its context's write mode a while after it
+ * opens, `shellOneContainer` runs one container in
  * every pod, so no picker asks, `shellDefaultSecond` has the pods'
  * default-container annotation name the second container, so the default is
  * not the first, and `shellAttachInteractive` gives the containers a
@@ -25,6 +27,8 @@ import { containerNames, containerOf, type Pod } from "./cluster";
 export type ShellScenario =
   | "shellQueued"
   | "shellNoShell"
+  | "shellFailed"
+  | "shellPanicked"
   | "shellLost"
   | "shellRelocked"
   | "shellOneContainer"
@@ -34,6 +38,8 @@ export type ShellScenario =
 export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellQueued",
   "shellNoShell",
+  "shellFailed",
+  "shellPanicked",
   "shellLost",
   "shellRelocked",
   "shellOneContainer",
@@ -73,7 +79,7 @@ export function shellContainers(
 ): ShellContainers {
   if (pod.status !== "Running") {
     throw new IpcError(
-      "invalidInput",
+      "shell.pod-not-running",
       `pod ${pod.name} is ${pod.status}, so it runs no container to open a shell in`,
     );
   }
@@ -185,7 +191,7 @@ export class MockShell {
       return;
     }
     if (this.#state !== "running") {
-      throw new IpcError("conflict", "the shell does not run");
+      throw new IpcError("subscription.not-found", "the shell does not run");
     }
     for (const character of text) this.#key(character);
   }
@@ -213,6 +219,27 @@ export class MockShell {
         this.#end({
           reason: "noShell",
           message: `OCI runtime exec failed: exec failed: unable to start container process: exec: "sh": executable file not found in $PATH: unknown`,
+        });
+        return;
+      }
+      if (this.#scenario === "shellFailed") {
+        this.#end({
+          reason: "failed",
+          error: wire(
+            "server.forbidden",
+            'pods "web-7d9f" is forbidden: User "dev-user" cannot create resource "pods/exec" in API group "" in the namespace "default"',
+            { reason: "Forbidden", causes: [] },
+          ),
+        });
+        return;
+      }
+      if (this.#scenario === "shellPanicked") {
+        this.#end({
+          reason: "failed",
+          error: wire(
+            "internal.panic",
+            "Twigo stopped this shell on an internal error",
+          ),
         });
         return;
       }

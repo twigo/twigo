@@ -10,6 +10,11 @@
 //!   processes it is responsible for (macOS).
 //! - `twigo-bench report <dir>` prints the table of the six metrics, writes `report.json`, and
 //!   fails when a judged metric misses its target; none measured on the mock is judged.
+#![expect(
+    clippy::print_stderr,
+    clippy::print_stdout,
+    reason = "the bench's stdout and stderr are its interface"
+)]
 
 mod churn;
 mod process;

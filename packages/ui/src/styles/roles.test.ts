@@ -497,3 +497,64 @@ test.each(THEMES)(
     expect(new Set(contrast).size).toBe(ROLES.length);
   },
 );
+
+const TINTED = [
+  ["banner", "../components/banner.tsx"],
+  ["callout", "../components/callout.tsx"],
+] as const;
+const CODE_ROLES = [
+  classOf(
+    "../components/error-details.tsx",
+    /<code className="[^"]*\btext-(strong|content|support|quiet)\b/,
+  ),
+  classOf(
+    "../components/error-details.tsx",
+    /\btext-(strong|content|support|quiet) underline-offset-2/,
+  ),
+];
+
+function tintsOf(file: string) {
+  const block = /const TINT = \{([\s\S]*?)\} as const/.exec(read(file))?.[1];
+  if (block === undefined) throw new Error(`${file} has no TINT`);
+  return [...block.matchAll(/(\w+):\s*"bg-([\w-]+)\/(\d+)/g)].map(
+    ([, tone, token, alpha]) => ({
+      tone: tone ?? "",
+      token: token ?? "",
+      alpha: Number(alpha) / 100,
+    }),
+  );
+}
+
+test.each(TINTED)(
+  "a %s marks its tint, so that the quiet role reads as support on it",
+  (_, file) => {
+    expect(read(file)).toContain("data-tone={tone}");
+  },
+);
+
+test.each(THEMES)(
+  "%s: the code of an error and its Copy details read at 4.5:1 or more on the tints of a banner and a callout, over the shell, the editor, the side bar, a card and a popover",
+  (theme) => {
+    const found = TINTED.flatMap(([what, file]) =>
+      tintsOf(file).flatMap(({ tone, token, alpha }) =>
+        ["shell", ...GROUNDS, "card", "popover"].flatMap((on) => {
+          const tint = colour(`var(--${token})`, theme);
+          tint.alpha = alpha;
+          const under = over(tint, surface(on as Surface, theme));
+          return CODE_ROLES.map((name) =>
+            reading(
+              `${name} on a ${tone} ${what} on ${on}`,
+              under.contrast(
+                eightBit(colour(`var(--${name})`, theme, underTint)),
+                "WCAG21",
+              ),
+              4.5,
+            ),
+          );
+        }),
+      ),
+    );
+    expect(found).not.toEqual([]);
+    expect(unmet(found)).toEqual([]);
+  },
+);

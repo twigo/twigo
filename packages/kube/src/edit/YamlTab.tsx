@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useChanges } from "@twigo/workbench";
+import type { ObjectProblem } from "../viewProblem";
 import { kindOf, resourceVersionOf, yamlOfJson } from "./object";
 import type { EditServices } from "./services";
 import { YamlSurface } from "./YamlSurface";
@@ -17,6 +18,7 @@ export function YamlTab({
   json,
   statusLocked,
   gone,
+  onReopen,
 }: {
   edits: EditServices;
   uri: string;
@@ -24,7 +26,8 @@ export function YamlTab({
   json: string;
   statusLocked: boolean;
   /** Why the object is not there to follow: `json` is then the one the edit was based on. */
-  gone?: { readonly title: string; readonly body: string };
+  gone?: ObjectProblem;
+  onReopen?: (() => void) | undefined;
 }) {
   const { copies, previews } = edits;
   useChanges(copies.changes);
@@ -53,6 +56,7 @@ export function YamlTab({
       statusLocked={statusLocked}
       schemaKind={kind}
       {...(gone && { gone })}
+      onReopen={onReopen}
       note={
         copies.get(uri)
           ? "Edited, not applied"

@@ -20,7 +20,7 @@ use k8s_openapi::api::core::v1::Pod;
 use serde_json::json;
 use twigo_cache::hub::{Query, Resource, RowFormat};
 use twigo_cache::request::field_value;
-use twigo_ipc::{Affected, ErrorKind, IpcError, ObjectRef};
+use twigo_ipc::{Affected, ErrorCode, ErrorKind, IpcError, ObjectRef};
 use twigo_kube::client::Clients;
 use twigo_policy::friction::Risk;
 
@@ -388,7 +388,7 @@ impl Run {
         }
         let stays = |why: String| {
             IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::ActionDrainRefused,
                 format!("Node {name} stays cordoned: {why}"),
             )
         };
@@ -468,17 +468,13 @@ impl Run {
             .map(|error| error.message.as_str())
             .collect::<Vec<_>>()
             .join("; ");
-        let stopped = || {
-            let mut told = format!(
+        let stopped = || Finished::Stopped {
+            text: format!(
                 "Stopped draining node {name}, which stays cordoned; it evicted {} of {}",
                 uids.len(),
                 counted(total, "pod")
-            );
-            if !failed.is_empty() {
-                told.push_str("; ");
-                told.push_str(&failures);
-            }
-            Finished::Stopped(told)
+            ),
+            failed: failed.iter().copied().cloned().collect(),
         };
         if progress.stopping() {
             return Ok(stopped());
@@ -486,7 +482,7 @@ impl Run {
         let finish = |done: String| match failed.first() {
             None => Ok(Finished::Done(done)),
             Some(first) => Err(IpcError::new(
-                first.kind,
+                first.code,
                 format!("Node {name} stays cordoned: {failures}"),
             )),
         };
@@ -580,7 +576,7 @@ async fn evict(clients: &Clients, pod: &Pod, progress: &Progress) -> Result<bool
             Err(error) => {
                 let error = twigo_kube::errors::request(&error);
                 return Err(IpcError::new(
-                    error.kind,
+                    error.code,
                     format!("evicting pod {namespace}/{name} failed: {}", error.message),
                 ));
             }

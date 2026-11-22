@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
+  type ComponentProps,
 } from "react";
 import { Columns3 } from "lucide-react";
 import {
@@ -48,8 +49,9 @@ import { cellsOf, objectOfRow } from "../selection";
 import type { ListServices } from "../services";
 import type { ListInput } from "../uri";
 import { useVisible } from "../useVisible";
+import { useReopen } from "../useReopen";
 import { ViewStatus } from "../ViewStatus";
-import { leavesOut } from "./listStatus";
+import { leavesOut, waitingLine } from "./listStatus";
 import { decideRows } from "./alarm";
 import { CellView } from "./cells";
 import { fitGrid } from "./fit";
@@ -65,30 +67,11 @@ const GROUP = "group:";
  * kind's preset make the query, Rust sorts, filters, groups and windows,
  * and the grid draws the window with each column's rule.
  */
-export function ResourceGrid(props: {
-  uri: string;
-  input: ListInput;
-  resource: Resource;
-  /** Plural, as the explorer names the kind: "Pods". */
-  title: string;
-  services: ListServices;
-  /**
-   * Where the selected row's details show: beside the list, with that row's
-   * actions, or over the list's right side, rows' ends included.
-   */
-  details: "beside" | "over" | undefined;
-  onActivate: () => void;
-}) {
-  const [attempt, setAttempt] = useState(0);
-  return (
-    <Grid
-      key={attempt}
-      {...props}
-      onRetry={() => {
-        setAttempt((n) => n + 1);
-      }}
-    />
-  );
+export function ResourceGrid(
+  props: Omit<ComponentProps<typeof Grid>, "onRetry">,
+) {
+  const [key, reopen] = useReopen();
+  return <Grid key={key} {...props} onRetry={reopen} />;
 }
 
 function Grid({
@@ -104,8 +87,13 @@ function Grid({
   uri: string;
   input: ListInput;
   resource: Resource;
+  /** Plural, as the explorer names the kind: "Pods". */
   title: string;
   services: ListServices;
+  /**
+   * Where the selected row's details show: beside the list, with that row's
+   * actions, or over the list's right side, rows' ends included.
+   */
   details: "beside" | "over" | undefined;
   onActivate: () => void;
   onRetry: () => void;
@@ -563,6 +551,7 @@ function Grid({
         </ActionDropdown>
       }
       loading={!SHOWS_ROWS.has(snapshot.status.state)}
+      waiting={waitingLine(snapshot.status)}
       empty={
         filtered ? (
           <EmptyState

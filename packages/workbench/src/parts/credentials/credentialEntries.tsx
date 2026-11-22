@@ -1,4 +1,5 @@
 import { KeyRound, Loader2, ShieldAlert, TriangleAlert } from "lucide-react";
+import { errorText } from "../../errors";
 import { useChanges, useWorkbench } from "../../react";
 import type { StatusEntry } from "../../views/registry";
 import { SignInPanel } from "./SignInPanel";
@@ -22,7 +23,7 @@ export function useCredentialEntries(): readonly StatusEntry[] {
         id: "credentials",
         text: "Kubeconfig entry unusable",
         icon: TriangleAlert,
-        tooltip: auth.message,
+        tooltip: errorText(auth.error),
       },
     ];
   }

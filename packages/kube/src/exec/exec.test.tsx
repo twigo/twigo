@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Backend } from "@twigo/protocol";
@@ -20,6 +21,7 @@ import {
   tabOf as tabElement,
   tabsIn,
   testWorkbench,
+  toastWords,
 } from "@twigo/workbench/testing";
 import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { ctrlC, withTerminalLayout } from "../../test/terminal";
@@ -232,7 +234,7 @@ test("a read-only context refuses the plan, offers the unlock and opens no tab",
   await settle(4);
   expect(panelTabs()).toEqual([]);
   const [message, options] = error.mock.calls[0] ?? [];
-  expect(message).toMatch(
+  expect(toastWords(message)).toMatch(
     /prod-eu is read-only .*create pods\/auth-api-1a4uyl1-r2bkk\/exec in auth/,
   );
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
@@ -470,6 +472,43 @@ test("Restart asks again and starts a new session in the same tab", async () => 
   expect(run).toHaveBeenCalledOnce();
   expect(tabs.get(uri)).toBe(tab);
   expect(panelTabs()).toEqual([uri]);
+});
+
+test("a shell that Twigo's own code stopped says so over the terminal, opens again with Reopen and reports with Report…", async () => {
+  const { workbench, tabs, open } = await mounted("shellPanicked");
+  await open("qa", ONE);
+  await settle(10);
+  expect(screen.getByText("Twigo hit an internal error.")).toBeTruthy();
+  expect(screen.getByText("This shell stopped.")).toBeTruthy();
+  const banner = screen.getByRole("button", { name: "Reopen" }).closest("div");
+  if (!banner) throw new Error("no banner");
+  expect(within(banner).getByText("internal.panic")).toBeTruthy();
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  fireEvent.click(within(banner).getByRole("button", { name: "Copy details" }));
+  expect(writeText).toHaveBeenCalledWith(
+    expect.stringContaining(
+      "Message: Twigo stopped this shell on an internal error",
+    ),
+  );
+  const uri = execUri(RUNNING);
+  const tab = tabs.get(uri);
+  const run = vi.spyOn(workbench.operations, "run");
+  fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+  await settle(10);
+  expect(run).toHaveBeenCalledOnce();
+  expect(tabs.get(uri)).toBe(tab);
+  expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
+});
+
+test("a shell that failed for any other reason has no banner of Twigo's", async () => {
+  const { open } = await mounted("shellFailed");
+  await open("qa", ONE);
+  await settle(10);
+  expect(screen.queryByRole("button", { name: "Report…" })).toBeNull();
 });
 
 test("a tab closed while Restart waits for its plan stays closed, and the session the plan ends with is closed", async () => {
@@ -974,6 +1013,6 @@ test("on a read-only context a pod's editor draws its Shell with the lock, sayin
   fireEvent.click(shell);
   await settle(10);
   const [message, options] = error.mock.calls[0] ?? [];
-  expect(message).toMatch(/^prod-eu is read-only/);
+  expect(toastWords(message)).toMatch(/^prod-eu is read-only/);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });

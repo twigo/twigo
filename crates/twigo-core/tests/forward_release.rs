@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use serde_json::json;
 use tokio::sync::watch;
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{ForwardId, ForwardState, ForwardTarget, Gvr, ResumeForward};
 
@@ -104,21 +104,14 @@ fn keep(dir: &Path, forwards: &[(u32, &str, u16, u16)]) {
     std::fs::write(dir.join("state.json"), state.to_string()).unwrap();
 }
 
-fn running(dir: &Path) -> Arc<Core> {
+fn running(dir: &Path) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 async fn restored(core: &Core, id: u32) {

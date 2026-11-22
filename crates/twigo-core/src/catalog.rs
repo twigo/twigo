@@ -12,7 +12,9 @@ use std::sync::atomic::{self, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
+use twigo_ipc::{CatalogFailure, ErrorCode, IpcError};
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
+use twigo_panic::Reporter;
 use twigo_policy::{Metadata, Policy, TypeLock};
 
 /// The contexts, ordered by their `order`, those without one last, then by
@@ -20,6 +22,8 @@ use twigo_policy::{Metadata, Policy, TypeLock};
 #[derive(Debug, PartialEq, Eq)]
 pub struct Contexts {
     listed: Vec<kubeconfig::Context>,
+    /// The files that could not be read, merged or watched.
+    failures: Vec<CatalogFailure>,
     /// By name: the read at which what the catalog says of the context for
     /// its mode last changed, or it was listed again ([`Metadata::revision`]).
     revisions: HashMap<String, u64>,
@@ -27,20 +31,52 @@ pub struct Contexts {
     read: u64,
 }
 
-/// The contexts as the sources list them, ordered.
-fn sorted(catalog: kubeconfig::Catalog) -> Vec<kubeconfig::Context> {
-    for failure in &catalog.failures {
-        eprintln!("skipped {}: {}", failure.file.display(), failure.message);
-    }
+/// The contexts as the sources list them, ordered, and what they could not.
+fn sorted(catalog: kubeconfig::Catalog) -> (Vec<kubeconfig::Context>, Vec<CatalogFailure>) {
     let mut contexts = catalog.contexts;
     contexts.sort_by(|a, b| by_order(a.order, b.order).then_with(|| a.name.cmp(&b.name)));
-    contexts
+    (contexts, catalog.failures)
+}
+
+/// Says what changed in the failures since the last read, one line for each
+/// file: a failure that holds is not said again, a changed one is said as it
+/// is, and a file is said to fail no longer once none of its failures is left.
+/// A file the person broke is a warning; one that Twigo cannot watch is Twigo's
+/// own failure, an error.
+fn tell_failures(before: &[CatalogFailure], now: &[CatalogFailure]) {
+    for failure in now.iter().filter(|failure| !before.contains(failure)) {
+        if failure.error.code == ErrorCode::KubeconfigUnwatched {
+            tracing::error!(
+                path = %failure.source,
+                code = %failure.error.code,
+                "{}",
+                failure.error.message
+            );
+        } else {
+            tracing::warn!(
+                path = %failure.source,
+                code = %failure.error.code,
+                "{}",
+                failure.error.message
+            );
+        }
+    }
+    for failure in before
+        .iter()
+        .filter(|failure| now.iter().all(|now| now.source != failure.source))
+    {
+        tracing::info!(path = %failure.source, code = %failure.error.code, "the file no longer fails");
+    }
 }
 
 impl Contexts {
     /// `listed`, read after `before`: a context keeps its revision while
     /// what the catalog says of it stays, else takes this read's.
-    fn new(listed: Vec<kubeconfig::Context>, before: Option<&Self>) -> Self {
+    fn new(
+        listed: Vec<kubeconfig::Context>,
+        failures: Vec<CatalogFailure>,
+        before: Option<&Self>,
+    ) -> Self {
         let read = before.map_or(0, |before| before.read + 1);
         let mut revisions = HashMap::new();
         for context in &listed {
@@ -57,6 +93,7 @@ impl Contexts {
         }
         Self {
             listed,
+            failures,
             revisions,
             read,
         }
@@ -89,8 +126,9 @@ impl Contexts {
         }
     }
 
-    pub fn ipc(&self, policy: &Policy) -> Vec<twigo_ipc::Context> {
-        self.listed
+    pub fn ipc(&self, policy: &Policy) -> twigo_ipc::Catalog {
+        let contexts = self
+            .listed
             .iter()
             .map(|context| twigo_ipc::Context {
                 name: context.name.clone(),
@@ -99,8 +137,13 @@ impl Contexts {
                 server: context.server.clone(),
                 access: policy.access(&context.name),
                 namespace: context.namespace.clone(),
+                problem: context.problem.as_ref().map(IpcError::from),
             })
-            .collect()
+            .collect();
+        twigo_ipc::Catalog {
+            contexts,
+            failures: self.failures.clone(),
+        }
     }
 }
 
@@ -153,6 +196,8 @@ pub struct Catalog {
     /// Told of what each read after the first changes of a context, for its
     /// audit log.
     policy: Option<Arc<Policy>>,
+    /// Told when the thread that watches the files panics.
+    reporter: Option<Reporter>,
 }
 
 impl Default for Catalog {
@@ -164,6 +209,7 @@ impl Default for Catalog {
             followed: Mutex::new(None),
             generation: Arc::new(AtomicU64::new(0)),
             policy: None,
+            reporter: None,
         }
     }
 }
@@ -175,6 +221,15 @@ impl Catalog {
     pub fn audited_by(self, policy: Arc<Policy>) -> Self {
         Self {
             policy: Some(policy),
+            ..self
+        }
+    }
+
+    /// The catalog, whose watch of the files reports to `reporter` when its
+    /// thread panics.
+    pub fn supervised_by(self, reporter: Reporter) -> Self {
+        Self {
+            reporter: Some(reporter),
             ..self
         }
     }
@@ -191,16 +246,19 @@ impl Catalog {
             let current = Arc::clone(&self.generation);
             let policy = self.policy.clone();
             move |catalog: kubeconfig::Catalog| {
-                let listed = sorted(catalog);
+                let (listed, failures) = sorted(catalog);
                 // Under the channel's write lock, which the successor's
                 // publish takes too, so the two cannot interleave.
                 contexts.send_if_modified(|now| {
                     if current.load(atomic::Ordering::Acquire) != generation
-                        || now.as_ref().is_some_and(|now| now.listed == listed)
+                        || now
+                            .as_ref()
+                            .is_some_and(|now| now.listed == listed && now.failures == failures)
                     {
                         return false;
                     }
-                    let next = Contexts::new(listed, now.as_deref());
+                    tell_failures(now.as_ref().map_or(&[], |now| &now.failures), &failures);
+                    let next = Contexts::new(listed, failures, now.as_deref());
                     if let (Some(policy), Some(before)) = (&policy, now.as_deref()) {
                         next.tell(before, policy);
                     }
@@ -211,13 +269,23 @@ impl Catalog {
         };
         let written = self.written.clone();
         let wrote = move || written.send_modify(|count| *count += 1);
-        match Watch::start(sources.clone(), publish.clone(), wrote) {
+        let on_panic = {
+            let reporter = self.reporter.clone();
+            move || {
+                if let Some(reporter) = reporter {
+                    reporter.panicked("kubeconfig watch");
+                }
+            }
+        };
+        match Watch::start(sources.clone(), publish.clone(), wrote, on_panic) {
             Ok(watch) => *followed = Some(watch),
             Err(error) => {
-                eprintln!(
-                    "could not watch the kubeconfig files, so their changes go unseen: {error}"
-                );
-                publish(sources.load());
+                let unseen: Vec<_> = sources
+                    .files()
+                    .iter()
+                    .map(|file| (file.clone(), error.to_string()))
+                    .collect();
+                publish(sources.load().unwatched(&sources, &unseen));
             }
         }
     }
@@ -283,6 +351,14 @@ impl Catalog {
                 .as_ref()
                 .and_then(|contexts| contexts.metadata(context))
         }
+    }
+
+    /// The contexts as last read, none until the sources have been, out of
+    /// the channel's borrow: a second borrow behind a waiting writer may
+    /// deadlock (tokio's `watch::Ref`), as the policy's would for each
+    /// context.
+    pub fn current(&self) -> Option<Arc<Contexts>> {
+        self.contexts.borrow().clone()
     }
 
     /// The contexts, once the sources have been read.

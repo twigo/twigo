@@ -7,7 +7,7 @@ mod ports;
 mod saved;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use twigo_cache::hub::{Hub, Resource};
 use twigo_ipc::{
-    BusyWhy, ErrorKind, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts,
+    BusyWhy, ErrorCode, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts,
     ForwardStarted, ForwardState, ForwardTarget, IpcError, ResumeForward, StartForward,
 };
 use twigo_kube::client::Actor;
@@ -30,7 +30,7 @@ pub(crate) use saved::{Saved, SavedForward};
 
 use crate::catalog::Contexts;
 use crate::proxy::{Changes, blocked};
-use crate::{ClientsError, Core, actions};
+use crate::{Core, actions};
 
 /// A forward's `Changed` goes out at most four times a second, unless its
 /// state changed.
@@ -277,7 +277,7 @@ impl Checks {
     fn refusal(&self, context: &str, target: &ForwardTarget) -> Option<IpcError> {
         let contexts = self.catalog.borrow().clone()?;
         if contexts.find(context).is_none() {
-            return Some(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+            return Some(crate::errors::unlisted(context));
         }
         blocked(&self.policy, context, &attributes(target), Actor::Ui)
             .map(|blocked| IpcError::from(*blocked))
@@ -463,9 +463,11 @@ impl Forwards {
     }
 
     /// Closes every port and connection, and the table: what the state says
-    /// ran stays, as no command saves, binds or starts after it.
+    /// ran stays, as no command saves, binds or starts after it. It takes
+    /// the table back from a panic, which the fatal path's recheck may have
+    /// left it in.
     pub(crate) fn shutdown(&self) {
-        let mut table = self.table();
+        let mut table = self.table.lock().unwrap_or_else(PoisonError::into_inner);
         table.closed = true;
         for entry in table.entries.values_mut() {
             entry.stop();
@@ -526,6 +528,7 @@ impl Forwards {
     /// once that passes.
     pub(crate) fn recheck(&self) {
         let mut table = self.table();
+        twigo_panic::inject::check("forward recheck");
         for entry in table.entries.values_mut() {
             entry.check(&self.checks);
         }
@@ -588,31 +591,36 @@ async fn pump(
 }
 
 fn missing(id: ForwardId) -> IpcError {
-    IpcError::new(ErrorKind::NotFound, format!("no forward {}", id.0))
+    IpcError::new(ErrorCode::ForwardNotFound, format!("no forward {}", id.0))
 }
 
 fn quitting() -> IpcError {
-    IpcError::new(ErrorKind::Unavailable, "Twigo is quitting")
+    IpcError::new(ErrorCode::AppQuitting, "Twigo is quitting")
 }
 
 fn unbound(local: u16, why: BusyWhy, own: Option<(String, String)>) -> IpcError {
-    let words = match (why, own) {
-        (BusyWhy::InUse, Some((kind, name))) => {
-            format!("port {local} is held by another forward of Twigo, to {kind} {name}")
-        }
-        (BusyWhy::InUse, None) => format!("port {local} is held by another process"),
-        (BusyWhy::NotPermitted, _) => {
-            format!("this system does not let Twigo listen on port {local}")
-        }
+    let (code, words) = match (why, own) {
+        (BusyWhy::InUse, Some((kind, name))) => (
+            ErrorCode::ForwardPortInUse,
+            format!("port {local} is held by another forward of Twigo, to {kind} {name}"),
+        ),
+        (BusyWhy::InUse, None) => (
+            ErrorCode::ForwardPortInUse,
+            format!("port {local} is held by another process"),
+        ),
+        (BusyWhy::NotPermitted, _) => (
+            ErrorCode::ForwardPortNotPermitted,
+            format!("this system does not let Twigo listen on port {local}"),
+        ),
     };
-    IpcError::new(ErrorKind::Conflict, words)
+    IpcError::new(code, words)
 }
 
 /// A local port a person names: 0 would ask the system for any port.
 fn named(local: Option<u16>) -> Result<(), IpcError> {
     if local == Some(0) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ForwardInvalidPort,
             "port 0 is not a local port to listen on",
         ));
     }
@@ -665,7 +673,7 @@ impl Core {
             Err(BindError::Busy(why)) => {
                 let free = free_port(local).await.map_err(|error| {
                     IpcError::new(
-                        ErrorKind::Conflict,
+                        ErrorCode::ForwardPortInUse,
                         format!("port {local} is busy, and no other is free: {error}"),
                     )
                 })?;
@@ -673,7 +681,7 @@ impl Core {
                 Ok(Bound::Busy(ForwardStarted::Busy { local, why, free }))
             }
             Err(BindError::Failed(error)) => Err(IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::ForwardListenFailed,
                 format!("could not listen on port {local}: {error}"),
             )),
         }
@@ -779,7 +787,7 @@ impl Core {
             .find(|declared| declared.port == port)
             .ok_or_else(|| {
                 IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ForwardNoPort,
                     format!("{} declares no port {port}", target.name),
                 )
             })
@@ -807,12 +815,21 @@ impl Core {
         local: Option<u16>,
     ) -> Result<ForwardStarted, IpcError> {
         let (context, base, runs) = {
-            let table = self.forwards.table();
-            let entry = table.entries.get(&id.0).ok_or_else(|| {
-                IpcError::new(ErrorKind::NotFound, format!("forward {} was removed", id.0))
-            })?;
-            let target = &entry.base.target;
-            self.forwards.admit(&table, &entry.context, target)?;
+            let mut table = self.forwards.table();
+            let missing = || {
+                IpcError::new(
+                    ErrorCode::ForwardNotFound,
+                    format!("forward {} was removed", id.0),
+                )
+            };
+            let entry = table.entries.get(&id.0).ok_or_else(missing)?;
+            self.forwards
+                .admit(&table, &entry.context, &entry.base.target)?;
+            // A data path that ended on a panic starts only as a new one.
+            let entry = table.entries.get_mut(&id.0).ok_or_else(missing)?;
+            if entry.run.as_ref().is_some_and(|run| run.data.ended()) {
+                entry.stop();
+            }
             (
                 entry.context.clone(),
                 entry.base.clone(),
@@ -928,7 +945,7 @@ impl Core {
             return;
         }
         if let Err(error) = self.state.set_forwards(space, &table.saved(space)) {
-            eprintln!("could not keep the forwards of {space}: {error}");
+            tracing::error!(space, %error, "could not keep the forwards of a space");
         }
     }
 
@@ -1011,7 +1028,7 @@ impl Core {
                 }
                 Err(BindError::Failed(error)) => {
                     entry.unbound = Some(IpcError::new(
-                        ErrorKind::Internal,
+                        ErrorCode::ForwardListenFailed,
                         format!("could not listen on port {local}: {error}"),
                     ));
                 }
@@ -1036,15 +1053,17 @@ impl Core {
                 Err(error) => entry.unbound = Some(error),
             }
         }
+        if let Some(error) = &entry.unbound {
+            tracing::warn!(code = %error.code, "a forward failed");
+        }
         table.entries.insert(id.0, entry);
         table.changed(id);
     }
 
-    /// Restores the forwards, then asks the policy and the catalog for each
-    /// again whenever either changes; never returns.
+    /// Asks the policy and the catalog for each forward again whenever
+    /// either changes; never returns.
     pub(crate) async fn follow_forward_modes(&self) {
         let mut changes = Changes::new(&self.policy, &self.catalog.subscribe());
-        self.restore_forwards().await;
         loop {
             self.forwards.recheck();
             changes.next().await;

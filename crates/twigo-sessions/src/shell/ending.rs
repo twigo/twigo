@@ -3,7 +3,7 @@
 //! and on its code.
 
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
-use twigo_ipc::{ErrorKind, IpcError, ShellEnd};
+use twigo_ipc::ShellEnd;
 
 /// `shell` says it ran our command rather than joined a container's main
 /// process.
@@ -32,7 +32,7 @@ pub(super) fn ending(status: Option<&Status>, printed: bool, shell: bool) -> She
         return ShellEnd::NoShell { message };
     }
     ShellEnd::Failed {
-        error: IpcError::new(ErrorKind::Unavailable, message),
+        error: twigo_kube::errors::exec(status),
     }
 }
 
@@ -62,6 +62,8 @@ fn no_executable(message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use twigo_ipc::{ErrorCode, IpcError, ServerStatus};
+
     use super::*;
 
     fn status(json: &str) -> Status {
@@ -84,8 +86,13 @@ mod tests {
     }
 
     fn failed(json: &str) -> ShellEnd {
+        let status = status(json);
         ShellEnd::Failed {
-            error: IpcError::new(ErrorKind::Unavailable, status(json).message.unwrap()),
+            error: IpcError::new(ErrorCode::ServerUnavailable, status.message.unwrap())
+                .with_server(ServerStatus {
+                    reason: status.reason.unwrap(),
+                    causes: Vec::new(),
+                }),
         }
     }
 

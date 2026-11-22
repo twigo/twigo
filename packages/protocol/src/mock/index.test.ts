@@ -104,7 +104,9 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
   const spaces = backend.invoke("spaces_list", null);
   const contexts = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
-  const colors = new Map((await contexts).map((c) => [c.name, c.color]));
+  const colors = new Map(
+    (await contexts).contexts.map((c) => [c.name, c.color]),
+  );
   expect(
     (await spaces).map((s) => [s.id, colors.get(s.contexts[0] ?? "")]),
   ).toEqual([
@@ -114,12 +116,52 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
   ]);
 });
 
+test("no problem of Twigo's own files is listed, but under the problems scenario the state set aside and the audit log off", async () => {
+  const none = createMockBackend().subscribe(
+    "problems_watch",
+    null,
+    () => undefined,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await none).toEqual([]);
+
+  const listed = createMockBackend("problems").subscribe(
+    "problems_watch",
+    null,
+    () => undefined,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect((await listed).map((problem) => problem.code)).toEqual([
+    "state.set-aside",
+    "audit.off",
+  ]);
+});
+
+test("under problemsCleared the state cannot be saved until a save works, and a later save fails again", async () => {
+  const sent: string[][] = [];
+  const listed = createMockBackend("problemsCleared").subscribe(
+    "problems_watch",
+    null,
+    (next) => sent.push(next.map(({ code }) => code)),
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect((await listed).map(({ code }) => code)).toEqual([
+    "state.unsaved",
+    "audit.off",
+  ]);
+  expect(sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(sent).toEqual([["audit.off"]]);
+  await vi.advanceTimersByTimeAsync(8000);
+  expect(sent).toEqual([["audit.off"], ["state.unsaved", "audit.off"]]);
+});
+
 test("a context's mode follows the strictest of its locks, a choice over them, and an unlock that ends by itself, and a context nothing marks is unmarked", async () => {
   const backend = createMockBackend();
   const seen: Context[][] = [];
-  const first = backend.subscribe("contexts_watch", null, (next) =>
-    seen.push(next),
-  );
+  const first = backend
+    .subscribe("contexts_watch", null, (next) => seen.push(next.contexts))
+    .then((catalog) => catalog.contexts);
   await vi.advanceTimersByTimeAsync(0);
   const access = (contexts: Context[] | undefined, name: string) =>
     contexts?.find((context) => context.name === name)?.access;
@@ -209,14 +251,14 @@ test("a context's mode follows the strictest of its locks, a choice over them, a
 
   const refused = expect(
     backend.invoke("command_plan", { action: "unlock", context: "staging" }),
-  ).rejects.toMatchObject({ kind: "invalidInput" });
+  ).rejects.toMatchObject({ code: "policy.not-locked" });
   const unlisted = expect(
     backend.invoke("command_plan", {
       action: "setMode",
       context: "ghost",
       mode: "guarded",
     }),
-  ).rejects.toMatchObject({ kind: "notFound" });
+  ).rejects.toMatchObject({ code: "context.not-listed" });
   await vi.advanceTimersByTimeAsync(0);
   await refused;
   await unlisted;
@@ -226,7 +268,9 @@ test("an admin's policy file holds its contexts and leaves the others", async ()
   const backend = createMockBackend("policyFile");
   const first = backend.subscribe("contexts_watch", null, () => undefined);
   await vi.advanceTimersByTimeAsync(0);
-  const prod = (await first).find((context) => context.name === "prod-eu");
+  const prod = (await first).contexts.find(
+    (context) => context.name === "prod-eu",
+  );
   expect(prod?.access.source.kind).toBe("policyFile");
 
   const refused = [
@@ -544,6 +588,138 @@ test("pinned states keep or drop rows as Rust does", async () => {
   }
 });
 
+test("a list whose cluster does not answer carries the failure that keeps it waiting, and an object opened under it has none of its parts", async () => {
+  for (const [scenario, state, code] of [
+    ["connectRefused", "connecting", "connect.refused"],
+    ["connectCertificate", "connecting", "connect.certificate"],
+    ["connectLost", "stale", "connect.lost"],
+  ] as const) {
+    const status = (await open(scenario)).batches[0]?.status;
+    expect(status, scenario).toMatchObject({ state, cause: { code } });
+  }
+  const refused = (await open("serverRefuses")).batches[0]?.status;
+  expect(refused).toMatchObject({
+    state: "error",
+    error: {
+      code: "server.invalid",
+      kind: "invalidInput",
+      server: { reason: "Invalid" },
+    },
+  });
+  expect(
+    refused?.state === "error" && refused.error.server?.causes.length,
+  ).toBeGreaterThan(0);
+
+  const backend = createMockBackend("connectRefused");
+  const objects: ObjectBatch[] = [];
+  const pending = backend.subscribe(
+    "object_open",
+    {
+      object: {
+        space: "prod-eu",
+        gvr: { group: "", version: "v1", resource: "pods" },
+        namespaced: true,
+        namespace: "default",
+        name: "web",
+      },
+      parts: { ...OVERVIEW, overview: true, manifest: true },
+    },
+    (batch) => objects.push(batch),
+  );
+  await vi.advanceTimersByTimeAsync(10);
+  await pending;
+  expect(objects[0]).toMatchObject({
+    status: { state: "connecting", cause: { code: "connect.refused" } },
+    exists: false,
+    overview: null,
+    manifest: null,
+  });
+});
+
+test("a list that ended on an internal error says so, and under discoveryFails each space's discovery fails for its own reason", async () => {
+  const panicked = await open("listPanicked");
+  expect(panicked.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "internal.panic" },
+  });
+
+  const backend = createMockBackend("discoveryFails");
+  const found: Record<string, unknown> = {};
+  for (const space of ["prod-eu", "staging", "dev"]) {
+    const opened = backend.invoke("space_open", space);
+    await vi.advanceTimersByTimeAsync(0);
+    await opened;
+    const watching = backend.subscribe("resources_watch", space, (message) => {
+      found[space] = message;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await watching;
+  }
+  const listed = createMockBackend("listFails");
+  const dev = listed.invoke("space_open", "dev");
+  await vi.advanceTimersByTimeAsync(0);
+  await dev;
+  const failing = await open("listFails", query({ space: "dev" }), listed);
+  expect(failing.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "credentials.plugin-failed" },
+  });
+  expect(
+    Object.values(found).map((message) =>
+      JSON.stringify(
+        (message as { error?: { code: string } }).error?.code ?? "ready",
+      ),
+    ),
+  ).toEqual([
+    '"connect.refused"',
+    '"context.missing-user"',
+    '"credentials.plugin-failed"',
+  ]);
+});
+
+test("the catalog names the kubeconfig files it could not read, and the context whose entry names no user", async () => {
+  const catalogs = async (scenario: MockScenario) => {
+    const backend = createMockBackend(scenario);
+    const pending = backend.subscribe("contexts_watch", null, () => undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    return pending;
+  };
+  const broken = await catalogs("kubeconfigFailures");
+  expect(broken.failures.map(({ error }) => error.code)).toEqual([
+    "kubeconfig.unparsable",
+    "kubeconfig.unreadable",
+  ]);
+  expect(broken.failures.every(({ source }) => source.startsWith("~/"))).toBe(
+    true,
+  );
+  expect(
+    broken.contexts.flatMap(({ problem }) => (problem ? [problem.code] : [])),
+  ).toEqual(["context.missing-user"]);
+  expect(broken.contexts.length).toBeGreaterThan(0);
+
+  const none = await catalogs("kubeconfigAllFailed");
+  expect(none.contexts).toEqual([]);
+  expect(none.failures).toHaveLength(2);
+  expect((await catalogs("live")).failures).toEqual([]);
+});
+
+test("a context whose user no file defines is refused its lists as a request with no credentials is", async () => {
+  const backend = createMockBackend("kubeconfigFailures");
+  const opened = backend.invoke("space_open", "orphan");
+  await vi.advanceTimersByTimeAsync(0);
+  await opened;
+  const refused = await open(
+    "kubeconfigFailures",
+    query({
+      space: "orphan",
+      gvr: { group: "", version: "v1", resource: "nodes" },
+      namespaced: false,
+    }),
+    backend,
+  );
+  expect(refused.batches[0]?.status).toEqual({ state: "unauthorized" });
+});
+
 test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {
   const nodes = {
     gvr: { group: "", version: "v1", resource: "nodes" },
@@ -762,7 +938,7 @@ test("nodes, deployments and events come behind the same query view as pods", as
     )
     .catch((error: unknown) => error);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await refused).toMatchObject({ kind: "notFound" });
+  expect(await refused).toMatchObject({ code: "apply.kind-not-served" });
 });
 
 test("text matches the columns of priority 0 and those the query's choices show", async () => {
@@ -851,8 +1027,10 @@ test("a field selector keeps the pods of one node, and one on a field pods lack 
   expect(wrong.batches[0]?.status).toEqual({
     state: "error",
     error: {
+      code: "server.invalid",
       kind: "invalidInput",
       message: "field label not supported: spec.containers",
+      server: { reason: "BadRequest", causes: [] },
     },
   });
   expect(wrong.batches[0]?.total).toBe(0);
@@ -1164,13 +1342,13 @@ test("opening a context that has a space returns that space", async () => {
   expect(space.id).toBe("staging");
 });
 
-test("opening an unknown context fails with notFound", async () => {
+test("opening an unknown context fails as unlisted", async () => {
   const backend = createMockBackend();
   const failed = backend
     .invoke("space_open", "nowhere")
     .catch((e: unknown) => e);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await failed).toMatchObject({ kind: "notFound" });
+  expect(await failed).toMatchObject({ code: "context.not-listed" });
 });
 
 test("a schema comes recorded for a few kinds and is not found for the others", async () => {
@@ -1206,15 +1384,21 @@ test("a schema comes recorded for a few kinds and is not found for the others", 
     ).toBeDefined();
   }
 
-  for (const request of [
-    { space: "prod-eu", group: "apps", version: "v1", kind: "Nothing" },
-    { space: "nowhere", group: "apps", version: "v1", kind: "Deployment" },
-  ]) {
+  for (const [request, code] of [
+    [
+      { space: "prod-eu", group: "apps", version: "v1", kind: "Nothing" },
+      "openapi.no-kind",
+    ],
+    [
+      { space: "nowhere", group: "apps", version: "v1", kind: "Deployment" },
+      "space.not-found",
+    ],
+  ] as const) {
     const failed = backend
       .invoke("schema_get", request)
       .catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(0);
-    expect(await failed).toMatchObject({ kind: "notFound" });
+    expect(await failed).toMatchObject({ code });
   }
 });
 
@@ -1237,7 +1421,7 @@ test("state loads what was stored, all of a set or none", async () => {
     ])
     .catch((e: unknown) => e);
   await vi.advanceTimersByTimeAsync(0);
-  expect(await failed).toMatchObject({ kind: "notFound" });
+  expect(await failed).toMatchObject({ code: "space.not-found" });
   expect(await call(backend.invoke("state_load", null))).toEqual({
     app: { history: "[]" },
     spaces: { "prod-eu": { namespaces: '["default"]' } },
@@ -1350,7 +1534,7 @@ test("groups come once a list knows its columns, empty until it shows rows", asy
   expect(odd.batches[0]?.total).toBe(5000);
 });
 
-test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {
+test("a request for an idle plugin's credential starts its run, and only https and local http links open", async () => {
   vi.useRealTimers();
   const backend = createMockBackend("review");
   await backend.invoke("exec_trust", ["azure-prod-eu"]);
@@ -1369,7 +1553,54 @@ test("a request for an idle plugin's credential starts its run, and only sign-in
   expect(seen).toContain("running");
   await expect(
     backend.invoke("url_open", "http://localhost:1@example.com/"),
-  ).rejects.toThrow("only sign-in links");
+  ).rejects.toThrow("only https links");
+});
+
+test("the webview's errors reach the console, which stands for the diagnostics log", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const backend = createMockBackend();
+  const logged = backend.invoke("diagnostics_log", {
+    level: "warn",
+    message: "a part crashed",
+    stack: null,
+    source: "react-caught",
+  });
+  await vi.advanceTimersByTimeAsync(50);
+  await logged;
+  expect(warn).toHaveBeenCalledWith("[react-caught] a part crashed", "");
+  warn.mockRestore();
+});
+
+test("the report is the one Rust renders from a recorded log, and opening and saving it are logged", async () => {
+  const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  const backend = createMockBackend();
+  const settled = async <T>(answer: Promise<T>): Promise<T> => {
+    await vi.advanceTimersByTimeAsync(50);
+    return answer;
+  };
+
+  const report = await settled(backend.invoke("report_problem", null));
+  expect(report.facts.map((fact) => fact.id)).toEqual([
+    "twigo",
+    "system",
+    "engine",
+    "kubernetes",
+    "lastPanic",
+  ]);
+  expect(report.log).toContain("context=<context-1>");
+  expect(report.log).not.toContain("prod-eu");
+  expect(report.hidden.names).toBeGreaterThan(0);
+
+  const request = { facts: ["twigo" as const] };
+  expect(
+    await settled(backend.invoke("report_open_issue", request)),
+  ).toBeNull();
+  expect(info).toHaveBeenCalledWith("[report_open_issue]", request);
+
+  const saved = await settled(backend.invoke("report_save", { text: "a" }));
+  expect(saved).toMatch(/twigo-report-\d{4}-\d{2}-\d{2}\.txt$/);
+  expect(info).toHaveBeenCalledWith("[report_save]", { text: "a" });
+  info.mockRestore();
 });
 
 test("a request runs a failed unattended plugin again, as Rust holds only a sign-in's failure", async () => {

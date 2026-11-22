@@ -1,6 +1,11 @@
 import { UNMARKED } from "@twigo/protocol/mock";
 import { expect, test, vi } from "vitest";
-import type { Backend, Context } from "@twigo/protocol";
+import type {
+  Backend,
+  Catalog as Listed,
+  CatalogFailure,
+  Context,
+} from "@twigo/protocol";
 import { Catalog } from "./catalog";
 
 const ONE: Context[] = [
@@ -11,6 +16,7 @@ const ONE: Context[] = [
     server: null,
     namespace: null,
     access: UNMARKED,
+    problem: null,
   },
 ];
 const TWO: Context[] = [
@@ -21,20 +27,24 @@ const TWO: Context[] = [
     server: null,
     namespace: null,
     access: UNMARKED,
+    problem: null,
   },
 ];
 
 function backend(early: Context[] | undefined) {
-  let send: ((next: Context[]) => void) | undefined;
+  let send: ((next: Listed) => void) | undefined;
   const fake = {
     invoke: vi.fn(),
     subscribe: vi.fn((_command: string, _request: unknown, on: typeof send) => {
       send = on;
-      if (early) on?.(early);
-      return Promise.resolve(ONE);
+      if (early) on?.({ contexts: early, failures: [] });
+      return Promise.resolve({ contexts: ONE, failures: [] });
     }),
   } as unknown as Backend;
-  return { fake, send: (next: Context[]) => send?.(next) };
+  return {
+    fake,
+    send: (next: Context[]) => send?.({ contexts: next, failures: [] }),
+  };
 }
 
 test("lists the answer, then each change", async () => {
@@ -55,4 +65,72 @@ test("a change that arrives before the answer is the newer list", async () => {
   const catalog = new Catalog(fake);
   await catalog.watch();
   expect(catalog.list).toEqual(TWO);
+});
+
+const failing = (source: string): CatalogFailure => ({
+  source,
+  error: {
+    code: "kubeconfig.unparsable",
+    kind: "invalidInput",
+    message: "Cannot be parsed: unclosed bracket '[' at line 7, column 10",
+  },
+});
+
+test("a file that fails is announced once, again only after it has been read well in between", async () => {
+  let send: ((next: Listed) => void) | undefined;
+  const fake = {
+    invoke: vi.fn(),
+    subscribe: vi.fn((_command: string, _request: unknown, on: typeof send) => {
+      send = on;
+      return Promise.resolve({
+        contexts: ONE,
+        failures: [failing("~/.kube/a.yaml")],
+      });
+    }),
+  } as unknown as Backend;
+  const announce = vi.fn();
+  const catalog = new Catalog(fake, announce);
+  await catalog.watch();
+  expect(catalog.failures.map(({ source }) => source)).toEqual([
+    "~/.kube/a.yaml",
+  ]);
+  expect(announce).toHaveBeenCalledTimes(1);
+
+  send?.({ contexts: TWO, failures: [failing("~/.kube/a.yaml")] });
+  expect(announce).toHaveBeenCalledTimes(1);
+
+  send?.({
+    contexts: TWO,
+    failures: [failing("~/.kube/a.yaml"), failing("~/.kube/b.yaml")],
+  });
+  expect(announce).toHaveBeenCalledTimes(2);
+  expect(announce).toHaveBeenLastCalledWith(failing("~/.kube/b.yaml"));
+
+  send?.({ contexts: TWO, failures: [] });
+  send?.({ contexts: TWO, failures: [failing("~/.kube/a.yaml")] });
+  expect(announce).toHaveBeenCalledTimes(3);
+});
+
+test("a file that fails no more is told as recovered, once, and one that never failed is not", async () => {
+  let send: ((next: Listed) => void) | undefined;
+  const fake = {
+    invoke: vi.fn(),
+    subscribe: vi.fn((_command: string, _request: unknown, on: typeof send) => {
+      send = on;
+      return Promise.resolve({
+        contexts: ONE,
+        failures: [failing("~/.kube/a.yaml"), failing("~/.kube/b.yaml")],
+      });
+    }),
+  } as unknown as Backend;
+  const recovered = vi.fn();
+  const catalog = new Catalog(fake, undefined, recovered);
+  await catalog.watch();
+  expect(recovered).not.toHaveBeenCalled();
+
+  send?.({ contexts: TWO, failures: [failing("~/.kube/b.yaml")] });
+  expect(recovered.mock.calls).toEqual([["~/.kube/a.yaml"]]);
+
+  send?.({ contexts: ONE, failures: [failing("~/.kube/b.yaml")] });
+  expect(recovered).toHaveBeenCalledTimes(1);
 });

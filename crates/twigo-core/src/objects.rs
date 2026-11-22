@@ -20,9 +20,10 @@ use twigo_cache::request::field_value;
 use twigo_cache::table::{Cell, Column, ColumnKind, Row};
 use twigo_describe::{Fact, Found, Input, Need, Owned, Printed};
 use twigo_ipc::{
-    Block, ErrorKind, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
+    Block, ErrorCode, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
     ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
+use twigo_panic::contain;
 
 use crate::usage::{absent, usage, waiting};
 
@@ -65,7 +66,7 @@ impl Opened {
     ) -> Self {
         let control = Arc::new(Control::default());
         let context = target.context.as_str().into();
-        let task = tokio::spawn(run(
+        let task = tokio::spawn(serve(
             hub,
             target,
             object,
@@ -115,11 +116,11 @@ pub(crate) struct Reading(Arc<Control>);
 impl Reading {
     pub(crate) fn json(&self) -> Result<Value, IpcError> {
         let latest = self.0.latest.lock().expect("object lock").clone();
-        let object =
-            latest.ok_or_else(|| IpcError::new(ErrorKind::NotFound, "the object is not listed"))?;
+        let object = latest
+            .ok_or_else(|| IpcError::new(ErrorCode::ObjectNotListed, "the object is not listed"))?;
         serde_json::from_str(object.json.get()).map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::AnswerUndecodable,
                 format!("the object does not parse: {error}"),
             )
         })
@@ -130,7 +131,7 @@ impl Reading {
 fn values_of(object: &Value, keys: &[String]) -> Result<Vec<Option<String>>, IpcError> {
     if object["apiVersion"] != "v1" || object["kind"] != "ConfigMap" {
         return Err(IpcError::new(
-            ErrorKind::Forbidden,
+            ErrorCode::ObjectValuesWithheld,
             "only a ConfigMap's values are sent".to_owned(),
         ));
     }
@@ -312,6 +313,45 @@ struct Held {
     found: Option<Found>,
 }
 
+/// Runs the object; if it panics, its last batch changes nothing but the
+/// state, which says why, and nothing starts it again.
+async fn serve(
+    hub: Hub,
+    target: Target,
+    object: Subscription<Object>,
+    parts: ObjectParts,
+    opening: Option<Opening>,
+    control: Arc<Control>,
+    mut send: impl FnMut(ObjectBatch) -> bool,
+) {
+    let (mut seq, mut exists) = (0, false);
+    let mut tell = |batch: ObjectBatch| {
+        (seq, exists) = (batch.seq, batch.exists);
+        send(batch)
+    };
+    if contain(
+        "object",
+        run(hub, target, object, parts, opening, control, &mut tell),
+    )
+    .await
+    .is_ok()
+    {
+        return;
+    }
+    send(ObjectBatch {
+        seq: seq + 1,
+        status: ViewState::Error {
+            error: IpcError::panicked("this object's page"),
+        },
+        exists,
+        overview: None,
+        manifest: None,
+        events: None,
+        related: None,
+        usage: None,
+    });
+}
+
 async fn run(
     hub: Hub,
     target: Target,
@@ -429,7 +469,7 @@ async fn run(
                 held.owned = None;
             }
             if let Some(subscription) = &held.events {
-                let unavailable = unavailable(&subscription.state());
+                let unavailable = subscription.state().refusal();
                 let whole = subscription.listed();
                 if drained(subscription)
                     || unavailable != events.unavailable
@@ -463,7 +503,7 @@ async fn run(
             }
             let owned_unavailable = owned
                 .iter()
-                .find_map(|(_, subscription)| unavailable(&subscription.state()));
+                .find_map(|(_, subscription)| subscription.state().refusal());
             if owned_changed || changed || owned_unavailable != related.unavailable {
                 related = Related {
                     owners: owners(json, target.namespace.as_deref()),
@@ -720,17 +760,6 @@ impl Shown<'_> {
     }
 }
 
-/// Why an upstream's objects cannot be listed, in its state; None while
-/// they are listed or still coming.
-fn unavailable(state: &ViewState) -> Option<String> {
-    match state {
-        ViewState::Forbidden { verb, resource } => Some(format!("You may not {verb} {resource}.")),
-        ViewState::Unauthorized => Some("The cluster does not accept the credentials.".to_owned()),
-        ViewState::Error { error } => Some(error.message.clone()),
-        _ => None,
-    }
-}
-
 /// Drains a subscription, saying whether anything changed.
 fn drained<T: twigo_cache::store::Item>(subscription: &Subscription<T>) -> bool {
     match subscription.drain() {
@@ -886,8 +915,10 @@ fn found(needs: &mut [Held]) -> bool {
             continue;
         };
         let moved = drained(objects);
-        let found = if let Some(message) = unavailable(&objects.state()) {
-            Some(Found::Unavailable { message })
+        let found = if let Some(message) = objects.state().refusal() {
+            Some(Found::Unavailable {
+                message: message.message,
+            })
         } else if objects.listed() {
             if !moved && matches!(held.found, Some(Found::Listed { .. })) {
                 continue;
@@ -1009,8 +1040,67 @@ mod metered;
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use twigo_ipc::ErrorKind;
 
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn an_object_that_panics_ends_with_a_batch_that_says_so_after_those_it_sent() {
+        let fake = twigo_cache::fake::Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        let (hub, _clients) = fake.hub(twigo_kube::client::Budgets::default());
+        let object = hub
+            .object(
+                "kind-test",
+                twigo_cache::hub::Resource {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    resource: "pods".to_owned(),
+                    namespaced: true,
+                },
+                Some("a".to_owned()),
+                "p1",
+            )
+            .unwrap();
+        let opening: Opening = Box::pin(async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            panic!("a metrics bug")
+        });
+        let (sender, mut batches) = mpsc::unbounded_channel();
+        let opened = Opened::spawn(
+            hub.clone(),
+            Target {
+                context: "kind-test".to_owned(),
+                namespace: Some("a".to_owned()),
+            },
+            object,
+            ObjectParts {
+                overview: false,
+                manifest: false,
+                events: false,
+                related: false,
+                usage: false,
+            },
+            Some(opening),
+            move |batch| sender.send(batch).is_ok(),
+        );
+        let mut sent = Vec::new();
+        let last = loop {
+            let batch = batches.recv().await.unwrap();
+            if matches!(batch.status, ViewState::Error { .. }) {
+                break batch;
+            }
+            opened.ack(batch.seq);
+            sent.push((batch.seq, batch.exists));
+        };
+        let &(seq, exists) = sent.last().expect("it sent batches before it panicked");
+        assert!(exists, "listed");
+        assert_eq!((last.seq, last.exists), (seq + 1, exists));
+        let ViewState::Error { error } = &last.status else {
+            unreachable!()
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+    }
 
     #[test]
     fn an_open_secret_sends_neither_its_values_nor_their_base64() {
@@ -1124,7 +1214,7 @@ mod tests {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::ConnectOther,
                     "no cluster".to_owned(),
                 ))
             })
@@ -1170,7 +1260,7 @@ mod tests {
         let connect: twigo_cache::hub::Connect = Arc::new(|_context| {
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::ConnectOther,
                     "no cluster".to_owned(),
                 ))
             })

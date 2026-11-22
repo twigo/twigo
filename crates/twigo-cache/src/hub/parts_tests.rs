@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use http::StatusCode;
 use tokio::time::sleep;
-use twigo_ipc::{Part, PartState, Parts, ViewState};
+use twigo_ipc::{ErrorCode, Part, PartState, Parts, ViewState};
 use twigo_kube::client::Budgets;
 
-use super::tests::{budget, forbidden, pods, query, reach, ready, settle, until};
+use super::tests::{budget, forbidden, pods, query, reach, ready, settle, until, waits_on};
 use super::*;
 use crate::cluster::{REFUSED_FOR, RESOLVED_FOR};
 use crate::fake::Fake;
@@ -167,7 +167,7 @@ async fn when_the_watches_end_every_row_stays_and_the_part_that_waits_is_stale()
         unreachable!("one waits");
     };
     assert_eq!((&waiting.state, waiting.shown), (&ViewState::Queued, true));
-    assert_eq!(mirror.status, Some(ViewState::Stale));
+    assert_eq!(mirror.status, Some(ViewState::Stale { cause: None }));
 }
 
 #[tokio::test(start_paused = true)]
@@ -185,7 +185,11 @@ async fn a_part_still_syncing_adds_no_rows_until_it_has_listed() {
     until_shown(&mut list, &mut mirror, |m| m.names().len() == 2).await;
     assert_eq!(
         mirror.unready(),
-        [namespace_part("c", ViewState::Connecting, false)]
+        [namespace_part(
+            "c",
+            ViewState::Connecting { cause: None },
+            false
+        )]
     );
 
     fake.stream_initial();
@@ -213,11 +217,33 @@ async fn a_first_list_that_broke_off_on_a_transient_error_says_connecting() {
     let mut mirror = Mirror::default();
 
     until_shown(&mut list, &mut mirror, |m| {
-        m.unready() == [namespace_part("a", ViewState::Stale, false)]
+        matches!(m.unready(), [part] if matches!(part.state, ViewState::Stale { .. }) && !part.shown)
     })
     .await;
-    assert_eq!(mirror.status, Some(ViewState::Connecting));
+    let status = mirror.status.clone().expect("a batch came");
+    assert!(matches!(status, ViewState::Connecting { .. }), "{status:?}");
+    assert_eq!(waits_on(&status), Some(ErrorCode::ServerUnavailable));
 
+    until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
+    assert_eq!(mirror.status, Some(ViewState::Ready));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_connection_says_why_while_the_part_waits_and_a_list_that_recovers_drops_it() {
+    let fake = Fake::default();
+    pods_in(&fake, &["a"]);
+    fake.state().refused = true;
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut list = hub.rows(query(&["a"])).await.unwrap();
+    let mut mirror = Mirror::default();
+
+    until_shown(&mut list, &mut mirror, |m| {
+        m.status.as_ref().and_then(waits_on) == Some(ErrorCode::ConnectRefused)
+    })
+    .await;
+    assert!(matches!(mirror.status, Some(ViewState::Connecting { .. })));
+
+    fake.state().refused = false;
     until_shown(&mut list, &mut mirror, |m| m.names() == ["p-a"]).await;
     assert_eq!(mirror.status, Some(ViewState::Ready));
 }
@@ -260,7 +286,12 @@ async fn a_list_has_the_columns_of_a_part_that_has_not_listed_yet() {
         .unwrap();
     let mut mirror = Mirror::default();
     until_shown(&mut list, &mut mirror, |m| {
-        m.unready() == [namespace_part("a", ViewState::Connecting, false)]
+        m.unready()
+            == [namespace_part(
+                "a",
+                ViewState::Connecting { cause: None },
+                false,
+            )]
     })
     .await;
     assert_eq!(mirror.columns, None);
@@ -304,7 +335,7 @@ async fn a_cluster_wide_part_whose_rewatch_waits_keeps_its_rows_and_is_stale() {
     fake.end_watches();
     until_shown(&mut list, &mut mirror, |m| m.unready().len() == 1).await;
     assert_eq!(mirror.names(), ["p-a", "p-b", "p-z"]);
-    assert_eq!(mirror.status, Some(ViewState::Stale));
+    assert_eq!(mirror.status, Some(ViewState::Stale { cause: None }));
     assert_eq!(
         mirror.unready(),
         [PartState {
@@ -320,8 +351,11 @@ fn a_list_says_the_state_of_its_rows_or_else_of_the_parts_still_on_their_way() {
     let syncing = ViewState::Syncing { loaded: 1 };
     for (looks, says) in [
         (
-            [(forbidden(), false), (ViewState::Connecting, false)],
-            ViewState::Connecting,
+            [
+                (forbidden(), false),
+                (ViewState::Connecting { cause: None }, false),
+            ],
+            ViewState::Connecting { cause: None },
         ),
         (
             [(forbidden(), false), (syncing.clone(), false)],
@@ -333,13 +367,16 @@ fn a_list_says_the_state_of_its_rows_or_else_of_the_parts_still_on_their_way() {
         ),
         (
             [(ViewState::Ready, true), (ViewState::Queued, true)],
-            ViewState::Stale,
+            ViewState::Stale { cause: None },
         ),
     ] {
         assert_eq!(status(&looks), says, "{looks:?}");
     }
     assert_eq!(status(&[(ViewState::Queued, false)]), ViewState::Queued);
-    assert_eq!(status(&[(ViewState::Stale, false)]), ViewState::Connecting);
+    assert_eq!(
+        status(&[(ViewState::Stale { cause: None }, false)]),
+        ViewState::Connecting { cause: None }
+    );
 }
 
 fn forty_namespaces(fake: &Fake) -> Vec<String> {
@@ -637,9 +674,9 @@ async fn all_namespaces_say_connecting_until_their_reviews_are_in() {
     let mut list = hub.rows(query(&[])).await.unwrap();
     let mut mirror = Mirror::default();
 
-    assert_eq!(list.state(), ViewState::Connecting);
+    assert_eq!(list.state(), ViewState::Connecting { cause: None });
     mirror.read(&list);
-    assert_eq!(mirror.status, Some(ViewState::Connecting));
+    assert_eq!(mirror.status, Some(ViewState::Connecting { cause: None }));
     assert_eq!(
         mirror.parts,
         Some(Parts {
@@ -650,7 +687,11 @@ async fn all_namespaces_say_connecting_until_their_reviews_are_in() {
     );
     sleep(Duration::from_secs(3)).await;
     mirror.read(&list);
-    assert_eq!(mirror.status, Some(ViewState::Connecting), "no refusal yet");
+    assert_eq!(
+        mirror.status,
+        Some(ViewState::Connecting { cause: None }),
+        "no refusal yet"
+    );
     until_shown(&mut list, &mut mirror, |m| m.names().len() == 1).await;
     assert_eq!(mirror.status, Some(ViewState::Ready));
     assert_eq!(fake.count("selfsubjectaccessreviews"), 41);
@@ -805,17 +846,23 @@ fn connecting(
 
 #[tokio::test(start_paused = true)]
 async fn all_namespaces_wait_for_what_does_not_answer_and_never_take_it_for_a_refusal() {
-    let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
-    for (failing, says) in [
-        ("the cluster-wide review", ViewState::Connecting),
-        ("the namespaces", ViewState::Connecting),
-        (
-            "the clients",
-            ViewState::Error {
-                error: error.clone(),
-            },
-        ),
-    ] {
+    let error = IpcError::new(
+        ErrorCode::CredentialsPluginTimeout,
+        "the credential plugin timed out",
+    );
+    for failing in ["the cluster-wide review", "the namespaces", "the clients"] {
+        let says = |state: &ViewState| match failing {
+            "the clients" => {
+                *state
+                    == ViewState::Error {
+                        error: error.clone(),
+                    }
+            }
+            _ => {
+                matches!(state, ViewState::Connecting { .. })
+                    && waits_on(state) == Some(ErrorCode::ServerUnavailable)
+            }
+        };
         let fake = Fake::default();
         allowed_in_three(&fake);
         let (hub, down, tries, _clients) = connecting(&fake, error.clone());
@@ -838,11 +885,17 @@ async fn all_namespaces_wait_for_what_does_not_answer_and_never_take_it_for_a_re
         };
         let mut list = hub.rows(query(&[])).await.unwrap();
         let mut mirror = Mirror::default();
-        assert_eq!(list.state(), says, "{failing}");
+        let first = list.state();
+        let waiting_for_the_first_try = matches!(first, ViewState::Connecting { cause: None });
+        assert!(
+            says(&first) || waiting_for_the_first_try,
+            "{failing}: {first:?}"
+        );
 
         sleep(Duration::from_secs(60)).await;
         mirror.read(&list);
-        assert_eq!(mirror.status, Some(says), "{failing}");
+        let status = mirror.status.clone().expect("a batch came");
+        assert!(says(&status), "{failing}: {status:?}");
         assert_eq!(
             hub.scopes(),
             [],
@@ -871,7 +924,7 @@ async fn all_namespaces_of_rejected_credentials_say_unauthorized_and_wait_for_a_
         let fake = Fake::default();
         allowed_in_three(&fake);
         fake.state().reviews_take = Duration::from_secs(1);
-        let error = IpcError::new(ErrorKind::Unauthorized, "the plugin failed");
+        let error = IpcError::new(ErrorCode::CredentialsPluginFailed, "the plugin failed");
         let (hub, down, tries, clients) = connecting(&fake, error);
         down.store(rejected == "the clients", Ordering::Relaxed);
         {
@@ -934,11 +987,14 @@ async fn a_reader_of_a_list_with_no_part_sees_what_it_waits_on_change() {
     fake.state()
         .reviews_fail
         .insert(None, StatusCode::SERVICE_UNAVAILABLE);
-    let error = IpcError::new(ErrorKind::Timeout, "the credential plugin timed out");
+    let error = IpcError::new(
+        ErrorCode::CredentialsPluginTimeout,
+        "the credential plugin timed out",
+    );
     let (hub, down, ..) = connecting(&fake, error.clone());
     down.store(false, Ordering::Relaxed);
     let mut list = hub.rows(query(&[])).await.unwrap();
-    assert_eq!(list.state(), ViewState::Connecting);
+    assert_eq!(list.state(), ViewState::Connecting { cause: None });
 
     down.store(true, Ordering::Relaxed);
     let says = ViewState::Error { error };

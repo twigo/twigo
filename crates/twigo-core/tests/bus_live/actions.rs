@@ -16,11 +16,11 @@ use kube::config::{AuthInfo, Kubeconfig, NamedAuthInfo};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use twigo_ipc::{
-    Access, AccessQuery, BlockReason, ErrorKind, Execute, Friction, Mode, OperationEvent, Plan,
-    PlanRequest, ShellKind, ShellTarget,
+    Access, AccessQuery, BlockReason, ErrorCode, ErrorKind, Execute, Friction, Mode,
+    OperationEvent, Plan, PlanRequest, ShellKind, ShellTarget,
 };
 
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 
 use super::{Cluster, WAIT, core, core_over, eventually, kubectl, line, plan, reference, run};
 
@@ -217,10 +217,11 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     let refused = plan(&core, undo(&cluster)).await.unwrap();
     let told = run(&core, &refused, None).await.unwrap();
     let error = failed(&told);
-    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
     assert_eq!(
-        error.message,
-        "Deployment web changed since you scaled it, so Twigo left it"
+        error.code,
+        ErrorCode::ActionObjectChanged,
+        "{}",
+        error.message
     );
     assert_eq!(replicas().await, Some(4));
 
@@ -228,7 +229,12 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     merge(&deployments, "web", json!({ "spec": { "replicas": 3 } })).await;
     let told = run(&core, &moved, None).await.unwrap();
     let error = failed(&told);
-    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
+    assert_eq!(
+        error.code,
+        ErrorCode::ActionObjectChanged,
+        "{}",
+        error.message
+    );
     assert_eq!(
         error.message,
         "Deployment web has 3 replicas now, not the 4 Twigo asked about, so it scaled nothing"
@@ -336,10 +342,11 @@ async fn scale_runs_at_once_and_its_undo_puts_it_back_unless_someone_else_change
     create(&deployments, deployment("again", 1, "kwok-node-0")).await;
     let told = run(&core, &planned, None).await.unwrap();
     let error = failed(&told);
-    assert_eq!(error.kind, ErrorKind::Conflict, "{}", error.message);
     assert_eq!(
-        error.message,
-        "Deployment again was replaced since Twigo asked, so it scaled nothing"
+        error.code,
+        ErrorCode::ActionObjectChanged,
+        "{}",
+        error.message
     );
     cluster.delete(&namespace).await;
 }
@@ -1559,7 +1566,7 @@ async fn as_account(
     namespace: &str,
     name: &str,
     role: Value,
-) -> (tempfile::TempDir, std::sync::Arc<Core>, String) {
+) -> (tempfile::TempDir, Started, String) {
     let accounts = Api::<ServiceAccount>::namespaced(cluster.admin.clone(), namespace);
     create(&accounts, json!({ "metadata": { "name": name } })).await;
     let mut role_ref = role;

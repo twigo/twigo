@@ -30,11 +30,11 @@ use tokio::sync::{mpsc, watch};
 use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-use twigo_core::{Core, ProxyProcess};
+use twigo_core::{Core, ProxyProcess, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
-    ErrorKind, Execute, Mode, ModeSource, NoDiff, PlanRequest, RequestClass,
+    ErrorCode, ErrorKind, Execute, Mode, ModeSource, NoDiff, PlanRequest, RequestClass,
 };
 use twigo_policy::Actor;
 
@@ -202,6 +202,12 @@ async fn answer(
     if watch {
         let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
         return Ok(Response::new(StreamBody::new(held).boxed_unsync()));
+    }
+    if request.uri().path().ends_with("/configmaps/vetoed") && query.contains("dryRun") {
+        let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 400, "reason": "BadRequest", "message": "admission webhook \"x\" does not support dry run" });
+        let mut response = Response::new(body(status.to_string()));
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        return Ok(response);
     }
     let secret = request.uri().path().contains("/secrets/") && query.contains("dryRun");
     if secret && request.method() == Method::PATCH {
@@ -373,7 +379,7 @@ contexts:{kind_a}
 
 /// A core over the kubeconfig `config` in `dir`, of two contexts on the
 /// fake server, which the person marked Local.
-async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
+async fn core(dir: &Path, fake: &Fake) -> Started {
     let core = unmarked(dir, fake).await;
     for context in ["kind-a", "kind-b"] {
         core.policy
@@ -384,21 +390,15 @@ async fn core(dir: &Path, fake: &Fake) -> Arc<Core> {
 }
 
 /// [`core`], with its contexts marked by nobody.
-async fn unmarked(dir: &Path, fake: &Fake) -> Arc<Core> {
+async fn unmarked(dir: &Path, fake: &Fake) -> Started {
     let kubeconfig = dir.join("config");
     let server = format!("http://{}", fake.address);
     std::fs::write(&kubeconfig, self::kubeconfig(&server, KIND_A)).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     core
 }
@@ -1642,14 +1642,16 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
         let sending = tokio::spawn(send(process.at(), patching));
         let ask = asked(&mut events).await;
         shown(&ask);
+        let ApprovalDetail::Unknown {
+            reason: NoDiff::Refused { error },
+            body: None,
+        } = &ask.detail
+        else {
+            panic!("{kind}: {:?}", ask.detail);
+        };
         assert_eq!(
-            ask.detail,
-            ApprovalDetail::Unknown {
-                reason: NoDiff::Refused {
-                    message: unsaid.to_owned()
-                },
-                body: None,
-            },
+            (error.message.as_str(), &error.server),
+            (unsaid, &None),
             "{kind}"
         );
         answer_with(&core, &ask, ApprovalAnswer::Deny, None);
@@ -1671,6 +1673,38 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
     answer_with(&core, &ask, ApprovalAnswer::Deny, None);
     sending.await.unwrap();
     assert_eq!(fake.writes(Method::PATCH) + fake.writes(Method::PUT), 0);
+}
+
+#[tokio::test]
+async fn a_dry_run_the_server_refuses_is_told_with_its_code_and_its_own_words() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let patching = process
+        .request("PATCH", "kind-a", &format!("{CONFIGMAPS}/vetoed"))
+        .header("content-type", "application/merge-patch+json")
+        .body(json_body(&json!({ "data": { "k": "w" } })))
+        .unwrap();
+    let sending = tokio::spawn(send(process.at(), patching));
+    let ask = asked(&mut events).await;
+    let ApprovalDetail::Unknown {
+        reason: NoDiff::Refused { error },
+        ..
+    } = &ask.detail
+    else {
+        panic!("{:?}", ask.detail);
+    };
+    assert_eq!(error.code, ErrorCode::ServerInvalid);
+    assert_eq!(
+        error.message,
+        "admission webhook \"x\" does not support dry run"
+    );
+    assert_eq!(error.server.as_ref().unwrap().reason, "BadRequest");
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    sending.await.unwrap();
 }
 
 #[tokio::test]
@@ -2166,6 +2200,17 @@ async fn a_relock_ends_an_exec_class_answer_without_an_upgrade_and_leaves_a_read
         "read-only lets a service's proxy through"
     );
     assert!(still_open(&mut watch).await, "a relock leaves a read");
+}
+
+#[tokio::test]
+async fn an_exec_class_answer_whose_relock_watch_panics_ends() {
+    twigo_panic::inject::arm("proxy relock", 1);
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    let process = Process::start(&core, None).await;
+    let (node, _node) = held_open(&process, "/api/v1/nodes/n/proxy/logs").await;
+    assert!(ends(node).await, "a watch that cannot wait fails closed");
 }
 
 #[tokio::test]

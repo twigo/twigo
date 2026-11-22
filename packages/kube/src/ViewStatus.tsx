@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 import type { ViewState } from "@twigo/protocol";
-import { EmptyState } from "@twigo/ui";
+import { EmptyState, LinkButton } from "@twigo/ui";
+import {
+  ErrorMessage,
+  isInternalError,
+  ReportButton,
+  ReportLink,
+} from "@twigo/workbench";
 import { viewProblem } from "./viewProblem";
 
 /**
@@ -20,6 +26,7 @@ export function ViewStatus({
   status: ViewState;
   /** What failed to load, lower case: `pods`. */
   what: string;
+  /** Retry, or Reopen for a view that Twigo stopped; `inline` draws only Reopen. */
   onRetry?: () => void;
   /** Given by a list of every namespace: where it is refused, it says so and offers to choose namespaces in place of a retry. */
   onChoose?: () => void;
@@ -27,11 +34,12 @@ export function ViewStatus({
   inline?: boolean;
 }): ReactNode {
   const everyNamespace = onChoose !== undefined && status.state === "forbidden";
-  const retry = everyNamespace
-    ? { label: "Choose namespaces", onClick: onChoose }
-    : onRetry && { label: "Retry", onClick: onRetry };
   const shown = viewProblem(status, what, everyNamespace);
   if (!shown) return null;
+  const internal = isInternalError(shown.error);
+  const retry = everyNamespace
+    ? { label: "Choose namespaces", onClick: onChoose }
+    : onRetry && { label: internal ? "Reopen" : "Retry", onClick: onRetry };
   if (inline) {
     return (
       <EmptyState
@@ -40,7 +48,13 @@ export function ViewStatus({
         icon={shown.icon}
         className="px-3"
       >
-        {shown.body}
+        <ErrorMessage error={shown.error} message={shown.body} />
+        {internal && onRetry && (
+          <LinkButton className="ml-2" onClick={onRetry}>
+            Reopen
+          </LinkButton>
+        )}
+        {internal && <ReportLink className="ml-2" />}
       </EmptyState>
     );
   }
@@ -50,9 +64,16 @@ export function ViewStatus({
       variant={shown.variant}
       title={shown.title}
       {...(retry && { action: retry })}
+      {...(internal && { secondary: <ReportButton /> })}
       className="flex-1 py-16"
     >
-      <p className="max-w-md">{shown.body}</p>
+      <p className="max-w-md">
+        <ErrorMessage
+          error={shown.error}
+          message={shown.body}
+          className="justify-center"
+        />
+      </p>
     </EmptyState>
   );
 }

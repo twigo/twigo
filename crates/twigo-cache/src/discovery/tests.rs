@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, timeout};
-use twigo_ipc::{Discovered, ErrorKind, IpcError};
+use twigo_ipc::{Discovered, ErrorCode, ErrorKind, IpcError};
 use twigo_kube::client::{Budgets, Clients};
 use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig::Fingerprint;
@@ -98,6 +98,35 @@ async fn a_second_start_revalidates_the_cached_discovery_with_304() {
     let mut second = follower(&fake, cache.path()).await;
     assert_eq!(names(&next(&mut second).await), ["namespaces", "widgets"]);
     assert_eq!(fake.state().not_modified, 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cache_that_cannot_be_read_or_written_is_logged_by_the_servers_url_alone() {
+    let fake = fake();
+    let home = tempfile::tempdir().unwrap();
+    let cache = home.path().join("a-file");
+    std::fs::write(&cache, "").unwrap();
+    let clients = fake.clients_reaching(
+        Budgets::default(),
+        "https://10.0.0.1:6443/ as api.internal trusting 0123456789abcdef0123456789abcdef",
+    );
+    let current = Arc::new(Mutex::new(Ok(clients)));
+    let events = twigo_log::capture();
+    let mut follower = over(Hub::new(swapping(&current)), &cache).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
+
+    let lines = events.lines();
+    for message in [
+        "could not read the cached discovery",
+        "could not cache the discovery",
+    ] {
+        let line = lines
+            .iter()
+            .find(|line| line["fields"]["message"] == message)
+            .unwrap_or_else(|| panic!("{message} in {lines:?}"));
+        assert_eq!(line["fields"]["server"], "https://10.0.0.1:6443/", "{line}");
+        assert!(line["fields"].get("cluster").is_none(), "{line}");
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -299,7 +328,7 @@ async fn an_untrusted_plugin_stops_the_follower() {
             connects.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Box::pin(async {
                 Err(IpcError::new(
-                    ErrorKind::Unauthorized,
+                    ErrorCode::CredentialsUntrusted,
                     "Twigo runs aws only once you trust it".to_owned(),
                 ))
             })
@@ -330,7 +359,7 @@ async fn clients_that_cannot_be_built_fail_rather_than_show_the_last_server() {
     rebuild(
         &current,
         Err(IpcError::new(
-            ErrorKind::Unavailable,
+            ErrorCode::ConnectOther,
             "no such file: ca.pem".to_owned(),
         )),
     );
@@ -385,7 +414,7 @@ async fn a_stopped_follower_restarts_once_its_kubeconfig_entry_changes() {
 async fn clients_refused_for_an_untrusted_plugin_come_once_the_entry_changes() {
     let fake = fake();
     let current = Arc::new(Mutex::new(Err(IpcError::new(
-        ErrorKind::Unauthorized,
+        ErrorCode::CredentialsUntrusted,
         "Twigo runs aws only once you trust it".to_owned(),
     ))));
     let (edit, entry) = watch::channel(Some(fingerprint("https://a.example:6443")));

@@ -23,7 +23,7 @@ use jiff::Timestamp;
 use kube::client::Body;
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
-use twigo_ipc::{ErrorKind, IpcError, ViewState};
+use twigo_ipc::{ErrorCode, ErrorKind, IpcError, ViewState};
 use twigo_kube::client::{Clients, Waiting};
 
 use crate::cluster::{Cluster, REFUSED_FOR};
@@ -109,6 +109,10 @@ struct Status {
     queued: bool,
     /// The store has held a whole list since the upstream started.
     listed: bool,
+    /// The last failure that may pass, which `connecting` and `stale` wait
+    /// out; it goes with any other phase, as a part that lists again has
+    /// none.
+    cause: Option<IpcError>,
 }
 
 impl<T: Item> Upstream<T> {
@@ -119,8 +123,9 @@ impl<T: Item> Upstream<T> {
                 phase: Phase::Connecting,
                 queued: false,
                 listed: false,
+                cause: None,
             }),
-            state: watch::Sender::new(ViewState::Connecting),
+            state: watch::Sender::new(ViewState::Connecting { cause: None }),
             watching: AtomicBool::new(false),
             retry: Notify::new(),
         }
@@ -165,6 +170,7 @@ impl<T: Item> Upstream<T> {
     /// The state of a run about to start, set before it does, so nobody
     /// reads a failure it is about to retry.
     pub fn restart(&self) {
+        self.store.recover();
         self.update(|status| {
             status.queued = false;
             status.phase = if status.listed {
@@ -184,14 +190,21 @@ impl<T: Item> Upstream<T> {
     fn update(&self, change: impl FnOnce(&mut Status)) {
         let mut status = self.status();
         change(&mut status);
+        if !matches!(status.phase, Phase::Connecting | Phase::Stale) {
+            status.cause = None;
+        }
         let view = match (&status.phase, status.queued) {
             (Phase::Failed(view) | Phase::Refused(view), _) => view.clone(),
             (_, true) => ViewState::Queued,
-            (Phase::Connecting, _) => ViewState::Connecting,
+            (Phase::Connecting, _) => ViewState::Connecting {
+                cause: status.cause.clone(),
+            },
             (Phase::Syncing(loaded), _) => ViewState::Syncing { loaded: *loaded },
             (Phase::Ready, _) => ViewState::Ready,
             (Phase::Relisting, _) => ViewState::Relisting,
-            (Phase::Stale, _) => ViewState::Stale,
+            (Phase::Stale, _) => ViewState::Stale {
+                cause: status.cause.clone(),
+            },
         };
         // Under the lock, so states go out in the order they were set.
         self.state.send_if_modified(|state| {
@@ -264,7 +277,16 @@ async fn start<D: Decode>(
         backoff: backoff(),
         unwatchable: false,
     };
-    if let Err(view) = run.run(next).await {
+    // A panic ends the upstream as a failure: the lists on it say so, and the
+    // next list that holds it starts it again.
+    let ended = twigo_panic::contain("hub upstream", run.run(next))
+        .await
+        .unwrap_or_else(|_| {
+            Err(ViewState::Error {
+                error: IpcError::panicked("the watch behind this list"),
+            })
+        });
+    if let Err(view) = ended {
         run.upstream.update(|status| {
             status.queued = false;
             status.phase = Phase::Failed(view);
@@ -404,24 +426,24 @@ where
                     if quiet {
                         // A server or proxy that ends watches at once must
                         // not have them reopened at once.
-                        self.interrupted();
+                        self.interrupted(None);
                         self.pause().await;
                     }
                     next
                 }
                 Outcome::Retired(next) => {
-                    self.interrupted();
+                    self.interrupted(None);
                     next
                 }
                 Outcome::Idle { next, seen } => {
-                    self.interrupted();
+                    self.interrupted(None);
                     answers(&clients, seen).await;
                     next
                 }
                 Outcome::NotStreamed => unreachable!("a streaming list is only asked for by list"),
                 Outcome::Gone => Next::List,
                 Outcome::NoColumns(next) => {
-                    self.interrupted();
+                    self.interrupted(None);
                     self.pause().await;
                     next
                 }
@@ -448,8 +470,8 @@ where
                 Outcome::Failed { error, verb, next } => {
                     match failure(&error, verb, &self.spec.resource) {
                         Failure::Gone => Next::List,
-                        Failure::Transient => {
-                            self.interrupted();
+                        Failure::Transient(cause) => {
+                            self.interrupted(Some(cause));
                             self.pause().await;
                             next
                         }
@@ -720,9 +742,13 @@ where
     }
 
     /// A list or watch broke off: the upstream is stale while it
-    /// reconnects, or still relisting.
-    fn interrupted(&self) {
+    /// reconnects, or still relisting. `cause` is the failure that broke it,
+    /// when one did; it replaces the last one, which stays till then.
+    fn interrupted(&self, cause: Option<IpcError>) {
         self.upstream.update(|status| {
+            if cause.is_some() {
+                status.cause = cause;
+            }
             if status.phase != Phase::Relisting {
                 status.phase = Phase::Stale;
             }
@@ -740,6 +766,11 @@ where
     /// wait once it has run [`RETRY_WITHIN`], so a filter typed over many
     /// refused parts asks each at most that often.
     async fn refused(&mut self, view: ViewState) {
+        if let ViewState::Error { error } = &view
+            && self.upstream.current() != view
+        {
+            tracing::warn!(context = %self.spec.context, resource = %self.spec.resource, code = %error.code, "a list is refused");
+        }
         if matches!(view, ViewState::Forbidden { .. }) && !self.upstream.status().listed {
             // Before the state shows, so a subscription that sees it wakes the wait.
             let retry = self.upstream.retry.notified();
@@ -815,7 +846,8 @@ pub(crate) async fn read<D: Decode>(
                 match failure(&error, "list", resource) {
                     Failure::Refused(view) => view,
                     Failure::Unauthorized => ViewState::Unauthorized,
-                    Failure::Gone | Failure::Transient => ViewState::Stale,
+                    Failure::Gone => ViewState::Stale { cause: None },
+                    Failure::Transient(cause) => ViewState::Stale { cause: Some(cause) },
                 }
             })?;
         let page = decoder
@@ -831,7 +863,7 @@ pub(crate) async fn read<D: Decode>(
 
 fn undecodable(error: &DecodeError) -> ViewState {
     let error = IpcError::new(
-        ErrorKind::Internal,
+        ErrorCode::AnswerUndecodable,
         format!("could not decode the server's answer: {error}"),
     );
     ViewState::Error { error }
@@ -904,29 +936,78 @@ async fn answers(clients: &Clients, seen: u64) -> bool {
 #[derive(Clone)]
 pub(crate) enum Failure {
     Gone,
-    Transient,
+    Transient(IpcError),
     Refused(ViewState),
     Unauthorized,
+}
+
+impl Failure {
+    pub(crate) fn cause(self) -> Option<IpcError> {
+        match self {
+            Failure::Transient(cause) => Some(cause),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn failure(error: &kube::Error, verb: &str, resource: &str) -> Failure {
     if twigo_kube::errors::no_credential(error) {
         return Failure::Unauthorized;
     }
-    match error {
-        kube::Error::Api(status) if status.code == 410 => return Failure::Gone,
-        // The connection broke under the watch.
-        kube::Error::ReadEvents(_) => return Failure::Transient,
-        _ => {}
+    if matches!(error, kube::Error::Api(status) if status.code == 410) {
+        return Failure::Gone;
     }
     let error = twigo_kube::errors::request(error);
     match error.kind {
-        ErrorKind::Unavailable | ErrorKind::Timeout => Failure::Transient,
+        ErrorKind::Unavailable | ErrorKind::Timeout => Failure::Transient(error),
         ErrorKind::Unauthorized => Failure::Unauthorized,
         ErrorKind::Forbidden => Failure::Refused(ViewState::Forbidden {
             verb: verb.to_owned(),
             resource: resource.to_owned(),
         }),
         _ => Failure::Refused(ViewState::Error { error }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use twigo_ipc::ViewState;
+
+    use super::*;
+    use crate::table::Row;
+
+    #[test]
+    fn a_gateways_503_with_a_json_body_is_a_wait_not_a_refusal() {
+        let error = twigo_kube::errors::refused(
+            http::StatusCode::SERVICE_UNAVAILABLE,
+            br#"{"message":"failure to get a peer from the ring-balancer"}"#,
+        );
+        let Failure::Transient(cause) = failure(&error, "list", "pods") else {
+            panic!("a 503 is waited out");
+        };
+        assert_eq!(cause.code, ErrorCode::ServerUnavailable);
+    }
+
+    #[test]
+    fn a_cause_goes_when_the_part_lists_again_and_stays_while_it_waits() {
+        let upstream = Upstream::<Row>::new();
+        let refused = IpcError::new(ErrorCode::ConnectRefused, "refused");
+        upstream.update(|status| {
+            status.cause = Some(refused.clone());
+            status.phase = Phase::Stale;
+        });
+        let cause = Some(refused);
+        assert_eq!(
+            upstream.current(),
+            ViewState::Stale {
+                cause: cause.clone()
+            }
+        );
+        upstream.update(|status| status.phase = Phase::Connecting);
+        assert_eq!(upstream.current(), ViewState::Connecting { cause });
+
+        upstream.update(|status| status.phase = Phase::Ready);
+        upstream.update(|status| status.phase = Phase::Stale);
+        assert_eq!(upstream.current(), ViewState::Stale { cause: None });
     }
 }

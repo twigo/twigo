@@ -1,5 +1,6 @@
 import { CircleAlert, FileX, KeyRound, ShieldOff } from "lucide-react";
-import type { ObjectSnapshot, ViewState } from "@twigo/protocol";
+import { refusal, type ObjectSnapshot, type ViewState } from "@twigo/protocol";
+import { INTERNAL_ERROR, isInternalError } from "@twigo/workbench";
 
 /**
  * Why a view has no rows or object, in words, for the states that have one.
@@ -12,32 +13,58 @@ export function viewProblem(
   everyNamespace = false,
 ) {
   switch (status.state) {
-    case "forbidden":
+    case "forbidden": {
+      const error = refusal(status);
       return {
         icon: ShieldOff,
         variant: "muted" as const,
         title: "Access denied",
         body: everyNamespace
-          ? `These credentials may not list ${status.resource} in every namespace at once.`
-          : `These credentials may not ${status.verb} ${status.resource}.`,
+          ? `You may not list ${status.resource} in every namespace at once.`
+          : error.message,
+        error,
       };
-    case "unauthorized":
+    }
+    case "unauthorized": {
+      const error = refusal(status);
       return {
         icon: KeyRound,
         variant: "muted" as const,
         title: "Sign-in needed",
-        body: "The cluster rejected the credentials.",
+        body: error.message,
+        error,
       };
-    case "error":
+    }
+    case "error": {
+      const error = refusal(status);
+      if (isInternalError(error)) {
+        return {
+          icon: CircleAlert,
+          variant: "error" as const,
+          title: INTERNAL_ERROR.title,
+          body: INTERNAL_ERROR.stopped(),
+          error,
+        };
+      }
       return {
         icon: CircleAlert,
         variant: "error" as const,
         title: `Could not load ${what}`,
-        body: status.error.message,
+        body: error.message,
+        error,
       };
+    }
     default:
       return undefined;
   }
+}
+
+export type ObjectProblem = NonNullable<ReturnType<typeof objectProblem>>;
+
+export function isStopped(
+  problem: ObjectProblem,
+): problem is ObjectProblem & { error: NonNullable<ObjectProblem["error"]> } {
+  return problem.error !== undefined && isInternalError(problem.error);
 }
 
 /**
@@ -54,6 +81,7 @@ export function objectProblem({
       variant: "muted" as const,
       title: "The object does not exist",
       body: "It is gone from the server.",
+      error: undefined,
     };
   }
   return viewProblem(status, "the object");

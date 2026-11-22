@@ -7,7 +7,7 @@ use tokio::sync::watch;
 use twigo_env::{Failure, Reason, ShellEnv, Status};
 
 use super::*;
-use twigo_ipc::{BlockReason, Environment, Mode, ModeSource, ViewState};
+use twigo_ipc::{BlockReason, Environment, ErrorKind, Mode, ModeSource, ViewState};
 
 fn env(kubeconfig: &Path) -> Arc<ShellEnv> {
     Arc::new(ShellEnv::from_iter([(
@@ -34,6 +34,22 @@ async fn names(core: &Core, wanted: &[&str]) {
 }
 
 #[tokio::test]
+async fn a_test_s_core_fails_the_test_on_a_panic_nobody_armed() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = Core::new(
+        dir.path(),
+        &dir.path().join("cache"),
+        &dir.path().join("policy.json"),
+    );
+    let (_status, followed) = watch::channel(Status::Resolving);
+    let started = core.start_for_tests(followed, None);
+    core.reporter.panicked("state writer");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let dropped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(started)));
+    assert!(dropped.is_err(), "the drop fails the test");
+}
+
+#[tokio::test]
 async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     let dir = tempfile::tempdir().unwrap();
     let process = dir.path().join("process");
@@ -56,10 +72,7 @@ async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     );
     core.state.open_space("kind-process");
     let (status, followed) = watch::channel(Status::Resolving);
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, None).await }
-    });
+    let _duties = core.start_for_tests(followed, None);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
@@ -149,7 +162,7 @@ impl Plugins {
             .unwrap_or(0)
     }
 
-    async fn core(&self) -> (Arc<Core>, tempfile::TempDir) {
+    async fn core(&self) -> (Started, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();
         let core = Core::new(
             data.path(),
@@ -157,15 +170,9 @@ impl Plugins {
             &data.path().join("policy.json"),
         );
         let env = Arc::new(ShellEnv::from_iter(Vec::<(OsString, OsString)>::new()));
-        let (status, followed) = watch::channel(Status::Resolved(env));
-        tokio::spawn({
-            let core = Arc::clone(&core);
-            let explicit = self.kubeconfig();
-            async move {
-                let _status = status;
-                core.run(followed, Some(explicit)).await;
-            }
-        });
+        let (_status, followed) = watch::channel(Status::Resolved(env));
+        let explicit = self.kubeconfig();
+        let core = core.start_for_tests(followed, Some(explicit));
         core.catalog.contexts().await;
         (core, data)
     }
@@ -203,8 +210,8 @@ async fn an_untrusted_plugin_never_runs_and_a_changed_one_asks_again() {
     );
     assert_eq!(plugins.runs(), 1);
 
-    plugins.write(1, &["--profile", "other"]);
     let mut contexts = core.catalog.subscribe();
+    plugins.write(1, &["--profile", "other"]);
     contexts.changed().await.unwrap();
     let refused = core.cluster_version("kind-0").await.unwrap_err();
     assert_eq!(
@@ -283,8 +290,8 @@ async fn twenty_five_plugins_that_never_answer_run_only_for_the_space_opened() {
     core.cancel_sign_in("kind-7").await.unwrap();
     let cancelled = opened.await.unwrap().unwrap_err();
     assert_eq!(
-        cancelled.kind,
-        twigo_ipc::ErrorKind::Unauthorized,
+        cancelled.code,
+        twigo_ipc::ErrorCode::CredentialsPluginCancelled,
         "{cancelled:?}"
     );
     let twigo_ipc::ContextAuth::Plugin {
@@ -294,7 +301,11 @@ async fn twenty_five_plugins_that_never_answer_run_only_for_the_space_opened() {
     else {
         panic!("the cancelled run shows as failed");
     };
-    assert!(error.contains("cancelled"), "{error}");
+    assert_eq!(
+        error.code,
+        twigo_ipc::ErrorCode::CredentialsPluginCancelled,
+        "{error:?}"
+    );
     assert_eq!(plugins.runs(), 1);
 }
 
@@ -327,14 +338,14 @@ async fn a_plugin_that_may_ask_waits_for_the_focus() {
 }
 
 #[test]
-fn only_sign_in_links_open() {
-    assert!(sign_in_url("https://microsoft.com/devicelogin").is_ok());
-    assert!(sign_in_url("http://127.0.0.1:53712/2c9b0d6e").is_ok());
-    assert!(sign_in_url("http://localhost/callback").is_ok());
-    assert!(sign_in_url("http://example.com/login").is_err());
-    assert!(sign_in_url("http://localhost:1@example.com/").is_err());
-    assert!(sign_in_url("file:///etc/passwd").is_err());
-    assert!(sign_in_url("javascript:alert(1)").is_err());
+fn only_https_and_http_to_this_computer_open() {
+    assert!(openable_url("https://microsoft.com/devicelogin").is_ok());
+    assert!(openable_url("http://127.0.0.1:53712/2c9b0d6e").is_ok());
+    assert!(openable_url("http://localhost/callback").is_ok());
+    assert!(openable_url("http://example.com/login").is_err());
+    assert!(openable_url("http://localhost:1@example.com/").is_err());
+    assert!(openable_url("file:///etc/passwd").is_err());
+    assert!(openable_url("javascript:alert(1)").is_err());
 }
 
 #[tokio::test]
@@ -427,7 +438,7 @@ async fn a_window_reaches_only_its_own_lists_and_a_reload_drops_them() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(first.status, ViewState::Connecting);
+    assert_eq!(first.status, ViewState::Connecting { cause: None });
     let ack = Ack { id, seq: first.seq };
     core.list_ack("main", ack).unwrap();
     for refused in [
@@ -530,7 +541,7 @@ async fn a_window_reaches_only_its_own_objects_and_a_reload_closes_them() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(first.status, ViewState::Connecting);
+    assert_eq!(first.status, ViewState::Connecting { cause: None });
     assert!(!first.exists && first.overview.is_none());
     let ack = Ack { id, seq: first.seq };
     core.object_ack("main", ack).unwrap();
@@ -580,7 +591,10 @@ async fn a_namespaced_object_without_a_namespace_is_refused() {
     let mut nowhere = pod(&space);
     nowhere.object.namespace = None;
     let refused = core.object_open("main", nowhere, |_| true).await;
-    assert_eq!(refused.unwrap_err().kind, ErrorKind::InvalidInput);
+    assert_eq!(
+        refused.unwrap_err().code,
+        twigo_ipc::ErrorCode::InternalRequest
+    );
 }
 
 fn logs(space: &str, group: &str, resource: &str) -> twigo_ipc::OpenLogs {
@@ -635,7 +649,7 @@ async fn a_window_reaches_only_its_own_logs_and_a_reload_closes_them() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(first.status, ViewState::Connecting);
+    assert_eq!(first.status, ViewState::Connecting { cause: None });
     assert_eq!(first.pods, Some(Vec::new()));
     assert_eq!(first.window.map(|window| window.entries.len()), Some(0));
     let ack = Ack { id, seq: first.seq };
@@ -701,16 +715,12 @@ async fn logs_of_a_kind_without_pods_or_an_unknown_space_are_refused() {
 
 /// A running core over the kubeconfig `text`, whose cluster nothing listens
 /// on, so a request that reaches the network fails as unavailable.
-fn running(dir: &Path, text: &str) -> Arc<Core> {
+fn running(dir: &Path, text: &str) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 const UNREACHABLE: &str = "
@@ -760,7 +770,7 @@ async fn protect(core: &Core, request: PlanRequest) -> Result<(), IpcError> {
 
 fn access(core: &Core, context: &str) -> twigo_ipc::ContextAccess {
     let contexts = core.contexts().unwrap();
-    let found = contexts.into_iter().find(|c| c.name == context);
+    let found = contexts.contexts.into_iter().find(|c| c.name == context);
     found.unwrap().access
 }
 
@@ -770,6 +780,17 @@ fn mark_local(core: &Core) {
     core.policy
         .set_environment("kind-local", Some(Environment::Local))
         .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_namespaces_of_a_cluster_that_refuses_the_connection_say_so() {
+    let fake = twigo_cache::fake::Fake::default();
+    fake.state().refused = true;
+    let (hub, _clients) = fake.hub(twigo_kube::client::Budgets::default());
+
+    let state = hub.namespaces("kind-local").await.unwrap_err();
+    let error = namespaces_unavailable(state);
+    assert_eq!(error.code, twigo_ipc::ErrorCode::ConnectRefused);
 }
 
 #[tokio::test]

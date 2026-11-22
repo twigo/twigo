@@ -44,6 +44,7 @@ interface ToastProps {
   tone: Tone;
   message: ReactNode;
   action: ToastAction | undefined;
+  more?: readonly ToastAction[];
   tile?: ReactNode;
 }
 
@@ -58,8 +59,16 @@ function Lead({ tile }: { tile: ReactNode }) {
  * A toast is a popover surface with the tone as its icon and a thin rule,
  * not a filled box (ARCHITECTURE 4.9).
  */
-export function Toast({ id, tone, message, action, tile }: ToastProps) {
+export function Toast({
+  id,
+  tone,
+  message,
+  action,
+  more = [],
+  tile,
+}: ToastProps) {
   const { icon: Icon, text, rule } = TONE[tone];
+  const actions = action === undefined ? [] : [action, ...more];
   return (
     <div
       role={tone === "error" || tone === "warning" ? "alert" : "status"}
@@ -72,17 +81,22 @@ export function Toast({ id, tone, message, action, tile }: ToastProps) {
       </span>
       <span className="grid min-w-0 flex-1 justify-items-start gap-1 leading-5">
         <span className="break-words text-content">{message}</span>
-        {action && (
-          <button
-            type="button"
-            onClick={() => {
-              action.run();
-              toast.dismiss(id);
-            }}
-            className="-ml-1.5 rounded-sm px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
-          >
-            {action.label}
-          </button>
+        {actions.length > 0 && (
+          <span className="-ml-1.5 flex flex-wrap gap-x-1">
+            {actions.map(({ label, run }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => {
+                  run();
+                  toast.dismiss(id);
+                }}
+                className="rounded-sm px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10 focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none"
+              >
+                {label}
+              </button>
+            ))}
+          </span>
         )}
       </span>
       <button
@@ -237,10 +251,12 @@ function secondsLeft(until: number): number {
  * over it, so the list keeps its own width at its right offset, as in a wider
  * window.
  */
+/** Under a dialog's z-50, where sonner's own sits over it and its buttons. */
 const LIST = {
   "--width": "288px",
   width: "var(--width)",
   left: "auto",
+  zIndex: 40,
 } as CSSProperties;
 const TOAST = { width: "var(--width)" };
 const GAP = 6;

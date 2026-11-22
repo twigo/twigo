@@ -10,8 +10,11 @@ publish.workspace = true
 
 [features]
 # `Core::set_terminal_program` and `set_terminal_zdotdir`, for the tests that run a shell of
-# their own.
-test-util = []
+# their own, and `Core::start_for_tests`, whose supervisor fails a test on a panic nobody armed.
+test-util = ["twigo-panic/inject"]
+
+[lints]
+workspace = true
 
 [dependencies]
 atomic-write-file.workspace = true
@@ -31,6 +34,7 @@ kube.workspace = true
 notify-debouncer-full.workspace = true
 percent-encoding.workspace = true
 rcgen.workspace = true
+regex.workspace = true
 ring.workspace = true
 rustls = { workspace = true, features = ["ring", "std"] }
 serde.workspace = true
@@ -40,12 +44,15 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
 twigo-cache.workspace = true
 twigo-describe.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-log.workspace = true
 twigo-netmon.workspace = true
+twigo-panic.workspace = true
 twigo-policy.workspace = true
 twigo-quantity.workspace = true
 twigo-sessions.workspace = true
@@ -55,7 +62,10 @@ hyper = { workspace = true, features = ["client", "http1", "server"] }
 twigo-core = { workspace = true, features = ["test-util"] }
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-log = { workspace = true, features = ["test-util"] }
+twigo-panic = { workspace = true, features = ["inject"] }
 twigo-policy = { workspace = true, features = ["test-util"] }
+serde-saphyr.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "process", "rt", "rt-multi-thread", "test-util", "time"] }
 tower.workspace = true

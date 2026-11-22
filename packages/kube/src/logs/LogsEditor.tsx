@@ -20,11 +20,15 @@ import {
   useWidth,
 } from "@twigo/ui";
 import {
+  ErrorBanner,
+  isInternalError,
   useChanges,
   useListRegistration,
   useWorkbench,
   type EditorProps,
 } from "@twigo/workbench";
+import { InternalStop } from "../InternalStop";
+import { StoppedActions } from "../StoppedActions";
 import { useNow } from "../useNow";
 import { parseLogsUri } from "../uri";
 import { ViewStatus } from "../ViewStatus";
@@ -42,10 +46,7 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
   const { keys, lists, platform } = useWorkbench();
   useChanges(tabs.changes);
   const input = useMemo(() => parseLogsUri(uri), [uri]);
-  const session = useMemo(
-    () => (input ? tabs.session(uri, input) : undefined),
-    [input, tabs, uri],
-  );
+  const session = input ? tabs.session(uri, input) : undefined;
   const snapshot = useSyncExternalStore(
     session?.subscribe ?? NO_SUBSCRIBE,
     () => session?.getSnapshot(),
@@ -141,6 +142,9 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
     ),
   );
   const problem = viewProblem(status, "logs");
+  const reopen = () => {
+    tabs.reopen(uri);
+  };
   const narrowed = viewNarrows(tab.view);
 
   const span: HistogramSpan | undefined =
@@ -213,28 +217,48 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         </Banner>
       )}
       {snapshot.refused && (
-        <Banner tone="error" icon={CircleAlert} title="Not applied:">
-          {snapshot.refused.message}. The lines show the last filter and search
-          that worked.
-        </Banner>
-      )}
-      {failed[0] && (
-        <Banner
+        <ErrorBanner
           tone="error"
           icon={CircleAlert}
-          title={
-            failed.length === 1
-              ? `Cannot read the logs of ${failed[0].name}:`
-              : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
-          }
+          title="Not applied:"
+          error={snapshot.refused}
+          message={`${snapshot.refused.message}.`}
         >
-          {failed[0].error.message}
-        </Banner>
+          The lines show the last filter and search that worked.
+        </ErrorBanner>
       )}
+      {failed[0] &&
+        (isInternalError(failed[0].error) ? (
+          <InternalStop
+            error={failed[0].error}
+            reopen={reopen}
+            what={`The logs of ${failed[0].name}`}
+          />
+        ) : (
+          <ErrorBanner
+            tone="error"
+            icon={CircleAlert}
+            title={
+              failed.length === 1
+                ? `Cannot read the logs of ${failed[0].name}:`
+                : `Cannot read the logs of ${String(failed.length)} containers, ${failed[0].name} first:`
+            }
+            error={failed[0].error}
+          />
+        ))}
       {problem && total > 0 && (
-        <Banner tone="error" icon={problem.icon} title={`${problem.title}.`}>
-          {problem.body} The lines read so far stay.
-        </Banner>
+        <ErrorBanner
+          tone="error"
+          icon={problem.icon}
+          title={`${problem.title}.`}
+          {...(isInternalError(problem.error) && {
+            action: <StoppedActions onReopen={reopen} />,
+          })}
+          error={problem.error}
+          message={problem.body}
+        >
+          The lines read so far stay.
+        </ErrorBanner>
       )}
       {status.state === "queued" && (
         <Banner
@@ -246,7 +270,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
         </Banner>
       )}
       {problem && total === 0 ? (
-        <ViewStatus status={status} what="logs" />
+        <ViewStatus
+          status={status}
+          what="logs"
+          {...(isInternalError(problem.error) && { onRetry: reopen })}
+        />
       ) : (
         // The list stays mounted under what covers it, since its window is
         // what asks Rust for the lines.

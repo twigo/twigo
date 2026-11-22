@@ -4,7 +4,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
-use twigo_ipc::{ErrorKind, IpcError};
+use twigo_ipc::{ErrorCode, IpcError};
 
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
@@ -54,16 +54,19 @@ pub fn is_mask(text: &str) -> bool {
 pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcError> {
     if object["apiVersion"] != "v1" || object["kind"] != "Secret" {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::SecretNotASecret,
             "only a Secret's values are revealed".to_owned(),
         ));
     }
     let encoded = object["data"][key].as_str().ok_or_else(|| {
-        IpcError::new(ErrorKind::NotFound, format!("the Secret has no key {key}"))
+        IpcError::new(
+            ErrorCode::SecretNoKey,
+            format!("the Secret has no key {key}"),
+        )
     })?;
     let bytes = STANDARD.decode(encoded).map_err(|error| {
         IpcError::new(
-            ErrorKind::Internal,
+            ErrorCode::AnswerUndecodable,
             format!("the value of {key} is no base64: {error}"),
         )
     })?;
@@ -73,11 +76,71 @@ pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcErro
     })
 }
 
+/// `text` with each of `names` that stands in it as a whole token replaced by
+/// what `with` makes of the name's index, so that a short name does not garble
+/// the words around it.
+///
+/// The longest of the names that start at one place wins, and a replacement is
+/// never read again, so a name that an earlier replacement spells is not
+/// replaced inside it.
+pub fn whole_tokens_replaced<N: AsRef<str>>(
+    text: &str,
+    names: &[N],
+    mut with: impl FnMut(usize) -> String,
+) -> String {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut found = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let name = name.as_ref();
+        let (Some(first), Some(last)) = (name.chars().next(), name.chars().next_back()) else {
+            continue;
+        };
+        for (start, _) in text.match_indices(name) {
+            let end = start + name.len();
+            let joins_word = (word(first) && text[..start].chars().next_back().is_some_and(word))
+                || (word(last) && text[end..].chars().next().is_some_and(word));
+            if !joins_word {
+                found.push((start, end, index));
+            }
+        }
+    }
+    found.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
+    let mut replaced = String::with_capacity(text.len());
+    let mut from = 0;
+    for (start, end, index) in found {
+        if start < from {
+            continue;
+        }
+        replaced.push_str(&text[from..start]);
+        replaced.push_str(&with(index));
+        from = end;
+    }
+    replaced.push_str(&text[from..]);
+    replaced
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_name_is_replaced_only_as_a_whole_token_and_the_longest_wins() {
+        let names = ["prod", "prod-eu", "eu"];
+        let replaced =
+            whole_tokens_replaced("prod-eu, prod, prods, a-eu eu_1 eu.", &names, |index| {
+                format!("<{index}>")
+            });
+        assert_eq!(replaced, "<1>, <0>, prods, a-<2> eu_1 <2>.");
+    }
+
+    #[test]
+    fn a_replacement_is_not_read_again() {
+        let names = ["prod", "context"];
+        let replaced = whole_tokens_replaced("prod", &names, |_| "<context-1>".to_owned());
+        assert_eq!(replaced, "<context-1>");
+    }
 
     #[test]
     fn a_secret_keeps_its_keys_and_sizes_only() {
@@ -178,13 +241,13 @@ mod tests {
         let value = secret_value(&secret, "key.der").unwrap();
         assert_eq!(value, ("MIIBCgKCAQEA/w==".to_owned(), true));
         let missing = secret_value(&secret, "token").unwrap_err();
-        assert_eq!(missing.kind, ErrorKind::NotFound);
+        assert_eq!(missing.code, ErrorCode::SecretNoKey);
         let config = serde_json::json!({
             "apiVersion": "v1",
             "kind": "ConfigMap",
             "data": { "password": "aHVudGVyMg==" },
         });
         let refused = secret_value(&config, "password").unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::InvalidInput);
+        assert_eq!(refused.code, ErrorCode::SecretNotASecret);
     }
 }

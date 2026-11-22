@@ -25,7 +25,8 @@ use futures::FutureExt;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
-use twigo_ipc::ListBatch;
+use twigo_ipc::{IpcError, ListBatch, ViewState};
+use twigo_panic::contain;
 
 use crate::hub::{Shown, Subscription};
 use crate::metrics::{FIRST_ANSWER, INTERVAL, Opening, Reader};
@@ -69,7 +70,13 @@ impl Batcher {
         send: impl FnMut(ListBatch) -> bool + Send + 'static,
     ) -> Self {
         let control = Arc::new(Control::default());
-        let task = tokio::spawn(run(subscription, spec, metrics, Arc::clone(&control), send));
+        let task = tokio::spawn(serve(
+            subscription,
+            spec,
+            metrics,
+            Arc::clone(&control),
+            send,
+        ));
         Self { control, task }
     }
 
@@ -112,6 +119,42 @@ impl FirstOrder {
         let since = *self.waiting_since.get_or_insert_with(Instant::now);
         since.elapsed() < FIRST_ANSWER
     }
+}
+
+/// Runs the list; if it panics, its last batch changes nothing but the
+/// state, which says why, and nothing starts it again.
+async fn serve(
+    subscription: Subscription<Row>,
+    spec: Spec,
+    opening: Option<Opening>,
+    control: Arc<Control>,
+    mut send: impl FnMut(ListBatch) -> bool,
+) {
+    let (mut seq, mut total) = (0, 0);
+    let mut tell = |batch: ListBatch| {
+        (seq, total) = (batch.seq, batch.total);
+        send(batch)
+    };
+    if contain("list", run(subscription, spec, opening, control, &mut tell))
+        .await
+        .is_ok()
+    {
+        return;
+    }
+    send(ListBatch {
+        seq: seq + 1,
+        total,
+        columns: None,
+        window: None,
+        upserts: Vec::new(),
+        status: ViewState::Error {
+            error: IpcError::panicked("this list"),
+        },
+        parts: None,
+        counts: None,
+        groups: None,
+        metrics: None,
+    });
 }
 
 async fn run(
@@ -217,7 +260,7 @@ mod tests {
 
     use tokio::sync::mpsc;
     use tokio::time::{Instant, sleep};
-    use twigo_ipc::{Gvr, ListQuery, Part, PartState, Parts, ViewState};
+    use twigo_ipc::{ErrorCode, Gvr, ListQuery, Part, PartState, Parts, ViewState};
     use twigo_kube::client::{Budgets, Clients};
 
     use super::*;
@@ -325,6 +368,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_list_that_panics_ends_with_a_batch_that_says_so() {
+        twigo_panic::inject::arm("list", 1);
+        let mut rig = rig().await;
+        let (_, last) = rig.next().await;
+        assert_eq!(last.seq, 1);
+        let ViewState::Error { error } = &last.status else {
+            panic!("the list failed: {:?}", last.status);
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+        assert!(last.window.is_none() && last.upserts.is_empty());
+        rig.fake.add("pods", Some("a"), "p2");
+        sleep(FLUSH * 10).await;
+        assert!(rig.batches.try_recv().is_err(), "it is not started again");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_last_batch_of_a_list_that_panics_later_follows_those_it_sent() {
+        let (fake, hub, subscription, spec) = subscribed().await;
+        let (sender, mut batches) = mpsc::unbounded_channel();
+        let opening: Opening = Box::pin(async {
+            sleep(Duration::from_secs(5)).await;
+            panic!("a metrics bug")
+        });
+        let batcher = Batcher::spawn(subscription, spec, Some(opening), move |batch| {
+            sender.send(batch).is_ok()
+        });
+        batcher.set_window(0, 100, false);
+        let mut sent = Vec::new();
+        let last = loop {
+            let batch = batches.recv().await.unwrap();
+            if matches!(batch.status, ViewState::Error { .. }) {
+                break batch;
+            }
+            batcher.ack(batch.seq);
+            sent.push((batch.seq, batch.total));
+        };
+        let &(seq, total) = sent.last().expect("it sent batches before it panicked");
+        assert_eq!(total, 1, "listed");
+        assert_eq!((last.seq, last.total), (seq + 1, total));
+        drop((fake, hub));
     }
 
     #[tokio::test(start_paused = true)]

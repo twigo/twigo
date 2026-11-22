@@ -12,7 +12,7 @@ use kube::config::Kubeconfig;
 use kube::{Api, Config};
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
-use twigo_core::{Core, ShellFrame};
+use twigo_core::{Core, ShellFrame, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, AnswerKubeconfigOffer, ApprovalAnswer, ApprovalEvent, Environment,
@@ -35,7 +35,7 @@ fn unique() -> String {
 
 struct Live {
     dir: tempfile::TempDir,
-    core: Arc<Core>,
+    core: Started,
     context: String,
     alias: String,
     server: String,
@@ -121,10 +121,7 @@ impl Live {
         );
         core.set_terminal_zdotdir(None);
         let (status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-        tokio::spawn({
-            let core = Arc::clone(&core);
-            async move { core.run(followed, None).await }
-        });
+        let core = core.start_for_tests(followed, None);
         core.catalog.contexts().await;
         for name in [&context, &alias] {
             core.policy

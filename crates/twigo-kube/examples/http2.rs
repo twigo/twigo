@@ -4,6 +4,7 @@
 //! watches but sends no request for 100 s.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-kube --example http2 [namespace]
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

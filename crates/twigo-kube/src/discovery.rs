@@ -9,7 +9,7 @@ use http_body_util::BodyExt;
 use kube::Client;
 use kube::client::{APIGroupDiscoveryList, Body};
 use serde::{Deserialize, Serialize};
-use twigo_ipc::{ErrorKind, Gvr, IpcError, Resource};
+use twigo_ipc::{ErrorCode, Gvr, IpcError, Resource};
 
 use crate::errors;
 
@@ -84,9 +84,10 @@ impl From<&Error> for IpcError {
     fn from(error: &Error) -> Self {
         match error {
             Error::Request(error) => crate::errors::request(error),
-            Error::NotAggregated { .. } | Error::Decode { .. } => {
-                IpcError::new(ErrorKind::Unavailable, error.to_string())
+            Error::NotAggregated { .. } => {
+                IpcError::new(ErrorCode::DiscoveryNotAggregated, error.to_string())
             }
+            Error::Decode { .. } => IpcError::new(ErrorCode::AnswerUndecodable, error.to_string()),
         }
     }
 }

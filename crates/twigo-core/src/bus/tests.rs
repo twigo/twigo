@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -7,15 +8,15 @@ use serde_json::{Value, json};
 use tokio::sync::watch;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
-    BlockReason, Environment, ErrorKind, Execute, Friction, Mode, ModeSource, OperationEvent,
-    PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
+    BlockReason, Environment, ErrorCode, ErrorKind, Execute, Friction, IpcError, Mode, ModeSource,
+    OperationEvent, PlanId, PlanRequest, ShellEnd, ShellEvent, ShellKind, ShellTarget,
 };
 use twigo_policy::Attributes;
 use twigo_policy::friction::Risk;
 
 use super::{Finished, Planned, Previewed, Progress, Run};
 use crate::actions::Prepared;
-use crate::{Core, ShellFrame};
+use crate::{Core, ShellFrame, Started};
 
 const KUBECONFIG: &str = "
 clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
@@ -25,11 +26,11 @@ contexts:
   context: { cluster: c, user: u }
 ";
 
-async fn running(dir: &Path) -> Arc<Core> {
+async fn running(dir: &Path) -> Started {
     marked(running_with(dir, KUBECONFIG)).await
 }
 
-async fn marked(core: Arc<Core>) -> Arc<Core> {
+async fn marked(core: Started) -> Started {
     core.catalog.contexts().await;
     core.policy
         .set_environment("kind-a", Some(Environment::Local))
@@ -37,16 +38,12 @@ async fn marked(core: Arc<Core>) -> Arc<Core> {
     core
 }
 
-fn running_with(dir: &Path, text: &str) -> Arc<Core> {
+fn running_with(dir: &Path, text: &str) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
-    core
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 /// How many times the plan's run ran.
@@ -81,7 +78,7 @@ fn planned(core: &Core, risk: Risk, runs: &Runs) -> Planned {
                 *runs.lock().unwrap() += 1;
                 progress.running("Waiting for config map m to go");
                 progress.stopped().await;
-                Ok(Finished::Stopped("stopped".to_owned()))
+                Ok(Finished::stopped("stopped".to_owned()))
             })
         })),
     }
@@ -376,6 +373,8 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     );
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "stopped");
+    assert_eq!(lines[1]["message"], "stopped");
+    assert!(lines[1].get("codes").is_none());
 }
 
 #[tokio::test]
@@ -709,7 +708,7 @@ async fn a_scale_that_lost_to_another_write_reads_again_and_its_undo_holds_to_it
     );
 }
 
-async fn scripted_core(server: &Scripted, dir: &Path) -> (Arc<Core>, String) {
+async fn scripted_core(server: &Scripted, dir: &Path) -> (Started, String) {
     let core = marked(running_with(
         dir,
         &KUBECONFIG.replace("127.0.0.1:1", &format!("127.0.0.1:{}", server.port)),
@@ -841,10 +840,7 @@ async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
     let [OperationEvent::Failed { error }] = told.as_slice() else {
         panic!("{told:?}");
     };
-    assert_eq!(
-        error.message,
-        "Job j has completed, so there is nothing to suspend"
-    );
+    assert_eq!(error.code, ErrorCode::ActionNoChange);
     assert!(
         !server
             .seen
@@ -874,11 +870,7 @@ async fn a_job_that_ended_since_its_plan_is_neither_suspended_nor_put_back() {
         space: space.clone(),
     };
     let refused = core.command_plan("main", undo).await.unwrap_err();
-    assert_eq!(refused.kind, ErrorKind::Conflict);
-    assert_eq!(
-        refused.message,
-        "Job r has completed since you resumed it, so Twigo left it"
-    );
+    assert_eq!(refused.code, ErrorCode::ActionObjectChanged);
 }
 
 fn previewed(name: &str) -> Previewed {
@@ -1088,7 +1080,7 @@ impl Server {
     }
 }
 
-fn over_server(dir: &Path, port: u16) -> Arc<Core> {
+fn over_server(dir: &Path, port: u16) -> Started {
     running_with(
         dir,
         &format!(
@@ -1526,6 +1518,7 @@ async fn read_only_refuses_a_shell_before_anything_is_asked_and_nothing_reaches_
 
 #[tokio::test]
 async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
+    let events = twigo_log::capture();
     let dir = tempfile::tempdir().unwrap();
     let (server, port) = Server::start();
     let core = over_server(dir.path(), port);
@@ -1558,9 +1551,18 @@ async fn guarded_needs_the_confirmation_and_connects_only_once_opened() {
     let Some(ShellEnd::Failed { error }) = ended(&told) else {
         panic!("{:?}", told.lock().unwrap());
     };
-    assert_eq!(error.kind, ErrorKind::Forbidden);
-    assert_eq!(error.message, "forbidden by the server");
+    assert_eq!(error.code, ErrorCode::ServerForbidden);
     core.shell_close("main", id).unwrap();
+
+    let lines = events.lines();
+    let [event] = lines
+        .iter()
+        .filter(|line| line["fields"]["message"] == "a shell ended in error")
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one event for the shell's end: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.forbidden");
 }
 
 #[tokio::test]
@@ -1692,4 +1694,206 @@ async fn a_session_goes_with_its_window_and_with_shell_close() {
             .kind,
         ErrorKind::NotFound
     );
+}
+
+#[tokio::test]
+async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|progress: Progress| {
+        Box::pin(async move {
+            progress.running("Deleting config map m");
+            panic!("a run's bug");
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+    {
+        let told = told.lock().unwrap();
+        let Some(OperationEvent::Failed { error }) = told.last() else {
+            panic!("the run failed: {told:?}");
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+    }
+    let lines = audit(dir.path());
+    assert_eq!(lines[1]["event"], "ended");
+    assert_eq!(lines[1]["outcome"], "failed");
+    assert_eq!(lines[1]["codes"], json!(["internal.panic"]));
+    until("the bus lets the plan go", || {
+        core.bus.inner().windows["main"].entries.is_empty()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_failed_command_leaves_its_code_and_none_of_the_server_s_words_in_the_audit_line_and_the_log()
+ {
+    let logged = twigo_log::capture();
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|_: Progress| {
+        Box::pin(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2": must be a number"#,
+            ))
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (_told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the end: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.invalid");
+    assert_eq!(event["fields"]["command"], "delete");
+    assert_eq!(event["fields"]["outcome"], "failed");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
+
+    let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines = audit(dir.path());
+    assert_eq!(lines[1]["outcome"], "failed");
+    assert_eq!(lines[1]["codes"], json!(["server.invalid"]));
+    assert!(lines[1].get("message").is_none());
+    assert!(!text.contains("hunter2"), "{text}");
+}
+
+#[tokio::test]
+async fn a_stopped_delete_s_ended_line_holds_its_sentence_and_the_failed_codes_and_none_of_the_server_s_words()
+ {
+    let logged = twigo_log::capture();
+    let server = Scripted::start(|line, _| match line {
+        "GET /api/v1/namespaces/a/configmaps/m1 HTTP/1.1" => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"m1","namespace":"a","uid":"u-1"}}"#,
+        ),
+        "GET /api/v1/namespaces/a/configmaps/m2 HTTP/1.1" => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"m2","namespace":"a","uid":"u-2"}}"#,
+        ),
+        "DELETE /api/v1/namespaces/a/configmaps/m1 HTTP/1.1" => (
+            403,
+            r#"{"kind":"Status","apiVersion":"v1","status":"Failure","message":"admission webhook \"guard\" denied the request: the value \"hunter2\" is protected","reason":"Forbidden","code":403}"#,
+        ),
+        "DELETE /api/v1/namespaces/a/configmaps/m2 HTTP/1.1" => {
+            (200, r#"{"kind":"Status","apiVersion":"v1","status":"Success"}"#)
+        }
+        line if line.starts_with("GET /api/v1/namespaces/a/configmaps?") => (
+            200,
+            r#"{"apiVersion":"v1","kind":"ConfigMapList","metadata":{"resourceVersion":"5"},"items":[{"metadata":{"name":"m2","namespace":"a","uid":"u-2","resourceVersion":"4"}}]}"#,
+        ),
+        _ => (404, r#"{"kind":"Status","apiVersion":"v1","code":404}"#),
+    })
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let (core, space) = scripted_core(&server, dir.path()).await;
+    let request = PlanRequest::Delete {
+        space,
+        targets: vec![configmap("m1"), configmap("m2")],
+    };
+    let plan = core.command_plan("main", request).await.unwrap();
+    let typed = match &plan.friction {
+        Friction::Typed { text } => Some(text.clone()),
+        _ => None,
+    };
+    let (told, send) = events();
+    let execute = Execute {
+        plan: plan.id,
+        typed,
+    };
+    core.command_execute("main", execute, send).await.unwrap();
+    until("it waits for the second to go", || {
+        told.lock().unwrap().iter().any(|event| {
+            matches!(event, OperationEvent::Running { text } if text.starts_with("Waiting for 1 of"))
+        })
+    })
+    .await;
+    core.command_cancel("main", plan.id);
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists()
+            && audit(dir.path())
+                .iter()
+                .any(|line| line["event"] == "ended")
+    })
+    .await;
+
+    let told = told.lock().unwrap();
+    let Some(OperationEvent::Stopped { text }) = told.last() else {
+        panic!("the run stopped: {told:?}");
+    };
+    assert!(
+        text.contains("hunter2"),
+        "the window keeps what the server said: {text}"
+    );
+    let file = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let ended = audit(dir.path())
+        .into_iter()
+        .find(|line| line["event"] == "ended")
+        .unwrap();
+    assert_eq!(ended["outcome"], "stopped");
+    assert_eq!(
+        ended["message"],
+        "Stopped waiting for 1 config map, which is still being deleted"
+    );
+    assert_eq!(ended["codes"], json!(["server.forbidden"]));
+    assert!(!file.contains("hunter2"), "{file}");
+    let lines: Vec<_> = logged
+        .lines()
+        .into_iter()
+        .filter(|line| line["fields"]["message"] == "a command ended in error")
+        .collect();
+    let [event] = &lines[..] else {
+        panic!("one event for the stop: {lines:?}");
+    };
+    assert_eq!(event["fields"]["code"], "server.forbidden");
+    assert_eq!(event["fields"]["outcome"], "stopped");
+    assert!(!event.to_string().contains("hunter2"), "{event}");
+}
+
+#[test]
+fn a_send_that_panicked_does_not_stop_the_events_after_it() {
+    let sent = Arc::new(AtomicUsize::new(0));
+    let (progress, _stop) = Progress::new({
+        let sent = Arc::clone(&sent);
+        move |_| {
+            assert!(sent.fetch_add(1, Ordering::SeqCst) > 0, "a sender's bug");
+            true
+        }
+    });
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| progress.running("a")));
+    assert!(panicked.is_err());
+    progress.running("b");
+    assert_eq!(sent.load(Ordering::SeqCst), 2);
 }

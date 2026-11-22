@@ -25,7 +25,7 @@ import {
   type MockScenario,
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
-import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import { carriesCode, tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
 import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { OBJECT_SCHEME, objectUri, parseObjectUri, pfUri } from "../uri";
@@ -618,7 +618,10 @@ test("a resume that fails for another reason than a busy port or the mode is sho
     invoke: (command, request) =>
       failing && command === "forward_resume"
         ? Promise.reject(
-            new IpcError("unavailable", "the cluster does not answer"),
+            new IpcError(
+              "forward.cluster-unanswered",
+              "the cluster does not answer",
+            ),
           )
         : mock.invoke(command, request),
     subscribe: (command, request, onMessage) =>
@@ -747,7 +750,12 @@ const REFUSED = (source: ModeSource): Forward["state"] => {
   };
   return {
     state: "failed",
-    error: { kind: "permissions", message: "qa is read-only", blocked },
+    error: {
+      code: "policy.blocked",
+      kind: "permissions",
+      message: "qa is read-only",
+      blocked,
+    },
   };
 };
 
@@ -775,6 +783,7 @@ test("a forward that listens nowhere says so: not on an address, and that Change
     state: {
       state: "failed",
       error: {
+        code: "forward.port-in-use",
         kind: "conflict",
         message: "port 8080 is held by another process",
       },
@@ -811,16 +820,46 @@ test("the counters say that they count since Twigo started, and each shows its o
     ...forward,
     sent: 1536,
     received: 5 * 1024 * 1024,
-    failure: "pod auth-api-1 refused the connection to port 8080",
+    failure: {
+      code: "forward.port-refused",
+      kind: "unavailable",
+      message: "pod auth-api-1 refused the connection to port 8080",
+    },
   }));
   await open(await start(API, 80));
   const value = (label: string) =>
     screen.getByText(label, { selector: "dt" }).nextSibling?.textContent;
   expect(value("Sent")).toBe("1.5 KiB since Twigo started");
   expect(value("Received")).toBe("5 MiB since Twigo started");
-  expect(value("Last failure")).toBe(
+  expect(value("Last failure")).toContain(
     "pod auth-api-1 refused the connection to port 8080",
   );
+  expect(
+    carriesCode(
+      screen.getByText("Last failure", { selector: "dt" })
+        .nextSibling as HTMLElement,
+      "forward.port-refused",
+    ),
+  ).toBe(true);
+});
+
+test("a forward that Twigo's own code stopped says so with its code, offers Start and Report…", async () => {
+  const { start, open } = await mounted("live", "qa", (forward) => ({
+    ...forward,
+    state: {
+      state: "failed",
+      error: {
+        code: "internal.panic",
+        kind: "internal",
+        message: "Twigo stopped this forward on an internal error",
+      },
+    },
+  }));
+  await open(await start(API, 80));
+  expect(screen.getByText("Twigo hit an internal error")).toBeTruthy();
+  expect(screen.getByText("This forward stopped.")).toBeTruthy();
+  expect(document.body.textContent).toContain("Start tries it again.");
+  expect(screen.getByRole("button", { name: "Report…" })).toBeTruthy();
 });
 
 test("a tab whose address names another space shows nothing of that space's forward", async () => {

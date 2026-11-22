@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ContextAccess;
+use crate::{ContextAccess, IpcError};
 
 /// A workbench space: one context or a group of them (ARCHITECTURE 4.2).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -11,6 +11,22 @@ pub struct Space {
     /// The names of its contexts; the catalog's `Context` says the rest,
     /// as long as a source lists it.
     pub contexts: Vec<String>,
+}
+
+/// What the catalog's sources list, and what they could not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct Catalog {
+    pub contexts: Vec<Context>,
+    /// Files that exist but could not be read or merged, whose contexts are
+    /// missing, and files whose changes go unseen.
+    pub failures: Vec<CatalogFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct CatalogFailure {
+    /// The file, as a person names it: `~/.kube/config`.
+    pub source: String,
+    pub error: IpcError,
 }
 
 /// A context the catalog lists.
@@ -31,6 +47,9 @@ pub struct Context {
     /// The namespace the kubeconfig context names, which a new space of it
     /// starts on; none when it names none.
     pub namespace: Option<String>,
+    /// Why no connection can be made, when the kubeconfig already says:
+    /// `context.empty`, `context.missing-cluster` or `context.missing-user`.
+    pub problem: Option<IpcError>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

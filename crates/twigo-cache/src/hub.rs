@@ -39,7 +39,7 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use twigo_ipc::{self as ipc, Access, ErrorKind, IpcError, PartState, Parts, ViewState};
+use twigo_ipc::{self as ipc, Access, ErrorCode, ErrorKind, IpcError, PartState, Parts, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::cluster::{Cluster, Resolved};
@@ -87,7 +87,7 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
 fn segment(name: &str) -> Result<(), IpcError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '%']) {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::InternalRequest,
             format!("{name:?} can be no name in a request's path"),
         ));
     }
@@ -133,7 +133,7 @@ impl Resource {
             }
             (true, None) => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::InternalRequest,
                     format!("{name} names no namespace"),
                 ));
             }
@@ -397,14 +397,14 @@ impl Hub {
         let mut backoff = backoff();
         let mut failed_at = None;
         loop {
-            match self.read_namespaces(context).await {
-                Err(ViewState::Stale) => {}
+            let cause = match self.read_namespaces(context).await {
+                Err(ViewState::Stale { cause }) => cause,
                 answered => return answered,
-            }
+            };
             let failed_at = *failed_at.get_or_insert_with(Instant::now);
             let left = STALE_FOR.saturating_sub(failed_at.elapsed());
             if left.is_zero() {
-                return Err(ViewState::Stale);
+                return Err(ViewState::Stale { cause });
             }
             let pause = backoff
                 .next()
@@ -505,13 +505,21 @@ impl Hub {
             Ok(true) | Err(Failure::Refused(_)) => return Ok(none),
             Ok(false) => {}
             Err(Failure::Unauthorized) => return Err(ViewState::Unauthorized),
-            Err(_) => return Err(ViewState::Connecting),
+            Err(failure) => {
+                return Err(ViewState::Connecting {
+                    cause: failure.cause(),
+                });
+            }
         }
         let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
             Err(ViewState::Forbidden { .. }) => return Ok(none),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
-            Err(_) => return Err(ViewState::Connecting),
+            Err(ViewState::Stale { cause }) => return Err(ViewState::Connecting { cause }),
+            Err(ViewState::Error { error }) => {
+                return Err(ViewState::Connecting { cause: Some(error) });
+            }
+            Err(_) => return Err(ViewState::Connecting { cause: None }),
         };
         let reviews: Vec<BoxFuture<'static, Result<bool, Failure>>> = names
             .iter()
@@ -671,14 +679,17 @@ impl Hub {
                 }
             }
         };
+        // Before the feed, which panics on a store a panic poisoned: the
+        // guard then gives the count back as it unwinds.
+        let guard = Guard::Hold {
+            hub: Arc::downgrade(&self.inner),
+            key: key.clone(),
+        };
         Part {
             feed: upstream.store.feed(),
             upstream,
             filter,
-            guard: Guard::Hold {
-                hub: Arc::downgrade(&self.inner),
-                key: key.clone(),
-            },
+            guard,
             showing: true,
         }
     }
@@ -775,7 +786,7 @@ impl Hub {
                 .await
                 .map_err(|error| match error.kind {
                     ErrorKind::Unauthorized => Failure::Unauthorized,
-                    _ => Failure::Transient,
+                    _ => Failure::Transient(error),
                 })?;
         let ask = || {
             let review = SelfSubjectAccessReview {
@@ -1177,7 +1188,7 @@ impl<T: Item> Subscription<T> {
                 key,
                 namespaces: namespaces.to_vec(),
                 omitted: Mutex::new(None),
-                waiting: Mutex::new(ViewState::Connecting),
+                waiting: Mutex::new(ViewState::Connecting { cause: None }),
                 parts: Mutex::default(),
                 swapped,
             }),
@@ -1226,14 +1237,16 @@ impl<T: Item> Subscription<T> {
             match self.state() {
                 state if failed(&state) => return Err(state),
                 _ if self.listed() => return Ok(self.items()),
-                ViewState::Stale => {
+                ViewState::Stale { .. } => {
                     let tried = tokio::time::timeout(STALE_FOR, async {
-                        while self.state() == ViewState::Stale {
+                        while matches!(self.state(), ViewState::Stale { .. }) {
                             self.changed().await;
                         }
                     });
-                    if tried.await.is_err() {
-                        return Err(ViewState::Stale);
+                    if tried.await.is_err()
+                        && let stale @ ViewState::Stale { .. } = self.state()
+                    {
+                        return Err(stale);
                     }
                 }
                 _ => self.changed().await,
@@ -1494,11 +1507,18 @@ where
 /// hub's backoff, the subscription saying what it waits on meanwhile.
 async fn settle(subscription: Weak<SubscriptionInner<Row>>, hub: Hub, query: Query, key: Key) {
     let mut backoff = backoff();
+    let mut told = None;
     let resolved = loop {
         let waiting = match hub.resolve(&query).await {
             Ok(resolved) => break resolved,
             Err(waiting) => waiting,
         };
+        if let ViewState::Error { error } = &waiting
+            && told.as_ref() != Some(error)
+        {
+            tracing::warn!(context = %query.context, code = %error.code, "a list cannot get its context's clients");
+            told = Some(error.clone());
+        }
         {
             let Some(subscription) = subscription.upgrade() else {
                 return;
@@ -1535,7 +1555,7 @@ fn status(looks: &[(ViewState, bool)]) -> ViewState {
     let (shown, unshown): (Vec<_>, Vec<_>) = looks.iter().partition(|(_, shown)| *shown);
     if !shown.is_empty() {
         return combine(shown.into_iter().map(|(state, _)| match state {
-            ViewState::Queued => ViewState::Stale,
+            ViewState::Queued => ViewState::Stale { cause: None },
             state => state.clone(),
         }));
     }
@@ -1547,7 +1567,7 @@ fn status(looks: &[(ViewState, bool)]) -> ViewState {
         return combine(refused.into_iter());
     }
     combine(on_their_way.into_iter().map(|state| match state {
-        ViewState::Stale => ViewState::Connecting,
+        ViewState::Stale { cause } => ViewState::Connecting { cause },
         state => state,
     }))
 }
@@ -1559,10 +1579,10 @@ fn status(looks: &[(ViewState, bool)]) -> ViewState {
 pub fn combine(states: impl Iterator<Item = ViewState>) -> ViewState {
     let rank = |state: &ViewState| match state {
         ViewState::Ready => 0,
-        ViewState::Stale => 1,
+        ViewState::Stale { .. } => 1,
         ViewState::Relisting => 2,
         ViewState::Syncing { .. } => 3,
-        ViewState::Connecting => 4,
+        ViewState::Connecting { .. } => 4,
         ViewState::Queued => 5,
         ViewState::Forbidden { .. } => 6,
         ViewState::Unauthorized => 7,

@@ -12,6 +12,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use yaml_edit::YamlError;
+
 /// kubectl holds its lock for one write.
 const LOCK_TRIES: u32 = 10;
 const LOCK_PAUSE: Duration = Duration::from_millis(50);
@@ -22,8 +24,32 @@ pub enum WriteError {
     Locked(PathBuf),
     #[error("{0}")]
     Io(#[from] io::Error),
-    #[error("the file does not parse: {0}")]
-    Parse(String),
+    #[error("the file does not parse{}", at(.line, .column))]
+    Parse {
+        line: Option<usize>,
+        column: Option<usize>,
+    },
+    #[error("the file holds no mapping")]
+    NoMapping,
+}
+
+fn at(line: &Option<usize>, column: &Option<usize>) -> String {
+    match (line, column) {
+        (Some(line), Some(column)) => format!(" at line {line}, column {column}"),
+        _ => String::new(),
+    }
+}
+
+impl From<YamlError> for WriteError {
+    /// By where the fault is, never what yaml-edit says of it: its message
+    /// can quote the text around the fault, a token among it.
+    fn from(error: YamlError) -> Self {
+        let (line, column) = match error {
+            YamlError::Parse { line, column, .. } => (line, column),
+            _ => (None, None),
+        };
+        Self::Parse { line, column }
+    }
 }
 
 /// A temporary file beside the target, with the target's mode, or 0600 for
@@ -88,7 +114,27 @@ impl Lock {
 impl Drop for Lock {
     fn drop(&mut self) {
         if let Err(error) = fs::remove_file(&self.0) {
-            eprintln!("could not remove {}: {error}", self.0.display());
+            tracing::warn!(path = %self.0.display(), %error, "could not remove the lock file");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr as _;
+
+    use yaml_edit::YamlFile;
+
+    use super::*;
+
+    #[test]
+    fn a_file_that_does_not_parse_is_named_by_its_place_and_not_by_the_text_around_it() {
+        let text = "a: 1\n--- \nb\n... token-SECRET\n";
+        let error = YamlFile::from_str(text).unwrap_err();
+        assert!(error.to_string().contains("token-SECRET"), "{error}");
+        assert_eq!(
+            WriteError::from(error).to_string(),
+            "the file does not parse at line 4, column 5"
+        );
     }
 }

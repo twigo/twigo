@@ -146,7 +146,11 @@ async fn an_api_server_restart_leaves_the_rows_after_a_stale_spell() {
             if seen.last() != Some(&state) {
                 seen.push(state.clone());
             }
-            if state == ViewState::Ready && seen.contains(&ViewState::Stale) {
+            if state == ViewState::Ready
+                && seen
+                    .iter()
+                    .any(|state| matches!(state, ViewState::Stale { .. }))
+            {
                 return;
             }
         }

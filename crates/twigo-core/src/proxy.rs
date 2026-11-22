@@ -21,13 +21,14 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OnceCell, watch};
 use tokio_util::sync::CancellationToken;
-use twigo_ipc::{BlockReason, Blocked, ErrorKind, IpcError, RequestClass};
+use twigo_ipc::{BlockReason, Blocked, ErrorCode, IpcError, RequestClass};
 use twigo_kube::client::{Actor, ActorClients, Clients};
 use twigo_policy::{Attributes, Policy};
 
+use crate::Core;
 use crate::approvals::Approvals;
 use crate::catalog::Contexts;
-use crate::{ClientsError, Core};
+use crate::delete::deleted;
 pub(crate) use tokens::{Digest, Holder};
 
 /// The proxy's endpoint, its tokens and the actors' clients it sends with.
@@ -55,12 +56,7 @@ impl Proxy {
     /// Deletes what a previous run left in `dir`: the kubeconfigs of
     /// processes that ended with it, whose tokens no longer mean anything.
     pub(crate) fn new(dir: PathBuf) -> Self {
-        match std::fs::remove_dir_all(&dir) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                eprintln!("could not delete {}: {error}", dir.display());
-            }
-            _ => {}
-        }
+        deleted(&dir, std::fs::remove_dir_all(&dir));
         Self {
             dir,
             endpoint: OnceCell::new(),
@@ -143,11 +139,7 @@ impl Drop for ProxyProcess {
         self.proxy.revoke(self.id);
         self.ended.cancel();
         self.approvals.end_process(self.id);
-        if let Err(error) = std::fs::remove_file(&self.kubeconfig)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("could not delete {}: {error}", self.kubeconfig.display());
-        }
+        deleted(&self.kubeconfig, std::fs::remove_file(&self.kubeconfig));
     }
 }
 
@@ -170,7 +162,7 @@ impl Core {
     ) -> Result<ProxyProcess, IpcError> {
         if !matches!(actor, Actor::Terminal | Actor::Helm | Actor::Agent) {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::ProxyActorRefused,
                 format!(
                     "only a terminal, helm or an agent reaches a cluster through the policy proxy, never the actor {}",
                     actor.name()
@@ -179,7 +171,7 @@ impl Core {
         }
         let contexts = self.catalog.contexts().await;
         if contexts.find(context).is_none() {
-            return Err(IpcError::from(&ClientsError::NoContext(context.to_owned())));
+            return Err(crate::errors::unlisted(context));
         }
         let endpoint = self
             .proxy
@@ -188,7 +180,7 @@ impl Core {
             .await
             .map_err(|error| {
                 IpcError::new(
-                    ErrorKind::Internal,
+                    ErrorCode::ProxyUnbound,
                     format!("the policy proxy could not listen on 127.0.0.1: {error}"),
                 )
             })?;
@@ -228,12 +220,7 @@ impl Core {
         }
         let path = self.proxy.dir.join(format!("process-{id}.kubeconfig"));
         let written = kubeconfig::write(&self.proxy.dir, &path, &entries, context, &endpoint.ca);
-        written.map_err(|error| {
-            IpcError::new(
-                ErrorKind::Internal,
-                format!("could not write {}: {error}", path.display()),
-            )
-        })?;
+        written.map_err(|error| crate::errors::unwritten(&path, error))?;
         let mut tokens = self.proxy.tokens.lock().expect("tokens lock");
         for holder in issued {
             tokens.insert(holder.digest, Arc::new(holder));

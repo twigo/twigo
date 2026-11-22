@@ -80,7 +80,7 @@ test("it leads with the tile of the space it speaks about", async () => {
   const { backend } = await mounted();
   await act(() => protect(backend, { action: "unlock", context: "prod-eu" }));
   expect(
-    screen.getByText("prod-eu is unlocked.").parentElement?.parentElement
+    screen.getByText("prod-eu is unlocked.").closest("[data-tone]")
       ?.textContent,
   ).toMatch(/^PEprod-eu is unlocked\./);
 });

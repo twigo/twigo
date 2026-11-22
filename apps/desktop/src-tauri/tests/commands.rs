@@ -1,6 +1,8 @@
 //! Every command of the IPC protocol has a handler, an entry in the app's
 //! manifest and a permission in the main window's capability: one that
-//! lacks either is refused by Tauri at runtime, with no error at build.
+//! lacks either is refused by Tauri at runtime, with no error at build. And
+//! each, as the page-load and window callbacks, meets a panic as
+//! ARCHITECTURE 2.1 says.
 
 use std::collections::BTreeSet;
 
@@ -44,4 +46,31 @@ fn every_command_is_handled_listed_and_allowed() {
     assert_eq!(manifest, protocol, "build.rs lists the protocol's commands");
     assert_eq!(handled, protocol, "main.rs handles the protocol's commands");
     assert_eq!(allowed, protocol, "capabilities/main.json allows them");
+}
+
+#[test]
+fn every_command_and_callback_meets_a_panic_through_the_fatal_path_or_contained() {
+    let main = include_str!("../src/main.rs");
+    assert!(
+        main.contains(".invoke_handler(fatal.guarded_handler(tauri::generate_handler!["),
+        "the invoke handler runs guarded"
+    );
+    for callback in [".on_page_load(", ".on_window_event("] {
+        assert!(
+            between(main, callback, "\n        .").contains("fatal.guarded("),
+            "{callback} runs guarded"
+        );
+    }
+    let unguarded: Vec<&str> = main
+        .split("#[tauri::command]\n")
+        .skip(1)
+        .filter(|command| command.starts_with("async fn "))
+        .filter(|command| !between(command, "{", "\n}\n").contains("contained("))
+        .map(|command| between(command, "async fn ", "("))
+        .collect();
+    assert!(main.contains("#[tauri::command]\nasync fn "));
+    assert!(
+        unguarded.is_empty(),
+        "async commands not through contained(): {unguarded:?}"
+    );
 }

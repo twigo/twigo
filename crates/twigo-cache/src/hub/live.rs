@@ -553,7 +553,7 @@ async fn a_service_account_that_may_list_namespaces_reads_all_of_those_it_may_li
     let mut all = hub.rows(live.query(&[])).await.unwrap();
     until(&mut all, |all| {
         let shown = all.drain_shown();
-        shown.status == ViewState::Ready && shown.parts.count == 2
+        shown.status == ViewState::Ready && shown.parts.count == 2 && shown.parts.unready.is_empty()
     })
     .await;
     let after = namespace_api.list(&every).await.unwrap().items.len();

@@ -16,7 +16,11 @@ export interface QuickPickItem {
   readonly matches?: readonly TextRange[];
   /** Quiet words after the label, such as a namespace. */
   readonly description?: string;
+  /** An error's code after the description, as an error's code shows elsewhere. */
+  readonly code?: string;
   readonly icon?: ComponentType<{ className?: string }>;
+  /** The icon in the warn tone, for a row that names a problem. */
+  readonly iconTone?: "warn";
   /** Two letters of the name on its colour before the icon, as the rail draws a space: a row of another space than the one shown. */
   readonly tile?: {
     readonly name: string;
@@ -40,6 +44,8 @@ export interface QuickPickItem {
   readonly keybinding?: string;
   /** Items group under headings in the order they come. */
   readonly group?: string;
+  /** The row says something and cannot be chosen: Enter and a click on it do nothing. */
+  readonly disabled?: boolean;
   /**
    * With `acceptChecked` on the provider: present, the row has a box and
    * starts with this tick; absent, the row is an action that Enter or a

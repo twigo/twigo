@@ -37,6 +37,18 @@ export type {
 } from "./quickaccess/registry";
 export { filtered } from "./quickaccess/providers";
 export { createWorkbench, Workbench } from "./services";
+export {
+  errorDetails,
+  errorOneLine,
+  errorText,
+  type ErrorLike,
+} from "./errors";
+export { ErrorBanner } from "./ErrorBanner";
+export { ErrorMessage } from "./ErrorMessage";
+export { INTERNAL_ERROR, isInternalError } from "./internalError";
+export { REPORT_PROBLEM } from "./report/commands";
+export { ReportButton, ReportLink } from "./report/ReportLink";
+export { notifyError } from "./notifyError";
 export type { Look, Outcome } from "./operations/service";
 export { canUnlock, unlockAction } from "./operations/unlock";
 export { StateStore } from "./state/store";

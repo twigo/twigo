@@ -4,6 +4,7 @@ fn main() {
         "shell_environment_watch",
         "shell_environment_retry",
         "contexts_watch",
+        "problems_watch",
         "context_relock",
         "command_plan",
         "command_execute",
@@ -57,6 +58,12 @@ fn main() {
         "forward_remove",
         "forwards_watch",
         "url_open",
+        "diagnostics_log",
+        "log_reveal",
+        "log_level_set",
+        "report_problem",
+        "report_open_issue",
+        "report_save",
     ]);
     let mut attributes = tauri_build::Attributes::new().app_manifest(commands);
     // An inlined plugin keeps its permissions in OUT_DIR, so builds without the feature have no

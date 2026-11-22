@@ -9,6 +9,11 @@
 //! controlling terminal, as `pnpm tauri dev` in a terminal starts Twigo,
 //! where an interactive shell in a background process group stops at its
 //! first touch of the terminal.
+#![expect(
+    clippy::print_stderr,
+    clippy::print_stdout,
+    reason = "a test without the harness reports on its own streams"
+)]
 
 use std::ffi::{OsStr, OsString};
 use std::os::fd::AsRawFd;

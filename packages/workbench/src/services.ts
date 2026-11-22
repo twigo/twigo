@@ -14,8 +14,12 @@ import { Credentials } from "./credentials";
 import type { Lookup } from "./contextkey/when";
 import { Keybindings } from "./keybindings/service";
 import { Lists } from "./lists/service";
+import { notifyError } from "./notifyError";
 import { CANCEL_COUNTDOWN, Operations, UNDO } from "./operations/service";
 import { PartSizes } from "./parts/sizes";
+import { announceProblem, dismissProblem } from "./problems/notice";
+import { Problems } from "./problems/service";
+import { ProblemReport } from "./report/service";
 import { spaceMark } from "./parts/spaceMark";
 import { QuickAccess } from "./quickaccess/registry";
 import { Catalog } from "./spaces/catalog";
@@ -26,6 +30,8 @@ import { StateStore } from "./state/store";
 import { Views } from "./views/registry";
 import { registerCore } from "./core";
 import { Zoom } from "./zoom";
+
+const kubeconfigToast = (source: string) => `kubeconfig:${source}`;
 
 /**
  * The services of one window. Features, the workbench's own included,
@@ -86,6 +92,8 @@ export class Workbench {
   readonly credentials: Credentials;
   readonly operations: Operations;
   readonly approvals: Approvals;
+  readonly problemReport: ProblemReport;
+  readonly problems: Problems;
 
   constructor(
     readonly backend: Backend,
@@ -100,7 +108,19 @@ export class Workbench {
       layout,
       platform,
     );
-    this.catalog = new Catalog(backend);
+    this.catalog = new Catalog(
+      backend,
+      (failure) => {
+        notifyError(failure.error, {
+          lead: `${failure.source}: `,
+          warning: true,
+          key: kubeconfigToast(failure.source),
+        });
+      },
+      (source) => {
+        notify.dismiss(kubeconfigToast(source));
+      },
+    );
     this.colors = new ContextColors(this.catalog, state);
     this.spaces = new Spaces(
       backend,
@@ -139,6 +159,14 @@ export class Workbench {
       () => this.operations.confirming,
       this.spaces,
     );
+    this.problemReport = new ProblemReport(backend);
+    this.problems = new Problems(
+      backend,
+      (problem) => {
+        announceProblem(this, problem);
+      },
+      dismissProblem,
+    );
   }
 
   /** A menu's commands as actions to draw, run against `lookup` with `args`, such as the space a tile's menu is about. */
@@ -146,7 +174,7 @@ export class Workbench {
     return menuActions(this, menu, lookup, args);
   }
 
-  /** Opens a sign-in link in the person's browser; Rust checks it first. */
+  /** Opens a link in the person's browser: https, or http to this computer; Rust checks it first. */
   openUrl(url: string): void {
     this.backend.invoke("url_open", url).catch((error: unknown) => {
       this.report(error);
@@ -155,11 +183,12 @@ export class Workbench {
 
   /** Shows a failure the user did not ask to see but must know about, led by the tile of the space whose context the gate refused. */
   report(error: unknown, command?: string): void {
-    const { message, blocked } = toIpcError(error);
-    const text = command ? `${command}: ${message}` : message;
-    notify.error(text, {
-      key: text,
-      tile: spaceMark(blocked && this.spaces.ofContext(blocked.context)),
+    const ipc = toIpcError(error);
+    notifyError(ipc, {
+      ...(command && { lead: `${command}: ` }),
+      tile: spaceMark(
+        ipc.blocked && this.spaces.ofContext(ipc.blocked.context),
+      ),
     });
   }
 }
@@ -205,6 +234,9 @@ export async function createWorkbench(
   });
   await workbench.spaces.load();
   workbench.credentials.start().catch((error: unknown) => {
+    workbench.report(error);
+  });
+  workbench.problems.watch().catch((error: unknown) => {
     workbench.report(error);
   });
   // Rust denies every ask while no window follows them.

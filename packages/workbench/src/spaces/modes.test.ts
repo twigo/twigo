@@ -6,7 +6,7 @@ import { notify } from "@twigo/ui";
 import { registerCore } from "../core";
 import { Workbench } from "../services";
 import { StateStore } from "../state/store";
-import { confirmAsking, testWorkbench } from "../testing";
+import { confirmAsking, testWorkbench, toastWords } from "../testing";
 import {
   RELOCK_CONTEXT,
   SET_CONTEXT_ENVIRONMENT,
@@ -90,6 +90,16 @@ test("each source is named in words", () => {
       pattern: null,
     }),
   ).toContain("cannot be read");
+  expect(
+    describeSource({
+      kind: "policyFile",
+      file: "/etc/twigo/policy.json",
+      pattern: null,
+      reason: "it is not JSON at line 3, column 1",
+    }),
+  ).toBe(
+    "/etc/twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
+  );
   expect(describeSource({ kind: "user", overrides: null })).toBe(
     "You set this.",
   );
@@ -301,6 +311,18 @@ test("marking a context sets its default mode and its colour", async () => {
   expect(colors.source("qa")).toBe("chosen");
 });
 
+test("a policy file that cannot be read makes every context read-only, and each says why in the file's reason", async () => {
+  const workbench = await testWorkbench(
+    undefined,
+    createMockBackend("policyFileUnreadable"),
+  );
+  const access = workbench.catalog.find("dev")?.access;
+  expect(access?.mode).toBe("read-only");
+  expect(access && describeAccess(access)).toBe(
+    "/Library/Application Support/Twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
+  );
+});
+
 test("a policy file's entry cannot be changed and says who set it", async () => {
   const error = vi.spyOn(notify, "error");
   const workbench = await testWorkbench(
@@ -322,7 +344,7 @@ test("a policy file's entry cannot be changed and says who set it", async () => 
   expect(catalog.find("prod-eu")?.access.mode).toBe("read-only");
   expect(error).toHaveBeenCalledTimes(2);
   for (const [message] of error.mock.calls) {
-    expect(message).toContain("prod-*");
+    expect(toastWords(message)).toContain("prod-*");
   }
 });
 

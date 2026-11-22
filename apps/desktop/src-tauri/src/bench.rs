@@ -46,7 +46,10 @@ pub fn plugin<R: Runtime>() -> TauriPlugin<R> {
             if matches!(payload.event(), PageLoadEvent::Started)
                 && let Err(error) = webview.with_webview(paint_when_covered)
             {
-                eprintln!("could not keep the bench page visible: {error}");
+                #[expect(clippy::print_stderr, reason = "the bench's stderr is its interface")]
+                {
+                    eprintln!("could not keep the bench page visible: {error}");
+                }
             }
         })
         .build()

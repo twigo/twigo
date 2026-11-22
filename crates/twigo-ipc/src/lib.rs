@@ -7,6 +7,7 @@ mod apply;
 mod approval;
 pub mod command;
 mod credentials;
+mod diagnostics;
 mod discovery;
 mod environment;
 mod error;
@@ -15,6 +16,7 @@ mod keyboard;
 mod list;
 mod logs;
 mod object;
+mod report;
 mod schema;
 mod shell;
 mod space;
@@ -36,9 +38,10 @@ pub use approval::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId, NoDiff,
 };
 pub use credentials::{ContextAuth, EnvVar, ExecPlugin, ExecReview, PluginStatus, ReviewedPlugin};
+pub use diagnostics::{DiagnosticsEntry, DiagnosticsLevel, LogVerbosity, SetLogLevel};
 pub use discovery::{ClusterVersion, Discovered, Resource};
 pub use environment::ShellEnvironment;
-pub use error::{ErrorKind, IpcError};
+pub use error::{ErrorCode, ErrorKind, IpcError, ServerCause, ServerStatus};
 pub use forward::{
     BusyWhy, Forward, ForwardEvent, ForwardId, ForwardPort, ForwardPorts, ForwardStarted,
     ForwardState, ForwardTarget, ResumeForward, StartForward,
@@ -62,15 +65,16 @@ pub use object::{
     Related, RelatedObject, Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
     Vital,
 };
+pub use report::{Fact, FactId, Hidden, OpenIssue, Report, SaveReport};
 pub use schema::SchemaQuery;
 pub use shell::{
     OpenShell, ShellAck, ShellContainers, ShellEnd, ShellEvent, ShellInput, ShellKind,
     ShellMessage, ShellPod, ShellResize, ShellTarget,
 };
-pub use space::{Context, ContextColor, Space};
+pub use space::{Catalog, CatalogFailure, Context, ContextColor, Space};
 pub use state::{StateEntry, StateSnapshot};
 pub use terminal::{
     AnswerKubeconfigOffer, KubeconfigNames, KubeconfigOffer, KubeconfigOfferAnswer,
     KubeconfigOfferEvent, KubeconfigOfferId, NewTerminal, ProxyWhy, TerminalKind, TerminalSession,
 };
-pub use typescript::typescript;
+pub use typescript::{error_kinds, typescript};

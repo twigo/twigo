@@ -1,6 +1,7 @@
 import { lazy, Suspense, useMemo } from "react";
 import type { ApprovalDetail } from "@twigo/protocol";
 import { Callout, PropertyList, Skeleton } from "@twigo/ui";
+import { ErrorMessage } from "@twigo/workbench";
 import { kindOf, SECRET_NOTE, yamlOfObject } from "../edit/object";
 import {
   commandLine,
@@ -52,6 +53,12 @@ export function RequestDetail({ detail }: { detail: ApprovalDetail }) {
       return (
         <div className="grid gap-1.5">
           <p>Twigo cannot show what this changes.</p>
+          {detail.reason.reason === "refused" && (
+            <p className="text-support">
+              The server refused the dry run:{" "}
+              <ErrorMessage error={detail.reason.error} />
+            </p>
+          )}
           {noDiffWords(detail.reason).map((sentence) => (
             <p key={sentence} className="text-support">
               {sentence}

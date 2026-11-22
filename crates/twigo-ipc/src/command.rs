@@ -6,11 +6,12 @@ use ts_rs::TS;
 
 use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ExecReview,
-    Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted, ForwardTarget,
-    GetValues, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery,
-    LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
-    PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource, SetLogView, SetLogWindow,
+    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, Discovered,
+    DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
+    ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
+    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenIssue,
+    OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, Report,
+    ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
     SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
     ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
     TerminalSession,
@@ -41,8 +42,20 @@ pub struct ContextsWatch;
 impl Command for ContextsWatch {
     const NAME: &'static str = "contexts_watch";
     type Request = ();
-    type Response = Vec<Context>;
-    type Message = Vec<Context>;
+    type Response = Catalog;
+    type Message = Catalog;
+}
+
+/// Answers with what Twigo's own files could not do this run (the state set
+/// aside, an audit log that records nothing, tokens kept in memory), then
+/// sends the list again on every change.
+pub struct ProblemsWatch;
+
+impl Command for ProblemsWatch {
+    const NAME: &'static str = "problems_watch";
+    type Request = ();
+    type Response = Vec<IpcError>;
+    type Message = Vec<IpcError>;
 }
 
 /// Ends a context's unlock now, by its name, which the audit log records.
@@ -458,14 +471,82 @@ impl Command for ApprovalAnswerSend {
     type Message = ();
 }
 
-/// Opens a sign-in link in the person's browser: https, or a plugin's own
-/// server on localhost or 127.0.0.1.
+/// Opens a link in the person's browser: https, or http to localhost or
+/// 127.0.0.1, as a credential plugin's own server or a forward's port is.
 pub struct UrlOpen;
 
 impl Command for UrlOpen {
     const NAME: &'static str = "url_open";
     type Request = String;
     type Response = ();
+    type Message = ();
+}
+
+/// Writes an error the webview caught, or did not, to the diagnostics log
+/// with the window's label; the webview waits for no answer.
+pub struct DiagnosticsLog;
+
+impl Command for DiagnosticsLog {
+    const NAME: &'static str = "diagnostics_log";
+    type Request = DiagnosticsEntry;
+    type Response = ();
+    type Message = ();
+}
+
+/// Shows the current diagnostics log file in the system's file manager.
+pub struct LogReveal;
+
+impl Command for LogReveal {
+    const NAME: &'static str = "log_reveal";
+    type Request = ();
+    type Response = ();
+    type Message = ();
+}
+
+/// Sets how much Twigo's own crates write to the diagnostics log until Twigo
+/// quits, and logs the change.
+pub struct LogLevelSet;
+
+impl Command for LogLevelSet {
+    const NAME: &'static str = "log_level_set";
+    type Request = SetLogLevel;
+    type Response = ();
+    type Message = ();
+}
+
+/// The report of this run's problems, redacted: the facts for an issue and
+/// the last lines of the log (ARCHITECTURE 4.10). It reads the log and the
+/// versions the core already knows, and sends no request.
+pub struct ReportProblem;
+
+impl Command for ReportProblem {
+    const NAME: &'static str = "report_problem";
+    type Request = ();
+    type Response = Report;
+    type Message = ();
+}
+
+/// Opens the repository's new-issue form in the person's browser, with the
+/// facts they left ticked; with no facts, or when the link would pass 6,000
+/// characters, it opens the bare template.
+pub struct ReportOpenIssue;
+
+impl Command for ReportOpenIssue {
+    const NAME: &'static str = "report_open_issue";
+    type Request = OpenIssue;
+    type Response = ();
+    type Message = ();
+}
+
+/// Asks where to save the report's text, as `logs_download` asks for a logs
+/// tab's, and writes it there, named `twigo-report-<date>.txt`: the path it
+/// wrote, none when the person cancels.
+pub struct ReportSave;
+
+impl Command for ReportSave {
+    const NAME: &'static str = "report_save";
+    type Request = SaveReport;
+    type Response = Option<String>;
     type Message = ();
 }
 

@@ -219,6 +219,32 @@ async fn a_reader_hears_only_the_keys_whose_values_changed_appeared_or_went() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_answer_twigo_cannot_decode_is_unavailable_and_logged_once_at_error_with_its_code() {
+    let rig = rig().await;
+    let events = twigo_log::capture();
+    let mut reader = rig.context.reader(Kind::Pods);
+    reader.want(namespace("a"));
+    sleep(Duration::from_millis(1)).await;
+    assert_eq!(reader.drain().state, Some(MetricsState::Ready));
+
+    rig.fake.state().metrics_garbled = true;
+    sleep(INTERVAL * 4).await;
+    assert_eq!(reader.drain().state, Some(MetricsState::Unavailable));
+    let [event] = &events.lines()[..] else {
+        panic!("one event for four failed polls: {:?}", events.lines());
+    };
+    assert_eq!(event["level"], "ERROR");
+    assert_eq!(event["fields"]["code"], "answer.undecodable");
+
+    rig.fake.state().metrics_garbled = false;
+    until(|| reader.drain().state == Some(MetricsState::Ready)).await;
+    let lines = events.lines();
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(lines[1]["level"], "INFO");
+    assert_eq!(lines[1]["fields"]["followed"], 3);
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_answer_that_does_not_serve_the_service_is_a_state_with_no_values_and_recovers() {
     let rig = rig().await;
     let mut reader = rig.context.reader(Kind::Pods);
@@ -852,7 +878,7 @@ async fn clients_that_a_failed_credential_could_not_build_come_with_the_next_rea
             Box::pin(async move {
                 if refused {
                     return Err(twigo_ipc::IpcError::new(
-                        twigo_ipc::ErrorKind::Unauthorized,
+                        twigo_ipc::ErrorCode::CredentialsUntrusted,
                         "Twigo runs aws only once you trust it".to_owned(),
                     ));
                 }

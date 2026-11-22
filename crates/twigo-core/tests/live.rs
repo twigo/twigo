@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use kube::config::Kubeconfig;
 use tokio::sync::watch;
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
-use twigo_ipc::SchemaQuery;
+use twigo_ipc::{FactId, SchemaQuery};
+use twigo_log::Facts;
 
-async fn cluster() -> (Arc<Core>, String, tempfile::TempDir) {
+async fn cluster() -> (Started, String, tempfile::TempDir) {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
         .expect("TWIGO_TEST_KUBECONFIG must name the kubeconfig of a kind or kwok cluster");
     let context = Kubeconfig::read_from(&path)
@@ -26,10 +27,7 @@ async fn cluster() -> (Arc<Core>, String, tempfile::TempDir) {
     );
     let env = ShellEnv::from_iter(Vec::<(OsString, OsString)>::new());
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(path.into())).await }
-    });
+    let core = core.start_for_tests(followed, Some(path.into()));
     (core, context, dir)
 }
 
@@ -51,6 +49,13 @@ async fn the_namespaces_and_the_version_come_from_the_cluster() {
 
     let version = core.cluster_version(&context).await.unwrap();
     assert!(version.git_version.starts_with("v1."), "{version:?}");
+    let report = core.report(&Facts::detect("0.1.0", None, None), &[]).await;
+    let stated = report
+        .facts
+        .iter()
+        .find(|fact| fact.id == FactId::Kubernetes)
+        .expect("the version the cluster said is one of the report's facts");
+    assert_eq!(stated.value, version.git_version);
     let missing = core.cluster_version("kind-missing").await.unwrap_err();
     assert_eq!(missing.kind, twigo_ipc::ErrorKind::NotFound);
 }

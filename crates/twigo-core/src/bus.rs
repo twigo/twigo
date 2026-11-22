@@ -10,12 +10,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::watch;
 use tokio::time::Instant;
 use twigo_ipc::{
-    Affected, ContextAccess, ErrorKind, Friction, IpcError, OperationEvent, Plan, PlanId,
+    Affected, ContextAccess, ErrorCode, Friction, IpcError, OperationEvent, Plan, PlanId,
     PreviewId, SubscriptionId,
 };
 use twigo_policy::friction::Risk;
@@ -92,7 +92,13 @@ pub(crate) enum Finished {
         text: String,
         revert: Box<Revert>,
     },
-    Stopped(String),
+    /// Stopped by the person. `failed` holds the requests that failed
+    /// before: their messages quote the server, so the window is told them
+    /// after `text` and the audit log records their codes alone.
+    Stopped {
+        text: String,
+        failed: Vec<IpcError>,
+    },
     Revealed {
         value: String,
         binary: bool,
@@ -106,6 +112,13 @@ pub(crate) enum Finished {
 }
 
 impl Finished {
+    pub(crate) fn stopped(text: String) -> Self {
+        Self::Stopped {
+            text,
+            failed: Vec::new(),
+        }
+    }
+
     /// What puts it back, if it can be undone.
     pub(crate) fn revert(&self) -> Option<Revert> {
         match self {
@@ -115,8 +128,12 @@ impl Finished {
     }
 
     /// The event that tells it, with when its undo ends, and what the
-    /// audit log says of it, which never holds a value.
-    pub(crate) fn told(self, undo_until: Option<i64>) -> (OperationEvent, &'static str, String) {
+    /// audit log says of it: its outcome, Twigo's sentence, which never holds
+    /// a value, and the codes of the requests that failed.
+    pub(crate) fn told(
+        self,
+        undo_until: Option<i64>,
+    ) -> (OperationEvent, &'static str, String, Vec<ErrorCode>) {
         match self {
             Finished::Done(text) | Finished::Undoable { text, .. } => (
                 OperationEvent::Done {
@@ -125,21 +142,36 @@ impl Finished {
                 },
                 "done",
                 text,
+                Vec::new(),
             ),
-            Finished::Stopped(text) => (
-                OperationEvent::Stopped { text: text.clone() },
-                "stopped",
-                text,
-            ),
+            Finished::Stopped { text, failed } => {
+                let mut codes = Vec::new();
+                for error in &failed {
+                    if !codes.contains(&error.code) {
+                        codes.push(error.code);
+                    }
+                }
+                let told = failed.iter().fold(text.clone(), |told, error| {
+                    format!("{told}; {}", error.message)
+                });
+                (
+                    OperationEvent::Stopped { text: told },
+                    "stopped",
+                    text,
+                    codes,
+                )
+            }
             Finished::Revealed { value, binary } => (
                 OperationEvent::Revealed { value, binary },
                 "done",
                 "revealed".to_owned(),
+                Vec::new(),
             ),
             Finished::Session { id, tty, stdin } => (
                 OperationEvent::Session { id, tty, stdin },
                 "done",
                 "opened".to_owned(),
+                Vec::new(),
             ),
         }
     }
@@ -169,7 +201,9 @@ impl Progress {
     }
 
     pub(crate) fn tell(&self, event: OperationEvent) {
-        (self.send.lock().expect("progress lock"))(event);
+        // A panic in the webview's closure, the only code that runs under
+        // this lock, leaves nothing the next event cannot be sent through.
+        (self.send.lock().unwrap_or_else(PoisonError::into_inner))(event);
     }
 
     /// Whether it was asked to stop.
@@ -273,7 +307,7 @@ impl Bus {
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that asked for the plan is gone",
             ));
         }
@@ -281,7 +315,7 @@ impl Bus {
             && window.started.get(object) != Some(started)
         {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::BusPreviewReplaced,
                 "a newer preview of this object replaced this one",
             ));
         }
@@ -343,13 +377,13 @@ impl Bus {
         let window = inner.windows.entry(ticket.window.clone()).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that asked for the preview is gone",
             ));
         }
         if window.started.get(&prepared.object) != Some(&started) {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::BusPreviewReplaced,
                 "a newer preview of this object replaced this one",
             ));
         }
@@ -370,7 +404,7 @@ impl Bus {
         let held = inner.windows.get_mut(window);
         let Some((prepared, _)) = held.as_ref().and_then(|held| held.previews.get(&id)) else {
             return Err(IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::BusNotWaiting,
                 format!("no preview {} waits to apply", id.0),
             ));
         };
@@ -395,7 +429,7 @@ impl Bus {
         });
         let Some(held) = held else {
             return Err(IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::BusNotWaiting,
                 format!("no plan {} waits to run", id.0),
             ));
         };
@@ -416,7 +450,7 @@ impl Bus {
         let window = inner.windows.entry(ticket.window).or_default();
         if window.generation != ticket.generation {
             return Err(IpcError::new(
-                ErrorKind::Unavailable,
+                ErrorCode::WindowGone,
                 "the page that ran the plan is gone",
             ));
         }

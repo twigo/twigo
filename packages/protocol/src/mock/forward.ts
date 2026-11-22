@@ -1,4 +1,4 @@
-import { IpcError } from "../error";
+import { IpcError, wire, wireError } from "../error";
 import type {
   Blocked,
   ContextAccess,
@@ -10,7 +10,6 @@ import type {
   ForwardStarted,
   ForwardState,
   ForwardTarget,
-  IpcError as WireError,
   ResumeForward,
   StartForward,
 } from "../generated";
@@ -196,19 +195,11 @@ function descriptor(gvr: ForwardTarget["gvr"]): {
   const found = KINDS[`${gvr.group}/${gvr.version}/${gvr.resource}`];
   if (!found) {
     throw new IpcError(
-      "invalidInput",
+      "forward.unsupported-target",
       `a port-forward reaches a pod, a Service, a Deployment, a ReplicaSet, a StatefulSet or a DaemonSet, not ${gvr.resource}`,
     );
   }
   return found;
-}
-
-function wire(error: IpcError): WireError {
-  return {
-    kind: error.kind,
-    message: error.message,
-    ...(error.blocked && { blocked: error.blocked }),
-  };
 }
 
 function key(target: ForwardTarget, port: number): string {
@@ -268,7 +259,7 @@ export class MockForwards {
     const declared = ports.find((candidate) => candidate.port === port);
     if (!declared) {
       throw new IpcError(
-        "invalidInput",
+        "forward.no-port",
         `${target.name} declares no port ${String(port)}`,
       );
     }
@@ -337,14 +328,17 @@ export class MockForwards {
           (pod) => pod.namespace === namespace && pod.name === name,
         )
       ) {
-        throw new IpcError("notFound", `pods "${name}" not found`);
+        throw new IpcError("server.not-found", `pods "${name}" not found`);
       }
     } else if (target.gvr.resource === "deployments") {
       if (
         cluster.podsOf(namespace, name).length === 0 &&
         !cluster.emptied.has(`${namespace}/${name}`)
       ) {
-        throw new IpcError("notFound", `deployments.apps "${name}" not found`);
+        throw new IpcError(
+          "server.not-found",
+          `deployments.apps "${name}" not found`,
+        );
       }
     }
     const manifest = fixture(recorded);
@@ -363,7 +357,7 @@ export class MockForwards {
             );
     if (ports.length === 0) {
       throw new IpcError(
-        "invalidInput",
+        "forward.no-port",
         `${kind} ${name} declares no TCP port to forward`,
       );
     }
@@ -379,14 +373,15 @@ export class MockForwards {
   #context(space: string): string {
     const context = this.host.context(space);
     if (context === undefined) {
-      throw new IpcError("notFound", `no space ${space}`);
+      throw new IpcError("space.not-found", `no space ${space}`);
     }
     return context;
   }
 
   #live(id: ForwardId): Live {
     const live = this.#lives.get(id);
-    if (!live) throw new IpcError("notFound", `no forward ${String(id)}`);
+    if (!live)
+      throw new IpcError("forward.not-found", `no forward ${String(id)}`);
     return live;
   }
 
@@ -508,7 +503,7 @@ export class MockForwards {
     const refusal = this.#missing(target) ?? this.#unreachable(live);
     if (refusal) {
       this.#set(live, {
-        state: { state: "failed", error: wire(refusal) },
+        state: { state: "failed", error: wireError(refusal) },
         pod: null,
         podPort: null,
       });
@@ -543,7 +538,7 @@ export class MockForwards {
     if (this.scenario !== "forwardFailed") return undefined;
     const { pod, podPort } = this.#route(live, 0);
     return new IpcError(
-      "unavailable",
+      "forward.port-refused",
       `pod ${pod} refused the connection to port ${String(podPort)}: nothing listens on it`,
     );
   }
@@ -562,7 +557,7 @@ export class MockForwards {
       target: `pods${pod}/portforward in ${target.namespace}`,
     };
     return new IpcError(
-      "permissions",
+      "policy.blocked",
       `${context} is ${mode}${setBy(source)}, so Twigo did not send ${blocked.verb} ${blocked.target}`,
       blocked,
     );
@@ -577,7 +572,10 @@ export class MockForwards {
       if (state.state === "stopped") continue;
       this.#clear(live);
       this.#set(live, {
-        state: { state: "failed", error: wire(this.#blocked(target, context)) },
+        state: {
+          state: "failed",
+          error: wireError(this.#blocked(target, context)),
+        },
         pod: null,
         podPort: null,
         connections: 0,
@@ -650,7 +648,10 @@ export class MockForwards {
         ? `pod ${target.name} is not ready; waiting for it`
         : `pod ${pod ?? ""} is gone; waiting for another ready pod`;
     this.#set(live, {
-      state: { state: "reconnecting", reason },
+      state: {
+        state: "reconnecting",
+        reason: wire("forward.no-ready-pod", reason),
+      },
       pod: null,
       podPort: null,
       connections: 0,
@@ -722,10 +723,8 @@ export class MockForwards {
       {
         state: "failed",
         error: wire(
-          new IpcError(
-            "notFound",
-            'deployments.apps "payments-legacy" not found',
-          ),
+          "server.not-found",
+          'deployments.apps "payments-legacy" not found',
         ),
       },
     );

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo } from "react";
 import { GitCompare } from "lucide-react";
 import { EmptyState, Banner, Skeleton } from "@twigo/ui";
 import {
+  ReportButton,
   useChanges,
   useEditorShown,
   useWorkbench,
@@ -14,7 +15,9 @@ import {
 } from "../discovery";
 import { objectQuery, useObject } from "../object/useObject";
 import { parseDiffUri, parseObjectUri } from "../uri";
-import { objectProblem } from "../viewProblem";
+import { ProblemBanner, ProblemWords } from "../ProblemBanner";
+import { isStopped, objectProblem } from "../viewProblem";
+import { useReopen } from "../useReopen";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
 import { kindOf, SECRET_NOTE, yamlOfJson } from "./object";
@@ -27,6 +30,7 @@ export function DiffEditor({
   edits,
   discovery,
 }: EditorProps & { edits: EditServices; discovery: Discovery }) {
+  const [attempt, reopen] = useReopen();
   const input = parseDiffUri(uri);
   if (!input) {
     return <EmptyState title="Not a comparison">{uri}</EmptyState>;
@@ -36,15 +40,23 @@ export function DiffEditor({
       return <ApplyDiff edits={edits} editor={input.editor} uri={uri} />;
     case "server":
       return (
-        <ServerDiff edits={edits} discovery={discovery} editor={input.editor} />
+        <ServerDiff
+          key={attempt}
+          edits={edits}
+          discovery={discovery}
+          editor={input.editor}
+          onReopen={reopen}
+        />
       );
     case "objects":
       return (
         <ObjectsDiff
+          key={attempt}
           discovery={discovery}
           space={input.space}
           left={input.left}
           right={input.right}
+          onReopen={reopen}
         />
       );
   }
@@ -116,10 +128,12 @@ function ServerDiff({
   edits,
   discovery,
   editor,
+  onReopen,
 }: {
   edits: EditServices;
   discovery: Discovery;
   editor: string;
+  onReopen: () => void;
 }) {
   useChanges(edits.copies.changes);
   const base = edits.copies.get(editor)?.base;
@@ -152,8 +166,15 @@ function ServerDiff({
   }
   if (modified === undefined) {
     return problem ? (
-      <EmptyState icon={problem.icon} title={problem.title}>
-        {problem.body}
+      <EmptyState
+        icon={problem.icon}
+        title={problem.title}
+        {...(isStopped(problem) && {
+          action: { label: "Reopen", onClick: onReopen },
+          secondary: <ReportButton />,
+        })}
+      >
+        <ProblemWords problem={problem} />
       </EmptyState>
     ) : (
       <Skeleton className="m-3 h-4 w-1/2" />
@@ -161,6 +182,11 @@ function ServerDiff({
   }
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
+      {problem && (
+        <ProblemBanner problem={problem} onReopen={onReopen}>
+          The server's side is as it was last seen.
+        </ProblemBanner>
+      )}
       <Banner
         tone="info"
         icon={GitCompare}
@@ -185,11 +211,13 @@ function ObjectsDiff({
   space,
   left,
   right,
+  onReopen,
 }: {
   discovery: Discovery;
   space: string;
   left: string;
   right: string;
+  onReopen: () => void;
 }) {
   const original = useManifest(discovery, space, left);
   const modified = useManifest(discovery, space, right);
@@ -212,14 +240,31 @@ function ObjectsDiff({
   const missing = [original.problem, modified.problem].flatMap(
     (problem, side) =>
       problem && names[side] !== undefined
-        ? [`${names[side]}: ${problem.title}. ${problem.body}`]
+        ? [{ name: names[side] ?? "", problem }]
         : [],
   );
+  const note = [
+    missing.length === 0 &&
+      "Both as they are on the server, followed while this is open.",
+    (isSecret(original.manifest) || isSecret(modified.manifest)) && SECRET_NOTE,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <div className="flex h-full min-h-0 flex-col bg-editor">
+      {texts &&
+        missing.map(({ name, problem }) => (
+          <ProblemBanner
+            key={name}
+            problem={problem}
+            lead={`${name}: `}
+            onReopen={onReopen}
+          >
+            It is shown as it was last seen.
+          </ProblemBanner>
+        ))}
       <Banner tone="info" icon={GitCompare} title={names.join(" and ")}>
-        {texts &&
-          `Both as they are on the server, followed while this is open.${isSecret(original.manifest) || isSecret(modified.manifest) ? ` ${SECRET_NOTE}` : ""}`}
+        {texts && note}
       </Banner>
       <div className="min-h-0 flex-1">
         {texts ? (
@@ -227,9 +272,18 @@ function ObjectsDiff({
             <DiffView original={texts.original} modified={texts.modified} />
           </Suspense>
         ) : missing.length > 0 ? (
-          <EmptyState icon={GitCompare} title="Nothing to compare">
-            {missing.map((line) => (
-              <p key={line}>{line}</p>
+          <EmptyState
+            icon={GitCompare}
+            title="Nothing to compare"
+            {...(missing.some(({ problem }) => isStopped(problem)) && {
+              action: { label: "Reopen", onClick: onReopen },
+              secondary: <ReportButton />,
+            })}
+          >
+            {missing.map(({ name, problem }) => (
+              <p key={name}>
+                {name}: {problem.title}. <ProblemWords problem={problem} />
+              </p>
             ))}
           </EmptyState>
         ) : (

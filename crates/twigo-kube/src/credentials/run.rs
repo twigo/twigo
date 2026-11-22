@@ -7,7 +7,6 @@ use std::io;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
@@ -65,10 +64,7 @@ pub(super) async fn run(
             message: error.to_string(),
         },
     })?;
-    let group = child
-        .id()
-        .and_then(|id| i32::try_from(id).ok())
-        .map(Pid::from_raw);
+    let group = twigo_env::group_of(&child);
     if let Some(group) = group {
         started(group);
     }
@@ -134,15 +130,7 @@ pub(super) async fn run(
         Err(error) => {
             // The plugin and whatever it started, such as gcloud under
             // gke-gcloud-auth-plugin.
-            if let Some(group) = group
-                && let Err(kill) = killpg(group, Signal::SIGKILL)
-                && kill != nix::errno::Errno::ESRCH
-            {
-                eprintln!("could not stop {command}: {kill}");
-            }
-            if let Err(reap) = child.wait().await {
-                eprintln!("could not reap {command}: {reap}");
-            }
+            twigo_env::kill_and_reap(&mut child, group, &command).await;
             return Err(error);
         }
     };

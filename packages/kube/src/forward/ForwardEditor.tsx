@@ -12,7 +12,15 @@ import {
   type Property,
 } from "@twigo/ui";
 import { formatBytes } from "@twigo/utils";
-import { useChanges, useWorkbench, type EditorProps } from "@twigo/workbench";
+import {
+  ErrorMessage,
+  INTERNAL_ERROR,
+  isInternalError,
+  ReportLink,
+  useChanges,
+  useWorkbench,
+  type EditorProps,
+} from "@twigo/workbench";
 import { objectUri, parsePfUri } from "../uri";
 import { isPod } from "./kinds";
 import type { Forwards } from "./service";
@@ -197,7 +205,11 @@ function Loaded({ uri, forward }: { uri: string; forward: Forward }) {
     {
       key: "failure",
       label: "Last failure",
-      value: forward.failure ?? <Quiet>None</Quiet>,
+      value: forward.failure ? (
+        <ErrorMessage error={forward.failure} />
+      ) : (
+        <Quiet>None</Quiet>
+      ),
     },
   ];
   return (
@@ -255,7 +267,9 @@ function Problem({ forward }: { forward: Forward }) {
   if (state.state === "reconnecting") {
     return (
       <Callout tone="warn" title="Reconnecting">
-        <p>{state.reason}</p>
+        <p>
+          <ErrorMessage error={state.reason} />
+        </p>
         <p className="text-support">
           It looks again while it has connections, and at its next one.
         </p>
@@ -265,13 +279,19 @@ function Problem({ forward }: { forward: Forward }) {
   if (state.state !== "failed") return null;
   const { error } = state;
   const where = addressOf(forward);
+  const internal = isInternalError(error);
   const [title, tone] = error.blocked
     ? [`${error.blocked.context} is ${error.blocked.mode}`, "warn" as const]
-    : ["Failed", "error" as const];
+    : [internal ? INTERNAL_ERROR.title : "Failed", "error" as const];
   const listens = listensOn(forward).length > 0;
   return (
     <Callout tone={tone} title={title}>
-      <p className="break-words">{error.message}</p>
+      <p className="break-words">
+        <ErrorMessage
+          error={error}
+          {...(internal && { message: INTERNAL_ERROR.stopped("This forward") })}
+        />
+      </p>
       <p className="text-support">
         {!listens
           ? `Nothing listens on ${where}. Change Local Port… moves it to another port, and Start tries this one again.`
@@ -279,6 +299,7 @@ function Problem({ forward }: { forward: Forward }) {
             ? `It still listens on ${where} and closes every connection at once, until the mode lets forwards through.`
             : `It still listens on ${where}. Start tries it again.`}
       </p>
+      {internal && <ReportLink />}
     </Callout>
   );
 }

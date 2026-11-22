@@ -1,7 +1,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { EditorShownContext } from "@twigo/workbench";
-import { inWorkbench, testWorkbench } from "@twigo/workbench/testing";
+import {
+  carriesCode,
+  inWorkbench,
+  testWorkbench,
+} from "@twigo/workbench/testing";
 import { Discovery } from "../discovery";
 import { diffUri } from "../uri";
 import { DiffEditor } from "./DiffEditors";
@@ -180,9 +184,8 @@ test("comparing objects says when one cannot be read, and that a Secret's values
     }),
   );
   expect(await screen.findByText("Nothing to compare")).toBeTruthy();
-  expect(
-    screen.getByText(/auth\/limits: Could not load the object/),
-  ).toBeTruthy();
+  const missing = screen.getByText(/auth\/limits: Could not load the object/);
+  expect(carriesCode(missing, "object.not-listed")).toBe(true);
   expect(screen.queryByRole("status")).toBeNull();
   expect(screen.queryByText(/Both as they are/)).toBeNull();
   cleanup();

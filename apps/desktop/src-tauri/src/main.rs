@@ -3,10 +3,14 @@
 
 #[cfg(feature = "bench")]
 mod bench;
+mod fatal;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::future::Future;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tauri::async_runtime::JoinHandle;
@@ -19,22 +23,53 @@ use twigo_core::{Core, PolicyFile, ShellFrame};
 use twigo_env::Environment;
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, ClusterVersion, Context, ContextAuth, Discovered, DownloadLogs, ErrorKind,
-    ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts, ForwardStarted,
-    ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer, KubeconfigOfferEvent,
-    ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs, OpenObject, OpenShell,
-    OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery, SetLogSource,
+    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, DiagnosticsLevel,
+    Discovered, DownloadLogs, ErrorCode, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
+    ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
+    KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
+    NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
+    PlanId, PlanRequest, Report, ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource,
     SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
     ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
     SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
+use twigo_log::{Facts, Level, Log};
 
 /// The explicit mode's kubeconfig (ARCHITECTURE 5.5): the only source of
 /// contexts, of which only `kind-*` and `kwok-*` count. Debug and bench
 /// builds only.
 #[cfg(any(debug_assertions, feature = "bench"))]
 const EXPLICIT_KUBECONFIG: &str = "TWIGO_KUBECONFIG";
+
+/// The name of a duty or an item that panics each time it runs, for the check
+/// build that has the `inject` feature, as `TWIGO_KUBECONFIG` is for the
+/// kubeconfig.
+#[cfg(feature = "inject")]
+const INJECTED_PANIC: &str = "TWIGO_PANIC";
+
+/// Whether `result` reached the webview. Tauri's send succeeds for a reloaded
+/// page and a closed window alike, and fails only when the event loop is gone
+/// (tauri 2.12.7), so a failure is for `debug` and whoever sent stops sending.
+/// A follower of a window ends with its replacement or with the window.
+fn sent(channel: &str, result: tauri::Result<()>) -> bool {
+    result
+        .inspect_err(|error| tracing::debug!(channel, %error, "could not send to the webview"))
+        .is_ok()
+}
+
+/// An async command that answers `internal.panic` where it would otherwise
+/// leave the webview's promise pending for good, since Tauri answers only
+/// once the command's future ends.
+async fn contained<T>(command: impl Future<Output = Result<T, IpcError>>) -> Result<T, IpcError> {
+    let answered = twigo_panic::contain("command", command)
+        .await
+        .unwrap_or_else(|_| Err(IpcError::panicked("this command")));
+    if let Err(error) = &answered {
+        tracing::info!(code = %error.code, "a command answered an error");
+    }
+    answered
+}
 
 /// The layout watch and one subscription per webview, which a reload
 /// replaces.
@@ -50,9 +85,12 @@ fn keyboard_layout_watch(
     channel: Channel<KeyboardLayout>,
 ) -> Result<KeyboardLayout, IpcError> {
     let watch = keyboard.watch.as_ref().map_err(IpcError::from)?;
+    let open = AtomicBool::new(true);
     let (layout, subscription) = watch.subscribe(move |layout| {
-        if let Err(error) = channel.send(layout.clone()) {
-            eprintln!("could not send the keyboard layout: {error}");
+        if open.load(Ordering::Relaxed)
+            && !sent("the keyboard layout", channel.send(layout.clone()))
+        {
+            open.store(false, Ordering::Relaxed);
         }
     });
     keyboard
@@ -79,12 +117,19 @@ impl Followers {
             replaced.abort();
         }
     }
+
+    fn remove(&self, window: &str) {
+        if let Some(follower) = self.0.lock().expect("followers lock").remove(window) {
+            follower.abort();
+        }
+    }
 }
 
 /// The login shell's environment and its followers.
 struct Shell {
     environment: Arc<Environment>,
     followers: Followers,
+    resolving: JoinHandle<()>,
 }
 
 #[tauri::command]
@@ -98,8 +143,8 @@ fn shell_environment_watch(
     let follower = tauri::async_runtime::spawn(async move {
         while status.changed().await.is_ok() {
             let next = ShellEnvironment::from(&*status.borrow_and_update());
-            if let Err(error) = channel.send(next) {
-                eprintln!("could not send the shell environment: {error}");
+            if !sent("the shell environment", channel.send(next)) {
+                return;
             }
         }
     });
@@ -109,15 +154,20 @@ fn shell_environment_watch(
 
 #[tauri::command]
 async fn shell_environment_retry(shell: State<'_, Shell>) -> Result<(), IpcError> {
-    shell.environment.retry().await;
-    Ok(())
+    contained(async {
+        shell.environment.retry().await;
+        Ok(())
+    })
+    .await
 }
 
 /// The core and the followers of its catalog, of the active context's
 /// credentials and of the active space's resources.
 struct App {
     core: Arc<Core>,
+    supervisor: JoinHandle<()>,
     contexts: Followers,
+    problems: Followers,
     auth: Followers,
     resources: Followers,
     /// The labels of the windows that have the focus, which moves from one
@@ -126,6 +176,14 @@ struct App {
 }
 
 impl App {
+    /// A window is gone: its subscriptions and its followers end with it.
+    fn close(&self, window: &str) {
+        self.core.drop_window(window);
+        for followers in [&self.contexts, &self.problems, &self.auth, &self.resources] {
+            followers.remove(window);
+        }
+    }
+
     fn focus(&self, window: &str, focused: bool) {
         let mut windows = self.focused.lock().expect("focus lock");
         if focused {
@@ -138,37 +196,60 @@ impl App {
 }
 
 #[tauri::command]
-async fn contexts_watch(
+fn problems_watch(
     webview: Webview,
     app: State<'_, App>,
-    channel: Channel<Vec<Context>>,
-) -> Result<Vec<Context>, IpcError> {
-    let mut contexts = app.core.catalog.subscribe();
-    let mut access = app.core.policy.changes();
-    // Marks what it answers with as seen, so the follower sends only what
-    // comes after.
-    contexts
-        .wait_for(Option::is_some)
-        .await
-        .expect("the catalog lives as long as the app");
-    access.borrow_and_update();
-    let current = app.core.contexts().expect("waited for");
-    let core = Arc::clone(&app.core);
+    channel: Channel<Vec<IpcError>>,
+) -> Vec<IpcError> {
+    let mut problems = twigo_log::problems::watch();
+    let current = problems.borrow_and_update().clone();
     let follower = tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::select! {
-                changed = contexts.changed() => if changed.is_err() { return },
-                changed = access.changed() => if changed.is_err() { return },
-            }
-            if let Some(next) = core.contexts()
-                && let Err(error) = channel.send(next)
-            {
-                eprintln!("could not send the contexts: {error}");
+        while problems.changed().await.is_ok() {
+            let next = problems.borrow_and_update().clone();
+            if !sent("the problems", channel.send(next)) {
+                return;
             }
         }
     });
-    app.contexts.replace(&webview, follower);
-    Ok(current)
+    app.problems.replace(&webview, follower);
+    current
+}
+
+#[tauri::command]
+async fn contexts_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    channel: Channel<Catalog>,
+) -> Result<Catalog, IpcError> {
+    contained(async {
+        let mut contexts = app.core.catalog.subscribe();
+        let mut access = app.core.policy.changes();
+        // Marks what it answers with as seen, so the follower sends only what
+        // comes after.
+        contexts
+            .wait_for(Option::is_some)
+            .await
+            .expect("the catalog lives as long as the app");
+        access.borrow_and_update();
+        let current = app.core.contexts().expect("waited for");
+        let core = Arc::clone(&app.core);
+        let follower = tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::select! {
+                    changed = contexts.changed() => if changed.is_err() { return },
+                    changed = access.changed() => if changed.is_err() { return },
+                }
+                if let Some(next) = core.contexts()
+                    && !sent("the contexts", channel.send(next))
+                {
+                    return;
+                }
+            }
+        });
+        app.contexts.replace(&webview, follower);
+        Ok(current)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -182,7 +263,7 @@ async fn command_plan(
     app: State<'_, App>,
     request: PlanRequest,
 ) -> Result<Plan, IpcError> {
-    app.core.command_plan(webview.label(), request).await
+    contained(async { app.core.command_plan(webview.label(), request).await }).await
 }
 
 #[tauri::command]
@@ -192,17 +273,14 @@ async fn command_execute(
     request: Execute,
     channel: Channel<OperationEvent>,
 ) -> Result<(), IpcError> {
-    app.core
-        .command_execute(webview.label(), request, move |event| {
-            match channel.send(event) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("could not send an operation's event: {error}");
-                    false
-                }
-            }
-        })
-        .await
+    contained(async {
+        app.core
+            .command_execute(webview.label(), request, move |event| {
+                sent("an operation's event", channel.send(event))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -211,7 +289,7 @@ async fn apply_preview(
     app: State<'_, App>,
     request: ApplyRequest,
 ) -> Result<ApplyPreviewed, IpcError> {
-    app.core.apply_preview(webview.label(), request).await
+    contained(async { app.core.apply_preview(webview.label(), request).await }).await
 }
 
 #[tauri::command]
@@ -221,7 +299,7 @@ fn command_cancel(webview: Webview, app: State<'_, App>, request: PlanId) {
 
 #[tauri::command]
 async fn access_review(app: State<'_, App>, request: AccessQuery) -> Result<Vec<bool>, IpcError> {
-    app.core.access_review(request).await
+    contained(async { app.core.access_review(request).await }).await
 }
 
 #[tauri::command]
@@ -231,13 +309,7 @@ fn spaces_list(app: State<'_, App>) -> Vec<Space> {
 
 #[tauri::command]
 async fn space_open(app: State<'_, App>, request: String) -> Result<Space, IpcError> {
-    if app.core.catalog.contexts().await.find(&request).is_none() {
-        return Err(IpcError::new(
-            ErrorKind::NotFound,
-            format!("no source lists the context {request:?}"),
-        ));
-    }
-    Ok(app.core.state.open_space(&request))
+    contained(async { app.core.space_open(&request).await }).await
 }
 
 #[tauri::command]
@@ -255,12 +327,12 @@ fn state_set(app: State<'_, App>, request: Vec<StateEntry>) -> Result<(), IpcErr
 
 #[tauri::command]
 async fn cluster_version(app: State<'_, App>, request: String) -> Result<ClusterVersion, IpcError> {
-    app.core.cluster_version(&request).await
+    contained(async { app.core.cluster_version(&request).await }).await
 }
 
 #[tauri::command]
 async fn namespaces_list(app: State<'_, App>, request: String) -> Result<Vec<String>, IpcError> {
-    app.core.namespaces(&request).await
+    contained(async { app.core.namespaces(&request).await }).await
 }
 
 #[tauri::command]
@@ -270,21 +342,24 @@ async fn context_auth_watch(
     request: String,
     channel: Channel<ContextAuth>,
 ) -> Result<ContextAuth, IpcError> {
-    // Commands run concurrently, so the follower replaced last is that of
-    // the watch that answered last: the webview waits for an answer before
-    // its next watch.
-    let mut auth = app.core.follow_auth(request);
-    let current = auth.next().await;
-    let follower = tauri::async_runtime::spawn(async move {
-        loop {
-            let next = auth.next().await;
-            if let Err(error) = channel.send(next) {
-                eprintln!("could not send the context's credentials: {error}");
+    contained(async {
+        // Commands run concurrently, so the follower replaced last is that of
+        // the watch that answered last: the webview waits for an answer before
+        // its next watch.
+        let mut auth = app.core.follow_auth(request);
+        let current = auth.next().await;
+        let follower = tauri::async_runtime::spawn(async move {
+            loop {
+                let next = auth.next().await;
+                if !sent("the context's credentials", channel.send(next)) {
+                    return;
+                }
             }
-        }
-    });
-    app.auth.replace(&webview, follower);
-    Ok(current)
+        });
+        app.auth.replace(&webview, follower);
+        Ok(current)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -298,18 +373,15 @@ fn resources_watch(
     // before its next watch, so the follower is that of the last space.
     let core = Arc::clone(&app.core);
     let follower = tauri::async_runtime::spawn(async move {
-        let send = |next: Discovered| {
-            if let Err(error) = channel.send(next) {
-                eprintln!("could not send the resources: {error}");
-            }
-        };
+        let send = |next: Discovered| sent("the resources", channel.send(next));
         let mut resources = match core.follow_resources(&request).await {
             Ok(resources) => resources,
-            Err(error) => return send(Discovered::Failed { error }),
+            Err(error) => {
+                send(Discovered::Failed { error });
+                return;
+            }
         };
-        loop {
-            send(resources.next().await);
-        }
+        while send(resources.next().await) {}
     });
     app.resources.replace(&webview, follower);
 }
@@ -321,17 +393,14 @@ async fn list_subscribe(
     request: ListQuery,
     channel: Channel<ListBatch>,
 ) -> Result<SubscriptionId, IpcError> {
-    app.core
-        .list_subscribe(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("could not send a list batch: {error}");
-                    false
-                }
-            }
-        })
-        .await
+    contained(async {
+        app.core
+            .list_subscribe(webview.label(), request, move |batch| {
+                sent("a list batch", channel.send(batch))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -364,17 +433,14 @@ async fn object_open(
     request: OpenObject,
     channel: Channel<ObjectBatch>,
 ) -> Result<SubscriptionId, IpcError> {
-    app.core
-        .object_open(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("could not send an object batch: {error}");
-                    false
-                }
-            }
-        })
-        .await
+    contained(async {
+        app.core
+            .object_open(webview.label(), request, move |batch| {
+                sent("an object batch", channel.send(batch))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -411,7 +477,7 @@ fn object_close(
 
 #[tauri::command]
 async fn schema_get(app: State<'_, App>, request: SchemaQuery) -> Result<String, IpcError> {
-    app.core.schema(request).await
+    contained(async { app.core.schema(request).await }).await
 }
 
 #[tauri::command]
@@ -421,17 +487,14 @@ async fn logs_open(
     request: OpenLogs,
     channel: Channel<LogBatch>,
 ) -> Result<SubscriptionId, IpcError> {
-    app.core
-        .logs_open(webview.label(), request, move |batch| {
-            match channel.send(batch) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("could not send a logs batch: {error}");
-                    false
-                }
-            }
-        })
-        .await
+    contained(async {
+        app.core
+            .logs_open(webview.label(), request, move |batch| {
+                sent("a logs batch", channel.send(batch))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -474,35 +537,50 @@ async fn logs_download(
     app: State<'_, App>,
     request: DownloadLogs,
 ) -> Result<Option<String>, IpcError> {
-    let name = app.core.logs_file_name(webview.label(), request.id)?;
+    contained(async {
+        let name = app.core.logs_file_name(webview.label(), request.id)?;
+        let Some(path) = save_path(&webview, name, ("Logs", &["log", "txt"])).await? else {
+            return Ok(None);
+        };
+        app.core.logs_write(webview.label(), request, &path).await?;
+        Ok(Some(path.display().to_string()))
+    })
+    .await
+}
+
+/// None when the person cancels the dialog.
+async fn save_path(
+    webview: &Webview,
+    name: String,
+    filter: (&str, &[&str]),
+) -> Result<Option<PathBuf>, IpcError> {
     let (answer, picked) = tokio::sync::oneshot::channel();
     webview
         .dialog()
         .file()
         .set_parent(&webview.window())
         .set_file_name(name)
-        .add_filter("Logs", &["log", "txt"])
+        .add_filter(filter.0, filter.1)
         .save_file(move |picked| {
             // Once the command is dropped, nothing waits for the answer.
             let _ = answer.send(picked);
         });
     let picked = picked.await.map_err(|error| {
         IpcError::new(
-            ErrorKind::Internal,
+            ErrorCode::FileDialogFailed,
             format!("the save dialog failed: {error}"),
         )
     })?;
-    let Some(picked) = picked else {
-        return Ok(None);
-    };
-    let path = picked.into_path().map_err(|error| {
-        IpcError::new(
-            ErrorKind::InvalidInput,
-            format!("Twigo saves logs only to a file on this computer: {error}"),
-        )
-    })?;
-    app.core.logs_write(webview.label(), request, &path).await?;
-    Ok(Some(path.display().to_string()))
+    picked
+        .map(|picked| {
+            picked.into_path().map_err(|error| {
+                IpcError::new(
+                    ErrorCode::FileNotLocal,
+                    format!("Twigo saves only to a file on this computer: {error}"),
+                )
+            })
+        })
+        .transpose()
 }
 
 #[tauri::command]
@@ -519,7 +597,7 @@ async fn shell_containers(
     app: State<'_, App>,
     request: ShellPod,
 ) -> Result<ShellContainers, IpcError> {
-    app.core.shell_containers(request).await
+    contained(async { app.core.shell_containers(request).await }).await
 }
 
 #[tauri::command]
@@ -529,21 +607,18 @@ async fn shell_open(
     request: OpenShell,
     channel: Channel<InvokeResponseBody>,
 ) -> Result<(), IpcError> {
-    app.core
-        .shell_open(webview.label(), request, move |frame| {
-            let body = match frame {
-                ShellFrame::Output(bytes) => Ok(InvokeResponseBody::Raw(bytes)),
-                ShellFrame::Event(event) => event.body(),
-            };
-            match body.and_then(|body| channel.send(body)) {
-                Ok(()) => true,
-                Err(error) => {
-                    eprintln!("could not send a shell frame: {error}");
-                    false
-                }
-            }
-        })
-        .await
+    contained(async {
+        app.core
+            .shell_open(webview.label(), request, move |frame| {
+                let body = match frame {
+                    ShellFrame::Output(bytes) => Ok(InvokeResponseBody::Raw(bytes)),
+                    ShellFrame::Event(event) => event.body(),
+                };
+                sent("a shell frame", body.and_then(|body| channel.send(body)))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -552,7 +627,7 @@ async fn shell_input(
     app: State<'_, App>,
     request: ShellInput,
 ) -> Result<(), IpcError> {
-    app.core.shell_input(webview.label(), request).await
+    contained(async { app.core.shell_input(webview.label(), request).await }).await
 }
 
 #[tauri::command]
@@ -575,7 +650,7 @@ async fn terminal_create(
     app: State<'_, App>,
     request: NewTerminal,
 ) -> Result<TerminalSession, IpcError> {
-    app.core.terminal_create(webview.label(), request).await
+    contained(async { app.core.terminal_create(webview.label(), request).await }).await
 }
 
 #[tauri::command]
@@ -585,12 +660,8 @@ fn kubeconfig_offers_watch(
     channel: Channel<KubeconfigOfferEvent>,
 ) -> Vec<KubeconfigOffer> {
     app.core
-        .follow_kubeconfig_offers(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                eprintln!("could not send a kubeconfig offer: {error}");
-                false
-            }
+        .follow_kubeconfig_offers(webview.label(), move |event| {
+            sent("a kubeconfig offer", channel.send(event))
         })
 }
 
@@ -600,9 +671,12 @@ async fn kubeconfig_offer_answer(
     app: State<'_, App>,
     request: AnswerKubeconfigOffer,
 ) -> Result<(), IpcError> {
-    app.core
-        .answer_kubeconfig_offer(webview.label(), request)
-        .await
+    contained(async {
+        app.core
+            .answer_kubeconfig_offer(webview.label(), request)
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -616,17 +690,17 @@ fn shell_close(
 
 #[tauri::command]
 async fn context_sign_in(app: State<'_, App>, request: String) -> Result<(), IpcError> {
-    app.core.sign_in(&request).await
+    contained(async { app.core.sign_in(&request).await }).await
 }
 
 #[tauri::command]
 async fn context_sign_in_cancel(app: State<'_, App>, request: String) -> Result<(), IpcError> {
-    app.core.cancel_sign_in(&request).await
+    contained(async { app.core.cancel_sign_in(&request).await }).await
 }
 
 #[tauri::command]
 async fn exec_review(app: State<'_, App>) -> Result<ExecReview, IpcError> {
-    Ok(app.core.review().await)
+    contained(async { Ok(app.core.review().await) }).await
 }
 
 #[tauri::command]
@@ -636,14 +710,9 @@ fn exec_trust(app: State<'_, App>, request: Vec<String>) -> Result<(), IpcError>
 
 #[tauri::command]
 fn approvals_watch(webview: Webview, app: State<'_, App>, channel: Channel<ApprovalEvent>) {
-    app.core
-        .follow_approvals(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                eprintln!("could not send an approval's ask: {error}");
-                false
-            }
-        });
+    app.core.follow_approvals(webview.label(), move |event| {
+        sent("an approval's ask", channel.send(event))
+    });
 }
 
 #[tauri::command]
@@ -660,7 +729,7 @@ async fn forward_ports(
     app: State<'_, App>,
     request: ForwardTarget,
 ) -> Result<ForwardPorts, IpcError> {
-    app.core.forward_ports(request).await
+    contained(async { app.core.forward_ports(request).await }).await
 }
 
 #[tauri::command]
@@ -668,12 +737,12 @@ async fn forward_start(
     app: State<'_, App>,
     request: StartForward,
 ) -> Result<ForwardStarted, IpcError> {
-    app.core.forward_start(request).await
+    contained(async { app.core.forward_start(request).await }).await
 }
 
 #[tauri::command]
 async fn forward_stop(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
-    app.core.forward_stop(request).await
+    contained(async { app.core.forward_stop(request).await }).await
 }
 
 #[tauri::command]
@@ -681,12 +750,12 @@ async fn forward_resume(
     app: State<'_, App>,
     request: ResumeForward,
 ) -> Result<ForwardStarted, IpcError> {
-    app.core.forward_resume(request).await
+    contained(async { app.core.forward_resume(request).await }).await
 }
 
 #[tauri::command]
 async fn forward_remove(app: State<'_, App>, request: ForwardId) -> Result<(), IpcError> {
-    app.core.forward_remove(request).await
+    contained(async { app.core.forward_remove(request).await }).await
 }
 
 #[tauri::command]
@@ -695,28 +764,115 @@ fn forwards_watch(
     app: State<'_, App>,
     channel: Channel<ForwardEvent>,
 ) -> Vec<Forward> {
-    app.core
-        .follow_forwards(webview.label(), move |event| match channel.send(event) {
-            Ok(()) => true,
-            Err(error) => {
-                eprintln!("could not send a forward's change: {error}");
-                false
-            }
-        })
+    app.core.follow_forwards(webview.label(), move |event| {
+        sent("a forward's change", channel.send(event))
+    })
 }
 
 #[tauri::command]
 fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
-    let url = twigo_core::sign_in_url(&request)?;
+    let url = twigo_core::openable_url(&request)?;
     handle
         .opener()
         .open_url(url, None::<&str>)
         .map_err(|error| {
             IpcError::new(
-                ErrorKind::Internal,
+                ErrorCode::LinkOpenFailed,
                 format!("could not open {request}: {error}"),
             )
         })
+}
+
+/// Writes what the webview caught, or did not, to the diagnostics log under
+/// the target `twigo::webview`, which the default filter's `twigo=info` covers.
+#[tauri::command]
+fn diagnostics_log(webview: Webview, request: DiagnosticsEntry) {
+    let DiagnosticsEntry {
+        level,
+        message,
+        stack,
+        source,
+    } = request;
+    let (window, stack) = (webview.label(), stack.as_deref());
+    match level {
+        DiagnosticsLevel::Error => {
+            tracing::error!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+        DiagnosticsLevel::Warn => {
+            tracing::warn!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+        DiagnosticsLevel::Info => {
+            tracing::info!(target: "twigo::webview", window, source, stack, "{message}");
+        }
+    }
+}
+
+/// Shows the current log file in the file manager. The opener plugin's own
+/// command stays out of the webview's reach, as `url_open` leaves it.
+#[tauri::command]
+fn log_reveal(handle: AppHandle, log: State<'_, Log>) -> Result<(), IpcError> {
+    handle
+        .opener()
+        .reveal_item_in_dir(log.path())
+        .map_err(|error| {
+            IpcError::new(
+                ErrorCode::FileUnrevealed,
+                format!("could not show the log file: {error}"),
+            )
+        })
+}
+
+#[tauri::command]
+fn log_level_set(log: State<'_, Log>, request: SetLogLevel) {
+    log.set_level(match request.level {
+        LogVerbosity::Info => Level::INFO,
+        LogVerbosity::Debug => Level::DEBUG,
+        LogVerbosity::Trace => Level::TRACE,
+    });
+}
+
+#[tauri::command]
+async fn report_problem(app: State<'_, App>, log: State<'_, Log>) -> Result<Report, IpcError> {
+    contained(async { Ok(app.core.report(log.facts(), &log.files()).await) }).await
+}
+
+/// Twigo builds the link, so it goes through no `openable_url` check.
+#[tauri::command]
+async fn report_open_issue(
+    handle: AppHandle,
+    app: State<'_, App>,
+    log: State<'_, Log>,
+    request: OpenIssue,
+) -> Result<(), IpcError> {
+    contained(async {
+        let url = app
+            .core
+            .report_issue(log.facts(), &log.files(), request)
+            .await;
+        handle
+            .opener()
+            .open_url(url, None::<&str>)
+            .map_err(|error| {
+                IpcError::new(
+                    ErrorCode::LinkOpenFailed,
+                    format!("could not open the new-issue form: {error}"),
+                )
+            })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn report_save(webview: Webview, request: SaveReport) -> Result<Option<String>, IpcError> {
+    contained(async {
+        let name = twigo_core::report::file_name();
+        let Some(path) = save_path(&webview, name, ("Report", &["txt"])).await? else {
+            return Ok(None);
+        };
+        twigo_core::report::write(&request.text, &path).await?;
+        Ok(Some(path.display().to_string()))
+    })
+    .await
 }
 
 fn explicit_kubeconfig() -> Option<PathBuf> {
@@ -727,6 +883,16 @@ fn explicit_kubeconfig() -> Option<PathBuf> {
     None
 }
 
+#[cfg(feature = "inject")]
+fn arm_panic() {
+    if let Some(name) = std::env::var(INJECTED_PANIC)
+        .ok()
+        .filter(|name| !name.is_empty())
+    {
+        twigo_panic::inject::arm(&name, u32::MAX);
+    }
+}
+
 fn main() {
     // Before Tauri, so that the single-instance plugin never sees the login
     // shell's copy of Twigo and no window opens.
@@ -735,11 +901,23 @@ fn main() {
         && flag == twigo_env::DUMP_ENV
     {
         if let Err(error) = twigo_env::dump(head, tail) {
-            eprintln!("could not print the environment: {error}");
+            #[expect(
+                clippy::print_stderr,
+                reason = "the login shell reads this copy's stderr, and it never opens the log"
+            )]
+            {
+                eprintln!("could not print the environment: {error}");
+            }
             std::process::exit(1);
         }
         return;
     }
+
+    // After the `--dump-env` copy has returned, which never opens the log.
+    twigo_log::install_hook(env!("CARGO_PKG_VERSION"));
+    #[cfg(feature = "inject")]
+    arm_panic();
+    let fatal = fatal::Path::default();
 
     let builder = tauri::Builder::default()
         // First: a second launch must hand over to the running app before any
@@ -751,7 +929,7 @@ fn main() {
                     .and_then(|()| window.show())
                     .and_then(|()| window.set_focus());
                 if let Err(error) = shown {
-                    eprintln!("could not bring the running window forward: {error}");
+                    tracing::warn!(%error, "could not bring the running window forward");
                 }
             }
         }))
@@ -763,54 +941,69 @@ fn main() {
     #[cfg(all(feature = "bench", target_os = "macos"))]
     let builder = builder.activate_ignoring_other_apps(false);
     let app = builder
-        .setup(|app| {
-            let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;
-            app.manage(Keyboard {
-                watch: LayoutWatch::start(main),
-                subscriptions: Mutex::default(),
-            });
-            let environment = Arc::new(Environment::default());
-            tauri::async_runtime::spawn({
-                let environment = Arc::clone(&environment);
-                async move { environment.resolve().await }
-            });
-            let core = Core::new(
-                &app.path().app_data_dir()?,
-                &app.path().app_cache_dir()?,
-                &PolicyFile::default_path(),
-            );
-            tauri::async_runtime::spawn({
-                let core = Arc::clone(&core);
-                let environment = Arc::clone(&environment);
-                let explicit = explicit_kubeconfig();
-                async move { core.run(environment.subscribe(), explicit).await }
-            });
-            tauri::async_runtime::spawn({
-                let core = Arc::clone(&core);
-                async move { core.follow_network(twigo_netmon::Watch::start()).await }
-            });
-            app.manage(Shell {
-                environment,
-                followers: Followers::default(),
-            });
-            let app_state = App {
-                core,
-                contexts: Followers::default(),
-                auth: Followers::default(),
-                resources: Followers::default(),
-                focused: Mutex::default(),
-            };
-            if let Some(window) = app.get_webview_window("main") {
-                app_state.focus("main", window.is_focused().unwrap_or(false));
+        .setup({
+            let fatal = fatal.clone();
+            move |app| {
+                // Before `Core::new` reads the policy, the state and the trust
+                // file, so what it says of them is logged.
+                let facts = Facts::detect(
+                    env!("CARGO_PKG_VERSION"),
+                    option_env!("TWIGO_COMMIT"),
+                    tauri::webview_version().ok(),
+                );
+                app.manage(Log::start(&app.path().app_log_dir()?, &facts));
+                let main = MainThread::new().ok_or("Tauri ran setup off the main thread")?;
+                app.manage(Keyboard {
+                    watch: LayoutWatch::start(main),
+                    subscriptions: Mutex::default(),
+                });
+                let environment = Arc::new(Environment::default());
+                let resolving = tauri::async_runtime::spawn({
+                    let environment = Arc::clone(&environment);
+                    async move { environment.resolve().await }
+                });
+                let core = Core::new(
+                    &app.path().app_data_dir()?,
+                    &app.path().app_cache_dir()?,
+                    &PolicyFile::default_path(),
+                );
+                fatal.ready(app.handle(), &core);
+                let supervisor = tauri::async_runtime::spawn(core.start(
+                    environment.subscribe(),
+                    explicit_kubeconfig(),
+                    Some(twigo_netmon::Watch::start),
+                    {
+                        let fatal = fatal.clone();
+                        move |why| fatal.run(&why.to_string())
+                    },
+                ));
+                app.manage(Shell {
+                    environment,
+                    followers: Followers::default(),
+                    resolving,
+                });
+                let app_state = App {
+                    core,
+                    supervisor,
+                    contexts: Followers::default(),
+                    problems: Followers::default(),
+                    auth: Followers::default(),
+                    resources: Followers::default(),
+                    focused: Mutex::default(),
+                };
+                if let Some(window) = app.get_webview_window("main") {
+                    app_state.focus("main", window.is_focused().unwrap_or(false));
+                }
+                app.manage(app_state);
+                Ok(())
             }
-            app.manage(app_state);
-            Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(fatal.guarded_handler(tauri::generate_handler![
             keyboard_layout_watch,
             shell_environment_watch,
             shell_environment_retry,
             contexts_watch,
+            problems_watch,
             context_relock,
             command_plan,
             command_execute,
@@ -864,45 +1057,124 @@ fn main() {
             forward_remove,
             forwards_watch,
             url_open,
-        ])
+            diagnostics_log,
+            log_reveal,
+            log_level_set,
+            report_problem,
+            report_open_issue,
+            report_save,
+        ]))
         // A page that starts to load, as on a reload, has none of the
         // subscriptions of the one it replaces.
-        .on_page_load(|webview, payload| {
-            if payload.event() == PageLoadEvent::Started
-                && let Some(app) = webview.try_state::<App>()
-            {
-                app.core.drop_window(webview.label());
+        .on_page_load({
+            let fatal = fatal.clone();
+            move |webview, payload| {
+                fatal.guarded("a page load panicked", || {
+                    if payload.event() == PageLoadEvent::Started
+                        && let Some(app) = webview.try_state::<App>()
+                    {
+                        app.core.drop_window(webview.label());
+                    }
+                });
             }
         })
-        .on_window_event(|window, event| {
-            let focused = match event {
-                WindowEvent::Focused(focused) => *focused,
-                WindowEvent::Destroyed => false,
-                _ => return,
-            };
-            // Before setup the app is not managed yet; setup reads the
-            // window's focus itself.
-            if let Some(app) = window.app_handle().try_state::<App>() {
-                app.focus(window.label(), focused);
-                // A webview window's webview has the window's label.
-                if let WindowEvent::Destroyed = event {
-                    app.core.drop_window(window.label());
-                }
+        .on_window_event({
+            let fatal = fatal.clone();
+            move |window, event| {
+                fatal.guarded("a window event panicked", || {
+                    window_event(window, event);
+                });
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building Twigo");
-    app.run(|app, event| {
+    app.run(move |app, event| match event {
+        RunEvent::ExitRequested { .. } => fatal.ending(),
         // macOS delivers ⌘Q, the Dock's Quit and logout as `terminate:`,
         // which ends the process without `ExitRequested`, but still with
         // `Exit`: the webview cannot be asked for anything by then, so it
         // sends every change at once and this writes them.
-        if let RunEvent::Exit = event {
-            let core = &app.state::<App>().core;
-            core.shutdown();
-            if let Err(error) = core.state.flush() {
-                eprintln!("could not save the state: {error}");
+        RunEvent::Exit => {
+            fatal.ending();
+            let state = app.state::<App>();
+            state.supervisor.abort();
+            if let Some(shell) = app.try_state::<Shell>() {
+                shell.resolving.abort();
             }
+            // On its own, so that a poisoned lock here leaves the flush to
+            // run, for the restart a fatal path asked for too.
+            if catch_unwind(AssertUnwindSafe(|| state.core.shutdown())).is_err() {
+                tracing::error!("could not end the sessions on exit, which panicked");
+            }
+            fatal::flush(&state.core);
         }
+        _ => {}
     });
+}
+
+/// A window's focus, and a window gone: its subscriptions and its followers
+/// end with it.
+fn window_event(window: &tauri::Window, event: &WindowEvent) {
+    let focused = match event {
+        WindowEvent::Focused(focused) => *focused,
+        WindowEvent::Destroyed => false,
+        _ => return,
+    };
+    // Before setup the app is not managed yet; setup reads the window's focus
+    // itself.
+    let Some(app) = window.app_handle().try_state::<App>() else {
+        return;
+    };
+    app.focus(window.label(), focused);
+    // A webview window's webview has the window's label.
+    if let WindowEvent::Destroyed = event {
+        app.close(window.label());
+        if let Some(shell) = window.try_state::<Shell>() {
+            shell.followers.remove(window.label());
+        }
+        if let Some(keyboard) = window.try_state::<Keyboard>() {
+            keyboard
+                .subscriptions
+                .lock()
+                .expect("subscriptions lock")
+                .remove(window.label());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_async_command_that_panics_answers_internal_panic() {
+        let answered: Result<u8, IpcError> = contained(async { panic!("a command's bug") }).await;
+        assert_eq!(answered.unwrap_err().code, ErrorCode::InternalPanic);
+        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
+        let refused: Result<u8, IpcError> =
+            contained(async { Err(IpcError::new(ErrorCode::SpaceNotFound, "no")) }).await;
+        assert_eq!(refused.unwrap_err().code, ErrorCode::SpaceNotFound);
+    }
+
+    #[tokio::test]
+    async fn a_command_that_answers_an_error_leaves_one_line_of_the_commands_with_its_code_and_none_of_its_words()
+     {
+        let events = twigo_log::capture();
+        let refused: Result<u8, IpcError> = contained(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2""#,
+            ))
+        })
+        .await;
+        assert!(refused.is_err());
+        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
+        let lines = events.lines();
+        let [event] = &lines[..] else {
+            panic!("one event for one error: {lines:?}");
+        };
+        assert_eq!(event["target"], "twigo");
+        assert_eq!(event["fields"]["code"], "server.invalid");
+        assert!(!event.to_string().contains("hunter2"), "{event}");
+    }
 }

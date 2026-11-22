@@ -14,8 +14,11 @@ use crate::request::field_value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Failure {
-    /// A `503` whose body is plain text and no Status, a `404`, a failed connection or a broken answer.
+    /// A `503` whose body is plain text and no Status, a `404` or a failed connection.
     Unavailable,
+    /// A `200` that Twigo cannot decode: what the server wrote is no list of samples, or its gzip is
+    /// broken. Unlike the others it is no state of the cluster, and says so in the log.
+    Undecodable,
     Forbidden,
     /// A retry would only run the credential plugin again.
     Unauthorized,
@@ -74,8 +77,8 @@ pub(super) async fn fetch(
         .await
         .map_err(|_| Failure::Unavailable)?
         .to_bytes();
-    let body = encoding::page(&parts.headers, body).map_err(|_| Failure::Unavailable)?;
-    sample::parse(&body, kind).map_err(|_| Failure::Unavailable)
+    let body = encoding::page(&parts.headers, body).map_err(|_| Failure::Undecodable)?;
+    sample::parse(&body, kind).map_err(|_| Failure::Undecodable)
 }
 
 #[cfg(test)]

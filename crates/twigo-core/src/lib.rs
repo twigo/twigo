@@ -8,10 +8,12 @@ mod auth;
 mod bus;
 pub mod catalog;
 pub mod connections;
+mod delete;
 mod errors;
 mod forward;
 pub mod objects;
 mod proxy;
+pub mod report;
 pub mod state;
 pub mod subscriptions;
 mod terminal;
@@ -19,6 +21,8 @@ pub mod trust;
 mod usage;
 
 use std::collections::HashSet;
+use std::future::Future;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -34,10 +38,10 @@ use twigo_cache::view::Spec;
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AccessQuery, Ack, AnswerApproval, ApplyPreviewed, ApplyRequest, ApprovalEvent, ClusterVersion,
-    Context, DownloadLogs, ErrorKind, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
+    DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -45,6 +49,7 @@ use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
+use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
@@ -97,6 +102,10 @@ pub struct Core {
     /// Both None until the login shell's environment is known.
     proxy_env: watch::Sender<Option<ProxyEnv>>,
     shell_env: watch::Sender<Option<Arc<ShellEnv>>>,
+    /// What the threads and loops that outlive a call tell the supervisor
+    /// [`Core::start`] runs, whose reads wait here until it starts.
+    reporter: Reporter,
+    reports: Mutex<Option<Reports>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -123,7 +132,9 @@ impl Core {
     pub fn new(data: &Path, cache: &Path, policy_file: &Path) -> Arc<Self> {
         let shell_env = watch::Sender::new(None);
         let focused = watch::Sender::new(false);
+        let (reporter, reports) = twigo_panic::reports();
         let state = State::open(data.join("state.json"));
+        state.report_to(reporter.clone());
         let catalog = Catalog::default();
         let policy = Policy::new(
             PolicyFile::read(policy_file),
@@ -131,7 +142,9 @@ impl Core {
             state.choices(),
             Audit::open(&data.join("audit.jsonl")),
         );
-        let catalog = catalog.audited_by(Arc::clone(&policy));
+        let catalog = catalog
+            .audited_by(Arc::clone(&policy))
+            .supervised_by(reporter.clone());
         let approvals = Arc::new(Approvals::new(Arc::clone(&policy), catalog.subscribe()));
         let discovery = Arc::new(Cache::new(cache.join("discovery")));
         Arc::new_cyclic(|core| {
@@ -166,6 +179,8 @@ impl Core {
                 focused,
                 proxy_env: watch::Sender::new(None),
                 shell_env,
+                reporter,
+                reports: Mutex::new(Some(reports)),
             }
         })
     }
@@ -181,6 +196,24 @@ impl Core {
         self.credentials.shutdown();
         self.shells.each(terminal::Shell::quit);
         self.forwards.shutdown();
+    }
+
+    /// What the fatal path does before it asks, since the duty that would
+    /// may be the one that died: ends every unlock, then fails each forward
+    /// whose mode now refuses it, and where that recheck panics closes every
+    /// forward as a quit does. A panic of one step is logged, and the next
+    /// goes on.
+    pub fn fail_closed(&self) {
+        if catch_unwind(AssertUnwindSafe(|| self.policy.end_unlocks())).is_err() {
+            tracing::error!("could not end the unlocks, which panicked");
+        }
+        if catch_unwind(AssertUnwindSafe(|| self.forwards.recheck())).is_ok() {
+            return;
+        }
+        tracing::error!("could not recheck the forwards, which panicked, so every forward stops");
+        if catch_unwind(AssertUnwindSafe(|| self.forwards.shutdown())).is_err() {
+            tracing::error!("could not stop the forwards, which panicked");
+        }
     }
 
     /// The context's clients, once the catalog and the login shell's
@@ -312,19 +345,23 @@ impl Core {
     }
 
     /// The contexts the catalog lists, with what each lets through now.
-    pub fn contexts(&self) -> Option<Vec<Context>> {
-        // Out of the borrow: the policy reads the same channel for each
-        // context, and a second borrow behind a waiting writer may deadlock
-        // (tokio's `watch::Ref`).
-        let listed = self.catalog.subscribe().borrow().clone();
-        listed.map(|listed| listed.ipc(&self.policy))
+    pub fn contexts(&self) -> Option<twigo_ipc::Catalog> {
+        self.catalog
+            .current()
+            .map(|listed| listed.ipc(&self.policy))
     }
 
     async fn listed(&self, context: &str) -> Result<(), IpcError> {
         match self.catalog.contexts().await.find(context) {
             Some(_) => Ok(()),
-            None => Err(IpcError::from(&ClientsError::NoContext(context.to_owned()))),
+            None => Err(errors::unlisted(context)),
         }
+    }
+
+    /// The space of a context the catalog lists, opened if the person has none yet.
+    pub async fn space_open(&self, context: &str) -> Result<twigo_ipc::Space, IpcError> {
+        self.listed(context).await?;
+        Ok(self.state.open_space(context))
     }
 
     /// What a command will do and the friction it asks for (ARCHITECTURE
@@ -406,7 +443,7 @@ impl Core {
         let context = planned.context.clone();
         if self.policy.connection(&context) != planned.connection {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionClusterChanged,
                 format!(
                     "{context} names another cluster now than when Twigo asked, so it sent nothing"
                 ),
@@ -427,7 +464,7 @@ impl Core {
                 },
             });
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionModeChanged,
                 format!(
                     "{context} is {} now, which asks for more than you confirmed, so Twigo sent nothing",
                     access.mode.name()
@@ -439,13 +476,13 @@ impl Core {
                 if since.elapsed() < Duration::from_secs((*seconds).into()) =>
             {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ConfirmCountdown,
                     "the countdown has not ended",
                 ));
             }
             Friction::Typed { text } if request.typed.as_deref() != Some(text.as_str()) => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ConfirmNameMismatch,
                     format!("type {text} to confirm"),
                 ));
             }
@@ -489,24 +526,36 @@ impl Core {
         );
         let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
-            let ended = run(progress.clone()).await;
+            // A panic ends the plan as failed here, with the undo and the bus
+            // entry freed. A plan is never retried: a write must not go out
+            // twice.
+            let ended = twigo_panic::contain("plan run", run(progress.clone()))
+                .await
+                .unwrap_or_else(|_| Err(IpcError::panicked("this run")));
             let undo_until = space.zip(ticket).and_then(|(space, ticket)| {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
                 undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
             });
-            let (event, outcome, message) = match ended {
-                Ok(finished) => finished.told(undo_until),
+            let (event, outcome, message, codes) = match ended {
+                Ok(finished) => {
+                    let (event, outcome, message, codes) = finished.told(undo_until);
+                    (event, outcome, Some(message), codes)
+                }
                 Err(error) => {
-                    let message = error.message.clone();
-                    (OperationEvent::Failed { error }, "failed", message)
+                    let code = error.code;
+                    (OperationEvent::Failed { error }, "failed", None, vec![code])
                 }
             };
+            if let Some(code) = codes.first() {
+                tracing::info!(%context, command, outcome, %code, "a command ended in error");
+            }
             policy.audit().record(&Entry::Ended {
                 context: &context,
                 command,
                 target: &target,
                 outcome,
-                message: &message,
+                message: message.as_deref(),
+                codes: &codes,
             });
             progress.tell(event);
             bus.ended(&window, request.plan);
@@ -597,6 +646,8 @@ impl Core {
             .apiserver_version()
             .await
             .map_err(|e| twigo_kube::errors::request(&e))?;
+        self.connections
+            .note_version(context, &clients, &info.git_version);
         Ok(ClusterVersion {
             git_version: info.git_version,
         })
@@ -615,12 +666,10 @@ impl Core {
             .await
             .map_err(|e| IpcError::from(&e))?;
         let gvk = GroupVersionKind::gvk(&query.group, &query.version, &query.kind);
-        let schema = tokio::task::spawn_blocking(move || document.json_schema(&gvk))
-            .await
-            .expect("converting a schema does not panic");
+        let schema = twigo_panic::blocking(move || document.json_schema(&gvk)).await;
         schema.ok_or_else(|| {
             IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::OpenapiNoKind,
                 format!(
                     "the cluster's OpenAPI for {}/{} has no kind {}",
                     query.group, query.version, query.kind
@@ -636,7 +685,7 @@ impl Core {
             .into_iter()
             .find(|candidate| candidate.id == space)
             .and_then(|space| space.contexts.into_iter().next())
-            .ok_or_else(|| IpcError::new(ErrorKind::NotFound, format!("no space {space:?}")))
+            .ok_or_else(|| IpcError::new(ErrorCode::SpaceNotFound, format!("no space {space:?}")))
     }
 
     /// The resources a space's context serves, followed as they change.
@@ -657,11 +706,10 @@ impl Core {
     /// time (ARCHITECTURE 3.2).
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
-        self.hub.namespaces(&context).await.map_err(|state| {
-            state.refusal().unwrap_or_else(|| {
-                IpcError::new(ErrorKind::Unavailable, "the cluster is unavailable")
-            })
-        })
+        self.hub
+            .namespaces(&context)
+            .await
+            .map_err(namespaces_unavailable)
     }
 
     /// A list of a space's resource for a window, filtered, sorted and
@@ -747,7 +795,7 @@ impl Core {
         };
         if query.namespaced && query.namespace.is_none() {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::InternalRequest,
                 format!("{} names no namespace", query.name),
             ));
         }
@@ -855,13 +903,8 @@ impl Core {
         })?;
         let lines = lines
             .await
-            .map_err(|_| IpcError::new(ErrorKind::Unavailable, "the logs tab closed"))?;
-        tokio::fs::write(path, lines).await.map_err(|error| {
-            IpcError::new(
-                ErrorKind::Internal,
-                format!("could not write {}: {error}", path.display()),
-            )
-        })
+            .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))??;
+        report::write(&lines, path).await
     }
 
     /// The containers of a pod a shell can reach (ARCHITECTURE 4.6), refused
@@ -949,8 +992,8 @@ impl Core {
 
     /// Retires every connection on wake, and those whose route moved on a
     /// network change, which also tells the sessions of those (ARCHITECTURE
-    /// 3.2, 4.6); never returns.
-    pub async fn follow_network(&self, mut watch: twigo_netmon::Watch) {
+    /// 3.2, 4.6), for as long as the watch lasts.
+    async fn follow_network(&self, mut watch: twigo_netmon::Watch) {
         while let Some(event) = watch.next().await {
             self.network_event(event);
         }
@@ -963,71 +1006,256 @@ impl Core {
         }
     }
 
-    /// Follows the catalog's sources and the login shell's proxy variables,
-    /// tells the state store and the connections which contexts the sources
-    /// list, and makes the terminals' offers anew as the files change; never
-    /// returns. In the explicit mode (ARCHITECTURE 5.5)
-    /// `explicit` is the only source; otherwise the sources come from the
-    /// login shell's environment, as `status` follows it, read again
-    /// whenever it is resolved.
-    pub async fn run(&self, mut status: watch::Receiver<Status>, explicit: Option<PathBuf>) {
-        let sources = async {
-            if let Some(file) = &explicit {
-                self.catalog
-                    .follow(catalog::sources(Some(file.clone()), None, None));
-            }
-            loop {
-                let env = match &*status.borrow_and_update() {
-                    Status::Resolving => None,
-                    Status::Resolved(env) | Status::Failed { env, .. } => Some(env.clone()),
-                };
-                if let Some(env) = env {
-                    let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
-                    let proxy = ProxyEnv::from_vars(var);
-                    // Published first, so a watch the retire re-opens builds
-                    // with the new variables.
-                    self.proxy_env.send_replace(Some(proxy.clone()));
-                    self.connections.follow_env(&proxy);
-                    self.shell_env.send_replace(Some(Arc::clone(&env)));
-                    if explicit.is_none() {
-                        let home = env.get("HOME").map(Path::new);
-                        self.catalog
-                            .follow(catalog::sources(None, env.get("KUBECONFIG"), home));
-                    }
-                }
-                if status.changed().await.is_err() {
-                    return;
-                }
-            }
-        };
-        let seen = async {
-            let mut contexts = self.catalog.subscribe();
-            loop {
-                let listed = contexts.borrow_and_update().clone();
-                if let Some(listed) = listed {
-                    let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
-                    self.state.saw(&names, Timestamp::now());
-                    self.connections.keep(listed.iter());
-                }
-                if contexts.changed().await.is_err() {
-                    return;
-                }
-            }
-        };
-        let offered = async {
-            let mut written = self.catalog.written();
-            while written.changed().await.is_ok() {
-                self.terminals.refresh_offers().await;
-            }
-        };
-        tokio::join!(
-            sources,
-            seen,
-            offered,
-            self.policy.follow_unlocks(),
-            self.follow_forward_modes()
-        );
+    /// Restores the forwards, then runs the app-wide duties, each as a task
+    /// of its own under a supervisor (ARCHITECTURE 2.1). The caller spawns
+    /// what this returns, and keeps its handle.
+    ///
+    /// The duties follow the catalog's sources and the login shell's proxy
+    /// variables, tell the state store and the connections which contexts the
+    /// sources list, make the terminals' offers anew as the files change, end
+    /// the unlocks that run out, recheck the forwards when a mode or the
+    /// catalog changes, and, where `network` is given, retire connections on
+    /// wake and on a network change. A duty that panics starts again, at most
+    /// three times in five minutes; past that, for a thread of the core's
+    /// that cannot go on, and for a panic of the supervisor's own task,
+    /// `fatal` is called, and the other duties go on. In the explicit mode
+    /// (ARCHITECTURE 5.5) `explicit` is the only source; otherwise the
+    /// sources come from the login shell's environment, as `status` follows
+    /// it, read again whenever it is resolved.
+    pub fn start(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+        network: Option<fn() -> twigo_netmon::Watch>,
+        fatal: impl Fn(Fatal) + Send + Sync + 'static,
+    ) -> impl Future<Output = ()> + Send + 'static {
+        self.supervise(self.supervisor(status, explicit, network, fatal))
     }
+
+    /// [`Core::start`] on the runtime, without the network, for tests.
+    #[cfg(feature = "test-util")]
+    pub fn start_for_tests(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+    ) -> Started {
+        let failures = Failures::default();
+        let mut supervisor = self.supervisor(status, explicit, None, {
+            let failures = failures.clone();
+            move |fatal| failures.push(fatal.to_string())
+        });
+        supervisor.unarmed({
+            let failures = failures.clone();
+            move |duty| failures.push(format!("{duty} panicked, and nothing armed it"))
+        });
+        Started {
+            core: Arc::clone(self),
+            duties: tokio::spawn(self.supervise(supervisor)),
+            failures,
+        }
+    }
+
+    /// The supervisor of the core's duties, which have not started yet.
+    fn supervisor(
+        self: &Arc<Self>,
+        status: watch::Receiver<Status>,
+        explicit: Option<PathBuf>,
+        network: Option<fn() -> twigo_netmon::Watch>,
+        fatal: impl Fn(Fatal) + Send + Sync + 'static,
+    ) -> Supervisor {
+        let reports = self
+            .reports
+            .lock()
+            .expect("reports lock")
+            .take()
+            .expect("a core starts once");
+        let mut supervisor = Supervisor::new(reports, fatal);
+        self.duty(&mut supervisor, "catalog sources", move |core| {
+            let (status, explicit) = (status.clone(), explicit.clone());
+            async move { core.follow_sources(status, explicit).await }
+        });
+        self.duty(&mut supervisor, "seen contexts", |core| async move {
+            core.follow_seen().await;
+        });
+        self.duty(&mut supervisor, "terminal offers", |core| async move {
+            core.follow_offers().await;
+        });
+        self.duty(&mut supervisor, "unlock expiry", |core| async move {
+            core.policy.follow_unlocks().await;
+        });
+        self.duty(&mut supervisor, "forward modes", |core| async move {
+            core.follow_forward_modes().await;
+        });
+        if let Some(watch) = network {
+            self.duty(&mut supervisor, "network", move |core| async move {
+                core.follow_network(watch()).await;
+            });
+        }
+        let core = Arc::clone(self);
+        supervisor.thread("kubeconfig watch", move || {
+            core.catalog
+                .sources()
+                .map(|sources| core.catalog.follow(sources))
+                .is_some()
+        });
+        let core = Arc::clone(self);
+        supervisor.thread("state writer", move || core.state.can_write());
+        supervisor
+    }
+
+    /// Restores the forwards, then runs `supervisor`.
+    fn supervise(
+        self: &Arc<Self>,
+        supervisor: Supervisor,
+    ) -> impl Future<Output = ()> + Send + 'static {
+        let core = Arc::clone(self);
+        async move {
+            // Once: a panic here ends the forwards' commands, which wait for
+            // it.
+            if twigo_panic::contain("forward restore", core.restore_forwards())
+                .await
+                .is_err()
+            {
+                core.reporter.fatal("forward restore");
+            }
+            supervisor.run().await;
+        }
+    }
+
+    /// Adds a duty that runs `run` on this core, again after each panic.
+    fn duty<F>(
+        self: &Arc<Self>,
+        supervisor: &mut Supervisor,
+        name: &'static str,
+        run: impl Fn(Arc<Self>) -> F + Send + 'static,
+    ) where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let core = Arc::clone(self);
+        supervisor.task(name, move || run(Arc::clone(&core)));
+    }
+
+    /// Follows the catalog's sources and the login shell's proxy variables;
+    /// ends when the status's sender is gone.
+    async fn follow_sources(&self, mut status: watch::Receiver<Status>, explicit: Option<PathBuf>) {
+        if let Some(file) = &explicit {
+            self.catalog
+                .follow(catalog::sources(Some(file.clone()), None, None));
+        }
+        loop {
+            let env = match &*status.borrow_and_update() {
+                Status::Resolving => None,
+                Status::Resolved(env) | Status::Failed { env, .. } => Some(env.clone()),
+            };
+            if let Some(env) = env {
+                let var = |name: &str| env.get(name)?.to_str().map(str::to_owned);
+                let proxy = ProxyEnv::from_vars(var);
+                // Published first, so a watch the retire re-opens builds
+                // with the new variables.
+                self.proxy_env.send_replace(Some(proxy.clone()));
+                self.connections.follow_env(&proxy);
+                self.shell_env.send_replace(Some(Arc::clone(&env)));
+                if explicit.is_none() {
+                    let home = env.get("HOME").map(Path::new);
+                    self.catalog
+                        .follow(catalog::sources(None, env.get("KUBECONFIG"), home));
+                }
+            }
+            if status.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    async fn follow_seen(&self) {
+        let mut contexts = self.catalog.subscribe();
+        loop {
+            let listed = contexts.borrow_and_update().clone();
+            if let Some(listed) = listed {
+                let names: HashSet<String> = listed.iter().map(|c| c.name.clone()).collect();
+                self.state.saw(&names, Timestamp::now());
+                self.connections.keep(listed.iter());
+            }
+            if contexts.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Makes the offers anew at its start, so that a start after a panic
+    /// redoes the refresh that panicked, and at each write of the files.
+    async fn follow_offers(&self) {
+        let mut written = self.catalog.written();
+        loop {
+            self.terminals.refresh_offers().await;
+            if written.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+/// A core whose duties run for a test ([`Core::start_for_tests`]): dropping
+/// it ends them, and fails the test where a duty panicked with nothing armed
+/// or could not be kept.
+#[cfg(feature = "test-util")]
+#[must_use = "dropping it ends the core's duties"]
+pub struct Started {
+    core: Arc<Core>,
+    duties: tokio::task::JoinHandle<()>,
+    failures: Failures,
+}
+
+#[cfg(feature = "test-util")]
+impl std::ops::Deref for Started {
+    type Target = Arc<Core>;
+
+    fn deref(&self) -> &Arc<Core> {
+        &self.core
+    }
+}
+
+#[cfg(feature = "test-util")]
+impl Drop for Started {
+    fn drop(&mut self) {
+        self.duties.abort();
+        let failures = self.failures.take();
+        if !failures.is_empty() && !std::thread::panicking() {
+            panic!("the core's duties failed: {}", failures.join("; "));
+        }
+    }
+}
+
+/// What a test's supervisor saw that fails the test.
+#[cfg(feature = "test-util")]
+#[derive(Clone, Default)]
+struct Failures(Arc<Mutex<Vec<String>>>);
+
+#[cfg(feature = "test-util")]
+impl Failures {
+    fn push(&self, failure: String) {
+        self.lock().push(failure);
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.lock())
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Why a read of the namespaces gave up: the last failure's cause when the
+/// hub kept one, else the refusal it ended on.
+fn namespaces_unavailable(state: ViewState) -> IpcError {
+    match state {
+        ViewState::Stale { cause: Some(cause) } => Some(cause),
+        state => state.refusal(),
+    }
+    .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
 }
 
 /// How the hub gets a context's clients: through the core, while it lives.
@@ -1037,7 +1265,7 @@ fn connect(core: Weak<Core>) -> Connect {
         Box::pin(async move {
             let Some(core) = core.upgrade() else {
                 return Err(IpcError::new(
-                    ErrorKind::Unavailable,
+                    ErrorCode::AppQuitting,
                     "Twigo is quitting".to_owned(),
                 ));
             };
@@ -1048,14 +1276,15 @@ fn connect(core: Weak<Core>) -> Connect {
     })
 }
 
-/// A link the sign-in panel may open: https, or a plugin's own server on
+/// A link the person's browser may open for Twigo: https, or http to this
+/// computer, as a credential plugin's own server or a forward's port is, on
 /// localhost or 127.0.0.1, without a user part, which would name another
 /// host.
-pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
+pub fn openable_url(url: &str) -> Result<String, IpcError> {
     let refused = || {
         IpcError::new(
-            twigo_ipc::ErrorKind::InvalidInput,
-            format!("Twigo opens only sign-in links: {url}"),
+            twigo_ipc::ErrorCode::LinkRefused,
+            format!("Twigo opens only https links and http links to this computer: {url}"),
         )
     };
     let parsed: http::Uri = url.parse().map_err(|_| refused())?;

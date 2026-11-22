@@ -514,8 +514,11 @@ fn a_status_change_alone_is_a_batch() {
     let mut rig = Rig::new(&query());
     rig.flush().unwrap();
     assert_eq!(rig.view.batch(ViewState::Ready, ready()), None);
-    let batch = rig.view.batch(ViewState::Stale, ready()).unwrap();
-    assert_eq!(batch.status, ViewState::Stale);
+    let batch = rig
+        .view
+        .batch(ViewState::Stale { cause: None }, ready())
+        .unwrap();
+    assert_eq!(batch.status, ViewState::Stale { cause: None });
     assert_eq!(batch.seq, 2);
 }
 
@@ -543,11 +546,14 @@ fn the_parts_come_in_the_first_batch_and_when_they_change() {
     };
     let batch = rig
         .view
-        .batch(ViewState::Stale, waiting.clone())
+        .batch(ViewState::Stale { cause: None }, waiting.clone())
         .expect("a change of the parts alone is a batch");
     assert_eq!(batch.parts, Some(waiting.clone()));
     assert_eq!((batch.window, batch.upserts), (None, Vec::new()));
-    assert_eq!(rig.view.batch(ViewState::Stale, waiting), None);
+    assert_eq!(
+        rig.view.batch(ViewState::Stale { cause: None }, waiting),
+        None
+    );
 
     let back = rig.view.batch(ViewState::Ready, ready()).unwrap();
     assert_eq!(back.parts, Some(ready()));
@@ -1377,9 +1383,11 @@ fn a_list_has_the_metric_columns_with_the_servers_and_never_before() {
         let connecting = Parts {
             count: 1,
             omitted: 0,
-            unready: vec![unready("a", ViewState::Connecting, false)],
+            unready: vec![unready("a", ViewState::Connecting { cause: None }, false)],
         };
-        let before = view.batch(ViewState::Connecting, connecting).unwrap();
+        let before = view
+            .batch(ViewState::Connecting { cause: None }, connecting)
+            .unwrap();
         assert_eq!(names(&before), Vec::<String>::new());
         assert_eq!(before.metrics, None, "no columns, no state");
 

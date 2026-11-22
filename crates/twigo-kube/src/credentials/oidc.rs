@@ -13,7 +13,7 @@
 
 mod persist;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -26,6 +26,8 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use ring::digest::{SHA256, digest};
 use secrecy::SecretString;
 use serde::Deserialize;
+use twigo_ipc::{ErrorCode, IpcError};
+use twigo_log::problems;
 
 use super::output::Credential;
 use crate::client::ProxyEnv;
@@ -60,6 +62,18 @@ pub enum OidcError {
     NoIdToken,
     #[error("oidc: {0}")]
     Invalid(String),
+}
+
+impl OidcError {
+    /// What a log may say of it: the issuer's reply to a failed refresh is
+    /// left out, since it may echo the request's refresh token or client
+    /// secret. The window shows the whole [`Display`](std::fmt::Display).
+    pub(super) fn loggable(&self) -> String {
+        match self {
+            Self::Refresh { status, .. } => format!("oidc: the refresh failed: {status}"),
+            other => other.to_string(),
+        }
+    }
 }
 
 /// The provider's settings, as the user entry holds them.
@@ -143,10 +157,35 @@ enum Style {
     Form,
 }
 
+/// The users whose refreshed tokens are in memory only, by [`OidcEntry::key`]:
+/// `tokens.unsaved` stays while any is left.
+#[derive(Clone, Default)]
+pub(super) struct Unsaved(Arc<Mutex<HashSet<String>>>);
+
+impl Unsaved {
+    fn add(&self, key: &str) {
+        let mut users = self.0.lock().expect("unsaved lock");
+        users.insert(key.to_owned());
+        problems::report(IpcError::new(
+            ErrorCode::TokensUnsaved,
+            "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
+        ));
+    }
+
+    fn remove(&self, key: &str) {
+        let mut users = self.0.lock().expect("unsaved lock");
+        if users.remove(key) && users.is_empty() {
+            problems::clear(ErrorCode::TokensUnsaved);
+        }
+    }
+}
+
 pub struct Oidc {
     /// The file the user entry comes from, which the tokens go back to.
     origin: Option<PathBuf>,
     user: String,
+    key: String,
+    unsaved: Unsaved,
     env: tokio::sync::watch::Receiver<Option<Arc<twigo_env::ShellEnv>>>,
     state: Mutex<State>,
     refreshing: tokio::sync::Mutex<()>,
@@ -193,12 +232,16 @@ impl Oidc {
     pub(super) fn new(
         origin: Option<PathBuf>,
         user: String,
+        key: String,
         entry: OidcEntry,
         env: tokio::sync::watch::Receiver<Option<Arc<twigo_env::ShellEnv>>>,
+        unsaved: Unsaved,
     ) -> Self {
         Self {
             origin,
             user,
+            key,
+            unsaved,
             env,
             state: Mutex::new(State {
                 on_disk: (entry.id_token.clone(), entry.refresh_token.clone()),
@@ -226,9 +269,7 @@ impl Oidc {
         // The refresh goes on when the request that wanted it is dropped,
         // since the issuer may have rotated the refresh token already.
         let oidc = Arc::clone(self);
-        tokio::spawn(async move { oidc.refreshed().await })
-            .await
-            .expect("the refresh does not panic")
+        twigo_panic::joined(tokio::spawn(async move { oidc.refreshed().await }).await)
     }
 
     /// A token from the file, else one refreshed after a rejection or on
@@ -257,10 +298,7 @@ impl Oidc {
                 Ok(credential) => return Ok(credential),
                 Err(error) => {
                     self.state().spent = true;
-                    eprintln!(
-                        "kept the rejected oidc token of {}, since its refresh failed: {error}",
-                        self.user
-                    );
+                    tracing::warn!(user = %self.user, error = %error.loggable(), "kept the rejected oidc token, since its refresh failed");
                 }
             }
         }
@@ -302,7 +340,7 @@ impl Oidc {
             let id_token = tokens.id_token;
             let written_id = id_token.clone();
             let written_refresh = rotated.clone();
-            let written = tokio::task::spawn_blocking(move || {
+            let written = twigo_panic::blocking(move || {
                 persist::write(
                     &origin,
                     &user,
@@ -313,19 +351,18 @@ impl Oidc {
                 )
                 .map_err(|error| (origin, error))
             })
-            .await
-            .expect("the write does not panic");
+            .await;
             match written {
                 Ok(()) => {
                     let mut state = self.state();
                     let refresh = rotated.or_else(|| state.on_disk.1.clone());
                     state.on_disk = (Some(written_id), refresh);
+                    self.unsaved.remove(&self.key);
                 }
-                Err((origin, error)) => eprintln!(
-                    "kept the refreshed oidc tokens of {} in memory only: {}: {error}",
-                    self.user,
-                    origin.display()
-                ),
+                Err((origin, error)) => {
+                    tracing::error!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
+                    self.unsaved.add(&self.key);
+                }
             }
         }
         credential

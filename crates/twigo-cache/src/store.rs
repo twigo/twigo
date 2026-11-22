@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use tokio::sync::watch;
+use twigo_panic::inject;
 
 use crate::meta::Meta;
 use crate::object::Object;
@@ -223,6 +224,7 @@ impl<T: Item> Store<T> {
     pub fn upsert(&self, mut item: T) {
         let key = RowKey::of(item.meta());
         let mut contents = self.contents();
+        inject::check("store lock");
         keep_received(
             contents.columns.as_deref(),
             &mut item,
@@ -286,6 +288,20 @@ impl<T: Item> Store<T> {
             drop(contents);
             self.changed();
         }
+    }
+
+    /// Makes a store a panic poisoned usable: its items may be half changed,
+    /// so it holds none, and every reader reads it anew.
+    pub fn recover(&self) {
+        if !self.contents.is_poisoned() {
+            return;
+        }
+        self.contents.clear_poison();
+        let mut contents = self.contents();
+        contents.items.clear();
+        contents.reset();
+        drop(contents);
+        self.changed();
     }
 
     /// A feed whose first drain takes every item.

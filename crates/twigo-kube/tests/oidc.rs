@@ -22,7 +22,9 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use twigo_env::ShellEnv;
+use twigo_ipc::ErrorCode;
 use twigo_kube::credentials::{Oidc, OidcEntry, OidcError, Registry, Timeouts};
+use twigo_log::problems;
 
 /// A JWT whose `exp` is `from_now` away; its signature goes unchecked.
 fn jwt(from_now: SignedDuration, n: u32) -> String {
@@ -182,7 +184,13 @@ async fn answer(
             if !client_ok {
                 (401, serde_json::json!({"error": "invalid_client"}))
             } else if form.get("refresh_token") != Some(&issued.refresh) {
-                (400, serde_json::json!({"error": "invalid_grant"}))
+                (
+                    400,
+                    serde_json::json!({
+                        "error": "invalid_grant",
+                        "error_description": format!("the refresh token {} is not valid", form["refresh_token"]),
+                    }),
+                )
             } else {
                 let n = u32::try_from(issued.grants.len()).unwrap();
                 issued.refresh = format!("r{}", n + 1);
@@ -350,17 +358,106 @@ async fn a_token_kubectl_got_meanwhile_is_taken_rather_than_refreshed() {
     assert!(issuer.grants().is_empty());
 }
 
+static UNSAVED: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn unsaved() -> bool {
+    problems::watch()
+        .borrow()
+        .iter()
+        .any(|problem| problem.code == ErrorCode::TokensUnsaved)
+}
+
 #[tokio::test]
 async fn a_held_lock_keeps_the_new_tokens_in_memory_and_the_file_as_it_was() {
+    let _serial = UNSAVED.lock().await;
     let issuer = Issuer::start("r1").await;
     let before = kubeconfig(&issuer, &jwt(SignedDuration::from_secs(-60), 0), Some("r1"));
     let setup = setup(&before);
     std::fs::write(lock(&setup.file), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
+    let events = twigo_log::capture();
     let refreshed = token(&setup.oidc.credential().await.unwrap());
+    assert!(
+        unsaved(),
+        "the next start would ask to sign in again, which the person should know"
+    );
+    let lines = events.lines();
+    let line = lines
+        .iter()
+        .find(|line| line["fields"]["message"] == "kept the refreshed oidc tokens in memory only")
+        .unwrap_or_else(|| panic!("the write-back's event in {lines:?}"));
+    assert_eq!(line["level"], "ERROR");
     assert_eq!(std::fs::read_to_string(&setup.file).unwrap(), before);
     assert!(lock(&setup.file).exists(), "another writer's lock stays");
     assert_eq!(token(&setup.oidc.credential().await.unwrap()), refreshed);
     assert_eq!(issuer.grants().len(), 1);
+}
+
+#[tokio::test]
+async fn a_refresh_that_is_written_back_takes_back_the_problem_a_held_lock_raised() {
+    let _serial = UNSAVED.lock().await;
+    let issuer = Issuer::start("r1").await;
+    let setup = setup(&kubeconfig(
+        &issuer,
+        &jwt(SignedDuration::from_secs(-60), 0),
+        Some("r1"),
+    ));
+    issuer.issued.lock().unwrap().lifetime = Some(SignedDuration::from_millis(11_500));
+    std::fs::write(lock(&setup.file), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
+    setup.oidc.credential().await.unwrap();
+    assert!(unsaved());
+
+    std::fs::remove_file(lock(&setup.file)).unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    setup.oidc.credential().await.unwrap();
+    assert!(!unsaved());
+    assert!(
+        std::fs::read_to_string(&setup.file)
+            .unwrap()
+            .contains("refresh-token: r3")
+    );
+}
+
+#[tokio::test]
+async fn the_problem_stays_while_any_user_s_tokens_are_unsaved() {
+    let _serial = UNSAVED.lock().await;
+    let first = Issuer::start("r1").await;
+    let second = Issuer::start("r1").await;
+    for issuer in [&first, &second] {
+        issuer.issued.lock().unwrap().lifetime = Some(SignedDuration::from_millis(11_500));
+    }
+    let expired = jwt(SignedDuration::from_secs(-60), 0);
+    let one = setup(&kubeconfig(&first, &expired, Some("r1")));
+    let other_file = tempfile::tempdir().unwrap();
+    let other_path = other_file.path().join("config");
+    std::fs::write(&other_path, kubeconfig(&second, &expired, Some("r1"))).unwrap();
+    let other = one
+        .registry
+        .oidc(Some(other_path.clone()), "dev", entry(&other_path));
+    std::fs::write(lock(&one.file), "").unwrap();
+    std::fs::write(lock(&other_path), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
+    one.oidc.credential().await.unwrap();
+    other.credential().await.unwrap();
+    assert!(unsaved());
+
+    std::fs::remove_file(lock(&one.file)).unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    one.oidc.credential().await.unwrap();
+    assert!(
+        std::fs::read_to_string(&one.file)
+            .unwrap()
+            .contains("refresh-token: r3")
+    );
+    assert!(
+        unsaved(),
+        "the other user's tokens are still in memory only"
+    );
+
+    std::fs::remove_file(lock(&other_path)).unwrap();
+    other.credential().await.unwrap();
+    assert!(!unsaved());
 }
 
 #[tokio::test]
@@ -557,6 +654,35 @@ async fn a_rejected_token_stays_while_the_issuer_refuses_its_refresh() {
         tried,
         "one refresh per rejected token"
     );
+}
+
+#[tokio::test]
+async fn a_refresh_the_issuer_refuses_is_logged_by_its_status_and_not_by_its_reply() {
+    let issuer = Issuer::start("not-the-token").await;
+    issuer.issued.lock().unwrap().form_only = true;
+    let valid = jwt(SignedDuration::from_hours(1), 0);
+    let setup = setup(&kubeconfig(&issuer, &valid, Some("SPENT-refresh")));
+    let events = twigo_log::capture();
+    let used = setup.oidc.credential().await.unwrap();
+    setup.oidc.reject(&used);
+    setup.oidc.credential().await.unwrap();
+
+    let lines = events.lines();
+    let line = lines
+        .iter()
+        .find(|line| {
+            line["fields"]["message"] == "kept the rejected oidc token, since its refresh failed"
+        })
+        .unwrap_or_else(|| panic!("the refresh's event in {lines:?}"));
+    assert_eq!(line["level"], "WARN");
+    assert_eq!(line["fields"]["user"], "dev");
+    assert_eq!(
+        line["fields"]["error"],
+        "oidc: the refresh failed: 400 Bad Request"
+    );
+    let line = line.to_string();
+    assert!(!line.contains("SPENT-refresh"), "{line}");
+    assert!(!line.contains("invalid_grant"), "{line}");
 }
 
 #[tokio::test]

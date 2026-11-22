@@ -50,8 +50,8 @@ use kube::core::{GroupVersionKind, Request, Status};
 use serde_json::{Value, json};
 use twigo_cache::hub::Resource;
 use twigo_ipc::{
-    Affected, ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, BlockReason, ErrorKind,
-    IpcError, OpenedEdit, PreviewId, RequestClass, Resource as Served,
+    Affected, ApplyConflict, ApplyPreviewed, ApplyRequest, ApplyStrategy, BlockReason, ErrorCode,
+    ErrorKind, IpcError, OpenedEdit, PreviewId, RequestClass, Resource as Served,
 };
 use twigo_kube::apply::{
     self, Combined, EDIT_FIELD_MANAGER, Edit, FIELD_MANAGER, Path, Refusal, comparable,
@@ -62,7 +62,7 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{for_view, is_mask};
+use twigo_policy::redact::{for_view, is_mask, whole_tokens_replaced};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
@@ -177,11 +177,11 @@ impl Refused {
                 }
             }
             422 if let Some(strict) = strict_refusal(&status.message) => Self::Other(
-                IpcError::new(ErrorKind::InvalidInput, scrub(strict, secrets)),
+                IpcError::new(ErrorCode::ApplyInvalidEdit, scrub(strict, secrets)),
             ),
             422 if immutable(status) => Self::Immutable(message),
             500 if invalid_body(&status.message) => {
-                Self::Other(IpcError::new(ErrorKind::InvalidInput, message))
+                Self::Other(IpcError::new(ErrorCode::ApplyInvalidEdit, message))
             }
             _ => Self::Other(scrubbed(errors::request(error), secrets)),
         }
@@ -251,9 +251,7 @@ fn scrub(text: &str, secrets: &[String]) -> String {
     } else {
         without_quoted_object(text)
     };
-    secrets
-        .iter()
-        .fold(text, |text, value| whole_tokens_replaced(&text, value))
+    whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
 }
 
 /// `text` with the object of a `patch: Invalid value: "…"` left out.
@@ -280,31 +278,26 @@ fn without_quoted_object(text: &str) -> String {
     text.to_owned()
 }
 
-fn whole_tokens_replaced(text: &str, value: &str) -> String {
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    let bounded_start = value.chars().next().is_some_and(word);
-    let bounded_end = value.chars().next_back().is_some_and(word);
-    let mut replaced = String::with_capacity(text.len());
-    let mut from = 0;
-    for (index, _) in text.match_indices(value) {
-        let end = index + value.len();
-        let joins_word = (bounded_start && text[..index].chars().next_back().is_some_and(word))
-            || (bounded_end && text[end..].chars().next().is_some_and(word));
-        if !joins_word {
-            replaced.push_str(&text[from..index]);
-            replaced.push_str(HIDDEN);
-            from = end;
+/// `error` with its message scrubbed of `secrets`; for a Secret the causes
+/// keep only their reason and field, as each cause's message quotes the
+/// patched object in a spelling no value matches: the object's JSON, HTML
+/// characters escaped, quoted again as a string ([`NewInvalid`] writes a
+/// cause's `ErrorBody()` and the message's `Error()`, which `scrub` cuts
+/// only at `patch: Invalid value: "`).
+///
+/// [`NewInvalid`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apimachinery/pkg/api/errors/errors.go#L284-L312
+fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
+    error.message = scrub(&error.message, secrets);
+    if !secrets.is_empty() {
+        for cause in error
+            .server
+            .iter_mut()
+            .flat_map(|server| &mut server.causes)
+        {
+            cause.message.clear();
         }
     }
-    replaced.push_str(&text[from..]);
-    replaced
-}
-
-fn scrubbed(error: IpcError, secrets: &[String]) -> IpcError {
-    IpcError {
-        message: scrub(&error.message, secrets),
-        ..error
-    }
+    error
 }
 
 /// Every value of a Secret's `data` and `stringData` in `objects`, encoded
@@ -358,7 +351,7 @@ fn refuse_masks(base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
             let opened = base.and_then(|base| base[field].get(key));
             if value.as_str().is_some_and(is_mask) && opened != Some(value) {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ApplyMaskedValue,
                     format!(
                         "{key} still holds a masked value, so Twigo would write the mask: give it a value"
                     ),
@@ -373,7 +366,7 @@ fn refuse_masks(base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
 fn same_object(target: &Target, live: &Value, edited: &Value) -> Result<(), IpcError> {
     let refused = |what: &str, named: &Value, target: String| {
         IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::ApplyWrongTarget,
             format!("the edit names {what} {named}, but it is an edit of {target}"),
         )
     };
@@ -413,14 +406,14 @@ fn manifest_target(
         .find(|resource| resource.gvr.group == group && resource.kind == kind)
         .ok_or_else(|| {
             IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::ApplyKindNotServed,
                 format!("the cluster serves no {kind} in {api_version}"),
             )
         })?;
     let name = edited["metadata"]["name"]
         .as_str()
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| IpcError::new(ErrorKind::InvalidInput, "the manifest names no object"))?
+        .ok_or_else(|| IpcError::new(ErrorCode::ApplyNoObject, "the manifest names no object"))?
         .to_owned();
     let namespace = edited["metadata"]["namespace"].as_str().map(str::to_owned);
     let target = Target::in_context(
@@ -453,7 +446,7 @@ fn collection(target: &Target) -> &str {
 }
 
 fn built(error: kube::core::request::Error) -> IpcError {
-    IpcError::new(ErrorKind::Internal, error.to_string())
+    IpcError::new(ErrorCode::InternalRequest, error.to_string())
 }
 
 fn apply_request(
@@ -675,7 +668,7 @@ fn lists_moved(paths: &[String]) -> ApplyPreviewed {
 /// the webview: a reload would show the same rounded number, so it offers none.
 fn inexact(paths: &[String]) -> IpcError {
     IpcError::new(
-        ErrorKind::InvalidInput,
+        ErrorCode::ApplyIntegerTooLarge,
         format!(
             "{} holds an integer too large for this editor to carry exactly, and this edit sends it whole, so it would change: make this edit with kubectl, which can carry it",
             paths.join(", ")
@@ -753,7 +746,7 @@ pub(crate) async fn preview(
             let gvk = GroupVersionKind::gvk(&group, &version, &kind);
             Some(document.shape(&gvk).ok_or_else(|| {
                 IpcError::new(
-                    ErrorKind::NotFound,
+                    ErrorCode::OpenapiNoKind,
                     format!("the cluster's OpenAPI for {group}/{version} has no kind {kind}"),
                 )
             })?)
@@ -790,7 +783,7 @@ pub(crate) async fn preview(
                     Err(Refusal::Inexact(paths)) => return Err(inexact(&paths)),
                     Err(Refusal::Foreign(foreign)) => {
                         return Err(IpcError::new(
-                            ErrorKind::Conflict,
+                            ErrorCode::ApplyOtherVersion,
                             format!(
                                 "Twigo applied this object at {}, and {} of what it owns there does not exist at {version}: open it at that version to change it, or nothing Twigo owns is lost",
                                 foreign.version,
@@ -904,11 +897,9 @@ async fn previewable(core: &Core, clients: &Clients, target: &Target) -> Result<
             blocked.mode.name()
         ),
     };
-    Err(IpcError {
-        kind: ErrorKind::Permissions,
-        message,
-        blocked: Some(blocked),
-    })
+    let mut refused = IpcError::new(ErrorCode::PolicyBlocked, message);
+    refused.blocked = Some(blocked);
+    Err(refused)
 }
 
 /// The object once more, when only what a status write moves has changed
@@ -1216,7 +1207,12 @@ fn recreation(
 ) -> Result<Prepared, IpcError> {
     let uid = live["metadata"]["uid"]
         .as_str()
-        .ok_or_else(|| IpcError::new(ErrorKind::Internal, format!("{} has no uid", target.name)))?
+        .ok_or_else(|| {
+            IpcError::new(
+                ErrorCode::AnswerUndecodable,
+                format!("{} has no uid", target.name),
+            )
+        })?
         .to_owned();
     let body = apply::for_create(edited, job);
     let writes = vec![
@@ -1562,7 +1558,7 @@ impl Run {
                     }
                     Err(kube::Error::Api(status)) if status.code == 409 => {
                         return Err(IpcError::new(
-                            ErrorKind::Conflict,
+                            ErrorCode::ActionObjectChanged,
                             format!(
                                 "{} changed since the diff, so Twigo applied nothing: {}",
                                 sentence(what),
@@ -1603,7 +1599,7 @@ impl Run {
                 removals_text(&step.removals)
             ))),
             Err(kube::Error::Api(status)) if status.code == 409 => Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionObjectChanged,
                 format!(
                     "{} changed since the diff, so Twigo removed nothing: {}",
                     sentence(what),
@@ -1613,7 +1609,7 @@ impl Run {
             Err(error) => {
                 let failed = scrubbed(errors::request(&error), &step.secrets);
                 Err(IpcError::new(
-                    failed.kind,
+                    failed.code,
                     format!(
                         "The merge patch that removes {} from {what} failed: {}",
                         removals_text(&step.removals),
@@ -1654,7 +1650,7 @@ async fn remove_after_apply(
                 object = get(clients, &target.path).await?;
                 if object["metadata"]["uid"] != uid {
                     return Err(IpcError::new(
-                        ErrorKind::Conflict,
+                        ErrorCode::ActionObjectChanged,
                         "the object was replaced since the apply, so Twigo patched nothing",
                     ));
                 }
@@ -1699,7 +1695,7 @@ impl PatchRun {
         match sent {
             Ok(_) => Ok(Finished::Done(format!("Applied {what}"))),
             Err(kube::Error::Api(status)) if status.code == 409 => Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::ActionObjectChanged,
                 format!(
                     "{} changed since the diff, so Twigo applied nothing: {}",
                     sentence(what),
@@ -1716,7 +1712,7 @@ impl PatchRun {
 fn failed_after_apply(what: &str, removed: &str, secrets: &[String], failed: IpcError) -> IpcError {
     let failed = scrubbed(failed, secrets);
     IpcError::new(
-        failed.kind,
+        failed.code,
         format!(
             "Applied {what}, but the merge patch that removes {removed} failed, so those fields are still there: {}",
             failed.message
@@ -1753,7 +1749,7 @@ impl Recreate {
         let (target, what, step) = (&self.target, &self.what, &self.step);
         if let Err(refused) = can_create(&clients, target, &step.body).await {
             return Err(IpcError::new(
-                refused.kind,
+                refused.code,
                 format!(
                     "{} cannot be created from your edit, so Twigo deleted nothing: {}",
                     sentence(what),
@@ -1780,7 +1776,7 @@ impl Recreate {
             Err(kube::Error::Api(status)) if status.code == 404 => {}
             Err(kube::Error::Api(status)) if status.code == 409 => {
                 return Err(IpcError::new(
-                    ErrorKind::Conflict,
+                    ErrorCode::ActionObjectChanged,
                     format!(
                         "{} was replaced since the diff, so Twigo deleted nothing",
                         sentence(what)
@@ -1795,7 +1791,7 @@ impl Recreate {
                 Err(error) if error.kind == ErrorKind::NotFound => break,
                 Err(error) => {
                     return Err(IpcError::new(
-                        error.kind,
+                        error.code,
                         format!(
                             "Deleted {what}, but Twigo cannot tell whether it is gone, so it created nothing: {}",
                             error.message
@@ -1809,7 +1805,7 @@ impl Recreate {
             }
             tokio::select! {
                 () = progress.stopped() => {
-                    return Ok(Finished::Stopped(format!(
+                    return Ok(Finished::stopped(format!(
                         "Stopped waiting for {what}, which is still being deleted, and created nothing"
                     )));
                 }
@@ -1827,7 +1823,7 @@ impl Recreate {
             Err(error) => {
                 let failed = errors::request(&error);
                 Err(IpcError::new(
-                    failed.kind,
+                    failed.code,
                     format!(
                         "Deleted {what}, but creating it from your edit failed: {}",
                         failed.message
@@ -2184,6 +2180,52 @@ mod tests {
             scrub("no quoted object here", &["x".to_owned()]),
             "no quoted object here"
         );
+    }
+
+    #[test]
+    fn a_secret_s_refusal_keeps_its_causes_reason_and_field_but_never_their_message() {
+        let quoted = r#"{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"line1\\nsec\\\"ret\\u003ctag\\u003e\\u0026end\"},\"type\":\"Opaque\"}"#;
+        let status = |message: String, cause: String| {
+            serde_json::from_value::<Status>(json!({
+                "status": "Failure",
+                "reason": "Invalid",
+                "code": 422,
+                "message": message,
+                "details": { "causes": [{
+                    "reason": "FieldValueInvalid",
+                    "message": cause,
+                    "field": "patch",
+                }] },
+            }))
+            .unwrap()
+        };
+        let refused = status(
+            format!(
+                r#""" is invalid: patch: Invalid value: "{quoted}": illegal base64 data at input byte 0"#
+            ),
+            format!(r#"Invalid value: "{quoted}": illegal base64 data at input byte 0"#),
+        );
+        let secrets = secret_values(&[&json!({
+            "data": { "bad": "@@@" },
+            "stringData": { "k": "line1\nsec\"ret<tag>&end" },
+        })]);
+        let Refused::Other(error) = Refused::of(&kube::Error::Api(Box::new(refused)), &secrets)
+        else {
+            panic!("a 422 that no field names is an ordinary refusal");
+        };
+        assert_eq!(error.code, ErrorCode::ServerInvalid);
+        let server = error.server.as_ref().expect("the server's status stays");
+        assert_eq!(server.reason, "Invalid");
+        assert_eq!(
+            server.causes,
+            [twigo_ipc::ServerCause {
+                reason: "FieldValueInvalid".to_owned(),
+                field: "patch".to_owned(),
+                message: String::new(),
+            }]
+        );
+        let sent = serde_json::to_string(&error).unwrap();
+        assert!(!sent.contains("line1") && !sent.contains("u003c"), "{sent}");
     }
 
     #[test]

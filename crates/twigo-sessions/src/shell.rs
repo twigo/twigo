@@ -17,8 +17,9 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::io::ReaderStream;
-use twigo_ipc::{ErrorKind, IpcError, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, IpcError, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Clients, Waiting};
+use twigo_panic::contain;
 
 use crate::flow::{FRAME_MAX, Flow};
 use connect::{Connect, Kube};
@@ -146,12 +147,12 @@ impl Session {
         let parked = self.parked.lock().expect("shell lock").take();
         let Some(parked) = parked else {
             return Err(IpcError::new(
-                ErrorKind::Conflict,
+                ErrorCode::SessionStarted,
                 "this shell has started already",
             ));
         };
         self.size.send_replace((cols, rows));
-        let task = tokio::spawn(run(parked, send));
+        let task = tokio::spawn(serve(parked, send));
         *self.task.lock().expect("shell lock") = Some(task);
         Ok(())
     }
@@ -189,12 +190,24 @@ pub(crate) async fn abandoned(mut abandoned: watch::Receiver<bool>) {
     let _ = abandoned.wait_for(|abandoned| *abandoned).await;
 }
 
+/// Runs the session; if it panics, it ends `Failed`, and nothing starts it
+/// again.
+async fn serve(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send) {
+    if contain("pod shell", run(parked, &mut send)).await.is_err() {
+        send(Frame::Event(ShellEvent::Ended {
+            end: ShellEnd::Failed {
+                error: IpcError::panicked("this shell"),
+            },
+        }));
+    }
+}
+
 /// The session's life: in the queue, connecting, then running; every step
 /// also ends on a relock or the clients going, and once it connects, on a
 /// change of the network under them. Its socket is on the sessions client,
 /// whose connections are not tracked, so a retirement ends nothing: a new
 /// certificate or a failed probe retires connections it never used.
-async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send + 'static) {
+async fn run(parked: Parked, mut send: impl FnMut(Frame) -> bool + Send) {
     let Parked {
         clients,
         connect,

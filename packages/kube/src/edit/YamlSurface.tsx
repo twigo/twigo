@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import { Eye, TriangleAlert } from "lucide-react";
 import { Banner, Skeleton } from "@twigo/ui";
-import { useChanges } from "@twigo/workbench";
+import { errorOneLine, useChanges } from "@twigo/workbench";
+import { ProblemBanner } from "../ProblemBanner";
+import type { ObjectProblem } from "../viewProblem";
 import { EditActions } from "./actions";
 import { AnswerView, FailedBar } from "./answers";
 import { placementOf } from "./placement";
@@ -26,6 +28,7 @@ export function YamlSurface({
   schemaKind,
   note,
   gone,
+  onReopen,
 }: {
   edits: EditServices;
   uri: string;
@@ -35,7 +38,8 @@ export function YamlSurface({
   statusLocked: boolean;
   schemaKind: Omit<SchemaKind, "space"> | undefined;
   note: string;
-  gone?: { readonly title: string; readonly body: string };
+  gone?: ObjectProblem;
+  onReopen?: (() => void) | undefined;
 }) {
   useChanges(edits.copies.changes);
   useChanges(edits.previews.changes);
@@ -84,15 +88,18 @@ export function YamlSurface({
         <span className="min-w-0 flex-1 truncate text-support">
           {note}
           {loaded?.state === "failed" && (
-            <span title={loaded.message}> · No schema for completion</span>
+            <span title={errorOneLine(loaded.error)}>
+              {" "}
+              · No schema for completion
+            </span>
           )}
         </span>
         <EditActions edits={edits} uri={uri} menus={["edit/toolbar"]} />
       </div>
       {gone && (
-        <Banner tone="warn" icon={TriangleAlert} title={gone.title}>
-          {gone.body} Your edit is kept until you discard it.
-        </Banner>
+        <ProblemBanner problem={gone} onReopen={onReopen}>
+          Your edit is kept until you discard it.
+        </ProblemBanner>
       )}
       {changed && (
         <Banner

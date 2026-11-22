@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ApplyRequest, ObjectBatch, OperationEvent } from "../generated";
 import { IpcError } from "../error";
-import { APPLIED_LAG_MS } from "./edits";
+import { APPLIED_LAG_MS, ENDS_MS } from "./edits";
 import { createMockBackend, type MockScenario } from "./index";
 
 beforeEach(() => {
@@ -172,6 +172,41 @@ async function opened(
     );
   return { manifests, latest: () => manifests()[manifests().length - 1] };
 }
+
+test("objectPanicked ends an open object on an internal error after its manifest came, keeping exists and sending no part again", async () => {
+  const backend = await backendOf("objectPanicked");
+  const batches: ObjectBatch[] = [];
+  const parts = {
+    overview: false,
+    manifest: true,
+    events: false,
+    related: false,
+    usage: false,
+  };
+  const id = await settled(
+    backend.subscribe("object_open", { object: OPENED, parts }, (batch) =>
+      batches.push(batch),
+    ),
+  );
+  await vi.advanceTimersByTimeAsync(ENDS_MS - 100);
+  expect(batches.map(({ status }) => status.state)).toEqual(["ready"]);
+  expect(batches[0]?.manifest).not.toBeNull();
+
+  await vi.advanceTimersByTimeAsync(200);
+  expect(batches[1]).toMatchObject({
+    status: { state: "error", error: { code: "internal.panic" } },
+    exists: true,
+    manifest: null,
+  });
+  await settled(
+    backend.invoke("object_set_parts", {
+      id,
+      parts: { ...parts, events: true },
+    }),
+  );
+  await vi.advanceTimersByTimeAsync(100);
+  expect(batches).toHaveLength(2);
+});
 
 /** Previews `edited` against the object as opened, plans it and runs the plan. */
 async function applyEdit(

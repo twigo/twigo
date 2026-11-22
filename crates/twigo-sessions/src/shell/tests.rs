@@ -13,7 +13,7 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::Status;
 use kube::api::TerminalSize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, SimplexStream, WriteHalf, simplex};
 use tokio::time::advance;
-use twigo_ipc::{ErrorKind, ShellEnd, ShellEvent};
+use twigo_ipc::{ErrorCode, ErrorKind, ShellEnd, ShellEvent};
 use twigo_kube::client::{Actor, Budgets, Clients};
 
 use super::connect::{Connect, Connected};
@@ -462,6 +462,26 @@ async fn its_end_with_the_reader_stopped_drains_the_rest_without_waiting_for_ack
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_shell_that_panics_ends_failed_and_is_not_started_again() {
+    twigo_panic::inject::arm("pod shell", 1);
+    let harness = connecting_with_a_process().await;
+    let Some(ShellEnd::Failed { error }) = harness.ended() else {
+        panic!("not a failure: {:?}", harness.events());
+    };
+    assert_eq!(error.code, ErrorCode::InternalPanic);
+    assert_eq!(harness.events().len(), 1, "nothing before its end");
+    assert_eq!(harness.held(), 0, "its place in the budget is free");
+}
+
+async fn connecting_with_a_process() -> Harness {
+    let (to, _process) = connected(true);
+    let harness = parked(true, Budgets::default(), Ok(to));
+    harness.open(100, 40);
+    settle().await;
+    harness
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_attach_that_ends_with_success_is_detached_and_a_shell_that_does_exited_0() {
     for (join, expected) in [
         (Join::Attach, ShellEnd::Detached),
@@ -900,8 +920,7 @@ async fn a_refusal_from_the_connection_reads_as_its_error() {
     let Some(ShellEnd::Failed { error }) = harness.ended() else {
         panic!("{:?}", harness.events());
     };
-    assert_eq!(error.kind, ErrorKind::Forbidden);
-    assert_eq!(error.message, "pods \"p\" is forbidden");
+    assert_eq!(error.code, ErrorCode::ServerForbidden);
     assert_eq!(harness.held(), 0);
 }
 

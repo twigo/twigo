@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use serde_json::Value;
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, ShellContainers, ShellKind, ShellPod, ShellTarget};
+use twigo_ipc::{ErrorCode, IpcError, ShellContainers, ShellKind, ShellPod, ShellTarget};
 use twigo_policy::friction::Risk;
 use twigo_policy::{Actor, Attributes, Policy};
 use twigo_sessions::shell::{Join, SHELL, Session, Spec};
@@ -89,7 +89,7 @@ fn attach_settings(pod: &Value, container: &str) -> Result<(bool, bool), IpcErro
         })
         .ok_or_else(|| {
             IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::ShellNoContainer,
                 format!("Pod {} has no container {container}", name(pod)),
             )
         })
@@ -236,7 +236,7 @@ fn offered(pod: &Value) -> Result<ShellContainers, IpcError> {
     let phase = pod["status"]["phase"].as_str().unwrap_or_default();
     if matches!(phase, "Succeeded" | "Failed") {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ShellPodNotRunning,
             format!("Pod {} has finished", name(pod)),
         ));
     }
@@ -250,7 +250,7 @@ fn offered(pod: &Value) -> Result<ShellContainers, IpcError> {
     .collect();
     let Some(first) = containers.first().cloned() else {
         return Err(IpcError::new(
-            ErrorKind::Conflict,
+            ErrorCode::ShellPodNotRunning,
             format!("Pod {} has no running container", name(pod)),
         ));
     };
@@ -288,7 +288,7 @@ mod tests {
 
     use jiff::SignedDuration;
     use serde_json::json;
-    use twigo_ipc::{Environment, Mode};
+    use twigo_ipc::{Environment, ErrorKind, Mode};
 
     use super::*;
 
@@ -424,6 +424,56 @@ mod tests {
             .expect("the unlock running out ends it");
         assert_eq!(policy.access("c").mode, Mode::ReadOnly);
         follow.abort();
+    }
+
+    #[tokio::test]
+    async fn an_unlock_running_out_ends_the_wait_and_says_so_though_its_duty_panicked() {
+        twigo_panic::inject::arm("unlock expiry", 1);
+        let dir = tempfile::tempdir().unwrap();
+        let kubeconfig = dir.path().join("config");
+        std::fs::write(
+            &kubeconfig,
+            "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+contexts: [{ name: kind-c, context: { cluster: c } }]
+",
+        )
+        .unwrap();
+        let core = crate::Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        let (_status, followed) = tokio::sync::watch::channel(twigo_env::Status::Resolving);
+        let _duties = core.start_for_tests(followed, Some(kubeconfig));
+        core.catalog.contexts().await;
+        core.policy
+            .set_environment("kind-c", Some(Environment::Production))
+            .unwrap();
+        core.policy
+            .unlock_for("kind-c", SignedDuration::from_millis(200))
+            .unwrap();
+        let mut waiting = relocked(Arc::clone(&core.policy), "kind-c".to_owned(), exec()).boxed();
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "unlocked: it waits"
+        );
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the unlock running out ends it");
+        assert_eq!(
+            twigo_panic::inject::armed("unlock expiry"),
+            0,
+            "the duty panicked"
+        );
+        let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+        assert!(
+            audit
+                .lines()
+                .any(|line| line.contains(r#""event":"relocked""#)
+                    && line.contains(r#""by":"time""#)),
+            "{audit}"
+        );
     }
 
     #[tokio::test]

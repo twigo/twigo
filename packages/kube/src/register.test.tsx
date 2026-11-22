@@ -50,7 +50,11 @@ function held(fail?: string) {
         if (space === fail)
           send({
             state: "failed",
-            error: { kind: "unavailable", message: "no route" },
+            error: {
+              code: "connect.other",
+              kind: "unavailable",
+              message: "no route",
+            },
           });
         else void mock.subscribe(command, request, onMessage);
       });

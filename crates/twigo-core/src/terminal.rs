@@ -20,8 +20,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use futures::future::Either;
 use twigo_ipc::{
-    AnswerKubeconfigOffer, ErrorKind, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
-    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
+    AnswerKubeconfigOffer, ErrorCode, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
+    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEnd, ShellEvent, TerminalKind,
+    TerminalSession,
 };
 use twigo_kube::client::Actor;
 use twigo_kube::kubeconfig::{Names, Reach, Sources};
@@ -29,8 +30,8 @@ use twigo_policy::Policy;
 use twigo_sessions::shell::Frame;
 use twigo_sessions::terminal::{Spec, Terminal};
 
+use crate::Core;
 use crate::proxy::ProxyProcess;
-use crate::{ClientsError, Core};
 use directory::Directory;
 pub(crate) use offers::Offers;
 use offers::Source;
@@ -64,6 +65,16 @@ impl Shell {
         rows: u16,
         send: impl FnMut(Frame) -> bool + Send + 'static,
     ) -> Result<(), IpcError> {
+        let mut send = send;
+        let send = move |frame: Frame| {
+            if let Frame::Event(ShellEvent::Ended {
+                end: ShellEnd::Failed { error },
+            }) = &frame
+            {
+                tracing::warn!(code = %error.code, "a shell ended in error");
+            }
+            send(frame)
+        };
         match self {
             Self::Pod(session) => session.open(cols, rows, send),
             Self::Local(local) => {
@@ -143,9 +154,7 @@ impl Terminals {
     /// Makes every offer anew, as the user's files have changed.
     pub(crate) async fn refresh_offers(&self) {
         let offers = Arc::clone(&self.offers);
-        tokio::task::spawn_blocking(move || offers.refresh())
-            .await
-            .expect("a refresh does not panic");
+        twigo_panic::blocking(move || offers.refresh()).await;
     }
 }
 
@@ -166,13 +175,6 @@ pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
     } else {
         TerminalKind::Kubeconfig
     }
-}
-
-fn written(path: &Path, error: std::io::Error) -> IpcError {
-    IpcError::new(
-        ErrorKind::Internal,
-        format!("could not write {}: {error}", path.display()),
-    )
 }
 
 impl Core {
@@ -200,7 +202,7 @@ impl Core {
         // process, whose proxy follows the mode by itself.
         let contexts = self.catalog.contexts().await;
         let Some(found) = contexts.find(&context) else {
-            return Err(IpcError::from(&ClientsError::NoContext(context)));
+            return Err(crate::errors::unlisted(&context));
         };
         let kind = kind(&self.policy, &context);
         let sources = self
@@ -218,7 +220,8 @@ impl Core {
         });
         let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
         let root = &self.terminals.root;
-        let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
+        let directory =
+            Directory::create(root, made).map_err(|e| crate::errors::unwritten(root, e))?;
         let (proxy, file, kubeconfig) = match kind {
             TerminalKind::Proxy { .. } => {
                 let process = self
@@ -230,14 +233,16 @@ impl Core {
             }
             TerminalKind::Kubeconfig => {
                 let entry = &found.entries.kubeconfig().contexts[0];
-                let file = directory.kubeconfig(entry).map_err(|e| written(root, e))?;
+                let file = directory
+                    .kubeconfig(entry)
+                    .map_err(|e| crate::errors::unwritten(root, e))?;
                 let kubeconfig = std::env::join_paths(
                     std::iter::once(file.as_path())
                         .chain(sources.files().iter().map(PathBuf::as_path)),
                 )
                 .map_err(|error| {
                     IpcError::new(
-                        ErrorKind::InvalidInput,
+                        ErrorCode::TerminalKubeconfigPath,
                         format!("a kubeconfig file's path cannot join KUBECONFIG: {error}"),
                     )
                 })?;
@@ -259,7 +264,7 @@ impl Core {
                     let path = directory.path();
                     directory
                         .write(name, contents)
-                        .map_err(|e| written(path, e))?;
+                        .map_err(|e| crate::errors::unwritten(path, e))?;
                 }
                 (startup.args, startup.env)
             }
@@ -267,7 +272,7 @@ impl Core {
         };
         let chained = kind == TerminalKind::Kubeconfig;
         let (watcher, source) = self
-            .watch_offers(window, &label, &context, &file, sources, chained)
+            .watch_offers(window, &label, &context, &file, sources, chained)?
             .unzip();
         let env =
             environment::environment(&login, &kubeconfig, &startup_env, twigo_env::utf8_locale);
@@ -306,6 +311,8 @@ impl Core {
     /// files give kubectl somewhere to write new entries: the watch, and
     /// the source it offers from, whose session the caller sets. The user's
     /// files follow `file` in its `KUBECONFIG` where it is `chained`.
+    /// Refused where the kubeconfig Twigo wrote does not parse, in words
+    /// that leave out its text.
     fn watch_offers(
         &self,
         window: &str,
@@ -314,18 +321,32 @@ impl Core {
         file: &Path,
         sources: Sources,
         chained: bool,
-    ) -> Option<(Watcher, Arc<Source>)> {
-        let target = sources.target()?.to_owned();
+    ) -> Result<Option<(Watcher, Arc<Source>)>, IpcError> {
+        let Some(target) = sources.target().map(ToOwned::to_owned) else {
+            return Ok(None);
+        };
         let text = match std::fs::read_to_string(file) {
             Ok(text) => text,
             Err(error) => {
-                eprintln!("could not read {}: {error}", file.display());
-                return None;
+                tracing::error!(path = %file.display(), %error, "could not read the terminal's kubeconfig");
+                return Ok(None);
             }
         };
-        let parses = "Twigo writes a kubeconfig that parses";
-        let written = Names::of(&text).expect(parses);
-        let proxied = (!chained).then(|| Reach::of(&text).expect(parses));
+        let unparsable = || {
+            tracing::error!(path = %file.display(), "the kubeconfig Twigo wrote for a terminal does not parse");
+            IpcError::new(
+                ErrorCode::KubeconfigUnparsable,
+                format!(
+                    "the kubeconfig Twigo wrote for this terminal, {}, does not parse",
+                    file.display()
+                ),
+            )
+        };
+        let written = Names::of(&text).map_err(|_| unparsable())?;
+        let proxied = (!chained)
+            .then(|| Reach::of(&text))
+            .transpose()
+            .map_err(|_| unparsable())?;
         let source = Arc::new(Source {
             window: window.into(),
             label: label.into(),
@@ -339,13 +360,10 @@ impl Core {
         });
         let offers = Arc::clone(&self.terminals.offers);
         match watcher::watch(offers, Arc::clone(&source), written, proxied) {
-            Ok(watcher) => Some((watcher, source)),
+            Ok(watcher) => Ok(Some((watcher, source))),
             Err(error) => {
-                eprintln!(
-                    "could not watch {}, so what tools write there is not offered: {error}",
-                    file.display()
-                );
-                None
+                tracing::warn!(path = %file.display(), %error, "could not watch the terminal's kubeconfig, so what tools write there is not offered");
+                Ok(None)
             }
         }
     }
@@ -382,9 +400,7 @@ impl Core {
             return Ok(());
         }
         let (moved, answering) =
-            tokio::task::spawn_blocking(move || (answering.move_entries(), answering))
-                .await
-                .expect("a move does not panic");
+            twigo_panic::blocking(move || (answering.move_entries(), answering)).await;
         offers.moved(answering, moved)
     }
 

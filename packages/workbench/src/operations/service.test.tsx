@@ -1,4 +1,11 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { Trash2 } from "lucide-react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import {
@@ -12,7 +19,7 @@ import {
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
 import { notify, Toaster } from "@twigo/ui";
-import { inWorkbench, testWorkbench } from "../testing";
+import { inWorkbench, testWorkbench, toastWords } from "../testing";
 import { WorkbenchView } from "../WorkbenchView";
 import { COUNTING_DOWN, UNDOABLE, type Outcome } from "./service";
 
@@ -239,7 +246,7 @@ test("a wait shows until the run ends, and a stop asks Rust to stop it", async (
 
 function blocked(source: Blocked["source"]): IpcError {
   return new IpcError(
-    "permissions",
+    "policy.blocked",
     "dev is read-only as Production by default, so Twigo did not send delete pods/web-1 in default",
     {
       context: "dev",
@@ -263,7 +270,7 @@ test("a refused plan runs nothing, and a lock the person may lift offers the unl
   expect(commands(sent)).toEqual(["command_plan"]);
   expect(report).not.toHaveBeenCalled();
   const [message, options] = error.mock.calls[0] ?? [];
-  expect(message).toBe(refused.message);
+  expect(toastWords(message)).toBe(refused.message);
   expect(options?.action?.label).toBe("Unlock for 15 minutes");
 });
 
@@ -289,7 +296,7 @@ test("a policy file's lock is only said, as nothing in Twigo lifts it, and its t
 });
 
 test("a plan that fails for another reason than the gate is failed, not refused, and its toast leads with the space's tile", async () => {
-  const gone = new IpcError("notFound", "no preview 1 waits to apply");
+  const gone = new IpcError("bus.not-waiting", "no preview 1 waits to apply");
   const { report, outcome } = await started(gone, [], true);
   await expect(outcome).resolves.toEqual({ state: "failed" });
   expect(report).not.toHaveBeenCalled();
@@ -298,6 +305,7 @@ test("a plan that fails for another reason than the gate is failed, not refused,
 
 test("a run that fails says so, led by the tile of the space it ran in", async () => {
   const error = {
+    code: "action.object-changed" as const,
     kind: "conflict" as const,
     message: "pod web-1 was replaced",
   };
@@ -310,6 +318,33 @@ test("a run that fails says so, led by the tile of the space it ran in", async (
   await expect(outcome).resolves.toEqual({ state: "failed" });
   expect(report).not.toHaveBeenCalled();
   expect(said("was replaced")).toMatch(/^DEpod web-1 was replaced/);
+});
+
+test("a run that ends in an internal error says it in Twigo's words and offers Report…, which opens the report", async () => {
+  const error = {
+    code: "internal.panic" as const,
+    kind: "internal" as const,
+    message: "Twigo stopped this run on an internal error",
+  };
+  const { workbench, outcome } = await started(
+    plan({ kind: "atOnce" }),
+    [{ state: "failed", error }],
+    true,
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  await expect(outcome).resolves.toEqual({ state: "failed" });
+  expect(said("Twigo hit an internal error")).toMatch(
+    /^DETwigo hit an internal errorinternal\.panicCopy detailsReport…$/,
+  );
+  expect(workbench.problemReport.report).toBeUndefined();
+  const toast = screen
+    .getAllByRole("alert")
+    .find((each) => each.textContent.includes("internal error"));
+  fireEvent.click(
+    within(toast ?? document.body).getByRole("button", { name: "Report…" }),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(20));
+  expect(workbench.problemReport.report).toBeDefined();
 });
 
 test("a second countdown of the same object replaces the first, and ⌘Z cancels only outside a text field", async () => {
@@ -466,7 +501,7 @@ test("an undo's toast goes when it ends, and a refused run leaves it", async () 
   await scaled;
 
   vi.spyOn(backend, "subscribe").mockRejectedValueOnce(
-    new IpcError("conflict", "dev is guarded now"),
+    new IpcError("action.mode-changed", "dev is guarded now"),
   );
   const refused = workbench.operations.run(REQUEST, LOOK);
   await act(() => vi.advanceTimersByTimeAsync(20));
@@ -599,7 +634,7 @@ test("an undo Rust refused leaves the undo to try again", async () => {
   await scaled.outcome;
   const { operations, keys, backend } = scaled.workbench;
   vi.spyOn(backend, "invoke").mockRejectedValueOnce(
-    new IpcError("conflict", "prod-eu is read-only now"),
+    new IpcError("action.mode-changed", "prod-eu is read-only now"),
   );
   await expect(operations.undo("dev")).resolves.toEqual({ state: "failed" });
   expect(keys.lookup(null)(UNDOABLE)).toEqual(["dev"]);
@@ -887,7 +922,9 @@ test("a run that Rust refuses to start fails, led by the tile of the space it wa
     ...backend,
     subscribe(command, request, onMessage) {
       return command === "command_execute"
-        ? Promise.reject(new IpcError("notFound", "no plan 7 waits to run"))
+        ? Promise.reject(
+            new IpcError("bus.not-waiting", "no plan 7 waits to run"),
+          )
         : backend.subscribe(command, request, onMessage);
     },
   };
@@ -1026,7 +1063,7 @@ test("a change that lowers protection asks for the context's name, and a wrong n
     workbench.operations.asking?.confirm("prod-e");
   });
   await expect(outcome).resolves.toEqual({ state: "failed" });
-  expect(error.mock.calls[0]?.[0]).toBe("type prod-eu to confirm");
+  expect(toastWords(error.mock.calls[0]?.[0])).toBe("type prod-eu to confirm");
   expect(workbench.catalog.find("prod-eu")?.access.mode).toBe("read-only");
 });
 

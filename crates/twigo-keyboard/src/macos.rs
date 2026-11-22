@@ -104,7 +104,7 @@ unsafe extern "C-unwind" fn selected_changed(
     let main = MainThread(PhantomData);
     match current(main) {
         Ok(layout) => shared.publish(layout),
-        Err(error) => eprintln!("keeping the previous keyboard layout: {error}"),
+        Err(error) => tracing::warn!(%error, "keeping the previous keyboard layout"),
     }
 }
 

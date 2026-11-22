@@ -13,7 +13,7 @@ use twigo_ipc::{
 use twigo_policy::{Audit, Choices, Metadata, Policy, PolicyFile};
 
 use super::kind;
-use crate::{Core, ShellFrame};
+use crate::{Core, ShellFrame, Started};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -76,7 +76,7 @@ const ARN: &str = "arn:aws:eks:eu-west-1:1:cluster/new";
 
 struct Setup {
     dir: tempfile::TempDir,
-    core: Arc<Core>,
+    core: Started,
     _status: watch::Sender<Status>,
 }
 
@@ -113,10 +113,7 @@ impl Setup {
         .collect();
         core.set_terminal_zdotdir(None);
         let (status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-        tokio::spawn({
-            let core = Arc::clone(&core);
-            async move { core.run(followed, None).await }
-        });
+        let core = core.start_for_tests(followed, None);
         core.catalog.contexts().await;
         for context in ["kind-a", "kind-b"] {
             core.policy
@@ -570,10 +567,7 @@ async fn a_terminal_waits_for_the_login_environment_and_takes_its_kind_after() {
         &dir.path().join("policy.json"),
     );
     let (status, followed) = watch::channel(Status::Resolving);
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(mine)).await }
-    });
+    let _duties = core.start_for_tests(followed, Some(mine));
     core.catalog.contexts().await;
     core.set_terminal_program(PathBuf::from("/bin/sh"), vec!["-c".into(), "exit".into()]);
     let creating = tokio::spawn({

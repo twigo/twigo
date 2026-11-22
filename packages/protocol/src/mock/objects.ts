@@ -12,7 +12,9 @@ import type {
   RelatedObject,
   Usage,
   Value,
+  ViewState,
 } from "../generated";
+import { SHOWS_ROWS } from "../viewState";
 import {
   hash,
   imageOf,
@@ -21,7 +23,12 @@ import {
   type Node,
   type Pod,
 } from "./cluster";
-import { FIRST_CHANGE_MS, NEXT_CHANGE_MS, type MockEdits } from "./edits";
+import {
+  ENDS_MS,
+  FIRST_CHANGE_MS,
+  NEXT_CHANGE_MS,
+  type MockEdits,
+} from "./edits";
 import { headed } from "./header";
 import { cardOf, named } from "./pods";
 import { CRASH_LINE as LAST_LINE } from "./logs";
@@ -104,6 +111,10 @@ export interface EditBinding {
   readonly key: string;
   /** `server`: a colleague edits it; `status`: a controller writes its status. */
   readonly change?: "server" | "status";
+  /** A state that a scenario pins the object in, whatever the cluster says. */
+  readonly status?: ViewState;
+  /** How the subscription ends after `ENDS_MS`: the status says why, and what the object showed stays. */
+  readonly ends?: ViewState;
 }
 
 /**
@@ -140,7 +151,9 @@ export class MockObject {
   /** The last usage that did not wait, which stays until its scope answers again. */
   #kept: Usage | undefined;
   #parts: ObjectParts;
+  readonly #status: ViewState;
   #seq = 0;
+  #ended = false;
 
   constructor(
     query: ObjectQuery,
@@ -178,7 +191,7 @@ export class MockObject {
     const recorded = name === undefined ? undefined : RECORDED[name];
     if (name === undefined || recorded === undefined) {
       throw new IpcError(
-        "notFound",
+        "object.not-listed",
         `the mock backend has no recorded ${resource}`,
       );
     }
@@ -215,11 +228,13 @@ export class MockObject {
     };
     this.#onMessage = onMessage;
     this.#parts = parts;
+    this.#status = binding?.status ?? { state: "ready" };
     this.#read();
     setTimeout(() => {
       this.#send(parts);
     }, 0);
     if (binding) this.#follow(binding);
+    if (binding?.ends) this.#endIn(binding.ends);
     this.#followScrapes();
     if (metrics) {
       this.#stops.push(
@@ -311,6 +326,27 @@ export class MockObject {
     next(FIRST_CHANGE_MS);
   }
 
+  /** Ends the subscription as Rust's last batch does: the status says why, `exists` holds, and no part comes again. */
+  #endIn(ends: ViewState): void {
+    const timer = setTimeout(() => {
+      this.#ended = true;
+      this.#seq += 1;
+      this.#onMessage({
+        seq: this.#seq,
+        status: ends,
+        exists: true,
+        overview: null,
+        manifest: null,
+        events: null,
+        related: null,
+        usage: null,
+      });
+    }, ENDS_MS);
+    this.#stops.push(() => {
+      clearTimeout(timer);
+    });
+  }
+
   /** Stops following and changing. */
   close(): void {
     for (const stop of this.#stops) stop();
@@ -339,7 +375,10 @@ export class MockObject {
       data?: Record<string, string>;
     };
     if (object.kind !== "ConfigMap") {
-      throw new IpcError("forbidden", "only a ConfigMap's values are sent");
+      throw new IpcError(
+        "object.values-withheld",
+        "only a ConfigMap's values are sent",
+      );
     }
     return keys.map((key) => object.data?.[key] ?? null);
   }
@@ -348,11 +387,14 @@ export class MockObject {
   reveal(key: string): { value: string; binary: boolean } {
     const values = VALUES[this.#fixture];
     if (values === undefined) {
-      throw new IpcError("invalidInput", "only a Secret's values are revealed");
+      throw new IpcError(
+        "secret.not-a-secret",
+        "only a Secret's values are revealed",
+      );
     }
     const value = values[key];
     if (value === undefined) {
-      throw new IpcError("notFound", `the Secret has no key ${key}`);
+      throw new IpcError("secret.no-key", `the Secret has no key ${key}`);
     }
     return value;
   }
@@ -366,6 +408,7 @@ export class MockObject {
   }
 
   #send(parts: ObjectParts): void {
+    if (this.#ended) return;
     const usage = parts.usage ? this.#usage() : null;
     if (
       parts.usage &&
@@ -375,15 +418,16 @@ export class MockObject {
       return;
     }
     this.#seq += 1;
+    const shown = SHOWS_ROWS.has(this.#status.state);
     this.#onMessage({
       seq: this.#seq,
-      status: { state: "ready" },
-      exists: true,
-      overview: parts.overview ? this.#overview : null,
-      manifest: parts.manifest ? this.#manifest : null,
-      events: parts.events ? events(this.#overview) : null,
-      related: parts.related ? this.#related : null,
-      usage,
+      status: this.#status,
+      exists: shown,
+      overview: shown && parts.overview ? this.#overview : null,
+      manifest: shown && parts.manifest ? this.#manifest : null,
+      events: shown && parts.events ? events(this.#overview) : null,
+      related: shown && parts.related ? this.#related : null,
+      usage: shown ? usage : null,
     });
   }
 }

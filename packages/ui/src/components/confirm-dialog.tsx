@@ -57,7 +57,7 @@ export interface ConfirmDialogProps {
   readonly children?: ReactNode;
   /** What the person types before a button works. */
   readonly typed?: string;
-  readonly error?: string;
+  readonly error?: ReactNode;
   readonly wide?: boolean;
   readonly busy?: boolean;
   /** How long after it shows, and after the window gains the focus, the choices ignore activation, and while the window has none, so a click meant for what was there before, or the one that brings the window forward, cannot go ahead; declining never waits. */

@@ -20,7 +20,7 @@ use tokio::sync::{oneshot, watch};
 use tokio_util::sync::CancellationToken;
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, ApprovalId,
-    BlockReason, Blocked, Environment, ErrorKind, IpcError, Mode, ModeSource,
+    BlockReason, Blocked, Environment, ErrorCode, IpcError, Mode, ModeSource,
 };
 use twigo_policy::{Actor, Approval, Attributes, Choices, Entry, Policy};
 
@@ -442,13 +442,13 @@ impl Approvals {
         let mut state = self.state();
         let Some(pending) = state.asks.get(&answer.id.0) else {
             return Err(IpcError::new(
-                ErrorKind::NotFound,
+                ErrorCode::ApprovalGone,
                 "the process no longer waits for this answer",
             ));
         };
         if *pending.window != *window {
             return Err(IpcError::new(
-                ErrorKind::Forbidden,
+                ErrorCode::ApprovalOtherWindow,
                 "another window asks this",
             ));
         }
@@ -462,14 +462,14 @@ impl Approvals {
             && answer.typed.as_deref() != Some(ask.context.as_str())
         {
             return Err(IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::ConfirmNameMismatch,
                 format!("type {} to confirm", ask.context),
             ));
         }
         match answer.answer {
             ApprovalAnswer::Once | ApprovalAnswer::Lasting if ask.unmarked => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ApprovalUnmarked,
                     format!(
                         "nobody has said what {} is yet: answer with its type, or deny",
                         ask.context
@@ -478,13 +478,13 @@ impl Approvals {
             }
             ApprovalAnswer::Mark { .. } if !ask.unmarked => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ApprovalMarked,
                     format!("{} is marked already: allow or deny", ask.context),
                 ));
             }
             ApprovalAnswer::Lasting if ask.lasting_minutes.is_none() => {
                 return Err(IpcError::new(
-                    ErrorKind::InvalidInput,
+                    ErrorCode::ApprovalOnceOnly,
                     "this can be allowed only once: only a terminal's writes and exec can be allowed for a while, and never a delete",
                 ));
             }
@@ -579,7 +579,7 @@ impl Approvals {
         drop(state);
         self.audit(audited, "withdrawn");
         IpcError::new(
-            ErrorKind::NotFound,
+            ErrorCode::ApprovalGone,
             "the process no longer waits for this answer",
         )
     }
@@ -829,7 +829,7 @@ impl Drop for Withdraw<'_> {
 
 #[cfg(test)]
 mod tests {
-    use twigo_ipc::RequestClass;
+    use twigo_ipc::{ErrorKind, RequestClass};
 
     use super::*;
 

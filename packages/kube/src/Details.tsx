@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+} from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
 import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
 import { ActionRow, cn, IconButton, PropertyList } from "@twigo/ui";
@@ -22,6 +28,7 @@ import { cellsOf, objectOf, type Selected, type Selection } from "./selection";
 import type { ListServices } from "./services";
 import { isTabular } from "./tabular";
 import { objectUri } from "./uri";
+import { useReopen } from "./useReopen";
 import { useVisible } from "./useVisible";
 import { ViewStatus } from "./ViewStatus";
 
@@ -39,7 +46,12 @@ export const DWELL_MS = 150;
  * state and owner, then the commands of `resource/details`, then the
  * object's views as tabs. Its left edge resizes it.
  */
-export function Details({
+export function Details(props: Omit<ComponentProps<typeof Panel>, "onReopen">) {
+  const [key, reopen] = useReopen();
+  return <Panel key={key} {...props} onReopen={reopen} />;
+}
+
+function Panel({
   uri,
   selected,
   space,
@@ -47,6 +59,7 @@ export function Details({
   docked,
   onOpen,
   onClose,
+  onReopen,
 }: {
   /** The list editor the row is in. */
   uri: string;
@@ -58,6 +71,7 @@ export function Details({
   /** Opens an object's editor beside the list. */
   onOpen: (uri: string) => void;
   onClose: () => void;
+  onReopen: () => void;
 }) {
   const workbench = useWorkbench();
   const { backend, keys, menus, sizes } = workbench;
@@ -271,6 +285,7 @@ export function Details({
             values={values}
             reveal={reveal}
             onOpen={open}
+            onReopen={onReopen}
             onEvents={() => {
               states.setDetailsTab(uri, "events");
             }}
@@ -288,7 +303,12 @@ export function Details({
           />
         ) : (
           <>
-            <ViewStatus status={snapshot.status} what="the object" inline />
+            <ViewStatus
+              status={snapshot.status}
+              what="the object"
+              onRetry={onReopen}
+              inline
+            />
             <Cells selected={selected} uri={uri} selection={selection} />
           </>
         )}

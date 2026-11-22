@@ -323,6 +323,13 @@ export class LogsTabs {
       this.update(uri, { focus: undefined });
   }
 
+  /** Opens the tab's session anew, as a reopened tab does: what it reads and how it shows it stay, the lines do not. */
+  reopen(uri: string): void {
+    const tab = this.get(uri);
+    this.closed(uri);
+    this.restore(uri, tab);
+  }
+
   closed(uri: string): void {
     this.#sessions.get(uri)?.close();
     this.#sessions.delete(uri);

@@ -3,6 +3,7 @@
 //! `table_memory`.
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example hub_memory [namespace]
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use std::sync::Arc;
 

@@ -16,6 +16,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 
+use nix::errno::Errno;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::{Pid, Uid, User, setsid};
 use tokio::io::AsyncReadExt;
@@ -44,9 +45,16 @@ const MAX_PRINTED: usize = 4 << 20;
 /// How much of a failed shell's output a failure keeps.
 const OUTPUT_TAIL: usize = 16 << 10;
 
-/// The environment that child processes get.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The environment that child processes get. Its `Debug` prints the names
+/// of the variables only: the values hold the person's credentials.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ShellEnv(Vars);
+
+impl std::fmt::Debug for ShellEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.0.keys()).finish()
+    }
+}
 
 impl ShellEnv {
     /// Twigo's own environment, for when the login shell's is unknown.
@@ -128,13 +136,24 @@ fn in_utf8(identifier: Option<&str>, exists: impl Fn(&str) -> bool) -> String {
         .unwrap_or_else(|| "en_US.UTF-8".to_owned())
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(thiserror::Error)]
 #[error("{} {reason}", shell.display())]
 pub struct Failure {
     pub shell: PathBuf,
     pub reason: Reason,
-    /// The end of what the shell printed, without the environment.
+    /// The end of what the shell printed, without the environment. Its
+    /// `Debug` leaves it out: a startup file may print a token.
     pub output: String,
+}
+
+impl std::fmt::Debug for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Failure")
+            .field("shell", &self.shell)
+            .field("reason", &self.reason)
+            .field("output", &format_args!("{} bytes", self.output.len()))
+            .finish()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -201,6 +220,34 @@ async fn resolve_with(
         })
 }
 
+/// The process group `child` leads, as its start in a session of its own made
+/// it; none once it has been reaped.
+pub fn group_of(child: &tokio::process::Child) -> Option<Pid> {
+    child
+        .id()
+        .and_then(|id| i32::try_from(id).ok())
+        .map(Pid::from_raw)
+}
+
+/// Kills the process group `child` led, everything it started with it, and
+/// reaps `child`. A group that has ended already is no failure; any other is
+/// said.
+pub async fn kill_and_reap(
+    child: &mut tokio::process::Child,
+    group: Option<Pid>,
+    command: &(impl std::fmt::Display + Sync),
+) {
+    if let Some(group) = group
+        && let Err(error) = killpg(group, Signal::SIGKILL)
+        && error != Errno::ESRCH
+    {
+        tracing::warn!(%command, %error, "could not stop the process group");
+    }
+    if let Err(error) = child.wait().await {
+        tracing::warn!(%command, %error, "could not reap the process");
+    }
+}
+
 async fn run(
     shell: &Path,
     call: &[&OsStr],
@@ -214,10 +261,7 @@ async fn run(
     };
     let (mut child, mut printed) =
         spawn(shell, call).map_err(|error| failure(Reason::Start(error), b""))?;
-    let group = child
-        .id()
-        .and_then(|id| i32::try_from(id).ok())
-        .map(Pid::from_raw);
+    let group = group_of(&child);
 
     let mut buffer = Vec::new();
     let read = async {
@@ -244,14 +288,7 @@ async fn run(
         Ok(Err(reason)) => reason,
         Err(_) => {
             // The shell and everything its startup files left running.
-            if let Some(group) = group
-                && let Err(error) = killpg(group, Signal::SIGKILL)
-            {
-                eprintln!("could not stop {}: {error}", shell.display());
-            }
-            if let Err(error) = child.wait().await {
-                eprintln!("could not reap {}: {error}", shell.display());
-            }
+            kill_and_reap(&mut child, group, &shell.display()).await;
             Reason::Timeout
         }
     };

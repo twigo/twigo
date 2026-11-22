@@ -172,10 +172,7 @@ test("a pod that runs nothing is refused in words, and one that is not there is 
       pod: pending.name,
     }),
   );
-  expect(error.kind).toBe("invalidInput");
-  expect(error.message).toBe(
-    `pod ${pending.name} is ${pending.status}, so it runs no container to open a shell in`,
-  );
+  expect(error.code).toBe("shell.pod-not-running");
   const missing = await refused(
     backend.invoke("shell_containers", {
       space: "kind-local",
@@ -352,7 +349,7 @@ test("exit N ends the session with its code after the output, and Ctrl-D on an e
   const refusedInput = await refused(
     shell.backend.invoke("shell_input", { id: shell.id, data: [97] }),
   );
-  expect(refusedInput.kind).toBe("conflict");
+  expect(refusedInput.code).toBe("subscription.not-found");
 
   const other = await openShell();
   await vi.advanceTimersByTimeAsync(500);
@@ -453,6 +450,32 @@ test("a container with no shell ends in its runtime's words before any output", 
     end: { reason: "noShell" },
   });
   expect(JSON.stringify(ended)).toContain("executable file not found");
+  expect(more).toEqual([]);
+});
+
+test("an exec the API server refuses ends failed with its code and reason before any output", async () => {
+  const shell = await openShell("shellFailed");
+  await vi.advanceTimersByTimeAsync(500);
+  const [connecting, ended, ...more] = shell.messages;
+  expect(connecting).toEqual({ state: "connecting" });
+  expect(ended).toMatchObject({
+    state: "ended",
+    end: {
+      reason: "failed",
+      error: { code: "server.forbidden", server: { reason: "Forbidden" } },
+    },
+  });
+  expect(more).toEqual([]);
+});
+
+test("a shell that ends on an internal error of Twigo's says its code before any output", async () => {
+  const shell = await openShell("shellPanicked");
+  await vi.advanceTimersByTimeAsync(500);
+  const [, ended, ...more] = shell.messages;
+  expect(ended).toMatchObject({
+    state: "ended",
+    end: { reason: "failed", error: { code: "internal.panic" } },
+  });
   expect(more).toEqual([]);
 });
 

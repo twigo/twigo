@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::watch;
-use twigo_ipc::ShellEnvironment;
+use twigo_ipc::{ErrorCode, IpcError, ShellEnvironment};
 
 use crate::{Failure, ShellEnv, login_shell, resolve};
 
@@ -41,7 +41,7 @@ impl Environment {
         let status = match resolve(&self.shell).await {
             Ok(env) => Status::Resolved(Arc::new(env)),
             Err(failure) => {
-                eprintln!("the login shell's environment is unknown: {failure}");
+                tracing::warn!(%failure, "the login shell's environment is unknown");
                 Status::Failed {
                     env: Arc::new(ShellEnv::from_process()),
                     failure: Arc::new(failure),
@@ -77,7 +77,7 @@ impl From<&Status> for ShellEnvironment {
             Status::Resolved(_) => Self::Resolved,
             Status::Failed { failure, .. } => Self::Failed {
                 shell: failure.shell.display().to_string(),
-                reason: failure.reason.to_string(),
+                reason: IpcError::new(ErrorCode::EnvironmentUnresolved, failure.reason.to_string()),
                 output: failure.output.clone(),
             },
         }

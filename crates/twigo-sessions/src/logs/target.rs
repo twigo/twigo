@@ -3,7 +3,7 @@
 //! CronJob's through its Jobs.
 
 use twigo_cache::hub::Resource;
-use twigo_ipc::{ErrorKind, IpcError, LogTarget};
+use twigo_ipc::{ErrorCode, IpcError, LogTarget};
 
 use crate::pods::{Reach, Target, resource_name};
 
@@ -27,7 +27,7 @@ pub fn target(target: &LogTarget) -> Result<Target, IpcError> {
         .map(|(_, _, reach)| *reach)
         .ok_or_else(|| {
             IpcError::new(
-                ErrorKind::InvalidInput,
+                ErrorCode::LogsUnsupportedTarget,
                 format!(
                     "{} has no logs: a logs tab follows a pod, or the pods of a workload",
                     resource_name(&gvr.group, &gvr.resource)
@@ -36,7 +36,7 @@ pub fn target(target: &LogTarget) -> Result<Target, IpcError> {
         })?;
     if target.namespace.is_empty() {
         return Err(IpcError::new(
-            ErrorKind::InvalidInput,
+            ErrorCode::InternalRequest,
             format!("{} names no namespace", target.name),
         ));
     }
@@ -78,12 +78,7 @@ mod tests {
             assert!(target(group, resource).is_ok(), "{resource}");
         }
         let refused = target("", "services").unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::InvalidInput);
-        assert!(
-            refused.message.starts_with("services has no logs"),
-            "{}",
-            refused.message
-        );
+        assert_eq!(refused.code, ErrorCode::LogsUnsupportedTarget);
         assert!(target("apps", "pods").is_err());
     }
 
@@ -100,7 +95,6 @@ mod tests {
             name: "api".to_owned(),
         })
         .unwrap_err();
-        assert_eq!(refused.kind, ErrorKind::InvalidInput);
-        assert_eq!(refused.message, "api names no namespace");
+        assert_eq!(refused.code, ErrorCode::InternalRequest);
     }
 }

@@ -6,7 +6,7 @@ import type {
   KeyboardLayout,
 } from "@twigo/protocol";
 import { createMockBackend } from "@twigo/protocol/mock";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { createWorkbench, type Workbench } from "./services";
 
 const US: KeyboardLayout = { id: "us", keys: {} };
@@ -76,4 +76,16 @@ test("the window follows the approval broker from startup", async () => {
   const workbench = await act(() => createWorkbench(backend, "mac"));
   send({ event: "asked", ask });
   expect(workbench.approvals.asks).toEqual([ask]);
+});
+
+test("the window follows the problems of Twigo's own files from the start", async () => {
+  const workbench = await act(() =>
+    createWorkbench(createMockBackend("problems"), "mac"),
+  );
+  await vi.waitFor(() => {
+    expect(workbench.problems.list.map(({ code }) => code)).toEqual([
+      "state.set-aside",
+      "audit.off",
+    ]);
+  });
 });

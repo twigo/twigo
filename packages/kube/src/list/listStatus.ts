@@ -6,6 +6,7 @@ import {
   type ViewState,
 } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
+import { caused } from "./errorWords";
 
 export interface ListStatus {
   readonly title: string;
@@ -49,16 +50,23 @@ export function stateLabel(status: ViewState): string | undefined {
     case "queued":
       return "Waiting for a stream slot";
     case "connecting":
-      return "Connecting…";
+      return status.cause ? `Connecting${caused(status.cause)}` : "Connecting…";
     case "syncing":
       return `Loading · ${status.loaded.toLocaleString("en")}`;
     case "relisting":
       return "Relisting…";
     case "stale":
-      return "No updates · reconnecting";
+      return `No updates · reconnecting${caused(status.cause)}`;
     default:
       return undefined;
   }
+}
+
+/** The line over a list's skeleton, once its cluster has said why it does not answer; none while it only takes its time. */
+export function waitingLine(status: ViewState): string | undefined {
+  return status.state === "connecting" && status.cause
+    ? stateLabel(status)
+    : undefined;
 }
 
 /** What shows of a list is the same, so that a batch that changes only a measure repaints neither the status bar nor the explorer. */

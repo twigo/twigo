@@ -15,6 +15,7 @@
     "allow-shell-environment-watch",
     "allow-shell-environment-retry",
     "allow-contexts-watch",
+    "allow-problems-watch",
     "allow-context-relock",
     "allow-command-plan",
     "allow-command-execute",
@@ -67,6 +68,12 @@
     "allow-forward-resume",
     "allow-forward-remove",
     "allow-forwards-watch",
-    "allow-url-open"
+    "allow-url-open",
+    "allow-diagnostics-log",
+    "allow-log-reveal",
+    "allow-log-level-set",
+    "allow-report-problem",
+    "allow-report-open-issue",
+    "allow-report-save"
   ]
 }

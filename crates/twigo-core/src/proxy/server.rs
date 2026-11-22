@@ -13,6 +13,8 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
+use twigo_log::Repeats;
+use twigo_panic::contain;
 
 use super::handle::handle;
 use super::tls::Tls;
@@ -38,7 +40,23 @@ pub(super) async fn bind(core: Weak<Core>) -> std::io::Result<Endpoint> {
     let tls = Tls::new()?;
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let address = listener.local_addr()?;
-    tokio::spawn(accept(listener, tls.acceptor, address, core));
+    // Its listener goes with it, and the address is in every proxy
+    // kubeconfig: nothing starts it again.
+    tokio::spawn({
+        let owner = core.clone();
+        async move {
+            if contain(
+                "policy proxy",
+                accept(listener, tls.acceptor, address, core),
+            )
+            .await
+            .is_err()
+                && let Some(owner) = owner.upgrade()
+            {
+                owner.reporter.fatal("policy proxy");
+            }
+        }
+    });
     Ok(Endpoint {
         address,
         ca: tls.ca,
@@ -53,11 +71,22 @@ async fn accept(listener: TcpListener, tls: TlsAcceptor, address: SocketAddr, co
         .timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT)
         .max_header_size(MAX_HEADER_SIZE);
+    let mut failures = Repeats::default();
     loop {
         let stream = match listener.accept().await {
-            Ok((stream, _)) => stream,
+            Ok((stream, _)) => {
+                if let Some(count) = failures.ended() {
+                    tracing::warn!(
+                        count,
+                        "the policy proxy accepts connections again, after more failures"
+                    );
+                }
+                stream
+            }
             Err(error) => {
-                eprintln!("the policy proxy could not accept a connection: {error}");
+                if failures.failed() {
+                    tracing::warn!(%error, "the policy proxy could not accept a connection");
+                }
                 tokio::time::sleep(ACCEPT_PAUSE).await;
                 continue;
             }

@@ -112,7 +112,7 @@ export class ObjectView {
   id(): Promise<SubscriptionId> {
     return this.#opened.then((id) => {
       if (this.#closed)
-        throw new IpcError("unavailable", "the object is closed");
+        throw new IpcError("subscription.not-found", "the object is closed");
       return id;
     });
   }

@@ -4,19 +4,20 @@ use std::fmt::Write;
 
 use ts_rs::{Config, TS, TypeVisitor};
 
-use crate::ShellEvent;
 use crate::command::{
     AccessReview, ApplyPreview, ApprovalAnswerSend, ApprovalsWatch, ClusterVersionGet, Command,
     CommandCancel, CommandExecute, CommandPlan, ContextAuthWatch, ContextRelock, ContextSignIn,
-    ContextSignInCancel, ContextsWatch, ExecReviewGet, ExecTrust, ForwardPortsGet, ForwardRemove,
-    ForwardResume, ForwardStart, ForwardStop, ForwardsWatch, KeyboardLayoutWatch,
+    ContextSignInCancel, ContextsWatch, DiagnosticsLog, ExecReviewGet, ExecTrust, ForwardPortsGet,
+    ForwardRemove, ForwardResume, ForwardStart, ForwardStop, ForwardsWatch, KeyboardLayoutWatch,
     KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe,
-    ListUnsubscribe, LogsAck, LogsClose, LogsDownload, LogsOpen, LogsSetSource, LogsSetView,
-    LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen, ObjectSetParts,
-    ObjectValues, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet,
+    ListUnsubscribe, LogLevelSet, LogReveal, LogsAck, LogsClose, LogsDownload, LogsOpen,
+    LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen,
+    ObjectSetParts, ObjectValues, ProblemsWatch, ReportOpenIssue, ReportProblem, ReportSave,
+    ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose, ShellContainersGet,
     ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput, ShellSetSize,
     SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
 };
+use crate::{ErrorCode, ShellEvent};
 
 /// The TypeScript module of `packages/protocol`: every type the commands
 /// reach, and the `Commands` table that types its invoke client.
@@ -75,6 +76,7 @@ pub fn typescript() -> String {
     module.command::<KeyboardLayoutWatch>();
     module.command::<StateLoad>();
     module.command::<StateSet>();
+    module.command::<ProblemsWatch>();
     module.command::<ShellEnvironmentWatch>();
     module.command::<ShellEnvironmentRetry>();
     module.command::<ContextAuthWatch>();
@@ -85,6 +87,12 @@ pub fn typescript() -> String {
     module.command::<ApprovalsWatch>();
     module.command::<ApprovalAnswerSend>();
     module.command::<UrlOpen>();
+    module.command::<DiagnosticsLog>();
+    module.command::<LogReveal>();
+    module.command::<LogLevelSet>();
+    module.command::<ReportProblem>();
+    module.command::<ReportOpenIssue>();
+    module.command::<ReportSave>();
 
     let mut out = String::from(
         "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n",
@@ -96,6 +104,25 @@ pub fn typescript() -> String {
     }
     out.push_str("\nexport type Commands = {\n");
     out.push_str(&module.commands);
+    out.push_str("};\n");
+    out
+}
+
+/// The kind of every error code, as the table the mock reads beside the
+/// generated module, so that it cannot disagree with `ErrorCode::kind`.
+pub fn error_kinds() -> String {
+    let mut out = String::from(
+        "// Generated from crates/twigo-ipc: TWIGO_UPDATE_TYPESCRIPT=1 cargo test -p twigo-ipc --test typescript\n\n",
+    );
+    out.push_str("import type { ErrorCode, ErrorKind } from \"./generated\";\n\n");
+    out.push_str("export const ERROR_KINDS: Record<ErrorCode, ErrorKind> = {\n");
+    for code in ErrorCode::ALL {
+        let (wire, kind) = (
+            serde_json::to_string(code).expect("a code serializes"),
+            serde_json::to_string(&code.kind()).expect("a kind serializes"),
+        );
+        writeln!(out, "  {wire}: {kind},").expect("writing to a String cannot fail");
+    }
     out.push_str("};\n");
     out
 }

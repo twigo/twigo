@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use kube::config::{Kubeconfig, KubeconfigError, NamedAuthInfo, NamedCluster, NamedContext};
 use serde::Deserialize;
-use twigo_ipc::{ContextColor, Environment};
+use twigo_ipc::{CatalogFailure, ContextColor, Environment, ErrorCode, IpcError};
 
 use crate::credentials::{Exec, ExecError, OidcEntry, OidcError, token_or_basic};
 
@@ -120,7 +120,7 @@ impl Sources {
                     continue;
                 }
                 Err(error) => {
-                    failures.push(FileFailure::new(file, &error));
+                    failures.push(self.failure(file, &error));
                     continue;
                 }
             };
@@ -137,7 +137,7 @@ impl Sources {
                     next
                 }
                 Err(error) => {
-                    failures.push(FileFailure::new(file, &error));
+                    failures.push(self.failure(file, &error));
                     continue;
                 }
             };
@@ -154,13 +154,50 @@ impl Sources {
         Catalog { contexts, failures }
     }
 
+    /// What a file's failure says to the person: the file by its name, and
+    /// why in words that quote nothing of it, since a parse error renders the
+    /// lines around the fault, and names the value it found where it expected
+    /// a variant, a token among them: a parse failure says its place only.
+    fn failure(&self, file: &Path, error: &KubeconfigError) -> CatalogFailure {
+        let (code, message) = match error {
+            KubeconfigError::ReadConfig(error, _) => (
+                ErrorCode::KubeconfigUnreadable,
+                format!("The file cannot be read: {}", error.kind()),
+            ),
+            KubeconfigError::Parse(error) => (
+                ErrorCode::KubeconfigUnparsable,
+                match error.location() {
+                    Some(at) => format!(
+                        "The file cannot be parsed at line {}, column {}",
+                        at.line(),
+                        at.column()
+                    ),
+                    None => "The file cannot be parsed".to_owned(),
+                },
+            ),
+            error => (
+                ErrorCode::KubeconfigUnmergeable,
+                format!("The file cannot be merged with the others: {error}"),
+            ),
+        };
+        CatalogFailure {
+            source: self.named(file),
+            error: IpcError::new(code, message),
+        }
+    }
+
     /// A file as a person names it: under the home directory, from `~`.
     pub fn named(&self, file: &Path) -> String {
-        match self.home.as_deref().map(|home| file.strip_prefix(home)) {
-            Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
-            Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
-            _ => file.display().to_string(),
-        }
+        named(self.home.as_deref(), file)
+    }
+}
+
+/// A file as a person names it: under `home`, from `~`.
+pub fn named(home: Option<&Path>, file: &Path) -> String {
+    match home.map(|home| file.strip_prefix(home)) {
+        Some(Ok(rest)) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(Ok(rest)) => format!("~{}{}", std::path::MAIN_SEPARATOR, rest.display()),
+        _ => file.display().to_string(),
     }
 }
 
@@ -176,9 +213,26 @@ fn is_test_context(name: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Catalog {
     pub contexts: Vec<Context>,
-    /// Files that exist but could not be read or merged; their contexts are
-    /// missing.
-    pub failures: Vec<FileFailure>,
+    /// Files that exist but could not be read or merged, whose contexts are
+    /// missing, and files whose changes go unseen.
+    pub failures: Vec<CatalogFailure>,
+}
+
+impl Catalog {
+    /// The catalog with a failure for each of `files`, whose changes go
+    /// unseen for the reason it names.
+    pub fn unwatched(mut self, sources: &Sources, files: &[(PathBuf, String)]) -> Self {
+        for (file, why) in files {
+            self.failures.push(CatalogFailure {
+                source: sources.named(file),
+                error: IpcError::new(
+                    ErrorCode::KubeconfigUnwatched,
+                    format!("Changes to the file go unseen: {why}"),
+                ),
+            });
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +347,19 @@ impl Entries {
         Kubeconfig::clone(&self.config)
     }
 
+    /// The names of the cluster and the user entries it points at.
+    pub fn names(&self) -> (Option<&str>, Option<&str>) {
+        let entry = self
+            .config
+            .contexts
+            .first()
+            .and_then(|named| named.context.as_ref());
+        (
+            entry.map(|entry| entry.cluster.as_str()),
+            entry.and_then(|entry| entry.user.as_deref()),
+        )
+    }
+
     pub fn proxy_url(&self) -> Option<&str> {
         let cluster = self.config.clusters.first()?.cluster.as_ref()?;
         cluster.proxy_url.as_deref()
@@ -379,18 +446,14 @@ pub enum Problem {
     MissingUser(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileFailure {
-    pub file: PathBuf,
-    pub message: String,
-}
-
-impl FileFailure {
-    fn new(file: &Path, error: &KubeconfigError) -> Self {
-        Self {
-            file: file.to_owned(),
-            message: error.to_string(),
-        }
+impl From<&Problem> for IpcError {
+    fn from(problem: &Problem) -> Self {
+        let code = match problem {
+            Problem::NoContext => ErrorCode::ContextEmpty,
+            Problem::MissingCluster(_) => ErrorCode::ContextMissingCluster,
+            Problem::MissingUser(_) => ErrorCode::ContextMissingUser,
+        };
+        IpcError::new(code, problem.to_string())
     }
 }
 

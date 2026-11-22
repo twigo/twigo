@@ -18,6 +18,7 @@ import {
 import type { Backend, ListBatch, ListQuery } from "@twigo/protocol";
 import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { StateStore, Workbench, WorkbenchView } from "@twigo/workbench";
+import { carriesCode } from "@twigo/workbench/testing";
 import { byHealth } from "../columns";
 import { PODS } from "../kinds";
 import { registerKube } from "../register";
@@ -235,12 +236,31 @@ test("a list the credentials may not read shows – and why, never 0", async () 
   await home("live");
   await settle(30);
   const nodes = tile("Nodes");
-  expect(nodes?.textContent).toBe(
-    "Nodes–These credentials may not list nodes.",
-  );
-  expect(nodes?.closest("button")).toBeNull();
+  if (!nodes) throw new Error("no Nodes tile");
+  expect(nodes.textContent).toContain("Nodes–You may not list nodes.");
+  expect(carriesCode(nodes, "server.forbidden")).toBe(true);
+  expect(nodes.closest("button")).toBeNull();
   expect(tile("Pods")?.textContent).toMatch(/^Pods5,000/);
   expect(screen.getByText("Kubernetes v1.33.4")).toBeTruthy();
+});
+
+test("a list that Twigo's own code stopped says so in its tile, with its code, Report… and Reopen, which counts again", async () => {
+  const { workbench, lists } = await home("listPanicked");
+  const nodes = tile("Nodes");
+  if (!nodes) throw new Error("no Nodes tile");
+  expect(nodes.textContent).toContain(
+    "Twigo hit an internal error. This view stopped.",
+  );
+  expect(carriesCode(nodes, "internal.panic")).toBe(true);
+  const execute = vi.spyOn(workbench.commands, "execute");
+  fireEvent.click(within(nodes).getByRole("button", { name: "Report…" }));
+  expect(execute.mock.calls.map(([command]) => command)).toEqual([
+    "workbench.action.reportProblem",
+  ]);
+  const before = lists.length;
+  fireEvent.click(within(nodes).getByRole("button", { name: "Reopen" }));
+  await settle();
+  expect(lists.length).toBeGreaterThan(before);
 });
 
 test("the home leaves when an editor opens and comes back when the last closes", async () => {

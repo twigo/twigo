@@ -73,9 +73,6 @@ test.each([
   ["syncing", "Loading · 1,850", "Syncing"],
   ["stale", "No updates · reconnecting", "Reconnecting"],
   ["relisting", "v1.33.4", "Connected"],
-  ["forbidden", "Forbidden", "Forbidden"],
-  ["unauthorized", "Unauthorized", "Unauthorized"],
-  ["error", "Unreachable", "Unreachable"],
 ] as const)(
   "a %s list's cluster entry reads %s",
   async (scenario, text, connection) => {
@@ -85,6 +82,59 @@ test.each([
     );
   },
 );
+
+test.each([
+  ["forbidden", "Forbidden", "You may not list pods."],
+  [
+    "unauthorized",
+    "Unauthorized",
+    "The cluster does not accept the credentials.",
+  ],
+] as const)(
+  "a %s list's cluster entry reads %s, and its tooltip carries the refusal's message",
+  async (scenario, text, message) => {
+    await openList(createMockBackend(scenario));
+    const title = entry(text)?.getAttribute("title") ?? "";
+    expect(title.split("\n")[0]).toBe(`${text} · Kubernetes v1.33.4`);
+    expect(title).toContain(message);
+  },
+);
+
+test("a part that cannot connect names its cause in the parts' tooltip", () => {
+  const cause = {
+    code: "connect.certificate",
+    kind: "unavailable",
+    message: "The server's certificate is not trusted",
+  } as const;
+  const line = partsLine({
+    count: 2,
+    unready: [
+      {
+        part: { kind: "namespace", name: "team-a" },
+        state: { state: "connecting", cause },
+        shown: false,
+      },
+    ],
+    omitted: 0,
+  });
+  expect(line?.tooltip).toBe("team-a: connecting · certificate not trusted");
+
+  const broken = partsLine({
+    count: 2,
+    unready: [
+      {
+        part: { kind: "namespace", name: "team-c" },
+        state: {
+          state: "stale",
+          cause: { ...cause, code: "connect.lost", message: "lost" },
+        },
+        shown: false,
+      },
+    ],
+    omitted: 0,
+  });
+  expect(broken?.tooltip).toBe("team-c: connecting · connection lost");
+});
 
 test("the status bar counts the active list's rows", async () => {
   await openList();
@@ -238,19 +288,23 @@ test.each([
     of22(part("team-b", FORBIDDEN)),
     "Forbidden · 1 of 22 namespaces",
     "error",
-    "May not watch pods in team-b",
+    "team-b: You may not watch pods. · server.forbidden",
   ],
   [
     "a part in error",
     of22(
       part("team-b", {
         state: "error",
-        error: { kind: "unavailable", message: "connection refused" },
+        error: {
+          code: "connect.other",
+          kind: "unavailable",
+          message: "connection refused",
+        },
       }),
     ),
     "Unreachable · 1 of 22 namespaces",
     "error",
-    "team-b: connection refused",
+    "team-b: connection refused · connect.other",
   ],
   [
     "parts that wait for a stream with no rows",
@@ -343,7 +397,7 @@ test("several kinds of trouble: the worst leads and the tooltip lists the rest, 
     text: "Forbidden · 2 of 22 namespaces",
     tone: "error",
     tooltip: [
-      "May not watch pods in team-b, team-d",
+      "team-b, team-d: You may not watch pods. · server.forbidden",
       "team-x: no rows yet",
       "team-c: no updates, reconnecting",
     ].join("\n"),
@@ -376,7 +430,7 @@ test("a list that has the rows of one namespace says the others are refused, in 
   await act(() => vi.advanceTimersByTimeAsync(1500));
   const forbidden = entry("Forbidden · 2 of 3 namespaces");
   expect(forbidden?.getAttribute("title")).toBe(
-    "May not watch pods in auth, payments\nKubernetes v1.33.4",
+    "auth, payments: You may not watch pods. · server.forbidden\nKubernetes v1.33.4",
   );
   expect(screen.queryByText("Access denied")).toBeNull();
   expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
@@ -396,7 +450,7 @@ test("a list in which every namespace is refused is replaced by the denial", asy
   expect(screen.getByText("Access denied")).toBeTruthy();
   expect(
     entry("Forbidden · 2 of 2 namespaces")?.getAttribute("title"),
-  ).toContain("May not watch pods in auth, payments");
+  ).toContain("auth, payments: You may not watch pods. · server.forbidden");
 });
 
 test("a list whose last namespaces wait for a stream shows the rows it has and says so", async () => {

@@ -1,4 +1,6 @@
+import { TriangleAlert } from "lucide-react";
 import * as v from "valibot";
+import type { CatalogFailure } from "@twigo/protocol";
 import { fuzzyMatch } from "@twigo/ui";
 import type { Workbench } from "../services";
 import type { QuickAccessProvider, QuickPickItem } from "./registry";
@@ -170,6 +172,7 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
       for (const context of catalog.list ?? []) {
         if (own.has(context.name)) continue;
         const server = hostOf(context.server);
+        const { problem } = context;
         files.set(context.source, [
           ...(files.get(context.source) ?? []),
           {
@@ -177,11 +180,16 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
             label: context.name,
             tile: { name: context.name, color: colors.of(context.name) },
             ...(server && { description: server }),
+            ...(problem && {
+              code: problem.code,
+              state: { tone: "warn", label: problem.message },
+            }),
             group: context.source,
           },
         ]);
       }
-      return [open, ...files.values()].flatMap((section) =>
+      const failed = catalog.failures.map((failure) => [failedRow(failure)]);
+      return [open, ...files.values(), ...failed].flatMap((section) =>
         filtered(section, filter),
       );
     },
@@ -192,6 +200,19 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
       }
       await spaces.open(item.id.slice("context:".length));
     },
+  };
+}
+
+/** A kubeconfig file that failed, as a row that cannot be chosen: its words and its code, under the file's name. */
+function failedRow({ source, error }: CatalogFailure): QuickPickItem {
+  return {
+    id: `kubeconfig:${source}`,
+    label: error.message,
+    code: error.code,
+    icon: TriangleAlert,
+    iconTone: "warn",
+    group: source,
+    disabled: true,
   };
 }
 

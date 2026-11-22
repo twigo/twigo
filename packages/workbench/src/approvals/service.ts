@@ -6,6 +6,7 @@ import type {
   ApprovalEvent,
   ApprovalId,
   Backend,
+  IpcError,
 } from "@twigo/protocol";
 import { toIpcError } from "@twigo/protocol";
 import { notify } from "@twigo/ui";
@@ -60,7 +61,7 @@ export class Approvals {
   #details: ApprovalDetails | undefined;
   /** The ask whose answer is on its way, which nothing else answers meanwhile. */
   #answering: ApprovalId | undefined;
-  #failure: string | undefined;
+  #failure: IpcError | undefined;
 
   /** `covered` says whether a plan's confirmation or the question of what a context is is open, which the asks wait behind. */
   constructor(
@@ -82,7 +83,7 @@ export class Approvals {
     return this.#answering !== undefined;
   }
 
-  get failure(): string | undefined {
+  get failure(): IpcError | undefined {
     return this.#failure;
   }
 
@@ -134,7 +135,7 @@ export class Approvals {
       this.#asks = this.#asks.filter(({ id }) => id !== ask.id);
     } catch (error) {
       if (this.#asks.some(({ id }) => id === ask.id)) {
-        this.#failure = toIpcError(error).message;
+        this.#failure = toIpcError(error);
       } else {
         notify.warning(
           `${ask.process} no longer asks to ${describeAsk(ask)}, so your answer did not reach it`,

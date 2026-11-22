@@ -3,7 +3,7 @@
 //! or the login shell's proxy variables change, which retires the
 //! connections of the clients they replace.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 use kube::Config;
@@ -57,6 +57,7 @@ struct Built {
     fingerprint: Fingerprint,
     env: ProxyEnv,
     clients: Arc<Clients>,
+    version: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -126,6 +127,7 @@ impl Connections {
             fingerprint: context.fingerprint,
             env: env.clone(),
             clients: Arc::clone(&clients),
+            version: None,
         });
         drop(latest);
         if let Some(replaced) = replaced {
@@ -134,6 +136,43 @@ impl Connections {
             replaced.clients.connections().abandon();
         }
         Ok((clients, true))
+    }
+
+    /// Keeps the version a cluster said through `clients`, unless they are no
+    /// longer the context's current ones, which may reach another cluster.
+    pub fn note_version(&self, context: &str, clients: &Arc<Clients>, version: &str) {
+        let slot = self
+            .contexts
+            .lock()
+            .expect("connections lock")
+            .get(context)
+            .cloned();
+        let mut built = slot
+            .as_ref()
+            .map(|slot| slot.built.lock().expect("slot lock"));
+        if let Some(built) = built
+            .as_mut()
+            .and_then(|built| built.as_mut())
+            .filter(|built| Arc::ptr_eq(&built.clients, clients))
+        {
+            built.version = Some(version.to_owned());
+        }
+    }
+
+    /// The versions the clusters of the current clients said, each once.
+    pub fn versions(&self) -> BTreeSet<String> {
+        let contexts = self.contexts.lock().expect("connections lock");
+        contexts
+            .values()
+            .filter_map(|slot| {
+                slot.built
+                    .lock()
+                    .expect("slot lock")
+                    .as_ref()?
+                    .version
+                    .clone()
+            })
+            .collect()
     }
 
     /// Follows what the sources list now, by context and fingerprint:
@@ -195,10 +234,15 @@ impl Connections {
     /// Retires the connections of every context, as on wake from sleep, and
     /// tells their sessions that the network changed.
     pub fn wake(&self) {
-        for (name, clients) in self.built() {
+        let built = self.built();
+        for (name, clients) in &built {
             clients.connections().wake();
-            eprintln!("woke from sleep: retired the connections of {name}");
+            tracing::debug!(context = %name, "retired the connections after a wake from sleep");
         }
+        tracing::info!(
+            contexts = built.len(),
+            "woke from sleep, so the connections were retired"
+        );
     }
 
     /// Retires the connections of each context whose route moved, as after
@@ -206,7 +250,7 @@ impl Connections {
     pub fn retire_moved(&self) {
         for (name, clients) in self.built() {
             if clients.connections().retire_moved() {
-                eprintln!("the route to {name} moved: retired its connections");
+                tracing::info!(context = %name, "the route moved, so the connections were retired");
             }
         }
     }
@@ -362,6 +406,60 @@ contexts:
         );
         assert!(built(&after).await, "the context's new ones");
         assert!(!built(&after).await);
+    }
+
+    #[tokio::test]
+    async fn a_version_is_kept_only_for_the_clients_that_are_current() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config"), KUBECONFIG).unwrap();
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let connections = Connections::default();
+        let env = ProxyEnv::default();
+        let before = load(dir.path());
+        let clients = |catalog: &kubeconfig::Catalog, name: &str| {
+            let context = find(catalog, name).clone();
+            let (connections, env) = (&connections, env.clone());
+            async move {
+                connections
+                    .clients(&context, &env, None, Gate::unrestricted())
+                    .await
+                    .unwrap()
+                    .0
+            }
+        };
+        let (a, b) = (
+            clients(&before, "kind-a").await,
+            clients(&before, "kind-b").await,
+        );
+        assert!(connections.versions().is_empty());
+        connections.note_version("kind-a", &a, "v1.37.2");
+        connections.note_version("kind-b", &b, "v1.33.4");
+        assert_eq!(
+            connections.versions().into_iter().collect::<Vec<_>>(),
+            ["v1.33.4", "v1.37.2"]
+        );
+
+        connections.note_version("kind-b", &a, "v1.99.0");
+        assert!(
+            !connections.versions().contains("v1.99.0"),
+            "clients of another context are not kind-b's"
+        );
+
+        ca(
+            dir.path(),
+            &rcgen::generate_simple_self_signed(["a".to_owned()]).unwrap(),
+        );
+        let after = load(dir.path());
+        connections.keep(&after.contexts);
+        connections.note_version("kind-a", &a, "v1.40.0");
+        assert_eq!(
+            connections.versions().into_iter().collect::<Vec<_>>(),
+            ["v1.33.4"],
+            "kind-a's clients were replaced, so what they asked is gone and what they ask now is not kept"
+        );
     }
 
     #[tokio::test]

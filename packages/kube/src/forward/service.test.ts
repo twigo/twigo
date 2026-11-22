@@ -141,11 +141,29 @@ test("settled of a start waits for the first change that leaves starting, and te
   event(changed({ ...starting, pod: "web-1" }));
   await Promise.resolve();
   expect(settled).not.toHaveBeenCalled();
-  event(changed(forward(1, "dev", { state: "reconnecting", reason: "x" })));
+  event(
+    changed(
+      forward(1, "dev", {
+        state: "reconnecting",
+        reason: {
+          code: "forward.no-ready-pod",
+          kind: "unavailable",
+          message: "x",
+        },
+      }),
+    ),
+  );
   await vi.waitFor(() => {
     expect(settled).toHaveBeenCalledWith(
       expect.objectContaining({
-        state: { state: "reconnecting", reason: "x" },
+        state: {
+          state: "reconnecting",
+          reason: {
+            code: "forward.no-ready-pod",
+            kind: "unavailable",
+            message: "x",
+          },
+        },
       }),
     );
   });
@@ -155,7 +173,7 @@ test("settled of a start does not take the state an earlier run left for its own
   const { forwards, answer, event } = watched();
   const failed = forward(1, "dev", {
     state: "failed",
-    error: { kind: "unavailable", message: "refused" },
+    error: { code: "connect.other", kind: "unavailable", message: "refused" },
   });
   await answer([failed]);
   const settled = vi.fn();

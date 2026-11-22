@@ -2,6 +2,7 @@
 //! of 3.3, for the pods of one namespace (`bench/pods.sh`).
 //!
 //! TWIGO_TEST_KUBECONFIG=… cargo run --release -p twigo-cache --example table_memory [namespace]
+#![expect(clippy::print_stdout, reason = "an example's output is its result")]
 
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::ListParams;

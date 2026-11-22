@@ -23,7 +23,7 @@ use twigo_env::ShellEnv;
 use std::path::PathBuf;
 
 use super::exec::{Exec, Mode};
-use super::oidc::{Oidc, OidcEntry};
+use super::oidc::{Oidc, OidcEntry, Unsaved};
 use super::output::Credential;
 use super::run::{self, RunError};
 
@@ -61,6 +61,7 @@ impl Default for Timeouts {
 pub struct Registry {
     sources: Mutex<HashMap<String, Weak<Source>>>,
     oidc: Mutex<HashMap<String, Weak<Oidc>>>,
+    unsaved: Unsaved,
     shared: Shared,
 }
 
@@ -83,6 +84,7 @@ impl Registry {
         Self {
             sources: Mutex::default(),
             oidc: Mutex::default(),
+            unsaved: Unsaved::default(),
             shared: Shared {
                 env,
                 focused,
@@ -124,8 +126,10 @@ impl Registry {
         let source = Arc::new(Oidc::new(
             origin,
             user.to_owned(),
+            key.clone(),
             entry,
             self.shared.env.clone(),
+            self.unsaved.clone(),
         ));
         sources.insert(key, Arc::downgrade(&source));
         source

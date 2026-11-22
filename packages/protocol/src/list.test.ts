@@ -257,11 +257,14 @@ test("a batch that tells a list that metrics are absent fails the view, since Ru
 test("a failed subscribe shows the error state", async () => {
   const fake = fakeBackend();
   const view = new ListView(fake.backend, QUERY);
-  fake.reject({ kind: "forbidden", message: "no" });
+  fake.reject({ code: "server.forbidden", kind: "forbidden", message: "no" });
   await vi.runAllTimersAsync();
   const status = view.getSnapshot().status;
   expect(status.state).toBe("error");
   expect(status.state === "error" && status.error).toBeInstanceOf(IpcError);
+  expect(status.state === "error" && status.error.code).toBe(
+    "server.forbidden",
+  );
 });
 
 test("close unsubscribes and ignores later batches", async () => {

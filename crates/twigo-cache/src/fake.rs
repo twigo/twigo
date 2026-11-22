@@ -82,6 +82,8 @@ pub struct State {
     reviews_waiting: usize,
     /// `/version` fails as over a dead connection.
     pub dead: bool,
+    /// Every request fails as when the cluster refuses the connection.
+    pub refused: bool,
     /// `/version` sends its headers and never its body, as over a connection
     /// whose window is full.
     pub version_body_hangs: bool,
@@ -99,6 +101,8 @@ pub struct State {
     pub not_modified: usize,
     /// Each Metrics API request waits this long before it is answered.
     pub metrics_takes: std::time::Duration,
+    /// The Metrics API answers `200` with a body that is no list of samples.
+    pub metrics_garbled: bool,
     /// A list's body arrives this long after its status and headers.
     pub body_takes: std::time::Duration,
     /// The most Metrics API requests that waited at once.
@@ -549,6 +553,14 @@ impl Fake {
         request: Request<kube::client::Body>,
     ) -> Result<Response<Body>, BoxError> {
         let path = request.uri().path();
+        if self.state().refused {
+            self.state()
+                .requests
+                .push((Instant::now(), request.uri().to_string()));
+            return Err(Box::new(std::io::Error::from(
+                std::io::ErrorKind::ConnectionRefused,
+            )));
+        }
         if (path == "/api" || path == "/apis") && self.state().discovery_hangs {
             self.state()
                 .requests
@@ -915,6 +927,9 @@ impl State {
     ) -> Response<Body> {
         if watch {
             return status(StatusCode::METHOD_NOT_ALLOWED, "MethodNotAllowed");
+        }
+        if self.metrics_garbled {
+            return full(StatusCode::OK, &json!("not a list"), gzip);
         }
         let name = selector.and_then(|selector| selector.strip_prefix("metadata.name="));
         let at = jiff::Timestamp::from_second(1_800_000_000 + self.requests.len() as i64)

@@ -1,4 +1,5 @@
-import type { ViewState } from "./generated";
+import { wire } from "./error";
+import type { IpcError as Wire, ViewState } from "./generated";
 
 export const SHOWS_ROWS: ReadonlySet<ViewState["state"]> = new Set([
   "ready",
@@ -38,4 +39,34 @@ export function leastReady(states: Iterable<ViewState>): ViewState {
     if (readiness(state) > readiness(worst)) worst = state;
   }
   return worst.state === "syncing" ? { state: "syncing", loaded } : worst;
+}
+
+type Refused = Extract<
+  ViewState,
+  { state: "forbidden" | "unauthorized" | "error" }
+>;
+
+/**
+ * What the cluster's refusal says as an error, in the words of Rust's
+ * `ViewState::refusal`: none for a state that is not one.
+ */
+export function refusal(state: Refused): Wire;
+export function refusal(state: ViewState): Wire | undefined;
+export function refusal(state: ViewState): Wire | undefined {
+  switch (state.state) {
+    case "forbidden":
+      return wire(
+        "server.forbidden",
+        `You may not ${state.verb} ${state.resource}.`,
+      );
+    case "unauthorized":
+      return wire(
+        "server.unauthorized",
+        "The cluster does not accept the credentials.",
+      );
+    case "error":
+      return state.error;
+    default:
+      return undefined;
+  }
 }

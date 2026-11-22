@@ -21,6 +21,7 @@ import {
   type Action,
   type ActionGroups,
 } from "../components/actions";
+import { EmptyState } from "../components/empty-state";
 import { Skeleton } from "../components/skeleton";
 import { fitWidth } from "./fit";
 import { HeaderCell, MarkBox } from "./header";
@@ -132,6 +133,8 @@ export interface DataGridProps<R, G> {
   readonly headerEnd?: ReactNode;
   /** Skeleton rows until the first rows come. */
   readonly loading: boolean;
+  /** A line over the skeleton rows, to say why they last. */
+  readonly waiting?: string | undefined;
   /** What shows when there are no items. */
   readonly empty?: ReactNode;
   /** When a cell last changed, to flash it; undefined when it did not. */
@@ -186,6 +189,7 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
     onRest,
     headerEnd,
     loading,
+    waiting,
     empty,
     flash,
     register,
@@ -757,11 +761,20 @@ export function DataGrid<R, G>(props: DataGridProps<R, G>) {
         </div>
       )}
       {loading ? (
-        <SkeletonRows
-          template={template}
-          columns={columns.length}
-          marking={marking}
-        />
+        <>
+          {waiting && (
+            <div style={{ paddingLeft: marking ? MARK_WIDTH : 0 }}>
+              <EmptyState density="inline" role="status">
+                {waiting}
+              </EmptyState>
+            </div>
+          )}
+          <SkeletonRows
+            template={template}
+            columns={columns.length}
+            marking={marking}
+          />
+        </>
       ) : length === 0 ? (
         empty
       ) : (

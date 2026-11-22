@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 aho-corasick.workspace = true
 anstyle.workspace = true
@@ -27,10 +30,13 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io"] }
+tracing.workspace = true
 twigo-cache.workspace = true
 twigo-describe.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-log.workspace = true
+twigo-panic.workspace = true
 
 [dev-dependencies]
 dhat.workspace = true
@@ -44,3 +50,5 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test
 tower.workspace = true
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-log = { workspace = true, features = ["test-util"] }
+twigo-panic = { workspace = true, features = ["inject"] }

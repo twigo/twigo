@@ -24,6 +24,8 @@ import type { Subject } from "../resourceActions";
 import { rowState } from "../rowState";
 import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
+import type { ObjectProblem } from "../viewProblem";
+import { useReopen } from "../useReopen";
 import { ObjectContent } from "./ObjectContent";
 import { ObjectHeader } from "./ObjectHeader";
 import { noContainerRuns } from "./noContainerRuns";
@@ -56,16 +58,12 @@ import { Vitals } from "./Vitals";
  * YAML view is shown or an edit is held, and its usage, for a kind that has
  * one, while the Overview is shown in a visible window.
  */
-export function ObjectEditor({
-  uri,
-  discovery,
-  overviews,
-  pages,
-  tabs,
-  edits,
-  capabilities,
-  fullPages,
-}: EditorProps & {
+export function ObjectEditor(props: ObjectEditorProps) {
+  const [key, reopen] = useReopen();
+  return <ObjectPage key={key} {...props} onReopen={reopen} />;
+}
+
+type ObjectEditorProps = EditorProps & {
   discovery: Discovery;
   overviews: OverviewStates;
   pages: PageStates;
@@ -74,7 +72,19 @@ export function ObjectEditor({
   capabilities: Capabilities;
   /** What the person chose in the full page's sections, apart from the inspector's. */
   fullPages: OverviewStates;
-}) {
+};
+
+function ObjectPage({
+  uri,
+  discovery,
+  overviews,
+  pages,
+  tabs,
+  edits,
+  capabilities,
+  fullPages,
+  onReopen,
+}: ObjectEditorProps & { onReopen: () => void }) {
   const workbench = useWorkbench();
   const { backend, editors, commands, keys, menus, catalog, spaces, colors } =
     workbench;
@@ -290,6 +300,7 @@ export function ObjectEditor({
               onEvents={() => {
                 tabs.set(uri, "events");
               }}
+              onReopen={onReopen}
               fullPage={wide}
               yaml={(json) => (
                 <YamlTab
@@ -301,7 +312,7 @@ export function ObjectEditor({
                 />
               )}
               {...(opened !== undefined && {
-                kept: (problem: { title: string; body: string }) => (
+                kept: (problem: ObjectProblem) => (
                   <YamlTab
                     edits={edits}
                     uri={uri}
@@ -309,6 +320,7 @@ export function ObjectEditor({
                     json={opened}
                     statusLocked={statusLocked}
                     gone={problem}
+                    onReopen={onReopen}
                   />
                 ),
               })}

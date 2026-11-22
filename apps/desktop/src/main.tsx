@@ -5,6 +5,7 @@ import { registerKube } from "@twigo/kube";
 import { tauriBackend, toIpcError, type Backend } from "@twigo/protocol";
 import { createWorkbench, platformOf, WorkbenchView } from "@twigo/workbench";
 import { StartupFailure } from "./App";
+import { logWebviewErrors } from "./diagnostics";
 import { installNativeMenu } from "./nativeMenu";
 import { installZoom } from "./zoom";
 import "./index.css";
@@ -29,8 +30,7 @@ async function browserBackend(): Promise<Backend> {
   );
 }
 
-async function start() {
-  const backend = isTauri() ? tauriBackend : await browserBackend();
+async function start(backend: Backend) {
   const workbench = await createWorkbench(
     backend,
     platformOf(navigator.userAgent),
@@ -41,8 +41,12 @@ async function start() {
   return <WorkbenchView workbench={workbench} />;
 }
 
-const view = await start().catch((error: unknown) => (
-  <StartupFailure message={toIpcError(error).message} />
-));
+const backend = isTauri() ? tauriBackend : await browserBackend();
+const log = logWebviewErrors(backend);
 
-createRoot(root).render(<StrictMode>{view}</StrictMode>);
+const view = await start(backend).catch((error: unknown) => {
+  log.caught("start", error);
+  return <StartupFailure error={toIpcError(error)} />;
+});
+
+createRoot(root, log.root).render(<StrictMode>{view}</StrictMode>);

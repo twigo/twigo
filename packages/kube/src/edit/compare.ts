@@ -54,14 +54,14 @@ export function comparisons(
     if (snapshot.status.state === "forbidden") {
       const own = namespaced ? object.namespace : undefined;
       const none = `You may not list ${object.gvr.resource} in this cluster`;
-      if (own === undefined) throw new IpcError("forbidden", `${none}.`);
+      if (own === undefined) throw new IpcError("server.forbidden", `${none}.`);
       const together = [
         ...new Set([...spaces.state(object.space).namespaces, own]),
       ];
       snapshot = await rows(together);
       if (snapshot.status.state === "forbidden") {
         throw new IpcError(
-          "forbidden",
+          "server.forbidden",
           together.length > 1
             ? `${none}, nor in the namespaces selected and the object's own.`
             : `${none}, nor in the object's own namespace (${own}).`,

@@ -151,7 +151,7 @@ export class MockTerminal {
       return;
     }
     if (this.#state !== "running") {
-      throw new IpcError("conflict", "the shell does not run");
+      throw new IpcError("subscription.not-found", "the shell does not run");
     }
     for (const character of text) this.#key(character);
   }
@@ -384,11 +384,11 @@ export class MockOffers {
   answer({ id, revision }: AnswerKubeconfigOffer): null {
     const offer = this.#waiting.get(id);
     if (offer === undefined) {
-      throw new IpcError("notFound", `the offer ${String(id)} is gone`);
+      throw new IpcError("offer.gone", `the offer ${String(id)} is gone`);
     }
     if (offer.revision !== revision) {
       throw new IpcError(
-        "conflict",
+        "offer.changed",
         `Nothing was moved into ${offer.target}: the offer changed after it was shown to you, and now says what a move does.`,
       );
     }

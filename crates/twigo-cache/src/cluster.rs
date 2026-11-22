@@ -4,6 +4,7 @@
 //! with the clients they were learnt over.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio::time::Instant;
 
-use twigo_ipc::Access;
+use twigo_ipc::{Access, IpcError, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::upstream::Failure;
@@ -122,7 +123,14 @@ impl Cluster {
                 .or_insert_with(|| {
                     let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
                     let review = tokio::spawn(async move {
-                        let may = ask.await;
+                        let may = AssertUnwindSafe(ask)
+                            .catch_unwind()
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(Failure::Refused(ViewState::Error {
+                                    error: IpcError::panicked("this access check"),
+                                }))
+                            });
                         let mut facts = cluster.facts(&clients);
                         facts.reviewing.remove(&asked);
                         if let Ok(may) = may {
@@ -130,7 +138,7 @@ impl Cluster {
                         }
                         may
                     });
-                    async move { review.await.expect("a review ends with an answer") }
+                    async move { twigo_panic::joined(review.await) }
                         .boxed()
                         .shared()
                 })
@@ -201,5 +209,50 @@ impl Cluster {
             };
         }
         facts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use twigo_ipc::ErrorCode;
+    use twigo_kube::client::Budgets;
+
+    use super::*;
+    use crate::fake::Fake;
+
+    fn list_pods() -> Access {
+        Access {
+            verb: "list".to_owned(),
+            group: String::new(),
+            resource: "pods".to_owned(),
+            subresource: None,
+            name: None,
+        }
+    }
+
+    fn bug() -> Failure {
+        panic!("a review's bug")
+    }
+
+    #[tokio::test]
+    async fn a_review_that_panics_answers_its_askers_and_leaves_nothing_for_the_next() {
+        let (_hub, clients) = Fake::default().hub(Budgets::default());
+        let cluster = Arc::new(Cluster::default());
+        let ask = || async { Err(bug()) }.boxed();
+        let access = list_pods();
+        let (first, second) = tokio::join!(
+            cluster.review(&clients, Some("a"), &access, ask),
+            cluster.review(&clients, Some("a"), &access, ask),
+        );
+        for answer in [first, second] {
+            let Err(Failure::Refused(ViewState::Error { error })) = answer else {
+                panic!("a refusal that says why");
+            };
+            assert_eq!(error.code, ErrorCode::InternalPanic);
+        }
+        let again = cluster
+            .review(&clients, Some("a"), &access, || async { Ok(true) }.boxed())
+            .await;
+        assert!(matches!(again, Ok(true)), "the next asker sends its own");
     }
 }
