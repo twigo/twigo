@@ -534,6 +534,31 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
         &directory.path().join("policy.json"),
     );
     core.state.open_space("gone-context");
+    core.state
+        .set(vec![twigo_ipc::StateEntry {
+            space: Some("gone-context".to_owned()),
+            key: "namespaces".to_owned(),
+            value: r#"["billing-eu"]"#.to_owned(),
+        }])
+        .unwrap();
+    let saved = serde_json::from_value(json!({ "forwards": [{
+        "id": 1,
+        "target": {
+            "space": "gone-context",
+            "gvr": { "group": "", "version": "v1", "resource": "services" },
+            "namespace": "checkout",
+            "name": "payments-api",
+        },
+        "kind": "Service",
+        "port": 8080,
+        "port_name": null,
+        "app_protocol": null,
+        "local": 8080,
+        "detour": false,
+        "runs": true,
+    }] }))
+    .unwrap();
+    core.state.set_forwards("gone-context", &saved).unwrap();
     let (status, followed) = watch::channel(Status::Resolving);
     core.start_for_tests(followed, None);
     status.send_replace(Status::Resolved(Arc::new(ShellEnv::from_iter([(
@@ -552,18 +577,19 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
         directory.path(),
         "twigo.log",
         [record(json!({
-            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context",
+            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
         }))],
     );
     let report = core.report(&facts(None), &[log]).await;
     assert!(
         report.log.ends_with(
-            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>\n"
+            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
+             on <namespace-2> and Service <object-1> in <namespace-3>\n"
         ),
         "{}",
         report.log
     );
-    assert_eq!(report.hidden.names, 5);
+    assert_eq!(report.hidden.names, 8);
 }
 
 #[tokio::test]

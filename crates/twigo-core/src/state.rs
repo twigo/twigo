@@ -7,7 +7,7 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{self, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
@@ -56,6 +56,21 @@ const FORWARDS: &str = "forwards";
 const LAST_FORWARD: &str = "forwards/last";
 
 const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
+
+/// The webview's key for the namespaces a space is on
+/// (`packages/workbench/src/spaces/store.ts`), which the problem report
+/// hides by name.
+const NAMESPACES: &str = "namespaces";
+
+/// What the spaces call by name: a problem report hides these wherever a
+/// log line says them.
+#[derive(Debug, Default)]
+pub(crate) struct Named {
+    /// The namespaces the spaces are on, and those of their saved forwards.
+    pub namespaces: BTreeSet<String>,
+    /// The names of the saved forwards' targets.
+    pub objects: BTreeSet<String>,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -220,6 +235,29 @@ impl State {
                 })
             })
             .unwrap_or_default()
+    }
+
+    /// The namespaces the spaces chose and the targets of their saved
+    /// forwards, as far as they read back.
+    pub(crate) fn named(&self) -> Named {
+        let data = self.inner.lock();
+        let mut named = Named::default();
+        for record in &data.file.spaces {
+            let chosen = record
+                .state
+                .get(NAMESPACES)
+                .and_then(|value| serde_json::from_str::<Vec<String>>(value.get()).ok());
+            named.namespaces.extend(chosen.into_iter().flatten());
+            let saved = record
+                .state
+                .get(FORWARDS)
+                .and_then(|value| serde_json::from_str::<Saved>(value.get()).ok());
+            for forward in saved.into_iter().flat_map(|saved| saved.forwards) {
+                named.namespaces.insert(forward.target.namespace);
+                named.objects.insert(forward.target.name);
+            }
+        }
+        named
     }
 
     /// Replaces a space's forwards, unless the space is gone.

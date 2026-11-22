@@ -108,6 +108,13 @@ impl Core {
         for context in self.state.spaces().iter().flat_map(|space| &space.contexts) {
             name(context, Kind::Context, context);
         }
+        let named = self.state.named();
+        for namespace in &named.namespaces {
+            name(namespace, Kind::Namespace, namespace);
+        }
+        for object in &named.objects {
+            name(object, Kind::Object, object);
+        }
 
         let shell = self.shell_env.borrow().clone();
         let mut homes: Vec<PathBuf> = std::env::home_dir().into_iter().collect();
