@@ -1,9 +1,5 @@
-import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
-
-const SHOWN_MS = 1500;
-
-type Result = "idle" | "copied" | "failed";
+import { useCopy } from "../lib/useCopy";
 
 const LABEL = {
   idle: "Copy details",
@@ -28,16 +24,7 @@ export function ErrorDetails({
   notice?: boolean;
   className?: string;
 }) {
-  const [result, setResult] = useState<Result>("idle");
-  useEffect(() => {
-    if (result === "idle") return;
-    const timer = setTimeout(() => {
-      setResult("idle");
-    }, SHOWN_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [result]);
+  const [result, onCopy] = useCopy(copy);
   return (
     <span
       className={cn(
@@ -50,16 +37,7 @@ export function ErrorDetails({
       </code>
       <button
         type="button"
-        onClick={() => {
-          navigator.clipboard.writeText(copy).then(
-            () => {
-              setResult("copied");
-            },
-            () => {
-              setResult("failed");
-            },
-          );
-        }}
+        onClick={onCopy}
         className={cn(
           "rounded-sm outline-none focus-visible:shadow-[var(--focus-ring)]",
           notice

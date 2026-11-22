@@ -1,9 +1,5 @@
-import { useEffect, useState } from "react";
 import { cn } from "../lib/cn";
-
-const SHOWN_MS = 1500;
-
-type Result = "idle" | "copied" | "failed";
+import { useCopy } from "../lib/useCopy";
 
 const NAME = { copied: "Copied", failed: "Could not copy" } as const;
 
@@ -35,16 +31,7 @@ export function CopyButton({
   className?: string;
   floated?: boolean;
 }) {
-  const [result, setResult] = useState<Result>("idle");
-  useEffect(() => {
-    if (result === "idle") return;
-    const timer = setTimeout(() => {
-      setResult("idle");
-    }, SHOWN_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [result]);
+  const [result, copy] = useCopy(text);
   const name = result === "idle" ? label : NAME[result];
   return (
     <button
@@ -53,16 +40,7 @@ export function CopyButton({
       aria-label={name}
       title={name}
       data-result={result}
-      onClick={() => {
-        navigator.clipboard.writeText(text).then(
-          () => {
-            setResult("copied");
-          },
-          () => {
-            setResult("failed");
-          },
-        );
-      }}
+      onClick={copy}
       className={cn(
         "copy-glyph inline-flex h-[18px] w-4 items-center justify-center rounded-sm text-support opacity-0 outline-none group-focus-within/copy:opacity-100 group-hover/copy:opacity-100 hover:text-content focus-visible:opacity-100 focus-visible:shadow-[var(--focus-ring)]",
         floated ? "float-right" : "absolute top-0 right-0 bg-editor",
