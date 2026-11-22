@@ -184,6 +184,38 @@ async fn a_shell_a_signal_ends_says_which() {
 }
 
 #[tokio::test]
+async fn a_terminal_that_panics_ends_failed_and_kills_a_shell_that_ignores_the_hangup() {
+    let dir = TempDir::new().unwrap();
+    let terminal = Terminal::park(script(
+        dir.path(),
+        "trap '' HUP; echo $$ > shell.pid; echo output; exec sleep 1000",
+    ));
+    let (frames, mut received) = mpsc::unbounded_channel();
+    terminal
+        .open(80, 24, move |frame| {
+            assert!(!matches!(frame, Frame::Output(_)), "a consumer's bug");
+            frames.send(frame).is_ok()
+        })
+        .unwrap();
+    let ended = tokio::time::timeout(WAIT, async {
+        while let Some(frame) = received.recv().await {
+            if let Frame::Event(ShellEvent::Ended { end }) = frame {
+                return end;
+            }
+        }
+        panic!("no end");
+    })
+    .await
+    .expect("an end within 10 s");
+    let ShellEnd::Failed { error } = ended else {
+        panic!("not a failure");
+    };
+    assert_eq!(error.code, ErrorCode::InternalPanic);
+    let shell = wait_for_pid(&dir.path().join("shell.pid")).await;
+    assert!(gone(shell, Duration::from_secs(6)).await);
+}
+
+#[tokio::test]
 async fn a_program_that_cannot_start_ends_failed_in_words() {
     let dir = TempDir::new().unwrap();
     let mut spec = interactive(dir.path());

@@ -38,6 +38,7 @@ tower = { workspace = true, optional = true }
 tracing.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
+twigo-panic.workspace = true
 twigo-quantity.workspace = true
 
 [dev-dependencies]
@@ -50,3 +51,4 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test
 tower.workspace = true
 twigo-kube = { workspace = true, features = ["test-util"] }
 twigo-log = { workspace = true, features = ["test-util"] }
+twigo-panic = { workspace = true, features = ["inject"] }

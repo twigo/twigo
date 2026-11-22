@@ -32,6 +32,7 @@ twigo-keyboard = { path = "crates/twigo-keyboard" }
 twigo-kube = { path = "crates/twigo-kube" }
 twigo-log = { path = "crates/twigo-log" }
 twigo-netmon = { path = "crates/twigo-netmon" }
+twigo-panic = { path = "crates/twigo-panic" }
 twigo-policy = { path = "crates/twigo-policy" }
 twigo-quantity = { path = "crates/twigo-quantity" }
 twigo-sessions = { path = "crates/twigo-sessions" }

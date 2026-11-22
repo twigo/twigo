@@ -36,6 +36,7 @@ twigo-describe.workspace = true
 twigo-ipc.workspace = true
 twigo-kube.workspace = true
 twigo-log.workspace = true
+twigo-panic.workspace = true
 
 [dev-dependencies]
 dhat.workspace = true
@@ -49,3 +50,4 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test
 tower.workspace = true
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-panic = { workspace = true, features = ["inject"] }

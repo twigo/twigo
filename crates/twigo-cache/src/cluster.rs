@@ -11,7 +11,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use tokio::time::Instant;
 
-use twigo_ipc::Access;
+use twigo_ipc::{Access, IpcError, ViewState};
 use twigo_kube::client::Clients;
 
 use crate::upstream::Failure;
@@ -121,6 +121,13 @@ impl Cluster {
                 .entry(asked.clone())
                 .or_insert_with(|| {
                     let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
+                    let forget = {
+                        let (cluster, clients, asked) =
+                            (Arc::clone(&cluster), Arc::clone(&clients), asked.clone());
+                        move || {
+                            cluster.facts(&clients).reviewing.remove(&asked);
+                        }
+                    };
                     let review = tokio::spawn(async move {
                         let may = ask.await;
                         let mut facts = cluster.facts(&clients);
@@ -130,9 +137,21 @@ impl Cluster {
                         }
                         may
                     });
-                    async move { review.await.expect("a review ends with an answer") }
-                        .boxed()
-                        .shared()
+                    async move {
+                        match review.await {
+                            Ok(may) => may,
+                            // The task left its entry behind, which would hand
+                            // this failure to every later asker.
+                            Err(_) => {
+                                forget();
+                                Err(Failure::Refused(ViewState::Error {
+                                    error: IpcError::panicked("this access check"),
+                                }))
+                            }
+                        }
+                    }
+                    .boxed()
+                    .shared()
                 })
                 .clone()
         };
@@ -201,5 +220,50 @@ impl Cluster {
             };
         }
         facts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use twigo_ipc::ErrorCode;
+    use twigo_kube::client::Budgets;
+
+    use super::*;
+    use crate::fake::Fake;
+
+    fn list_pods() -> Access {
+        Access {
+            verb: "list".to_owned(),
+            group: String::new(),
+            resource: "pods".to_owned(),
+            subresource: None,
+            name: None,
+        }
+    }
+
+    fn bug() -> Failure {
+        panic!("a review's bug")
+    }
+
+    #[tokio::test]
+    async fn a_review_that_panics_answers_its_askers_and_leaves_nothing_for_the_next() {
+        let (_hub, clients) = Fake::default().hub(Budgets::default());
+        let cluster = Arc::new(Cluster::default());
+        let ask = || async { Err(bug()) }.boxed();
+        let access = list_pods();
+        let (first, second) = tokio::join!(
+            cluster.review(&clients, Some("a"), &access, ask),
+            cluster.review(&clients, Some("a"), &access, ask),
+        );
+        for answer in [first, second] {
+            let Err(Failure::Refused(ViewState::Error { error })) = answer else {
+                panic!("a refusal that says why");
+            };
+            assert_eq!(error.code, ErrorCode::InternalPanic);
+        }
+        let again = cluster
+            .review(&clients, Some("a"), &access, || async { Ok(true) }.boxed())
+            .await;
+        assert!(matches!(again, Ok(true)), "the next asker sends its own");
     }
 }

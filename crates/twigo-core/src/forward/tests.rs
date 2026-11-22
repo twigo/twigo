@@ -134,10 +134,7 @@ fn running(dir: &Path) -> Arc<Core> {
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 
@@ -380,13 +377,7 @@ fn running_over(dir: &Path, api: &Api) -> Arc<Core> {
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 
@@ -1465,13 +1456,7 @@ async fn a_follower_that_came_before_the_restore_learns_of_the_forwards() {
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
 
     let mut learned = Vec::new();
     until("both forwards are announced", || {
@@ -2148,6 +2133,48 @@ async fn a_resume_and_a_move_of_a_failed_forward_answer_starting_and_start_it_ag
 }
 
 #[tokio::test]
+async fn a_forward_whose_data_path_panics_fails_and_a_resume_starts_it_as_a_new_one() {
+    twigo_panic::inject::arm("forward", 1);
+    let api = Api::serving_pod().await;
+    let dir = tempfile::tempdir().unwrap();
+    keep(dir.path(), &Saved::default());
+    let core = running_over(dir.path(), &api);
+    core.catalog.contexts().await;
+    let local = free();
+    let ForwardStarted::Started { forward } = core
+        .forward_start(StartForward {
+            target: target("kind-plain", "api"),
+            port: 8080,
+            local: Some(local),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a free port starts");
+    };
+    until("its data path's panic fails it", || {
+        failed_with(&core, |error| error.code == ErrorCode::InternalPanic)
+    })
+    .await;
+
+    let ForwardStarted::Started { forward } = core
+        .forward_resume(ResumeForward {
+            id: forward.id,
+            local: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("a resume answers with the forward");
+    };
+    assert_eq!(forward.local, local, "on the port it had");
+    until("the forward is ready", || {
+        (listed(&core)[0].state == ForwardState::Ready).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn a_resume_or_a_start_of_a_stopped_forward_whose_context_the_catalog_lacks_answers_the_refusal_and_starts_nothing()
  {
     let dir = tempfile::tempdir().unwrap();
@@ -2576,13 +2603,7 @@ async fn a_sign_in_that_gets_a_credential_proves_a_forward_failed_for_its_creden
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
     core.trust_plugins(vec![review.plugins[0].plugin.digest.clone()])
@@ -2728,10 +2749,7 @@ async fn a_forward_restored_before_the_catalog_has_loaded_waits_and_the_check_af
         &dir.path().join("policy.json"),
     );
     let (status, followed) = watch::channel(twigo_env::Status::Resolving);
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, None).await }
-    });
+    core.start_for_tests(followed, None);
     assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(listed(&core)[0].state, ForwardState::Restored);
@@ -2852,13 +2870,7 @@ async fn signing_in_to(dir: &Path, api: &Api, contexts: &[(&str, &str)]) -> Arc<
     let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
         ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
     )));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move {
-            let _status = _status;
-            core.run(followed, Some(kubeconfig)).await
-        }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
     core.trust_plugins(

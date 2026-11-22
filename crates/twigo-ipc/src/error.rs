@@ -38,6 +38,15 @@ impl IpcError {
         }
     }
 
+    /// What an item says when Twigo's own code panicked in its task: `what`
+    /// is the item, as "this list". Everything else keeps working.
+    pub fn panicked(what: &str) -> Self {
+        Self::new(
+            ErrorCode::InternalPanic,
+            format!("Twigo stopped {what} on an internal error"),
+        )
+    }
+
     pub fn with_server(mut self, server: ServerStatus) -> Self {
         self.server = Some(server);
         self

@@ -149,6 +149,7 @@ Everything NATS-specific goes.
 │ twigo-netmon    wake from sleep · network changes (IOKit, SystemConfiguration,        │
 │                 logind, rtnetlink)                                                    │
 │ twigo-log       diagnostics log (twigo.log) · panic hook · the audit log's file       │
+│ twigo-panic     supervisor of the app-wide duties · what ends an item · the seam      │
 │                                                                                       │
 │ twigo-core      spaces · settings · catalog · command bus · policy proxy · approval   │
 │                 broker · state                                                        │
@@ -176,7 +177,23 @@ Everything NATS-specific goes.
 VS Code runs a main process, renderers, extension hosts (Node, web worker, remote), a shared process and a pty host.
 Most of that exists because of Node: it isolates crashes and JS event loops.
 Twigo has one Rust process.
-A tokio task that panics does not take the process down.
+A tokio task that panics does not take the process down, and no panic goes unseen or leaves a part waiting: Twigo contains it where it happens, as [a decision](decisions/panics.md) records.
+The hook of `twigo-log` records every panic first (4.10).
+
+- **The app-wide duties** run as tasks of their own under one supervisor, which `Core::start` builds: the catalog's sources, the contexts seen, the terminals' offers, the end of unlocks, the forwards' modes and the network.
+  A duty that panics starts again, at most three times in five minutes, and logs it with its name and task id; past that, or when a thread of the core that cannot go on panics (the state writer once its lock is poisoned), or when the policy proxy's accept loop panics, which no restart brings back for the kubeconfigs that name its address, the fatal path runs.
+  The kubeconfig watch and the state writer are threads, and report to the same supervisor.
+- **An item**, a list, an open object, a logs tab, a pod shell, a terminal or a forward, ends where it panicked and is not started again: its owner sends the end the item already has, with the code `internal.panic`, which is a list's last batch in the state `error`, an object's or a logs tab's error, `Failed` for a shell or a terminal, and `failed` for a forward, which the person can resume.
+  A hub upstream that panicked ends `Failed`, so the next list that holds it starts it, and a store a panic poisoned is emptied before that.
+- **A plan** whose run panics ends `Failed` with `internal.panic`, its `ended` line in the audit log says `failed`, and its bus entry and undo go free.
+  A plan is never retried, since a write must not go out twice.
+- **A command** that is async answers `internal.panic`.
+  A sync one runs inside Tauri's own handler, which on macOS is called from wry's `extern "C"` URL scheme handler, so a panic there aborted the process (`SIGABRT`, exit 134, in a probe on macOS 27.2.1 with Tauri 2.12.7, 2026-11-21); the invoke handler now runs under `catch_unwind`, and a panic takes the fatal path.
+- **The fatal path** writes the log, then shows a native dialog, since the webview may be what the panic broke, that says Twigo must restart, with Restart and Quit.
+  Restart asks Tauri to restart; spaces and forwards come back as they do at any start.
+- **A joined task's panic** goes on as it was (`twigo_panic::joined`), so the hook records it once.
+- `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, in a build with the `inject` feature of `twigo-panic`, which a release build never has: the names are the duties above, `list`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `hub upstream`, `plan run`, `command`, `policy proxy`, and the threads `state writer` and `kubeconfig watch`.
+
 A wasmtime trap ends the extension call, not the app.
 Each webview is already a separate OS process managed by the system.
 The only extra processes Twigo needs are the ones it must run anyway: exec plugins, shells, native helpers and agents.
@@ -203,6 +220,7 @@ twigo/
 │  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
 │  ├─ twigo-log/              the diagnostics log's subscriber, the rotating file the audit log shares, the panic hook, the facts of a run
+│  ├─ twigo-panic/            the supervisor of the app-wide duties, the helper that ends an item, the join that raises a panic again, the seam that arms a panic by name
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
 │  ├─ twigo-netmon/           wake from sleep and network changes, from IOKit, SystemConfiguration, logind and rtnetlink
@@ -235,6 +253,7 @@ Why these crates:
   What an approval covers is its too, while the policy proxy's server and the approval broker live in `twigo-core`, since they need the context's clients and the windows.
 - `twigo-log` holds what logging needs once, so no crate sets up a subscriber of its own: the rotating file that both the diagnostics log and the audit log write through, the subscriber with its run-time filter, the panic hook and the facts of a run (4.10).
   Every other crate logs through `tracing` and depends on no more of it than the macros.
+- `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions` and `twigo-core` use it.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
 - `twigo-netmon` keeps the OS's power and network notifications out of the transport, which only learns that the machine woke or the network changed.

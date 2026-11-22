@@ -40,17 +40,11 @@ fn cluster() -> (PathBuf, String) {
 fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Arc<Core>, String) {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let space = core.state.open_space(context).id;
-    let (status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
+    let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        let kubeconfig = kubeconfig.to_owned();
-        async move {
-            let _status = status;
-            core.run(followed, Some(kubeconfig)).await;
-        }
-    });
+    let kubeconfig = kubeconfig.to_owned();
+    core.start_for_tests(followed, Some(kubeconfig));
     (core, space)
 }
 

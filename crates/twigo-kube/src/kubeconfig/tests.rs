@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -465,6 +466,7 @@ fn a_kubeconfig_replaced_by_rename_changes_the_catalog_once() {
             sender.send(catalog).unwrap();
         },
         || {},
+        || {},
     )
     .unwrap();
     assert_eq!(names(&changes.try_recv().unwrap()), ["kind-a"]);
@@ -501,6 +503,7 @@ fn a_write_that_leaves_the_catalog_as_it_was_is_still_told() {
         kubectl(&[&file]),
         move |catalog| changed.send(catalog).unwrap(),
         move || wrote.send(()).unwrap(),
+        || {},
     )
     .unwrap();
     changes.try_recv().unwrap();
@@ -529,6 +532,7 @@ fn a_directory_created_later_is_watched() {
             sender.send(catalog).unwrap();
         },
         || {},
+        || {},
     )
     .unwrap();
     assert!(changes.try_recv().unwrap().contexts.is_empty());
@@ -555,6 +559,7 @@ fn a_watched_directory_deleted_and_made_again_is_watched_again() {
         move |catalog| {
             sender.send(catalog).unwrap();
         },
+        || {},
         || {},
     )
     .unwrap();
@@ -594,6 +599,7 @@ fn a_write_through_a_symlink_is_seen() {
         move |catalog| {
             sender.send(catalog).unwrap();
         },
+        || {},
         || {},
     )
     .unwrap();
@@ -754,4 +760,26 @@ fn refreshed_oidc_tokens_leave_the_fingerprint_alone() {
     let with_ca = fingerprint();
     write(dir.path(), "idp.pem", "second");
     assert_ne!(fingerprint(), with_ca, "the IdP's CA file changed in place");
+}
+
+#[test]
+fn a_watch_that_panics_ends_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = write(dir.path(), "config", FIRST);
+    let (changed, changes) = mpsc::channel();
+    let (panicked, panics) = mpsc::channel();
+    let reads = AtomicUsize::new(0);
+    let _watch = Watch::start(
+        kubectl(&[&file]),
+        move |catalog| {
+            changed.send(catalog).unwrap();
+            assert_eq!(reads.fetch_add(1, Ordering::SeqCst), 0, "a consumer's bug");
+        },
+        || {},
+        move || panicked.send(()).unwrap(),
+    )
+    .unwrap();
+    changes.try_recv().unwrap();
+    write(dir.path(), "config", SECOND);
+    panics.recv_timeout(Duration::from_secs(5)).unwrap();
 }

@@ -37,6 +37,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::{Instant, MissedTickBehavior, sleep_until};
 use twigo_cache::hub::{Hub, Resource, backoff};
 use twigo_ipc::{ErrorCode, ForwardState, Gvr, IpcError};
+use twigo_panic::contain;
 
 use crate::pods::Reach;
 use cause::{Cause, Lift};
@@ -285,14 +286,28 @@ impl Forward {
             failed_after: 0,
             cut: 0,
         };
+        let task = tokio::spawn({
+            let shared = Arc::clone(&shared);
+            async move {
+                if contain("forward", supervisor.run()).await.is_err() {
+                    shared.fail_for_good(IpcError::panicked("this forward"));
+                }
+            }
+        });
         Self {
             shared,
             status: status_rx,
             control,
             sockets: sender,
-            task: tokio::spawn(supervisor.run()),
+            task,
             accepting,
         }
+    }
+
+    /// Its data path ended on a panic, which no command starts again: the
+    /// forward is to be stopped, or resumed as a new one.
+    pub fn ended(&self) -> bool {
+        self.task.is_finished()
     }
 
     pub fn status(&self) -> watch::Receiver<Status> {
@@ -385,6 +400,17 @@ struct Shared {
 impl Shared {
     fn update(&self, change: impl FnOnce(&mut Status) -> bool) {
         self.status.send_if_modified(change);
+    }
+
+    /// The data path is gone, and its connections with it.
+    fn fail_for_good(&self, error: IpcError) {
+        self.end.send_modify(|ends| *ends += 1);
+        self.update(|status| {
+            status.state = ForwardState::Failed { error };
+            status.connections = 0;
+            status.queued = 0;
+            true
+        });
     }
 
     fn pick(&self) -> std::sync::MutexGuard<'_, Pick> {
@@ -609,7 +635,14 @@ impl Supervisor {
                 Some(control) = self.control.recv() => self.control(control),
                 Some(report) = self.reports.recv() => self.report(report),
                 Some(socket) = self.sockets.recv() => self.accepted(socket),
-                Some(_) = self.tasks.join_next(), if !self.tasks.is_empty() => self.publish(),
+                Some(ended) = self.tasks.join_next(), if !self.tasks.is_empty() => {
+                    if let Err(error) = ended
+                        && error.is_panic()
+                    {
+                        tracing::error!(context = %self.shared.config.context, "a connection of a forward panicked, so it ended");
+                    }
+                    self.publish();
+                }
                 opened = ready(&mut self.opening) => self.opened(opened),
                 () = changed(&mut self.watching) => self.look(),
                 proved = probed(&mut self.proof) => self.proved(proved),

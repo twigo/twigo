@@ -11,6 +11,8 @@ use notify_debouncer_full::{
     DebounceEventResult, DebouncedEvent, Debouncer, NoCache, new_debouncer_opt,
 };
 
+use twigo_panic::inject;
+
 use super::{Catalog, Sources};
 
 /// Long enough to take a writer's temporary file, rename and chmod as one
@@ -41,11 +43,13 @@ impl Watch {
     /// Calls `on_change` with the catalog before it returns, then on a
     /// thread of its own with every new one, and `on_write` after every
     /// change to the files, whether or not it changed the catalog, until the
-    /// watch is dropped.
+    /// watch is dropped. A panic on that thread ends it, and `on_panic` is
+    /// called from it: the caller starts the watch again.
     pub fn start(
         sources: Sources,
         mut on_change: impl FnMut(Catalog) + Send + 'static,
         mut on_write: impl FnMut() + Send + 'static,
+        on_panic: impl FnOnce() + Send + 'static,
     ) -> Result<Self, notify::Error> {
         let (events, received) = mpsc::channel::<DebounceEventResult>();
         let mut watched = Watched {
@@ -69,24 +73,30 @@ impl Watch {
             .spawn(move || {
                 // Ends once the watch is dropped: the debouncer goes with it,
                 // and so does the sending half of the channel.
-                for result in received {
-                    let Some(shared) = weak.upgrade() else { return };
-                    {
-                        let mut watched = lock(&shared);
-                        if !watched.relevant(&result) {
-                            continue;
+                let followed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    for result in received {
+                        inject::check("kubeconfig watch");
+                        let Some(shared) = weak.upgrade() else { return };
+                        {
+                            let mut watched = lock(&shared);
+                            if !watched.relevant(&result) {
+                                continue;
+                            }
+                            // Before the load, so that a file written meanwhile
+                            // in a directory that has just appeared is seen.
+                            watched.follow(&sources);
                         }
-                        // Before the load, so that a file written meanwhile
-                        // in a directory that has just appeared is seen.
-                        watched.follow(&sources);
+                        drop(shared);
+                        let next = sources.load();
+                        if next != last {
+                            last = next.clone();
+                            on_change(next);
+                        }
+                        on_write();
                     }
-                    drop(shared);
-                    let next = sources.load();
-                    if next != last {
-                        last = next.clone();
-                        on_change(next);
-                    }
-                    on_write();
+                }));
+                if followed.is_err() {
+                    on_panic();
                 }
             })?;
         Ok(Self { _watched: shared })

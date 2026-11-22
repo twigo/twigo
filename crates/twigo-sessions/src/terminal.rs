@@ -26,6 +26,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use twigo_ipc::{ErrorCode, IpcError, ShellEnd, ShellEvent};
 use twigo_log::Repeats;
+use twigo_panic::contain;
 
 use crate::flow::{FRAME_MAX, Flow};
 use crate::shell::{Frame, INPUT_QUEUE};
@@ -127,8 +128,19 @@ impl Terminal {
         let task = tokio::spawn({
             let hangup = Arc::clone(&hangup);
             async move {
-                if send(Frame::Event(ShellEvent::Running)) {
-                    run(pty, slave, &hangup, commands, send).await;
+                if !send(Frame::Event(ShellEvent::Running)) {
+                    return;
+                }
+                if contain("terminal", run(pty, slave, &hangup, commands, &mut send))
+                    .await
+                    .is_err()
+                {
+                    hangup.hang_up(Then::Kill);
+                    send(Frame::Event(ShellEvent::Ended {
+                        end: ShellEnd::Failed {
+                            error: IpcError::panicked("this terminal"),
+                        },
+                    }));
                 }
             }
         });

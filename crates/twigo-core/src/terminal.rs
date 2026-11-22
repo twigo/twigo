@@ -143,9 +143,7 @@ impl Terminals {
     /// Makes every offer anew, as the user's files have changed.
     pub(crate) async fn refresh_offers(&self) {
         let offers = Arc::clone(&self.offers);
-        tokio::task::spawn_blocking(move || offers.refresh())
-            .await
-            .expect("a refresh does not panic");
+        twigo_panic::joined(tokio::task::spawn_blocking(move || offers.refresh()).await);
     }
 }
 
@@ -267,7 +265,7 @@ impl Core {
         };
         let chained = kind == TerminalKind::Kubeconfig;
         let (watcher, source) = self
-            .watch_offers(window, &label, &context, &file, sources, chained)
+            .watch_offers(window, &label, &context, &file, sources, chained)?
             .unzip();
         let env =
             environment::environment(&login, &kubeconfig, &startup_env, twigo_env::utf8_locale);
@@ -306,6 +304,8 @@ impl Core {
     /// files give kubectl somewhere to write new entries: the watch, and
     /// the source it offers from, whose session the caller sets. The user's
     /// files follow `file` in its `KUBECONFIG` where it is `chained`.
+    /// Refused where the kubeconfig Twigo wrote does not parse, in words
+    /// that leave out its text.
     fn watch_offers(
         &self,
         window: &str,
@@ -314,18 +314,32 @@ impl Core {
         file: &Path,
         sources: Sources,
         chained: bool,
-    ) -> Option<(Watcher, Arc<Source>)> {
-        let target = sources.target()?.to_owned();
+    ) -> Result<Option<(Watcher, Arc<Source>)>, IpcError> {
+        let Some(target) = sources.target().map(ToOwned::to_owned) else {
+            return Ok(None);
+        };
         let text = match std::fs::read_to_string(file) {
             Ok(text) => text,
             Err(error) => {
                 tracing::error!(path = %file.display(), %error, "could not read the terminal's kubeconfig");
-                return None;
+                return Ok(None);
             }
         };
-        let parses = "Twigo writes a kubeconfig that parses";
-        let written = Names::of(&text).expect(parses);
-        let proxied = (!chained).then(|| Reach::of(&text).expect(parses));
+        let unparsable = || {
+            tracing::error!(path = %file.display(), "the kubeconfig Twigo wrote for a terminal does not parse");
+            IpcError::new(
+                ErrorCode::KubeconfigUnparsable,
+                format!(
+                    "the kubeconfig Twigo wrote for this terminal, {}, does not parse",
+                    file.display()
+                ),
+            )
+        };
+        let written = Names::of(&text).map_err(|_| unparsable())?;
+        let proxied = (!chained)
+            .then(|| Reach::of(&text))
+            .transpose()
+            .map_err(|_| unparsable())?;
         let source = Arc::new(Source {
             window: window.into(),
             label: label.into(),
@@ -339,10 +353,10 @@ impl Core {
         });
         let offers = Arc::clone(&self.terminals.offers);
         match watcher::watch(offers, Arc::clone(&source), written, proxied) {
-            Ok(watcher) => Some((watcher, source)),
+            Ok(watcher) => Ok(Some((watcher, source))),
             Err(error) => {
                 tracing::warn!(path = %file.display(), %error, "could not watch the terminal's kubeconfig, so what tools write there is not offered");
-                None
+                Ok(None)
             }
         }
     }
@@ -378,10 +392,9 @@ impl Core {
             offers.withdraw(answering);
             return Ok(());
         }
-        let (moved, answering) =
-            tokio::task::spawn_blocking(move || (answering.move_entries(), answering))
-                .await
-                .expect("a move does not panic");
+        let (moved, answering) = twigo_panic::joined(
+            tokio::task::spawn_blocking(move || (answering.move_entries(), answering)).await,
+        );
         offers.moved(answering, moved)
     }
 

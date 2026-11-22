@@ -5949,6 +5949,7 @@ dependencies = [
  "twigo-keyboard",
  "twigo-log",
  "twigo-netmon",
+ "twigo-panic",
 ]
 
 [[package]]
@@ -6028,6 +6029,7 @@ dependencies = [
  "twigo-ipc",
  "twigo-kube",
  "twigo-log",
+ "twigo-panic",
  "twigo-quantity",
 ]
 
@@ -6072,6 +6074,7 @@ dependencies = [
  "twigo-kube",
  "twigo-log",
  "twigo-netmon",
+ "twigo-panic",
  "twigo-policy",
  "twigo-quantity",
  "twigo-sessions",
@@ -6191,6 +6194,7 @@ dependencies = [
  "twigo-env",
  "twigo-ipc",
  "twigo-log",
+ "twigo-panic",
  "twigo-policy",
  "yaml-edit",
 ]
@@ -6226,6 +6230,16 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
+]
+
+[[package]]
+name = "twigo-panic"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "tokio",
+ "tracing",
+ "twigo-panic",
 ]
 
 [[package]]
@@ -6290,6 +6304,7 @@ dependencies = [
  "twigo-ipc",
  "twigo-kube",
  "twigo-log",
+ "twigo-panic",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 use std::io::{BufRead, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -42,10 +43,7 @@ fn running_with(dir: &Path, text: &str) -> Arc<Core> {
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 
@@ -1684,4 +1682,62 @@ async fn a_session_goes_with_its_window_and_with_shell_close() {
             .kind,
         ErrorKind::NotFound
     );
+}
+
+#[tokio::test]
+async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = running(dir.path()).await;
+    let runs = Runs::default();
+    let mut planned = planned(&core, Risk::Lasting, &runs);
+    planned.run = Run::Sends(Box::new(|progress: Progress| {
+        Box::pin(async move {
+            progress.running("Deleting config map m");
+            panic!("a run's bug");
+        })
+    }));
+    let ticket = core.bus.ticket("main");
+    let access = core.policy.access("kind-a");
+    let plan = core.bus.keep(ticket, planned, &access).unwrap();
+    let (told, send) = events();
+    let request = Execute {
+        plan: plan.id,
+        typed: None,
+    };
+    core.command_execute("main", request, send).await.unwrap();
+
+    until("the run's end is logged", || {
+        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
+    })
+    .await;
+    {
+        let told = told.lock().unwrap();
+        let Some(OperationEvent::Failed { error }) = told.last() else {
+            panic!("the run failed: {told:?}");
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+    }
+    let lines = audit(dir.path());
+    assert_eq!(lines[1]["event"], "ended");
+    assert_eq!(lines[1]["outcome"], "failed");
+    until("the bus lets the plan go", || {
+        core.bus.inner().windows["main"].entries.is_empty()
+    })
+    .await;
+}
+
+#[test]
+fn a_send_that_panicked_does_not_stop_the_events_after_it() {
+    let sent = Arc::new(AtomicUsize::new(0));
+    let (progress, _stop) = Progress::new({
+        let sent = Arc::clone(&sent);
+        move |_| {
+            assert!(sent.fetch_add(1, Ordering::SeqCst) > 0, "a sender's bug");
+            true
+        }
+    });
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| progress.running("a")));
+    assert!(panicked.is_err());
+    progress.running("b");
+    assert_eq!(sent.load(Ordering::SeqCst), 2);
 }
