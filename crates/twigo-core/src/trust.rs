@@ -65,7 +65,9 @@ impl Trust {
         let mut next = self.current();
         next.digests.extend(digests);
         next.reviewed = true;
-        self.write(&next.digests)?;
+        self.write(&next.digests).inspect_err(|error| {
+            tracing::error!(path = %self.path.display(), %error, "could not save the trusted plugins");
+        })?;
         self.trusted.send_replace(next);
         Ok(())
     }
@@ -140,5 +142,24 @@ mod tests {
                 .iter()
                 .any(|problem| problem.code == ErrorCode::TrustSetAside)
         );
+    }
+
+    #[test]
+    fn a_list_that_cannot_be_saved_says_so_in_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocked = dir.path().join("a-file");
+        std::fs::write(&blocked, "").unwrap();
+        let trust = Trust::open(blocked.join("trust.json"));
+        let log = twigo_log::capture();
+
+        assert!(trust.trust(["digest".to_owned()]).is_err());
+
+        let errors: Vec<_> = log
+            .lines()
+            .into_iter()
+            .filter(|line| line["level"] == "ERROR")
+            .map(|line| line["fields"]["message"].clone())
+            .collect();
+        assert_eq!(errors, ["could not save the trusted plugins"]);
     }
 }
