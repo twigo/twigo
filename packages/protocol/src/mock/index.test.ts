@@ -617,6 +617,38 @@ test("a list whose cluster does not answer carries the failure that keeps it wai
   });
 });
 
+test("a list that ended on an internal error says so, and under discoveryFails each space's discovery fails for its own reason", async () => {
+  const panicked = await open("listPanicked");
+  expect(panicked.batches[0]?.status).toMatchObject({
+    state: "error",
+    error: { code: "internal.panic" },
+  });
+
+  const backend = createMockBackend("discoveryFails");
+  const found: Record<string, unknown> = {};
+  for (const space of ["prod-eu", "staging", "dev"]) {
+    const opened = backend.invoke("space_open", space);
+    await vi.advanceTimersByTimeAsync(0);
+    await opened;
+    const watching = backend.subscribe("resources_watch", space, (message) => {
+      found[space] = message;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await watching;
+  }
+  expect(
+    Object.values(found).map((message) =>
+      JSON.stringify(
+        (message as { error?: { code: string } }).error?.code ?? "ready",
+      ),
+    ),
+  ).toEqual([
+    '"connect.refused"',
+    '"context.missing-user"',
+    '"credentials.plugin-failed"',
+  ]);
+});
+
 test("the catalog names the kubeconfig files it could not read, and the context whose entry names no user", async () => {
   const catalogs = async (scenario: MockScenario) => {
     const backend = createMockBackend(scenario);

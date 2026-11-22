@@ -13,16 +13,48 @@ import { CONTEXTS, UNMARKED } from "./fixtures";
  * them waiting, as Rust's upstream reports it: `connectRefused` and
  * `connectCertificate` connect again, `connectLost` shows its rows with no
  * updates. `serverRefuses` is a list the API server answers with a refusal
- * that has causes, which the status carries as data.
+ * that has causes, which the status carries as data, and `listPanicked` one
+ * that ended on an internal error of Twigo's.
  */
 export const CAUSE_SCENARIOS = [
   "connectRefused",
   "connectCertificate",
   "connectLost",
   "serverRefuses",
+  "listPanicked",
 ] as const;
 
 export type CauseScenario = (typeof CAUSE_SCENARIOS)[number];
+
+/**
+ * `discoveryFails`: no space's discovery answers, each for a reason of its
+ * own, as it does when a cluster cannot be reached, a context names no user
+ * or a credential plugin fails.
+ */
+export const DISCOVERY_FAILS = "discoveryFails";
+
+const DISCOVERY_FAILURES: Readonly<Record<string, Wire>> = {
+  "prod-eu": error(
+    "connect.refused",
+    "The cluster refused the connection: Connection refused (os error 61)",
+  ),
+  staging: error(
+    "context.missing-user",
+    'no kubeconfig defines the user "staging-admin"',
+  ),
+  dev: error(
+    "credentials.plugin-failed",
+    "exec: executable aws failed with exit code 255",
+  ),
+};
+
+/** Why a space's discovery fails under `discoveryFails`, none for a space that has no reason. */
+export function discoveryFailure(
+  scenario: string,
+  space: string,
+): Wire | undefined {
+  return scenario === DISCOVERY_FAILS ? DISCOVERY_FAILURES[space] : undefined;
+}
 
 export function isCauseScenario(scenario: string): scenario is CauseScenario {
   return (CAUSE_SCENARIOS as readonly string[]).includes(scenario);
@@ -57,6 +89,13 @@ export const CAUSED: Readonly<Record<CauseScenario, ViewState>> = {
     cause: error(
       "connect.lost",
       "Error reading events stream: connection closed before message completed",
+    ),
+  },
+  listPanicked: {
+    state: "error",
+    error: error(
+      "internal.panic",
+      "Twigo stopped this list on an internal error",
     ),
   },
   serverRefuses: {

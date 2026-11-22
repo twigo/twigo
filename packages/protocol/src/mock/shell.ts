@@ -14,7 +14,8 @@ import { containerNames, containerOf, type Pod } from "./cluster";
 /**
  * Pins what a shell does: `shellQueued` waits for a place among the
  * cluster's sessions, `shellNoShell` finds no shell in the container,
- * `shellFailed` is refused by the API server, `shellLost` loses its
+ * `shellFailed` is refused by the API server, `shellPanicked` ends on an
+ * internal error of Twigo's, `shellLost` loses its
  * connection and `shellRelocked` its context's write mode a while after it
  * opens, `shellOneContainer` runs one container in
  * every pod, so no picker asks, `shellDefaultSecond` has the pods'
@@ -27,6 +28,7 @@ export type ShellScenario =
   | "shellQueued"
   | "shellNoShell"
   | "shellFailed"
+  | "shellPanicked"
   | "shellLost"
   | "shellRelocked"
   | "shellOneContainer"
@@ -37,6 +39,7 @@ export const SHELL_SCENARIOS: readonly ShellScenario[] = [
   "shellQueued",
   "shellNoShell",
   "shellFailed",
+  "shellPanicked",
   "shellLost",
   "shellRelocked",
   "shellOneContainer",
@@ -228,6 +231,18 @@ export class MockShell {
               'pods "web-7d9f" is forbidden: User "dev-user" cannot create resource "pods/exec" in API group "" in the namespace "default"',
               undefined,
               { reason: "Forbidden", causes: [] },
+            ),
+          ),
+        });
+        return;
+      }
+      if (this.#scenario === "shellPanicked") {
+        this.#end({
+          reason: "failed",
+          error: wireError(
+            new IpcError(
+              "internal.panic",
+              "Twigo stopped this shell on an internal error",
             ),
           ),
         });

@@ -39,7 +39,9 @@ import {
   ANONYMOUS,
   CAUSE_SCENARIOS,
   CAUSED,
+  DISCOVERY_FAILS,
   catalogOf,
+  discoveryFailure,
   isCauseScenario,
   isKubeconfigScenario,
   KUBECONFIG_SCENARIOS,
@@ -171,7 +173,9 @@ type ListScenario = "live" | ViewState["state"] | CauseScenario;
  * from an earlier run or are forbidden (`forwardBusy` and the like), or
  * while the context's Metrics API is not served, does not answer or refuses
  * the person (`metricsNone` and the like), live lists while the catalog's
- * kubeconfig files fail (`kubeconfigFailures` and the like), or `problems`:
+ * kubeconfig files fail (`kubeconfigFailures` and the like), `discoveryFails`:
+ * live lists of spaces whose discovery fails, each for a reason of its own,
+ * or `problems`:
  * live lists while Twigo's saved state was set aside and its audit log cannot
  * open. A pinned cause (`connectRefused` and the like) is a list scenario.
  */
@@ -192,7 +196,8 @@ export type MockScenario =
   | TerminalScenario
   | ForwardScenario
   | MetricsScenario
-  | KubeconfigScenario;
+  | KubeconfigScenario
+  | typeof DISCOVERY_FAILS;
 
 export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "live",
@@ -213,6 +218,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   ...METRICS_SCENARIOS,
   ...KUBECONFIG_SCENARIOS,
   ...CAUSE_SCENARIOS,
+  DISCOVERY_FAILS,
   "queued",
   "connecting",
   "syncing",
@@ -307,7 +313,8 @@ export function createMockBackend(
     isTerminalScenario(scenario) ||
     isForwardScenario(scenario) ||
     isMetricsScenario(scenario) ||
-    isKubeconfigScenario(scenario)
+    isKubeconfigScenario(scenario) ||
+    scenario === DISCOVERY_FAILS
       ? "live"
       : scenario;
   const metrics = new MockMetrics(
@@ -999,7 +1006,12 @@ export function createMockBackend(
     problems_watch: () => (scenario === "problems" ? PROBLEMS : []),
     resources_watch: (id, onMessage) => {
       space(id);
+      const failure = discoveryFailure(scenario, id);
       const send = () => {
+        if (failure) {
+          onMessage({ state: "failed", error: failure });
+          return;
+        }
         onMessage({
           state: "ready",
           cluster: `mock://${id}`,
