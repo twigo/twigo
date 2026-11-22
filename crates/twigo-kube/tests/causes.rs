@@ -203,7 +203,6 @@ async fn socks_refusing_credentials() -> u16 {
 
 const UNREACHED: &str = "Twigo could not reach the proxy: ";
 const DECLINED: &str = "The proxy did not open the connection to the cluster: ";
-const FAILED: &str = "The proxy could not reach the cluster: ";
 
 #[tokio::test]
 async fn a_proxy_that_is_not_there() {
@@ -241,21 +240,20 @@ async fn a_socks_proxy_that_is_not_there() {
 }
 
 #[tokio::test]
-async fn a_socks_reply_says_whether_the_proxy_tried_the_cluster() {
-    for (reply, tried, inner) in [
-        (3, true, "network unreachable"),
-        (4, true, "host unreachable"),
-        (5, true, "connection refused"),
-        (6, true, "ttl expired"),
-        (1, false, "general server failure"),
-        (2, false, "connection not allowed"),
-        (7, false, "command not supported"),
+async fn a_socks_reply_that_opens_nothing_says_what_the_proxy_replied() {
+    for (reply, inner) in [
+        (3, "network unreachable"),
+        (4, "host unreachable"),
+        (5, "connection refused"),
+        (6, "ttl expired"),
+        (1, "general server failure"),
+        (2, "connection not allowed"),
+        (7, "command not supported"),
     ] {
         let port = socks_replying(reply).await;
         let error = through(&format!("socks5://127.0.0.1:{port}")).await;
         assert_eq!(error.code, ErrorCode::ConnectProxy);
-        let start = if tried { FAILED } else { DECLINED };
-        assert!(error.message.starts_with(start), "{error:?}");
+        assert!(error.message.starts_with(DECLINED), "{error:?}");
         assert!(error.message.ends_with(inner), "{error:?}");
     }
 }

@@ -8,7 +8,7 @@ use rustls::CertificateError;
 use tower::timeout::error::Elapsed;
 use twigo_ipc::{Blocked, ErrorCode, IpcError, ServerCause, ServerStatus};
 
-use crate::client::dial::{ProxyFailed, ProxyRefused, ProxyUnreachable, Unresolved};
+use crate::client::dial::{ProxyRefused, ProxyUnreachable, Unresolved};
 use crate::credentials::{CredentialError, OidcError, RunError};
 
 /// kube-client's reason for an answer that is no `Status`: a proxy's HTML or
@@ -194,12 +194,6 @@ fn said(cause: &(dyn std::error::Error + 'static)) -> Option<(ErrorCode, &'stati
         return Some((
             ErrorCode::ConnectProxy,
             "The proxy did not open the connection to the cluster",
-        ));
-    }
-    if cause.is::<ProxyFailed>() {
-        return Some((
-            ErrorCode::ConnectProxy,
-            "The proxy could not reach the cluster",
         ));
     }
     if cause.is::<Unresolved>() {

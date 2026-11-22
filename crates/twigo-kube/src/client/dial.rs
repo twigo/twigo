@@ -41,13 +41,6 @@ pub struct ProxyUnreachable(#[source] BoxError);
 #[error("refused by the proxy")]
 pub struct ProxyRefused(#[source] BoxError);
 
-/// A proxy that tried the connection to the cluster and could not make it: a
-/// SOCKS reply that says the network or the host was unreachable, the
-/// connection refused or the TTL expired.
-#[derive(Debug, thiserror::Error)]
-#[error("through the proxy")]
-pub struct ProxyFailed(#[source] BoxError);
-
 /// The system's resolver, which hyper-util uses by default, with its failure
 /// told by [`Unresolved`].
 type Resolver = MapErr<GaiResolver, fn(io::Error) -> Unresolved>;
@@ -189,7 +182,10 @@ impl Service<Uri> for Dialer {
                     if let Some((user, password)) = auth {
                         socks = socks.with_auth(user, password);
                     }
-                    let tcp = socks.oneshot(with_port(&server)).await.map_err(declined)?;
+                    let tcp = socks
+                        .oneshot(with_port(&server))
+                        .await
+                        .map_err(|error| ProxyRefused(error.into()))?;
                     Ok(Stream::Tcp(tcp))
                 }))
             }
@@ -209,25 +205,6 @@ async fn within<T>(
     tokio::time::timeout(limit, hop).await.unwrap_or_else(|_| {
         Err(ProxyUnreachable(io::Error::from(io::ErrorKind::TimedOut).into()).into())
     })
-}
-
-/// [`ProxyFailed`] for a reply that says the proxy tried the cluster and could
-/// not get there, else [`ProxyRefused`].
-///
-/// @todo: read the reply from `SocksV5Error`'s variants, not its words, once
-/// hyper-util exports it (a private module in 0.1.21).
-fn declined<E: std::error::Error + Send + Sync + 'static>(error: E) -> BoxError {
-    const TRIED: [&str; 4] = [
-        "SOCKS error: network unreachable",
-        "SOCKS error: host unreachable",
-        "SOCKS error: connection refused",
-        "SOCKS error: ttl expired",
-    ];
-    if TRIED.contains(&error.to_string().as_str()) {
-        ProxyFailed(error.into()).into()
-    } else {
-        ProxyRefused(error.into()).into()
-    }
 }
 
 /// The connection to the proxy, made apart from the tunnel or the handshake
