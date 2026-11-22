@@ -10,11 +10,11 @@ use crate::{
     DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
     ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
     KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenIssue,
-    OpenLogs, OpenObject, OpenShell, OpenedIssue, OperationEvent, Plan, PlanId, PlanRequest,
-    Report, ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView,
-    SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput,
-    ShellMessage, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
-    SubscriptionId, TerminalSession,
+    OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, Report,
+    ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
+    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
+    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
+    TerminalSession,
 };
 
 pub trait Command {
@@ -527,15 +527,14 @@ impl Command for ReportProblem {
 }
 
 /// Opens the repository's new-issue form in the person's browser, with the
-/// facts they left ticked and what they wrote; with no facts it opens the bare
-/// template. The link stays under 6,000 characters, and the answer says what
-/// that cut.
+/// facts they left ticked; with no facts, or when the link would pass 6,000
+/// characters, it opens the bare template.
 pub struct ReportOpenIssue;
 
 impl Command for ReportOpenIssue {
     const NAME: &'static str = "report_open_issue";
     type Request = OpenIssue;
-    type Response = OpenedIssue;
+    type Response = ();
     type Message = ();
 }
 

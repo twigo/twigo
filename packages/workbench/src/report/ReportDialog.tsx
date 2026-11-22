@@ -23,7 +23,7 @@ import {
 import { ErrorMessage } from "../ErrorMessage";
 import { useChanges, useReturnFocus, useWorkbench } from "../react";
 import { REVEAL_LOG_FILE } from "./commands";
-import { hiddenWords, openedWords, reportText, SECURITY_URL } from "./words";
+import { hiddenWords, reportText, SECURITY_URL } from "./words";
 
 /**
  * "Report a Problem" (ARCHITECTURE 4.10): what Rust prepared and redacted,
@@ -84,11 +84,13 @@ function Body({ report }: { report: Report }) {
     const written = navigator.clipboard.writeText(log);
     void run(async () => {
       await written;
-      const opened = await backend.invoke("report_open_issue", {
+      await backend.invoke("report_open_issue", {
         facts: stated.map(({ id }) => id),
       });
       problemReport.close();
-      notify.info(openedWords(opened, report.facts), { key: "report:opened" });
+      notify.info("The log is on your clipboard: paste it into Logs.", {
+        key: "report:opened",
+      });
     });
   };
 

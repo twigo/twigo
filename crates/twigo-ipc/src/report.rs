@@ -61,14 +61,6 @@ pub struct OpenIssue {
     pub facts: Vec<FactId>,
 }
 
-/// What the link left out to stay under its length.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct OpenedIssue {
-    /// Facts whose values were shortened.
-    pub facts_cut: Vec<FactId>,
-}
-
 /// The text the person sees, to save to a file they choose.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SaveReport {

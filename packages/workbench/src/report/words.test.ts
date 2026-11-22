@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { Fact } from "@twigo/protocol";
-import { hiddenWords, openedWords, reportText } from "./words";
+import { hiddenWords, reportText } from "./words";
 
 const NONE = {
   names: 0,
@@ -37,13 +37,4 @@ test("the report's text is the facts and the log, each block apart and none empt
   );
   expect(reportText({ facts: [], log: "line" })).toBe("line");
   expect(reportText({ facts: [], log: "" })).toBe("");
-});
-
-test("the toast says where to paste the log, and what the link had to leave short", () => {
-  expect(openedWords({ factsCut: [] }, FACTS)).toBe(
-    "The log is on your clipboard: paste it into Logs.",
-  );
-  expect(openedWords({ factsCut: ["kubernetes"] }, FACTS)).toBe(
-    "The log is on your clipboard: paste it into Logs. The link was too long, so Twigo shortened Kubernetes.",
-  );
 });

@@ -602,18 +602,17 @@ fn fact(id: FactId, label: &str, value: &str) -> twigo_ipc::Fact {
 
 #[test]
 fn the_link_is_the_bare_template_without_facts_and_carries_what_was_ticked() {
-    let (bare, cut) = issue::link(&[]);
+    let bare = issue::link(&[]);
     assert_eq!(
         bare,
         "https://github.com/twigo/twigo/issues/new?template=bug_report.yml"
     );
-    assert!(cut.facts_cut.is_empty());
 
     let facts = [
         fact(FactId::Twigo, "Twigo", "0.1.0 (3f2a9c1)"),
         fact(FactId::Kubernetes, "Kubernetes", "v1.37.2, v1.33.4"),
     ];
-    let (url, _) = issue::link(&facts);
+    let url = issue::link(&facts);
     assert_eq!(
         url,
         "https://github.com/twigo/twigo/issues/new?template=bug_report.yml\
@@ -622,7 +621,7 @@ fn the_link_is_the_bare_template_without_facts_and_carries_what_was_ticked() {
 }
 
 #[test]
-fn a_link_past_the_budget_cuts_the_longest_fact_down_to_what_fits() {
+fn a_link_past_the_limit_is_the_bare_template() {
     let versions = (0..300)
         .map(|n| format!("v1.{n}.0-eks-2d5f260"))
         .collect::<Vec<_>>()
@@ -632,17 +631,7 @@ fn a_link_past_the_budget_cuts_the_longest_fact_down_to_what_fits() {
         fact(FactId::Kubernetes, "Kubernetes", &versions),
     ];
 
-    let (url, cut) = issue::link(&facts);
-    assert!(url.len() <= 6000 && url.len() > 5000, "{}", url.len());
-    assert_eq!(cut.facts_cut, [FactId::Kubernetes]);
-    assert!(
-        url.contains("Twigo%3A%200%2E1%2E0%20%283f2a9c1%29"),
-        "a short fact stays whole"
-    );
-    assert!(
-        url.ends_with("%E2%80%A6"),
-        "the cut value ends with an ellipsis"
-    );
+    assert_eq!(issue::link(&facts), issue::link(&[]));
 }
 
 #[test]
@@ -806,13 +795,13 @@ async fn only_the_facts_left_ticked_go_in_the_link() {
     );
     let run = facts(None);
     let ask = |ticked: Vec<FactId>| core.report_issue(&run, &[], OpenIssue { facts: ticked });
-    let (url, _) = ask(vec![FactId::Engine, FactId::Kubernetes]).await;
+    let url = ask(vec![FactId::Engine, FactId::Kubernetes]).await;
     assert!(
         url.contains("Engine%3A") && !url.contains("Twigo%3A"),
         "{url}"
     );
     assert!(!url.contains("Kubernetes"), "no cluster was asked: {url}");
-    let (bare, _) = ask(vec![]).await;
+    let bare = ask(vec![]).await;
     assert!(!bare.contains("environment"), "{bare}");
 }
 

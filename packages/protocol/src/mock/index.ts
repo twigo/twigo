@@ -657,7 +657,7 @@ export function createMockBackend(
     report_problem: () => REPORT as Report,
     report_open_issue: (request) => {
       console.info("[report_open_issue]", request);
-      return { factsCut: [] };
+      return null;
     },
     report_save: (request) => {
       console.info("[report_save]", request);

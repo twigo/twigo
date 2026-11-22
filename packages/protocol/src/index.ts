@@ -82,7 +82,6 @@ export type {
   FactId,
   Hidden,
   LogVerbosity,
-  OpenedIssue,
   Report,
   ServerCause,
   ServerStatus,

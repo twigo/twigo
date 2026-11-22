@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use twigo_ipc::{ErrorCode, Fact, FactId, IpcError, OpenIssue, OpenedIssue, Report};
+use twigo_ipc::{ErrorCode, Fact, FactId, IpcError, OpenIssue, Report};
 use twigo_kube::kubeconfig::named;
 use twigo_log::Facts;
 
@@ -53,13 +53,14 @@ impl Core {
     }
 
     /// The link of the new-issue form for the facts the person left ticked,
-    /// which stays under 6,000 characters, and what it left out to.
+    /// which is the bare template when the facts would take it past 6,000
+    /// characters.
     pub async fn report_issue(
         &self,
         facts: &Facts,
         files: &[PathBuf],
         request: OpenIssue,
-    ) -> (String, OpenedIssue) {
+    ) -> String {
         let (known, versions) = (self.known(), self.connections.versions());
         let (facts, files) = (facts.clone(), files.to_vec());
         twigo_panic::joined(

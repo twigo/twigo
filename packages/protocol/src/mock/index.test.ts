@@ -1592,9 +1592,9 @@ test("the report is the one Rust renders from a recorded log, and opening and sa
   expect(report.hidden.names).toBeGreaterThan(0);
 
   const request = { facts: ["twigo" as const] };
-  expect(await settled(backend.invoke("report_open_issue", request))).toEqual({
-    factsCut: [],
-  });
+  expect(
+    await settled(backend.invoke("report_open_issue", request)),
+  ).toBeNull();
   expect(info).toHaveBeenCalledWith("[report_open_issue]", request);
 
   const saved = await settled(backend.invoke("report_save", { text: "a" }));

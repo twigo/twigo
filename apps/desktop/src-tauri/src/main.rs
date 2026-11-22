@@ -26,11 +26,11 @@ use twigo_ipc::{
     Discovered, DownloadLogs, ErrorCode, ExecReview, Execute, Forward, ForwardEvent, ForwardId,
     ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
     KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
-    NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OpenedIssue,
-    OperationEvent, Plan, PlanId, PlanRequest, Report, ResumeForward, SaveReport, SchemaQuery,
-    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
-    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
-    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
+    NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
+    PlanId, PlanRequest, Report, ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource,
+    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
+    ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
+    SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
@@ -831,9 +831,9 @@ async fn report_open_issue(
     app: State<'_, App>,
     log: State<'_, Log>,
     request: OpenIssue,
-) -> Result<OpenedIssue, IpcError> {
+) -> Result<(), IpcError> {
     contained(async {
-        let (url, opened) = app
+        let url = app
             .core
             .report_issue(log.facts(), &log.files(), request)
             .await;
@@ -845,8 +845,7 @@ async fn report_open_issue(
                     ErrorCode::LinkOpenFailed,
                     format!("could not open the new-issue form: {error}"),
                 )
-            })?;
-        Ok(opened)
+            })
     })
     .await
 }
