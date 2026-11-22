@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import { Eye, TriangleAlert } from "lucide-react";
 import { Banner, Skeleton } from "@twigo/ui";
-import { useChanges } from "@twigo/workbench";
+import { errorOneLine, useChanges } from "@twigo/workbench";
 import { EditActions } from "./actions";
 import { AnswerView, FailedBar } from "./answers";
 import { placementOf } from "./placement";
@@ -84,7 +84,10 @@ export function YamlSurface({
         <span className="min-w-0 flex-1 truncate text-support">
           {note}
           {loaded?.state === "failed" && (
-            <span title={loaded.message}> · No schema for completion</span>
+            <span title={errorOneLine(loaded.error)}>
+              {" "}
+              · No schema for completion
+            </span>
           )}
         </span>
         <EditActions edits={edits} uri={uri} menus={["edit/toolbar"]} />

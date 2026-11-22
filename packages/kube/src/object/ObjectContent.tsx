@@ -7,6 +7,7 @@ import {
   type RelatedObject,
 } from "@twigo/protocol";
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
+import { ErrorMessage } from "@twigo/workbench";
 import { ViewStatus } from "../ViewStatus";
 import { objectProblem } from "../viewProblem";
 import { Manifest } from "../edit/Manifest";
@@ -189,7 +190,9 @@ export function RelatedView({
       ) : (
         <section aria-label="Owns">
           <h3 className="mb-1 text-xs font-semibold text-support">Owns</h3>
-          <p className="text-error">{related.unavailable.message}</p>
+          <p className="text-error">
+            <ErrorMessage error={related.unavailable} />
+          </p>
         </section>
       )}
     </div>

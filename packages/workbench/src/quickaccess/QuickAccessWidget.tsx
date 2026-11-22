@@ -12,7 +12,8 @@ import {
   Tick,
   Tile,
 } from "@twigo/ui";
-import { toIpcError } from "@twigo/protocol";
+import { toIpcError, type IpcError } from "@twigo/protocol";
+import { ErrorMessage } from "../ErrorMessage";
 import { PanelBoundary } from "../parts/PanelBoundary";
 import { initials } from "../parts/spaceBadge";
 import { useChanges, useWorkbench } from "../react";
@@ -56,7 +57,7 @@ type Loaded =
       readonly items: readonly QuickPickItem[];
       readonly notice?: string;
     }
-  | { readonly state: "failed"; readonly message: string };
+  | { readonly state: "failed"; readonly error: IpcError };
 
 /** Keys that are the keybinding service's alone: unbound, they still move no caret and submit nothing. */
 const BOUND_KEYS = new Set(["ArrowUp", "ArrowDown", "Enter"]);
@@ -149,7 +150,7 @@ function Open({ session }: { session: Session }) {
         if (live) {
           setLoaded({
             value,
-            result: { state: "failed", message: toIpcError(error).message },
+            result: { state: "failed", error: toIpcError(error) },
           });
         }
       },
@@ -343,7 +344,9 @@ function Open({ session }: { session: Session }) {
           {ask ? (
             <Asked message={ask.validate(value)} prompt={ask.prompt} />
           ) : result.state === "failed" ? (
-            <p className="px-3 py-3 text-xs text-error">{result.message}</p>
+            <p className="px-3 py-3 text-xs text-error">
+              <ErrorMessage error={result.error} />
+            </p>
           ) : (
             result.state === "ready" &&
             items.length === 0 && <QuickInputEmpty>No results</QuickInputEmpty>

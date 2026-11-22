@@ -215,8 +215,11 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       )}
       {snapshot.refused && (
         <Banner tone="error" icon={CircleAlert} title="Not applied:">
-          {snapshot.refused.message}. The lines show the last filter and search
-          that worked.
+          <ErrorMessage
+            error={snapshot.refused}
+            message={`${snapshot.refused.message}.`}
+          />{" "}
+          The lines show the last filter and search that worked.
         </Banner>
       )}
       {failed[0] && (
@@ -234,7 +237,8 @@ export function LogsEditor({ uri, tabs }: EditorProps & { tabs: LogsTabs }) {
       )}
       {problem && total > 0 && (
         <Banner tone="error" icon={problem.icon} title={`${problem.title}.`}>
-          {problem.body} The lines read so far stay.
+          <ErrorMessage error={problem.error} message={problem.body} /> The
+          lines read so far stay.
         </Banner>
       )}
       {status.state === "queued" && (

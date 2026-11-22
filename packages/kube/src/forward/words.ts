@@ -1,6 +1,6 @@
 import type { Forward } from "@twigo/protocol";
 import type { Tone } from "@twigo/ui";
-import { modeLabel, type SessionState } from "@twigo/workbench";
+import { errorOneLine, modeLabel, type SessionState } from "@twigo/workbench";
 
 /** The target's port as a person names it: `http`, or its number when it has no name. */
 export function portLabel({ port, portName }: Forward): string {
@@ -64,16 +64,16 @@ export function stateOf({ state, queued }: Forward): Shown {
         label: "Reconnecting",
         tone: "warn",
         pulse: true,
-        detail: state.reason.message,
+        detail: errorOneLine(state.reason),
       };
     case "failed":
       return state.error.blocked
         ? {
             label: modeLabel(state.error.blocked.mode),
             tone: "warn",
-            detail: state.error.message,
+            detail: errorOneLine(state.error),
           }
-        : { label: "Failed", tone: "error", detail: state.error.message };
+        : { label: "Failed", tone: "error", detail: errorOneLine(state.error) };
     case "stopped":
       return { label: "Stopped", tone: "idle", hollow: true };
   }

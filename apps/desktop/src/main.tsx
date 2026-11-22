@@ -42,7 +42,7 @@ async function start() {
 }
 
 const view = await start().catch((error: unknown) => (
-  <StartupFailure message={toIpcError(error).message} />
+  <StartupFailure error={toIpcError(error)} />
 ));
 
 createRoot(root).render(<StrictMode>{view}</StrictMode>);

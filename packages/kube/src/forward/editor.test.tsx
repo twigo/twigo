@@ -25,7 +25,7 @@ import {
   type MockScenario,
 } from "@twigo/protocol/mock";
 import { WorkbenchView, type Workbench } from "@twigo/workbench";
-import { tabsIn, testWorkbench } from "@twigo/workbench/testing";
+import { carriesCode, tabsIn, testWorkbench } from "@twigo/workbench/testing";
 import { patching } from "../../test/forward";
 import { bareTabPaths, settle, withScreenSize } from "../../test/workbench";
 import { OBJECT_SCHEME, objectUri, parseObjectUri, pfUri } from "../uri";
@@ -831,9 +831,16 @@ test("the counters say that they count since Twigo started, and each shows its o
     screen.getByText(label, { selector: "dt" }).nextSibling?.textContent;
   expect(value("Sent")).toBe("1.5 KiB since Twigo started");
   expect(value("Received")).toBe("5 MiB since Twigo started");
-  expect(value("Last failure")).toBe(
+  expect(value("Last failure")).toContain(
     "pod auth-api-1 refused the connection to port 8080",
   );
+  expect(
+    carriesCode(
+      screen.getByText("Last failure", { selector: "dt" })
+        .nextSibling as HTMLElement,
+      "forward.port-refused",
+    ),
+  ).toBe(true);
 });
 
 test("a tab whose address names another space shows nothing of that space's forward", async () => {

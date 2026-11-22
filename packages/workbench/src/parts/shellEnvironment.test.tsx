@@ -6,7 +6,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
-import { inWorkbench, testWorkbench } from "../testing";
+import { carriesCode, inWorkbench, testWorkbench } from "../testing";
 import { useShellEnvironmentEntries } from "./shellEnvironment";
 import { SHOW_SHELL_ENVIRONMENT } from "./shellEnvironmentIds";
 import { StatusEntries } from "./StatusBar";
@@ -41,6 +41,7 @@ test("a timed-out environment explains itself, shows the shell's output and retr
   expect(document.body.textContent).toContain(
     "/bin/zsh did not answer in 10 s",
   );
+  expect(carriesCode(document.body, "environment.unresolved")).toBe(true);
   expect(screen.queryByText("Loading nvm…")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Show details" }));
   expect(screen.getByText("Loading nvm…")).toBeTruthy();

@@ -32,7 +32,6 @@ export function noDiffWords(reason: NoDiff): readonly string[] {
       ];
     case "refused":
       return [
-        `The server refused the dry run: ${reason.error.message}`,
         "The write itself may still pass, as a webhook that does not support dry runs refuses only the dry run.",
       ];
     case "notAResource":

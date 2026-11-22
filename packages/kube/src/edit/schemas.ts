@@ -1,4 +1,4 @@
-import { toIpcError, type Backend } from "@twigo/protocol";
+import { toIpcError, type Backend, type IpcError } from "@twigo/protocol";
 import { Changes } from "@twigo/workbench";
 
 export interface SchemaKind {
@@ -11,7 +11,7 @@ export interface SchemaKind {
 export type SchemaState =
   | { readonly state: "loading" }
   | { readonly state: "ready"; readonly schema: object }
-  | { readonly state: "failed"; readonly message: string };
+  | { readonly state: "failed"; readonly error: IpcError };
 
 /**
  * The JSON Schema of each kind the person edits (ARCHITECTURE 4.6), asked of
@@ -43,7 +43,7 @@ export class Schemas {
       const text = await this.backend.invoke("schema_get", kind);
       return { state: "ready", schema: JSON.parse(text) as object };
     } catch (error) {
-      return { state: "failed", message: toIpcError(error).message };
+      return { state: "failed", error: toIpcError(error) };
     }
   }
 
