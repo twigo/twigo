@@ -230,7 +230,7 @@ const BY_RESOURCE: Readonly<Record<string, Partial<ColumnRule>>> = {
   },
   "helm.sh/releases/Namespace": { drop: 1 },
   "helm.sh/releases/App Version": { width: 112, secondary: true, drop: 2 },
-  "helm.sh/releases/Updated": { drop: 3 },
+  "helm.sh/releases/Updated": { width: 80, drop: 3 },
   "helm.sh/releases/Chart": { cell: "chart", width: 200, drop: 4 },
   "helm.sh/releases/Revision": { width: 80, drop: 5 },
   "helm.sh/releases/Status": {

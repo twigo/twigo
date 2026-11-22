@@ -141,6 +141,7 @@ export function ReleasePage({
   const { releases: states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
+  // @todo: drop this read once the owner has chosen the release editor's views (tabs:four, tabs:split, tabs:page), keeping the choice's branch
   const { tabs: layout } = variants();
   const asked = layout === "page" ? "page" : states.tab(uri);
   const tab: ReleaseTab = asked === "page" ? "overview" : asked;
@@ -614,7 +615,10 @@ function Scrubbed({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <Prose text={text} className="text-prose text-content" />
+      <Prose
+        text={text}
+        className="text-prose whitespace-pre-line text-content"
+      />
       {(hidden || revealed) && (
         <div className="text-xs text-support">
           {revealed ? (
