@@ -127,8 +127,7 @@ async fn a_server_that_does_not_speak_tls() {
     assert_eq!(error.code, ErrorCode::ConnectTls);
 }
 
-#[tokio::test]
-async fn a_server_that_accepts_and_never_answers() {
+async fn silent() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -137,6 +136,12 @@ async fn a_server_that_accepts_and_never_answers() {
             held.push(listener.accept().await.unwrap());
         }
     });
+    port
+}
+
+#[tokio::test]
+async fn a_server_that_accepts_and_never_answers() {
+    let port = silent().await;
     let mut config = config(&format!("https://localhost:{port}"));
     config.connect_timeout = Some(Duration::from_millis(300));
     let error = failure(&config, Options::default()).await;
@@ -145,7 +150,12 @@ async fn a_server_that_accepts_and_never_answers() {
 }
 
 async fn through(proxy_url: &str) -> IpcError {
-    let config = config("https://localhost:6443");
+    through_within(proxy_url, None).await
+}
+
+async fn through_within(proxy_url: &str, connect_timeout: Option<Duration>) -> IpcError {
+    let mut config = config("https://localhost:6443");
+    config.connect_timeout = connect_timeout.or(config.connect_timeout);
     let proxy = proxy_for(&config.cluster_url, Some(proxy_url), &ProxyEnv::default()).unwrap();
     let options = Options {
         proxy,
@@ -260,6 +270,20 @@ async fn a_socks_proxy_that_refuses_the_credentials_did_not_open_the_connection(
         error.message.contains("credentials not accepted"),
         "{error:?}"
     );
+}
+
+#[tokio::test]
+async fn a_proxy_that_accepts_and_never_answers_is_not_reached_whatever_it_speaks() {
+    for scheme in ["http", "socks5"] {
+        let port = silent().await;
+        let error = through_within(
+            &format!("{scheme}://localhost:{port}"),
+            Some(Duration::from_millis(300)),
+        )
+        .await;
+        assert_eq!(error.code, ErrorCode::ConnectProxy, "{scheme}: {error:?}");
+        assert!(error.message.starts_with(UNREACHED), "{scheme}: {error:?}");
+    }
 }
 
 #[tokio::test]

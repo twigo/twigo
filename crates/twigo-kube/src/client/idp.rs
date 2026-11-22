@@ -68,7 +68,7 @@ impl Idp {
             proxy_for(issuer, None, env).map_err(|error| IdpError::Proxy(error.to_string()))?;
         let mut http = dial::http();
         http.enforce_http(false);
-        let dialer = Dialer::new(http, proxy.as_ref())
+        let dialer = Dialer::new(http, proxy.as_ref(), None)
             .map_err(|error| IdpError::Proxy(error.to_string()))?;
         let connector = builder
             .https_or_http()

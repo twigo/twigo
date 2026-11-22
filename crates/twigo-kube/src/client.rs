@@ -480,13 +480,19 @@ fn connector(
             ServerName::try_from(name.clone())?,
         ));
     }
-    let dialer = Dialer::new(http, proxy)?;
+    let dialer = Dialer::new(http, proxy, config.connect_timeout)?;
     let https = match alpn {
         Alpn::Both => https.enable_all_versions().wrap_connector(dialer),
         Alpn::Http1 => https.enable_http1().wrap_connector(dialer),
     };
     let mut connector = TimeoutConnector::new(https);
-    connector.set_connect_timeout(config.connect_timeout);
+    // Through a proxy the connection is two legs, each given the connect
+    // timeout: the dialer's hop to the proxy ends first, so a proxy that does
+    // not answer is told as the proxy's, and TLS to the cluster keeps its time.
+    connector.set_connect_timeout(config.connect_timeout.map(|timeout| match proxy {
+        Some(_) => timeout.saturating_mul(2),
+        None => timeout,
+    }));
     connector.set_write_timeout(config.write_timeout);
     // No read timeout: it would time the whole multiplexed connection, so a
     // quiet cluster would cut every watch.
