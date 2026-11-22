@@ -74,15 +74,11 @@ export function HelmView({ space }: { space: string }) {
     return typeof cell === "string" ? cell : "";
   };
   const open = (row: Row, keep: boolean) => {
-    const namespace = text(row, "Namespace") || namespaces[0] || "";
     const name = text(row, "Name");
-    editors.open(
-      helmUri({ space, namespace: idNamespace(row, namespace), name }),
-      {
-        preview: !keep,
-        preserveFocus: !keep,
-      },
-    );
+    editors.open(helmUri({ space, namespace: idNamespace(row), name }), {
+      preview: !keep,
+      preserveFocus: !keep,
+    });
   };
   const ids = snapshot.ids;
   const item = (index: number): GridItem<Row, never> | undefined => {
@@ -166,7 +162,7 @@ export function HelmView({ space }: { space: string }) {
 }
 
 /** A row's id is `context/namespace/name`, whose namespace a list of one namespace has no column for. */
-function idNamespace(row: Row, fallback: string): string {
+function idNamespace(row: Row): string {
   const parts = row.id.split("/");
-  return parts.length >= 2 ? (parts[parts.length - 2] ?? fallback) : fallback;
+  return parts[parts.length - 2] ?? "";
 }

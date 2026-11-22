@@ -51,20 +51,22 @@ test("helm:sidebar is a third container whose rows read the list's batches, a cl
   await settle(6);
   const grid = screen.getByRole("grid", { name: "Helm releases" });
   const rows = within(grid).getAllByRole("row");
+  const [, first] = rows;
+  if (!first) throw new Error("no row");
   expect(rows).toHaveLength(6);
   expect(rows[1]?.textContent).toContain("alpha");
   expect(rows[1]?.textContent).toContain("demo-0.1.0");
   expect(rows[1]?.textContent).toContain("payments");
   expect(screen.queryByRole("treeitem", { name: "Helm" })).toBeNull();
-  fireEvent.mouseDown(rows[1] as HTMLElement, { detail: 1 });
-  fireEvent.click(rows[1] as HTMLElement, { detail: 1 });
+  fireEvent.mouseDown(first, { detail: 1 });
+  fireEvent.click(first, { detail: 1 });
   expect(opened).toHaveBeenLastCalledWith(alpha, {
     preview: true,
     preserveFocus: true,
   });
-  fireEvent.mouseDown(rows[1] as HTMLElement, { detail: 2 });
-  fireEvent.click(rows[1] as HTMLElement, { detail: 2 });
-  fireEvent.doubleClick(rows[1] as HTMLElement, { detail: 2 });
+  fireEvent.mouseDown(first, { detail: 2 });
+  fireEvent.click(first, { detail: 2 });
+  fireEvent.doubleClick(first, { detail: 2 });
   expect(opened).toHaveBeenLastCalledWith(alpha, {
     preview: false,
     preserveFocus: false,
@@ -112,7 +114,7 @@ test("mask:tree shows the values as rows of key paths with an eye on each masked
 });
 
 test("a release's page has the page's filter, which searches the notes and opens the section that holds a match", async () => {
-  const workbench = await open(alpha);
+  await open(alpha);
   expect(document.body.textContent).not.toContain("registry.example/demo:1.2");
   fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), {
     code: "Slash",

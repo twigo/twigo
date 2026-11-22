@@ -122,6 +122,20 @@ function withNotes(overview: Document, notes: string): Document {
   };
 }
 
+/** What the Overview shows: the split variant keeps the notes, the hooks and the objects in views of their own. */
+function overviewShown(
+  overview: Document,
+  split: boolean,
+  notes: string,
+): Document {
+  return split
+    ? {
+        ...overview,
+        sections: overview.sections.filter(({ id }) => OWN[id] === undefined),
+      }
+    : withNotes(overview, notes);
+}
+
 function foundTone(overview: Document | undefined) {
   const tone = overview?.sections.find(
     ({ id }) => id === "helm.diagnostics",
@@ -227,19 +241,9 @@ export function ReleasePage({
   const notesShown =
     shown.get(partKey({ kind: "notes" }))?.value ?? snapshot.notes?.text ?? "";
   // What the Overview shows, which the page's filter reads: the split variant keeps the notes, the hooks and the objects in views of their own.
-  const shownOverview = useMemo(
-    () =>
-      snapshot.overview &&
-      (layout === "split"
-        ? {
-            ...snapshot.overview,
-            sections: snapshot.overview.sections.filter(
-              ({ id }) => OWN[id] === undefined,
-            ),
-          }
-        : withNotes(snapshot.overview, notesShown)),
-    [snapshot.overview, layout, notesShown],
-  );
+  const loaded = snapshot.overview;
+  const shownOverview =
+    loaded && overviewShown(loaded, layout === "split", notesShown);
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
