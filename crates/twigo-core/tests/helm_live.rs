@@ -42,8 +42,6 @@ fn unique() -> String {
     format!("{nanos}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
-/// The test cluster, two namespaces of its own on it, a directory for what
-/// `helm` reads and writes, and an account that may read the first.
 struct Cluster {
     kubeconfig: Kubeconfig,
     context: String,
@@ -107,8 +105,6 @@ impl Cluster {
         }
     }
 
-    /// `helm` over a copy of the test's kubeconfig, with its configuration, cache and data in a
-    /// directory of its own, so it reads none of the person's repositories or plugins.
     fn helm(&self, args: &[&str]) -> String {
         let home = self.dir.path().join("helm");
         let output = Command::new("helm")
@@ -129,7 +125,6 @@ impl Cluster {
         String::from_utf8(output.stdout).unwrap()
     }
 
-    /// What `helm list` says of the releases in `namespace`, by name.
     fn listed(&self, namespace: &str) -> HashMap<String, Value> {
         let listed = self.helm(&["list", "-n", namespace, "-o", "json"]);
         let releases: Vec<Value> = serde_json::from_str(&listed).unwrap();
@@ -139,8 +134,6 @@ impl Cluster {
             .collect()
     }
 
-    /// The kubeconfig's cluster and context over the token of a service account that may read
-    /// the Secrets of `readable` and nothing else.
     async fn account(&self) -> PathBuf {
         let home = &self.readable;
         let accounts = Api::<ServiceAccount>::namespaced(self.admin.clone(), home);
@@ -209,7 +202,6 @@ fn core(dir: &Path, kubeconfig: PathBuf, context: &str) -> (Started, String) {
     (core.start_for_tests(followed, Some(kubeconfig)), space)
 }
 
-/// The window of a list of releases, as the webview applies the batches.
 struct Releases {
     core: Arc<Core>,
     id: SubscriptionId,
@@ -300,7 +292,6 @@ impl Releases {
         self.cells.get(row)?.get(at)
     }
 
-    /// The row of a release, with the revision it shows, if that row is in the window.
     fn revision(&self, context: &str, namespace: &str, name: &str) -> Option<i64> {
         let row = format!("{context}/{namespace}/{name}");
         if !self.ids.contains(&row) {

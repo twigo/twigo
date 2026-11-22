@@ -21,8 +21,6 @@ fn secret_name(release: &str, version: u32) -> String {
     format!("{PREFIX}.{release}.v{version}")
 }
 
-/// Puts the Secret Helm writes for a revision, as the list's metadata shows it, or writes it
-/// again with another status.
 fn revision(fake: &Fake, namespace: &str, release: &str, version: u32, status: &str) {
     fake.put(
         "",
@@ -63,7 +61,6 @@ fn query(namespaces: &[&str]) -> ReleaseListQuery {
     }
 }
 
-/// What the window holds, as the webview applies the batches.
 #[derive(Default)]
 struct Seen {
     columns: Vec<Column>,
@@ -94,7 +91,6 @@ impl Seen {
         row.cells.get(at)
     }
 
-    /// Each row as its namespace, name, revision, status and problem, `-` for an empty cell.
     fn table(&self) -> Vec<String> {
         self.ids
             .iter()
@@ -118,7 +114,6 @@ impl Seen {
 
 struct Rig {
     fake: Fake,
-    /// The hub's upstreams end with it.
     _hub: (Hub, Arc<Clients>),
     list: Batcher,
     batches: mpsc::UnboundedReceiver<ListBatch>,
@@ -159,7 +154,6 @@ impl Rig {
         batch
     }
 
-    /// Waits until the list is ready and shows exactly these rows, for at most ten virtual minutes.
     async fn shows(&mut self, rows: &[&str]) {
         let reached = async {
             while self.seen.status != Some(ViewState::Ready) || self.seen.table() != rows {
@@ -341,7 +335,6 @@ async fn a_secret_of_helms_owner_without_the_labels_is_a_row_of_its_own() {
     .await;
 }
 
-/// A Secret with a `name` label and a `version` that is no number.
 fn odd_secret(fake: &Fake) {
     fake.put(
         "",
