@@ -891,7 +891,7 @@ impl Core {
         })?;
         let lines = lines
             .await
-            .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))?;
+            .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))??;
         tokio::fs::write(path, lines).await.map_err(|error| {
             IpcError::new(
                 ErrorCode::FileUnwritten,

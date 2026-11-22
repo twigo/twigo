@@ -57,11 +57,16 @@ struct Pending {
     view: Option<Spec>,
     window: Option<LogWindow>,
     acked: Option<u32>,
-    lines: Vec<(bool, oneshot::Sender<Vec<u8>>)>,
+    lines: Vec<(bool, Lines)>,
     /// The source and view changes asked for, each counted though only the
     /// last of each kind applies.
     changes: u32,
+    /// The session's task panicked: what is asked is answered so at once.
+    ended: bool,
 }
+
+/// Where the lines asked for go, or why there are none.
+type Lines = oneshot::Sender<Result<Vec<u8>, IpcError>>;
 
 impl Session {
     /// Refuses a target of a kind without pods of its own, and a view
@@ -120,10 +125,18 @@ impl Session {
         self.ask(|pending| pending.acked = Some(seq));
     }
 
-    /// The lines as a file, those the view keeps or every one buffered.
-    pub fn lines(&self, filtered: bool) -> oneshot::Receiver<Vec<u8>> {
+    /// The lines as a file, those the view keeps or every one buffered;
+    /// `internal.panic` once the session's task has panicked.
+    pub fn lines(&self, filtered: bool) -> oneshot::Receiver<Result<Vec<u8>, IpcError>> {
         let (reply, lines) = oneshot::channel();
-        self.ask(|pending| pending.lines.push((filtered, reply)));
+        self.ask(|pending| {
+            if pending.ended {
+                // The caller may have gone, and the file with it.
+                let _ = reply.send(Err(panicked()));
+            } else {
+                pending.lines.push((filtered, reply));
+            }
+        });
         lines
     }
 }
@@ -227,18 +240,24 @@ async fn serve(session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatc
         );
         send(batch)
     };
-    if contain("logs", run(session, control, &mut tell))
+    if contain("logs", run(session, Arc::clone(&control), &mut tell))
         .await
         .is_ok()
     {
         return;
     }
+    let waiting = {
+        let mut pending = control.pending.lock().expect("session lock");
+        pending.ended = true;
+        std::mem::take(&mut pending.lines)
+    };
+    for (_, reply) in waiting {
+        let _ = reply.send(Err(panicked()));
+    }
     let (seq, total, dropped, arrived, changes) = last;
     send(LogBatch {
         seq: seq + 1,
-        status: ViewState::Error {
-            error: IpcError::panicked("this log"),
-        },
+        status: ViewState::Error { error: panicked() },
         pods: None,
         total,
         window: None,
@@ -248,6 +267,10 @@ async fn serve(session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatc
         arrived,
         changes,
     });
+}
+
+fn panicked() -> IpcError {
+    IpcError::panicked("this log")
 }
 
 async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatch) -> bool) {
@@ -268,6 +291,7 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
             acked,
             lines,
             changes,
+            ended: _,
         } = std::mem::take(&mut *control.pending.lock().expect("session lock"));
         if let Some(source) = source {
             session.set_source(source);
@@ -292,7 +316,7 @@ async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBa
         for (filtered, reply) in lines {
             let spec = filtered.then_some(&session.spec);
             // The caller may have gone, and the file with it.
-            let _ = reply.send(view::lines(&session.buffer, spec));
+            let _ = reply.send(Ok(view::lines(&session.buffer, spec)));
         }
         if session.window.is_none() || unacked.is_some() || !(ticked || moved) {
             continue;
@@ -769,6 +793,23 @@ mod tests {
         assert_eq!(error.code, ErrorCode::InternalPanic);
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         assert!(batches.try_recv().is_err(), "it is not started again");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_session_that_panicked_answers_its_downloads_with_internal_panic() {
+        twigo_panic::inject::arm("logs", 1);
+        let (session, _batches) = opened(&Fake::default()).await;
+        let waiting = session.lines(false);
+        let answered = |lines: oneshot::Receiver<Result<Vec<u8>, IpcError>>| async move {
+            tokio::time::timeout(std::time::Duration::from_secs(600), lines)
+                .await
+                .expect("answered")
+                .unwrap()
+        };
+        let waited = answered(waiting).await;
+        assert_eq!(waited.unwrap_err().code, ErrorCode::InternalPanic);
+        let later = answered(session.lines(true)).await;
+        assert_eq!(later.unwrap_err().code, ErrorCode::InternalPanic);
     }
 
     #[tokio::test(start_paused = true)]
