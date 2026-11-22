@@ -251,3 +251,24 @@ test("under tabs:split the Overview leaves out what Hooks and Objects hold, whic
     "Objects4 objects",
   ]);
 });
+
+async function filter(name: string, text: string) {
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), {
+    code: "Slash",
+    key: "/",
+  });
+  await settle(3);
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter this page" }), {
+    target: { value: text },
+  });
+  await settle(3);
+  return page(name).textContent;
+}
+
+test("the page's filter finds what Helm wrote of a failed revision, and keeps the finding that holds it", async () => {
+  await open(release("epsilon"));
+  const found = await filter("epsilon", "cannot patch");
+  expect(found).toContain("1 match in 1 section");
+  expect(found).toContain('Upgrade "epsilon" failed');
+  expect(found).not.toContain("Nothing here matches");
+});

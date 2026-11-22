@@ -91,6 +91,34 @@ const OWN: Readonly<Record<string, ReleaseTab>> = {
   "helm.notes": "notes",
 };
 
+/** The core's Overview with Helm's description a field of the Diagnostics section, where the page's filter finds it and the section keeps the Reveal. */
+function withDescription(overview: Document, description: string): Document {
+  if (description === "") return overview;
+  return {
+    ...overview,
+    sections: overview.sections.map((section) =>
+      section.id === "helm.diagnostics"
+        ? {
+            ...section,
+            blocks: [
+              ...section.blocks,
+              {
+                type: "fields",
+                fields: [
+                  {
+                    label: "Description",
+                    value: { type: "text", text: description },
+                    default: false,
+                  },
+                ],
+              },
+            ],
+          }
+        : section,
+    ),
+  };
+}
+
 /** The core's Overview with Notes, which the page adds after the findings where the chart has any. */
 function withNotes(overview: Document, notes: string): Document {
   if (notes === "") return overview;
@@ -124,18 +152,31 @@ function withNotes(overview: Document, notes: string): Document {
   };
 }
 
-/** What the Overview shows: the split variant keeps the notes, the hooks and the objects in views of their own. */
-function overviewShown(
+/**
+ * What a view of the page draws of the Overview, which the page's filter
+ * reads: the split variant keeps the notes, the hooks and the objects in
+ * views of their own, each section of which is open there.
+ */
+function pageOverview(
   overview: Document,
+  view: ReleaseTab,
   split: boolean,
   notes: string,
+  description: string,
 ): Document {
+  const described = withDescription(overview, description);
   return split
     ? {
-        ...overview,
-        sections: overview.sections.filter(({ id }) => OWN[id] === undefined),
+        ...described,
+        sections: described.sections
+          .filter(({ id }) => (OWN[id] ?? "overview") === view)
+          .map((section) =>
+            view === "overview"
+              ? section
+              : { ...section, fold: "open" as const },
+          ),
       }
-    : withNotes(overview, notes);
+    : withNotes(described, notes);
 }
 
 function foundTone(overview: Document | undefined) {
@@ -251,12 +292,21 @@ export function ReleasePage({
   });
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [text, setText] = useState<TextState>();
-  const notesShown =
-    shown.get(partKey({ kind: "notes" }))?.value ?? snapshot.notes?.text ?? "";
-  // What the Overview shows, which the page's filter reads: the split variant keeps the notes, the hooks and the objects in views of their own.
+  const notes = shown.get(partKey({ kind: "notes" }));
+  const description = shown.get(partKey({ kind: "description" }));
+  const notesText = notes?.value ?? snapshot.notes?.text ?? "";
+  const descriptionText =
+    description?.value ?? snapshot.description?.text ?? "";
   const loaded = snapshot.overview;
   const shownOverview =
-    loaded && overviewShown(loaded, layout === "split", notesShown);
+    loaded &&
+    pageOverview(
+      loaded,
+      "overview",
+      layout === "split",
+      notesText,
+      descriptionText,
+    );
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
@@ -338,8 +388,6 @@ export function ReleasePage({
     if (next) workbench.editors.open(next);
   };
   const lookup = keys.lookup(element);
-  const notes = shown.get(partKey({ kind: "notes" }));
-  const description = shown.get(partKey({ kind: "description" }));
   const body = (view: ReleaseTab) => (
     <Body
       view={view}
@@ -347,9 +395,9 @@ export function ReleasePage({
       release={release}
       snapshot={snapshot}
       shown={shown}
-      notes={notes?.value ?? snapshot.notes?.text ?? ""}
+      notes={notesText}
       notesHidden={snapshot.notes?.hidden === true && !notes}
-      description={description?.value ?? snapshot.description?.text ?? ""}
+      description={descriptionText}
       descriptionHidden={snapshot.description?.hidden === true && !description}
       revealed={{
         notes: notes !== undefined,
@@ -667,24 +715,13 @@ function Body({
       </div>
     );
   }
-  const document = split
-    ? {
-        ...overview,
-        sections: overview.sections
-          .filter(({ id }) => (OWN[id] ?? "overview") === view)
-          .map((section) =>
-            view === "overview"
-              ? section
-              : { ...section, fold: "open" as const },
-          ),
-      }
-    : withNotes(overview, notes);
+  const document = pageOverview(overview, view, split, notes, description);
   const slots = {
     "helm.diagnostics": (
-      <DescriptionBody
-        text={description}
+      <RevealControl
         hidden={descriptionHidden}
         revealed={revealed.description}
+        what="what Helm wrote"
         onReveal={() => {
           onReveal({ kind: "description" });
         }}
@@ -802,17 +839,6 @@ function NotesBody(props: {
   onHide: () => void;
 }) {
   return <Scrubbed {...props} what="the notes" />;
-}
-
-function DescriptionBody(props: {
-  text: string;
-  hidden: boolean;
-  revealed: boolean;
-  onReveal: () => void;
-  onHide: () => void;
-}) {
-  if (props.text === "") return null;
-  return <Scrubbed {...props} what="what Helm wrote" />;
 }
 
 /** A bar over a text: what is hidden in it, and the ways to show or hide it. */
