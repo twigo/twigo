@@ -17,7 +17,8 @@ test("kubeconfig:group, the default: a file that failed is a group of its own wi
   const broken = found.filter(({ group }) => group === "~/.kube/broken.yaml");
   expect(broken).toEqual([
     expect.objectContaining({
-      label: "Cannot be parsed: unclosed bracket '[' at line 7, column 10",
+      label:
+        "The file cannot be parsed: expected sequence start at line 7, column 10",
       description: "kubeconfig.unparsable",
       disabled: true,
     }),

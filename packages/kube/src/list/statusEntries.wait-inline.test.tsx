@@ -26,7 +26,7 @@ test("wait:inline, the default: a list that cannot connect says why in the statu
   expect(bar.closest("[title]")?.getAttribute("title")).toBe(
     [
       "Connecting · Kubernetes v1.33.4",
-      "The server refused the connection: Connection refused (os error 61)",
+      "The cluster refused the connection: Connection refused (os error 61)",
       "connect.refused",
     ].join("\n"),
   );

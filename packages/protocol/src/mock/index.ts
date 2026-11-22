@@ -36,6 +36,7 @@ import {
 } from "./auth";
 import { Cluster } from "./cluster";
 import {
+  ANONYMOUS,
   CAUSE_SCENARIOS,
   CAUSED,
   catalogOf,
@@ -862,7 +863,9 @@ export function createMockBackend(
           : lists === "forbidden" ||
               (lists === "live" && FORBIDDEN[context]?.includes(resource))
             ? forbidden
-            : lists;
+            : lists === "live" && ANONYMOUS.includes(context)
+              ? PINNED.unauthorized
+              : lists;
       subscriptions.set(
         id,
         new Subscription(

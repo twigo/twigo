@@ -17,7 +17,7 @@ test("when every kubeconfig file failed the start says so and names the files wi
   expect(files.getByText("~/.kube/broken.yaml")).toBeTruthy();
   expect(
     files.getByText(
-      "Cannot be parsed: unclosed bracket '[' at line 7, column 10",
+      "The file cannot be parsed: expected sequence start at line 7, column 10",
       { exact: false },
     ),
   ).toBeTruthy();

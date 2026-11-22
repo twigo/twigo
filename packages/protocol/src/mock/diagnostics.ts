@@ -42,21 +42,21 @@ export const CAUSED: Readonly<Record<CauseScenario, ViewState>> = {
     state: "connecting",
     cause: error(
       "connect.refused",
-      "The server refused the connection: Connection refused (os error 61)",
+      "The cluster refused the connection: Connection refused (os error 61)",
     ),
   },
   connectCertificate: {
     state: "connecting",
     cause: error(
       "connect.certificate",
-      "The server's certificate is not trusted: “34.141.62.18” certificate is not trusted: -67843",
+      "The cluster's certificate cannot be verified: “34.141.62.18” certificate is not trusted: -67843",
     ),
   },
   connectLost: {
     state: "stale",
     cause: error(
       "connect.lost",
-      "The connection to the server was lost: connection closed before message completed",
+      "Error reading events stream: connection closed before message completed",
     ),
   },
   serverRefuses: {
@@ -108,12 +108,12 @@ const FAILED_FILES: readonly CatalogFailure[] = [
     source: "~/.kube/broken.yaml",
     error: error(
       "kubeconfig.unparsable",
-      "Cannot be parsed: unclosed bracket '[' at line 7, column 10",
+      "The file cannot be parsed: expected sequence start at line 7, column 10",
     ),
   },
   {
     source: "~/.kube/work/locked.yaml",
-    error: error("kubeconfig.unreadable", "Cannot be read: permission denied"),
+    error: error("kubeconfig.unreadable", "The file cannot be read: permission denied"),
   },
 ];
 
@@ -130,6 +130,9 @@ const WITHOUT_USER: Context = {
     'no kubeconfig defines the user "orphan-admin"',
   ),
 };
+
+/** The contexts whose user no file defines: Twigo connects with no credentials, and the server refuses what they ask. */
+export const ANONYMOUS: readonly string[] = [WITHOUT_USER.name];
 
 export function catalogOf(scenario: string): Catalog {
   if (scenario === "kubeconfigAllFailed") {

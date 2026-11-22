@@ -643,6 +643,23 @@ test("the catalog names the kubeconfig files it could not read, and the context 
   expect((await catalogs("live")).failures).toEqual([]);
 });
 
+test("a context whose user no file defines is refused its lists as a request with no credentials is", async () => {
+  const backend = createMockBackend("kubeconfigFailures");
+  const opened = backend.invoke("space_open", "orphan");
+  await vi.advanceTimersByTimeAsync(0);
+  await opened;
+  const refused = await open(
+    "kubeconfigFailures",
+    query({
+      space: "orphan",
+      gvr: { group: "", version: "v1", resource: "nodes" },
+      namespaced: false,
+    }),
+    backend,
+  );
+  expect(refused.batches[0]?.status).toEqual({ state: "unauthorized" });
+});
+
 test("a forbidden list names its resource; live, prod-eu may not list nodes, staging may", async () => {
   const nodes = {
     gvr: { group: "", version: "v1", resource: "nodes" },
