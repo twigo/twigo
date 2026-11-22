@@ -554,7 +554,7 @@ async fn save_path(
         });
     let picked = picked.await.map_err(|error| {
         IpcError::new(
-            ErrorCode::LogsDialogFailed,
+            ErrorCode::FileDialogFailed,
             format!("the save dialog failed: {error}"),
         )
     })?;
@@ -562,7 +562,7 @@ async fn save_path(
         .map(|picked| {
             picked.into_path().map_err(|error| {
                 IpcError::new(
-                    ErrorCode::LogsNotAFile,
+                    ErrorCode::FileNotLocal,
                     format!("Twigo saves only to a file on this computer: {error}"),
                 )
             })

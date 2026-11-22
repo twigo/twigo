@@ -229,6 +229,8 @@ error_codes! {
     TokensUnsaved = "tokens.unsaved", Internal;
     FileUnwritten = "file.unwritten", Internal;
     FileUnrevealed = "file.unrevealed", Internal;
+    FileDialogFailed = "file.dialog-failed", Internal;
+    FileNotLocal = "file.not-local", InvalidInput;
 
     InternalPanic = "internal.panic", Internal;
     InternalIpc = "internal.ipc", Internal;
@@ -293,8 +295,6 @@ error_codes! {
     LogsInvalidTime = "logs.invalid-time", InvalidInput;
     LogsNoPrevious = "logs.no-previous", NotFound;
     LogsStreamFailed = "logs.stream-failed", Unavailable;
-    LogsDialogFailed = "logs.dialog-failed", Internal;
-    LogsNotAFile = "logs.not-a-file", InvalidInput;
 
     FilterInvalidRegex = "filter.invalid-regex", InvalidInput;
     FilterInvalidSelector = "filter.invalid-selector", InvalidInput;
