@@ -191,11 +191,11 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
         ]);
       }
       // @todo: remove the variants the owner did not choose once he has chosen at the checkpoint
-      const skipped = variant("kubeconfig") === "group" ? [] : catalog.failures;
-      const failed =
-        variant("kubeconfig") === "group"
-          ? catalog.failures.map((failure) => [failedRow(failure)])
-          : [];
+      const grouped = variant("kubeconfig") === "group";
+      const skipped = grouped ? [] : catalog.failures;
+      const failed = grouped
+        ? catalog.failures.map((failure) => [failedRow(failure)])
+        : [];
       return [
         ...[open, ...files.values(), ...failed].flatMap((section) =>
           filtered(section, filter),
