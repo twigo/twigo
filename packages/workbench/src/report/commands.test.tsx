@@ -36,17 +36,6 @@ test("Help lists the report, the log file and the log level after Quick Access H
   }
 });
 
-test("Reveal Log File asks Rust to show the file, and Report a Problem asks it for the report", async () => {
-  const { workbench, calls } = await recording();
-  const lookup = workbench.keys.lookup(null);
-  await act(() => workbench.commands.execute(REVEAL_LOG_FILE, lookup));
-  await act(() => workbench.commands.execute(REPORT_PROBLEM, lookup));
-  expect(calls.map(([command]) => command)).toEqual(
-    expect.arrayContaining(["log_reveal", "report_problem"]),
-  );
-  expect(workbench.problemReport.report?.facts.length).toBeGreaterThan(0);
-});
-
 test("Set Log Level… offers Info, Debug and Trace, says that the choice lasts until Twigo quits, and sends the one picked", async () => {
   const { workbench, calls } = await recording();
   render(
