@@ -146,7 +146,7 @@ export class Workbench {
     return menuActions(this, menu, lookup, args);
   }
 
-  /** Opens a sign-in link in the person's browser; Rust checks it first. */
+  /** Opens a link in the person's browser: https, or http to this computer; Rust checks it first. */
   openUrl(url: string): void {
     this.backend.invoke("url_open", url).catch((error: unknown) => {
       this.report(error);

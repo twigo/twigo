@@ -1356,7 +1356,7 @@ test("groups come once a list knows its columns, empty until it shows rows", asy
   expect(odd.batches[0]?.total).toBe(5000);
 });
 
-test("a request for an idle plugin's credential starts its run, and only sign-in links open", async () => {
+test("a request for an idle plugin's credential starts its run, and only https and local http links open", async () => {
   vi.useRealTimers();
   const backend = createMockBackend("review");
   await backend.invoke("exec_trust", ["azure-prod-eu"]);
@@ -1375,7 +1375,7 @@ test("a request for an idle plugin's credential starts its run, and only sign-in
   expect(seen).toContain("running");
   await expect(
     backend.invoke("url_open", "http://localhost:1@example.com/"),
-  ).rejects.toThrow("only sign-in links");
+  ).rejects.toThrow("only https links");
 });
 
 test("the webview's errors reach the console, which stands for the diagnostics log", async () => {

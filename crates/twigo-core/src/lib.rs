@@ -1170,14 +1170,15 @@ fn connect(core: Weak<Core>) -> Connect {
     })
 }
 
-/// A link the sign-in panel may open: https, or a plugin's own server on
+/// A link the person's browser may open for Twigo: https, or http to this
+/// computer, as a credential plugin's own server or a forward's port is, on
 /// localhost or 127.0.0.1, without a user part, which would name another
 /// host.
-pub fn sign_in_url(url: &str) -> Result<String, IpcError> {
+pub fn openable_url(url: &str) -> Result<String, IpcError> {
     let refused = || {
         IpcError::new(
             twigo_ipc::ErrorCode::LinkRefused,
-            format!("Twigo opens only sign-in links: {url}"),
+            format!("Twigo opens only https links and http links to this computer: {url}"),
         )
     };
     let parsed: http::Uri = url.parse().map_err(|_| refused())?;

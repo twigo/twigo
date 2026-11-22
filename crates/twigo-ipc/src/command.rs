@@ -458,8 +458,8 @@ impl Command for ApprovalAnswerSend {
     type Message = ();
 }
 
-/// Opens a sign-in link in the person's browser: https, or a plugin's own
-/// server on localhost or 127.0.0.1.
+/// Opens a link in the person's browser: https, or http to localhost or
+/// 127.0.0.1, as a credential plugin's own server or a forward's port is.
 pub struct UrlOpen;
 
 impl Command for UrlOpen {

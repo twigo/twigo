@@ -724,7 +724,7 @@ fn forwards_watch(
 
 #[tauri::command]
 fn url_open(handle: AppHandle, request: String) -> Result<(), IpcError> {
-    let url = twigo_core::sign_in_url(&request)?;
+    let url = twigo_core::openable_url(&request)?;
     handle
         .opener()
         .open_url(url, None::<&str>)
