@@ -193,8 +193,7 @@ struct State {
     /// from it, never ones it still holds after a failed write or a
     /// rejection.
     on_disk: (Option<String>, Option<String>),
-    /// A refresh's tokens could not be written back, which `tokens.unsaved`
-    /// says until a write works.
+    /// Whether this user raised `tokens.unsaved`.
     unsaved: bool,
 }
 
