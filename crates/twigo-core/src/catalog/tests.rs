@@ -332,3 +332,34 @@ fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() 
         ]
     );
 }
+
+#[test]
+fn a_file_that_keeps_failing_is_not_told_again_when_another_file_s_failure_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (steady, changing) = (dir.path().join("steady"), dir.path().join("changing"));
+    fs::write(&steady, "contexts: [unclosed").unwrap();
+    fs::write(&changing, "contexts: [unclosed").unwrap();
+    let list = std::env::join_paths([&steady, &changing]).unwrap();
+    let sources = Sources::kubectl(Some(&list), None);
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    fs::remove_file(&changing).unwrap();
+    fs::create_dir(&changing).unwrap();
+    catalog.follow(sources);
+    let line = |code: &str, path: &Path| {
+        (
+            "WARN".to_owned(),
+            code.to_owned(),
+            path.display().to_string(),
+        )
+    };
+    assert_eq!(
+        told(&logged),
+        [
+            line("kubeconfig.unparsable", &steady),
+            line("kubeconfig.unparsable", &changing),
+            line("kubeconfig.unreadable", &changing),
+        ]
+    );
+}
