@@ -21,6 +21,7 @@ import { registerListCommands } from "./lists/commands";
 import { registerSpaceColor } from "./spaces/colorCommand";
 import { registerContextModes } from "./spaces/modeCommands";
 import { registerQuickInputCommands } from "./quickaccess/commands";
+import { useProblemEntries } from "./problems/ProblemsEntry";
 import { registerReportCommands } from "./report/commands";
 import {
   CANCEL_COUNTDOWN,
@@ -438,6 +439,12 @@ export function registerCore(workbench: Workbench): void {
       when: `${COUNTING_DOWN} && !inputFocus`,
     },
   ]);
+  views.registerStatusBarItem({
+    id: "workbench.problems",
+    alignment: "left",
+    priority: 190,
+    useEntries: useProblemEntries,
+  });
   views.registerStatusBarItem({
     id: "workbench.chord",
     alignment: "right",
