@@ -340,20 +340,18 @@ impl Oidc {
             let id_token = tokens.id_token;
             let written_id = id_token.clone();
             let written_refresh = rotated.clone();
-            let written = twigo_panic::joined(
-                tokio::task::spawn_blocking(move || {
-                    persist::write(
-                        &origin,
-                        &user,
-                        &entry.issuer,
-                        &entry.client_id,
-                        &id_token,
-                        written_refresh.as_deref(),
-                    )
-                    .map_err(|error| (origin, error))
-                })
-                .await,
-            );
+            let written = twigo_panic::blocking(move || {
+                persist::write(
+                    &origin,
+                    &user,
+                    &entry.issuer,
+                    &entry.client_id,
+                    &id_token,
+                    written_refresh.as_deref(),
+                )
+                .map_err(|error| (origin, error))
+            })
+            .await;
             match written {
                 Ok(()) => {
                     let mut state = self.state();

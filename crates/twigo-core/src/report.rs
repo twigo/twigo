@@ -44,9 +44,7 @@ impl Core {
     pub async fn report(&self, facts: &Facts, files: &[PathBuf]) -> Report {
         let (known, versions) = (self.known(), self.connections.versions());
         let (facts, files) = (facts.clone(), files.to_vec());
-        twigo_panic::joined(
-            tokio::task::spawn_blocking(move || assemble(&facts, &files, &versions, known)).await,
-        )
+        twigo_panic::blocking(move || assemble(&facts, &files, &versions, known)).await
     }
 
     /// The link of the new-issue form for the facts the person left ticked,
@@ -60,14 +58,12 @@ impl Core {
     ) -> String {
         let (known, versions) = (self.known(), self.connections.versions());
         let (facts, files) = (facts.clone(), files.to_vec());
-        twigo_panic::joined(
-            tokio::task::spawn_blocking(move || {
-                let mut stated = stated(&facts, &files, &versions, &known.homes);
-                stated.retain(|fact| request.facts.contains(&fact.id));
-                issue::link(&stated)
-            })
-            .await,
-        )
+        twigo_panic::blocking(move || {
+            let mut stated = stated(&facts, &files, &versions, &known.homes);
+            stated.retain(|fact| request.facts.contains(&fact.id));
+            issue::link(&stated)
+        })
+        .await
     }
 
     fn known(&self) -> Known {

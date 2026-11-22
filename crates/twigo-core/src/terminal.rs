@@ -154,7 +154,7 @@ impl Terminals {
     /// Makes every offer anew, as the user's files have changed.
     pub(crate) async fn refresh_offers(&self) {
         let offers = Arc::clone(&self.offers);
-        twigo_panic::joined(tokio::task::spawn_blocking(move || offers.refresh()).await);
+        twigo_panic::blocking(move || offers.refresh()).await;
     }
 }
 
@@ -399,9 +399,8 @@ impl Core {
             offers.withdraw(answering);
             return Ok(());
         }
-        let (moved, answering) = twigo_panic::joined(
-            tokio::task::spawn_blocking(move || (answering.move_entries(), answering)).await,
-        );
+        let (moved, answering) =
+            twigo_panic::blocking(move || (answering.move_entries(), answering)).await;
         offers.moved(answering, moved)
     }
 

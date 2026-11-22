@@ -39,6 +39,12 @@ pub fn joined<T>(result: Result<T, JoinError>) -> T {
     }
 }
 
+/// What `work` returns when it runs on the blocking pool, its panic raised
+/// again as [`joined`] does.
+pub async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    joined(tokio::task::spawn_blocking(work).await)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,6 +54,16 @@ mod tests {
         assert_eq!(contain("kept", async { 7 }).await.unwrap(), 7);
         let ended = contain("lost", async { panic!("an item's bug") }).await;
         assert!(matches!(ended, Err(Panicked)));
+    }
+
+    #[tokio::test]
+    async fn a_blocking_closure_gives_its_value_and_its_panic_goes_on_with_its_own_payload() {
+        assert_eq!(blocking(|| 3).await, 3);
+        let raised = AssertUnwindSafe(blocking(|| -> u8 { panic!("the original") }))
+            .catch_unwind()
+            .await
+            .unwrap_err();
+        assert_eq!(raised.downcast_ref::<&str>(), Some(&"the original"));
     }
 
     #[tokio::test]
