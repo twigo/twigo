@@ -237,7 +237,7 @@ twigo/
 │  ├─ twigo-ext-host/         wasmtime host, manifests, capability enforcement, registry client
 │  ├─ twigo-ext-api/          WIT package `twigo:extension` (versioned dirs) + Rust guest SDK
 │  ├─ twigo-mcp/              MCP server + `twigo mcp` stdio shim
-│  └─ twigo-helm/             Helm release decoding (read); CLI bridge later
+│  └─ twigo-helm/             Helm releases read from their Secrets: decoded, described, their secret-grade parts masked; CLI bridge later
 ├─ packages/
 │  ├─ ui/                     design system (from legacy libs/ui)
 │  ├─ workbench/              parts, registries, commands, keybindings, context keys, quick access, settings UI
@@ -609,10 +609,31 @@ Shipping every row would cost about 15 MB of JSON, plus a sort on the UI thread 
     A Reveal is a command of the bus (5.1): it sends one key's value, read from the open object as it runs, which the view keeps until Hide or until it closes, and nothing stores.
   - The `kubectl.kubernetes.io/last-applied-configuration` annotation on a Secret holds its values in clear text.
     The decoder strips it from Secret rows and objects everywhere: tables, editors, agents.
-  - **Secret-grade data** is anything that can carry Secret values: Secret data, Helm values, and Secret objects inside a Helm release manifest.
+  - **Secret-grade data** is anything that can carry Secret values: Secret data, and of a Helm release its values, the chart's defaults, the Secrets of its manifest and of its hooks, its notes and its revisions' descriptions (below).
     The UI shows it masked, and revealing it follows the Reveal row of the policy table (6.4).
     Twigo's MCP tools always return it masked.
     Reading Secrets through the policy proxy or `host-kube` is its own policy class, `secret-read` (6.4).
+- **A Helm release.**
+  Helm 3 and 4 keep each revision of a release in a Secret of its own, `sh.helm.release.v1.<release>.v<revision>`, labelled `owner=helm`, `name`, `status` and `version`, whose `data.release` is base64 of gzip of the release's JSON, so the wire holds base64 twice ([`util.go`](https://github.com/helm/helm/blob/v4.3.2/pkg/storage/driver/util.go#L38-L91)).
+  The format has not changed since v3.0.0; Helm 4 only added fields, and Helm 3.22.1 and 4.3.2 read each other's releases.
+  - `twigo-helm` decodes a revision as Helm's `decodeRelease` does: Helm's base64, gzip only where the bytes begin with `1f 8b 08`, else the bytes as JSON, and gzip's members one after another, as Go's reader takes them.
+    It reads any Secret labelled `owner=helm`, whatever its `type`, as Helm does, takes the revision's identity from the `name` and `version` labels, and refuses a release that disagrees with them.
+  - Helm inflates with no bound (`io.ReadAll`); Twigo inflates into a buffer sized from the gzip trailer, never grown past 32 MiB and a byte, and refuses a release that inflates further with `helm.too-large`.
+    Five public charts, argo-cd 10.18.2, cert-manager v1.21.3, kube-prometheus-stack 93.9.0, ingress-nginx 4.15.1 and grafana 10.5.15, installed on kind 1.37 with Helm v4.3.2 on 2026-11-22, inflated 4.9 to 12.7 times, so a release at Kubernetes' 1 MiB limit for a Secret's data reaches about 10 MB, while gzip can inflate about 1,000 times.
+  - A revision Twigo cannot read says why by its code, `helm.not-a-release`, `helm.truncated` or `helm.too-large`, and its message names the category, for JSON the line and column, and the Secret's type where it is not `helm.sh/release.v1`, never serde's or base64's words, which quote the input.
+  - A revision is read as a summary, for a list row and a history line, or as a page, for its editor; the chart's templates, files and schema, most of the JSON, are never parsed.
+  - Secret-grade in a release: the person's values, the chart's defaults, the Secrets of the manifest and of the hooks, at a document's root or inside `items` at any depth, the notes, where a chart may print a password, and a revision's description, which after a failed upgrade quotes the API server's refusal, the patched Secret's values with it (recorded on kind 1.37 with Helm v4.3.2 on 2026-11-22).
+    The page holds them in `twigo_policy::redact::Held`, which has no `Serialize` and prints only its size, so that none can reach IPC unmasked ([decision](decisions/helm-release-masking.md)).
+  - The values, the person's and the chart's defaults alike, leave as JSON text in their stored order: keys, booleans and nulls as stored, every string and number as `<N bytes>`, N the length of its text in UTF-8.
+  - The manifest leaves as `helm get manifest` prints it, split as Helm splits it, each document read alone, the last of a repeated key kept, as Helm's reader keeps it.
+    A document that holds a Secret is written again from its value, the Secret masked as an open Secret is and only its `# Source:` line kept; every other document goes byte for byte, and one Twigo cannot read becomes its `# Source:` line and a line that says so and where its reader stopped.
+    The hooks go through the same masker; no view shows them yet.
+  - The notes and each revision's description leave scrubbed of every value of that revision's Secrets, the manifest's and the hooks', where it stands as a whole token, as the apply preview scrubs a refusal, and a refusal's quoted patched object goes whole.
+  - Two revisions compare masked: Rust compares the real values, and a masked value that differs from its counterpart reads `<N bytes, changed>` on both sides; values pair by their path, a manifest's Secrets by their namespace and name.
+  - A Reveal of the bus (5.1) shows one place of the revision an editor shows: what a path of the values holds, as JSON text as stored, an empty path being the whole document; one key of a Secret of the manifest, its text, or its base64 where it is not UTF-8; a document Twigo could not read; the notes or the description, whole.
+    Rust reveals only what its address names in the revision it read, and answers `helm.no-value` for anything else.
+  - Releases are read from Secrets only.
+    A ConfigMap labelled `owner=helm`, where Helm's ConfigMap driver keeps a release, shows its `release` as a size and never sends its value.
 - **Events for an object.**
   A watch of `events.k8s.io/v1` with a field selector on the regarding object: its `regarding.uid`, a node's `regarding.kind=Node,regarding.name=…`, since the kubelet reports a node's name as its uid, and a mirror pod's the uid of the pod it mirrors, as kubectl describe reads them ([research](research/details.md#events)).
   It runs while the object's Overview is followed, which is on every view, or its events are asked for: the Overview holds its events section, and the Events view's own part of the batch goes only while that view is shown (4.3).
