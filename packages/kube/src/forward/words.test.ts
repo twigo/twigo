@@ -149,7 +149,7 @@ test("a reason or a failure is the state's detail, and waiting connections turn 
   expect(
     stateOf(forward({ state: { state: "reconnecting", reason: NO_POD } }))
       .detail,
-  ).toContain("no pod");
+  ).toBe("no pod · forward.no-ready-pod");
   expect(
     stateOf(
       forward({
@@ -163,7 +163,7 @@ test("a reason or a failure is the state's detail, and waiting connections turn 
         },
       }),
     ).detail,
-  ).toContain("gone");
+  ).toBe("gone · server.not-found");
   expect(stateOf(forward({ queued: 2 }))).toEqual({
     label: "Ready · 2 waiting",
     tone: "warn",
@@ -194,9 +194,8 @@ test("a forward that the context's mode refuses says the mode, as a warning, and
   expect(stateOf(blocked)).toMatchObject({
     label: "Read-only",
     tone: "warn",
-    detail: expect.stringContaining(
-      "dev is read-only by dev in policy.json, so Twigo did not send create pods/x/portforward in ns",
-    ) as unknown,
+    detail:
+      "dev is read-only by dev in policy.json, so Twigo did not send create pods/x/portforward in ns · policy.blocked",
   });
 });
 
