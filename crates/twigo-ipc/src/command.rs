@@ -6,15 +6,15 @@ use ts_rs::TS;
 
 use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
-    ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, Discovered,
-    DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
-    ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
-    KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenIssue,
-    OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, Report,
-    ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow,
-    SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage,
-    ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId,
-    TerminalSession,
+    ApprovalEvent, Catalog, ClusterVersion, CompareRevisions, ComparedRevisions, ContextAuth,
+    DiagnosticsEntry, Discovered, DownloadLogs, ExecReview, Execute, Forward, ForwardEvent,
+    ForwardId, ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
+    KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal,
+    ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenRelease, OpenShell, OperationEvent, Plan,
+    PlanId, PlanRequest, ReleaseBatch, ReleaseListQuery, Report, ResumeForward, SaveReport,
+    SchemaQuery, SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetReleaseView,
+    SetWindow, ShellAck, ShellContainers, ShellEnvironment, ShellInput, ShellMessage, ShellPod,
+    ShellResize, Space, StartForward, StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 
 pub trait Command {
@@ -259,6 +259,67 @@ impl Command for ObjectClose {
     const NAME: &'static str = "object_close";
     type Request = SubscriptionId;
     type Response = ();
+    type Message = ();
+}
+
+/// The Helm releases of a space's namespaces, as a list whose batches come
+/// over the channel until `list_unsubscribe`.
+pub struct HelmListSubscribe;
+
+impl Command for HelmListSubscribe {
+    const NAME: &'static str = "helm_list_subscribe";
+    type Request = ReleaseListQuery;
+    type Response = SubscriptionId;
+    type Message = ListBatch;
+}
+
+/// Opens a Helm release for its editor or the inspector, whose batches come
+/// over the channel until it closes.
+pub struct HelmReleaseOpen;
+
+impl Command for HelmReleaseOpen {
+    const NAME: &'static str = "helm_release_open";
+    type Request = OpenRelease;
+    type Response = SubscriptionId;
+    type Message = ReleaseBatch;
+}
+
+/// Says which revision an open release shows and what its views show, which
+/// Rust follows.
+pub struct HelmReleaseSetView;
+
+impl Command for HelmReleaseSetView {
+    const NAME: &'static str = "helm_release_set_view";
+    type Request = SetReleaseView;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct HelmReleaseAck;
+
+impl Command for HelmReleaseAck {
+    const NAME: &'static str = "helm_release_ack";
+    type Request = Ack;
+    type Response = ();
+    type Message = ();
+}
+
+pub struct HelmReleaseClose;
+
+impl Command for HelmReleaseClose {
+    const NAME: &'static str = "helm_release_close";
+    type Request = SubscriptionId;
+    type Response = ();
+    type Message = ();
+}
+
+/// Two revisions of a release, masked, for the diff editor.
+pub struct HelmCompare;
+
+impl Command for HelmCompare {
+    const NAME: &'static str = "helm_compare";
+    type Request = CompareRevisions;
+    type Response = ComparedRevisions;
     type Message = ();
 }
 

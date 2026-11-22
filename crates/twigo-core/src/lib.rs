@@ -398,6 +398,12 @@ impl Core {
             } => actions::suspend(self, &space, target, suspend).await?,
             PlanRequest::Undo { space } => actions::undo(self, &space).await?,
             PlanRequest::Reveal { object, key } => actions::reveal(self, window, object, key)?,
+            PlanRequest::RevealHelm { release, .. } => {
+                return Err(IpcError::new(
+                    ErrorCode::SubscriptionNotFound,
+                    format!("no release subscription {}", release.0),
+                ));
+            }
             PlanRequest::Apply { space, preview } => {
                 actions::apply(self, window, space, preview).await?
             }

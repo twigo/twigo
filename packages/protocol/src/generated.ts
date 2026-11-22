@@ -271,6 +271,20 @@ export type ColumnValues = {
  */
 column: string, values: Array<string>, };
 
+/**
+ * Two revisions of a release, for a comparison.
+ */
+export type CompareRevisions = { release: ReleaseRef, from: number, to: number, part: ComparedPart, };
+
+export type ComparedPart = "values" | "defaults" | "manifest";
+
+/**
+ * The two sides masked as their views are, but that a masked value which
+ * differs from its counterpart reads `<N bytes, changed>` on both: values
+ * pair by their path, a manifest's Secrets by kind, namespace and name.
+ */
+export type ComparedRevisions = { from: string, to: string, };
+
 export type Condition = { type: string, status: string, 
 /**
  * Whether this status is good news, as Ready=True is and
@@ -474,7 +488,7 @@ export type Environment = "production" | "staging" | "development" | "local";
  * report or an issue may still name it. The test `error_codes` pins
  * every name and kind.
  */
-export type ErrorCode = "connect.refused" | "connect.unresolved" | "connect.timeout" | "connect.certificate" | "connect.tls" | "connect.proxy" | "connect.lost" | "connect.other" | "server.unauthorized" | "server.forbidden" | "server.not-found" | "server.conflict" | "server.invalid" | "server.timeout" | "server.unavailable" | "server.other" | "credentials.untrusted" | "credentials.plugin-missing" | "credentials.plugin-failed" | "credentials.plugin-timeout" | "credentials.plugin-cancelled" | "credentials.oidc-config" | "credentials.oidc-refresh" | "credentials.unusable" | "kubeconfig.unreadable" | "kubeconfig.unparsable" | "kubeconfig.unmergeable" | "kubeconfig.unwatched" | "context.not-listed" | "context.empty" | "context.missing-cluster" | "context.missing-user" | "context.invalid" | "context.no-plugin" | "policy.blocked" | "policy.file-unreadable" | "policy.file-sets-mode" | "policy.not-locked" | "policy.changed" | "answer.undecodable" | "discovery.not-aggregated" | "openapi.no-kind" | "openapi.not-listed" | "openapi.unreadable" | "environment.unresolved" | "forward.not-found" | "forward.invalid-port" | "forward.no-port" | "forward.unsupported-target" | "forward.port-in-use" | "forward.port-not-permitted" | "forward.listen-failed" | "forward.no-ready-pod" | "forward.port-refused" | "forward.waiting-for-slot" | "forward.cluster-unanswered" | "target.gone" | "state.set-aside" | "state.unsaved" | "state.reserved" | "state.not-json" | "space.not-found" | "trust.set-aside" | "trust.unsaved" | "audit.off" | "audit.unwritten" | "tokens.unsaved" | "file.unwritten" | "file.unrevealed" | "file.dialog-failed" | "file.not-local" | "internal.panic" | "internal.ipc" | "internal.request" | "action.object-changed" | "action.cluster-changed" | "action.mode-changed" | "action.kept-changing" | "action.no-change" | "action.unsupported-kind" | "action.paused" | "action.no-target" | "action.mixed-targets" | "action.unquotable" | "action.drain-refused" | "apply.invalid-edit" | "apply.masked-value" | "apply.wrong-target" | "apply.kind-not-served" | "apply.no-object" | "apply.integer-too-large" | "apply.other-version" | "undo.nothing" | "undo.ended" | "trigger.job-exists" | "bus.not-waiting" | "bus.preview-replaced" | "window.gone" | "subscription.not-found" | "app.quitting" | "approval.gone" | "approval.other-window" | "approval.unmarked" | "approval.marked" | "approval.once-only" | "confirm.name-mismatch" | "confirm.countdown" | "offer.gone" | "offer.other-window" | "offer.answering" | "offer.changed" | "offer.locked" | "offer.unmoved" | "session.started" | "session.busy" | "shell.no-container" | "shell.pod-not-running" | "terminal.start-failed" | "terminal.wait-failed" | "terminal.kubeconfig-path" | "logs.unsupported-target" | "logs.invalid-time" | "logs.no-previous" | "logs.stream-failed" | "filter.invalid-regex" | "filter.invalid-selector" | "object.not-listed" | "object.values-withheld" | "secret.not-a-secret" | "secret.no-key" | "proxy.actor-refused" | "proxy.unbound" | "link.refused" | "link.open-failed" | "keyboard.unavailable" | "keyboard.not-found";
+export type ErrorCode = "connect.refused" | "connect.unresolved" | "connect.timeout" | "connect.certificate" | "connect.tls" | "connect.proxy" | "connect.lost" | "connect.other" | "server.unauthorized" | "server.forbidden" | "server.not-found" | "server.conflict" | "server.invalid" | "server.timeout" | "server.unavailable" | "server.other" | "credentials.untrusted" | "credentials.plugin-missing" | "credentials.plugin-failed" | "credentials.plugin-timeout" | "credentials.plugin-cancelled" | "credentials.oidc-config" | "credentials.oidc-refresh" | "credentials.unusable" | "kubeconfig.unreadable" | "kubeconfig.unparsable" | "kubeconfig.unmergeable" | "kubeconfig.unwatched" | "context.not-listed" | "context.empty" | "context.missing-cluster" | "context.missing-user" | "context.invalid" | "context.no-plugin" | "policy.blocked" | "policy.file-unreadable" | "policy.file-sets-mode" | "policy.not-locked" | "policy.changed" | "answer.undecodable" | "discovery.not-aggregated" | "openapi.no-kind" | "openapi.not-listed" | "openapi.unreadable" | "environment.unresolved" | "forward.not-found" | "forward.invalid-port" | "forward.no-port" | "forward.unsupported-target" | "forward.port-in-use" | "forward.port-not-permitted" | "forward.listen-failed" | "forward.no-ready-pod" | "forward.port-refused" | "forward.waiting-for-slot" | "forward.cluster-unanswered" | "target.gone" | "state.set-aside" | "state.unsaved" | "state.reserved" | "state.not-json" | "space.not-found" | "trust.set-aside" | "trust.unsaved" | "audit.off" | "audit.unwritten" | "tokens.unsaved" | "file.unwritten" | "file.unrevealed" | "file.dialog-failed" | "file.not-local" | "internal.panic" | "internal.ipc" | "internal.request" | "action.object-changed" | "action.cluster-changed" | "action.mode-changed" | "action.kept-changing" | "action.no-change" | "action.unsupported-kind" | "action.paused" | "action.no-target" | "action.mixed-targets" | "action.unquotable" | "action.drain-refused" | "apply.invalid-edit" | "apply.masked-value" | "apply.wrong-target" | "apply.kind-not-served" | "apply.no-object" | "apply.integer-too-large" | "apply.other-version" | "undo.nothing" | "undo.ended" | "trigger.job-exists" | "bus.not-waiting" | "bus.preview-replaced" | "window.gone" | "subscription.not-found" | "app.quitting" | "approval.gone" | "approval.other-window" | "approval.unmarked" | "approval.marked" | "approval.once-only" | "confirm.name-mismatch" | "confirm.countdown" | "offer.gone" | "offer.other-window" | "offer.answering" | "offer.changed" | "offer.locked" | "offer.unmoved" | "session.started" | "session.busy" | "shell.no-container" | "shell.pod-not-running" | "terminal.start-failed" | "terminal.wait-failed" | "terminal.kubeconfig-path" | "logs.unsupported-target" | "logs.invalid-time" | "logs.no-previous" | "logs.stream-failed" | "filter.invalid-regex" | "filter.invalid-selector" | "object.not-listed" | "object.values-withheld" | "secret.not-a-secret" | "secret.no-key" | "helm.not-a-release" | "helm.truncated" | "helm.too-large" | "helm.revision-gone" | "helm.no-value" | "proxy.actor-refused" | "proxy.unbound" | "link.refused" | "link.open-failed" | "keyboard.unavailable" | "keyboard.not-found";
 
 export type ErrorKind = "invalidInput" | "notFound" | "conflict" | "forbidden" | "unauthorized" | "permissions" | "timeout" | "unavailable" | "internal";
 
@@ -780,6 +794,15 @@ sentence: Array<Span>,
  * A pod's CPU and Memory are not among them: they come with its usage.
  */
 vitals: Array<Vital>, };
+
+/**
+ * A secret-grade part of a revision, which a Reveal shows.
+ */
+export type HelmPart = { "kind": "values", 
+/**
+ * The chart's defaults, not the person's values.
+ */
+defaults: boolean, path: Array<ValueStep>, } | { "kind": "secret", document: number, items: Array<number>, key: string, } | { "kind": "document", document: number, } | { "kind": "notes" } | { "kind": "description" };
 
 /**
  * How many times the redaction hid each kind of thing in the log.
@@ -1246,6 +1269,30 @@ range: TimeRange | null, };
 export type LogWindow = { "type": "tail", count: number, } | { "type": "range", start: number, end: number, } | { "type": "around", id: number, before: number, after: number, };
 
 /**
+ * A Secret of a manifest, at the root of its document or inside a List's
+ * `items`.
+ */
+export type ManifestSecret = { 
+/**
+ * The document's index among those Helm's split gives, from 0.
+ */
+document: number, 
+/**
+ * The indexes through `items` from the document to the Secret; empty
+ * for a Secret that is the document.
+ */
+items: Array<number>, name: string, namespace: string | null, 
+/**
+ * The line of `text` its document starts at, from 1.
+ */
+line: number, 
+/**
+ * Its keys of `data` and `stringData` with their sizes, a key in both
+ * once, as `stringData`'s, which the server writes over `data`.
+ */
+entries: Array<DataEntry>, };
+
+/**
  * One resource, in nanocores for CPU and bytes for memory.
  */
 export type Measure = { 
@@ -1448,6 +1495,12 @@ export type OpenLogs = { target: LogTarget, source: LogSource, view: LogView, };
 
 export type OpenObject = { object: ObjectQuery, parts: ObjectParts, };
 
+export type OpenRelease = { release: ReleaseRef, 
+/**
+ * The revision to show; null follows the latest.
+ */
+revision: number | null, parts: ReleaseParts, };
+
 /**
  * Starts the session a plan's run answered with.
  */
@@ -1569,7 +1622,7 @@ export type PlanId = number;
 /**
  * What a person asks a command to do.
  */
-export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "apply", space: string, preview: PreviewId, } | { "action": "shell", target: ShellTarget, kind: ShellKind, } | { "action": "setMode", context: string, mode: Mode | null, } | { "action": "setEnvironment", context: string, environment: Environment | null, } | { "action": "unlock", context: string, };
+export type PlanRequest = { "action": "delete", space: string, targets: Array<ResourceRef>, } | { "action": "scale", space: string, target: ResourceRef, replicas: number, } | { "action": "restart", space: string, target: ResourceRef, } | { "action": "cordon", space: string, node: string, unschedulable: boolean, } | { "action": "drain", space: string, node: string, } | { "action": "trigger", space: string, namespace: string, name: string, } | { "action": "suspend", space: string, target: ResourceRef, suspend: boolean, } | { "action": "undo", space: string, } | { "action": "reveal", object: SubscriptionId, key: string, } | { "action": "revealHelm", release: SubscriptionId, revision: number, part: HelmPart, } | { "action": "apply", space: string, preview: PreviewId, } | { "action": "shell", target: ShellTarget, kind: ShellKind, } | { "action": "setMode", context: string, mode: Mode | null, } | { "action": "setEnvironment", context: string, environment: Environment | null, } | { "action": "unlock", context: string, };
 
 export type PluginStatus = { "state": "idle" } | { "state": "waiting" } | { "state": "running", 
 /**
@@ -1614,6 +1667,141 @@ export type RelatedObject = { target: ObjectRef,
  * The owner reference that ties them is the controller's.
  */
 controller: boolean, };
+
+/**
+ * One flush of an open release. Rust sends the next only after the webview
+ * acknowledged this one's `seq`, and coalesces changes meanwhile; a part is
+ * present when it changed, while it is asked for.
+ */
+export type ReleaseBatch = { seq: number, 
+/**
+ * The state of the Secrets of the release's namespace, as a list's.
+ */
+status: ViewState, 
+/**
+ * False until a revision is listed, and once none is left, as after an
+ * uninstall without `--keep-history`.
+ */
+exists: boolean, 
+/**
+ * The revision the parts are of: the one asked for, else the latest.
+ */
+revision: number | null, 
+/**
+ * The highest revision Helm keeps, which `helm get` reads.
+ */
+latest: number | null, 
+/**
+ * Why the shown revision cannot be read: `helm.not-a-release`,
+ * `helm.truncated`, `helm.too-large`, `helm.revision-gone` for a revision
+ * asked for that Helm no longer keeps, or `internal.panic`; its parts are
+ * null then.
+ */
+problem: IpcError | null, 
+/**
+ * Described as an object's is: a header whose `printed` are the release
+ * row's cells and whose `created` is the revision's `last_deployed`, then
+ * sections (Diagnostics, Objects, Hooks, Chart, Metadata). With the
+ * overview part.
+ */
+overview: Overview | null, 
+/**
+ * The rendered NOTES.txt; empty for a chart without one. With the
+ * overview part.
+ */
+notes: Scrubbed | null, 
+/**
+ * What Helm wrote of the revision, such as `Upgrade complete` or the
+ * error a failed one ended in. With the overview part.
+ */
+description: Scrubbed | null, values: ReleaseValues | null, manifest: ReleaseManifest | null, 
+/**
+ * Newest first.
+ */
+history: Array<RevisionLine> | null, };
+
+/**
+ * The releases of a space's namespaces, one row a release, which is its
+ * latest revision: Name, Revision and Status from the labels Helm sets on its
+ * Secrets, Chart (`name-version`), App Version and Updated once that revision
+ * is decoded. Updated is an `age` column that reads the row's `created`, the
+ * revision's `info.last_deployed`; Problem holds the wire name of the code
+ * that keeps the revision from being read, and is empty when it is. Its
+ * batches are [`ListBatch`](crate::ListBatch)es, and `list_set_window`,
+ * `list_ack` and `list_unsubscribe` serve it.
+ */
+export type ReleaseListQuery = { space: string, 
+/**
+ * As in [`ListQuery`](crate::ListQuery), for the namespaces where the
+ * person may list Secrets.
+ */
+namespaces: Array<string>, 
+/**
+ * As in [`ListQuery`](crate::ListQuery) from here on.
+ */
+text: string | null, columns: { [key in string]: boolean } | null, sort: Sort | null, countBy: string | null, groupBy: Grouping | null, values: ColumnValues | null, };
+
+/**
+ * A revision's manifest as `helm get manifest` prints it, but each document
+ * that holds a Secret written again with its values as their sizes and only
+ * its `# Source:` comment kept, and each document Twigo could not read
+ * replaced by its `# Source:` line and a line that says so. Hooks are not in
+ * it, as they are not in Helm's.
+ */
+export type ReleaseManifest = { text: string, 
+/**
+ * In the order they stand.
+ */
+secrets: Array<ManifestSecret>, 
+/**
+ * In the order they stand.
+ */
+unread: Array<UnreadDocument>, };
+
+/**
+ * What the views of an open release ask for; Rust decodes and sends only
+ * these.
+ */
+export type ReleaseParts = { 
+/**
+ * The shown revision's overview, notes and description, on every view.
+ */
+overview: boolean, 
+/**
+ * Its values, the person's and the chart's defaults, while the Values
+ * view is shown.
+ */
+values: boolean, 
+/**
+ * Its manifest, while the Manifest view is shown.
+ */
+manifest: boolean, 
+/**
+ * A line for each revision Helm keeps, while History is shown.
+ */
+history: boolean, };
+
+/**
+ * One release: the namespace of its Secrets and its name.
+ */
+export type ReleaseRef = { space: string, namespace: string, name: string, };
+
+/**
+ * A revision's values as JSON text, in the stored order of their keys: keys,
+ * booleans and nulls as Helm stored them, every string and number as
+ * `<N bytes>`, N the length of its text in UTF-8, a number's as stored.
+ */
+export type ReleaseValues = { 
+/**
+ * What the person set, as `helm get values -o json` prints it: `null`
+ * when they set nothing.
+ */
+user: string, 
+/**
+ * The chart's defaults as the release stores them, its subcharts' merged
+ * in at install.
+ */
+defaults: string, };
 
 /**
  * What "Report a Problem" shows (ARCHITECTURE 4.10): facts for the issue and
@@ -1667,6 +1855,32 @@ export type ReviewedPlugin = { plugin: ExecPlugin,
  * The contexts that use it.
  */
 contexts: Array<string>, };
+
+/**
+ * A revision as `helm history` prints it.
+ */
+export type RevisionLine = { revision: number, 
+/**
+ * Helm's word, from the label, so known before the revision is decoded:
+ * `deployed`, `superseded`, `failed`, `pending-upgrade`…
+ */
+status: string, 
+/**
+ * RFC 3339, `info.last_deployed`; null until decoded.
+ */
+updated: string | null, 
+/**
+ * `name-version`; null until decoded.
+ */
+chart: string | null, appVersion: string | null, description: Scrubbed | null, 
+/**
+ * The revision a rollback restored, as Helm 4.3 and later record it.
+ */
+rollbackOf: number | null, 
+/**
+ * Why it cannot be read, as [`ReleaseBatch::problem`] says.
+ */
+problem: IpcError | null, };
 
 export type Row = { id: RowId, 
 /**
@@ -1730,6 +1944,16 @@ export type SchemaQuery = { space: string,
  */
 group: string, version: string, kind: string, };
 
+/**
+ * A text with every value of the revision's Secrets that stands in it as a
+ * whole token replaced by `<hidden>`.
+ */
+export type Scrubbed = { text: string, 
+/**
+ * Something was replaced, which a Reveal of the whole text shows.
+ */
+hidden: boolean, };
+
 export type Section = { 
 /**
  * Stable, such as `core.metadata`; folding is kept by it.
@@ -1784,6 +2008,12 @@ export type SetLogView = { id: SubscriptionId, view: LogView, };
 export type SetLogWindow = { id: SubscriptionId, window: LogWindow, };
 
 export type SetParts = { id: SubscriptionId, parts: ObjectParts, };
+
+export type SetReleaseView = { id: SubscriptionId, 
+/**
+ * The revision to show; null follows the latest.
+ */
+revision: number | null, parts: ReleaseParts, };
 
 /**
  * `start` and `end` index the rows a window reads: every matching row,
@@ -1981,6 +2211,16 @@ label: string, value: TreeValue, };
 
 export type TreeValue = { "type": "scalar", text: string, } | { "type": "map", entries: Array<TreeNode>, } | { "type": "list", items: Array<TreeNode>, };
 
+export type UnreadDocument = { document: number, 
+/**
+ * The line of `text` it stands at, from 1.
+ */
+line: number, 
+/**
+ * The path its `# Source:` comment names, if it has one.
+ */
+source: string | null, };
+
 /**
  * What a pod or a node uses, from the sample its list's rows show.
  */
@@ -2020,6 +2260,11 @@ containers: Array<ContainerUsage>, };
 export type Value = { "type": "text", text: string, } | { "type": "time", at: string, } | { "type": "link", target: ObjectRef, text: string, } | { "type": "labels", labels: Array<Label>, } | { "type": "list", items: Array<Value>, } | { "type": "code", text: string, } | { "type": "toned", text: string, tone: Tone, } | { "type": "spans", spans: Array<Span>, };
 
 export type ValueCount = { value: string, count: number, };
+
+/**
+ * A map's key or a list's index.
+ */
+export type ValueStep = string | number;
 
 /**
  * The state of a subscription, or of one part of a list (ARCHITECTURE 3.7).
@@ -2075,6 +2320,12 @@ export type Commands = {
   object_ack: { request: Ack; response: null; message: null };
   object_values: { request: GetValues; response: Array<string | null>; message: null };
   object_close: { request: SubscriptionId; response: null; message: null };
+  helm_list_subscribe: { request: ReleaseListQuery; response: SubscriptionId; message: ListBatch };
+  helm_release_open: { request: OpenRelease; response: SubscriptionId; message: ReleaseBatch };
+  helm_release_set_view: { request: SetReleaseView; response: null; message: null };
+  helm_release_ack: { request: Ack; response: null; message: null };
+  helm_release_close: { request: SubscriptionId; response: null; message: null };
+  helm_compare: { request: CompareRevisions; response: ComparedRevisions; message: null };
   schema_get: { request: SchemaQuery; response: string; message: null };
   shell_containers: { request: ShellPod; response: ShellContainers; message: null };
   shell_open: { request: OpenShell; response: null; message: ShellMessage };
