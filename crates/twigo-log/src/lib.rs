@@ -84,7 +84,14 @@ impl Log {
     pub fn start(directory: &Path, facts: &Facts) -> Self {
         let path = directory.join(FILE);
         let file = Rotating::open_new(&path, LIMITS, rotating::to_stderr)
-            .inspect_err(|error| report(&path, error))
+            .inspect_err(|error| {
+                rotating::to_stderr(&Failure {
+                    path: &path,
+                    what: "cannot be opened",
+                    lost: true,
+                    error,
+                });
+            })
             .ok();
         let (spec, filter, invalid) = initial_filter();
         let writer = file
@@ -185,15 +192,6 @@ fn log_tracer() {
         let _ = tracing_log::LogTracer::builder()
             .with_max_level(level)
             .init();
-    });
-}
-
-fn report(path: &Path, error: &io::Error) {
-    rotating::to_stderr(&Failure {
-        path,
-        what: "cannot be opened",
-        lost: true,
-        error,
     });
 }
 

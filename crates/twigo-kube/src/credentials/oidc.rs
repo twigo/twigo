@@ -163,10 +163,13 @@ enum Style {
 pub(super) struct Unsaved(Arc<Mutex<HashSet<String>>>);
 
 impl Unsaved {
-    fn add(&self, key: &str, problem: IpcError) {
+    fn add(&self, key: &str) {
         let mut users = self.0.lock().expect("unsaved lock");
         users.insert(key.to_owned());
-        problems::report(problem);
+        problems::report(IpcError::new(
+            ErrorCode::TokensUnsaved,
+            "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
+        ));
     }
 
     fn remove(&self, key: &str) {
@@ -360,13 +363,7 @@ impl Oidc {
                 }
                 Err((origin, error)) => {
                     tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
-                    self.unsaved.add(
-                        &self.key,
-                        IpcError::new(
-                            ErrorCode::TokensUnsaved,
-                            "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
-                        ),
-                    );
+                    self.unsaved.add(&self.key);
                 }
             }
         }

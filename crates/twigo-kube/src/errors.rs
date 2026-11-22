@@ -148,10 +148,7 @@ fn upgrade(error: &kube::client::UpgradeConnectionError) -> (ErrorCode, String) 
     match error {
         GetPendingUpgrade(inner) => transport(inner),
         ProtocolSwitch(status) => (server_code(status.as_u16()), error.to_string()),
-        _ => (
-            server_code(StatusCode::SWITCHING_PROTOCOLS.as_u16()),
-            error.to_string(),
-        ),
+        _ => (ErrorCode::ServerOther, error.to_string()),
     }
 }
 
