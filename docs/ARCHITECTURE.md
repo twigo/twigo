@@ -1951,7 +1951,7 @@ A list, an object page, a logs tab, a shell, a terminal or a forward whose task 
 It shows the code as every error does, keeps Rust's own message (`Twigo stopped this list on an internal error`) in Copy details, and offers Report…, which opens the report dialog.
 Reopen is offered where the view can open again:
 
-- a list, an object page, a home tile and a comparison of objects subscribe anew, a tile reopening the home's four counts together;
+- a list, an object page, an embedded list, a row's details, a home tile and a comparison of objects subscribe anew, a tile reopening the home's four counts together;
 - a logs tab drops its session and opens another, keeping what it reads and how it shows it;
 - a shell or a terminal starts a new session, which it cannot resume, and its banner carries the code and Rust's message as every error does;
 - a forward is started again by Start.
