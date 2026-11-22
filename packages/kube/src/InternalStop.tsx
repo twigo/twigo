@@ -9,7 +9,6 @@ export function InternalStop({
 }: {
   error: ErrorLike;
   reopen: () => void;
-  /** What stopped, as the sentence's subject. */
   what?: string;
 }) {
   return (

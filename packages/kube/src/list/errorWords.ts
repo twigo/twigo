@@ -42,7 +42,6 @@ export function statusWord(error: Failure): string {
   }
 }
 
-/** ` · ` and why a list waits, once its cluster has said it; nothing before. */
 export function caused(cause: Failure | undefined): string {
   return cause ? ` · ${causeWords(cause)}` : "";
 }
