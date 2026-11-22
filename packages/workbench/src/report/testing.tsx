@@ -1,6 +1,6 @@
 import { act, render } from "@testing-library/react";
 import type { Backend, CommandName, IpcError } from "@twigo/protocol";
-import { createMockBackend } from "@twigo/protocol/mock";
+import { createMockBackend, type MockScenario } from "@twigo/protocol/mock";
 import { Toaster } from "@twigo/ui";
 import { inWorkbench, testWorkbench } from "../testing";
 import { ReportDialog } from "./ReportDialog";
@@ -11,8 +11,9 @@ import { ReportDialog } from "./ReportDialog";
  */
 export async function openReport(
   refuse: Partial<Record<CommandName, IpcError>> = {},
+  scenario: MockScenario = "ready",
 ) {
-  const mock = createMockBackend("ready");
+  const mock = createMockBackend(scenario);
   const calls: [string, unknown][] = [];
   const backend: Backend = {
     invoke: (command, request) => {
@@ -32,7 +33,7 @@ export async function openReport(
       },
     },
   });
-  const workbench = await testWorkbench("ready", backend);
+  const workbench = await testWorkbench(scenario, backend);
   render(
     <>
       <ReportDialog />

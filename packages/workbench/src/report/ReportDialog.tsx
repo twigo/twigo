@@ -72,7 +72,8 @@ function Body({ report }: { report: Report }) {
   const [description, setDescription] = useState("");
   const [error, setError] = useState<IpcError>();
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"text" | "description">();
+  const [cut, setCut] = useState<string>();
 
   const stated = report.facts.filter(({ id }) => ticked.has(id));
   const whole = shape === "one-text";
@@ -99,6 +100,7 @@ function Body({ report }: { report: Report }) {
     // Written in the click's own turn: WKWebView may not allow it after an
     // IPC round trip (not verified).
     const written = navigator.clipboard.writeText(log);
+    setCut(undefined);
     void run(async () => {
       await written;
       const opened = await backend.invoke("report_open_issue", {
@@ -109,8 +111,13 @@ function Body({ report }: { report: Report }) {
             ? description.trim()
             : null,
       });
+      const words = openedWords(opened, report.facts);
+      if (opened.descriptionCut) {
+        setCut(words);
+        return;
+      }
       problemReport.close();
-      notify.info(openedWords(opened, report.facts), { key: "report:opened" });
+      notify.info(words, { key: "report:opened" });
     });
   };
 
@@ -121,12 +128,12 @@ function Body({ report }: { report: Report }) {
     });
   };
 
-  const copy = () => {
+  const copy = (what: "text" | "description", words: string) => {
     void run(async () => {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
+      await navigator.clipboard.writeText(words);
+      setCopied(what);
       setTimeout(() => {
-        setCopied(false);
+        setCopied(undefined);
       }, 1500);
     });
   };
@@ -224,6 +231,28 @@ function Body({ report }: { report: Report }) {
           />
           <p className="text-xs text-quiet">{hiddenWords(report.hidden)}</p>
         </section>
+        {cut !== undefined && (
+          <div role="status">
+            <Callout tone="warn" title={cut}>
+              <p className="text-xs text-support">
+                Paste the log first, then copy your description here and paste
+                the rest of it into Description.
+              </p>
+              <div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    copy("description", description.trim());
+                  }}
+                >
+                  {copied === "description" ? "Copied" : "Copy description"}
+                </Button>
+              </div>
+            </Callout>
+          </div>
+        )}
         {error && (
           <div role="alert">
             <Callout tone="error" title={<ErrorMessage error={error} />} />
@@ -253,8 +282,15 @@ function Body({ report }: { report: Report }) {
         <Button size="sm" variant="outline" disabled={busy} onClick={save}>
           Save…
         </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={copy}>
-          {copied ? "Copied" : "Copy"}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            copy("text", text);
+          }}
+        >
+          {copied === "text" ? "Copied" : "Copy"}
         </Button>
         <Button size="sm" disabled={busy} onClick={openIssue}>
           Open Issue on GitHub
