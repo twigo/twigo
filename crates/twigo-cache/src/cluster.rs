@@ -4,6 +4,7 @@
 //! with the clients they were learnt over.
 
 use std::collections::{HashMap, HashSet};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -121,15 +122,15 @@ impl Cluster {
                 .entry(asked.clone())
                 .or_insert_with(|| {
                     let (cluster, clients, ask) = (Arc::clone(self), Arc::clone(clients), ask());
-                    let forget = {
-                        let (cluster, clients, asked) =
-                            (Arc::clone(&cluster), Arc::clone(&clients), asked.clone());
-                        move || {
-                            cluster.facts(&clients).reviewing.remove(&asked);
-                        }
-                    };
                     let review = tokio::spawn(async move {
-                        let may = ask.await;
+                        let may = AssertUnwindSafe(ask)
+                            .catch_unwind()
+                            .await
+                            .unwrap_or_else(|_| {
+                                Err(Failure::Refused(ViewState::Error {
+                                    error: IpcError::panicked("this access check"),
+                                }))
+                            });
                         let mut facts = cluster.facts(&clients);
                         facts.reviewing.remove(&asked);
                         if let Ok(may) = may {
@@ -137,21 +138,9 @@ impl Cluster {
                         }
                         may
                     });
-                    async move {
-                        match review.await {
-                            Ok(may) => may,
-                            // The task left its entry behind, which would hand
-                            // this failure to every later asker.
-                            Err(_) => {
-                                forget();
-                                Err(Failure::Refused(ViewState::Error {
-                                    error: IpcError::panicked("this access check"),
-                                }))
-                            }
-                        }
-                    }
-                    .boxed()
-                    .shared()
+                    async move { twigo_panic::joined(review.await) }
+                        .boxed()
+                        .shared()
                 })
                 .clone()
         };
