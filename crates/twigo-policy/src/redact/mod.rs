@@ -12,33 +12,88 @@ const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 /// The object as a view shows it: managedFields dropped, and for a Secret
 /// each value replaced by its size and the last-applied annotation dropped.
 pub fn for_view(mut object: Value) -> Value {
-    let secret = object["apiVersion"] == "v1" && object["kind"] == "Secret";
-    if let Some(metadata) = object["metadata"].as_object_mut() {
+    if let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) {
         metadata.remove("managedFields");
-        if secret
-            && let Some(annotations) = metadata
-                .get_mut("annotations")
-                .and_then(Value::as_object_mut)
-        {
-            annotations.remove(LAST_APPLIED);
-        }
     }
-    if secret {
-        for (field, encoded) in [("data", true), ("stringData", false)] {
-            let Some(values) = object.get_mut(field).and_then(Value::as_object_mut) else {
-                continue;
-            };
-            for value in values.values_mut() {
-                let bytes = match value.as_str() {
-                    Some(text) if encoded => STANDARD.decode(text).map_or(0, |bytes| bytes.len()),
-                    Some(text) => text.len(),
-                    None => 0,
-                };
-                *value = Value::String(format!("<{bytes} bytes>"));
-            }
-        }
+    if object["apiVersion"] == "v1" && object["kind"] == "Secret" {
+        mask_secret(&mut object);
     }
     object
+}
+
+/// A Secret with each value replaced by its size and the last-applied
+/// annotation dropped.
+fn mask_secret(secret: &mut Value) {
+    let masks: Vec<(Field, String, String)> = entries(secret)
+        .map(|entry| (entry.field, entry.key.to_owned(), mask(entry.bytes())))
+        .collect();
+    for (field, key, mask) in masks {
+        secret[field.name()][key] = Value::String(mask);
+    }
+    if let Some(annotations) = secret
+        .get_mut("metadata")
+        .and_then(|metadata| metadata.get_mut("annotations"))
+        .and_then(Value::as_object_mut)
+    {
+        annotations.remove(LAST_APPLIED);
+    }
+}
+
+fn mask(bytes: u64) -> String {
+    format!("<{bytes} bytes>")
+}
+
+/// Where a Secret keeps a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    /// In base64.
+    Data,
+    /// As text, which the server writes over `data`.
+    StringData,
+}
+
+impl Field {
+    pub fn name(self) -> &'static str {
+        match self {
+            Field::Data => "data",
+            Field::StringData => "stringData",
+        }
+    }
+}
+
+/// One value of a Secret, which has no `Debug`, as it would print the value.
+#[derive(Clone, Copy)]
+pub struct Entry<'a> {
+    pub field: Field,
+    pub key: &'a str,
+    pub value: &'a Value,
+}
+
+impl Entry<'_> {
+    /// Its size in bytes, as the Secret holds it.
+    pub fn bytes(&self) -> u64 {
+        let Some(text) = self.value.as_str() else {
+            return 0;
+        };
+        match self.field {
+            Field::Data => STANDARD.decode(text).map_or(0, |bytes| bytes.len() as u64),
+            Field::StringData => text.len() as u64,
+        }
+    }
+}
+
+/// A Secret's values: those of `data`, then those of `stringData`, each in
+/// the order of its keys.
+pub fn entries(secret: &Value) -> impl Iterator<Item = Entry<'_>> {
+    [Field::Data, Field::StringData]
+        .into_iter()
+        .flat_map(move |field| {
+            secret[field.name()]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(move |(key, value)| Entry { field, key, value })
+        })
 }
 
 /// Whether `text` reads as what [`for_view`] puts in place of a Secret's

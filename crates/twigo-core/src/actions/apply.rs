@@ -62,7 +62,7 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{for_view, is_mask, whole_tokens_replaced};
+use twigo_policy::redact::{Field, entries, for_view, is_mask, whole_tokens_replaced};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
@@ -306,17 +306,17 @@ fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
 /// kind.
 fn secret_values(objects: &[&Value]) -> Vec<String> {
     let mut values = BTreeSet::new();
-    for object in objects {
-        for (field, encoded) in [("data", true), ("stringData", false)] {
-            let items = object[field].as_object();
-            for value in items.into_iter().flat_map(|items| items.values()) {
-                let Some(text) = value.as_str().filter(|text| !text.is_empty()) else {
-                    continue;
-                };
-                values.insert(text.to_owned());
-                if !encoded {
-                    values.insert(STANDARD.encode(text));
-                } else if let Ok(bytes) = STANDARD.decode(text) {
+    for entry in objects.iter().flat_map(|object| entries(object)) {
+        let Some(text) = entry.value.as_str().filter(|text| !text.is_empty()) else {
+            continue;
+        };
+        values.insert(text.to_owned());
+        match entry.field {
+            Field::StringData => {
+                values.insert(STANDARD.encode(text));
+            }
+            Field::Data => {
+                if let Ok(bytes) = STANDARD.decode(text) {
                     values.insert(String::from_utf8_lossy(&bytes).into_owned());
                 }
             }
@@ -345,18 +345,16 @@ fn add_answered(secrets: &mut Vec<String>, answer: &Value) {
 /// Refuses a value of a Secret that still reads as a mask but is not the
 /// one it was opened with, as `<12 bytes>` would be written.
 fn refuse_masks(base: Option<&Value>, edited: &Value) -> Result<(), IpcError> {
-    for field in ["data", "stringData"] {
-        let items = edited[field].as_object();
-        for (key, value) in items.into_iter().flatten() {
-            let opened = base.and_then(|base| base[field].get(key));
-            if value.as_str().is_some_and(is_mask) && opened != Some(value) {
-                return Err(IpcError::new(
-                    ErrorCode::ApplyMaskedValue,
-                    format!(
-                        "{key} still holds a masked value, so Twigo would write the mask: give it a value"
-                    ),
-                ));
-            }
+    for entry in entries(edited) {
+        let opened = base.and_then(|base| base[entry.field.name()].get(entry.key));
+        if entry.value.as_str().is_some_and(is_mask) && opened != Some(entry.value) {
+            let key = entry.key;
+            return Err(IpcError::new(
+                ErrorCode::ApplyMaskedValue,
+                format!(
+                    "{key} still holds a masked value, so Twigo would write the mask: give it a value"
+                ),
+            ));
         }
     }
     Ok(())
