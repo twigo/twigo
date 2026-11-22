@@ -1,6 +1,7 @@
 import { FrameAcks } from "./acks";
 import type { Backend } from "./backend";
 import { IpcError, toIpcError } from "./error";
+import { isHelmList, releaseListQuery } from "./helm";
 import type {
   Cell,
   Column,
@@ -90,24 +91,30 @@ export class ListView {
     this.#snapshot =
       metrics === null ? INITIAL_SNAPSHOT : { ...INITIAL_SNAPSHOT, metrics };
     this.#backend = backend;
-    backend
-      .subscribe("list_subscribe", query, (batch) => {
-        this.#apply(batch);
-      })
-      .then(
-        (id) => {
-          this.#id = id;
-          if (this.#closed) {
-            void this.#backend.invoke("list_unsubscribe", id);
-            return;
-          }
-          if (this.#window) this.#sendWindow(...this.#window);
-          this.#acks.opened(id);
-        },
-        (error: unknown) => {
-          this.#fail(error);
-        },
-      );
+    const onBatch = (batch: ListBatch) => {
+      this.#apply(batch);
+    };
+    (isHelmList(query.gvr)
+      ? backend.subscribe(
+          "helm_list_subscribe",
+          releaseListQuery(query),
+          onBatch,
+        )
+      : backend.subscribe("list_subscribe", query, onBatch)
+    ).then(
+      (id) => {
+        this.#id = id;
+        if (this.#closed) {
+          void this.#backend.invoke("list_unsubscribe", id);
+          return;
+        }
+        if (this.#window) this.#sendWindow(...this.#window);
+        this.#acks.opened(id);
+      },
+      (error: unknown) => {
+        this.#fail(error);
+      },
+    );
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {

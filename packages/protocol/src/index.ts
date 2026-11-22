@@ -131,8 +131,25 @@ export type {
   Parts,
   PartState,
   Printed,
+  ComparedPart,
+  ComparedRevisions,
+  CompareRevisions,
+  HelmPart,
+  ManifestSecret,
+  OpenRelease,
+  ReleaseBatch,
+  ReleaseListQuery,
+  ReleaseManifest,
+  ReleaseParts,
+  ReleaseRef,
+  ReleaseValues,
   Related,
   RelatedObject,
+  RevisionLine,
+  Scrubbed,
+  SetReleaseView,
+  UnreadDocument,
+  ValueStep,
   Section,
   Span,
   Tone,
@@ -167,6 +184,7 @@ export type {
   ValueCount,
   ViewState,
 } from "./generated";
+export { HELM_RELEASES, isHelmList } from "./helm";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
 export {
   leastReady,
