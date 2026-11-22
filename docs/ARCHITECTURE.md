@@ -199,7 +199,7 @@ The hook of `twigo-log` records every panic first (4.10).
   Where no window is left, as when the last one's `Destroyed` handler panicked, Twigo is ending already: the fatal path writes the state and asks nothing, since the dialog without a parent is the system's own alert, which would outlive Twigo.
   Either answer writes the state first, and Restart asks Tauri to restart: spaces and forwards come back as they do at any start.
   An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
-- **A joined task's panic** goes on as it was (`twigo_panic::joined`), so the hook records it once.
+- **A joined task's panic** goes on as it was (`twigo_panic::joined`, and `twigo_panic::blocking` for a closure on the blocking pool), so the hook records it once.
 - **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
 - `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are the duties above, `supervisor`, `forward restore`, `list`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
 

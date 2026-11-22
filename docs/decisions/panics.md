@@ -28,7 +28,7 @@ Decided 2026-11-21.
   An answer that comes once Twigo has begun to end does nothing.
   The page-load and window callbacks run under the same catch as the invoke handler.
   A test's core, from `Core::start_for_tests`, fails the test when it is dropped if a duty panicked with nothing armed or could not be kept.
-- A task that must run to its end is joined with `twigo_panic::joined`, which raises its panic again with its own payload, so the hook records it once; never `.expect("… does not panic")`.
+- A task that must run to its end is joined with `twigo_panic::joined`, and a closure for the blocking pool runs through `twigo_panic::blocking`, which raises its panic again with its own payload, so the hook records it once; never `.expect("… does not panic")`.
 - No `expect` or `unwrap` sits on an error that carries input text: a `KubeconfigError` quotes the lines of the file.
 - One seam, behind the `inject` feature of `twigo-panic`: a name armed with `inject::arm` makes the supervisor's duty, `contain`'s item or a few other sites of that name panic.
   An arm counts in the runtime it was made in, and a thread checks it in the runtime that started it, so the tests of one process, each on a runtime of its own, never spend each other's arms; an arm made outside any runtime counts everywhere, as the check build's, where `TWIGO_PANIC=<name>` arms it each time.
