@@ -66,7 +66,7 @@ test("code:line: a refusal that is no error of the server's has its code too, an
 });
 
 test("code:line: an object that cannot be read says its code under the message too", () => {
-  const { error } = REFUSED as Extract<ViewState, { state: "error" }>;
+  const { error } = REFUSED;
   render(
     <ObjectContent
       pages={new PageStates()}
