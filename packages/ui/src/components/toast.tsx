@@ -251,10 +251,12 @@ function secondsLeft(until: number): number {
  * over it, so the list keeps its own width at its right offset, as in a wider
  * window.
  */
+/** Under a dialog's z-50, where sonner's own sits over it and its buttons. */
 const LIST = {
   "--width": "288px",
   width: "var(--width)",
   left: "auto",
+  zIndex: 40,
 } as CSSProperties;
 const TOAST = { width: "var(--width)" };
 const GAP = 6;
