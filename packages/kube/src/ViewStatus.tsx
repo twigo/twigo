@@ -53,6 +53,7 @@ export function ViewStatus({
       variant={shown.variant}
       title={shown.title}
       {...(retry && { action: retry })}
+      {...(internal && { secondary: <ReportLink /> })}
       className="flex-1 py-16"
     >
       <p className="max-w-md">
@@ -62,7 +63,6 @@ export function ViewStatus({
           className="justify-center"
         />
       </p>
-      {internal && <ReportLink />}
     </EmptyState>
   );
 }

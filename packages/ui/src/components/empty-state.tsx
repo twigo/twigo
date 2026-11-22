@@ -14,6 +14,7 @@ export function EmptyState({
   density = "hero",
   title,
   action,
+  secondary,
   kbd,
   className,
   children,
@@ -24,6 +25,8 @@ export function EmptyState({
   density?: "hero" | "inline";
   title?: string;
   action?: { label: string; onClick: () => void; icon?: LucideIcon };
+  /** Beside `action` and after it, such as a link to report the problem. */
+  secondary?: React.ReactNode;
   kbd?: string;
   className?: string;
   children?: React.ReactNode;
@@ -78,6 +81,7 @@ export function EmptyState({
           {action.label}
         </Button>
       )}
+      {secondary}
       {kbd && <Kbd className="mt-1">{kbd}</Kbd>}
     </div>
   );
