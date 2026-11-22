@@ -342,13 +342,71 @@ fn the_last_lines_reach_into_the_previous_file_and_stop_at_200_or_32_kib() {
     let lines = log::tail(&[current, previous.clone()]);
     assert_eq!(lines.len(), 32, "32 KiB of 1,000 bytes a line");
     assert!(
-        lines.iter().all(|line| line == &long),
-        "a line cut in its middle is left out"
+        !lines.iter().any(|line| line.starts_with("before")),
+        "no file is read once the window is full"
+    );
+}
+
+#[test]
+fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
+    let directory = tempfile::tempdir().unwrap();
+    let frames: Vec<String> = (0..2000)
+        .map(|frame| {
+            format!(
+                "{frame:>4}: twigo_core::deep::frame_{frame}{}",
+                "x".repeat(frame % 7)
+            )
+        })
+        .collect();
+    let panic = json!({
+        "timestamp": "2026-11-22T21:14:11.730045Z",
+        "level": "ERROR",
+        "fields": {
+            "message": "panic",
+            "backtrace": frames.join("\n"),
+            "location": "crates/a.rs:1:1",
+            "payload": "bug",
+        },
+        "target": "twigo_log::panic",
+    })
+    .to_string();
+    assert!(panic.len() > 64 << 10, "past the window of 32 KiB");
+    let before = record(json!({ "message": "before the panic" }));
+    let current = write(
+        directory.path(),
+        "twigo.log",
+        [before.clone(), before, panic],
+    );
+    assert_eq!(log::tail(std::slice::from_ref(&current)).len(), 3);
+
+    let report = assemble(&facts(None), &[current], &BTreeSet::new(), known());
+    let lines: Vec<&str> = report.log.lines().collect();
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.ends_with("before the panic"))
+            .count(),
+        2
+    );
+    let at = lines
+        .iter()
+        .position(|line| line.ends_with("location=crates/a.rs:1:1 payload=bug"))
+        .expect("the panic's own line stays whole");
+    assert_eq!(lines[at + 1], "    backtrace:");
+    let (notice, kept) = lines[at + 2..].split_last().unwrap();
+    assert!(
+        notice.starts_with("    … ") && notice.ends_with(" bytes of this record cut"),
+        "{notice}"
     );
     assert!(
-        !lines.iter().any(|line| line.starts_with("before")),
-        "no file is read past a gap"
+        !kept.is_empty()
+            && kept
+                .iter()
+                .zip(&frames)
+                .all(|(line, frame)| line.strip_prefix("      ") == Some(frame)),
+        "its backtrace is cut at a whole frame"
     );
+    assert!(report.log.len() < 9 << 10, "{}", report.log.len());
 }
 
 fn panic_record(location: &str) -> String {
