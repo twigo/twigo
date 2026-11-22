@@ -11,6 +11,7 @@ mod redact;
 mod tests;
 
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use twigo_ipc::{ErrorCode, Fact, FactId, IpcError, OpenIssue, OpenedIssue, Report};
@@ -152,15 +153,24 @@ impl Core {
 }
 
 /// An API server's address as a person writes it: the URL, its host with the
-/// port and its host.
+/// port and its host. A loopback host is also the address of every forward
+/// and of the policy proxy, so it names the server only with its port.
 fn server_names(server: &str) -> Vec<String> {
     let mut names = vec![server.to_owned()];
-    if let Ok(uri) = server.parse::<http::Uri>() {
-        names.extend(
-            uri.authority()
-                .map(|authority| authority.as_str().to_owned()),
-        );
-        names.extend(uri.host().map(str::to_owned));
+    if let Ok(uri) = server.parse::<http::Uri>()
+        && let (Some(authority), Some(host)) = (uri.authority(), uri.host())
+    {
+        let loopback = host.eq_ignore_ascii_case("localhost")
+            || host
+                .trim_matches(['[', ']'])
+                .parse::<IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+        if !loopback || authority.port().is_some() {
+            names.push(authority.as_str().to_owned());
+        }
+        if !loopback {
+            names.push(host.to_owned());
+        }
     }
     names
 }

@@ -239,6 +239,50 @@ fn an_address_goes_beside_any_punctuation_but_not_inside_a_word() {
     assert_eq!(redactor.hidden().addresses, 6);
 }
 
+#[test]
+fn a_loopback_server_is_known_by_its_url_and_port_and_never_by_its_bare_host() {
+    for (server, names) in [
+        (
+            "https://api.prod.example.com:6443",
+            vec![
+                "https://api.prod.example.com:6443",
+                "api.prod.example.com:6443",
+                "api.prod.example.com",
+            ],
+        ),
+        (
+            "https://127.0.0.1:44921",
+            vec!["https://127.0.0.1:44921", "127.0.0.1:44921"],
+        ),
+        (
+            "https://localhost:6443",
+            vec!["https://localhost:6443", "localhost:6443"],
+        ),
+        (
+            "https://[::1]:6443",
+            vec!["https://[::1]:6443", "[::1]:6443"],
+        ),
+        ("https://127.0.0.1", vec!["https://127.0.0.1"]),
+    ] {
+        assert_eq!(server_names(server), names, "{server}");
+    }
+
+    let known = Known {
+        names: server_names("https://127.0.0.1:44921")
+            .into_iter()
+            .map(|text| name(&text, Kind::Server, "https://127.0.0.1:44921"))
+            .collect(),
+        ..Known::default()
+    };
+    let mut redactor = Redactor::new(known, []);
+    assert_eq!(
+        redactor.text(
+            "a forward listens on 127.0.0.1:8080, the proxy on 127.0.0.1:53712, the server on 127.0.0.1:44921"
+        ),
+        "a forward listens on 127.0.0.1:8080, the proxy on 127.0.0.1:53712, the server on <server-1>"
+    );
+}
+
 fn write(directory: &Path, name: &str, lines: impl IntoIterator<Item = String>) -> PathBuf {
     let path = directory.join(name);
     let text: String = lines.into_iter().map(|line| format!("{line}\n")).collect();
