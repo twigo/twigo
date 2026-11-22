@@ -17,9 +17,10 @@ const MESSAGE: &str = "Twigo ran into an internal error that it cannot recover f
 const RESTART: &str = "Restart";
 const QUIT: &str = "Quit";
 
-/// The fatal path: it ends every unlock, so that none outlives its end while
-/// Twigo waits for the person, then asks in a native dialog, since the
-/// webview may be what the panic broke, whether to restart or quit.
+/// The fatal path: it fails closed ([`Core::fail_closed`]), so that no unlock
+/// and no forward outlives what the mode allows while Twigo waits for the
+/// person, then asks in a native dialog, since the webview may be what the
+/// panic broke, whether to restart or quit.
 #[derive(Clone, Default)]
 pub struct Path {
     ready: Arc<OnceLock<(AppHandle, Arc<Core>)>>,
@@ -41,9 +42,7 @@ impl Path {
         let Some((app, core)) = self.ready.get().cloned() else {
             return;
         };
-        if catch_unwind(AssertUnwindSafe(|| core.policy.end_unlocks())).is_err() {
-            tracing::error!("could not end the unlocks, which panicked");
-        }
+        core.fail_closed();
         let mut dialog = app
             .dialog()
             .message(MESSAGE)

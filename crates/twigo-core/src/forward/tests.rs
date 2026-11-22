@@ -3044,3 +3044,74 @@ async fn a_sign_in_that_fails_proves_nothing() {
     );
     assert!(failed_with(&core, |error| error.kind == ErrorKind::Unauthorized).is_some());
 }
+
+/// A core whose supervisor gave `duty` up and told the fatal path, which the
+/// test then takes itself.
+async fn given_up(dir: &Path, duty: &str) -> Arc<Core> {
+    let kubeconfig = dir.join("config");
+    std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
+    let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
+    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
+        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
+    )));
+    let (told, mut fatal) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(core.start(followed, Some(kubeconfig), None, move |why| {
+        let _ = told.send(why);
+    }));
+    let why = tokio::time::timeout(Duration::from_secs(10), fatal.recv())
+        .await
+        .expect("the fatal path within 10 s")
+        .unwrap();
+    assert_eq!(why.duty, duty);
+    core
+}
+
+#[tokio::test]
+async fn the_fatal_path_fails_a_forward_an_unlock_let_run_once_forward_modes_is_given_up() {
+    twigo_panic::inject::arm("forward modes", 4);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("policy.json"), REFUSING).unwrap();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, free(), true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = given_up(dir.path(), "forward modes").await;
+    core.catalog.contexts().await;
+    set_the_mode(&core, Mode::ReadOnly).await;
+    core.policy.unlock("kind-plain").unwrap();
+    assert_eq!(forward_state(&core, 1).await, ForwardState::Restored);
+
+    core.fail_closed();
+    until("the fatal path fails it", || {
+        failed_with(&core, |error| error.code == ErrorCode::PolicyBlocked)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn the_fatal_path_closes_every_forward_where_their_recheck_panics() {
+    twigo_panic::inject::arm("forward recheck", 1);
+    let dir = tempfile::tempdir().unwrap();
+    let local = free();
+    keep(
+        dir.path(),
+        &Saved {
+            forwards: vec![forward_of(1, 8080, local, true)],
+            ports: Vec::new(),
+        },
+    );
+    let core = given_up(dir.path(), "forward modes").await;
+    assert!(
+        std::net::TcpListener::bind(("127.0.0.1", local)).is_err(),
+        "it listens"
+    );
+
+    core.fail_closed();
+    until("its port is closed", || {
+        std::net::TcpListener::bind(("127.0.0.1", local)).ok()
+    })
+    .await;
+}
