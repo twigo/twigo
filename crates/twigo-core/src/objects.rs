@@ -23,6 +23,7 @@ use twigo_ipc::{
     Block, ErrorCode, EventList, IpcError, MetricsState, ObjectBatch, ObjectEvent, ObjectParts,
     ObjectRef, Overview, Related, RelatedObject, Usage, ViewState,
 };
+use twigo_panic::contain;
 
 use crate::usage::{absent, usage, waiting};
 
@@ -65,7 +66,7 @@ impl Opened {
     ) -> Self {
         let control = Arc::new(Control::default());
         let context = target.context.as_str().into();
-        let task = tokio::spawn(run(
+        let task = tokio::spawn(serve(
             hub,
             target,
             object,
@@ -310,6 +311,45 @@ struct Held {
     /// None when the hub refused it, which `found` then says.
     objects: Option<Subscription<Object>>,
     found: Option<Found>,
+}
+
+/// Runs the object; if it panics, its last batch changes nothing but the
+/// state, which says why, and nothing starts it again.
+async fn serve(
+    hub: Hub,
+    target: Target,
+    object: Subscription<Object>,
+    parts: ObjectParts,
+    opening: Option<Opening>,
+    control: Arc<Control>,
+    mut send: impl FnMut(ObjectBatch) -> bool,
+) {
+    let (mut seq, mut exists) = (0, false);
+    let mut tell = |batch: ObjectBatch| {
+        (seq, exists) = (batch.seq, batch.exists);
+        send(batch)
+    };
+    if contain(
+        "object",
+        run(hub, target, object, parts, opening, control, &mut tell),
+    )
+    .await
+    .is_ok()
+    {
+        return;
+    }
+    send(ObjectBatch {
+        seq: seq + 1,
+        status: ViewState::Error {
+            error: IpcError::panicked("this object's page"),
+        },
+        exists,
+        overview: None,
+        manifest: None,
+        events: None,
+        related: None,
+        usage: None,
+    });
 }
 
 async fn run(
@@ -1003,6 +1043,64 @@ mod tests {
     use twigo_ipc::ErrorKind;
 
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn an_object_that_panics_ends_with_a_batch_that_says_so_after_those_it_sent() {
+        let fake = twigo_cache::fake::Fake::default();
+        fake.add("pods", Some("a"), "p1");
+        let (hub, _clients) = fake.hub(twigo_kube::client::Budgets::default());
+        let object = hub
+            .object(
+                "kind-test",
+                twigo_cache::hub::Resource {
+                    group: String::new(),
+                    version: "v1".to_owned(),
+                    resource: "pods".to_owned(),
+                    namespaced: true,
+                },
+                Some("a".to_owned()),
+                "p1",
+            )
+            .unwrap();
+        let opening: Opening = Box::pin(async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            panic!("a metrics bug")
+        });
+        let (sender, mut batches) = mpsc::unbounded_channel();
+        let opened = Opened::spawn(
+            hub.clone(),
+            Target {
+                context: "kind-test".to_owned(),
+                namespace: Some("a".to_owned()),
+            },
+            object,
+            ObjectParts {
+                overview: false,
+                manifest: false,
+                events: false,
+                related: false,
+                usage: false,
+            },
+            Some(opening),
+            move |batch| sender.send(batch).is_ok(),
+        );
+        let mut sent = Vec::new();
+        let last = loop {
+            let batch = batches.recv().await.unwrap();
+            if matches!(batch.status, ViewState::Error { .. }) {
+                break batch;
+            }
+            opened.ack(batch.seq);
+            sent.push((batch.seq, batch.exists));
+        };
+        let &(seq, exists) = sent.last().expect("it sent batches before it panicked");
+        assert!(exists, "listed");
+        assert_eq!((last.seq, last.exists), (seq + 1, exists));
+        let ViewState::Error { error } = &last.status else {
+            unreachable!()
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+    }
 
     #[test]
     fn an_open_secret_sends_neither_its_values_nor_their_base64() {

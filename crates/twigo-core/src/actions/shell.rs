@@ -427,6 +427,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unlock_running_out_ends_the_wait_and_says_so_though_its_duty_panicked() {
+        twigo_panic::inject::arm("unlock expiry", 1);
+        let dir = tempfile::tempdir().unwrap();
+        let kubeconfig = dir.path().join("config");
+        std::fs::write(
+            &kubeconfig,
+            "
+clusters: [{ name: c, cluster: { server: 'http://127.0.0.1:1' } }]
+contexts: [{ name: kind-c, context: { cluster: c } }]
+",
+        )
+        .unwrap();
+        let core = crate::Core::new(
+            dir.path(),
+            &dir.path().join("cache"),
+            &dir.path().join("policy.json"),
+        );
+        let (_status, followed) = tokio::sync::watch::channel(twigo_env::Status::Resolving);
+        core.start_for_tests(followed, Some(kubeconfig));
+        core.catalog.contexts().await;
+        core.policy
+            .set_environment("kind-c", Some(Environment::Production))
+            .unwrap();
+        core.policy
+            .unlock_for("kind-c", SignedDuration::from_millis(200))
+            .unwrap();
+        let mut waiting = relocked(Arc::clone(&core.policy), "kind-c".to_owned(), exec()).boxed();
+        assert!(
+            (&mut waiting).now_or_never().is_none(),
+            "unlocked: it waits"
+        );
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("the unlock running out ends it");
+        assert_eq!(
+            twigo_panic::inject::armed("unlock expiry"),
+            0,
+            "the duty panicked"
+        );
+        let audit = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+        assert!(
+            audit
+                .lines()
+                .any(|line| line.contains(r#""event":"relocked""#)
+                    && line.contains(r#""by":"time""#)),
+            "{audit}"
+        );
+    }
+
+    #[tokio::test]
     async fn a_context_changed_to_another_mode_leaves_the_wait_alone() {
         let policy = Policy::open();
         let mut waiting = relocked(Arc::clone(&policy), "c".to_owned(), exec()).boxed();

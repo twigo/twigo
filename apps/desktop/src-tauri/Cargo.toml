@@ -11,6 +11,8 @@ publish.workspace = true
 [features]
 # The bench mode of bench/harness.sh: commands that write results and quit (src/bench.rs).
 bench = ["dep:objc2", "dep:serde_json"]
+# `TWIGO_PANIC=<name>` makes the duty or item of that name panic each time it runs, for the check build.
+inject = ["twigo-panic/inject"]
 
 [lints]
 workspace = true
@@ -33,6 +35,7 @@ twigo-ipc.workspace = true
 twigo-keyboard.workspace = true
 twigo-log.workspace = true
 twigo-netmon.workspace = true
+twigo-panic.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, optional = true }

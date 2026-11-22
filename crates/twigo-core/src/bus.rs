@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -169,7 +169,9 @@ impl Progress {
     }
 
     pub(crate) fn tell(&self, event: OperationEvent) {
-        (self.send.lock().expect("progress lock"))(event);
+        // A panic in the webview's closure, the only code that runs under
+        // this lock, leaves nothing the next event cannot be sent through.
+        (self.send.lock().unwrap_or_else(PoisonError::into_inner))(event);
     }
 
     /// Whether it was asked to stop.

@@ -238,9 +238,7 @@ impl Oidc {
         // The refresh goes on when the request that wanted it is dropped,
         // since the issuer may have rotated the refresh token already.
         let oidc = Arc::clone(self);
-        tokio::spawn(async move { oidc.refreshed().await })
-            .await
-            .expect("the refresh does not panic")
+        twigo_panic::joined(tokio::spawn(async move { oidc.refreshed().await }).await)
     }
 
     /// A token from the file, else one refreshed after a rejection or on
@@ -311,19 +309,20 @@ impl Oidc {
             let id_token = tokens.id_token;
             let written_id = id_token.clone();
             let written_refresh = rotated.clone();
-            let written = tokio::task::spawn_blocking(move || {
-                persist::write(
-                    &origin,
-                    &user,
-                    &entry.issuer,
-                    &entry.client_id,
-                    &id_token,
-                    written_refresh.as_deref(),
-                )
-                .map_err(|error| (origin, error))
-            })
-            .await
-            .expect("the write does not panic");
+            let written = twigo_panic::joined(
+                tokio::task::spawn_blocking(move || {
+                    persist::write(
+                        &origin,
+                        &user,
+                        &entry.issuer,
+                        &entry.client_id,
+                        &id_token,
+                        written_refresh.as_deref(),
+                    )
+                    .map_err(|error| (origin, error))
+                })
+                .await,
+            );
             match written {
                 Ok(()) => {
                     let mut state = self.state();

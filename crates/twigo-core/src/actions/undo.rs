@@ -439,10 +439,7 @@ mod tests {
         let (_status, followed) = tokio::sync::watch::channel(twigo_env::Status::Resolved(
             std::sync::Arc::new(twigo_env::ShellEnv::from_iter([])),
         ));
-        tokio::spawn({
-            let core = std::sync::Arc::clone(&core);
-            async move { core.run(followed, Some(kubeconfig)).await }
-        });
+        core.start_for_tests(followed, Some(kubeconfig));
         action(&core.undos, "s", Some("kwok-node-5"));
         let (id, connection, revert) = core.undos.get("s").unwrap();
         let weak = std::sync::Arc::downgrade(&core);

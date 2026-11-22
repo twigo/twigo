@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use twigo_ipc::{CatalogFailure, IpcError};
 use twigo_kube::kubeconfig::{self, Fingerprint, Sources, Watch};
+use twigo_panic::Reporter;
 use twigo_policy::{Metadata, Policy, TypeLock};
 
 /// The contexts, ordered by their `order`, those without one last, then by
@@ -180,6 +181,8 @@ pub struct Catalog {
     /// Told of what each read after the first changes of a context, for its
     /// audit log.
     policy: Option<Arc<Policy>>,
+    /// Told when the thread that watches the files panics.
+    reporter: Option<Reporter>,
 }
 
 impl Default for Catalog {
@@ -191,6 +194,7 @@ impl Default for Catalog {
             followed: Mutex::new(None),
             generation: Arc::new(AtomicU64::new(0)),
             policy: None,
+            reporter: None,
         }
     }
 }
@@ -202,6 +206,15 @@ impl Catalog {
     pub fn audited_by(self, policy: Arc<Policy>) -> Self {
         Self {
             policy: Some(policy),
+            ..self
+        }
+    }
+
+    /// The catalog, whose watch of the files reports to `reporter` when its
+    /// thread panics.
+    pub fn supervised_by(self, reporter: Reporter) -> Self {
+        Self {
+            reporter: Some(reporter),
             ..self
         }
     }
@@ -241,7 +254,15 @@ impl Catalog {
         };
         let written = self.written.clone();
         let wrote = move || written.send_modify(|count| *count += 1);
-        match Watch::start(sources.clone(), publish.clone(), wrote) {
+        let on_panic = {
+            let reporter = self.reporter.clone();
+            move || {
+                if let Some(reporter) = reporter {
+                    reporter.panicked("kubeconfig watch");
+                }
+            }
+        };
+        match Watch::start(sources.clone(), publish.clone(), wrote, on_panic) {
             Ok(watch) => *followed = Some(watch),
             Err(error) => publish(sources.load().unwatched(&sources, &error)),
         }

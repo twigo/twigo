@@ -1693,3 +1693,80 @@ async fn a_first_list_that_ends_in_a_404_tries_again_within_5_s() {
     let wait = Duration::from_millis(500)..=RETRY_WITHIN;
     assert!(gaps.iter().all(|gap| wait.contains(gap)), "{gaps:?}");
 }
+
+/// Panics under the lock of the store a scope's rows are kept in.
+fn poison_store(hub: &Hub) {
+    let upstream = hub
+        .inner
+        .registry()
+        .entries
+        .values()
+        .next()
+        .expect("one upstream")
+        .upstream::<Row>();
+    let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        upstream.store.items(|_| panic!("a reader's bug"));
+    }));
+    assert!(poisoned.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_that_panics_as_it_joins_does_not_keep_a_subscriber_of_the_scope() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut first).await;
+    poison_store(&hub);
+    let joined =
+        futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(hub.rows(query(&["a"]))))
+            .await;
+    assert!(joined.is_err());
+    assert_eq!(hub.subscribers("pods"), 1, "the first list's alone");
+}
+
+fn error_code(state: &ViewState) -> Option<twigo_ipc::ErrorCode> {
+    match state {
+        ViewState::Error { error } => Some(error.code),
+        _ => None,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_list_whose_upstream_panics_says_error_and_a_new_list_starts_it_again() {
+    twigo_panic::inject::arm("hub upstream", 1);
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    until(&mut first, |state| error_code(state).is_some()).await;
+    assert_eq!(
+        error_code(&first.state()),
+        Some(twigo_ipc::ErrorCode::InternalPanic)
+    );
+    sleep(Duration::from_secs(600)).await;
+    assert!(
+        error_code(&first.state()).is_some(),
+        "nothing starts it by itself"
+    );
+
+    let mut second = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut second).await;
+    assert_eq!(names(&second), ["p1"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panic_under_the_stores_lock_does_not_poison_the_lists_after_it() {
+    let fake = Fake::default();
+    fake.add("pods", Some("a"), "p1");
+    let (hub, _clients) = fake.hub(Budgets::default());
+    let mut first = hub.rows(query(&["a"])).await.unwrap();
+    ready(&mut first).await;
+    twigo_panic::inject::arm("store lock", 1);
+    fake.add("pods", Some("a"), "p2");
+    until(&mut first, |state| error_code(state).is_some()).await;
+
+    let mut second = hub.rows(query(&["a"])).await.unwrap();
+    until_rows(&mut second, &["p1", "p2"]).await;
+    ready(&mut second).await;
+}

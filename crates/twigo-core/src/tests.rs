@@ -56,10 +56,7 @@ async fn the_catalog_follows_the_login_shell_and_tells_the_store() {
     );
     core.state.open_space("kind-process");
     let (status, followed) = watch::channel(Status::Resolving);
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, None).await }
-    });
+    core.start_for_tests(followed, None);
 
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(
@@ -157,15 +154,9 @@ impl Plugins {
             &data.path().join("policy.json"),
         );
         let env = Arc::new(ShellEnv::from_iter(Vec::<(OsString, OsString)>::new()));
-        let (status, followed) = watch::channel(Status::Resolved(env));
-        tokio::spawn({
-            let core = Arc::clone(&core);
-            let explicit = self.kubeconfig();
-            async move {
-                let _status = status;
-                core.run(followed, Some(explicit)).await;
-            }
-        });
+        let (_status, followed) = watch::channel(Status::Resolved(env));
+        let explicit = self.kubeconfig();
+        core.start_for_tests(followed, Some(explicit));
         core.catalog.contexts().await;
         (core, data)
     }
@@ -713,10 +704,7 @@ fn running(dir: &Path, text: &str) -> Arc<Core> {
     std::fs::write(&kubeconfig, text).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter([]))));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(kubeconfig)).await }
-    });
+    core.start_for_tests(followed, Some(kubeconfig));
     core
 }
 

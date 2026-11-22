@@ -26,10 +26,7 @@ async fn cluster() -> (Arc<Core>, String, tempfile::TempDir) {
     );
     let env = ShellEnv::from_iter(Vec::<(OsString, OsString)>::new());
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-    tokio::spawn({
-        let core = Arc::clone(&core);
-        async move { core.run(followed, Some(path.into())).await }
-    });
+    core.start_for_tests(followed, Some(path.into()));
     (core, context, dir)
 }
 

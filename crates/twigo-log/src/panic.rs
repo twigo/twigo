@@ -95,6 +95,6 @@ fn write(line: &[u8]) {
     if LOG.get().is_some_and(|log| log.try_append(line, LOCK_WAIT)) {
         return;
     }
-    // `eprintln!` panics when stderr is closed.
+    // `eprintln!` panics when the write fails, as one to a broken pipe does.
     let _ = std::io::stderr().write_all(line);
 }

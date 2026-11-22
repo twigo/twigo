@@ -17,7 +17,7 @@ use std::path::Path;
 use jiff::Timestamp;
 use serde::Serialize;
 use twigo_ipc::{BlockReason, Blocked, ContextAccess, Friction, Mode, ModeSource, RequestClass};
-use twigo_log::{Limits, Rotating};
+use twigo_log::{Failure, Limits, Rotating};
 
 use crate::{Actor, Attributes, Change, Refused};
 
@@ -181,12 +181,18 @@ struct Line<'a> {
     entry: &'a Entry<'a>,
 }
 
+/// The diagnostics log holds what the open file could not do, since a
+/// launched app's stderr reaches nobody.
+fn unrecorded(failure: &Failure<'_>) {
+    tracing::error!(path = %failure.path.display(), error = %failure.error, "the audit log {}", failure.what);
+}
+
 impl Audit {
     /// The log at `path`, appended to, its directory made if the app's first
     /// run has not made it yet. A file that cannot be opened is logged and
     /// keeps nothing: the log records, it guards nothing.
     pub fn open(path: &Path) -> Self {
-        match Rotating::open(path, LIMITS) {
+        match Rotating::open(path, LIMITS, unrecorded) {
             Ok(log) => Self { log: Some(log) },
             Err(error) => {
                 tracing::error!(path = %path.display(), %error, "the audit log cannot be opened, so nothing is recorded");
@@ -275,5 +281,41 @@ mod tests {
         });
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains(r#""event":"ended""#), "{written}");
+    }
+
+    #[test]
+    fn a_log_that_cannot_move_aside_says_so_in_the_diagnostics_log_at_error() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("audit.jsonl");
+        std::fs::write(&path, vec![b'\n'; LIMITS.size as usize]).unwrap();
+        std::fs::write(home.path().join("audit.4.jsonl"), "").unwrap();
+        let oldest = home.path().join("audit.5.jsonl");
+        std::fs::create_dir(&oldest).unwrap();
+        std::fs::write(oldest.join("kept"), "").unwrap();
+
+        let events = twigo_log::capture();
+        Audit::open(&path).record(&Entry::Ended {
+            context: "kind-a",
+            command: "apply",
+            target: "deployments/web",
+            outcome: "done",
+            message: "",
+        });
+
+        let [event] = &events.lines()[..] else {
+            panic!("one event: {:?}", events.lines());
+        };
+        assert_eq!(event["level"], "ERROR");
+        assert_eq!(event["target"], "twigo_policy::audit");
+        assert_eq!(
+            event["fields"]["message"],
+            "the audit log could not move aside"
+        );
+        assert_eq!(event["fields"]["path"], path.to_str().unwrap());
+        assert!(
+            event["fields"]["error"]
+                .as_str()
+                .is_some_and(|error| !error.is_empty())
+        );
     }
 }

@@ -279,8 +279,7 @@ impl Written {
                 let from = match read.iter().find(|(seen, _)| Arc::ptr_eq(seen, text)) {
                     Some((_, from)) => from.clone(),
                     None => {
-                        let from = mapping(&parse(text)?)
-                            .ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+                        let from = mapping(&parse(text)?).ok_or(WriteError::NoMapping)?;
                         read.push((Arc::clone(text), from.clone()));
                         from
                     }
@@ -468,7 +467,7 @@ pub fn append(
         };
         file = parse(&format!("{kept}{separator}{EMPTY}"))?;
     }
-    let into = mapping(&file).ok_or_else(|| WriteError::Parse("it holds no mapping".to_owned()))?;
+    let into = mapping(&file).ok_or(WriteError::NoMapping)?;
     for (section, entry) in plan.moving {
         sequence(&into, section).push(entry);
     }
@@ -477,7 +476,7 @@ pub fn append(
 }
 
 fn parse(text: &str) -> Result<YamlFile, WriteError> {
-    YamlFile::from_str(text).map_err(|error| WriteError::Parse(error.to_string()))
+    YamlFile::from_str(text).map_err(WriteError::from)
 }
 
 fn mapping(file: &YamlFile) -> Option<Mapping> {

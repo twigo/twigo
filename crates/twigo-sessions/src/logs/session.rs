@@ -25,6 +25,8 @@ use twigo_ipc::{
     LogView, LogWindow, ObjectRef, OpenLogs, StreamState, ViewState,
 };
 
+use twigo_panic::contain;
+
 use crate::logs::buffer::{Buffer, Kind, LIMITS};
 use crate::logs::target::target;
 use crate::logs::view::{self, Spec};
@@ -74,7 +76,7 @@ impl Session {
         let session = Run::new(hub, context, request).await?;
         let control = Arc::new(Control::default());
         let name = session.subscriptions.target().name.clone();
-        let task = tokio::spawn(run(session, Arc::clone(&control), send));
+        let task = tokio::spawn(serve(session, Arc::clone(&control), send));
         Ok(Self {
             control,
             task,
@@ -209,6 +211,43 @@ struct Run {
     /// last changed.
     arrived: u64,
     changes: u32,
+}
+
+/// Runs the session; if it panics, its last batch changes nothing but the
+/// state, which says why, and nothing starts it again.
+async fn serve(session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatch) -> bool) {
+    let mut last = (0, 0, 0, 0, 0);
+    let mut tell = |batch: LogBatch| {
+        last = (
+            batch.seq,
+            batch.total,
+            batch.dropped,
+            batch.arrived,
+            batch.changes,
+        );
+        send(batch)
+    };
+    if contain("logs", run(session, control, &mut tell))
+        .await
+        .is_ok()
+    {
+        return;
+    }
+    let (seq, total, dropped, arrived, changes) = last;
+    send(LogBatch {
+        seq: seq + 1,
+        status: ViewState::Error {
+            error: IpcError::panicked("this log"),
+        },
+        pods: None,
+        total,
+        window: None,
+        matches: None,
+        histogram: None,
+        dropped,
+        arrived,
+        changes,
+    });
 }
 
 async fn run(mut session: Run, control: Arc<Control>, mut send: impl FnMut(LogBatch) -> bool) {
@@ -716,6 +755,91 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_session_that_panics_ends_with_a_batch_that_says_so() {
+        twigo_panic::inject::arm("logs", 1);
+        let (_session, mut batches) = opened(&Fake::default()).await;
+        let last = next(&mut batches).await;
+        assert_eq!(last.seq, 1);
+        let ViewState::Error { error } = &last.status else {
+            panic!("the session failed: {:?}", last.status);
+        };
+        assert_eq!(error.code, ErrorCode::InternalPanic);
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        assert!(batches.try_recv().is_err(), "it is not started again");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_last_batch_of_a_session_that_panics_later_follows_the_ones_it_sent() {
+        let fake = Fake::default();
+        fake.pod(web(false));
+        fake.serve("web-1", "web", Some("web-a"), None);
+        fake.write("web-1", "web", "web-a", T0 + SECOND, "line 1");
+        let (hub, _) = fake.hub();
+        let (sent, mut batches) = mpsc::unbounded_channel();
+        let session = Session::open(
+            hub,
+            "kind-test".to_owned(),
+            request("web-1"),
+            move |batch| {
+                assert!(
+                    batch.seq < 3 || matches!(batch.status, ViewState::Error { .. }),
+                    "a consumer's bug"
+                );
+                sent.send(batch).is_ok()
+            },
+        )
+        .await
+        .unwrap();
+        session.set_window(LogWindow::Tail { count: 100 });
+        let mut seen = Vec::new();
+        let last = loop {
+            let batch = next(&mut batches).await;
+            session.ack(batch.seq);
+            if matches!(batch.status, ViewState::Error { .. }) {
+                break batch;
+            }
+            seen.push((batch.seq, batch.total));
+            fake.write(
+                "web-1",
+                "web",
+                "web-a",
+                T0 + (seen.len() as i64 + 1) * SECOND,
+                "another",
+            );
+        };
+        assert_eq!(seen.last().map(|batch| batch.0), Some(2), "{seen:?}");
+        assert_eq!(last.seq, 4, "after the batch whose send panicked");
+        assert!(last.window.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_that_panics_says_so_in_its_container_and_the_session_goes_on() {
+        twigo_panic::inject::arm("log stream", 1);
+        let (session, mut batches) = opened(&Fake::default()).await;
+        let failed = loop {
+            let batch = next(&mut batches).await;
+            session.ack(batch.seq);
+            let stream = batch
+                .pods
+                .iter()
+                .flatten()
+                .flat_map(|pod| &pod.containers)
+                .find_map(|container| match &container.stream {
+                    StreamState::Error { error } => Some(error.clone()),
+                    _ => None,
+                });
+            if let Some(error) = stream {
+                break (batch.status, error);
+            }
+        };
+        assert_eq!(failed.1.code, ErrorCode::InternalPanic);
+        assert!(
+            !matches!(failed.0, ViewState::Error { .. }),
+            "the tab is not what failed"
+        );
     }
 
     #[tokio::test(start_paused = true)]

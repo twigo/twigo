@@ -34,6 +34,7 @@ twigo-log.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+twigo-log = { workspace = true, features = ["test-util"] }
 twigo-policy = { workspace = true, features = ["test-util"] }
 tower = { workspace = true, features = ["util"] }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

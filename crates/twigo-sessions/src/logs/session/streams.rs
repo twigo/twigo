@@ -11,7 +11,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use twigo_cache::hub::Hub;
-use twigo_ipc::{LogSource, StreamState};
+use twigo_ipc::{IpcError, LogSource, StreamState};
+use twigo_panic::contain;
 
 use super::{Key, Pod};
 use crate::logs::buffer::{Kind, Origin};
@@ -234,10 +235,20 @@ impl Streams {
         let events = self.events.clone();
         self.started += 1;
         let id = self.started;
-        let task = tokio::spawn(stream::run(stream, receiver, move |event| {
-            // The session may have ended, and its streams with it.
-            let _ = events.send((id, event));
-        }));
+        let task = tokio::spawn(async move {
+            let send = move |event| {
+                // The session may have ended, and its streams with it.
+                let _ = events.send((id, event));
+            };
+            if contain("log stream", stream::run(stream, receiver, &send))
+                .await
+                .is_err()
+            {
+                send(Event::State(StreamState::Error {
+                    error: IpcError::panicked("this container's stream"),
+                }));
+            }
+        });
         self.running.insert(
             key,
             Running {

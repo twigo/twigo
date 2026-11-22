@@ -679,14 +679,17 @@ impl Hub {
                 }
             }
         };
+        // Before the feed, which panics on a store a panic poisoned: the
+        // guard then gives the count back as it unwinds.
+        let guard = Guard::Hold {
+            hub: Arc::downgrade(&self.inner),
+            key: key.clone(),
+        };
         Part {
             feed: upstream.store.feed(),
             upstream,
             filter,
-            guard: Guard::Hold {
-                hub: Arc::downgrade(&self.inner),
-                key: key.clone(),
-            },
+            guard,
             showing: true,
         }
     }
