@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   ChevronDown,
@@ -75,6 +75,8 @@ export interface OverviewProps {
   readonly usage?: ShownUsage | undefined;
   /** The full page, which opens every section but the Metadata. */
   readonly fullPage?: boolean;
+  /** What a section holds after its blocks, by its id: what only the webview has, such as a release's notes. */
+  readonly slots?: Readonly<Record<string, ReactNode>> | undefined;
 }
 
 /**
@@ -101,6 +103,7 @@ export function Overview({
   onEvents,
   usage,
   fullPage = false,
+  slots,
 }: OverviewProps) {
   useChanges(states.changes);
   useChanges(pages.changes);
@@ -217,6 +220,7 @@ export function Overview({
                 }}
               />
             )}
+            {slots?.[part.id]}
           </div>
         )}
       </Folding>

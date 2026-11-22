@@ -41,7 +41,7 @@ import {
   type PageStates,
 } from "./pageStates";
 import type { ObjectTabs } from "./tabs";
-import { useReveal } from "./reveal";
+import { useSecretReveal } from "./reveal";
 import { hasUsage } from "./figures";
 import { objectQuery, refResource, refUri, useObject } from "./useObject";
 import { printedOf, useHeader } from "./useHeader";
@@ -118,7 +118,7 @@ function ObjectPage({
     related: tab === "related",
     usage: asked,
   });
-  const reveal = useReveal(id);
+  const reveal = useSecretReveal(id);
   const page = tab === "overview";
   const filtered = useFiltered(pages, uri) && page;
   const known =

@@ -4,6 +4,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ReactNode,
 } from "react";
 import { Copy, SquareArrowOutUpRight, X } from "lucide-react";
 import type { ObjectQuery, ObjectRef } from "@twigo/protocol";
@@ -20,7 +21,7 @@ import { ObjectViews } from "./object/ObjectViews";
 import { Vitals } from "./object/Vitals";
 import { useHeader } from "./object/useHeader";
 import { foundTone } from "./object/verdict";
-import { useReveal } from "./object/reveal";
+import { useSecretReveal } from "./object/reveal";
 import { hasUsage } from "./object/figures";
 import { OBJECT_FILTERED, OBJECT_URI, useFiltered } from "./object/pageStates";
 import { refResource, refUri, useObject } from "./object/useObject";
@@ -74,16 +75,12 @@ function Panel({
   onReopen: () => void;
 }) {
   const workbench = useWorkbench();
-  const { backend, keys, menus, sizes } = workbench;
+  const { backend, keys, menus } = workbench;
   const { discovery, selection, states } = services;
   useChanges(states.changes);
   useChanges(menus.changes);
   useChanges(keys.changes);
-  useChanges(sizes.changes);
   const resources = useResources(discovery, space);
-  const [dragged, setDragged] = useState<number>();
-  const width =
-    dragged ?? Math.max(MIN_WIDTH, sizes.get("inspector") ?? DEFAULT_WIDTH);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const { gvr, kind, namespaced, row } = selected;
   const { namespace, name } = objectOf(selected);
@@ -127,7 +124,7 @@ function Panel({
       usage: asked,
     },
   );
-  const reveal = useReveal(id);
+  const reveal = useSecretReveal(id);
   const open = (target: ObjectRef) => {
     if (resources.state !== "ready") return;
     const next = refUri(space, resources.value, target);
@@ -167,51 +164,11 @@ function Panel({
   const lookup = keys.lookup(element);
 
   return (
-    <aside
-      ref={setElement}
-      aria-label={`${kind} details`}
-      style={{ width, ...(docked && { minWidth: MIN_WIDTH }) }}
-      className={cn(
-        "flex h-full max-w-[85%] flex-col border-l border-border bg-editor",
-        docked
-          ? "relative"
-          : "absolute inset-y-0 right-0 z-10 animate-in shadow-lg animation-duration-150 slide-in-from-right-8",
-      )}
+    <DetailsFrame
+      label={`${kind} details`}
+      docked={docked}
+      onElement={setElement}
     >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize details"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          const start = event.clientX;
-          const from = element?.getBoundingClientRect().width ?? width;
-          const target = event.currentTarget;
-          let moved = false;
-          target.setPointerCapture(event.pointerId);
-          const move = (next: PointerEvent) => {
-            moved = true;
-            setDragged(
-              Math.round(Math.max(MIN_WIDTH, from + start - next.clientX)),
-            );
-          };
-          target.addEventListener("pointermove", move);
-          target.addEventListener(
-            "pointerup",
-            () => {
-              target.removeEventListener("pointermove", move);
-              if (moved && element)
-                sizes.set(
-                  "inspector",
-                  Math.round(element.getBoundingClientRect().width),
-                );
-              setDragged(undefined);
-            },
-            { once: true },
-          );
-        }}
-        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
-      />
       <ObjectHeader
         object={object}
         gvr={gvr}
@@ -313,6 +270,83 @@ function Panel({
           </>
         )}
       </div>
+    </DetailsFrame>
+  );
+}
+
+/**
+ * The column the details stand in: beside the list, or over it where the
+ * editor is too narrow, as Lens's drawer, with its left edge resizing it. Its
+ * width is the person's, kept with the part sizes (ARCHITECTURE 4.8).
+ */
+export function DetailsFrame({
+  label,
+  docked,
+  onElement,
+  children,
+}: {
+  label: string;
+  /** Beside the list rather than over it. */
+  docked: boolean;
+  onElement: (element: HTMLElement | null) => void;
+  children: ReactNode;
+}) {
+  const { sizes } = useWorkbench();
+  useChanges(sizes.changes);
+  const [dragged, setDragged] = useState<number>();
+  const width =
+    dragged ?? Math.max(MIN_WIDTH, sizes.get("inspector") ?? DEFAULT_WIDTH);
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    onElement(element);
+  }, [element, onElement]);
+  return (
+    <aside
+      ref={setElement}
+      aria-label={label}
+      style={{ width, ...(docked && { minWidth: MIN_WIDTH }) }}
+      className={cn(
+        "flex h-full max-w-[85%] flex-col border-l border-border bg-editor",
+        docked
+          ? "relative"
+          : "absolute inset-y-0 right-0 z-10 animate-in shadow-lg animation-duration-150 slide-in-from-right-8",
+      )}
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize details"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          const start = event.clientX;
+          const from = element?.getBoundingClientRect().width ?? width;
+          const target = event.currentTarget;
+          let moved = false;
+          target.setPointerCapture(event.pointerId);
+          const move = (next: PointerEvent) => {
+            moved = true;
+            setDragged(
+              Math.round(Math.max(MIN_WIDTH, from + start - next.clientX)),
+            );
+          };
+          target.addEventListener("pointermove", move);
+          target.addEventListener(
+            "pointerup",
+            () => {
+              target.removeEventListener("pointermove", move);
+              if (moved && element)
+                sizes.set(
+                  "inspector",
+                  Math.round(element.getBoundingClientRect().width),
+                );
+              setDragged(undefined);
+            },
+            { once: true },
+          );
+        }}
+        className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize"
+      />
+      {children}
     </aside>
   );
 }

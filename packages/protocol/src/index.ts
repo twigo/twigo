@@ -185,6 +185,12 @@ export type {
   ViewState,
 } from "./generated";
 export { HELM_RELEASES, isHelmList } from "./helm";
+export {
+  INITIAL_RELEASE,
+  ReleaseView,
+  type ReleaseAsk,
+  type ReleaseSnapshot,
+} from "./release";
 export { INITIAL_SNAPSHOT, ListView, type ListSnapshot } from "./list";
 export {
   leastReady,
