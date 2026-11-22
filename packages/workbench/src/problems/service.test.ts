@@ -17,10 +17,10 @@ function listing(first: IpcError[]) {
   return { backend, send: (next: IpcError[]) => send?.(next) };
 }
 
-test("each problem is announced the first time its code is listed, and not again when its words change or it is listed anew", async () => {
+test("each problem is announced when its code is listed, and not again when its words change", async () => {
   const { backend, send } = listing([problem("state.set-aside")]);
   const announce = vi.fn();
-  const problems = new Problems(backend, announce);
+  const problems = new Problems(backend, announce, () => undefined);
   await problems.watch();
   expect(problems.list.map(({ code }) => code)).toEqual(["state.set-aside"]);
   expect(announce).toHaveBeenCalledTimes(1);
@@ -30,9 +30,31 @@ test("each problem is announced the first time its code is listed, and not again
     "state.set-aside",
     "audit.off",
   ]);
-  send([]);
-  send([problem("audit.off")]);
+});
+
+test("a problem that leaves the list is cleared, and told again when it comes back", async () => {
+  const { backend, send } = listing([
+    problem("state.unsaved"),
+    problem("audit.off"),
+  ]);
+  const announce = vi.fn();
+  const cleared = vi.fn();
+  const problems = new Problems(backend, announce, cleared);
+  await problems.watch();
   expect(announce).toHaveBeenCalledTimes(2);
+  expect(cleared).not.toHaveBeenCalled();
+
+  send([problem("audit.off")]);
+  expect(cleared.mock.calls).toEqual([["state.unsaved"]]);
+  expect(announce).toHaveBeenCalledTimes(2);
+
+  send([problem("audit.off"), problem("state.unsaved")]);
+  expect(announce.mock.calls.map(([told]) => (told as IpcError).code)).toEqual([
+    "state.unsaved",
+    "audit.off",
+    "state.unsaved",
+  ]);
+  expect(cleared).toHaveBeenCalledTimes(1);
 });
 
 test("a change that arrives before the answer is the newer list", async () => {
@@ -46,7 +68,11 @@ test("a change that arrives before the answer is the newer list", async () => {
       },
     ),
   } as unknown as Backend;
-  const problems = new Problems(backend, () => undefined);
+  const problems = new Problems(
+    backend,
+    () => undefined,
+    () => undefined,
+  );
   await problems.watch();
   expect(problems.list.map(({ code }) => code)).toEqual(["audit.off"]);
 });
