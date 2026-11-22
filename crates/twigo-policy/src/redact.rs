@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn a_replacement_is_not_read_again() {
-        let names = ["context", "prod"];
+        let names = ["prod", "context"];
         let replaced = whole_tokens_replaced("prod", &names, |_| "<context-1>".to_owned());
         assert_eq!(replaced, "<context-1>");
     }
