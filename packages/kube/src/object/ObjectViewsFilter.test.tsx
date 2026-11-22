@@ -13,6 +13,7 @@ import {
 } from "@twigo/protocol";
 import { withScreenSize } from "../../test/workbench";
 import { ObjectViews } from "./ObjectViews";
+import { OBJECT_TABS } from "./tabs";
 import { PageStates } from "./pageStates";
 import { NO_HEADER } from "../../test/object";
 
@@ -64,6 +65,7 @@ function shown(
   pages.setText(URI, text);
   const views = (of: ObjectSnapshot) => (
     <ObjectViews
+      tabs={OBJECT_TABS}
       tab="overview"
       snapshot={of}
       onChange={() => undefined}

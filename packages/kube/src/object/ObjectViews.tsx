@@ -12,10 +12,12 @@ import { useChanges } from "@twigo/workbench";
 import { FILTER_STAGES, fitFilter } from "./filterStage";
 import { compile, describeMatches, matchesIn } from "./pageFilter";
 import type { PageStates } from "./pageStates";
-import { OBJECT_TABS, type ObjectTab } from "./tabs";
 
 /** Warning events of the object, from its Overview or its Events view, whichever came. */
-function warningCount({ overview, events }: ObjectSnapshot): number {
+function warningCount({
+  overview,
+  events,
+}: Pick<ObjectSnapshot, "overview" | "events">): number {
   const listed =
     events?.events ??
     overview?.sections
@@ -51,17 +53,20 @@ const SHORT_ROOM = describeMatches(MOST_MATCHES, MOST_SECTIONS, true);
  * and for every text; a count with more digits squeezes the field within its
  * stage. It holds while the field or its Clear button has the focus.
  */
-export function ObjectViews({
+export function ObjectViews<V extends string>({
   tab,
+  tabs,
   snapshot,
   onChange,
   pages,
   uri,
   kind,
 }: {
-  tab: ObjectTab;
-  snapshot: ObjectSnapshot;
-  onChange: (tab: ObjectTab) => void;
+  tab: V;
+  /** The views, the one called `overview` carrying the filter. */
+  tabs: readonly { readonly id: V; readonly title: string }[];
+  snapshot: Pick<ObjectSnapshot, "overview" | "events" | "usage">;
+  onChange: (tab: V) => void;
   pages: PageStates;
   uri: string;
   kind: string;
@@ -133,7 +138,7 @@ export function ObjectViews({
       >
         <TabBar
           label="Views of the object"
-          tabs={OBJECT_TABS.map(({ id, title }) => ({
+          tabs={tabs.map(({ id, title }) => ({
             value: id,
             label: title,
             ...(id === "events" && {

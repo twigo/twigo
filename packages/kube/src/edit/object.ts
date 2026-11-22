@@ -21,7 +21,7 @@ import {
   type YAMLMap,
 } from "yaml";
 
-export type KubeObject = Record<string, unknown>;
+type KubeObject = Record<string, unknown>;
 
 /** Characters Go refuses, reads as line breaks, or takes as a byte-order mark in the wrong place; `\r` alone is one too. */
 const CHARACTER =

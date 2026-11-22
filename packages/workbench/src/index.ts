@@ -72,3 +72,5 @@ export {
 } from "./spaces/modes";
 export { ALL_NAMESPACES, scopeNames, scopeWords } from "./spaces/scope";
 export { WorkbenchView } from "./WorkbenchView";
+
+export { variants, type Variants } from "./variants";

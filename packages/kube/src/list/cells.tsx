@@ -3,6 +3,7 @@ import { cn, StatusDot, type Tone } from "@twigo/ui";
 import { humanDuration } from "@twigo/utils";
 import { ageRole, printedAge, printedAt, restartedRecently } from "../age";
 import { IN_FLIGHT, type ColumnRule } from "../columns";
+import { problemWords } from "../helm/status";
 import { ObjectName } from "../ObjectName";
 import { Quantity } from "../Quantity";
 import { isTabular } from "../tabular";
@@ -58,12 +59,15 @@ export function CellView({
   tone: rowTone,
   alarmed,
   finished,
+  problem,
 }: {
   row: Row;
   column: ShownColumn;
   tone: Tone | undefined;
   alarmed: boolean;
   finished: boolean;
+  /** Why the row's object cannot be read, which its health column says in place of its word. */
+  problem?: string | undefined;
 }) {
   const { rule } = column;
   if (rule.cell === "cpu" || rule.cell === "memory") {
@@ -88,6 +92,18 @@ export function CellView({
     case "name":
       return <ObjectName name={text} generated={row.generated} />;
     case "status": {
+      if (rule.health && problem !== undefined) {
+        const { word, why } = problemWords(problem);
+        return (
+          <span
+            title={why}
+            className="inline-flex items-center gap-1.5 align-top font-semibold text-error"
+          >
+            <StatusDot tone="error" />
+            {word}
+          </span>
+        );
+      }
       const tone = rule.tone?.(text);
       const merged = column.merged && (
         <>
@@ -161,6 +177,18 @@ export function CellView({
       );
     case "since":
       return <Since text={text} received={row.received} />;
+    case "chart": {
+      const [, name = text, version] =
+        /^(.*?)-(\d+\.\d+\.\d+.*)$/.exec(text) ?? [];
+      return version === undefined ? (
+        text
+      ) : (
+        <>
+          {name}
+          <span className="text-support">-{version}</span>
+        </>
+      );
+    }
     case "text": {
       const tabular = !rule.figures && isTabular(text);
       return rule.secondary || rule.identifier || tabular ? (

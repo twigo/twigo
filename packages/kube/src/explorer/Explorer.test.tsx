@@ -58,7 +58,7 @@ test("the list keys move through the tree, left and right close and open section
   press("ArrowRight");
   expect(focused()).toBe("Config Maps");
   press("End");
-  expect(focused()).toBe("Custom Resources");
+  expect(focused()).toBe("Helm");
 });
 
 test("a kind opened from the tree leaves the focus in the tree, whose keys go on", async () => {

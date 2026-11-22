@@ -2,6 +2,11 @@ import { CircleAlert, FileX, KeyRound, ShieldOff } from "lucide-react";
 import { refusal, type ObjectSnapshot, type ViewState } from "@twigo/protocol";
 import { INTERNAL_ERROR, isInternalError } from "@twigo/workbench";
 
+/** Where a list of Helm releases looked, for the words of a refusal: a person refused releases would not guess that Secrets are why. */
+export interface ReleasesIn {
+  readonly where: string;
+}
+
 /**
  * Why a view has no rows or object, in words, for the states that have one.
  * A list of every namespace that is refused says it is the whole cluster at
@@ -11,6 +16,7 @@ export function viewProblem(
   status: ViewState,
   what: string,
   everyNamespace = false,
+  releases?: ReleasesIn,
 ) {
   switch (status.state) {
     case "forbidden": {
@@ -19,9 +25,11 @@ export function viewProblem(
         icon: ShieldOff,
         variant: "muted" as const,
         title: "Access denied",
-        body: everyNamespace
-          ? `You may not list ${status.resource} in every namespace at once.`
-          : error.message,
+        body: releases
+          ? `These credentials may not list Secrets in ${everyNamespace ? "every namespace at once" : releases.where}, which Helm keeps its releases in.`
+          : everyNamespace
+            ? `You may not list ${status.resource} in every namespace at once.`
+            : error.message,
         error,
       };
     }

@@ -39,7 +39,8 @@ export interface View {
   readonly container: string;
   readonly when?: string;
   readonly order?: number;
-  readonly component: ComponentType;
+  /** Drawn for the active space, keyed by it, so a view holds nothing of the space before. */
+  readonly component: ComponentType<{ readonly space: string }>;
 }
 
 export type Alignment = "left" | "right";

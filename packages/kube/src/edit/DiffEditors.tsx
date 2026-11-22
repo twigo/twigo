@@ -18,6 +18,7 @@ import { parseDiffUri, parseObjectUri } from "../uri";
 import { ProblemBanner, ProblemWords } from "../ProblemBanner";
 import { isStopped, objectProblem } from "../viewProblem";
 import { useReopen } from "../useReopen";
+import { ReleaseDiff } from "../helm/ReleaseDiff";
 import { EditActions } from "./actions";
 import { PreviewPage } from "./answers";
 import { kindOf, SECRET_NOTE, yamlOfJson } from "./object";
@@ -46,6 +47,15 @@ export function DiffEditor({
           discovery={discovery}
           editor={input.editor}
           onReopen={reopen}
+        />
+      );
+    case "release":
+      return (
+        <ReleaseDiff
+          release={input.release}
+          from={input.from}
+          to={input.to}
+          part={input.part}
         />
       );
     case "objects":
@@ -148,6 +158,7 @@ function ServerDiff({
       edits.copies.see(editor, live, statusSubresource);
     }
   }, [edits.copies, editor, live, statusSubresource]);
+  const baseIsSecret = useMemo(() => isSecret(base), [base]);
   const original = useMemo(
     () => (base === undefined ? undefined : yamlOfJson(base)),
     [base],
@@ -195,7 +206,7 @@ function ServerDiff({
           <EditActions edits={edits} uri={editor} menus={["edit/server"]} />
         }
       >
-        {isSecret(base) && SECRET_NOTE}
+        {baseIsSecret && SECRET_NOTE}
       </Banner>
       <div className="min-h-0 flex-1">
         <Suspense fallback={<Skeleton className="m-3 h-4 w-1/2" />}>
@@ -243,10 +254,14 @@ function ObjectsDiff({
         ? [{ name: names[side] ?? "", problem }]
         : [],
   );
+  const secret = useMemo(
+    () => isSecret(original.manifest) || isSecret(modified.manifest),
+    [original.manifest, modified.manifest],
+  );
   const note = [
     missing.length === 0 &&
       "Both as they are on the server, followed while this is open.",
-    (isSecret(original.manifest) || isSecret(modified.manifest)) && SECRET_NOTE,
+    secret && SECRET_NOTE,
   ]
     .filter(Boolean)
     .join(" ");

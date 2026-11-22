@@ -152,3 +152,6 @@ Findings that belong to no step yet.
   - `apply::a_status_write_during_a_preview_does_not_answer_stale` (`crates/twigo-core/tests/bus_live/apply.rs`) answered `Stale` on Kubernetes 1.33 and passed on 1.34 to 1.37 in the same run; the cause was not looked for.
   - `packages/kube/src/logs/logs.test.tsx` ended with an unhandled `requestAnimationFrame is not defined` from `FrameAcks` (`packages/protocol/src/acks.ts`): a timer of the mock's logs fired after the test's environment was gone, with every test passed.
 - A test that failed once in a local run and passed on the next (2026-11-18, on a branch of the object page): `a sort by a column the width has dropped stays, and the Name header says so until the column is back` in `packages/kube/src/list/ResourceGrid.test.tsx` (`pnpm --filter @twigo/kube test`, vitest 5.1.0) read the rows one row apart from the order they had before the width fell; the next run passed 1,167 tests, and the cause was not looked for.
+- Helm releases (`packages/workbench/src/variants.ts`, ARCHITECTURE 4.3, 4.4):
+  - The variants `helm:explorer`, `tabs:four` and `mask:token` are the default and the recommended; `?variant=` reads the others through `variants()` at the sites marked `@todo`, and the owner's choice removes the rest and the file.
+  - `tabs:page` has no page filter, since its Overview is one section of a longer page.

@@ -1,0 +1,151 @@
+import { Changes } from "@twigo/workbench";
+import type { HelmPart } from "@twigo/protocol";
+import { partKey, type Glyph, type Shown } from "./reveals";
+
+/** The views of a release: the recommended four, and the ones the split variant adds. */
+export type ReleaseTab =
+  | "overview"
+  | "values"
+  | "manifest"
+  | "history"
+  | "hooks"
+  | "notes"
+  | "objects";
+
+/** Which of a revision's two values documents is shown: the person's, or the chart's defaults. */
+export type Plate = "user" | "defaults";
+
+/** What a page's text view shows, for the commands that reveal and hide: its eyes, the line the cursor is on, how many values are hidden and which parts are shown. */
+export interface TextState {
+  readonly glyphs: readonly Glyph[];
+  readonly line: number;
+  readonly hidden: number;
+  readonly revealed: readonly HelmPart[];
+  /** The part that reveals the whole text, none for a manifest. */
+  readonly whole: HelmPart | undefined;
+}
+
+/** What the commands Reveal and Hide do on a page. */
+export interface PageActions {
+  reveal(): void;
+  hide(): void;
+  revealAll(): void;
+  hideAll(): void;
+}
+
+/** How the values read: as rows of key paths, or as their YAML. */
+export type Form = "tree" | "yaml";
+
+interface Reveals {
+  readonly revision: number | undefined;
+  readonly shown: ReadonlyMap<string, Shown>;
+}
+
+const NONE: ReadonlyMap<string, Shown> = new Map();
+
+/**
+ * What each open release editor, and each list's inspector, holds apart from
+ * the release itself, by URI: the view shown, the values plate, the revisions
+ * marked in History, and what the person revealed, which lasts until it is
+ * hidden, the editor closes, or the view leaves the revision it came from
+ * (ARCHITECTURE 3.6) and is never written anywhere.
+ */
+export class ReleaseStates {
+  readonly changes = new Changes();
+  readonly #tabs = new Map<string, ReleaseTab>();
+  readonly #plates = new Map<string, Plate>();
+  readonly #marks = new Map<string, ReadonlySet<number>>();
+  readonly #reveals = new Map<string, Reveals>();
+  readonly #forms = new Map<string, Form>();
+  readonly #actions = new Map<string, PageActions>();
+
+  form(uri: string): Form {
+    return this.#forms.get(uri) ?? "tree";
+  }
+
+  setForm(uri: string, form: Form): void {
+    if (this.form(uri) === form) return;
+    this.#forms.set(uri, form);
+    this.changes.emit();
+  }
+
+  /** A page says what Reveal and Hide do on it while it shows. */
+  register(uri: string, actions: PageActions): () => void {
+    this.#actions.set(uri, actions);
+    return () => {
+      if (this.#actions.get(uri) === actions) this.#actions.delete(uri);
+    };
+  }
+
+  act(uri: string, verb: keyof PageActions): void {
+    this.#actions.get(uri)?.[verb]();
+  }
+
+  tab(uri: string): ReleaseTab {
+    return this.#tabs.get(uri) ?? "overview";
+  }
+
+  setTab(uri: string, tab: ReleaseTab): void {
+    if (this.tab(uri) === tab) return;
+    this.#tabs.set(uri, tab);
+    this.changes.emit();
+  }
+
+  plate(uri: string): Plate {
+    return this.#plates.get(uri) ?? "user";
+  }
+
+  setPlate(uri: string, plate: Plate): void {
+    if (this.plate(uri) === plate) return;
+    this.#plates.set(uri, plate);
+    this.changes.emit();
+  }
+
+  marks(uri: string): ReadonlySet<number> {
+    return this.#marks.get(uri) ?? new Set();
+  }
+
+  mark(uri: string, revisions: readonly number[], marked: boolean): void {
+    const next = new Set(this.marks(uri));
+    for (const revision of revisions) {
+      if (marked) next.add(revision);
+      else next.delete(revision);
+    }
+    this.#marks.set(uri, next);
+    this.changes.emit();
+  }
+
+  /** What was revealed of `revision`: nothing once the view is of another. */
+  shown(uri: string, revision: number | undefined): ReadonlyMap<string, Shown> {
+    const held = this.#reveals.get(uri);
+    return held && held.revision === revision ? held.shown : NONE;
+  }
+
+  reveal(uri: string, revision: number | undefined, answer: Shown): void {
+    const before = this.shown(uri, revision);
+    this.#reveals.set(uri, {
+      revision,
+      shown: new Map(before).set(partKey(answer.part), answer),
+    });
+    this.changes.emit();
+  }
+
+  hide(
+    uri: string,
+    revision: number | undefined,
+    keys: readonly string[],
+  ): void {
+    const next = new Map(this.shown(uri, revision));
+    for (const key of keys) next.delete(key);
+    this.#reveals.set(uri, { revision, shown: next });
+    this.changes.emit();
+  }
+
+  closed(uri: string): void {
+    this.#tabs.delete(uri);
+    this.#plates.delete(uri);
+    this.#marks.delete(uri);
+    this.#reveals.delete(uri);
+    this.#forms.delete(uri);
+  }
+}

@@ -7,6 +7,7 @@ import type {
   ContextAccess,
   Execute,
   Friction,
+  HelmPart,
   ModeSource,
   ObjectRef,
   OperationEvent,
@@ -23,6 +24,7 @@ import type {
 import type { Change, MockAccess } from "./access";
 import { side } from "./edits";
 import { lowering, weigh, words, type Step } from "./protectionPlan";
+import { revealWords, type MockRelease } from "./helm";
 import { counted } from "./sections";
 import {
   cordoned,
@@ -382,6 +384,11 @@ export interface BusHost {
   cluster(context: string): Cluster;
   /** The value a Reveal of an open object's key answers. */
   reveal(object: number, key: string): { value: string; binary: boolean };
+  /** An open release and its context. */
+  release(id: number): {
+    readonly release: MockRelease;
+    readonly context: string;
+  };
   /** The context and the name of an open Secret. */
   secret(object: number): {
     context: string;
@@ -756,6 +763,12 @@ export class MockBus {
         return this.#undo(request.space);
       case "reveal":
         return this.#reveal(request.object, request.key);
+      case "revealHelm":
+        return this.#revealHelm(
+          request.release,
+          request.revision,
+          request.part,
+        );
       case "apply":
         return this.#apply(request.space, request.preview);
       case "shell":
@@ -1791,6 +1804,37 @@ export class MockBus {
         else if ("mode" in change) protection.setMode(context, change.mode);
         else protection.setEnvironment(context, change.environment);
         tell({ state: "done", text: said.done, undoUntil: null });
+      },
+    };
+  }
+
+  #revealHelm(id: number, revision: number, part: HelmPart): Planned {
+    const { release, context } = this.host.release(id);
+    const { binary } = release.reveal(revision, part);
+    const { question, doing, commandLine } = revealWords(
+      context,
+      release.ref,
+      revision,
+      part,
+      release.revision(revision),
+    );
+    return {
+      plan: {
+        context,
+        question,
+        confirm: "Reveal value",
+        destructive: false,
+        consequences: [
+          `It shows until you hide it, close the release or it moves to another revision${binary ? ", as base64" : ""}.`,
+        ],
+        affected: [],
+        commandLine,
+        doing,
+      },
+      risk: { kind: "reveal" },
+      run: (tell) => {
+        const { value, binary: isBinary } = release.reveal(revision, part);
+        tell({ state: "revealed", value, binary: isBinary });
       },
     };
   }

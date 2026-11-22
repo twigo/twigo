@@ -1,10 +1,11 @@
-import type { Forward, Gvr } from "@twigo/protocol";
+import { isHelmList, type Forward, type Gvr } from "@twigo/protocol";
 import { scopeWords, type Workbench } from "@twigo/workbench";
 import type { Discovery } from "./discovery";
 import { portWords } from "./forward/words";
 import { PODS } from "./kinds";
 import {
   parseDiffUri,
+  parseHelmUri,
   parseExecUri,
   parseListUri,
   parseLogsUri,
@@ -78,10 +79,27 @@ export function tabPaths(
       return path(
         space,
         resourceOf(space, gvr)?.namespaced === false ? undefined : scope,
-        editors.title(uri) ?? gvr.resource,
+        isHelmList(gvr)
+          ? "Helm releases"
+          : (editors.title(uri) ?? gvr.resource),
       );
     },
     object,
+    release: (uri: string) => {
+      const input = parseHelmUri(uri);
+      return (
+        input &&
+        path(
+          input.space,
+          input.namespace,
+          "Helm release",
+          input.name,
+          ...(input.revision === undefined
+            ? []
+            : [`r${String(input.revision)}`]),
+        )
+      );
+    },
     logs: (uri: string) => at(parseLogsUri(uri)),
     exec: (uri: string) => {
       const input = parseExecUri(uri);
@@ -113,6 +131,15 @@ export function tabPaths(
       const input = parseDiffUri(uri);
       if (!input) return undefined;
       const side = (editor: string) => object(editor) ?? manifest(editor);
+      if (input.kind === "release") {
+        return path(
+          input.release.space,
+          input.release.namespace,
+          "Helm release",
+          input.release.name,
+          `r${String(input.from)} ↔ r${String(input.to)}`,
+        );
+      }
       if (input.kind !== "objects") return side(input.editor);
       const [left, right] = [side(input.left), side(input.right)];
       return left && right ? `${left} ↔ ${right}` : undefined;
