@@ -61,6 +61,7 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
     for leaked in [
         "prod-eu",
         "staging-us",
+        "dev-sandbox",
         "billing",
         "oidc-alice",
         "alice",
@@ -87,8 +88,8 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
         "{text}"
     );
     assert!(
-        text.contains("could not keep the forwards of a space error=No space left on device (os error 28) space=<context-1>\n"),
-        "a space is its context\n{text}"
+        text.contains("could not keep the forwards of a space error=No space left on device (os error 28) space=<context-3>\n"),
+        "a space is a context\n{text}"
     );
     assert!(
         text.contains("127.0.0.1:8001") && text.contains("<address>"),
