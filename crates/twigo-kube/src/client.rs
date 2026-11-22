@@ -401,6 +401,12 @@ fn cluster(config: &Config) -> String {
     }
 }
 
+/// The URL a [`Clients::cluster`] starts with, which is how a log names a
+/// cluster: what follows only tells clusters of one address apart.
+pub fn cluster_url(cluster: &str) -> &str {
+    cluster.split_once(' ').map_or(cluster, |(url, _)| url)
+}
+
 /// The config without what kube would get credentials from itself: the
 /// exec plugin, which Twigo runs, the auth provider when Twigo gets its
 /// credential, and the gcp one's `cmd-path`, refused with the azure one as
@@ -539,5 +545,8 @@ mod tests {
             "https://192.168.49.2:8443/ as b.example trusting the system's roots"
         );
         assert!(with(Some(vec![b"ca-1".to_vec()]), true).ends_with("trusting any certificate"));
+        for cluster in [first.as_str(), &cluster(&named)] {
+            assert_eq!(cluster_url(cluster), "https://192.168.49.2:8443/");
+        }
     }
 }

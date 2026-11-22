@@ -47,6 +47,9 @@ pub struct Hidden {
     pub addresses: u32,
     /// Double-quoted strings.
     pub quoted: u32,
+    /// Lines of the file that were not records, which the log shows as a
+    /// placeholder, never as their text.
+    pub lines: u32,
 }
 
 /// The new issue's form, filled with the ticked facts and what the person

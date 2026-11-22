@@ -18,6 +18,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep_until};
 use twigo_ipc::{Discovered, ErrorKind, IpcError, ViewState};
+use twigo_kube::client::cluster_url;
 use twigo_kube::discovery::{Cache, Discovery, Error};
 use twigo_kube::kubeconfig::Fingerprint;
 
@@ -338,7 +339,7 @@ impl Follower {
         let loaded =
             twigo_panic::joined(tokio::task::spawn_blocking(move || cache.load(&key)).await);
         loaded.unwrap_or_else(|error| {
-            tracing::warn!(server = cluster, %error, "could not read the cached discovery");
+            tracing::warn!(server = cluster_url(cluster), %error, "could not read the cached discovery");
             None
         })
     }
@@ -351,7 +352,7 @@ impl Follower {
             tokio::task::spawn_blocking(move || cache.store(&key, &discovery)).await,
         );
         if let Err(error) = stored {
-            tracing::warn!(server = cluster, %error, "could not cache the discovery");
+            tracing::warn!(server = cluster_url(cluster), %error, "could not cache the discovery");
         }
     }
 }

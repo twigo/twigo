@@ -2,8 +2,8 @@
 //! text with what a report hides left out, and the place of the last panic.
 
 use std::fs::File;
-use std::io::{self, BufRead as _, BufReader, Read as _, Seek as _, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io::{BufRead as _, BufReader};
+use std::path::PathBuf;
 
 use serde_json::Value;
 
@@ -13,6 +13,10 @@ const LINES: usize = 200;
 
 const BYTES: usize = 32 << 10;
 
+/// What a record may take of the window, and where the report cuts it, so
+/// that at least four share the window, however long a backtrace is.
+const RECORD: usize = BYTES / 4;
+
 /// The newest lines of the files, each file named newest first, as far as
 /// [`LINES`] and [`BYTES`] allow, oldest first. A file that is not there is
 /// the log of no run, which is not an error.
@@ -20,46 +24,24 @@ pub(super) fn tail(files: &[PathBuf]) -> Vec<String> {
     let mut newest_first = Vec::new();
     let mut bytes = 0;
     'files: for file in files {
-        let Ok((lines, cut)) = read_tail(file, BYTES - bytes) else {
+        let Ok(text) = std::fs::read(file) else {
             continue;
         };
-        for line in lines.into_iter().rev() {
-            if newest_first.len() == LINES || bytes + line.len() + 1 > BYTES {
+        for line in String::from_utf8_lossy(&text)
+            .lines()
+            .rev()
+            .filter(|line| !line.is_empty())
+        {
+            let size = line.len().min(RECORD) + 1;
+            if newest_first.len() == LINES || bytes + size > BYTES {
                 break 'files;
             }
-            bytes += line.len() + 1;
-            newest_first.push(line);
-        }
-        // A file read from its middle leaves a gap before it, which the lines
-        // of an older file would not fill.
-        if cut {
-            break;
+            bytes += size;
+            newest_first.push(line.to_owned());
         }
     }
     newest_first.reverse();
     newest_first
-}
-
-/// The lines in the last `max` bytes of the file, whole ones only, and
-/// whether there is more before them.
-fn read_tail(path: &Path, max: usize) -> io::Result<(Vec<String>, bool)> {
-    let mut file = File::open(path)?;
-    let start = file.metadata()?.len().saturating_sub(max as u64);
-    file.seek(SeekFrom::Start(start))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    let text = String::from_utf8_lossy(&bytes);
-    let whole = if start == 0 {
-        &text[..]
-    } else {
-        text.split_once('\n').map_or("", |(_, rest)| rest)
-    };
-    let lines = whole
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect();
-    Ok((lines, start > 0))
 }
 
 /// Where the newest panic of the files was, and whether it was in the run
@@ -98,6 +80,11 @@ pub(super) fn last_panic(files: &[PathBuf]) -> Option<Panic> {
 
 const STARTED: &str = "Twigo started";
 
+/// The writer writes only JSON objects, so a line that is not one was cut by
+/// a full disk, a kill or a power loss, and its fields would be hidden by
+/// their quotes alone, which one unbalanced quote shifts.
+const NOT_A_RECORD: &str = "<a line that is not a record>";
+
 struct Record {
     time: String,
     level: String,
@@ -107,15 +94,9 @@ struct Record {
 }
 
 impl Record {
-    fn parse(line: &str) -> Self {
+    fn parse(line: &str) -> Option<Self> {
         let Ok(Value::Object(mut record)) = serde_json::from_str(line) else {
-            return Self {
-                time: String::new(),
-                level: String::new(),
-                target: String::new(),
-                message: line.to_owned(),
-                fields: Vec::new(),
-            };
+            return None;
         };
         let mut text = |name: &str| match record.remove(name) {
             Some(Value::String(text)) => text,
@@ -130,13 +111,13 @@ impl Record {
             Some(Value::String(message)) => message,
             _ => String::new(),
         };
-        Self {
+        Some(Self {
             time,
             level,
             target,
             message,
             fields: fields.into_iter().collect(),
-        }
+        })
     }
 
     fn learned(&self) -> impl Iterator<Item = (Kind, String)> {
@@ -153,16 +134,28 @@ impl Record {
 /// A record is `<time> <LEVEL> <target> <message> <field>=<value>…`; a value
 /// of several lines follows it as a block.
 pub(super) fn render(lines: &[String], known: super::redact::Known) -> (String, twigo_ipc::Hidden) {
-    let records: Vec<Record> = lines.iter().map(|line| Record::parse(line)).collect();
-    let mut redactor = Redactor::new(known, records.iter().flat_map(Record::learned));
+    let records: Vec<Option<Record>> = lines.iter().map(|line| Record::parse(line)).collect();
+    let mut redactor = Redactor::new(known, records.iter().flatten().flat_map(Record::learned));
     let mut text = String::new();
+    let mut not_records = 0;
     for record in &records {
-        write_record(&mut text, record, &mut redactor);
+        if let Some(record) = record {
+            write_record(&mut text, record, &mut redactor);
+        } else {
+            text.push_str(NOT_A_RECORD);
+            text.push('\n');
+            not_records += 1;
+        }
     }
-    (text, redactor.hidden())
+    let hidden = twigo_ipc::Hidden {
+        lines: not_records,
+        ..redactor.hidden()
+    };
+    (text, hidden)
 }
 
 fn write_record(text: &mut String, record: &Record, redactor: &mut Redactor) {
+    let start = text.len();
     if !record.time.is_empty() {
         // To the second, in UTC, as the file says it.
         match record.time.get(..19) {
@@ -208,4 +201,27 @@ fn write_record(text: &mut String, record: &Record, redactor: &mut Redactor) {
             text.push('\n');
         }
     }
+    cut(text, start);
+}
+
+/// Cuts the record that starts at `start` to [`RECORD`] bytes, at a line
+/// where its first leaves room, and says how much it left out. The lines
+/// below a record's own, a panic's backtrace among them, go first.
+fn cut(text: &mut String, start: usize) {
+    if text.len() - start <= RECORD {
+        return;
+    }
+    let mut end = start + RECORD;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if let Some(newline) = text[start..end].rfind('\n') {
+        end = start + newline + 1;
+    }
+    let left_out = text.len() - end;
+    text.truncate(end);
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&format!("    … {left_out} bytes of this record cut\n"));
 }

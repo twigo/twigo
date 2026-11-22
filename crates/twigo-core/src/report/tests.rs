@@ -84,7 +84,9 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
         "a name no list holds, carried as a field, is hidden\n{text}"
     );
     assert!(
-        text.contains("server=<server-1>") && text.contains("user=<user-1>"),
+        text.contains("server=<server-1>")
+            && !text.contains("<server-2>")
+            && text.contains("user=<user-1>"),
         "{text}"
     );
     assert!(
@@ -131,7 +133,53 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
             tokens: 1,
             addresses: 4,
             quoted: 4,
+            lines: 0,
         }
+    );
+}
+
+#[test]
+fn a_line_that_is_not_a_record_is_a_placeholder_and_never_its_text() {
+    let whole = record(json!({
+        "message": "the watch failed",
+        "context": "staging-us",
+        "namespace": "billing-team",
+    }));
+    let next = record(json!({ "message": "next", "context": "dev-x", "user": "carol-y" }));
+    let cut = &whole[..whole.find("billing-team").unwrap() + 7];
+    let glued = format!("{cut}{next}");
+    let (text, hidden) = rendered(&[&whole, cut, &glued, &next]);
+    assert_eq!(
+        text,
+        "2026-11-22T21:14:03Z WARN  twigo_core::state the watch failed context=<context-1> namespace=<namespace-1>\n\
+         <a line that is not a record>\n\
+         <a line that is not a record>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state next context=<context-2> user=<user-1>\n"
+    );
+    assert_eq!(hidden.lines, 2);
+}
+
+#[test]
+fn a_server_is_one_alias_as_the_discovery_writes_it_and_as_the_catalog_and_the_text_do() {
+    let (text, _) = rendered(&[
+        &record(json!({
+            "message": "could not read the cached discovery",
+            "server": "https://10.0.0.1:6443/",
+            "error": "x",
+        })),
+        &record(json!({ "message": "refused", "error": "rejected by 10.0.0.1:6443" })),
+        &record(json!({
+            "message": "could not cache the discovery",
+            "server": "https://10.9.9.9:6443/",
+        })),
+        &record(json!({ "message": "refused", "error": "dialing https://10.9.9.9:6443/x" })),
+    ]);
+    assert_eq!(
+        text,
+        "2026-11-22T21:14:03Z WARN  twigo_core::state could not read the cached discovery error=x server=<server-1>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=rejected by <server-1>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state could not cache the discovery server=<server-2>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>/x\n"
     );
 }
 
@@ -196,6 +244,71 @@ fn what_no_list_knows_goes_by_its_pattern() {
     );
 }
 
+#[test]
+fn an_address_goes_beside_any_punctuation_but_not_inside_a_word() {
+    let mut redactor = Redactor::new(known(), []);
+    for (said, left) in [
+        (
+            "error dialing backend: read tcp 10.0.0.7:54321->10.0.0.8:6443: read: connection reset by peer",
+            "error dialing backend: read tcp <address>-><address>: read: connection reset by peer",
+        ),
+        ("addr:10.0.0.9:6443 refused", "addr:<address> refused"),
+        (
+            "host-10.0.0.13 and 10.0.0.14-",
+            "host-<address> and <address>-",
+        ),
+        ("via ::ffff:10.0.0.15 and ::1", "via <address> and ::1"),
+        ("pod10.0.0.16 and 10.0.0.17x", "pod10.0.0.16 and 10.0.0.17x"),
+    ] {
+        assert_eq!(redactor.text(said), left);
+    }
+    assert_eq!(redactor.hidden().addresses, 6);
+}
+
+#[test]
+fn a_loopback_server_is_known_by_its_url_and_port_and_never_by_its_bare_host() {
+    for (server, names) in [
+        (
+            "https://api.prod.example.com:6443",
+            vec![
+                "https://api.prod.example.com:6443",
+                "api.prod.example.com:6443",
+                "api.prod.example.com",
+            ],
+        ),
+        (
+            "https://127.0.0.1:44921",
+            vec!["https://127.0.0.1:44921", "127.0.0.1:44921"],
+        ),
+        (
+            "https://localhost:6443",
+            vec!["https://localhost:6443", "localhost:6443"],
+        ),
+        (
+            "https://[::1]:6443",
+            vec!["https://[::1]:6443", "[::1]:6443"],
+        ),
+        ("https://127.0.0.1", vec!["https://127.0.0.1"]),
+    ] {
+        assert_eq!(server_names(server), names, "{server}");
+    }
+
+    let known = Known {
+        names: server_names("https://127.0.0.1:44921")
+            .into_iter()
+            .map(|text| name(&text, Kind::Server, "https://127.0.0.1:44921"))
+            .collect(),
+        ..Known::default()
+    };
+    let mut redactor = Redactor::new(known, []);
+    assert_eq!(
+        redactor.text(
+            "a forward listens on 127.0.0.1:8080, the proxy on 127.0.0.1:53712, the server on 127.0.0.1:44921"
+        ),
+        "a forward listens on 127.0.0.1:8080, the proxy on 127.0.0.1:53712, the server on <server-1>"
+    );
+}
+
 fn write(directory: &Path, name: &str, lines: impl IntoIterator<Item = String>) -> PathBuf {
     let path = directory.join(name);
     let text: String = lines.into_iter().map(|line| format!("{line}\n")).collect();
@@ -229,13 +342,71 @@ fn the_last_lines_reach_into_the_previous_file_and_stop_at_200_or_32_kib() {
     let lines = log::tail(&[current, previous.clone()]);
     assert_eq!(lines.len(), 32, "32 KiB of 1,000 bytes a line");
     assert!(
-        lines.iter().all(|line| line == &long),
-        "a line cut in its middle is left out"
+        !lines.iter().any(|line| line.starts_with("before")),
+        "no file is read once the window is full"
+    );
+}
+
+#[test]
+fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
+    let directory = tempfile::tempdir().unwrap();
+    let frames: Vec<String> = (0..2000)
+        .map(|frame| {
+            format!(
+                "{frame:>4}: twigo_core::deep::frame_{frame}{}",
+                "x".repeat(frame % 7)
+            )
+        })
+        .collect();
+    let panic = json!({
+        "timestamp": "2026-11-22T21:14:11.730045Z",
+        "level": "ERROR",
+        "fields": {
+            "message": "panic",
+            "backtrace": frames.join("\n"),
+            "location": "crates/a.rs:1:1",
+            "payload": "bug",
+        },
+        "target": "twigo_log::panic",
+    })
+    .to_string();
+    assert!(panic.len() > 64 << 10, "past the window of 32 KiB");
+    let before = record(json!({ "message": "before the panic" }));
+    let current = write(
+        directory.path(),
+        "twigo.log",
+        [before.clone(), before, panic],
+    );
+    assert_eq!(log::tail(std::slice::from_ref(&current)).len(), 3);
+
+    let report = assemble(&facts(None), &[current], &BTreeSet::new(), known());
+    let lines: Vec<&str> = report.log.lines().collect();
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.ends_with("before the panic"))
+            .count(),
+        2
+    );
+    let at = lines
+        .iter()
+        .position(|line| line.ends_with("location=crates/a.rs:1:1 payload=bug"))
+        .expect("the panic's own line stays whole");
+    assert_eq!(lines[at + 1], "    backtrace:");
+    let (notice, kept) = lines[at + 2..].split_last().unwrap();
+    assert!(
+        notice.starts_with("    … ") && notice.ends_with(" bytes of this record cut"),
+        "{notice}"
     );
     assert!(
-        !lines.iter().any(|line| line.starts_with("before")),
-        "no file is read past a gap"
+        !kept.is_empty()
+            && kept
+                .iter()
+                .zip(&frames)
+                .all(|(line, frame)| line.strip_prefix("      ") == Some(frame)),
+        "its backtrace is cut at a whole frame"
     );
+    assert!(report.log.len() < 9 << 10, "{}", report.log.len());
 }
 
 fn panic_record(location: &str) -> String {
@@ -491,6 +662,31 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
         &directory.path().join("policy.json"),
     );
     core.state.open_space("gone-context");
+    core.state
+        .set(vec![twigo_ipc::StateEntry {
+            space: Some("gone-context".to_owned()),
+            key: "namespaces".to_owned(),
+            value: r#"["billing-eu"]"#.to_owned(),
+        }])
+        .unwrap();
+    let saved = serde_json::from_value(json!({ "forwards": [{
+        "id": 1,
+        "target": {
+            "space": "gone-context",
+            "gvr": { "group": "", "version": "v1", "resource": "services" },
+            "namespace": "checkout",
+            "name": "payments-api",
+        },
+        "kind": "Service",
+        "port": 8080,
+        "port_name": null,
+        "app_protocol": null,
+        "local": 8080,
+        "detour": false,
+        "runs": true,
+    }] }))
+    .unwrap();
+    core.state.set_forwards("gone-context", &saved).unwrap();
     let (status, followed) = watch::channel(Status::Resolving);
     let _started = core.start_for_tests(followed, None);
     status.send_replace(Status::Resolved(Arc::new(ShellEnv::from_iter([(
@@ -509,18 +705,19 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
         directory.path(),
         "twigo.log",
         [record(json!({
-            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context",
+            "message": "api.prod.example.com refused oidc-alice for payments, prod-eu-cluster and gone-context, on billing-eu and Service payments-api in checkout",
         }))],
     );
     let report = core.report(&facts(None), &[log]).await;
     assert!(
         report.log.ends_with(
-            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>\n"
+            "<server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
+             on <namespace-2> and Service <object-1> in <namespace-3>\n"
         ),
         "{}",
         report.log
     );
-    assert_eq!(report.hidden.names, 5);
+    assert_eq!(report.hidden.names, 8);
 }
 
 #[tokio::test]
