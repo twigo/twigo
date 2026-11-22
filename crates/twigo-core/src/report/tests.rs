@@ -365,7 +365,7 @@ fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
             "message": "panic",
             "backtrace": frames.join("\n"),
             "location": "crates/a.rs:1:1",
-            "payload": "bug",
+            "payload": "assertion `left == right` failed\n  left: 3\n right: 4",
         },
         "target": "twigo_log::panic",
     })
@@ -390,10 +390,20 @@ fn a_record_past_the_window_is_cut_and_leaves_room_for_the_others() {
     );
     let at = lines
         .iter()
-        .position(|line| line.ends_with("location=crates/a.rs:1:1 payload=bug"))
+        .position(|line| line.ends_with("location=crates/a.rs:1:1"))
         .expect("the panic's own line stays whole");
-    assert_eq!(lines[at + 1], "    backtrace:");
-    let (notice, kept) = lines[at + 2..].split_last().unwrap();
+    assert_eq!(
+        lines[at + 1..at + 6],
+        [
+            "    payload:",
+            "      assertion `left == right` failed",
+            "        left: 3",
+            "       right: 4",
+            "    backtrace:",
+        ],
+        "the message stays and the backtrace is cut first"
+    );
+    let (notice, kept) = lines[at + 6..].split_last().unwrap();
     assert!(
         notice.starts_with("    … ") && notice.ends_with(" bytes of this record cut"),
         "{notice}"

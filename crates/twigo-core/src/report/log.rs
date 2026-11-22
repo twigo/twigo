@@ -193,6 +193,9 @@ fn write_record(text: &mut String, record: &Record, redactor: &mut Redactor) {
         }
     }
     text.push('\n');
+    // The cut keeps a record's head, and fields come in key order, which puts
+    // the backtrace before a panic's payload.
+    blocks.sort_by_key(|(name, _)| name.as_str() == "backtrace");
     for (name, value) in blocks {
         text.push_str(&format!("    {name}:\n"));
         for line in value.lines() {
