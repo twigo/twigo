@@ -75,3 +75,39 @@ fn a_failing_file_is_logged_when_its_failure_starts_and_ends_and_not_at_each_rea
         ]
     );
 }
+
+#[test]
+fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(&file, "contexts: [unclosed").unwrap();
+    let sources = Sources::explicit(file.clone());
+    let catalog = Catalog::default();
+    let heard = Heard::default();
+    tracing::subscriber::with_default(heard.clone(), || {
+        catalog.follow(sources.clone());
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        catalog.follow(sources.clone());
+        fs::remove_dir(&file).unwrap();
+        fs::write(&file, "contexts: []").unwrap();
+        catalog.follow(sources.clone());
+    });
+    let path = file.display().to_string();
+    assert_eq!(
+        *heard.0.lock().unwrap(),
+        [
+            (
+                Level::WARN,
+                "kubeconfig.unparsable".to_owned(),
+                path.clone()
+            ),
+            (
+                Level::WARN,
+                "kubeconfig.unreadable".to_owned(),
+                path.clone()
+            ),
+            (Level::INFO, "kubeconfig.unreadable".to_owned(), path),
+        ]
+    );
+}
