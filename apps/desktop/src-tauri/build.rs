@@ -23,6 +23,7 @@ fn main() {
         "list_set_window",
         "list_ack",
         "list_unsubscribe",
+        "helm_list_subscribe",
         "object_open",
         "object_set_parts",
         "object_ack",

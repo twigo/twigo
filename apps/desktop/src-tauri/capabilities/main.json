@@ -33,6 +33,7 @@
     "allow-list-set-window",
     "allow-list-ack",
     "allow-list-unsubscribe",
+    "allow-helm-list-subscribe",
     "allow-object-open",
     "allow-object-set-parts",
     "allow-object-ack",

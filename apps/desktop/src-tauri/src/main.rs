@@ -28,10 +28,10 @@ use twigo_ipc::{
     ForwardPorts, ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout,
     KubeconfigOffer, KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, LogVerbosity,
     NewTerminal, ObjectBatch, OpenIssue, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan,
-    PlanId, PlanRequest, Report, ResumeForward, SaveReport, SchemaQuery, SetLogLevel, SetLogSource,
-    SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck, ShellContainers, ShellEnvironment,
-    ShellInput, ShellPod, ShellResize, Space, StartForward, StateEntry, StateSnapshot,
-    SubscriptionId, TerminalSession,
+    PlanId, PlanRequest, ReleaseListQuery, Report, ResumeForward, SaveReport, SchemaQuery,
+    SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
+    ShellContainers, ShellEnvironment, ShellInput, ShellPod, ShellResize, Space, StartForward,
+    StateEntry, StateSnapshot, SubscriptionId, TerminalSession,
 };
 use twigo_keyboard::{LayoutWatch, MainThread, Subscription};
 use twigo_log::{Facts, Level, Log};
@@ -424,6 +424,23 @@ fn list_unsubscribe(
     request: SubscriptionId,
 ) -> Result<(), IpcError> {
     app.core.list_unsubscribe(webview.label(), request)
+}
+
+#[tauri::command]
+async fn helm_list_subscribe(
+    webview: Webview,
+    app: State<'_, App>,
+    request: ReleaseListQuery,
+    channel: Channel<ListBatch>,
+) -> Result<SubscriptionId, IpcError> {
+    contained(async {
+        app.core
+            .helm_list_subscribe(webview.label(), request, move |batch| {
+                sent("a list batch", channel.send(batch))
+            })
+            .await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1022,6 +1039,7 @@ fn main() {
             list_set_window,
             list_ack,
             list_unsubscribe,
+            helm_list_subscribe,
             object_open,
             object_set_parts,
             object_ack,
