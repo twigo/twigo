@@ -283,6 +283,12 @@ fn told(logged: &twigo_log::Captured) -> Vec<(String, String, String)> {
         .collect()
 }
 
+/// Stops the watch, so a file the test changes next is read by its own
+/// `follow` on the test's thread, which is the one the capture sees.
+fn unfollow(catalog: &Catalog) {
+    catalog.followed.lock().unwrap().take();
+}
+
 #[test]
 fn a_failing_file_is_logged_when_its_failure_starts_and_ends_and_not_at_each_read() {
     let dir = tempfile::tempdir().unwrap();
@@ -294,6 +300,7 @@ fn a_failing_file_is_logged_when_its_failure_starts_and_ends_and_not_at_each_rea
     catalog.follow(sources.clone());
     catalog.follow(sources.clone());
     catalog.follow(sources.clone());
+    unfollow(&catalog);
     fs::write(&file, "contexts: []").unwrap();
     catalog.follow(sources);
     let (code, path) = ("kubeconfig.unparsable", file.display().to_string());
@@ -315,9 +322,11 @@ fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() 
     let catalog = Catalog::default();
     let logged = twigo_log::capture();
     catalog.follow(sources.clone());
+    unfollow(&catalog);
     fs::remove_file(&file).unwrap();
     fs::create_dir(&file).unwrap();
     catalog.follow(sources.clone());
+    unfollow(&catalog);
     fs::remove_dir(&file).unwrap();
     fs::write(&file, "contexts: []").unwrap();
     catalog.follow(sources);
@@ -344,6 +353,7 @@ fn a_file_that_keeps_failing_is_not_told_again_when_another_file_s_failure_chang
     let catalog = Catalog::default();
     let logged = twigo_log::capture();
     catalog.follow(sources.clone());
+    unfollow(&catalog);
     fs::remove_file(&changing).unwrap();
     fs::create_dir(&changing).unwrap();
     catalog.follow(sources);
