@@ -45,6 +45,9 @@
   They run the kubectl on `PATH`, refuse to start without it, refuse contexts other than `kind-*`, and give kubectl a `KUBECACHEDIR` of their own.
   The helper image below has nothing that listens, so their port-forward reaches the kubelet's healthz (`127.0.0.1:10248`) through a pod on the host's network.
   Their `kubectl run` is `-i`, not `-it`: without a terminal kubectl attaches with `stderr` to a container that has a TTY, which kind 1.37 answers with a `500`, through the proxy or straight (2026-11-10), and kubectl falls back to the pod's logs, where `read` waits forever.
+- The Helm live test: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test helm_live -- --ignored`, with the `helm` of CI (v4.3.2) on `PATH`, which `bench/test-matrix.sh` runs with the others.
+  It refuses to start without `helm`, refuses contexts other than `kind-*`, makes two namespaces of its own and deletes them, and gives `helm` a copy of the kubeconfig and `HELM_CONFIG_HOME`, `HELM_CACHE_HOME` and `HELM_DATA_HOME` in a temporary directory, so it reads none of the person's repositories or plugins.
+  Its chart is `crates/twigo-core/tests/helm_chart`: a ConfigMap, a Secret from its values and notes that print the revision, and no pod.
 - The terminal's live tests: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test terminal_live -- --ignored`.
   They refuse contexts other than `kind-*`, run `/bin/sh` in place of the login shell (`Core::set_terminal_program`, the `test-util` feature), or `/bin/zsh` under a `.zshrc` that exports `KUBECONFIG`, and the kubectl on `PATH`, give the shell a `HOME`, a `KUBECACHEDIR` and a kubeconfig of their own, which names the kind context twice, and put a fake `aws` first on its `PATH`.
 - The port-forwards' live tests: `TWIGO_TEST_KUBECONFIG=<kind kubeconfig> cargo test -p twigo-core --test forward_live -- --ignored`, and, for the data path alone, `cargo test -p twigo-sessions --lib forward::live -- --ignored --nocapture`.
@@ -61,7 +64,7 @@
   They read the pods of `kube-system`, whose real containers give metrics-server something to measure and whose kwok pods give it kwok's `1m` and `1Mi`, and wait up to three minutes for the first samples.
 - The hub's heap at 5,000 pods: `bench/pods.sh <kubeconfig> 5000`, then `TWIGO_TEST_KUBECONFIG=<kubeconfig> cargo run --release -p twigo-cache --example hub_memory`, next to `--example table_memory`.
 - Before a push, run only the checks the change affects.
-  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, `twigo-core`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
+  CI runs the rest, the live tests on every release when `twigo-cache`, `twigo-kube`, `twigo-policy`, `twigo-core`, `twigo-helm`, `twigo-sessions`, `bench/harness`, `bench/cluster.sh`, `bench/pods.sh` or the Cargo files change, and the frame probe on WebKitGTK when `bench/ipc` or the Cargo files change.
 
 ## Gotchas
 

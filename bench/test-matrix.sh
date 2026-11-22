@@ -2,7 +2,8 @@
 # Usage: bench/test-matrix.sh [1.33 1.34 ...]
 #
 # Runs the live tests on a fresh kind cluster per Kubernetes version,
-# 1.33 to 1.37 by default, and deletes each cluster afterwards.
+# 1.33 to 1.37 by default, and deletes each cluster afterwards. The kubectl and
+# the helm on PATH are the ones the live tests of twigo-core run.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
