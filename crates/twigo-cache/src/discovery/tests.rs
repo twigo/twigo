@@ -101,16 +101,19 @@ async fn a_second_start_revalidates_the_cached_discovery_with_304() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_cache_that_cannot_be_read_or_written_is_logged_by_the_server_it_names() {
+async fn a_cache_that_cannot_be_read_or_written_is_logged_by_the_servers_url_alone() {
     let fake = fake();
     let home = tempfile::tempdir().unwrap();
     let cache = home.path().join("a-file");
     std::fs::write(&cache, "").unwrap();
+    let clients = fake.clients_reaching(
+        Budgets::default(),
+        "https://10.0.0.1:6443/ as api.internal trusting 0123456789abcdef0123456789abcdef",
+    );
+    let current = Arc::new(Mutex::new(Ok(clients)));
     let events = twigo_log::capture();
-    let mut follower = follower(&fake, &cache).await;
-    let Discovered::Ready { cluster, .. } = next(&mut follower).await else {
-        panic!("discovery answers without its cache");
-    };
+    let mut follower = over(Hub::new(swapping(&current)), &cache).await;
+    assert_eq!(names(&next(&mut follower).await), ["namespaces"]);
 
     let lines = events.lines();
     for message in [
@@ -121,7 +124,7 @@ async fn a_cache_that_cannot_be_read_or_written_is_logged_by_the_server_it_names
             .iter()
             .find(|line| line["fields"]["message"] == message)
             .unwrap_or_else(|| panic!("{message} in {lines:?}"));
-        assert_eq!(line["fields"]["server"], cluster.as_str(), "{line}");
+        assert_eq!(line["fields"]["server"], "https://10.0.0.1:6443/", "{line}");
         assert!(line["fields"].get("cluster").is_none(), "{line}");
     }
 }

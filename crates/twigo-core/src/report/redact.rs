@@ -51,6 +51,16 @@ impl Kind {
     }
 }
 
+/// A field's value as the names are written: the clients' URL of a server
+/// that has no path ends in `/`, which the kubeconfig's does not.
+fn written(kind: Kind, value: &str) -> &str {
+    if kind == Kind::Server {
+        value.trim_end_matches('/')
+    } else {
+        value
+    }
+}
+
 /// A name the catalog or the state knows, which stands for `canonical`: the
 /// URL of a server is also its host and its host with the port.
 pub(super) struct Name {
@@ -116,6 +126,7 @@ impl Redactor {
             .into_iter()
             .map(|name| (name.text, name.kind, name.canonical))
             .chain(learned.into_iter().map(|(kind, value)| {
+                let value = written(kind, &value).to_owned();
                 let canonical = value.clone();
                 (value, kind, canonical)
             }));
@@ -167,6 +178,7 @@ impl Redactor {
             }
             _ => {
                 let kind = Kind::of_field(name)?;
+                let value = written(kind, value);
                 let canonical = match self.known.get(value) {
                     Some((known, canonical)) if *known == kind => canonical,
                     _ => value,

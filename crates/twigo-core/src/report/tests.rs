@@ -84,7 +84,9 @@ fn the_log_is_text_with_what_it_names_hidden_and_counted() {
         "a name no list holds, carried as a field, is hidden\n{text}"
     );
     assert!(
-        text.contains("server=<server-1>") && text.contains("user=<user-1>"),
+        text.contains("server=<server-1>")
+            && !text.contains("<server-2>")
+            && text.contains("user=<user-1>"),
         "{text}"
     );
     assert!(
@@ -155,6 +157,30 @@ fn a_line_that_is_not_a_record_is_a_placeholder_and_never_its_text() {
          2026-11-22T21:14:03Z WARN  twigo_core::state next context=<context-2> user=<user-1>\n"
     );
     assert_eq!(hidden.lines, 2);
+}
+
+#[test]
+fn a_server_is_one_alias_as_the_discovery_writes_it_and_as_the_catalog_and_the_text_do() {
+    let (text, _) = rendered(&[
+        &record(json!({
+            "message": "could not read the cached discovery",
+            "server": "https://10.0.0.1:6443/",
+            "error": "x",
+        })),
+        &record(json!({ "message": "refused", "error": "rejected by 10.0.0.1:6443" })),
+        &record(json!({
+            "message": "could not cache the discovery",
+            "server": "https://10.9.9.9:6443/",
+        })),
+        &record(json!({ "message": "refused", "error": "dialing https://10.9.9.9:6443/x" })),
+    ]);
+    assert_eq!(
+        text,
+        "2026-11-22T21:14:03Z WARN  twigo_core::state could not read the cached discovery error=x server=<server-1>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=rejected by <server-1>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state could not cache the discovery server=<server-2>\n\
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>/x\n"
+    );
 }
 
 #[test]
