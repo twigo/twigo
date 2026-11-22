@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react";
 import { Banner } from "@twigo/ui";
-import { errorParts } from "./errorParts";
+import { ErrorCode } from "./ErrorMessage";
 import type { ErrorLike } from "./errors";
 
 /**
@@ -9,7 +9,7 @@ import type { ErrorLike } from "./errors";
  */
 export function ErrorBanner({
   error,
-  message,
+  message = error.message,
   children,
   ...banner
 }: Omit<ComponentProps<typeof Banner>, "children" | "detail"> & {
@@ -17,13 +17,9 @@ export function ErrorBanner({
   message?: string;
   children?: ReactNode;
 }) {
-  const { words, details } = errorParts({
-    error,
-    ...(message !== undefined && { message }),
-  });
   return (
-    <Banner {...banner} detail={details}>
-      {words}
+    <Banner {...banner} detail={<ErrorCode error={error} />}>
+      {message}
       {children !== undefined && <> {children}</>}
     </Banner>
   );
