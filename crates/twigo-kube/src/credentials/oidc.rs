@@ -13,7 +13,7 @@
 
 mod persist;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -157,10 +157,32 @@ enum Style {
     Form,
 }
 
+/// The users whose refreshed tokens are in memory only, by [`OidcEntry::key`]:
+/// `tokens.unsaved` stays while any is left.
+#[derive(Clone, Default)]
+pub(super) struct Unsaved(Arc<Mutex<HashSet<String>>>);
+
+impl Unsaved {
+    fn add(&self, key: &str, problem: IpcError) {
+        let mut users = self.0.lock().expect("unsaved lock");
+        users.insert(key.to_owned());
+        problems::report(problem);
+    }
+
+    fn remove(&self, key: &str) {
+        let mut users = self.0.lock().expect("unsaved lock");
+        if users.remove(key) && users.is_empty() {
+            problems::clear(ErrorCode::TokensUnsaved);
+        }
+    }
+}
+
 pub struct Oidc {
     /// The file the user entry comes from, which the tokens go back to.
     origin: Option<PathBuf>,
     user: String,
+    key: String,
+    unsaved: Unsaved,
     env: tokio::sync::watch::Receiver<Option<Arc<twigo_env::ShellEnv>>>,
     state: Mutex<State>,
     refreshing: tokio::sync::Mutex<()>,
@@ -193,8 +215,6 @@ struct State {
     /// from it, never ones it still holds after a failed write or a
     /// rejection.
     on_disk: (Option<String>, Option<String>),
-    /// Whether this user raised `tokens.unsaved`.
-    unsaved: bool,
 }
 
 impl std::fmt::Debug for Oidc {
@@ -209,12 +229,16 @@ impl Oidc {
     pub(super) fn new(
         origin: Option<PathBuf>,
         user: String,
+        key: String,
         entry: OidcEntry,
         env: tokio::sync::watch::Receiver<Option<Arc<twigo_env::ShellEnv>>>,
+        unsaved: Unsaved,
     ) -> Self {
         Self {
             origin,
             user,
+            key,
+            unsaved,
             env,
             state: Mutex::new(State {
                 on_disk: (entry.id_token.clone(), entry.refresh_token.clone()),
@@ -224,7 +248,6 @@ impl Oidc {
                 spent: false,
                 reread: false,
                 retry: None,
-                unsaved: false,
             }),
             refreshing: tokio::sync::Mutex::new(()),
         }
@@ -333,17 +356,17 @@ impl Oidc {
                     let mut state = self.state();
                     let refresh = rotated.or_else(|| state.on_disk.1.clone());
                     state.on_disk = (Some(written_id), refresh);
-                    if std::mem::take(&mut state.unsaved) {
-                        problems::clear(ErrorCode::TokensUnsaved);
-                    }
+                    self.unsaved.remove(&self.key);
                 }
                 Err((origin, error)) => {
-                    self.state().unsaved = true;
                     tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
-                    problems::report(IpcError::new(
-                        ErrorCode::TokensUnsaved,
-                        "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
-                    ));
+                    self.unsaved.add(
+                        &self.key,
+                        IpcError::new(
+                            ErrorCode::TokensUnsaved,
+                            "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
+                        ),
+                    );
                 }
             }
         }
