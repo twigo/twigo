@@ -172,14 +172,17 @@ fn a_server_is_one_alias_as_the_discovery_writes_it_and_as_the_catalog_and_the_t
             "message": "could not cache the discovery",
             "server": "https://10.9.9.9:6443/",
         })),
-        &record(json!({ "message": "refused", "error": "dialing https://10.9.9.9:6443/x" })),
+        &record(json!({
+            "message": "refused",
+            "error": "dialing https://10.9.9.9:6443/api/v1/namespaces/secret-ns/pods/web-7f9. Then 10.0.0.1:6443/healthz, \"https://10.0.0.1:6443/\"",
+        })),
     ]);
     assert_eq!(
         text,
         "2026-11-22T21:14:03Z WARN  twigo_core::state could not read the cached discovery error=x server=<server-1>\n\
          2026-11-22T21:14:03Z WARN  twigo_core::state refused error=rejected by <server-1>\n\
          2026-11-22T21:14:03Z WARN  twigo_core::state could not cache the discovery server=<server-2>\n\
-         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>/x\n"
+         2026-11-22T21:14:03Z WARN  twigo_core::state refused error=dialing <server-2>. Then <server-1>, \"<server-1>\"\n"
     );
 }
 
@@ -761,7 +764,7 @@ contexts:
             "{time} <server-1> refused <user-1> for <namespace-1>, <cluster-1> and <context-1>, \
              on <namespace-2> and Service <object-1> in <namespace-3>\n\
              {time} could not read the cached discovery server=<server-2>\n\
-             {time} <server-2> refused GET <server-2>/k8s/clusters/c-abc12/api/v1/namespaces/secret-ns/pods/web-7f9\n"
+             {time} <server-2> refused GET <server-2>\n"
         )
     );
     assert_eq!(report.hidden.names, 11);

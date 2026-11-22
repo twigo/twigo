@@ -203,6 +203,7 @@ impl Redactor {
             let (kind, canonical) = &stand_for[index];
             aliases.of(*kind, canonical)
         });
+        let text = SERVER_PATH.replace_all(&text, "$1");
         let text = replaced(&JWT, &text, &mut self.hidden.tokens, |_| {
             Some(TOKEN.to_owned())
         });
@@ -285,6 +286,12 @@ static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
 
 static URL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]*[^\s"'<>.,;:!?)\]]"#).expect("a pattern")
+});
+
+/// The rest of a URL that starts with a server's alias, where its path can
+/// name a namespace and an object.
+static SERVER_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(<server-[0-9]+>)/(?:[^\s"'<>]*[^\s"'<>.,;:!?)\]])?"#).expect("a pattern")
 });
 
 static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
