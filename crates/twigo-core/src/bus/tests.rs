@@ -374,7 +374,7 @@ async fn the_audit_log_has_what_a_person_confirmed_and_how_it_ended() {
     assert_eq!(lines[1]["event"], "ended");
     assert_eq!(lines[1]["outcome"], "stopped");
     assert_eq!(lines[1]["message"], "stopped");
-    assert!(lines[1].get("code").is_none());
+    assert!(lines[1].get("codes").is_none());
 }
 
 #[tokio::test]
