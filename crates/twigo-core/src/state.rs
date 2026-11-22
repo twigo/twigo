@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use atomic_write_file::AtomicWriteFile;
 use jiff::{SignedDuration, Timestamp};
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use twigo_ipc::{ErrorCode, ForwardId, IpcError, Space, StateEntry, StateSnapshot};
@@ -62,10 +63,32 @@ const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
 /// hides by name.
 const NAMESPACES: &str = "namespaces";
 
+/// The webview's key for the editors a space opened, as `{ uri, title }`
+/// (`packages/workbench/src/editors/recent.ts`).
+const RECENT: &str = "recent";
+
 #[derive(Debug, Default)]
 pub(crate) struct Named {
     pub namespaces: BTreeSet<String>,
     pub objects: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+struct Recent {
+    uri: String,
+}
+
+/// The namespace and the name of the object that an editor's URI opens,
+/// `k8s://<space>/<group>/<version>/<resource>[/<namespace>]/<name>`
+/// (`packages/kube/src/uri.ts`), each segment percent-encoded.
+fn object_of(uri: &str) -> Option<(Option<String>, String)> {
+    let decoded = |segment: &str| percent_decode_str(segment).decode_utf8_lossy().into_owned();
+    let segments: Vec<&str> = uri.strip_prefix("k8s://")?.split('/').collect();
+    match segments.as_slice() {
+        [_, _, _, _, name] => Some((None, decoded(name))),
+        [_, _, _, _, namespace, name] => Some((Some(decoded(namespace)), decoded(name))),
+        _ => None,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -235,7 +258,8 @@ impl State {
     }
 
     /// The namespaces the spaces are on, and the namespaces and the names of
-    /// their saved forwards' targets, as far as they read back.
+    /// their saved forwards' targets and of the objects of their recent
+    /// editors, as far as they read back.
     pub(crate) fn named(&self) -> Named {
         let data = self.inner.lock();
         let mut named = Named::default();
@@ -252,6 +276,18 @@ impl State {
             for forward in saved.into_iter().flat_map(|saved| saved.forwards) {
                 named.namespaces.insert(forward.target.namespace);
                 named.objects.insert(forward.target.name);
+            }
+            let recent = record
+                .state
+                .get(RECENT)
+                .and_then(|value| serde_json::from_str::<Vec<Recent>>(value.get()).ok());
+            for (namespace, name) in recent
+                .into_iter()
+                .flatten()
+                .filter_map(|editor| object_of(&editor.uri))
+            {
+                named.namespaces.extend(namespace);
+                named.objects.insert(name);
             }
         }
         named
