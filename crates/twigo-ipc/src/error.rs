@@ -103,9 +103,10 @@ macro_rules! error_codes {
         /// Why something failed, named by a condition: `family.condition`.
         ///
         /// A wire name is written out for each code, so renaming a variant
-        /// never moves it, and it is never reused or removed: a code that no
-        /// site builds any more stays, as a report or an issue may still name
-        /// it. The test `error_codes` pins every name and kind.
+        /// never moves it, and once a release has shipped a code it is never
+        /// reused or removed: a code that no site builds any more stays, as a
+        /// report or an issue may still name it. The test `error_codes` pins
+        /// every name and kind.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
         pub enum ErrorCode {
             $($(#[$doc])* #[serde(rename = $wire)] $variant,)*
