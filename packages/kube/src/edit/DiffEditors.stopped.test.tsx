@@ -79,7 +79,7 @@ test("a diff against the server whose object Twigo stopped says so over what it 
   expect(screen.getByTestId("diff")).toBeTruthy();
   const banner = screen
     .getByText("Twigo hit an internal error.")
-    .closest("[data-tone]");
+    .closest<HTMLElement>("[data-tone]");
   if (!banner) throw new Error("no banner");
   expect(banner.textContent).toContain("as it was last seen");
   expect(carriesCode(banner, "internal.panic")).toBe(true);
