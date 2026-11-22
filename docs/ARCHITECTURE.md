@@ -196,8 +196,9 @@ The hook of `twigo-log` records every panic first (4.10).
 - **The fatal path** writes the log, ends every unlock at once, so that the windows, the sessions and the audit log hear each end as at its time, and asks in a native dialog, since the webview may be what the panic broke, whether to restart or quit.
   Before it asks it rechecks every forward against its mode itself, since the forwards' modes duty that would may be the one that died: a forward the mode now refuses fails and ends its connections, and where that recheck panics every forward closes, as at a quit.
   The dialog is a sheet on Twigo's focused window, or its main one, which blocks that window and ends with it.
+  With it up, the app menu's Quit did nothing in a check build (macOS 27.2.1, 2026-11-22), so the sheet's own Quit is the way out.
   Where no window is left, as when the last one's `Destroyed` handler panicked, Twigo is ending already: the fatal path writes the state and asks nothing, since the dialog without a parent is the system's own alert, which would outlive Twigo.
-  Either answer writes the state first, and Restart asks Tauri to restart: spaces and forwards come back as they do at any start.
+  Either answer leaves a line in the log and writes the state first, and Restart asks Tauri to restart: spaces and forwards come back as they do at any start.
   An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
 - **A joined task's panic** goes on as it was (`twigo_panic::joined`, and `twigo_panic::blocking` for a closure on the blocking pool), so the hook records it once.
 - **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
@@ -1889,6 +1890,7 @@ What a person needs when something goes wrong, and what a bug report holds, star
 
 - `twigo_log::problems` lists, once per code for the run, what a file of Twigo's own could not do that leaves the person with less than they set up: `state.set-aside` (the modes and locks they set are gone), `state.unsaved` (until a save works), `trust.set-aside`, `audit.off` and `audit.unwritten` (nothing is recorded, or a line was lost), and `tokens.unsaved` (the next start asks to sign in again).
   Each is reported where it is logged, with Twigo's words and no path or value; a report of a code replaces its last.
+  Each is logged at error where it fails, as are `kubeconfig.unwatched` (5.5) and `policy.file-unreadable` (4.8), while a kubeconfig file that does not parse is a warning, since the person's own file is what is wrong there.
   `audit.unwritten` is raised only by a write that failed, not by a log that could not move aside or open anew, which loses no line, and it goes with the next line that lands; `tokens.unsaved` stays while any user's refreshed tokens are in memory only, the registry holding those users by their oidc key, and goes when the last of them is written back by a later refresh, as `state.unsaved` goes with the next save that works.
 - `problems_watch` answers the list and sends it again on every change.
   The list is the run's, not a window's: the files are read before any core exists, and the crates that fail do not know one.
@@ -1949,6 +1951,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
 
 A list, an object page, a logs tab, a shell, a terminal or a forward whose task panicked ends with `internal.panic` (2.1), and its view says so in one wording, which `INTERNAL_ERROR` in `packages/workbench/src/internalError.ts` keeps: "Twigo hit an internal error" and what stopped (`This view stopped.`; a shell's or terminal's scrollback says that this shell stopped).
 It shows the code as every error does, keeps Rust's own message (`Twigo stopped this list on an internal error`) in Copy details, and offers Report…, which opens the report dialog.
+A toast of `internal.panic` says it the same way, since `notifyError` decides it for every caller: the title without what stopped, the code with Copy details, and Report… beside them, for a plan whose run panicked (2.1) as for a forward that failed on it.
 Reopen is offered where the view can open again:
 
 - a list, an object page, an embedded list, a row's details, a home tile and a comparison of objects subscribe anew, a tile reopening the home's four counts together;
