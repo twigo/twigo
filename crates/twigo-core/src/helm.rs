@@ -127,6 +127,8 @@ pub(crate) async fn compare(
 }
 
 #[cfg(test)]
+mod canary;
+#[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
