@@ -507,6 +507,16 @@ fn table() -> Vec<Row> {
             ),
         ),
         accepting(
+            METADATA,
+            row(
+                "the release Secrets of a namespace, by Helm's label",
+                get.clone(),
+                "/api/v1/namespaces/a/secrets?labelSelector=owner%3Dhelm",
+                SecretRead,
+                OPEN,
+            ),
+        ),
+        accepting(
             TABLE,
             row(
                 "a table with metadata by default",
