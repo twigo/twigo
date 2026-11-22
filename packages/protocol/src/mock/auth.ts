@@ -1,4 +1,4 @@
-import { IpcError, wireError } from "../error";
+import { IpcError, wire } from "../error";
 import type {
   ContextAuth,
   ExecPlugin,
@@ -167,11 +167,9 @@ export class MockAuth {
       case "pluginFailed":
         prod.fails = {
           state: "failed",
-          error: wireError(
-            new IpcError(
-              "credentials.plugin-failed",
-              "exec: executable aws failed with exit code 255",
-            ),
+          error: wire(
+            "credentials.plugin-failed",
+            "exec: executable aws failed with exit code 255",
           ),
           output: AWS_SSO_EXPIRED,
           installHint: null,
@@ -230,11 +228,9 @@ export class MockAuth {
     clearTimeout(entry.timer);
     entry.status = {
       state: "failed",
-      error: wireError(
-        new IpcError(
-          "credentials.plugin-cancelled",
-          `exec: ${entry.plugin.command} was cancelled`,
-        ),
+      error: wire(
+        "credentials.plugin-cancelled",
+        `exec: ${entry.plugin.command} was cancelled`,
       ),
       output: entry.status.output,
       installHint: null,

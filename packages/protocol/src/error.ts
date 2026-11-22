@@ -72,6 +72,15 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
+/** An error as Rust sends it inside a state or an event, made from its code. */
+export function wire(
+  code: ErrorCode,
+  message: string,
+  server?: ServerStatus,
+): Wire {
+  return { code, kind: ERROR_KINDS[code], message, ...(server && { server }) };
+}
+
 /** The error as Rust sends it inside a state or an event. */
 export function wireError(error: IpcError): Wire {
   return {
