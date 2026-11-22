@@ -16,7 +16,6 @@ pub fn text(path: &str) -> String {
     std::fs::read_to_string(fixtures().join(path)).unwrap()
 }
 
-/// A release Secret or ConfigMap as the API server answered it.
 pub struct Recorded {
     pub name: String,
     pub namespace: String,
@@ -45,7 +44,6 @@ pub fn secret(file: &str) -> Recorded {
     })
 }
 
-/// The object at `path`, its `data.release` read by `release`.
 pub fn recorded(path: &str, release: impl Fn(&str) -> Vec<u8>) -> Recorded {
     let object: Value = serde_json::from_str(&text(path)).unwrap();
     let metadata = &object["metadata"];

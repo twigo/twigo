@@ -7,7 +7,6 @@ use common::{Recorded, recorded, secret};
 use twigo_helm::{Status, page, summary};
 use twigo_ipc::{ErrorCode, HelmPart};
 
-/// `configmaps/<file>.json`, whose `data.release` is Helm's string itself.
 fn config_map(file: &str) -> Recorded {
     recorded(&format!("configmaps/{file}.json"), |text| {
         text.as_bytes().to_vec()

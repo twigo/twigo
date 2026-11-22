@@ -15,7 +15,6 @@ use flate2::write::GzEncoder;
 use twigo_helm::{BOUND, Stored, page, summary};
 use twigo_ipc::ErrorCode;
 
-/// Counts the heap in use and its peak.
 struct Counting;
 
 static IN_USE: AtomicUsize = AtomicUsize::new(0);
@@ -43,7 +42,6 @@ static COUNTING: Counting = Counting;
 /// One measurement at a time, as the counters are the process's.
 static MEASURING: Mutex<()> = Mutex::new(());
 
-/// What `run` adds to the heap at its peak over what was in use before it.
 fn peak<T>(run: impl FnOnce() -> T) -> (T, usize) {
     let before = IN_USE.load(Ordering::Relaxed);
     PEAK.store(before, Ordering::Relaxed);
@@ -83,8 +81,6 @@ fn stored<'a>(
     }
 }
 
-/// A release whose chart carries a file of random bytes, as a chart that
-/// ships a binary does, and whose manifest holds 300 ConfigMaps and a Secret.
 fn near_the_limit() -> Vec<u8> {
     let mut state = 0x2545_f491_4f6c_dd1d_u64;
     let blob: Vec<u8> = (0..760_000)

@@ -83,7 +83,6 @@ struct Compared {
     manifest: ComparedRevisions,
 }
 
-/// What a Reveal of a place answers.
 #[derive(Serialize)]
 struct Revealed {
     part: HelmPart,
@@ -209,7 +208,6 @@ fn mocked(namespace: &str, name: &str, read: &[Read]) -> Mocked {
     }
 }
 
-/// Every place of a revision that a Reveal can name.
 fn places(page: &Page) -> Vec<HelmPart> {
     let mut parts = Vec::new();
     for defaults in [false, true] {
@@ -269,8 +267,6 @@ fn paths(value: &Value, path: &mut Vec<ValueStep>, each: &mut impl FnMut(&[Value
     }
 }
 
-/// Compares `json` with the file at `path` from the repository's root, which
-/// `TWIGO_UPDATE_HELM=1` rewrites.
 fn recorded_as(path: &str, json: &str) {
     let file = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -298,7 +294,6 @@ fn base64_forms(value: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// Every string of a masked values text is a mask, and no number is left.
 fn masked_only(value: &Value) -> bool {
     match value {
         Value::String(text) => {

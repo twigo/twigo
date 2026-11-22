@@ -324,8 +324,6 @@ fn two_revisions_compare_with_what_changed_marked() {
     }
 }
 
-/// The page of revision 1 of `release`, a release's JSON, stored as Helm
-/// stores it.
 fn built(release: &Json) -> Page {
     let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
     gzip.write_all(release.to_string().as_bytes()).unwrap();

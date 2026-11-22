@@ -28,7 +28,6 @@ fn revisions() -> impl Iterator<Item = (String, Page)> {
     })
 }
 
-/// The documents of a manifest as printed, cut where Helm cuts them.
 fn documents(manifest: &str) -> Vec<&str> {
     manifest
         .split("\n---\n")
