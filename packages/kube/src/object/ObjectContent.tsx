@@ -9,7 +9,7 @@ import {
 import { cn, EmptyState, LinkButton, Skeleton } from "@twigo/ui";
 import { ErrorMessage } from "@twigo/workbench";
 import { ViewStatus } from "../ViewStatus";
-import { objectProblem } from "../viewProblem";
+import { objectProblem, type ObjectProblem } from "../viewProblem";
 import { Manifest } from "../edit/Manifest";
 import { Events, Overview, type OverviewProps } from "./Overview";
 import type { PageStates } from "./pageStates";
@@ -62,7 +62,7 @@ export function ObjectContent({
    * The YAML tab of an object that has an edit, for when the object is gone
    * or cannot be read: the edit stays reachable, with why in its bar.
    */
-  kept?: (problem: { title: string; body: string }) => ReactNode;
+  kept?: (problem: ObjectProblem) => ReactNode;
   onOpen: (target: ObjectRef) => void;
   onLogs?: OverviewProps["onLogs"];
   onEvents: OverviewProps["onEvents"];
@@ -171,7 +171,7 @@ function Shown({
 }: {
   snapshot: ObjectSnapshot;
   has: boolean;
-  kept?: (problem: { title: string; body: string }) => ReactNode;
+  kept?: (problem: ObjectProblem) => ReactNode;
   onReopen: (() => void) | undefined;
   children: ReactNode;
 }) {

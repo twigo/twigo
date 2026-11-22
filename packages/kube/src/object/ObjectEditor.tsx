@@ -24,6 +24,7 @@ import type { Subject } from "../resourceActions";
 import { rowState } from "../rowState";
 import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
+import type { ObjectProblem } from "../viewProblem";
 import { ObjectContent } from "./ObjectContent";
 import { ObjectHeader } from "./ObjectHeader";
 import { noContainerRuns } from "./noContainerRuns";
@@ -318,7 +319,7 @@ function ObjectPage({
                 />
               )}
               {...(opened !== undefined && {
-                kept: (problem: { title: string; body: string }) => (
+                kept: (problem: ObjectProblem) => (
                   <YamlTab
                     edits={edits}
                     uri={uri}
@@ -326,6 +327,7 @@ function ObjectPage({
                     json={opened}
                     statusLocked={statusLocked}
                     gone={problem}
+                    onReopen={onReopen}
                   />
                 ),
               })}
