@@ -105,11 +105,8 @@ impl Core {
                 }
             }
         }
-        for space in self.state.spaces() {
-            name(&space.id, Kind::Context, &space.id);
-            for context in &space.contexts {
-                name(context, Kind::Context, context);
-            }
+        for context in self.state.spaces().iter().flat_map(|space| &space.contexts) {
+            name(context, Kind::Context, context);
         }
 
         let shell = self.shell_env.borrow().clone();
