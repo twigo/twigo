@@ -128,13 +128,20 @@ fn keep(dir: &Path, saved: &Saved) {
     state.flush().unwrap();
 }
 
+fn resolved() -> (
+    watch::Sender<twigo_env::Status>,
+    watch::Receiver<twigo_env::Status>,
+) {
+    watch::channel(twigo_env::Status::Resolved(Arc::new(ShellEnv::from_iter(
+        std::iter::empty::<(OsString, OsString)>(),
+    ))))
+}
+
 fn running(dir: &Path) -> Started {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     core.start_for_tests(followed, Some(kubeconfig))
 }
 
@@ -374,9 +381,7 @@ fn running_over(dir: &Path, api: &Api) -> Started {
     )
     .unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     core.start_for_tests(followed, Some(kubeconfig))
 }
 
@@ -1479,9 +1484,7 @@ async fn a_follower_that_came_before_the_restore_learns_of_the_forwards() {
     let (events, seen) = mpsc::channel();
     let before = core.follow_forwards("main", move |event| events.send(event).is_ok());
     assert!(before.is_empty());
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     let _duties = core.start_for_tests(followed, Some(kubeconfig));
 
     let mut learned = Vec::new();
@@ -2674,9 +2677,7 @@ async fn a_sign_in_that_gets_a_credential_proves_a_forward_failed_for_its_creden
         &dir.path().join("cache"),
         &dir.path().join("policy.json"),
     );
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     let _duties = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
@@ -2941,9 +2942,7 @@ async fn signing_in_to(dir: &Path, api: &Api, contexts: &[(&str, &str)]) -> Star
     )
     .unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     let review = core.review().await;
@@ -3051,9 +3050,7 @@ async fn given_up(dir: &Path, duty: &str) -> Arc<Core> {
     let kubeconfig = dir.join("config");
     std::fs::write(&kubeconfig, KUBECONFIG).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
-    let (_status, followed) = watch::channel(twigo_env::Status::Resolved(Arc::new(
-        ShellEnv::from_iter(std::iter::empty::<(OsString, OsString)>()),
-    )));
+    let (_status, followed) = resolved();
     let (told, mut fatal) = tokio::sync::mpsc::unbounded_channel();
     tokio::spawn(core.start(followed, Some(kubeconfig), None, move |why| {
         let _ = told.send(why);
