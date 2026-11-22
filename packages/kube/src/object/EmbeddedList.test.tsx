@@ -405,22 +405,28 @@ const PANICKED: ViewState = {
   },
 };
 
-test("a list that Twigo stopped offers Reopen beside Report…, and Reopen subscribes it anew", async () => {
+/** A backend whose first subscription of a list ends in `status`. */
+function endingOnce(status: ViewState) {
   const mock = createMockBackend("ready");
-  let subscribed = 0;
-  const backend: Backend = {
+  const backend = {
+    subscribed: 0,
     invoke: (command, request) => mock.invoke(command, request),
     subscribe: (command, request, onMessage) => {
       if (command !== "list_subscribe") {
         return mock.subscribe(command, request, onMessage);
       }
-      const stopped = ++subscribed === 1;
+      const ended = ++backend.subscribed === 1;
       return mock.subscribe(command, request, (batch) => {
         const list = batch as ListBatch;
-        onMessage(stopped ? { ...list, status: PANICKED } : list);
+        onMessage(ended ? { ...list, status } : list);
       });
     },
-  };
+  } satisfies Backend & { subscribed: number };
+  return backend;
+}
+
+test("a list that Twigo stopped offers Reopen beside Report…, and Reopen subscribes it anew", async () => {
+  const backend = endingOnce(PANICKED);
   await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
   await settle(12);
   expect(screen.getByText("This view stopped.")).toBeTruthy();
@@ -428,7 +434,19 @@ test("a list that Twigo stopped offers Reopen beside Report…, and Reopen subsc
   expect(screen.queryByRole("grid")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
   await settle(12);
-  expect(subscribed).toBe(2);
+  expect(backend.subscribed).toBe(2);
   expect(screen.getByRole("grid")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+});
+
+test("a list the server refuses offers no Reopen", async () => {
+  const backend = endingOnce({
+    state: "forbidden",
+    verb: "list",
+    resource: "pods",
+  });
+  await shown(NODE_PODS, vi.fn(), new OverviewStates(), backend);
+  await settle(12);
+  expect(screen.getByText("server.forbidden")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
 });
