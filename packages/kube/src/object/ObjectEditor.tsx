@@ -25,6 +25,7 @@ import { rowState } from "../rowState";
 import { parseObjectUri } from "../uri";
 import { useVisible } from "../useVisible";
 import type { ObjectProblem } from "../viewProblem";
+import { useReopen } from "../useReopen";
 import { ObjectContent } from "./ObjectContent";
 import { ObjectHeader } from "./ObjectHeader";
 import { noContainerRuns } from "./noContainerRuns";
@@ -58,16 +59,8 @@ import { Vitals } from "./Vitals";
  * one, while the Overview is shown in a visible window.
  */
 export function ObjectEditor(props: ObjectEditorProps) {
-  const [attempt, setAttempt] = useState(0);
-  return (
-    <ObjectPage
-      key={attempt}
-      {...props}
-      onReopen={() => {
-        setAttempt((n) => n + 1);
-      }}
-    />
-  );
+  const [key, reopen] = useReopen();
+  return <ObjectPage key={key} {...props} onReopen={reopen} />;
 }
 
 type ObjectEditorProps = EditorProps & {

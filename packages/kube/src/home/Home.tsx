@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { CircleX, Clock } from "lucide-react";
 import type { Gvr, Resource } from "@twigo/protocol";
 import {
@@ -23,6 +23,7 @@ import { PODS } from "../kinds";
 import type { ListServices } from "../services";
 import { recentRow } from "../quickaccess";
 import { StoppedActions } from "../StoppedActions";
+import { useReopen } from "../useReopen";
 import { listUri } from "../uri";
 import { exactly, podStatusWords, unit, type Attention } from "./attention";
 import { useTally, type Tally } from "./useTally";
@@ -43,16 +44,8 @@ const WARNING = "Warning";
  * and the keys that open things. Rust counts every list; none sends rows.
  */
 export function Home(props: { space: string; services: ListServices }) {
-  const [attempt, setAttempt] = useState(0);
-  return (
-    <HomeCounts
-      key={attempt}
-      {...props}
-      onReopen={() => {
-        setAttempt((n) => n + 1);
-      }}
-    />
-  );
+  const [key, reopen] = useReopen();
+  return <HomeCounts key={key} {...props} onReopen={reopen} />;
 }
 
 function HomeCounts({
