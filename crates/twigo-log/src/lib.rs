@@ -36,7 +36,7 @@ use std::sync::Once;
 #[cfg(feature = "test-util")]
 pub use capture::{Captured, capture};
 pub use facts::Facts;
-pub use panic::install_hook;
+pub use panic::{install_hook, panic_location};
 pub use repeats::Repeats;
 pub use rotating::{Failure, Limits, Rotating};
 pub use tracing::Level;
@@ -69,6 +69,7 @@ const LIMITS: Limits = Limits {
 /// `twigo.5.log`, 4 MiB at most each, mode 0600.
 pub struct Log {
     path: PathBuf,
+    facts: Facts,
     filter: reload::Handle<EnvFilter, Registry>,
 }
 
@@ -102,6 +103,7 @@ impl Log {
         }
         Self {
             path,
+            facts: facts.clone(),
             filter: handle,
         }
     }
@@ -109,6 +111,16 @@ impl Log {
     /// Where the current run's file is, whether it opened.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The facts of the run, which its first line holds.
+    pub fn facts(&self) -> &Facts {
+        &self.facts
+    }
+
+    /// The current run's file and the previous run's, which may not exist.
+    pub fn files(&self) -> [PathBuf; 2] {
+        [self.path.clone(), rotating::numbered(&self.path, 1)]
     }
 
     /// Twigo's own crates log from `level` up and the libraries from warn,

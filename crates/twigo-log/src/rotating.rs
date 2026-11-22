@@ -263,7 +263,7 @@ fn shift(path: &Path, kept: usize) -> io::Result<()> {
 }
 
 /// `<name>.<number>.<ext>`, and `path` itself for 0.
-fn numbered(path: &Path, number: usize) -> PathBuf {
+pub(crate) fn numbered(path: &Path, number: usize) -> PathBuf {
     match (number, path.extension()) {
         (0, _) => path.to_owned(),
         (_, None) => path.with_extension(number.to_string()),

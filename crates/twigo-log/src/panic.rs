@@ -40,6 +40,14 @@ pub fn install_hook(version: &'static str) {
     }));
 }
 
+/// Where a log line, parsed as JSON, says it panicked: `file:line:column`,
+/// none for a line that is no panic's record.
+pub fn panic_location(line: &Value) -> Option<&str> {
+    (line["target"] == module_path!() && line["fields"]["message"] == "panic")
+        .then(|| line["fields"]["location"].as_str())
+        .flatten()
+}
+
 pub(crate) fn open(log: &Rotating) {
     // A second log in one process keeps the first as the hook's.
     let _ = LOG.set(log.clone());
