@@ -1643,6 +1643,7 @@ Every long operation reports progress from Rust: drain, apply, Helm, provider "C
 A command's run tells how it goes over the channel of `command_execute` (5.1).
 The status bar shows a run that waits, as for a deleted namespace to go, until it ends, and a click stops the wait; a toast says how it ended, and an error waits to be read.
 An action with an undo ends in a toast that offers it for as long as it lasts, a bar running down under it, and ⌘Z in the list does the same (6.4).
+A toast has one button beside Dismiss, and `more` after it where a message comes with several ways to go on, as a problem of Twigo's own files does (4.10); `notify.dismiss(key)` takes a toast away by its key, as a kubeconfig file's warning goes when the file reads well again.
 
 ### 4.8 Settings and state
 
@@ -1852,12 +1853,14 @@ What a person needs when something goes wrong, and what a bug report holds, star
   `TWIGO_LOG` sets it at start, in `EnvFilter`'s syntax ([tracing-subscriber](https://docs.rs/tracing-subscriber/0.3.23/tracing_subscriber/filter/struct.EnvFilter.html)); it replaces the whole default, so `TWIGO_LOG=warn` is warnings only, Twigo's own crates included, and the first line of the run, which holds its facts, is written whatever it says.
   A value that is not a filter is said in the log and the default applies.
   **Set Log Level…** raises Twigo's own crates to info, debug or trace while the libraries stay at warn, until Twigo quits; it swaps the filter at run time and logs the change.
-  `log_level_set` is its command, and no menu entry calls it yet.
+  Set Log Level… (category Help in the palette, and macOS's Help menu) is a quick pick of the three, which says that the choice lasts until Twigo quits, and sends the one picked through `log_level_set`.
 - **Reveal Log File.**
-  `log_reveal` shows the current file in the system's file manager, and no menu entry calls it yet.
+  `log_reveal` shows the current file in the system's file manager; Reveal Log File (Help) and the report dialog call it.
   Rust calls the opener plugin, so the webview holds no permission of the plugin's own, as with `url_open`.
 - **The webview.**
-  Its errors reach the log through one command, `diagnostics_log`, with the window's label, as events of the target `twigo::webview`; the webview does not call it yet.
+  Its errors reach the log through one command, `diagnostics_log`, with the window's label, as events of the target `twigo::webview`.
+  `apps/desktop/src/main.tsx` sends what the page's `error` and `unhandledrejection` events and the React root's `onCaughtError`, `onUncaughtError` and `onRecoverableError` report, and a failure to start, each with the message, the stack and what caught it.
+  An `IpcError` goes by its code alone, since its message can quote what the API server said of a request; the same message and stack are sent once, and the count reaches the log each time it doubles.
 - **The panic hook.**
   `twigo-log` installs it first in `main`, after the `--dump-env` copy has returned, since that copy never opens the log.
   A panic writes one record in the log's own shape: the time, the thread's name, the tokio task's id where the panic is in one, the location, the message, a backtrace and Twigo's version.
@@ -1879,12 +1882,13 @@ What a person needs when something goes wrong, and what a bug report holds, star
   Each is reported where it is logged, with Twigo's words and no path or value; a report of a code replaces its last.
 - `problems_watch` answers the list and sends it again on every change.
   The list is the run's, not a window's: the files are read before any core exists, and the crates that fail do not know one.
+  The window follows it from the start, and raises one notification the first time each code is listed, in Rust's words, which say what it means for the person, with Reveal Log File and Report… beside Dismiss (4.7); a code listed again, with other words, raises none.
 - The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
 
 #### Report a Problem
 
 What a bug report holds, and how it leaves the machine, is Rust's to decide, since only Rust has the log as it was written.
-`report_problem`, `report_open_issue` and `report_save` are its commands, in `twigo-core`'s `report` module; no dialog or menu entry calls them yet.
+`report_problem`, `report_open_issue` and `report_save` are its commands, in `twigo-core`'s `report` module; Report a Problem… (Help) opens the dialog that calls them.
 
 - **What it holds.**
   - Facts, each with an id, a label and a value: Twigo's version and commit, the OS and its version, the architecture, the web engine and its version, the Kubernetes versions of the clusters this run asked, without their names, and the place (`file:line`) of the newest panic of this run or the previous one.
@@ -1913,6 +1917,21 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   `.github/ISSUE_TEMPLATE/bug_report.yml` has one `environment` textarea, which the link fills, a `logs` textarea that says to paste what Twigo copied, an optional `upload` field for a saved report, and never asks for a kubeconfig.
   A Rust test fails if the `environment` field is gone or renamed.
   An issue is public, so the dialog tells the person to read the text first.
+- **The dialog.**
+  A window-level dialog beside the trust dialog and the approvals (`packages/workbench/src/parts/Shell.tsx`), not an editor, so it opens with no space.
+  `ProblemReport` asks Rust for the report when it opens, and the dialog shows it until it closes.
+  - The issue's facts are read-only, with a tick on those the person may leave out.
+  - The log is one editable monospace field, with a line that says how much the redaction hid (`Twigo hid 6 names, 2 paths and 1 token; read it before you paste`) and Reveal Log File beside it.
+  - It says that the issue is public, that nothing leaves the computer until the person chooses and that Twigo itself sends nothing, and links GitHub's private reporting of a vulnerability for a security problem (`SECURITY.md`).
+  - Open Issue on GitHub writes the log as the person sees it to the clipboard in its click handler, before `report_open_issue`, since WKWebView may not allow the write after an IPC round trip (not verified); then the dialog closes with a toast that says where to paste the log and what the link had to cut.
+    Save… sends `report_save` the text of the facts left ticked above the log, and Copy puts the same text on the clipboard.
+  - A failure of any of them shows its error in the dialog with its code, as every error does (3.7).
+
+#### When Twigo's own code stops an item
+
+A list, an object page, a logs tab, a shell, a terminal or a forward whose task panicked ends with `internal.panic` (2.1), and its view says so in one wording, which `INTERNAL_ERROR` in `packages/workbench/src/internalError.ts` keeps: "Twigo hit an internal error" and what stopped (`This view stopped.`; a shell's or terminal's scrollback says that this shell stopped).
+It shows the code as every error does, keeps Rust's own message (`Twigo stopped this list on an internal error`) in Copy details, and offers Report…, which opens the report dialog.
+Reopen is offered where the view can open again: a list and an object page subscribe anew, and a shell or a terminal starts a new session, which it cannot resume; a forward is started again by Start, and a logs tab has no way of its own.
 
 ## 5. Commands, keybindings and extensions
 
