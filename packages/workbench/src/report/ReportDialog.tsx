@@ -165,6 +165,28 @@ function Body({ report }: { report: Report }) {
         below. Nothing leaves this computer until you choose, and Twigo itself
         sends nothing.
       </DialogDescription>
+      {cut !== undefined && (
+        <div role="status" className="mt-3">
+          <Callout tone="warn" title={cut}>
+            <p className="text-xs text-support">
+              Paste the log first, then copy your description here and paste the
+              rest of it into Description.
+            </p>
+            <div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  copy("description", description.trim());
+                }}
+              >
+                {copied === "description" ? "Copied" : "Copy description"}
+              </Button>
+            </div>
+          </Callout>
+        </div>
+      )}
       <div className="mt-3 grid min-h-0 flex-1 gap-3 overflow-auto pr-1">
         {shape === "compose" && (
           <div className="grid gap-1.5">
@@ -231,28 +253,6 @@ function Body({ report }: { report: Report }) {
           />
           <p className="text-xs text-quiet">{hiddenWords(report.hidden)}</p>
         </section>
-        {cut !== undefined && (
-          <div role="status">
-            <Callout tone="warn" title={cut}>
-              <p className="text-xs text-support">
-                Paste the log first, then copy your description here and paste
-                the rest of it into Description.
-              </p>
-              <div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    copy("description", description.trim());
-                  }}
-                >
-                  {copied === "description" ? "Copied" : "Copy description"}
-                </Button>
-              </div>
-            </Callout>
-          </div>
-        )}
         {error && (
           <div role="alert">
             <Callout tone="error" title={<ErrorMessage error={error} />} />
