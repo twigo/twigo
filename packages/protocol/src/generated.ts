@@ -1249,7 +1249,7 @@ export type Mode = "read-write" | "guarded" | "read-only";
 /**
  * Where a context's mode comes from, highest first (ARCHITECTURE 6.4).
  */
-export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user", overrides: Lock | null, } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "unmarked" };
+export type ModeSource = { "kind": "policyFile", file: string, pattern: string | null, reason?: string, } | { "kind": "unlisted" } | { "kind": "moved" } | { "kind": "user", overrides: Lock | null, } | { "kind": "kubeconfig" } | { "kind": "provider" } | { "kind": "environment", environment: Environment, } | { "kind": "unmarked" };
 
 /**
  * A terminal to start for `context`.
@@ -2038,6 +2038,7 @@ export type Commands = {
   keyboard_layout_watch: { request: null; response: KeyboardLayout; message: KeyboardLayout };
   state_load: { request: null; response: StateSnapshot; message: null };
   state_set: { request: Array<StateEntry>; response: null; message: null };
+  problems_watch: { request: null; response: Array<IpcError>; message: Array<IpcError> };
   shell_environment_watch: { request: null; response: ShellEnvironment; message: ShellEnvironment };
   shell_environment_retry: { request: null; response: null; message: null };
   context_auth_watch: { request: string; response: ContextAuth; message: ContextAuth };

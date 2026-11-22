@@ -16,8 +16,11 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, Blocked, ContextAccess, Friction, Mode, ModeSource, RequestClass};
-use twigo_log::{Failure, Limits, Rotating};
+use twigo_ipc::{
+    BlockReason, Blocked, ContextAccess, ErrorCode, Friction, IpcError, Mode, ModeSource,
+    RequestClass,
+};
+use twigo_log::{Failure, Limits, Rotating, problems};
 
 use crate::{Actor, Attributes, Change, Refused};
 
@@ -185,6 +188,10 @@ struct Line<'a> {
 /// launched app's stderr reaches nobody.
 fn unrecorded(failure: &Failure<'_>) {
     tracing::error!(path = %failure.path.display(), error = %failure.error, "the audit log {}", failure.what);
+    problems::report(IpcError::new(
+        ErrorCode::AuditUnwritten,
+        "The audit log could not be written, so some of what Twigo sent to a cluster is not recorded",
+    ));
 }
 
 impl Audit {
@@ -196,6 +203,10 @@ impl Audit {
             Ok(log) => Self { log: Some(log) },
             Err(error) => {
                 tracing::error!(path = %path.display(), %error, "the audit log cannot be opened, so nothing is recorded");
+                problems::report(IpcError::new(
+                    ErrorCode::AuditOff,
+                    "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+                ));
                 Self::off()
             }
         }
@@ -283,6 +294,23 @@ mod tests {
         assert!(written.contains(r#""event":"ended""#), "{written}");
     }
 
+    fn listed(code: ErrorCode) -> bool {
+        problems::watch()
+            .borrow()
+            .iter()
+            .any(|problem| problem.code == code)
+    }
+
+    #[test]
+    fn a_log_that_cannot_open_is_a_problem_the_window_is_told() {
+        let home = tempfile::tempdir().unwrap();
+        let blocked = home.path().join("blocked");
+        std::fs::write(&blocked, "").unwrap();
+        problems::clear(ErrorCode::AuditOff);
+        Audit::open(&blocked.join("audit.jsonl"));
+        assert!(listed(ErrorCode::AuditOff));
+    }
+
     #[test]
     fn a_log_that_cannot_move_aside_says_so_in_the_diagnostics_log_at_error() {
         let home = tempfile::tempdir().unwrap();
@@ -294,6 +322,7 @@ mod tests {
         std::fs::write(oldest.join("kept"), "").unwrap();
 
         let events = twigo_log::capture();
+        problems::clear(ErrorCode::AuditUnwritten);
         Audit::open(&path).record(&Entry::Ended {
             context: "kind-a",
             command: "apply",
@@ -301,6 +330,7 @@ mod tests {
             outcome: "done",
             message: "",
         });
+        assert!(listed(ErrorCode::AuditUnwritten));
 
         let [event] = &events.lines()[..] else {
             panic!("one event: {:?}", events.lines());

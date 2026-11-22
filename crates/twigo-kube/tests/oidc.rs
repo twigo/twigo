@@ -22,7 +22,9 @@ use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio_rustls::TlsAcceptor;
 use twigo_env::ShellEnv;
+use twigo_ipc::ErrorCode;
 use twigo_kube::credentials::{Oidc, OidcEntry, OidcError, Registry, Timeouts};
+use twigo_log::problems;
 
 /// A JWT whose `exp` is `from_now` away; its signature goes unchecked.
 fn jwt(from_now: SignedDuration, n: u32) -> String {
@@ -362,7 +364,15 @@ async fn a_held_lock_keeps_the_new_tokens_in_memory_and_the_file_as_it_was() {
     let before = kubeconfig(&issuer, &jwt(SignedDuration::from_secs(-60), 0), Some("r1"));
     let setup = setup(&before);
     std::fs::write(lock(&setup.file), "").unwrap();
+    problems::clear(ErrorCode::TokensUnsaved);
     let refreshed = token(&setup.oidc.credential().await.unwrap());
+    assert!(
+        problems::watch()
+            .borrow()
+            .iter()
+            .any(|problem| problem.code == ErrorCode::TokensUnsaved),
+        "the next start would ask to sign in again, which the person should know"
+    );
     assert_eq!(std::fs::read_to_string(&setup.file).unwrap(), before);
     assert!(lock(&setup.file).exists(), "another writer's lock stays");
     assert_eq!(token(&setup.oidc.credential().await.unwrap()), refreshed);

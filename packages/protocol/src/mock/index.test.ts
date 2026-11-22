@@ -116,6 +116,27 @@ test("lists the spaces, and the catalog colours their contexts", async () => {
   ]);
 });
 
+test("no problem of Twigo's own files is listed, but under the problems scenario the state set aside and the audit log off", async () => {
+  const none = createMockBackend().subscribe(
+    "problems_watch",
+    null,
+    () => undefined,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect(await none).toEqual([]);
+
+  const listed = createMockBackend("problems").subscribe(
+    "problems_watch",
+    null,
+    () => undefined,
+  );
+  await vi.advanceTimersByTimeAsync(0);
+  expect((await listed).map((problem) => problem.code)).toEqual([
+    "state.set-aside",
+    "audit.off",
+  ]);
+});
+
 test("a context's mode follows the strictest of its locks, a choice over them, and an unlock that ends by itself, and a context nothing marks is unmarked", async () => {
   const backend = createMockBackend();
   const seen: Context[][] = [];

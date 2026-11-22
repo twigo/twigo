@@ -851,7 +851,7 @@ impl Policy {
             return Ok(());
         }
         match self.file.mode(context) {
-            Some((_, ModeSource::PolicyFile { file, pattern })) => Err(match pattern {
+            Some((_, ModeSource::PolicyFile { file, pattern, .. })) => Err(match pattern {
                 Some(pattern) => Refused::PolicyFile(pattern, file),
                 None => Refused::PolicyFileUnreadable(file),
             }),

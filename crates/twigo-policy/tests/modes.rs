@@ -321,6 +321,41 @@ fn a_policy_file_that_cannot_be_read_locks_every_context_and_says_so() {
     }
 }
 
+/// Why the policy file at `path` cannot be read, as the window is told.
+fn reason_of(file: PolicyFile) -> String {
+    let policy = Policy::new(file, |_| Some(NOTHING), Choices::default(), Audit::off());
+    match policy.access("anything").source {
+        ModeSource::PolicyFile {
+            pattern: None,
+            reason: Some(reason),
+            ..
+        } => reason,
+        other => panic!("a file that cannot be read says why: {other:?}"),
+    }
+}
+
+#[test]
+fn a_policy_file_that_cannot_be_read_says_why_by_its_place_and_quotes_none_of_its_words() {
+    let (_dir, truncated) = file(r#"{"contexts": {"prod-*": "read-only""#);
+    assert_eq!(
+        reason_of(truncated),
+        "it ends too early at line 1, column 35"
+    );
+    let (_dir, unknown) = file("{\n  \"confidential-name\": true\n}");
+    let said = reason_of(unknown);
+    assert_eq!(
+        said,
+        "it says something the policy file does not at line 2, column 21"
+    );
+    let (_dir, glob) = file(r#"{"contexts": {"prod-[": "read-only"}}"#);
+    assert_eq!(
+        reason_of(glob),
+        "a context pattern is not a glob, near its character 5"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(reason_of(PolicyFile::read(dir.path())), "is a directory");
+}
+
 #[test]
 fn the_policy_file_has_terminals_of_the_contexts_it_names_use_the_proxy() {
     let (_dir, proxied) = file(r#"{"terminal": {"usePolicyProxy": ["prod-*", "arn:aws:eks:*"]}}"#);

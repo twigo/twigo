@@ -158,7 +158,8 @@ type ListScenario = "live" | ViewState["state"];
  * or while port-forwards are busy, lose their pod, fail, queue, come back
  * from an earlier run or are forbidden (`forwardBusy` and the like), or
  * while the context's Metrics API is not served, does not answer or refuses
- * the person (`metricsNone` and the like).
+ * the person (`metricsNone` and the like), or `problems`: live lists while
+ * Twigo's saved state was set aside and its audit log cannot open.
  */
 export type MockScenario =
   | ListScenario
@@ -169,6 +170,7 @@ export type MockScenario =
   | "rbacTypedNamespaces"
   | "partsQueued"
   | "protection"
+  | "problems"
   | AuthScenario
   | EditScenario
   | ShellScenario
@@ -186,6 +188,7 @@ export const MOCK_SCENARIOS: readonly MockScenario[] = [
   "rbacTypedNamespaces",
   "partsQueued",
   "protection",
+  "problems",
   ...AUTH_SCENARIOS,
   ...EDIT_SCENARIOS,
   ...SHELL_SCENARIOS,
@@ -222,6 +225,22 @@ const LAYOUTS: Readonly<Record<MockLayout, KeyboardLayout>> = {
   french,
   dvorak,
 };
+
+/** What Rust lists when the state file was set aside and the audit log cannot open, in its words. */
+const PROBLEMS = [
+  wireError(
+    new IpcError(
+      "state.set-aside",
+      "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+    ),
+  ),
+  wireError(
+    new IpcError(
+      "audit.off",
+      "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+    ),
+  ),
+];
 
 /** What twigo-env reported for a `.zshrc` of `echo "Loading nvm…"; sleep 60` (2026-11-01). */
 const SHELL_TIMEOUT: ShellEnvironment = {
@@ -263,6 +282,7 @@ export function createMockBackend(
     scenario === "rbacTypedNamespaces" ||
     scenario === "partsQueued" ||
     scenario === "protection" ||
+    scenario === "problems" ||
     isAuthScenario(scenario) ||
     isEditScenario(scenario) ||
     isShellScenario(scenario) ||
@@ -940,6 +960,7 @@ export function createMockBackend(
     kubeconfig_offers_watch: (_request, onMessage) => offers.watch(onMessage),
     command_execute: (request, onMessage) => bus.execute(request, onMessage),
     contexts_watch: (_request, onMessage) => access.watch(onMessage),
+    problems_watch: () => (scenario === "problems" ? PROBLEMS : []),
     resources_watch: (id, onMessage) => {
       space(id);
       const send = () => {

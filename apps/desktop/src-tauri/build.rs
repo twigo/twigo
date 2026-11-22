@@ -4,6 +4,7 @@ fn main() {
         "shell_environment_watch",
         "shell_environment_retry",
         "contexts_watch",
+        "problems_watch",
         "context_relock",
         "command_plan",
         "command_execute",

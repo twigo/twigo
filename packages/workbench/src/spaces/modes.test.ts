@@ -90,6 +90,16 @@ test("each source is named in words", () => {
       pattern: null,
     }),
   ).toContain("cannot be read");
+  expect(
+    describeSource({
+      kind: "policyFile",
+      file: "/etc/twigo/policy.json",
+      pattern: null,
+      reason: "it is not JSON at line 3, column 1",
+    }),
+  ).toBe(
+    "/etc/twigo/policy.json cannot be read (it is not JSON at line 3, column 1), so every context is read-only until an admin fixes it and Twigo restarts.",
+  );
   expect(describeSource({ kind: "user", overrides: null })).toBe(
     "You set this.",
   );

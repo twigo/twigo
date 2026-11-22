@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 
 use glob::{MatchOptions, Pattern};
 use serde::Deserialize;
+use serde_json::error::Category;
 use twigo_ipc::{Mode, ModeSource};
 
 /// A key nothing reads would be a lock that does not hold, so an unknown one
@@ -73,8 +74,9 @@ enum State {
         proxied: Vec<Pattern>,
     },
     /// The admin meant something the file does not say, so every context is
-    /// `read-only` until it reads again.
-    Unreadable,
+    /// `read-only` until it reads again. The reason names no word of the
+    /// file, only where it does not parse or what failed to read it.
+    Unreadable(String),
 }
 
 impl Default for State {
@@ -108,30 +110,46 @@ impl PolicyFile {
                     state: State::default(),
                 };
             }
-            Err(error) => {
-                tracing::error!(path = %file, %error, "could not read the policy file, so every context is read-only");
-                return Self {
-                    file,
-                    state: State::Unreadable,
-                };
-            }
+            Err(error) => return Self::unreadable(file, error.kind().to_string()),
         };
         match Self::parse(&text) {
             Ok(state) => Self { file, state },
-            Err(error) => {
-                tracing::error!(path = %file, %error, "could not read the policy file, so every context is read-only");
-                Self {
-                    file,
-                    state: State::Unreadable,
-                }
-            }
+            Err(reason) => Self::unreadable(file, reason),
         }
     }
 
+    fn unreadable(file: String, reason: String) -> Self {
+        tracing::error!(path = %file, %reason, "could not read the policy file, so every context is read-only");
+        Self {
+            file,
+            state: State::Unreadable(reason),
+        }
+    }
+
+    /// The state the text sets, or why it cannot: where it does not parse,
+    /// since the file's own words may name what the admin keeps private.
     fn parse(text: &str) -> Result<State, String> {
-        let shape: Shape = serde_json::from_str(text).map_err(|error| error.to_string())?;
-        let glob =
-            |pattern: &str| Pattern::new(pattern).map_err(|error| format!("{pattern}: {error}"));
+        let shape: Shape = serde_json::from_str(text).map_err(|error| {
+            let what = match error.classify() {
+                Category::Io => "cannot be read",
+                Category::Syntax => "is not JSON",
+                Category::Data => "says something the policy file does not",
+                Category::Eof => "ends too early",
+            };
+            format!(
+                "it {what} at line {}, column {}",
+                error.line(),
+                error.column()
+            )
+        })?;
+        let glob = |pattern: &str| {
+            Pattern::new(pattern).map_err(|error| {
+                format!(
+                    "a context pattern is not a glob, near its character {}",
+                    error.pos
+                )
+            })
+        };
         let mut entries = Vec::with_capacity(shape.contexts.len());
         for (pattern, mode) in shape.contexts {
             entries.push((glob(&pattern)?, mode));
@@ -154,12 +172,13 @@ impl PolicyFile {
     pub(crate) fn mode(&self, context: &str) -> Option<(Mode, ModeSource)> {
         let entries = match &self.state {
             State::Read { entries, .. } => entries,
-            State::Unreadable => {
+            State::Unreadable(reason) => {
                 return Some((
                     Mode::ReadOnly,
                     ModeSource::PolicyFile {
                         file: self.file.clone(),
                         pattern: None,
+                        reason: Some(reason.clone()),
                     },
                 ));
             }
@@ -174,6 +193,7 @@ impl PolicyFile {
                     ModeSource::PolicyFile {
                         file: self.file.clone(),
                         pattern: Some(pattern.as_str().to_owned()),
+                        reason: None,
                     },
                 )
             })
@@ -184,7 +204,7 @@ impl PolicyFile {
             State::Read {
                 allow_port_forward, ..
             } => *allow_port_forward,
-            State::Unreadable => false,
+            State::Unreadable(_) => false,
         }
     }
 
@@ -193,7 +213,7 @@ impl PolicyFile {
     pub(crate) fn uses_policy_proxy(&self, context: &str) -> bool {
         match &self.state {
             State::Read { proxied, .. } => proxied.iter().any(|pattern| matches(pattern, context)),
-            State::Unreadable => true,
+            State::Unreadable(_) => true,
         }
     }
 }

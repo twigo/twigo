@@ -6210,6 +6210,7 @@ dependencies = [
  "tracing",
  "tracing-log",
  "tracing-subscriber",
+ "twigo-ipc",
 ]
 
 [[package]]

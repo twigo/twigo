@@ -153,6 +153,7 @@ struct App {
     core: Arc<Core>,
     supervisor: JoinHandle<()>,
     contexts: Followers,
+    problems: Followers,
     auth: Followers,
     resources: Followers,
     /// The labels of the windows that have the focus, which moves from one
@@ -164,7 +165,7 @@ impl App {
     /// A window is gone: its subscriptions and its followers end with it.
     fn close(&self, window: &str) {
         self.core.drop_window(window);
-        for followers in [&self.contexts, &self.auth, &self.resources] {
+        for followers in [&self.contexts, &self.problems, &self.auth, &self.resources] {
             followers.remove(window);
         }
     }
@@ -178,6 +179,26 @@ impl App {
         }
         self.core.set_focused(!windows.is_empty());
     }
+}
+
+#[tauri::command]
+fn problems_watch(
+    webview: Webview,
+    app: State<'_, App>,
+    channel: Channel<Vec<IpcError>>,
+) -> Vec<IpcError> {
+    let mut problems = twigo_log::problems::watch();
+    let current = problems.borrow_and_update().clone();
+    let follower = tauri::async_runtime::spawn(async move {
+        while problems.changed().await.is_ok() {
+            let next = problems.borrow_and_update().clone();
+            if !sent("the problems", channel.send(next)) {
+                return;
+            }
+        }
+    });
+    app.problems.replace(&webview, follower);
+    current
 }
 
 #[tauri::command]
@@ -895,6 +916,7 @@ fn main() {
                     core,
                     supervisor,
                     contexts: Followers::default(),
+                    problems: Followers::default(),
                     auth: Followers::default(),
                     resources: Followers::default(),
                     focused: Mutex::default(),
@@ -912,6 +934,7 @@ fn main() {
                 shell_environment_watch,
                 shell_environment_retry,
                 contexts_watch,
+                problems_watch,
                 context_relock,
                 command_plan,
                 command_execute,
