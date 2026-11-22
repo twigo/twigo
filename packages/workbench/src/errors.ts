@@ -8,7 +8,6 @@ export interface ErrorLike {
   readonly server?: ServerStatus | undefined;
 }
 
-/** What Copy details puts on the clipboard: the code, the message, and what the API server said beside them. */
 export function errorDetails({ code, message, server }: ErrorLike): string {
   const lines = [`Code: ${code}`, `Message: ${message}`];
   if (server) {

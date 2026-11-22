@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { ViewState } from "@twigo/protocol";
+import { INITIAL_OBJECT, type ViewState } from "@twigo/protocol";
+import { ObjectContent } from "./object/ObjectContent";
+import { PageStates } from "./object/pageStates";
 import { ViewStatus } from "./ViewStatus";
 import { ending } from "./xterm/words";
 
@@ -61,4 +63,27 @@ test("code:line: a refusal that is no error of the server's has its code too, an
     error: { code: "server.forbidden", kind: "forbidden", message: "no exec" },
   });
   expect([title, detail]).toEqual(["no exec", "server.forbidden"]);
+});
+
+test("code:line: an object that cannot be read says its code under the message too", () => {
+  const { error } = REFUSED as Extract<ViewState, { state: "error" }>;
+  render(
+    <ObjectContent
+      pages={new PageStates()}
+      uri="k8s://test"
+      object="a"
+      tab="yaml"
+      space="dev"
+      states={{} as never}
+      kind="apps/deployments"
+      snapshot={{ ...INITIAL_OBJECT, status: { state: "error", error } }}
+      values={{} as never}
+      yaml={() => <p>the live editor</p>}
+      onOpen={() => undefined}
+      onEvents={() => undefined}
+    />,
+  );
+  expect(screen.getByText("Could not load the object")).toBeTruthy();
+  expect(screen.getByText("Pod web is invalid")).toBeTruthy();
+  expect(screen.getByText("server.invalid")).toBeTruthy();
 });

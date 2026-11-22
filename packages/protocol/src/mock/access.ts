@@ -190,7 +190,6 @@ export class MockAccess {
     this.#changed.set(name, (this.#changed.get(name) ?? 0) + 1);
   }
 
-  /** Whether a source lists the context. */
   has(name: string): boolean {
     return this.listed.contexts.some((context) => context.name === name);
   }

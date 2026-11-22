@@ -36,7 +36,7 @@ function error(
   return wireError(new IpcError(code, message, undefined, server));
 }
 
-/** The pinned state of each cause scenario's lists, in the words Rust gives each cause (`research/errors.md`). */
+/** The pinned state of each cause scenario's lists, with the cause in Twigo's sentence and the failure's own words, as the core words it. */
 export const CAUSED: Readonly<Record<CauseScenario, ViewState>> = {
   connectRefused: {
     state: "connecting",
@@ -131,7 +131,6 @@ const WITHOUT_USER: Context = {
   ),
 };
 
-/** What the catalog lists in a scenario: the fixtures' contexts, and what it could not read. */
 export function catalogOf(scenario: string): Catalog {
   if (scenario === "kubeconfigAllFailed") {
     return { contexts: [], failures: [...FAILED_FILES] };

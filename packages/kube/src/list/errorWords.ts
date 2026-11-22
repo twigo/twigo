@@ -6,7 +6,6 @@ export interface Failure {
   readonly server?: ServerStatus | undefined;
 }
 
-/** What a cluster that does not answer says in a few words, by what kept it from answering. */
 const CAUSES: Partial<Record<ErrorCode, string>> = {
   "connect.refused": "connection refused",
   "connect.unresolved": "name does not resolve",
@@ -18,7 +17,6 @@ const CAUSES: Partial<Record<ErrorCode, string>> = {
   "connect.other": "unreachable",
 };
 
-/** The reason the API server gave, none where it gave none. */
 function reasonOf(server: ServerStatus | undefined): string | undefined {
   return server?.reason === "" ? undefined : server?.reason;
 }
