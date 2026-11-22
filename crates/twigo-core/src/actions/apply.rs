@@ -34,12 +34,9 @@
 //! Deployment controller's revision annotation, and it rebuilds from what
 //! the server holds now.
 
-use std::collections::BTreeSet;
 use std::sync::Weak;
 use std::time::Duration;
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use http::Method;
 use http::header::WARNING;
 use http_body_util::BodyExt;
@@ -62,7 +59,7 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{Field, entries, for_view, is_mask, whole_tokens_replaced};
+use twigo_policy::redact::{entries, for_view, is_mask, scrub, scrubbed, secret_values};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
@@ -71,9 +68,6 @@ use super::{
 };
 use crate::Core;
 use crate::bus::{self, Finished, Planned, Previewed, Progress};
-
-/// What takes the place of a value in a message.
-const HIDDEN: &str = "<hidden>";
 
 /// What a preview prepared, sent by the plan of its id.
 pub(crate) struct Prepared {
@@ -236,98 +230,6 @@ fn strict_refusal(message: &str) -> Option<&str> {
 fn invalid_body(message: &str) -> bool {
     message.starts_with("failed to create typed patch object")
         || message.starts_with("failed to convert new object")
-}
-
-/// Takes every value in `secrets` out of `text`, where it stands as a whole
-/// token, so that a short value does not garble the words around it. For a
-/// Secret the patched object a refusal quotes goes whole, as no token matches
-/// what the server wrote of its values: JSON, HTML characters escaped, quoted
-/// again as a string ([`applyPatchToCurrentObject`]'s `field.Invalid`).
-///
-/// [`applyPatchToCurrentObject`]: https://github.com/kubernetes/kubernetes/blob/v1.37.0/staging/src/k8s.io/apiserver/pkg/endpoints/handlers/patch.go#L356-L358
-fn scrub(text: &str, secrets: &[String]) -> String {
-    let text = if secrets.is_empty() {
-        text.to_owned()
-    } else {
-        without_quoted_object(text)
-    };
-    whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
-}
-
-/// `text` with the object of a `patch: Invalid value: "…"` left out.
-fn without_quoted_object(text: &str) -> String {
-    const OPENING: &str = "patch: Invalid value: \"";
-    let Some(start) = text.find(OPENING).map(|at| at + OPENING.len()) else {
-        return text.to_owned();
-    };
-    let mut escaped = false;
-    for (index, c) in text[start..].char_indices() {
-        match c {
-            _ if escaped => escaped = false,
-            '\\' => escaped = true,
-            '"' => {
-                return format!(
-                    "{}{HIDDEN}{}",
-                    &text[..start - 1],
-                    &text[start + index + 1..]
-                );
-            }
-            _ => {}
-        }
-    }
-    text.to_owned()
-}
-
-/// `error` with its message scrubbed of `secrets`; for a Secret the causes
-/// keep only their reason and field, as each cause's message quotes the
-/// patched object in a spelling no value matches: the object's JSON, HTML
-/// characters escaped, quoted again as a string ([`NewInvalid`] writes a
-/// cause's `ErrorBody()` and the message's `Error()`, which `scrub` cuts
-/// only at `patch: Invalid value: "`).
-///
-/// [`NewInvalid`]: https://github.com/kubernetes/kubernetes/blob/v1.37.2/staging/src/k8s.io/apimachinery/pkg/api/errors/errors.go#L284-L312
-fn scrubbed(mut error: IpcError, secrets: &[String]) -> IpcError {
-    error.message = scrub(&error.message, secrets);
-    if !secrets.is_empty() {
-        for cause in error
-            .server
-            .iter_mut()
-            .flat_map(|server| &mut server.causes)
-        {
-            cause.message.clear();
-        }
-    }
-    error
-}
-
-/// Every value of a Secret's `data` and `stringData` in `objects`, encoded
-/// and decoded, the longest first, so that what a refusal echoes is covered
-/// before any answer shows how the server stored it; empty for any other
-/// kind.
-fn secret_values(objects: &[&Value]) -> Vec<String> {
-    let mut values = BTreeSet::new();
-    for entry in objects.iter().flat_map(|object| entries(object)) {
-        let Some(text) = entry.value.as_str().filter(|text| !text.is_empty()) else {
-            continue;
-        };
-        values.insert(text.to_owned());
-        match entry.field {
-            Field::StringData => {
-                values.insert(STANDARD.encode(text));
-            }
-            Field::Data => {
-                if let Ok(bytes) = STANDARD.decode(text) {
-                    values.insert(String::from_utf8_lossy(&bytes).into_owned());
-                }
-            }
-        }
-    }
-    let mut values: Vec<String> = values
-        .into_iter()
-        .filter(|value| !value.is_empty())
-        .collect();
-    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
-    values
 }
 
 /// Adds what a dry-run's answer holds, known only after it: a warning may
@@ -1874,6 +1776,7 @@ mod tests {
     use serde_json::json;
     use twigo_ipc::ResourceRef;
     use twigo_kube::client::Budgets;
+    use twigo_policy::redact::HIDDEN;
 
     use super::*;
 
@@ -2152,35 +2055,6 @@ mod tests {
     }
 
     #[test]
-    fn scrubbing_takes_a_value_only_as_a_whole_token() {
-        let secrets = vec!["a".to_owned(), "hunter2".to_owned(), "x=".to_owned()];
-        assert_eq!(
-            scrub("a a-bcd spat a_b ahunter2 hunter2 at x= cx=", &secrets),
-            format!("{HIDDEN} {HIDDEN}-bcd spat a_b ahunter2 {HIDDEN} at {HIDDEN} cx=")
-        );
-    }
-
-    #[test]
-    fn a_refusal_that_quotes_the_patched_object_loses_it_for_a_secret() {
-        let message = r#""" is invalid: patch: Invalid value: "{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"sec\\\"ret\\nnl\\u003ctag\\u003e\"},\"type\":\"Opaque\"}": illegal base64 data at input byte 0"#;
-        assert_eq!(
-            scrub(message, &["sec\"ret\nnl<tag>".to_owned()]),
-            format!(
-                "\"\" is invalid: patch: Invalid value: {HIDDEN}: illegal base64 data at input byte 0"
-            )
-        );
-        assert_eq!(
-            scrub(message, &[]),
-            message,
-            "only a Secret has values to hide"
-        );
-        assert_eq!(
-            scrub("no quoted object here", &["x".to_owned()]),
-            "no quoted object here"
-        );
-    }
-
-    #[test]
     fn a_secret_s_refusal_keeps_its_causes_reason_and_field_but_never_their_message() {
         let quoted = r#"{\"data\":{\"bad\":\"@@@\"},\"stringData\":{\"k\":\"line1\\nsec\\\"ret\\u003ctag\\u003e\\u0026end\"},\"type\":\"Opaque\"}"#;
         let status = |message: String, cause: String| {
@@ -2256,19 +2130,6 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_s_values_are_scrubbed_encoded_and_decoded() {
-        let secret = json!({
-            "apiVersion": "v1",
-            "kind": "Secret",
-            "data": { "password": "aHVudGVyMg==" },
-            "stringData": { "token": "s3cret" },
-        });
-        let secrets = secret_values(&[&secret]);
-        let text = scrub("bad aHVudGVyMg== and hunter2 and s3cret", &secrets);
-        assert_eq!(text, format!("bad {HIDDEN} and {HIDDEN} and {HIDDEN}"));
-    }
-
-    #[test]
     fn a_mask_is_refused_where_it_would_be_written_and_kept_where_it_was() {
         let base = json!({ "data": { "a": "<12 bytes>" } });
         let same = json!({ "data": { "a": "<12 bytes>" } });
@@ -2315,15 +2176,6 @@ mod tests {
             "Deployment \"immutable-web\" is invalid",
             "Invalid value: -1: must be greater than or equal to 0"
         ));
-    }
-
-    #[test]
-    fn a_value_of_string_data_is_scrubbed_as_the_server_would_store_it() {
-        let secrets = secret_values(&[&json!({ "stringData": { "token": "typed-value" } })]);
-        assert_eq!(
-            scrub("token is dHlwZWQtdmFsdWU=", &secrets),
-            format!("token is {HIDDEN}")
-        );
     }
 
     #[test]

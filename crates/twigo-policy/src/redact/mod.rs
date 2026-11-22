@@ -8,6 +8,10 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{ErrorCode, IpcError};
 
+mod scrub;
+
+pub use scrub::{HIDDEN, scrub, scrubbed, secret_values};
+
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
 
@@ -142,7 +146,7 @@ pub fn secret_value(object: &Value, key: &str) -> Result<(String, bool), IpcErro
 /// A Secret's value of `key` as [`secret_value`] gives it: `stringData`'s,
 /// which the server writes over `data`, else `data`'s decoded, or as written
 /// when it is no base64, which only a release's manifest can hold.
-pub(crate) fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
+fn value_of(secret: &Value, key: &str) -> Result<(String, bool), IpcError> {
     let entry = entries(secret)
         .filter(|entry| entry.key == key)
         .last()
