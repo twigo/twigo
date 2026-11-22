@@ -6258,6 +6258,7 @@ dependencies = [
  "jiff",
  "percent-encoding",
  "serde",
+ "serde-saphyr",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",

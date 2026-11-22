@@ -1,5 +1,7 @@
-//! What the webview may see of an object (ARCHITECTURE 3.6): managedFields
-//! stay in Rust, and so do a Secret's values until a Reveal.
+//! What the webview may see of an object and of a Helm release
+//! (ARCHITECTURE 3.6): managedFields stay in Rust, and so do a Secret's
+//! values, a release's values and the Secrets of its manifest until a
+//! Reveal, while texts that may quote them are scrubbed of them.
 
 use std::borrow::Cow;
 
@@ -8,9 +10,13 @@ use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
 use twigo_ipc::{ErrorCode, IpcError};
 
+mod held;
+pub mod manifest;
 mod scrub;
+pub mod values;
 
-pub use scrub::{HIDDEN, scrub, scrubbed, secret_values};
+pub use held::{Held, Size};
+pub use scrub::{HIDDEN, scrub, scrubbed, scrubbed_text, secret_values};
 
 /// Holds the whole object as last applied, a Secret's values in clear.
 const LAST_APPLIED: &str = "kubectl.kubernetes.io/last-applied-configuration";
@@ -30,8 +36,22 @@ pub fn for_view(mut object: Value) -> Value {
 /// A Secret with each value replaced by its size and the last-applied
 /// annotation dropped.
 fn mask_secret(secret: &mut Value) {
+    mask_secret_with(secret, |_| false);
+}
+
+/// [`mask_secret`], each value that `changed` picks reading
+/// `<N bytes, changed>`.
+fn mask_secret_with(secret: &mut Value, changed: impl Fn(&Entry<'_>) -> bool) {
     let masks: Vec<(Field, String, String)> = entries(secret)
-        .map(|entry| (entry.field, entry.key.to_owned(), mask(entry.bytes())))
+        .map(|entry| {
+            let bytes = entry.bytes();
+            let mask = if changed(&entry) {
+                format!("<{bytes} bytes, changed>")
+            } else {
+                mask(bytes)
+            };
+            (entry.field, entry.key.to_owned(), mask)
+        })
         .collect();
     for (field, key, mask) in masks {
         secret[field.name()][key] = Value::String(mask);

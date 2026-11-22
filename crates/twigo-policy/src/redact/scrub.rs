@@ -6,9 +6,9 @@ use std::collections::BTreeSet;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::Value;
-use twigo_ipc::IpcError;
+use twigo_ipc::{IpcError, Scrubbed};
 
-use super::{Field, entries, whole_tokens_replaced};
+use super::{Field, Held, entries, whole_tokens_replaced};
 
 /// What takes the place of a value in a text.
 pub const HIDDEN: &str = "<hidden>";
@@ -27,6 +27,24 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
         without_quoted_object(text)
     };
     whole_tokens_replaced(&text, secrets, |_| HIDDEN.to_owned())
+}
+
+/// A release's notes or a revision's description scrubbed of `values`, its
+/// Secrets' values, as [`scrub`] scrubs a refusal.
+pub fn scrubbed_text(text: &Held<String>, values: &Held<Vec<String>>) -> Scrubbed {
+    let scrubbed = scrub(&text.0, &values.0);
+    Scrubbed {
+        hidden: scrubbed != text.0,
+        text: scrubbed,
+    }
+}
+
+impl Held<Vec<String>> {
+    /// The values of both.
+    pub fn joined(mut self, other: Self) -> Self {
+        self.0.extend(other.0);
+        self
+    }
 }
 
 /// `text` with the object of a `patch: Invalid value: "…"` left out.
@@ -160,5 +178,21 @@ mod tests {
             scrub("token is dHlwZWQtdmFsdWU=", &secrets),
             format!("token is {HIDDEN}")
         );
+    }
+
+    #[test]
+    fn notes_say_whether_a_value_was_taken_out() {
+        let values =
+            Held::new(vec!["s3cret".to_owned()]).joined(Held::new(vec!["hunter2".to_owned()]));
+        let notes = Held::new("Log in with hunter2, or s3cret2.".to_owned());
+        assert_eq!(
+            scrubbed_text(&notes, &values),
+            Scrubbed {
+                text: format!("Log in with {HIDDEN}, or s3cret2."),
+                hidden: true,
+            }
+        );
+        let plain = Held::new("Nothing secret.".to_owned());
+        assert!(!scrubbed_text(&plain, &values).hidden);
     }
 }
