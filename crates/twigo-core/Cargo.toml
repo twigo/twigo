@@ -61,6 +61,7 @@ hyper = { workspace = true, features = ["client", "http1", "server"] }
 twigo-core = { workspace = true, features = ["test-util"] }
 twigo-cache = { workspace = true, features = ["test-util"] }
 twigo-kube = { workspace = true, features = ["test-util"] }
+twigo-log = { workspace = true, features = ["test-util"] }
 twigo-panic = { workspace = true, features = ["inject"] }
 twigo-policy = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true

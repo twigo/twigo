@@ -26,6 +26,7 @@
 mod capture;
 mod facts;
 mod panic;
+pub mod problems;
 mod repeats;
 mod rotating;
 

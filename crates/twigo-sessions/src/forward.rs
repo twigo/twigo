@@ -171,7 +171,7 @@ pub struct Status {
     pub queued: u32,
     pub sent: u64,
     pub received: u64,
-    pub failure: Option<String>,
+    pub failure: Option<IpcError>,
 }
 
 impl Status {
@@ -397,9 +397,28 @@ struct Shared {
     received: AtomicU64,
 }
 
+fn entered(state: &ForwardState) -> Option<(&'static str, ErrorCode)> {
+    match state {
+        ForwardState::Reconnecting { reason } => Some(("a forward is reconnecting", reason.code)),
+        ForwardState::Failed { error } => Some(("a forward failed", error.code)),
+        _ => None,
+    }
+}
+
 impl Shared {
+    /// Every change of a forward's status goes through here, which says the
+    /// one that puts it in an error, by its code.
     fn update(&self, change: impl FnOnce(&mut Status) -> bool) {
-        self.status.send_if_modified(change);
+        self.status.send_if_modified(|status| {
+            let before = entered(&status.state);
+            let changed = change(status);
+            if let Some((what, code)) = entered(&status.state)
+                && Some((what, code)) != before
+            {
+                tracing::warn!(%code, "{what}");
+            }
+            changed
+        });
     }
 
     /// The data path is gone, and its connections with it.
@@ -856,17 +875,14 @@ impl Supervisor {
         match proved {
             Ok(()) => self.proven(),
             Err(connection::Over::Fault(fault)) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 match fault {
                     Fault::Fatal(error) => self.fail(error),
                     // That pod is avoided: the proof chooses again.
                     Fault::Left { .. } => {}
-                    Fault::Port(words) => {
-                        let refused = IpcError::new(ErrorCode::ForwardPortRefused, words);
-                        self.unreachable(refused.into(), true);
-                    }
+                    Fault::Port(refused) => self.unreachable(refused.into(), true),
                     Fault::NoPod(error) => self.unreachable(error.into(), true),
                     Fault::Transient(cause) => self.unreachable(cause, true),
                     Fault::Lost => self.pause(),
@@ -906,10 +922,10 @@ impl Supervisor {
         });
     }
 
-    fn failure(&mut self, words: String) {
+    fn failure(&mut self, error: IpcError) {
         self.failed_after = self.accepted;
         self.shared.update(|status| {
-            status.failure = Some(words);
+            status.failure = Some(error);
             true
         });
     }
@@ -989,8 +1005,8 @@ impl Supervisor {
                 }
             }
             Report::Failed(number, fault) => {
-                if let Some(words) = fault.words() {
-                    self.failure(words);
+                if let Some(error) = fault.failure() {
+                    self.failure(error.clone());
                 }
                 if number > self.cut {
                     self.ended(fault);

@@ -39,7 +39,7 @@ use twigo_ipc::{
     DownloadLogs, ErrorCode, Execute, Friction, GetValues, IpcError, ListBatch, ListQuery,
     LogBatch, ObjectBatch, OpenLogs, OpenObject, OpenShell, OperationEvent, Plan, PlanId,
     PlanRequest, SchemaQuery, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow,
-    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId,
+    ShellAck, ShellContainers, ShellInput, ShellPod, ShellResize, SubscriptionId, ViewState,
 };
 use twigo_kube::client::{Actor, Clients, ProxyEnv};
 use twigo_kube::credentials::{Exec, ExecError, OidcError, Provider, Registry, Source, Timeouts};
@@ -530,11 +530,14 @@ impl Core {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
                 undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
             });
-            let (event, outcome, message) = match ended {
-                Ok(finished) => finished.told(undo_until),
+            let (event, outcome, message, code) = match ended {
+                Ok(finished) => {
+                    let (event, outcome, message) = finished.told(undo_until);
+                    (event, outcome, Some(message), None)
+                }
                 Err(error) => {
-                    let message = error.message.clone();
-                    (OperationEvent::Failed { error }, "failed", message)
+                    let code = error.code;
+                    (OperationEvent::Failed { error }, "failed", None, Some(code))
                 }
             };
             policy.audit().record(&Entry::Ended {
@@ -542,7 +545,8 @@ impl Core {
                 command,
                 target: &target,
                 outcome,
-                message: &message,
+                message: message.as_deref(),
+                code,
             });
             progress.tell(event);
             bus.ended(&window, request.plan);
@@ -694,9 +698,11 @@ impl Core {
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
         self.hub.namespaces(&context).await.map_err(|state| {
-            state.refusal().unwrap_or_else(|| {
-                IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable")
-            })
+            match state {
+                ViewState::Stale { cause: Some(cause) } => Some(cause),
+                state => state.refusal(),
+            }
+            .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
         })
     }
 

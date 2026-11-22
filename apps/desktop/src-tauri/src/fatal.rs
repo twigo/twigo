@@ -81,9 +81,13 @@ pub fn guarded<I>(
 pub async fn contained<T>(
     command: impl Future<Output = Result<T, IpcError>>,
 ) -> Result<T, IpcError> {
-    twigo_panic::contain("command", command)
+    let answered = twigo_panic::contain("command", command)
         .await
-        .unwrap_or_else(|_| Err(IpcError::panicked("this command")))
+        .unwrap_or_else(|_| Err(IpcError::panicked("this command")));
+    if let Err(error) = &answered {
+        tracing::info!(code = %error.code, "a command answered an error");
+    }
+    answered
 }
 
 #[cfg(test)]
@@ -102,6 +106,26 @@ mod tests {
         let refused: Result<u8, IpcError> =
             contained(async { Err(IpcError::new(ErrorCode::SpaceNotFound, "no")) }).await;
         assert_eq!(refused.unwrap_err().code, ErrorCode::SpaceNotFound);
+    }
+
+    #[tokio::test]
+    async fn a_command_that_answers_an_error_leaves_one_line_with_its_code_and_none_of_its_words() {
+        let events = twigo_log::capture();
+        let refused: Result<u8, IpcError> = contained(async {
+            Err(IpcError::new(
+                ErrorCode::ServerInvalid,
+                r#"Invalid value: "hunter2""#,
+            ))
+        })
+        .await;
+        assert!(refused.is_err());
+        assert_eq!(contained(async { Ok(3) }).await.unwrap(), 3);
+        let lines = events.lines();
+        let [event] = &lines[..] else {
+            panic!("one event for one error: {lines:?}");
+        };
+        assert_eq!(event["fields"]["code"], "server.invalid");
+        assert!(!event.to_string().contains("hunter2"), "{event}");
     }
 
     #[test]

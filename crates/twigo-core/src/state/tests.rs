@@ -102,12 +102,47 @@ fn an_unreadable_file_is_set_aside() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("state.json");
         std::fs::write(&path, content).unwrap();
+        problems::clear(ErrorCode::StateSetAside);
         let state = State::open(path.clone());
         assert!(state.snapshot().app.is_empty());
         assert!(!path.exists());
+        assert!(
+            listed(ErrorCode::StateSetAside),
+            "the locks the person set are gone, which the window says"
+        );
         let aside = dir.path().join("state.json.unreadable");
         assert_eq!(std::fs::read_to_string(aside).unwrap(), content);
     }
+}
+
+fn listed(code: ErrorCode) -> bool {
+    problems::watch()
+        .borrow()
+        .iter()
+        .any(|problem| problem.code == code)
+}
+
+fn within_five_seconds(what: &str, mut holds: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !holds() {
+        assert!(Instant::now() < deadline, "{what}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn a_state_that_cannot_be_saved_is_a_problem_until_a_save_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked = dir.path().join("blocked");
+    std::fs::write(&blocked, "").unwrap();
+    let state = State::open_with(blocked.join("state.json"), Duration::from_millis(10));
+    problems::clear(ErrorCode::StateUnsaved);
+    state.set(vec![entry(None, "key", "1")]).unwrap();
+    within_five_seconds("the save never failed", || listed(ErrorCode::StateUnsaved));
+
+    std::fs::remove_file(&blocked).unwrap();
+    state.set(vec![entry(None, "key", "2")]).unwrap();
+    within_five_seconds("the save never worked", || !listed(ErrorCode::StateUnsaved));
 }
 
 #[test]

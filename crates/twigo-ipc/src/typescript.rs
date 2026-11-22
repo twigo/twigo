@@ -12,9 +12,10 @@ use crate::command::{
     KubeconfigOfferAnswerSend, KubeconfigOffersWatch, ListAck, ListSetWindow, ListSubscribe,
     ListUnsubscribe, LogLevelSet, LogReveal, LogsAck, LogsClose, LogsDownload, LogsOpen,
     LogsSetSource, LogsSetView, LogsSetWindow, NamespacesList, ObjectAck, ObjectClose, ObjectOpen,
-    ObjectSetParts, ObjectValues, ResourcesWatch, SchemaGet, ShellAcknowledge, ShellClose,
-    ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen, ShellSendInput,
-    ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate, UrlOpen,
+    ObjectSetParts, ObjectValues, ProblemsWatch, ResourcesWatch, SchemaGet, ShellAcknowledge,
+    ShellClose, ShellContainersGet, ShellEnvironmentRetry, ShellEnvironmentWatch, ShellOpen,
+    ShellSendInput, ShellSetSize, SpaceOpen, SpacesList, StateLoad, StateSet, TerminalCreate,
+    UrlOpen,
 };
 use crate::{ErrorCode, ShellEvent};
 
@@ -75,6 +76,7 @@ pub fn typescript() -> String {
     module.command::<KeyboardLayoutWatch>();
     module.command::<StateLoad>();
     module.command::<StateSet>();
+    module.command::<ProblemsWatch>();
     module.command::<ShellEnvironmentWatch>();
     module.command::<ShellEnvironmentRetry>();
     module.command::<ContextAuthWatch>();

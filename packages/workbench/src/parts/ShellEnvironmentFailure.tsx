@@ -17,10 +17,11 @@ export function ShellEnvironmentFailure({ failed }: { failed: Failed }) {
         {SHELL_ENVIRONMENT_TITLE}
       </p>
       <p className="mt-1 text-support">
-        <span className="font-mono">{failed.shell}</span> {failed.reason}, so
-        Twigo runs tools with its own environment. Credential plugins on your
-        shell's <span className="font-mono">PATH</span>, such as kubelogin or
-        aws, may not be found.
+        <span className="font-mono">{failed.shell}</span>{" "}
+        {failed.reason.message}, so Twigo runs tools with its own environment.
+        Credential plugins on your shell's{" "}
+        <span className="font-mono">PATH</span>, such as kubelogin or aws, may
+        not be found.
       </p>
       <Details failed={failed} />
     </>

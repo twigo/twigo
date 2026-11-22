@@ -16,8 +16,11 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use serde::Serialize;
-use twigo_ipc::{BlockReason, Blocked, ContextAccess, Friction, Mode, ModeSource, RequestClass};
-use twigo_log::{Failure, Limits, Rotating};
+use twigo_ipc::{
+    BlockReason, Blocked, ContextAccess, ErrorCode, Friction, IpcError, Mode, ModeSource,
+    RequestClass,
+};
+use twigo_log::{Failure, Limits, Rotating, problems};
 
 use crate::{Actor, Attributes, Change, Refused};
 
@@ -80,7 +83,13 @@ pub enum Entry<'a> {
         command: &'a str,
         target: &'a str,
         outcome: &'a str,
-        message: &'a str,
+        /// What a command that finished says, in Twigo's words.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<&'a str>,
+        /// What a command that failed says in place of a message, which may
+        /// quote a value the server refused.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<ErrorCode>,
     },
     /// A change of a context's protection: what the context was before and
     /// is after, a lock that a person's mode sets aside named in its source.
@@ -185,6 +194,10 @@ struct Line<'a> {
 /// launched app's stderr reaches nobody.
 fn unrecorded(failure: &Failure<'_>) {
     tracing::error!(path = %failure.path.display(), error = %failure.error, "the audit log {}", failure.what);
+    problems::report(IpcError::new(
+        ErrorCode::AuditUnwritten,
+        "The audit log could not be written, so some of what Twigo sent to a cluster is not recorded",
+    ));
 }
 
 impl Audit {
@@ -196,6 +209,10 @@ impl Audit {
             Ok(log) => Self { log: Some(log) },
             Err(error) => {
                 tracing::error!(path = %path.display(), %error, "the audit log cannot be opened, so nothing is recorded");
+                problems::report(IpcError::new(
+                    ErrorCode::AuditOff,
+                    "The audit log could not be opened, so Twigo records none of what it sends to a cluster",
+                ));
                 Self::off()
             }
         }
@@ -277,10 +294,28 @@ mod tests {
             command: "apply",
             target: "deployments/web",
             outcome: "done",
-            message: "",
+            message: None,
+            code: None,
         });
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(written.contains(r#""event":"ended""#), "{written}");
+    }
+
+    fn listed(code: ErrorCode) -> bool {
+        problems::watch()
+            .borrow()
+            .iter()
+            .any(|problem| problem.code == code)
+    }
+
+    #[test]
+    fn a_log_that_cannot_open_is_a_problem_the_window_is_told() {
+        let home = tempfile::tempdir().unwrap();
+        let blocked = home.path().join("blocked");
+        std::fs::write(&blocked, "").unwrap();
+        problems::clear(ErrorCode::AuditOff);
+        Audit::open(&blocked.join("audit.jsonl"));
+        assert!(listed(ErrorCode::AuditOff));
     }
 
     #[test]
@@ -294,13 +329,16 @@ mod tests {
         std::fs::write(oldest.join("kept"), "").unwrap();
 
         let events = twigo_log::capture();
+        problems::clear(ErrorCode::AuditUnwritten);
         Audit::open(&path).record(&Entry::Ended {
             context: "kind-a",
             command: "apply",
             target: "deployments/web",
             outcome: "done",
-            message: "",
+            message: None,
+            code: None,
         });
+        assert!(listed(ErrorCode::AuditUnwritten));
 
         let [event] = &events.lines()[..] else {
             panic!("one event: {:?}", events.lines());

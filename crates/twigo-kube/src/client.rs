@@ -4,7 +4,7 @@
 mod auth;
 mod connections;
 mod counter;
-mod dial;
+pub(crate) mod dial;
 mod identity;
 pub(crate) mod idp;
 mod proxy;
@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use hyper_rustls::{FixedServerNameResolver, HttpsConnectorBuilder};
 use hyper_timeout::TimeoutConnector;
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::connect::Connect;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
 use kube::client::{Body, ConfigExt};
 use kube::{Client, Config};
@@ -453,7 +453,7 @@ fn connector(
     proxy: Option<&Proxy>,
     identity: Option<&Arc<Identity>>,
 ) -> Result<TimeoutConnector<hyper_rustls::HttpsConnector<Dialer>>, Error> {
-    let mut http = HttpConnector::new();
+    let mut http = dial::http();
     http.enforce_http(false);
     http.set_connect_timeout(config.connect_timeout);
     http.set_keepalive(Some(TCP_KEEPALIVE));

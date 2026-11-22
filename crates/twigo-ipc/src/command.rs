@@ -8,7 +8,7 @@ use crate::{
     AccessQuery, Ack, AnswerApproval, AnswerKubeconfigOffer, ApplyPreviewed, ApplyRequest,
     ApprovalEvent, Catalog, ClusterVersion, ContextAuth, DiagnosticsEntry, Discovered,
     DownloadLogs, ExecReview, Execute, Forward, ForwardEvent, ForwardId, ForwardPorts,
-    ForwardStarted, ForwardTarget, GetValues, KeyboardLayout, KubeconfigOffer,
+    ForwardStarted, ForwardTarget, GetValues, IpcError, KeyboardLayout, KubeconfigOffer,
     KubeconfigOfferEvent, ListBatch, ListQuery, LogBatch, NewTerminal, ObjectBatch, OpenLogs,
     OpenObject, OpenShell, OperationEvent, Plan, PlanId, PlanRequest, ResumeForward, SchemaQuery,
     SetLogLevel, SetLogSource, SetLogView, SetLogWindow, SetParts, SetWindow, ShellAck,
@@ -43,6 +43,18 @@ impl Command for ContextsWatch {
     type Request = ();
     type Response = Catalog;
     type Message = Catalog;
+}
+
+/// Answers with what Twigo's own files could not do this run (the state set
+/// aside, an audit log that records nothing, tokens kept in memory), then
+/// sends the list again on every change.
+pub struct ProblemsWatch;
+
+impl Command for ProblemsWatch {
+    const NAME: &'static str = "problems_watch";
+    type Request = ();
+    type Response = Vec<IpcError>;
+    type Message = Vec<IpcError>;
 }
 
 /// Ends a context's unlock now, by its name, which the audit log records.

@@ -285,10 +285,12 @@ fn why(source: &ModeSource) -> String {
         ModeSource::PolicyFile {
             file,
             pattern: Some(pattern),
+            ..
         } => format!(" by {pattern} in {file}"),
         ModeSource::PolicyFile {
             file,
             pattern: None,
+            ..
         } => format!(" because {file} cannot be read"),
         ModeSource::Unlisted | ModeSource::Moved => String::new(),
     }

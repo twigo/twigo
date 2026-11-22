@@ -219,7 +219,7 @@ twigo/
 │  ├─ twigo-policy/           read-only modes, authorize(), what an approval covers, audit log, redaction
 │  ├─ twigo-quantity/         Kubernetes resource quantities: the describers and the metrics poller read them alike
 │  ├─ twigo-env/              login-shell environment resolution
-│  ├─ twigo-log/              the diagnostics log's subscriber, the rotating file the audit log shares, the panic hook, the facts of a run
+│  ├─ twigo-log/              the diagnostics log's subscriber, the rotating file the audit log shares, the panic hook, the facts of a run, the problems of Twigo's own files
 │  ├─ twigo-panic/            the supervisor of the app-wide duties, the helper that ends an item, the join that raises a panic again, the seam that arms a panic by name
 │  ├─ twigo-ipc/              protocol types (serde) + TS codegen (ts-rs); channel framing
 │  ├─ twigo-keyboard/         active keyboard layout and its changes, from TIS, xkbcommon and ToUnicodeEx
@@ -251,8 +251,8 @@ Why these crates:
 - `twigo-policy` sits under everything that can reach a cluster.
   `twigo-kube` builds its gate into every client, so the crate holds no Kubernetes client of its own.
   What an approval covers is its too, while the policy proxy's server and the approval broker live in `twigo-core`, since they need the context's clients and the windows.
-- `twigo-log` holds what logging needs once, so no crate sets up a subscriber of its own: the rotating file that both the diagnostics log and the audit log write through, the subscriber with its run-time filter, the panic hook and the facts of a run (4.10).
-  Every other crate logs through `tracing` and depends on no more of it than the macros.
+- `twigo-log` holds what logging needs once, so no crate sets up a subscriber of its own: the rotating file that both the diagnostics log and the audit log write through, the subscriber with its run-time filter, the panic hook, the facts of a run and the list of the problems of Twigo's own files (4.10), which is why it depends on `twigo-ipc` for `IpcError`.
+  Every other crate logs through `tracing`, and depends on `twigo-log` for no more than a repeated failure's count and the problems it reports.
 - `twigo-panic` holds what containing a panic needs once, so the crates that spawn an item or join a task do not each write it: it depends on no other crate of Twigo, and `twigo-kube`, `twigo-cache`, `twigo-sessions` and `twigo-core` use it.
 - `twigo-keyboard` keeps the OS's keyboard APIs out of `apps/desktop`.
   It needs no Tauri, and its tests read named layouts without a window.
@@ -744,7 +744,8 @@ A refusal outranks `queued`: a `forbidden` part whose retry waits for a watch sa
 Every view header and the status bar render these states.
 A blank table is never an error state.
 
-Every failure that reaches the window is an `IpcError` with a code: a view's `error`, a cause, a refused command, a session's end, a forward's `reconnecting` and `failed`, a plugin's failure, a context's `problem` and an object's unavailable events.
+Every failure that reaches the window is an `IpcError` with a code: a view's `error`, a cause, a refused command, a session's end, a forward's `failure`, `reconnecting` and `failed`, a plugin's failure, the login shell's environment, a dry run the server refused, a kubeconfig file's failure, a context's `problem`, the problems of Twigo's own files (4.10) and an object's unavailable events.
+What stays in words is no failure of a request or a file: the answers of an edit's preview (`stale` and `immutable`), the runtime's words of a container with no shell, the kubelet's `reason` for a container that ended or waits, and the reason an unreadable policy file gives as the source of a mode (4.10).
 The code names the condition (`connect.refused`, `server.forbidden`), its kind is the class that retries and sign-ins branch on, and the API server's own `reason` and `causes` travel beside it as `server`, never as a code ([decision](decisions/error-codes.md)).
 
 A list reads its upstreams as parts, one per namespace or one for the cluster (`Parts`, `ListBatch.parts`):
@@ -1674,7 +1675,7 @@ An action with an undo ends in a toast that offers it for as long as it lasts, a
   - A space is dropped with its state once the catalog, as noted at each start and at each change, has lacked one of its contexts for 90 days.
     Only those notings move that clock, so a context that is back by the first reading after a long break keeps its space.
     It goes as the app starts, before the webview reads any space; VS Code's per-workspace state grew without bound.
-  - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered.
+  - A file that cannot be read, or has another version, moves aside as `state.json.unreadable`, and the app starts with nothing remembered, which `problems_watch` lists as `state.set-aside` (4.10).
     Before users exist there are no migrations.
   - Secrets never go into the state: they stay in Rust and the keychain (6.2).
   - Until the settings files come in M3, the mode a person chooses for a context and the type they mark it as live here too, under a key `state_set` refuses, since only a confirmed plan of the command bus, or a type given in answer to a process's ask, changes them (6.4).
@@ -1865,8 +1866,19 @@ What a person needs when something goes wrong, and what a bug report holds, star
 - **What never reaches it.**
   A token, a client key, an exec plugin's output, a Secret's data, a terminal's input or output, the login shell's environment, a kubeconfig's text and a frame, a batch or an object's values.
   `ShellEnv`, the login shell's failure and the oidc refresh's failure print names and statuses only, since an event may carry them.
-  The error of a kubeconfig that does not parse quotes the lines around the fault, a token or a client key among them, so no event carries it: `twigo_core::catalog` still prints it on stderr, until the catalog reports a failed file by its path and location in the window (`TODO.md`).
-  A server's message for a failed request can quote a value the person typed, so the log carries no such message.
+  The error of a kubeconfig that does not parse quotes the lines around the fault, a token or a client key among them, so no event carries it: the catalog reports a failed file by its path and the error's message without its snippet, which holds the line and column (5.5).
+  A server's message for a failed request can quote a value the person typed, so the log carries no such message, and the audit log's `ended` line carries a failed command's code in its place (6.4).
+- **A failure's event.**
+  Where a failure enters a view, a session, a forward or a command's answer, the log gets one event with `code`, the error's wire name, as a field, and no message: a command answers an error (info), a list or object's upstream is refused, a log stream's state becomes an error, a shell or a terminal ends `failed`, a forward becomes `reconnecting` or `failed`, and a metrics answer cannot be decoded (`answer.undecodable`, at error).
+  Each is said once while it holds, since each is logged where its state changes, and a sync command's error is not logged.
+
+#### Twigo's own files that fail
+
+- `twigo_log::problems` lists, once per code for the run, what a file of Twigo's own could not do that leaves the person with less than they set up: `state.set-aside` (the modes and locks they set are gone), `state.unsaved` (until a save works), `trust.set-aside`, `audit.off` and `audit.unwritten` (nothing, or not everything, is recorded), and `tokens.unsaved` (the next start asks to sign in again).
+  Each is reported where it is logged, with Twigo's words and no path or value; a report of a code replaces its last.
+- `problems_watch` answers the list and sends it again on every change.
+  The list is the run's, not a window's: the files are read before any core exists, and the crates that fail do not know one.
+- The policy file that cannot be read locks every context `read-only` (4.8) and says so in the access popover with its reason, which is where it does not parse (`it is not JSON at line 3, column 1`) or what failed to read it (`permission denied`), never a word of the file.
 
 ## 5. Commands, keybindings and extensions
 
@@ -2132,7 +2144,12 @@ A section takes over a core one only by naming its id in `replaces`, and its hea
 - **Sources.**
   - The core ships one: kubeconfig files, as kubectl reads them, and folders the user adds (M3).
     - The files `KUBECONFIG` lists, as the login shell sets it (6.1), else `~/.kube/config`, merged by kubectl's rules: the first file to define a name wins ([research](research/state.md)).
-    - A listed file that does not exist is skipped, as client-go skips it; one that cannot be read or parsed is skipped and logged, and the other files still count.
+    - A listed file that does not exist is skipped, as client-go skips it; one that cannot be read, parsed or merged is skipped, and the other files still count.
+      `contexts_watch` answers `{ contexts, failures }`, each failure the file as a person names it, from `~`, and an `IpcError`: `kubeconfig.unreadable` with the `io::ErrorKind`, `kubeconfig.unparsable` with serde-saphyr's message without its snippet, which carries the line and column, and `kubeconfig.unmergeable`.
+      The rendered parse error quotes the lines around the fault, a token among them, so it never leaves the core.
+      A watch that cannot start is a `kubeconfig.unwatched` failure of each file, since its edits go unseen.
+      The catalog logs a failure when it appears and when it ends, by `path` and `code`, and not at every read.
+    - A context whose entries are missing says so in `problem`: `context.empty`, `context.missing-cluster` or `context.missing-user`.
     - A notify debouncer watches the closest existing directory above each file, because writers replace files by rename and `~/.kube` may not exist yet, and the directory of a symlink's target, where writes through it land.
       Reads do not count, since inotify reports every open, Twigo's own loads among them, and a change that leaves the catalog as it was reports nothing.
     - The explicit mode keeps development, tests and the bench off real clusters: in debug and bench builds `TWIGO_KUBECONFIG` replaces every source, and only its `kind-*` and `kwok-*` contexts count.
@@ -2264,7 +2281,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - An exec plugin is a command chosen by whoever wrote the kubeconfig.
   - On the first start, Twigo lists every exec plugin the kubeconfigs name, with the contexts that use each, and the person trusts them once.
   - A new or changed entry (a different digest of command, args and env) asks when its space activates, before it runs.
-  - The digests live in `trust.json` beside the state store, which only Rust writes; an unreadable file trusts nothing.
+  - The digests live in `trust.json` beside the state store, which only Rust writes; an unreadable file trusts nothing, and is listed as the problem `trust.set-aside` (4.10).
 - **The deprecated `auth-provider: oidc`.**
   - Twigo refreshes it as client-go does: the id-token until 10 s before its `exp`, then discovery and a `refresh_token` grant, with the IdP's CA and the login shell's proxy.
   - It writes the new id-token and refresh-token back to the user's file, as kubectl does, since the file is the token store every client shares and Dex rotates the refresh token on every refresh (the owner's choice, 2026-11-01).
@@ -2291,6 +2308,16 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - socks5 and socks5h both leave names to the proxy, as Go does.
   - An https proxy's certificate is checked against the OS trust store, and the proxy gets no client certificate.
     client-go checks it against the cluster's CA and would give it the cluster's client certificate, since Go's transport reuses its TLS config for the proxy.
+- A request that gets no answer says why, as kubectl prints `Unable to connect to the server: <inner>`.
+  `twigo_kube::errors::request` walks the chain of the failure, through the error an `io::Error` wraps, which `io::Error::source` steps over and where hyper-rustls hands over a failed handshake's, and takes the first cause that names a condition, in Twigo's sentence with the innermost cause after it:
+  - `connect.refused` from `io::ErrorKind::ConnectionRefused`, `connect.timeout` from `Elapsed` and `io::ErrorKind::TimedOut`, whose sentence has no inner cause to add;
+  - `connect.certificate` from `rustls::Error::InvalidCertificate`, with the verifier's own words (the platform's, or rustls's name such as `UnknownIssuer`), and `connect.tls` from any other `rustls::Error`;
+  - `connect.proxy` for the tunnel's and SOCKS5's errors, which hyper-util keeps unnameable, so the dialer wraps them;
+  - `connect.unresolved` from a resolver of Twigo's own over the `GaiResolver` that `HttpConnector` uses, since its `ConnectError` is private;
+  - `connect.other` with the innermost text otherwise.
+  - A WebSocket upgrade takes the transport's code, or a `server.*` code by the status of an answer that was no upgrade.
+  - A body that is no `Status`, a proxy's HTML or an API path that does not exist, has no `server` status: kube-client's placeholder reason is no reason of the server's.
+  - An exec's end `Status` is read as a request's refusal is, so it takes a `server.*` code too.
 - When the kubeconfig changes, Twigo fingerprints each context from its context, cluster and user entries plus the files they reference, the user's oidc tokens left out (6.2).
   It rebuilds only the clients whose fingerprint changed, for every actor at once, since each actor's kube clients hold the context's shared pools (6.4), and restarts their upstreams.
   New proxy variables in the login shell rebuild every context's clients the same way.
@@ -2481,7 +2508,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
     The policy proxy notes, as the gate would, a request it stops itself on the policy's word before the request meets the gate: one its mode refuses or no answer can allow, one the person denied or no window could ask about (`noApproval`, or `unmarked` where the ask was what its context is, beside the ask's `approval` line), and one whose context names another cluster now (`read-only`, `mode`).
     A request whose unmarked ask a type answered meets the gate anew: the gate notes it as it goes, the proxy as the new mode refuses it, and an ask that `guarded` raises for it ends as any other.
     A request the proxy lets on meets the gate, which notes it, and one it refuses for another reason, a token, a `Host`, a path or a body's size, is no request the policy stopped and has no line.
-  - `confirmed` and `ended`: a command a person confirmed through the command bus, through which friction, and how it ended.
+  - `confirmed` and `ended`: a command a person confirmed through the command bus, through which friction, and how it ended: `done` or `stopped` with Twigo's own sentence as `message`, `failed` with the error's `code` and no message, since the server's message for a failed request can quote a value the person typed.
   - `refused`: a command of a person's that the policy refused before anything was sent, at `command_plan` or at `command_execute`, or a port-forward's start or resume: its context, the command and target as `confirmed` names them, the mode and source the policy read, and why.
     That is the gate's reason for one of the command's writes, or the reason a change of protection was refused: the admin's policy file sets the mode, there is nothing to unlock, no source lists it, or it changed since the plan.
     A plan whose context asks for more friction now than the person went through is refused too, and its line carries both frictions, the plan's and the context's now.
@@ -2497,7 +2524,7 @@ Twigo therefore owns credentials, and follows client-go's rules where the plugin
   - `trusted`: a plugin a person trusted, by its digest and program, never its arguments or environment, which may hold tokens.
 
   The log names targets, never a value, so the actors of M3 only add their name.
-  A file that cannot be opened is logged (4.10) and keeps nothing: the log records, it guards nothing.
+  A file that cannot be opened is logged (4.10), listed as the problem `audit.off`, and keeps nothing: the log records, it guards nothing.
   Past 8 MiB the log moves to `audit.1.jsonl`, each older one up by one as far as `audit.5.jsonl`, whose last content goes, and a new `audit.jsonl` opens, each 0600: at most 48 MiB.
   A move that fails is logged at error (4.10) and the log goes on where it is, to try again after another 8 MiB.
   A new log that cannot be opened after the move is logged at error, its lines go on to `audit.1.jsonl`, and the next line tries again before anything else.

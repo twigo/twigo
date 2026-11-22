@@ -20,7 +20,8 @@ use atomic_write_file::AtomicWriteFile;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use twigo_ipc::{ForwardId, Space, StateEntry, StateSnapshot};
+use twigo_ipc::{ErrorCode, ForwardId, IpcError, Space, StateEntry, StateSnapshot};
+use twigo_log::problems;
 use twigo_panic::{Reporter, inject};
 use twigo_policy::Choices;
 
@@ -84,6 +85,9 @@ struct Inner {
     scheduled: AtomicBool,
     /// Told when the writer thread's write panics.
     reporter: OnceLock<Reporter>,
+    /// The last write failed and said so as a problem, which this store takes
+    /// back when a write works.
+    unsaved: AtomicBool,
 }
 
 struct Data {
@@ -147,6 +151,7 @@ impl State {
             written: Mutex::new(0),
             scheduled: AtomicBool::new(false),
             reporter: OnceLock::new(),
+            unsaved: AtomicBool::new(false),
         });
         let (wake, woken) = mpsc::channel();
         let writer = Arc::clone(&inner);
@@ -381,9 +386,18 @@ impl Inner {
                 self.write()
             }));
             match written {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => {
+                    if self.unsaved.swap(false, Ordering::AcqRel) {
+                        problems::clear(ErrorCode::StateUnsaved);
+                    }
+                }
                 Ok(Err(error)) => {
                     tracing::error!(path = %self.path.display(), %error, "could not save the state");
+                    self.unsaved.store(true, Ordering::Release);
+                    problems::report(IpcError::new(
+                        ErrorCode::StateUnsaved,
+                        "Twigo could not save its state, so what you change is lost when it quits",
+                    ));
                 }
                 Err(_) => {
                     if let Some(reporter) = self.reporter.get() {
@@ -448,6 +462,10 @@ fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> File {
     if let Err(error) = std::fs::rename(path, &aside) {
         tracing::error!(path = %path.display(), %error, "could not move the state aside");
     }
+    problems::report(IpcError::new(
+        ErrorCode::StateSetAside,
+        "Twigo could not read its saved state, so it started without it: the modes and locks you set, your spaces and your forwards are gone",
+    ));
     File {
         version: VERSION,
         ..File::default()

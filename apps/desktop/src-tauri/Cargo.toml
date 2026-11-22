@@ -37,5 +37,8 @@ twigo-log.workspace = true
 twigo-netmon.workspace = true
 twigo-panic.workspace = true
 
+[dev-dependencies]
+twigo-log = { workspace = true, features = ["test-util"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, optional = true }

@@ -157,7 +157,14 @@ test("a delete is a sentence with its propagation, and one that sets none, as cl
 test("an unknown detail says why, and shows the body as code only when it comes", () => {
   draw({
     kind: "unknown",
-    reason: { reason: "refused", message: "webhook does not support dry run" },
+    reason: {
+      reason: "refused",
+      error: {
+        code: "server.invalid",
+        kind: "invalidInput",
+        message: "webhook does not support dry run",
+      },
+    },
     body: '{"spec":{"replicas":5}}',
   });
   expect(screen.getByText("Twigo cannot show what this changes.")).toBeTruthy();

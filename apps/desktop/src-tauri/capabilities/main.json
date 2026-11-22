@@ -15,6 +15,7 @@
     "allow-shell-environment-watch",
     "allow-shell-environment-retry",
     "allow-contexts-watch",
+    "allow-problems-watch",
     "allow-context-relock",
     "allow-command-plan",
     "allow-command-execute",

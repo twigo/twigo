@@ -9,23 +9,47 @@ use std::task::{Context, Poll};
 use http::Uri;
 use hyper::rt::{Read, ReadBufCursor, Write};
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder, MaybeHttpsStream};
+use hyper_util::client::legacy::connect::dns::GaiResolver;
 use hyper_util::client::legacy::connect::proxy::{SocksV5, Tunnel};
 use hyper_util::client::legacy::connect::{Connected, Connection, HttpConnector};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
-use tower::{BoxError, Service};
+use tower::util::MapErr;
+use tower::{BoxError, Service, ServiceExt};
 
 use super::proxy::Proxy;
 
+/// A name that does not resolve. hyper-util keeps its `ConnectError` private,
+/// so the resolver says it in a type of Twigo's own.
+#[derive(Debug, thiserror::Error)]
+#[error("the name does not resolve")]
+pub struct Unresolved(#[source] io::Error);
+
+/// A connection that the proxy, or the way to it, did not make. hyper-util's
+/// tunnel and SOCKS errors are not nameable.
+#[derive(Debug, thiserror::Error)]
+#[error("through the proxy")]
+pub struct ProxyFailed(#[source] BoxError);
+
+/// The system's resolver, which hyper-util uses by default, with its failure
+/// told by [`Unresolved`].
+type Resolver = MapErr<GaiResolver, fn(io::Error) -> Unresolved>;
+
+pub type Http = HttpConnector<Resolver>;
+
+pub fn http() -> Http {
+    HttpConnector::new_with_resolver(GaiResolver::new().map_err(Unresolved as fn(_) -> _))
+}
+
 #[derive(Clone)]
 pub enum Dialer {
-    Direct(HttpConnector),
-    Tunnel(Tunnel<HttpsConnector<HttpConnector>>),
-    Socks(SocksV5<HttpConnector>),
+    Direct(Http),
+    Tunnel(Tunnel<HttpsConnector<Http>>),
+    Socks(SocksV5<Http>),
 }
 
 impl Dialer {
-    pub fn new(http: HttpConnector, proxy: Option<&Proxy>) -> Result<Self, rustls::Error> {
+    pub fn new(http: Http, proxy: Option<&Proxy>) -> Result<Self, rustls::Error> {
         let Some(proxy) = proxy else {
             return Ok(Dialer::Direct(http));
         };
@@ -96,11 +120,17 @@ impl Service<Uri> for Dialer {
             }
             Dialer::Tunnel(tunnel) => {
                 let dialling = tunnel.call(with_port(&server));
-                Box::pin(async move { Ok(Stream::Tunnel(Box::new(dialling.await?))) })
+                Box::pin(async move {
+                    let tunnel = dialling.await.map_err(|error| ProxyFailed(error.into()))?;
+                    Ok(Stream::Tunnel(Box::new(tunnel)))
+                })
             }
             Dialer::Socks(socks) => {
                 let dialling = socks.call(with_port(&server));
-                Box::pin(async move { Ok(Stream::Tcp(dialling.await?)) })
+                Box::pin(async move {
+                    let tcp = dialling.await.map_err(|error| ProxyFailed(error.into()))?;
+                    Ok(Stream::Tcp(tcp))
+                })
             }
         }
     }

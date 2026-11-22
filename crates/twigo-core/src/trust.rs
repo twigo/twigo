@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
+use twigo_ipc::{ErrorCode, IpcError};
+use twigo_log::problems;
 
 /// Bumped when the file's shape changes; a file of another version is set
 /// aside, and nothing is trusted.
@@ -113,5 +115,30 @@ fn set_aside(path: &Path, reason: &dyn std::fmt::Display) -> Trusted {
     if let Err(error) = std::fs::rename(path, &aside) {
         tracing::error!(path = %path.display(), %error, "could not move the trusted plugins aside");
     }
+    problems::report(IpcError::new(
+        ErrorCode::TrustSetAside,
+        "Twigo could not read the list of plugins you trusted, so it trusts none and asks again",
+    ));
     Trusted::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_list_set_aside_is_a_problem_for_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.json");
+        std::fs::write(&path, "{ not json").unwrap();
+        problems::clear(ErrorCode::TrustSetAside);
+        let trust = Trust::open(path);
+        assert!(!trust.current().trusts("any"));
+        assert!(
+            problems::watch()
+                .borrow()
+                .iter()
+                .any(|problem| problem.code == ErrorCode::TrustSetAside)
+        );
+    }
 }

@@ -26,6 +26,8 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use ring::digest::{SHA256, digest};
 use secrecy::SecretString;
 use serde::Deserialize;
+use twigo_ipc::{ErrorCode, IpcError};
+use twigo_log::problems;
 
 use super::output::Credential;
 use crate::client::ProxyEnv;
@@ -331,6 +333,10 @@ impl Oidc {
                 }
                 Err((origin, error)) => {
                     tracing::warn!(user = %self.user, path = %origin.display(), %error, "kept the refreshed oidc tokens in memory only");
+                    problems::report(IpcError::new(
+                        ErrorCode::TokensUnsaved,
+                        "Twigo could not write refreshed sign-in tokens back to the kubeconfig, so it asks you to sign in again after a restart",
+                    ));
                 }
             }
         }

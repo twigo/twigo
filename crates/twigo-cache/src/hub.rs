@@ -397,14 +397,14 @@ impl Hub {
         let mut backoff = backoff();
         let mut failed_at = None;
         loop {
-            match self.read_namespaces(context).await {
-                Err(ViewState::Stale { .. }) => {}
+            let cause = match self.read_namespaces(context).await {
+                Err(ViewState::Stale { cause }) => cause,
                 answered => return answered,
-            }
+            };
             let failed_at = *failed_at.get_or_insert_with(Instant::now);
             let left = STALE_FOR.saturating_sub(failed_at.elapsed());
             if left.is_zero() {
-                return Err(ViewState::Stale { cause: None });
+                return Err(ViewState::Stale { cause });
             }
             let pause = backoff
                 .next()
@@ -505,12 +505,20 @@ impl Hub {
             Ok(true) | Err(Failure::Refused(_)) => return Ok(none),
             Ok(false) => {}
             Err(Failure::Unauthorized) => return Err(ViewState::Unauthorized),
-            Err(_) => return Err(ViewState::Connecting { cause: None }),
+            Err(failure) => {
+                return Err(ViewState::Connecting {
+                    cause: failure.cause(),
+                });
+            }
         }
         let names = match self.read_namespaces(&query.context).await {
             Ok(names) => names,
             Err(ViewState::Forbidden { .. }) => return Ok(none),
             Err(ViewState::Unauthorized) => return Err(ViewState::Unauthorized),
+            Err(ViewState::Stale { cause }) => return Err(ViewState::Connecting { cause }),
+            Err(ViewState::Error { error }) => {
+                return Err(ViewState::Connecting { cause: Some(error) });
+            }
             Err(_) => return Err(ViewState::Connecting { cause: None }),
         };
         let reviews: Vec<BoxFuture<'static, Result<bool, Failure>>> = names
@@ -778,7 +786,7 @@ impl Hub {
                 .await
                 .map_err(|error| match error.kind {
                     ErrorKind::Unauthorized => Failure::Unauthorized,
-                    _ => Failure::Transient,
+                    _ => Failure::Transient(error),
                 })?;
         let ask = || {
             let review = SelfSubjectAccessReview {
@@ -1235,8 +1243,10 @@ impl<T: Item> Subscription<T> {
                             self.changed().await;
                         }
                     });
-                    if tried.await.is_err() {
-                        return Err(ViewState::Stale { cause: None });
+                    if tried.await.is_err()
+                        && let stale @ ViewState::Stale { .. } = self.state()
+                    {
+                        return Err(stale);
                     }
                 }
                 _ => self.changed().await,

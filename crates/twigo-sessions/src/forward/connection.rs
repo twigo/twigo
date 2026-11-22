@@ -34,7 +34,7 @@ pub(super) enum Fault {
     /// The pod or the cluster did not answer, or refused for now.
     Transient(Cause),
     /// The pod's side refused the port, in its own words.
-    Port(String),
+    Port(IpcError),
     /// No pod was a candidate within the wait, and why.
     NoPod(IpcError),
     /// The upgrade to a pod behind a Service or a workload answered 404, as
@@ -46,11 +46,10 @@ pub(super) enum Fault {
 
 impl Fault {
     /// What the forward's `failure` says of it.
-    pub(super) fn words(&self) -> Option<String> {
+    pub(super) fn failure(&self) -> Option<&IpcError> {
         match self {
-            Fault::Port(words) => Some(words.clone()),
-            Fault::NoPod(error) | Fault::Left { error, .. } => Some(error.message.clone()),
-            Fault::Transient(cause) => Some(cause.error().message.clone()),
+            Fault::Port(error) | Fault::NoPod(error) | Fault::Left { error, .. } => Some(error),
+            Fault::Transient(cause) => Some(cause.error()),
             Fault::Fatal(_) | Fault::Lost => None,
         }
     }
@@ -61,6 +60,10 @@ pub(super) enum Over {
     /// The forward ended it.
     Ended,
     Fault(Fault),
+}
+
+fn port(text: String) -> Fault {
+    Fault::Port(IpcError::new(ErrorCode::ForwardPortRefused, text))
 }
 
 fn fault(error: IpcError) -> Fault {
@@ -421,7 +424,7 @@ async fn pump(
         shared.failed(&candidate.key);
         failure = Some(text);
     }
-    failure.map_or(Ok(()), |text| Err(Over::Fault(Fault::Port(text))))
+    failure.map_or(Ok(()), |text| Err(Over::Fault(port(text))))
 }
 
 /// Opens a stream to the candidate and drops it, which proves the
@@ -460,7 +463,7 @@ pub(super) async fn probe(
         text = &mut connected.error => match text {
             Some(text) => {
                 shared.failed(&candidate.key);
-                Err(Over::Fault(Fault::Port(text)))
+                Err(Over::Fault(port(text)))
             }
             None => Ok(()),
         },

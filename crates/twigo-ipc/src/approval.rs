@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ts_rs::TS;
 
-use crate::{Environment, RequestClass};
+use crate::{Environment, IpcError, RequestClass};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct ApprovalId(pub u32);
@@ -112,7 +112,7 @@ pub enum NoDiff {
     /// The server refused the dry run, in its words, or for a Secret in
     /// Twigo's, as the server's may quote its values, while the write itself
     /// may pass: a webhook that does not support dry runs.
-    Refused { message: String },
+    Refused { error: IpcError },
     /// Not a resource Twigo can read: a path outside the API's resources, or
     /// a write that no dry run covers, as a review of authorization.k8s.io
     /// answers whatever `dryRun` says.

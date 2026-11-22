@@ -337,6 +337,9 @@ impl Streams {
                     if let Some(running) = key.and_then(|key| self.running.get_mut(&key))
                         && running.state != state
                     {
+                        if let StreamState::Error { error } = &state {
+                            tracing::warn!(code = %error.code, "a log stream ended in error");
+                        }
                         running.state = state;
                         taken.changed = true;
                     }

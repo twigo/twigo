@@ -34,7 +34,7 @@ use twigo_core::{Core, ProxyProcess};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     AnswerApproval, ApprovalAnswer, ApprovalAsk, ApprovalDetail, ApprovalEvent, Environment,
-    ErrorKind, Execute, Mode, ModeSource, NoDiff, PlanRequest, RequestClass,
+    ErrorCode, ErrorKind, Execute, Mode, ModeSource, NoDiff, PlanRequest, RequestClass,
 };
 use twigo_policy::Actor;
 
@@ -202,6 +202,12 @@ async fn answer(
     if watch {
         let held = futures::stream::pending::<Result<Frame<Bytes>, Infallible>>();
         return Ok(Response::new(StreamBody::new(held).boxed_unsync()));
+    }
+    if request.uri().path().ends_with("/configmaps/vetoed") && query.contains("dryRun") {
+        let status = json!({ "kind": "Status", "apiVersion": "v1", "status": "Failure", "code": 400, "reason": "BadRequest", "message": "admission webhook \"x\" does not support dry run" });
+        let mut response = Response::new(body(status.to_string()));
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        return Ok(response);
     }
     let secret = request.uri().path().contains("/secrets/") && query.contains("dryRun");
     if secret && request.method() == Method::PATCH {
@@ -1636,14 +1642,16 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
         let sending = tokio::spawn(send(process.at(), patching));
         let ask = asked(&mut events).await;
         shown(&ask);
+        let ApprovalDetail::Unknown {
+            reason: NoDiff::Refused { error },
+            body: None,
+        } = &ask.detail
+        else {
+            panic!("{kind}: {:?}", ask.detail);
+        };
         assert_eq!(
-            ask.detail,
-            ApprovalDetail::Unknown {
-                reason: NoDiff::Refused {
-                    message: unsaid.to_owned()
-                },
-                body: None,
-            },
+            (error.message.as_str(), &error.server),
+            (unsaid, &None),
             "{kind}"
         );
         answer_with(&core, &ask, ApprovalAnswer::Deny, None);
@@ -1665,6 +1673,38 @@ async fn no_word_of_the_server_s_about_a_secret_reaches_its_ask() {
     answer_with(&core, &ask, ApprovalAnswer::Deny, None);
     sending.await.unwrap();
     assert_eq!(fake.writes(Method::PATCH) + fake.writes(Method::PUT), 0);
+}
+
+#[tokio::test]
+async fn a_dry_run_the_server_refuses_is_told_with_its_code_and_its_own_words() {
+    let fake = Fake::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let core = core(dir.path(), &fake).await;
+    core.policy.set_mode("kind-a", Some(Mode::Guarded)).unwrap();
+    let mut events = follow(&core, "main");
+    let process = Process::start(&core, Some("main")).await;
+    let patching = process
+        .request("PATCH", "kind-a", &format!("{CONFIGMAPS}/vetoed"))
+        .header("content-type", "application/merge-patch+json")
+        .body(json_body(&json!({ "data": { "k": "w" } })))
+        .unwrap();
+    let sending = tokio::spawn(send(process.at(), patching));
+    let ask = asked(&mut events).await;
+    let ApprovalDetail::Unknown {
+        reason: NoDiff::Refused { error },
+        ..
+    } = &ask.detail
+    else {
+        panic!("{:?}", ask.detail);
+    };
+    assert_eq!(error.code, ErrorCode::ServerInvalid);
+    assert_eq!(
+        error.message,
+        "admission webhook \"x\" does not support dry run"
+    );
+    assert_eq!(error.server.as_ref().unwrap().reason, "BadRequest");
+    answer_with(&core, &ask, ApprovalAnswer::Deny, None);
+    sending.await.unwrap();
 }
 
 #[tokio::test]

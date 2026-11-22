@@ -166,6 +166,7 @@ fn a_context_s_access_says_where_its_mode_comes_from() {
             source: ModeSource::PolicyFile {
                 file: "/etc/twigo/policy.json".to_owned(),
                 pattern: Some("prod-*".to_owned()),
+                reason: None,
             },
             environment: Some(Environment::Production),
             unlocked_until: Some(1000),
@@ -179,6 +180,19 @@ fn a_context_s_access_says_where_its_mode_comes_from() {
             },
             "environment": "production",
             "unlockedUntil": 1000,
+        })
+    );
+    assert_eq!(
+        wire(&ModeSource::PolicyFile {
+            file: "/etc/twigo/policy.json".to_owned(),
+            pattern: None,
+            reason: Some("it is not JSON at line 3, column 1".to_owned()),
+        }),
+        json!({
+            "kind": "policyFile",
+            "file": "/etc/twigo/policy.json",
+            "pattern": null,
+            "reason": "it is not JSON at line 3, column 1",
         })
     );
     assert_eq!(

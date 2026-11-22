@@ -31,7 +31,7 @@ hyper-util.workspace = true
 ipnet.workspace = true
 jiff.workspace = true
 k8s-openapi.workspace = true
-kube.workspace = true
+kube = { workspace = true, features = ["ws"] }
 nix.workspace = true
 notify-debouncer-full.workspace = true
 percent-encoding.workspace = true
@@ -47,6 +47,7 @@ tower.workspace = true
 tracing.workspace = true
 twigo-env.workspace = true
 twigo-ipc.workspace = true
+twigo-log.workspace = true
 twigo-panic.workspace = true
 twigo-policy.workspace = true
 yaml-edit.workspace = true

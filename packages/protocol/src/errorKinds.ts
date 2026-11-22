@@ -47,7 +47,7 @@ export const ERROR_KINDS: Record<ErrorCode, ErrorKind> = {
   "openapi.no-kind": "notFound",
   "openapi.not-listed": "notFound",
   "openapi.unreadable": "unavailable",
-  "exec.failed": "unavailable",
+  "environment.unresolved": "internal",
   "forward.not-found": "notFound",
   "forward.invalid-port": "invalidInput",
   "forward.no-port": "invalidInput",

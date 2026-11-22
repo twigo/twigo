@@ -283,3 +283,22 @@ async fn a_failure_s_debug_leaves_out_what_the_shell_printed() {
     let printed = format!("{failed:?} {status:?}");
     assert!(!printed.contains("hunter2"), "{printed}");
 }
+
+#[tokio::test]
+async fn a_shell_that_gave_no_environment_reaches_the_window_with_its_code() {
+    let fakes = Fakes::new();
+    let shell = fakes.script("sh", "exit 3");
+    let failure = fakes.resolve(&shell).await.expect_err("no environment");
+    let status = Status::Failed {
+        env: Arc::new(ShellEnv::from_process()),
+        failure: Arc::new(failure),
+    };
+    let twigo_ipc::ShellEnvironment::Failed { reason, .. } = (&status).into() else {
+        panic!("the status failed");
+    };
+    assert_eq!(reason.code, twigo_ipc::ErrorCode::EnvironmentUnresolved);
+    assert!(
+        reason.message.starts_with("printed no environment"),
+        "{reason:?}"
+    );
+}

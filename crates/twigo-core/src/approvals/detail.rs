@@ -13,7 +13,7 @@ use http::request::Parts;
 use http::{Method, Request};
 use kube::Client;
 use serde_json::Value;
-use twigo_ipc::{ApprovalDetail, NoDiff, RequestClass};
+use twigo_ipc::{ApprovalDetail, IpcError, NoDiff, RequestClass};
 use twigo_kube::client::{ActorClients, Server};
 use twigo_policy::Attributes;
 
@@ -123,12 +123,14 @@ async fn diff(
     }
     let api = &actor.api;
     let (result, mut warnings) = send(api, dry_run).await.map_err(|error| {
-        let message = match &error {
-            _ if secret => UNSAID.to_owned(),
-            kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
-            _ => error.to_string(),
-        };
-        NoDiff::Refused { message }
+        let refused = twigo_kube::errors::request(&error);
+        NoDiff::Refused {
+            error: if secret {
+                IpcError::new(refused.code, UNSAID)
+            } else {
+                refused
+            },
+        }
     })?;
     if secret && !warnings.is_empty() {
         warnings = vec![UNSAID.to_owned()];

@@ -21,7 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use futures::future::Either;
 use twigo_ipc::{
     AnswerKubeconfigOffer, ErrorCode, IpcError, KubeconfigOffer, KubeconfigOfferAnswer,
-    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEvent, TerminalKind, TerminalSession,
+    KubeconfigOfferEvent, Mode, NewTerminal, ProxyWhy, ShellEnd, ShellEvent, TerminalKind,
+    TerminalSession,
 };
 use twigo_kube::client::Actor;
 use twigo_kube::kubeconfig::{Names, Reach, Sources};
@@ -64,6 +65,16 @@ impl Shell {
         rows: u16,
         send: impl FnMut(Frame) -> bool + Send + 'static,
     ) -> Result<(), IpcError> {
+        let mut send = send;
+        let send = move |frame: Frame| {
+            if let Frame::Event(ShellEvent::Ended {
+                end: ShellEnd::Failed { error },
+            }) = &frame
+            {
+                tracing::warn!(code = %error.code, "a shell ended in error");
+            }
+            send(frame)
+        };
         match self {
             Self::Pod(session) => session.open(cols, rows, send),
             Self::Local(local) => {

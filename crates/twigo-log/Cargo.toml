@@ -18,10 +18,11 @@ workspace = true
 [dependencies]
 os_info.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 tracing-log.workspace = true
 tracing-subscriber.workspace = true
+twigo-ipc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

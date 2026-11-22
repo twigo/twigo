@@ -150,7 +150,7 @@ export function describeSource(source: ModeSource): string {
   switch (source.kind) {
     case "policyFile":
       return source.pattern === null
-        ? `${source.file} cannot be read, so every context is read-only until an admin fixes it and Twigo restarts.`
+        ? `${source.file} cannot be read${source.reason ? ` (${source.reason})` : ""}, so every context is read-only until an admin fixes it and Twigo restarts.`
         : `${source.pattern} in ${source.file} sets this. Twigo cannot change or unlock it.`;
     case "user":
       return source.overrides === null
