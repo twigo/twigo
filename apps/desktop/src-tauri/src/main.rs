@@ -7,6 +7,7 @@ mod fatal;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -932,7 +933,6 @@ fn main() {
         .setup({
             let fatal = fatal.clone();
             move |app| {
-                fatal.ready(app.handle());
                 // Before `Core::new` reads the policy, the state and the trust
                 // file, so what it says of them is logged.
                 let facts = Facts::detect(
@@ -956,6 +956,7 @@ fn main() {
                     &app.path().app_cache_dir()?,
                     &PolicyFile::default_path(),
                 );
+                fatal.ready(app.handle(), &core);
                 let supervisor = tauri::async_runtime::spawn(core.start(
                     environment.subscribe(),
                     explicit_kubeconfig(),
@@ -986,134 +987,146 @@ fn main() {
                 Ok(())
             }
         })
-        .invoke_handler(fatal::guarded::<tauri::ipc::Invoke>(
-            tauri::generate_handler![
-                keyboard_layout_watch,
-                shell_environment_watch,
-                shell_environment_retry,
-                contexts_watch,
-                problems_watch,
-                context_relock,
-                command_plan,
-                command_execute,
-                command_cancel,
-                apply_preview,
-                access_review,
-                spaces_list,
-                space_open,
-                state_load,
-                state_set,
-                cluster_version,
-                namespaces_list,
-                context_auth_watch,
-                resources_watch,
-                list_subscribe,
-                list_set_window,
-                list_ack,
-                list_unsubscribe,
-                object_open,
-                object_set_parts,
-                object_ack,
-                object_values,
-                object_close,
-                schema_get,
-                logs_open,
-                logs_set_source,
-                logs_set_view,
-                logs_set_window,
-                logs_ack,
-                logs_download,
-                logs_close,
-                shell_containers,
-                shell_open,
-                shell_input,
-                shell_resize,
-                shell_ack,
-                shell_close,
-                terminal_create,
-                kubeconfig_offers_watch,
-                kubeconfig_offer_answer,
-                context_sign_in,
-                context_sign_in_cancel,
-                exec_review,
-                exec_trust,
-                approvals_watch,
-                approval_answer,
-                forward_ports,
-                forward_start,
-                forward_stop,
-                forward_resume,
-                forward_remove,
-                forwards_watch,
-                url_open,
-                diagnostics_log,
-                log_reveal,
-                log_level_set,
-                report_problem,
-                report_open_issue,
-                report_save,
-            ],
-            move || fatal.run("a command panicked"),
-        ))
+        .invoke_handler(fatal.guarded_handler(tauri::generate_handler![
+            keyboard_layout_watch,
+            shell_environment_watch,
+            shell_environment_retry,
+            contexts_watch,
+            problems_watch,
+            context_relock,
+            command_plan,
+            command_execute,
+            command_cancel,
+            apply_preview,
+            access_review,
+            spaces_list,
+            space_open,
+            state_load,
+            state_set,
+            cluster_version,
+            namespaces_list,
+            context_auth_watch,
+            resources_watch,
+            list_subscribe,
+            list_set_window,
+            list_ack,
+            list_unsubscribe,
+            object_open,
+            object_set_parts,
+            object_ack,
+            object_values,
+            object_close,
+            schema_get,
+            logs_open,
+            logs_set_source,
+            logs_set_view,
+            logs_set_window,
+            logs_ack,
+            logs_download,
+            logs_close,
+            shell_containers,
+            shell_open,
+            shell_input,
+            shell_resize,
+            shell_ack,
+            shell_close,
+            terminal_create,
+            kubeconfig_offers_watch,
+            kubeconfig_offer_answer,
+            context_sign_in,
+            context_sign_in_cancel,
+            exec_review,
+            exec_trust,
+            approvals_watch,
+            approval_answer,
+            forward_ports,
+            forward_start,
+            forward_stop,
+            forward_resume,
+            forward_remove,
+            forwards_watch,
+            url_open,
+            diagnostics_log,
+            log_reveal,
+            log_level_set,
+            report_problem,
+            report_open_issue,
+            report_save,
+        ]))
         // A page that starts to load, as on a reload, has none of the
         // subscriptions of the one it replaces.
-        .on_page_load(|webview, payload| {
-            if payload.event() == PageLoadEvent::Started
-                && let Some(app) = webview.try_state::<App>()
-            {
-                app.core.drop_window(webview.label());
+        .on_page_load({
+            let fatal = fatal.clone();
+            move |webview, payload| {
+                fatal.guarded("a page load panicked", || {
+                    if payload.event() == PageLoadEvent::Started
+                        && let Some(app) = webview.try_state::<App>()
+                    {
+                        app.core.drop_window(webview.label());
+                    }
+                });
             }
         })
-        .on_window_event(|window, event| {
-            let focused = match event {
-                WindowEvent::Focused(focused) => *focused,
-                WindowEvent::Destroyed => false,
-                _ => return,
-            };
-            // Before setup the app is not managed yet; setup reads the
-            // window's focus itself.
-            if let Some(app) = window.app_handle().try_state::<App>() {
-                app.focus(window.label(), focused);
-                // A webview window's webview has the window's label.
-                if let WindowEvent::Destroyed = event {
-                    app.close(window.label());
-                    if let Some(shell) = window.try_state::<Shell>() {
-                        shell.followers.remove(window.label());
-                    }
-                    if let Some(keyboard) = window.try_state::<Keyboard>() {
-                        keyboard
-                            .subscriptions
-                            .lock()
-                            .expect("subscriptions lock")
-                            .remove(window.label());
-                    }
-                }
+        .on_window_event({
+            let fatal = fatal.clone();
+            move |window, event| {
+                fatal.guarded("a window event panicked", || {
+                    window_event(window, event);
+                });
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building Twigo");
-    app.run(|app, event| {
+    app.run(move |app, event| match event {
+        RunEvent::ExitRequested { .. } => fatal.ending(),
         // macOS delivers ⌘Q, the Dock's Quit and logout as `terminate:`,
         // which ends the process without `ExitRequested`, but still with
         // `Exit`: the webview cannot be asked for anything by then, so it
         // sends every change at once and this writes them.
-        if let RunEvent::Exit = event {
+        RunEvent::Exit => {
+            fatal.ending();
             let state = app.state::<App>();
             state.supervisor.abort();
             if let Some(shell) = app.try_state::<Shell>() {
                 shell.resolving.abort();
             }
-            // A poisoned lock must not stop the restart that a fatal path
-            // asked for.
-            let flushed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                state.core.shutdown();
-                state.core.state.flush()
-            }));
-            match flushed {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => tracing::error!(%error, "could not save the state on exit"),
-                Err(_) => tracing::error!("could not save the state on exit, which panicked"),
+            // On its own, so that a poisoned lock here leaves the flush to
+            // run, for the restart a fatal path asked for too.
+            if catch_unwind(AssertUnwindSafe(|| state.core.shutdown())).is_err() {
+                tracing::error!("could not end the sessions on exit, which panicked");
             }
+            fatal::flush(&state.core);
         }
+        _ => {}
     });
+}
+
+/// A window's focus, and a window gone: its subscriptions and its followers
+/// end with it.
+fn window_event(window: &tauri::Window, event: &WindowEvent) {
+    let focused = match event {
+        WindowEvent::Focused(focused) => *focused,
+        WindowEvent::Destroyed => false,
+        _ => return,
+    };
+    // Before setup the app is not managed yet; setup reads the window's focus
+    // itself.
+    let Some(app) = window.app_handle().try_state::<App>() else {
+        return;
+    };
+    app.focus(window.label(), focused);
+    // A webview window's webview has the window's label.
+    if let WindowEvent::Destroyed = event {
+        app.close(window.label());
+        if let Some(shell) = window.try_state::<Shell>() {
+            shell.followers.remove(window.label());
+        }
+        if let Some(keyboard) = window.try_state::<Keyboard>() {
+            keyboard
+                .subscriptions
+                .lock()
+                .expect("subscriptions lock")
+                .remove(window.label());
+        }
+    }
 }

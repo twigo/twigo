@@ -492,7 +492,7 @@ contexts: [{ name: prod-eu, context: { cluster: prod-eu-cluster, user: oidc-alic
     );
     core.state.open_space("gone-context");
     let (status, followed) = watch::channel(Status::Resolving);
-    core.start_for_tests(followed, None);
+    let _started = core.start_for_tests(followed, None);
     status.send_replace(Status::Resolved(Arc::new(ShellEnv::from_iter([(
         OsString::from("KUBECONFIG"),
         kubeconfig.into_os_string(),

@@ -68,6 +68,7 @@ impl Watch {
         let weak = Arc::downgrade(&shared);
         let mut last = sources.load();
         on_change(last.clone());
+        let scope = inject::Scope::current();
         std::thread::Builder::new()
             .name("kubeconfig-watch".into())
             .spawn(move || {
@@ -75,7 +76,6 @@ impl Watch {
                 // and so does the sending half of the channel.
                 let followed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     for result in received {
-                        inject::check("kubeconfig watch");
                         let Some(shared) = weak.upgrade() else { return };
                         {
                             let mut watched = lock(&shared);
@@ -87,6 +87,7 @@ impl Watch {
                             watched.follow(&sources);
                         }
                         drop(shared);
+                        scope.check("kubeconfig watch");
                         let next = sources.load();
                         if next != last {
                             last = next.clone();

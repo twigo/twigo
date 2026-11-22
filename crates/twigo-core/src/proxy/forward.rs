@@ -87,7 +87,9 @@ pub(super) fn passed(
         tokio::spawn(async move {
             tokio::select! {
                 () = watching.cancelled() => {}
-                () = ends.refused() => ending.cancel(),
+                // A panic of the wait ends the connection too: it fails
+                // closed.
+                _ = twigo_panic::contain("proxy relock", ends.refused()) => ending.cancel(),
             }
         });
         done.drop_guard()

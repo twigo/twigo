@@ -24,8 +24,7 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
-use tokio::task::JoinHandle;
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     BusyWhy, ErrorCode, ErrorKind, Forward, ForwardId, ForwardStarted, ForwardState, ForwardTarget,
@@ -330,26 +329,21 @@ impl Cluster {
     }
 }
 
-async fn core(dir: &Path, cluster: &Cluster) -> Arc<Core> {
-    core_task(dir, cluster).await.0
-}
-
-async fn core_task(dir: &Path, cluster: &Cluster) -> (Arc<Core>, JoinHandle<()>) {
+async fn core(dir: &Path, cluster: &Cluster) -> Started {
     std::fs::copy(&cluster.path, dir.join("config")).unwrap();
-    let (core, task) = running(dir);
+    let core = running(dir);
     core.catalog.contexts().await;
     core.state.open_space(&cluster.context);
-    (core, task)
+    core
 }
 
-fn running(dir: &Path) -> (Arc<Core>, JoinHandle<()>) {
+fn running(dir: &Path) -> Started {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
     let kubeconfig = dir.join("config");
-    let task = core.start_for_tests(followed, Some(kubeconfig));
-    (core, task)
+    core.start_for_tests(followed, Some(kubeconfig))
 }
 
 fn forwards(core: &Core) -> Vec<Forward> {
@@ -682,7 +676,7 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
         .expect("the cluster has a server");
     let to = real.trim_start_matches("https://").to_owned();
 
-    let (core, task) = core_task(dir.path(), &cluster).await;
+    let core = core(dir.path(), &cluster).await;
     let started = start(&core, cluster.pod(), 8080, Some(free())).await;
     state(&core, started.id, "the forward is ready", |state| {
         *state == ForwardState::Ready
@@ -692,7 +686,6 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     core.state.flush().unwrap();
     core.shutdown();
     let first = Arc::downgrade(&core);
-    task.abort();
     drop(core);
     eventually("the first core is gone", || async {
         first.upgrade().is_none()
@@ -797,12 +790,12 @@ async fn a_restart_restores_a_forward_listening_and_asks_the_cluster_only_when_u
     cluster.delete().await;
 }
 
-async fn core_over(dir: &Path, real: &str, relay: u16) -> Arc<Core> {
+async fn core_over(dir: &Path, real: &str, relay: u16) -> Started {
     let text = std::fs::read_to_string(dir.join("config"))
         .unwrap()
         .replace(real, &format!("https://127.0.0.1:{relay}"));
     std::fs::write(dir.join("config"), text).unwrap();
-    let (core, _task) = running(dir);
+    let core = running(dir);
     core.catalog.contexts().await;
     core
 }

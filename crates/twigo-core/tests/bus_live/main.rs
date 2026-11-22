@@ -23,7 +23,7 @@ use kube::config::Kubeconfig;
 use kube::{Api, Config};
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     Environment, Execute, Friction, Gvr, IpcError, OperationEvent, Plan, PlanRequest, ResourceRef,
@@ -125,7 +125,7 @@ impl Cluster {
 
 /// A core that reads only a copy of the test's kubeconfig, which a test may
 /// rewrite, with a space for its context.
-pub async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, PathBuf) {
+pub async fn core(dir: &Path, cluster: &Cluster) -> (Started, PathBuf) {
     let kubeconfig = dir.join("config");
     std::fs::copy(&cluster.path, &kubeconfig).unwrap();
     (
@@ -134,14 +134,14 @@ pub async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, PathBuf) {
     )
 }
 
-pub async fn core_over(dir: &Path, kubeconfig: &Path, context: &str) -> Arc<Core> {
+pub async fn core_over(dir: &Path, kubeconfig: &Path, context: &str) -> Started {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     core.state.open_space(context);
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
     let kubeconfig = kubeconfig.to_owned();
-    core.start_for_tests(followed, Some(kubeconfig));
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     core.policy
         .set_environment(context, Some(Environment::Local))

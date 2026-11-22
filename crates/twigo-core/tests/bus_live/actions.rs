@@ -20,7 +20,7 @@ use twigo_ipc::{
     OperationEvent, Plan, PlanRequest, ShellKind, ShellTarget,
 };
 
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 
 use super::{Cluster, WAIT, core, core_over, eventually, kubectl, line, plan, reference, run};
 
@@ -1566,7 +1566,7 @@ async fn as_account(
     namespace: &str,
     name: &str,
     role: Value,
-) -> (tempfile::TempDir, std::sync::Arc<Core>, String) {
+) -> (tempfile::TempDir, Started, String) {
     let accounts = Api::<ServiceAccount>::namespaced(cluster.admin.clone(), namespace);
     create(&accounts, json!({ "metadata": { "name": name } })).await;
     let mut role_ref = role;

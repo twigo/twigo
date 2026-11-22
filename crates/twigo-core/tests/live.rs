@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use kube::config::Kubeconfig;
 use tokio::sync::watch;
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::SchemaQuery;
 
-async fn cluster() -> (Arc<Core>, String, tempfile::TempDir) {
+async fn cluster() -> (Started, String, tempfile::TempDir) {
     let path = std::env::var_os("TWIGO_TEST_KUBECONFIG")
         .expect("TWIGO_TEST_KUBECONFIG must name the kubeconfig of a kind or kwok cluster");
     let context = Kubeconfig::read_from(&path)
@@ -26,7 +26,7 @@ async fn cluster() -> (Arc<Core>, String, tempfile::TempDir) {
     );
     let env = ShellEnv::from_iter(Vec::<(OsString, OsString)>::new());
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(env)));
-    core.start_for_tests(followed, Some(path.into()));
+    let core = core.start_for_tests(followed, Some(path.into()));
     (core, context, dir)
 }
 

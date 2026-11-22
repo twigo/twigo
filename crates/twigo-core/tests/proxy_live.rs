@@ -24,7 +24,7 @@ use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
 use tokio::sync::watch;
 use twigo_cache::hub::{Query, Resource, RowFormat};
-use twigo_core::{Core, ProxyProcess};
+use twigo_core::{Core, ProxyProcess, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{AnswerApproval, ApprovalAnswer, ApprovalEvent, Environment, Mode, ViewState};
 use twigo_policy::Actor;
@@ -217,14 +217,14 @@ where
 
 /// A core over a copy of the test's kubeconfig, and a terminal's process on
 /// its context with the window `main` to ask.
-async fn core(dir: &Path, cluster: &Cluster) -> (Arc<Core>, ProxyProcess) {
+async fn core(dir: &Path, cluster: &Cluster) -> (Started, ProxyProcess) {
     let kubeconfig = dir.join("config");
     std::fs::copy(&cluster.path, &kubeconfig).unwrap();
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
-    core.start_for_tests(followed, Some(kubeconfig));
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     core.catalog.contexts().await;
     core.policy
         .set_environment(&cluster.context, Some(Environment::Local))

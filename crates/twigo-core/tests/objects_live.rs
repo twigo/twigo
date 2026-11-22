@@ -19,7 +19,7 @@ use kube::config::Kubeconfig;
 use kube::{Api, Config};
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
-use twigo_core::Core;
+use twigo_core::{Core, Started};
 use twigo_env::{ShellEnv, Status};
 use twigo_ipc::{
     Ack, Block, EventList, Gvr, ObjectBatch, ObjectParts, ObjectQuery, OpenObject, Related,
@@ -161,14 +161,14 @@ impl Cluster {
 }
 
 /// A core that reads only `kubeconfig`, with a space for `context`.
-fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Arc<Core>, String) {
+fn core(dir: &Path, kubeconfig: &Path, context: &str) -> (Started, String) {
     let core = Core::new(dir, &dir.join("cache"), &dir.join("policy.json"));
     let space = core.state.open_space(context).id;
     let (_status, followed) = watch::channel(Status::Resolved(Arc::new(ShellEnv::from_iter(
         std::iter::empty::<(OsString, OsString)>(),
     ))));
     let kubeconfig = kubeconfig.to_owned();
-    core.start_for_tests(followed, Some(kubeconfig));
+    let core = core.start_for_tests(followed, Some(kubeconfig));
     (core, space)
 }
 

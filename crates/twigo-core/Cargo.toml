@@ -10,8 +10,8 @@ publish.workspace = true
 
 [features]
 # `Core::set_terminal_program` and `set_terminal_zdotdir`, for the tests that run a shell of
-# their own.
-test-util = []
+# their own, and `Core::start_for_tests`, whose supervisor fails a test on a panic nobody armed.
+test-util = ["twigo-panic/inject"]
 
 [lints]
 workspace = true

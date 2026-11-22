@@ -10,7 +10,9 @@ Decided 2026-11-21.
   A duty that panics starts again, at most 3 times in 5 minutes (VS Code's numbers for its extension host), with a line that names the duty and the task's id; the fourth panic in that window takes the fatal path.
   A duty that ends without a panic is logged and not started again.
   The kubeconfig watch and the state writer are threads: they say that they panicked to the same supervisor through a `Reporter`, which starts the watch again or lets the writer go on, and takes the fatal path once the state lock is poisoned.
+  A start of a thread that panics counts as another panic of its duty, since the watch's start reads the files whose content may be what panicked.
   The policy proxy's accept loop takes the fatal path at once, since its listener goes with it and its address is in every proxy kubeconfig.
+  Past the limit the other duties go on, and a panic of the supervisor's own task takes the fatal path too.
 - **An item** that a person opened, a list, an open object, a logs tab and each of its streams, a pod shell, a local terminal, a forward's data path, runs under `twigo_panic::contain`.
   Its owner keeps the sender and the state the end needs outside the item, and sends the end the item already has, with `internal.panic`: a list's last batch changes only its state to `error`, an object's and a logs tab's likewise, a shell and a terminal end `Failed`, a container's stream says `error`, and a forward is `failed`, which a resume starts again as a new data path.
   Nothing starts an item again; the webview's next subscribe, or the person's resume, does.
@@ -20,12 +22,16 @@ Decided 2026-11-21.
 - **A command**: an async one runs through `contained()` and answers `internal.panic`.
   The invoke handler runs under `catch_unwind`, and a panic of a sync command takes the fatal path.
   The panic is caught around the generated handler, not through the fields of Tauri's `Invoke`, which Tauri marks as not stable.
-- **The fatal path** writes the log, then shows a native dialog through `tauri-plugin-dialog` that says Twigo must restart, with Restart and Quit; Restart calls `AppHandle::request_restart`.
+- **The fatal path** writes the log, ends every unlock at once (the audit log's `relocked` line says `fatal`), then shows a native dialog through `tauri-plugin-dialog` that says Twigo must restart, with Restart and Quit; either answer writes the state, and Restart calls `AppHandle::request_restart`.
   It is native because the webview may be what the panic broke.
-  In tests the callback it is given panics.
+  It is a sheet on Twigo's focused window, or its main one, given as the dialog's parent; the system's own alert only where no window exists.
+  An answer that comes once Twigo has begun to end does nothing.
+  The page-load and window callbacks run under the same catch as the invoke handler.
+  A test's core, from `Core::start_for_tests`, fails the test when it is dropped if a duty panicked with nothing armed or could not be kept.
 - A task that must run to its end is joined with `twigo_panic::joined`, which raises its panic again with its own payload, so the hook records it once; never `.expect("… does not panic")`.
 - No `expect` or `unwrap` sits on an error that carries input text: a `KubeconfigError` quotes the lines of the file.
-- One seam, behind the `inject` feature of `twigo-panic`: a name armed with `inject::arm` makes the supervisor's duty, `contain`'s item or a few other sites of that name panic, once armed in a test's own runtime (so tests in one process never spend each other's) or each time in the check build, where `TWIGO_PANIC=<name>` arms it.
+- One seam, behind the `inject` feature of `twigo-panic`: a name armed with `inject::arm` makes the supervisor's duty, `contain`'s item or a few other sites of that name panic.
+  An arm counts in the runtime it was made in, and a thread checks it in the runtime that started it, so the tests of one process, each on a runtime of its own, never spend each other's arms; an arm made outside any runtime counts everywhere, as the check build's, where `TWIGO_PANIC=<name>` arms it each time.
   A release build never has the feature.
 
 ## Why
@@ -37,5 +43,9 @@ Decided 2026-11-21.
 - Containing a panic leaves a std lock that the panicking task held poisoned, and a state half changed: so what shares such a lock either fails loudly at its next use, which the fatal path then takes, or is made whole again where that is cheap, as the store is.
   Aborting on any panic, as Zed's hook does, would end terminals, shells and forwards for a bug in a list, and its released behaviour could not be tested, since the test harness needs unwinding.
 - A deterministic panic returns as soon as its task runs again, so a restart needs a limit: the first probe of the supervisor hit the limit within milliseconds.
+- The fatal path keeps the healthy duties and ends the unlocks because the person may never answer: with the duties gone, an exec session opened under an unlock outlived it, and the dialog does not stop the person from working on in another window.
+- The system's own alert, `CFUserNotificationDisplayAlert` in rfd 0.17.2, which the dialog was without a parent, outlives the process, and an alert that comes back without a click answers with its first button: a debug build with the `inject` feature, started with `TWIGO_PANIC="unlock expiry"` on macOS 27.2.1 on 2026-11-22 while the alert of a run ended by `kill` was still on screen, restarted itself five times in 9 s with no click.
+  A sheet is part of Twigo's window and ends with it.
+- Arms that counted everywhere were spent by the threads of other tests in the same binary: the thread tests of `crates/twigo-core/tests/panics.rs`, run 30 times on 2026-11-22, failed 4 times so.
 - A shared crate, not a helper in each: `twigo-kube`, `twigo-cache`, `twigo-sessions` and `twigo-core` all spawn items or join tasks, and the seam is checked by the supervisor and by the item helper alike.
 - A [`Shared` future that panicked stays poisoned](https://github.com/rust-lang/futures-rs/blob/0.3.34/futures-util/src/future/future/shared.rs#L300-L318), so a map that kept it made every later asker of the same check panic.
