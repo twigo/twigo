@@ -753,7 +753,7 @@ impl Core {
             })
             .await?;
         self.lists
-            .keep(ticket, Batcher::spawn(rows, spec, metrics, send))
+            .keep(ticket, Batcher::spawn("list", rows, spec, metrics, send))
     }
 
     /// A list or an object does not wait for the catalog to list the context, and has the

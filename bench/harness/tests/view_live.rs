@@ -240,6 +240,7 @@ async fn under_churn(path: &std::ffi::OsStr, context: &str, clients: &Arc<Client
     let hub = Hub::new(connect(clients));
     let (sender, batches) = mpsc::unbounded_channel();
     let batcher = Batcher::spawn(
+        "list",
         hub.rows(hub_query(context)).await.unwrap(),
         Spec::new(context, &query(context)).unwrap(),
         None,

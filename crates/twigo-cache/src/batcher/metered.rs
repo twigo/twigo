@@ -115,6 +115,7 @@ async fn open(
     let spec = Spec::new("kind-test", query).unwrap();
     let (sender, batches) = mpsc::unbounded_channel();
     let batcher = Batcher::spawn(
+        "list",
         subscription,
         spec,
         Some(opening(poller, followers)),

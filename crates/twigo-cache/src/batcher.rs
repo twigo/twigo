@@ -9,6 +9,9 @@
 //! no more memory than its rows and no wake-ups, and the next batch carries
 //! everything.
 //!
+//! The rows come from a [`Source`]: a hub subscription, or rows made from
+//! one, such as a release list's.
+//!
 //! A list of pods or nodes whose context serves metrics also joins them
 //! (ARCHITECTURE 3.6): it asks the poller for the namespaces of its window at
 //! each flush, and for nothing before its first window, while its metric
@@ -34,6 +37,27 @@ use crate::table::Row;
 use crate::view::{QueryView, Spec};
 
 pub const FLUSH: Duration = Duration::from_millis(50);
+
+/// What a list reads of the rows it shows.
+pub trait Source: Send + 'static {
+    /// What changed in the rows that show since the last call, and the state
+    /// and the parts that say which these are ([`Subscription::drain_shown`]).
+    fn drain_shown(&self) -> Shown<Row>;
+
+    /// The rows are those of the namespaces the person may list, which all
+    /// namespaces came to ([`Subscription::resolved`]).
+    fn resolved(&self) -> bool;
+}
+
+impl Source for Subscription<Row> {
+    fn drain_shown(&self) -> Shown<Row> {
+        Subscription::drain_shown(self)
+    }
+
+    fn resolved(&self) -> bool {
+        Subscription::resolved(self)
+    }
+}
 
 /// A running list: dropping it ends its task and its subscription.
 pub struct Batcher {
@@ -63,15 +87,18 @@ struct Window {
 
 impl Batcher {
     /// Sends each batch through `send` until it says the webview is gone.
+    /// `item` names the list for a panic's end and for `TWIGO_PANIC`.
     pub fn spawn(
-        subscription: Subscription<Row>,
+        item: &'static str,
+        source: impl Source,
         spec: Spec,
         metrics: Option<Opening>,
         send: impl FnMut(ListBatch) -> bool + Send + 'static,
     ) -> Self {
         let control = Arc::new(Control::default());
         let task = tokio::spawn(serve(
-            subscription,
+            item,
+            source,
             spec,
             metrics,
             Arc::clone(&control),
@@ -124,7 +151,8 @@ impl FirstOrder {
 /// Runs the list; if it panics, its last batch changes nothing but the
 /// state, which says why, and nothing starts it again.
 async fn serve(
-    subscription: Subscription<Row>,
+    item: &'static str,
+    source: impl Source,
     spec: Spec,
     opening: Option<Opening>,
     control: Arc<Control>,
@@ -135,7 +163,7 @@ async fn serve(
         (seq, total) = (batch.seq, batch.total);
         send(batch)
     };
-    if contain("list", run(subscription, spec, opening, control, &mut tell))
+    if contain(item, run(source, spec, opening, control, &mut tell))
         .await
         .is_ok()
     {
@@ -158,7 +186,7 @@ async fn serve(
 }
 
 async fn run(
-    subscription: Subscription<Row>,
+    source: impl Source,
     spec: Spec,
     mut opening: Option<Opening>,
     control: Arc<Control>,
@@ -219,12 +247,12 @@ async fn run(
             delta,
             status,
             parts,
-        } = subscription.drain_shown();
+        } = source.drain_shown();
         view.apply(delta);
         let mut settled = true;
         if let Some(metrics) = &mut metrics {
             view.set_api(metrics.api());
-            if subscription.resolved() {
+            if source.resolved() {
                 view.resolved();
             }
             metrics.want(view.wants(reading));
@@ -340,7 +368,7 @@ mod tests {
         (fake, hub, subscription, spec): (Fake, (Hub, Arc<Clients>), Subscription<Row>, Spec),
     ) -> Rig {
         let (sender, batches) = mpsc::unbounded_channel();
-        let batcher = Batcher::spawn(subscription, spec, None, move |batch| {
+        let batcher = Batcher::spawn("list", subscription, spec, None, move |batch| {
             sender.send((Instant::now(), batch)).is_ok()
         });
         Rig {
@@ -395,7 +423,7 @@ mod tests {
             sleep(Duration::from_secs(5)).await;
             panic!("a metrics bug")
         });
-        let batcher = Batcher::spawn(subscription, spec, Some(opening), move |batch| {
+        let batcher = Batcher::spawn("list", subscription, spec, Some(opening), move |batch| {
             sender.send(batch).is_ok()
         });
         batcher.set_window(0, 100, false);
