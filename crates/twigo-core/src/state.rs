@@ -62,13 +62,9 @@ const RESERVED: [&str; 3] = [CHOICES, FORWARDS, LAST_FORWARD];
 /// hides by name.
 const NAMESPACES: &str = "namespaces";
 
-/// What the spaces call by name: a problem report hides these wherever a
-/// log line says them.
 #[derive(Debug, Default)]
 pub(crate) struct Named {
-    /// The namespaces the spaces are on, and those of their saved forwards.
     pub namespaces: BTreeSet<String>,
-    /// The names of the saved forwards' targets.
     pub objects: BTreeSet<String>,
 }
 
@@ -237,8 +233,8 @@ impl State {
             .unwrap_or_default()
     }
 
-    /// The namespaces the spaces chose and the targets of their saved
-    /// forwards, as far as they read back.
+    /// The namespaces the spaces are on, and the namespaces and the names of
+    /// their saved forwards' targets, as far as they read back.
     pub(crate) fn named(&self) -> Named {
         let data = self.inner.lock();
         let mut named = Named::default();
