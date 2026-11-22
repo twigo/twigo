@@ -193,11 +193,29 @@ struct Failures {
     resizes: Repeats,
 }
 
-impl Drop for Failures {
-    fn drop(&mut self) {
+impl Failures {
+    /// Says how a write went: the first failure of a run when it happens, and
+    /// how many followed it once a write works again.
+    fn write(&mut self, written: &std::io::Result<usize>) {
+        match written {
+            Ok(_) => self.writes_ended(),
+            Err(error) if self.writes.failed() => {
+                tracing::warn!(%error, "could not write to a terminal");
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn writes_ended(&mut self) {
         if let Some(count) = self.writes.ended() {
             tracing::warn!(count, "more writes to a terminal failed");
         }
+    }
+}
+
+impl Drop for Failures {
+    fn drop(&mut self) {
+        self.writes_ended();
         if let Some(count) = self.resizes.ended() {
             tracing::warn!(count, "more resizes of a terminal failed");
         }
@@ -269,15 +287,13 @@ async fn run(
                     Some(data) => writing = data,
                     None => return,
                 },
-                written = writer.write(&writing), if !writing.is_empty() => match written {
-                    Ok(n) => { writing.drain(..n); }
-                    Err(error) => {
-                        if failures.writes.failed() {
-                            tracing::warn!(%error, "could not write to a terminal");
-                        }
-                        writing.clear();
+                written = writer.write(&writing), if !writing.is_empty() => {
+                    failures.write(&written);
+                    match written {
+                        Ok(n) => { writing.drain(..n); }
+                        Err(_) => writing.clear(),
                     }
-                },
+                }
                 changed = size.changed() => {
                     if changed.is_err() {
                         return;

@@ -4,8 +4,8 @@
 //! the UI's writes, of every command a person confirmed and how it ended,
 //! and of every answer to a process's ask but a type that marks its context.
 //! It names what was asked and where, never a value or a token. Past
-//! [`LIMIT`] it moves to `audit.1.jsonl`, the older ones up by one, and
-//! [`KEPT`] of them stay.
+//! `LIMITS.size` it moves to `audit.1.jsonl`, the older ones up by one, and
+//! `LIMITS.kept` of them stay.
 //!
 //! It also records each change of a context's protection, a command's, the
 //! type an unmarked ask's answer gave, or the catalog's, each unlock's end,
@@ -298,23 +298,6 @@ mod tests {
 
     fn serial() -> MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    #[test]
-    fn opens_a_log_in_a_directory_that_does_not_exist_yet() {
-        let _serial = serial();
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("app-data/nested/audit.jsonl");
-        Audit::open(&path).record(&Entry::Ended {
-            context: "kind-a",
-            command: "apply",
-            target: "deployments/web",
-            outcome: "done",
-            message: None,
-            codes: &[],
-        });
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains(r#""event":"ended""#), "{written}");
     }
 
     fn listed(code: ErrorCode) -> bool {

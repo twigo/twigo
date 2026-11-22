@@ -229,8 +229,8 @@ export type BusyWhy = "inUse" | "notPermitted";
  */
 export type Catalog = { contexts: Array<Context>, 
 /**
- * The kubeconfig files that exist and could not be read or merged,
- * whose contexts are missing.
+ * Files that exist but could not be read or merged, whose contexts are
+ * missing, and files whose changes go unseen.
  */
 failures: Array<CatalogFailure>, };
 
@@ -1477,15 +1477,6 @@ lock: string,
 locked?: unknown, };
 
 /**
- * What the link left out to stay under its length.
- */
-export type OpenedIssue = { 
-/**
- * Facts whose values were shortened.
- */
-factsCut: Array<FactId>, };
-
-/**
  * How a running plan goes, over its channel; every kind but `running` is
  * the last.
  */
@@ -2125,6 +2116,6 @@ export type Commands = {
   log_reveal: { request: null; response: null; message: null };
   log_level_set: { request: SetLogLevel; response: null; message: null };
   report_problem: { request: null; response: Report; message: null };
-  report_open_issue: { request: OpenIssue; response: OpenedIssue; message: null };
+  report_open_issue: { request: OpenIssue; response: null; message: null };
   report_save: { request: SaveReport; response: string | null; message: null };
 };

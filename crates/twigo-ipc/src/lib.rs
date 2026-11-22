@@ -65,7 +65,7 @@ pub use object::{
     Related, RelatedObject, Section, SetParts, Span, Tone, TreeNode, TreeValue, Usage, Value,
     Vital,
 };
-pub use report::{Fact, FactId, Hidden, OpenIssue, OpenedIssue, Report, SaveReport};
+pub use report::{Fact, FactId, Hidden, OpenIssue, Report, SaveReport};
 pub use schema::SchemaQuery;
 pub use shell::{
     OpenShell, ShellAck, ShellContainers, ShellEnd, ShellEvent, ShellInput, ShellKind,

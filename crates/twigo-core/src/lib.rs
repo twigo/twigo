@@ -49,7 +49,7 @@ use twigo_kube::discovery::Cache;
 use twigo_kube::kubeconfig;
 use twigo_kube::openapi::{self, Document};
 use twigo_netmon::Event;
-use twigo_panic::{Fatal, Reporter, Reports, Supervisor, inject};
+use twigo_panic::{Fatal, Reporter, Reports, Supervisor};
 use twigo_policy::friction::{covers, friction};
 use twigo_policy::{Audit, Change, Entry, PlannedChange, Policy, Why};
 use twigo_sessions::logs::Session;
@@ -526,24 +526,12 @@ impl Core {
         );
         let ticket = space.as_deref().map(|space| undos.started(space));
         tokio::spawn(async move {
-            // Its own task, so that a panic in it ends the plan as failed
-            // here, with the undo and the bus entry freed. A plan is never
-            // retried: a write must not go out twice.
-            let ended = match tokio::spawn({
-                let progress = progress.clone();
-                async move {
-                    inject::check("plan run");
-                    run(progress).await
-                }
-            })
-            .await
-            {
-                Ok(ended) => ended,
-                Err(error) => {
-                    tracing::error!(%context, command, panicked = error.is_panic(), "a plan's run ended on a panic");
-                    Err(IpcError::panicked("this run"))
-                }
-            };
+            // A panic ends the plan as failed here, with the undo and the bus
+            // entry freed. A plan is never retried: a write must not go out
+            // twice.
+            let ended = twigo_panic::contain("plan run", run(progress.clone()))
+                .await
+                .unwrap_or_else(|_| Err(IpcError::panicked("this run")));
             let undo_until = space.zip(ticket).and_then(|(space, ticket)| {
                 let revert = ended.as_ref().ok().and_then(Finished::revert);
                 undos.ended(&space, ticket, revert.map(|revert| (revert, connection)))
@@ -678,9 +666,7 @@ impl Core {
             .await
             .map_err(|e| IpcError::from(&e))?;
         let gvk = GroupVersionKind::gvk(&query.group, &query.version, &query.kind);
-        let schema = twigo_panic::joined(
-            tokio::task::spawn_blocking(move || document.json_schema(&gvk)).await,
-        );
+        let schema = twigo_panic::blocking(move || document.json_schema(&gvk)).await;
         schema.ok_or_else(|| {
             IpcError::new(
                 ErrorCode::OpenapiNoKind,
@@ -720,13 +706,10 @@ impl Core {
     /// time (ARCHITECTURE 3.2).
     pub async fn namespaces(&self, space: &str) -> Result<Vec<String>, IpcError> {
         let context = self.context(space)?;
-        self.hub.namespaces(&context).await.map_err(|state| {
-            match state {
-                ViewState::Stale { cause: Some(cause) } => Some(cause),
-                state => state.refusal(),
-            }
-            .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
-        })
+        self.hub
+            .namespaces(&context)
+            .await
+            .map_err(namespaces_unavailable)
     }
 
     /// A list of a space's resource for a window, filtered, sorted and
@@ -921,12 +904,7 @@ impl Core {
         let lines = lines
             .await
             .map_err(|_| IpcError::new(ErrorCode::WindowGone, "the logs tab closed"))??;
-        tokio::fs::write(path, lines).await.map_err(|error| {
-            IpcError::new(
-                ErrorCode::FileUnwritten,
-                format!("could not write {}: {error}", path.display()),
-            )
-        })
+        report::write(&lines, path).await
     }
 
     /// The containers of a pod a shell can reach (ARCHITECTURE 4.6), refused
@@ -1268,6 +1246,16 @@ impl Failures {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Why a read of the namespaces gave up: the last failure's cause when the
+/// hub kept one, else the refusal it ended on.
+fn namespaces_unavailable(state: ViewState) -> IpcError {
+    match state {
+        ViewState::Stale { cause: Some(cause) } => Some(cause),
+        state => state.refusal(),
+    }
+    .unwrap_or_else(|| IpcError::new(ErrorCode::ConnectOther, "the cluster is unavailable"))
 }
 
 /// How the hub gets a context's clients: through the core, while it lives.

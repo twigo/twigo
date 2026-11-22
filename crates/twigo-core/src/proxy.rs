@@ -220,12 +220,7 @@ impl Core {
         }
         let path = self.proxy.dir.join(format!("process-{id}.kubeconfig"));
         let written = kubeconfig::write(&self.proxy.dir, &path, &entries, context, &endpoint.ca);
-        written.map_err(|error| {
-            IpcError::new(
-                ErrorCode::FileUnwritten,
-                format!("could not write {}: {error}", path.display()),
-            )
-        })?;
+        written.map_err(|error| crate::errors::unwritten(&path, error))?;
         let mut tokens = self.proxy.tokens.lock().expect("tokens lock");
         for holder in issued {
             tokens.insert(holder.digest, Arc::new(holder));

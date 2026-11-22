@@ -336,8 +336,7 @@ impl Follower {
     async fn load(&self, cluster: &str) -> Option<Discovery> {
         let cache = Arc::clone(&self.cache);
         let key = cluster.to_owned();
-        let loaded =
-            twigo_panic::joined(tokio::task::spawn_blocking(move || cache.load(&key)).await);
+        let loaded = twigo_panic::blocking(move || cache.load(&key)).await;
         loaded.unwrap_or_else(|error| {
             tracing::warn!(server = cluster_url(cluster), %error, "could not read the cached discovery");
             None
@@ -348,9 +347,7 @@ impl Follower {
         let cache = Arc::clone(&self.cache);
         let key = cluster.to_owned();
         let discovery = discovery.clone();
-        let stored = twigo_panic::joined(
-            tokio::task::spawn_blocking(move || cache.store(&key, &discovery)).await,
-        );
+        let stored = twigo_panic::blocking(move || cache.store(&key, &discovery)).await;
         if let Err(error) = stored {
             tracing::warn!(server = cluster_url(cluster), %error, "could not cache the discovery");
         }

@@ -199,7 +199,7 @@ The hook of `twigo-log` records every panic first (4.10).
   Where no window is left, as when the last one's `Destroyed` handler panicked, Twigo is ending already: the fatal path writes the state and asks nothing, since the dialog without a parent is the system's own alert, which would outlive Twigo.
   Either answer writes the state first, and Restart asks Tauri to restart: spaces and forwards come back as they do at any start.
   An answer that comes once Twigo has begun to end does nothing, so an exit never turns into a restart.
-- **A joined task's panic** goes on as it was (`twigo_panic::joined`), so the hook records it once.
+- **A joined task's panic** goes on as it was (`twigo_panic::joined`, and `twigo_panic::blocking` for a closure on the blocking pool), so the hook records it once.
 - **The rest** is left to tokio, and the hook's record is all its panic leaves: among it the forward's pump, whose row then stops changing, the discovery follower, the metrics poll, a credential plugin's run, whose status stays `running`, the sign-in and fingerprint followers, the terminals' kubeconfig watcher threads, the per-window followers and the proxy's connections.
 - `TWIGO_PANIC=<name>` makes the duty or the item of that name panic each time it runs, and the kubeconfig watch at each change of its files, in a build with the app's `inject` feature, which turns on `twigo-panic`'s and which a release build never has: the names are the duties above, `supervisor`, `forward restore`, `list`, `object`, `logs`, `log stream`, `pod shell`, `terminal`, `forward`, `forward recheck`, `hub upstream`, `store lock`, `plan run`, `command`, `policy proxy`, `proxy relock`, and the threads `state writer` and `kubeconfig watch`.
 
@@ -1926,7 +1926,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
 - **What leaves the machine, and how.**
   Twigo itself sends nothing: the person chooses a way out, and every one is theirs to press.
   - Open Issue on GitHub: `report_open_issue` takes the ids of the facts left ticked, states them again from this run, and has the opener plugin open `…/issues/new?template=bug_report.yml` with them as its `environment` field.
-    The link stays under 6,000 characters: past that the longest fact values are cut, down to 40 characters each, and the answer says which were cut.
+    The link stays under 6,000 characters: past that it opens the bare template, which takes some 170 distinct Kubernetes versions in one run to reach (measured on 2026-11-22 with five facts and a 100-character panic place).
     A request without a GitHub session got `302` at 7,001 characters, `500` at 7,051 and 8,001 and `414` at 8,201 (`curl -s -o /dev/null -w "%{http_code}"` on `github.com/cli/cli/issues/new?title=t&body=<n × a>`, 2026-11-22); the limit for a signed-in person was not measured.
     The log never goes in the link: opening a link sends it to github.com and keeps it in the browser's history, so the dialog's click handler writes the log to the clipboard, where `report_open_issue` could not, and the person pastes it into the form's Logs field.
   - Save…: `report_save` asks where, through the same dialog as a logs tab's download, and writes the text the person sees as `twigo-report-<date>.txt`, which the form's upload field takes.
@@ -1941,7 +1941,7 @@ What a bug report holds, and how it leaves the machine, is Rust's to decide, sin
   - The issue's facts are read-only, with a tick on those the person may leave out.
   - The log is one editable monospace field, with a line that says how much the redaction hid (`Twigo hid 6 names, 2 paths and 1 token; read it before you paste`) and Reveal Log File beside it.
   - It says that the issue is public, that nothing leaves the computer until the person chooses and that Twigo itself sends nothing, and links GitHub's private reporting of a vulnerability for a security problem (`SECURITY.md`).
-  - Open Issue on GitHub writes the log as the person sees it to the clipboard in its click handler, before `report_open_issue`, since WKWebView may not allow the write after an IPC round trip (not verified); then the dialog closes with a toast that says where to paste the log and what the link had to cut.
+  - Open Issue on GitHub writes the log as the person sees it to the clipboard in its click handler, before `report_open_issue`, since WKWebView may not allow the write after an IPC round trip (not verified); then the dialog closes with a toast that says where to paste the log.
     Save… sends `report_save` the text of the facts left ticked above the log, and Copy puts the same text on the clipboard.
   - A failure of any of them shows its error in the dialog with its code, as every error does (3.7).
 

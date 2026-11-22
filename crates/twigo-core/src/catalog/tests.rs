@@ -267,3 +267,99 @@ contexts: [{ name: kind-a, context: { cluster: c } }]
         tokio::time::timeout(std::time::Duration::from_secs(1), fingerprint.changed()).await;
     assert!(quiet.is_err(), "the first read is no change");
 }
+
+fn told(logged: &twigo_log::Captured) -> Vec<(String, String, String)> {
+    logged
+        .lines()
+        .iter()
+        .map(|line| {
+            let text = |value: &serde_json::Value| value.as_str().unwrap_or_default().to_owned();
+            (
+                text(&line["level"]),
+                text(&line["fields"]["code"]),
+                text(&line["fields"]["path"]),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_failing_file_is_logged_when_its_failure_starts_and_ends_and_not_at_each_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(&file, "contexts: [unclosed").unwrap();
+    let sources = Sources::explicit(file.clone());
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    catalog.follow(sources.clone());
+    catalog.follow(sources.clone());
+    fs::write(&file, "contexts: []").unwrap();
+    catalog.follow(sources);
+    let (code, path) = ("kubeconfig.unparsable", file.display().to_string());
+    assert_eq!(
+        told(&logged),
+        [
+            ("WARN".to_owned(), code.to_owned(), path.clone()),
+            ("INFO".to_owned(), code.to_owned(), path),
+        ]
+    );
+}
+
+#[test]
+fn a_failure_that_changes_is_one_warning_and_the_file_ends_once_nothing_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("config");
+    fs::write(&file, "contexts: [unclosed").unwrap();
+    let sources = Sources::explicit(file.clone());
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    fs::remove_file(&file).unwrap();
+    fs::create_dir(&file).unwrap();
+    catalog.follow(sources.clone());
+    fs::remove_dir(&file).unwrap();
+    fs::write(&file, "contexts: []").unwrap();
+    catalog.follow(sources);
+    let path = file.display().to_string();
+    let line = |level: &str, code: &str| (level.to_owned(), code.to_owned(), path.clone());
+    assert_eq!(
+        told(&logged),
+        [
+            line("WARN", "kubeconfig.unparsable"),
+            line("WARN", "kubeconfig.unreadable"),
+            line("INFO", "kubeconfig.unreadable"),
+        ]
+    );
+}
+
+#[test]
+fn a_file_that_keeps_failing_is_not_told_again_when_another_file_s_failure_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (steady, changing) = (dir.path().join("steady"), dir.path().join("changing"));
+    fs::write(&steady, "contexts: [unclosed").unwrap();
+    fs::write(&changing, "contexts: [unclosed").unwrap();
+    let list = std::env::join_paths([&steady, &changing]).unwrap();
+    let sources = Sources::kubectl(Some(&list), None);
+    let catalog = Catalog::default();
+    let logged = twigo_log::capture();
+    catalog.follow(sources.clone());
+    fs::remove_file(&changing).unwrap();
+    fs::create_dir(&changing).unwrap();
+    catalog.follow(sources);
+    let line = |code: &str, path: &Path| {
+        (
+            "WARN".to_owned(),
+            code.to_owned(),
+            path.display().to_string(),
+        )
+    };
+    assert_eq!(
+        told(&logged),
+        [
+            line("kubeconfig.unparsable", &steady),
+            line("kubeconfig.unparsable", &changing),
+            line("kubeconfig.unreadable", &changing),
+        ]
+    );
+}

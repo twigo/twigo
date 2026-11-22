@@ -1,4 +1,4 @@
-import type { Fact, Hidden, OpenedIssue } from "@twigo/protocol";
+import type { Fact, Hidden } from "@twigo/protocol";
 
 /** GitHub's private reporting of a vulnerability, which SECURITY.md names for what is not to be public. */
 export const SECURITY_URL =
@@ -51,17 +51,4 @@ export function reportText({
   return [facts.map(({ label, value }) => `${label}: ${value}`).join("\n"), log]
     .filter((block) => block !== "")
     .join("\n\n");
-}
-
-export function openedWords(
-  { factsCut }: OpenedIssue,
-  facts: readonly Fact[],
-): string {
-  const cut = factsCut.map(
-    (id) => `shortened ${facts.find((fact) => fact.id === id)?.label ?? id}`,
-  );
-  const said = "The log is on your clipboard: paste it into Logs.";
-  return cut.length === 0
-    ? said
-    : `${said} The link was too long, so Twigo ${listed(cut)}.`;
 }

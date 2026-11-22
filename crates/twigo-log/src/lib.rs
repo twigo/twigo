@@ -32,7 +32,6 @@ mod rotating;
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Once;
 
 #[cfg(feature = "test-util")]
 pub use capture::{Captured, capture};
@@ -84,7 +83,14 @@ impl Log {
     pub fn start(directory: &Path, facts: &Facts) -> Self {
         let path = directory.join(FILE);
         let file = Rotating::open_new(&path, LIMITS, rotating::to_stderr)
-            .inspect_err(|error| report(&path, error))
+            .inspect_err(|error| {
+                rotating::to_stderr(&Failure {
+                    path: &path,
+                    what: "cannot be opened",
+                    lost: true,
+                    error,
+                });
+            })
             .ok();
         let (spec, filter, invalid) = initial_filter();
         let writer = file
@@ -178,23 +184,11 @@ fn subscriber(
 /// Makes the `log` records of Tauri and the other libraries events, those the
 /// subscriber's filter can let through.
 fn log_tracer() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let level = AsLog::as_log(&LevelFilter::current());
-        // Another `log` logger already set is the application's to keep.
-        let _ = tracing_log::LogTracer::builder()
-            .with_max_level(level)
-            .init();
-    });
-}
-
-fn report(path: &Path, error: &io::Error) {
-    rotating::to_stderr(&Failure {
-        path,
-        what: "cannot be opened",
-        lost: true,
-        error,
-    });
+    let level = AsLog::as_log(&LevelFilter::current());
+    // Another `log` logger already set, ours of an earlier start among them, is kept.
+    let _ = tracing_log::LogTracer::builder()
+        .with_max_level(level)
+        .init();
 }
 
 #[cfg(test)]

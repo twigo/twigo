@@ -1,5 +1,5 @@
 //! The seam: a panic armed by name. The supervisor starts a duty, and
-//! [`contain`](crate::contain) an item, under the name they were given, and
+//! [`contain`](crate::contain()) an item, under the name they were given, and
 //! each panics when that name is armed. A few more sites say a name of their
 //! own, such as the store's lock. Without the `inject` feature nothing is
 //! armed and [`check`] is empty, so a release build never has it.

@@ -1,5 +1,8 @@
 //! How the core's errors reach the webview (`IpcError`).
 
+use std::fmt::Display;
+use std::path::Path;
+
 use twigo_ipc::{ErrorCode, IpcError};
 use twigo_policy::Refused;
 
@@ -11,6 +14,14 @@ pub(crate) fn unlisted(context: &str) -> IpcError {
     IpcError::new(
         ErrorCode::ContextNotListed,
         format!("no source lists the context {context:?}"),
+    )
+}
+
+/// A file Twigo writes for the person or a process could not be written.
+pub(crate) fn unwritten(path: &Path, error: impl Display) -> IpcError {
+    IpcError::new(
+        ErrorCode::FileUnwritten,
+        format!("could not write {}: {error}", path.display()),
     )
 }
 

@@ -158,10 +158,8 @@ impl Document {
         for _ in 0..2 {
             let url = listed(client, &path).await?;
             if let Some(document) = fetch(client, cache, &url).await? {
-                let parsed = twigo_panic::joined(
-                    tokio::task::spawn_blocking(move || serde_json::from_slice::<Whole>(&document))
-                        .await,
-                );
+                let parsed =
+                    twigo_panic::blocking(move || serde_json::from_slice::<Whole>(&document)).await;
                 return parsed
                     .map(|whole| Self {
                         schemas: whole.components.schemas,
@@ -245,13 +243,11 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
 
     let stored = {
         let (cache, url, hash) = (cache.clone(), url.to_owned(), hash.clone());
-        twigo_panic::joined(
-            tokio::task::spawn_blocking(move || {
-                let document = cache.load(&url)?.filter(|document| names(&hash, document));
-                Ok::<_, std::io::Error>(document)
-            })
-            .await,
-        )
+        twigo_panic::blocking(move || {
+            let document = cache.load(&url)?.filter(|document| names(&hash, document));
+            Ok::<_, std::io::Error>(document)
+        })
+        .await
     };
     match stored {
         Ok(Some(document)) => return Ok(Some(document)),
@@ -268,7 +264,7 @@ async fn fetch(client: &Client, cache: &Cache, url: &str) -> Result<Option<Bytes
     }
     let stored = {
         let (cache, url, document) = (cache.clone(), url.to_owned(), document.clone());
-        twigo_panic::joined(tokio::task::spawn_blocking(move || cache.store(&url, &document)).await)
+        twigo_panic::blocking(move || cache.store(&url, &document)).await
     };
     if let Err(error) = stored {
         tracing::warn!(url, %error, "could not cache an OpenAPI document");

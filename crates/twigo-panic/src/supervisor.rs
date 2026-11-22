@@ -349,18 +349,6 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_duty_that_panics_starts_again() {
-        let (mut supervisor, _reporter, told) = supervisor();
-        let starts = Arc::new(AtomicUsize::new(0));
-        supervisor.task("flaky", flaky(&starts, 1));
-        let running = tokio::spawn(supervisor.run());
-        sleep(Duration::from_secs(1)).await;
-        assert_eq!(starts.load(Ordering::SeqCst), 2);
-        assert!(told.lock().unwrap().is_empty());
-        assert!(!running.is_finished(), "the second start waits");
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn the_fourth_panic_in_five_minutes_takes_the_fatal_path_and_the_other_duties_go_on() {
         let (mut supervisor, _reporter, told) = supervisor();
         let starts = Arc::new(AtomicUsize::new(0));

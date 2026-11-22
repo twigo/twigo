@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use twigo_ipc::{ErrorCode, ShellEnd, ShellEvent};
 
-use super::{Spec, Terminal};
+use super::{Failures, Spec, Terminal};
 use crate::shell::Frame;
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -729,4 +729,35 @@ fn ptys_opened_from_many_threads_at_once_all_open() {
             .sum()
     });
     assert_eq!(failed, 0);
+}
+
+#[test]
+fn a_write_that_fails_after_one_that_worked_starts_a_run_of_its_own() {
+    let logged = twigo_log::capture();
+    let mut failures = Failures::default();
+    let broken = || Err(std::io::ErrorKind::BrokenPipe.into());
+    failures.write(&broken());
+    failures.write(&broken());
+    failures.write(&Ok(1));
+    failures.write(&broken());
+    drop(failures);
+
+    let told: Vec<_> = logged
+        .lines()
+        .iter()
+        .map(|line| {
+            (
+                line["fields"]["message"].as_str().unwrap().to_owned(),
+                line["fields"]["count"].as_u64(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        told,
+        [
+            ("could not write to a terminal".to_owned(), None),
+            ("more writes to a terminal failed".to_owned(), Some(1)),
+            ("could not write to a terminal".to_owned(), None),
+        ]
+    );
 }

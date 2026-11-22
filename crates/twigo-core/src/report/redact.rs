@@ -217,27 +217,11 @@ impl Redactor {
         let text = replaced(&EMAIL, &text, &mut self.people, |_| {
             Some("<email>".to_owned())
         });
-        let text = self.homes_hidden(&text);
-        let text = self.accounts_hidden(&text);
+        let text = counted(&text, &self.homes, &mut self.hidden.paths, "~");
+        let text = counted(&text, &self.accounts, &mut self.people, "<account>");
         let text = self.addresses_hidden(&text);
         replaced(&QUOTED, &text, &mut self.hidden.quoted, |found| {
-            (!only_aliases(&found[1])).then(|| "\"…\"".to_owned())
-        })
-    }
-
-    fn homes_hidden(&mut self, text: &str) -> String {
-        let paths = &mut self.hidden.paths;
-        whole_tokens_replaced(text, &self.homes, |_| {
-            *paths += 1;
-            "~".to_owned()
-        })
-    }
-
-    fn accounts_hidden(&mut self, text: &str) -> String {
-        let people = &mut self.people;
-        whole_tokens_replaced(text, &self.accounts, |_| {
-            *people += 1;
-            "<account>".to_owned()
+            (!ALIASES_ONLY.is_match(&found[1])).then(|| "\"…\"".to_owned())
         })
     }
 
@@ -303,8 +287,13 @@ fn looks_like_a_credential(word: &str) -> bool {
     !word.bytes().all(|byte| byte.is_ascii_lowercase())
 }
 
-fn only_aliases(inside: &str) -> bool {
-    ALIASES_ONLY.is_match(inside)
+/// `text` with each of `names` as a whole token replaced by `alias`, and
+/// `count` raised by one for each.
+fn counted(text: &str, names: &[String], count: &mut u32, alias: &str) -> String {
+    whole_tokens_replaced(text, names, |_| {
+        *count += 1;
+        alias.to_owned()
+    })
 }
 
 fn address(candidate: &str) -> Option<IpAddr> {

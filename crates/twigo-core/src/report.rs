@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use twigo_ipc::{ErrorCode, Fact, FactId, IpcError, OpenIssue, OpenedIssue, Report};
+use twigo_ipc::{Fact, FactId, IpcError, OpenIssue, Report};
 use twigo_kube::kubeconfig::named;
 use twigo_log::Facts;
 
@@ -30,13 +30,10 @@ pub fn file_name() -> String {
     )
 }
 
-pub async fn write(text: &str, path: &Path) -> Result<(), IpcError> {
-    tokio::fs::write(path, text).await.map_err(|error| {
-        IpcError::new(
-            ErrorCode::FileUnwritten,
-            format!("could not write {}: {error}", path.display()),
-        )
-    })
+pub async fn write(text: impl AsRef<[u8]>, path: &Path) -> Result<(), IpcError> {
+    tokio::fs::write(path, text)
+        .await
+        .map_err(|error| crate::errors::unwritten(path, error))
 }
 
 impl Core {
@@ -47,29 +44,26 @@ impl Core {
     pub async fn report(&self, facts: &Facts, files: &[PathBuf]) -> Report {
         let (known, versions) = (self.known(), self.connections.versions());
         let (facts, files) = (facts.clone(), files.to_vec());
-        twigo_panic::joined(
-            tokio::task::spawn_blocking(move || assemble(&facts, &files, &versions, known)).await,
-        )
+        twigo_panic::blocking(move || assemble(&facts, &files, &versions, known)).await
     }
 
     /// The link of the new-issue form for the facts the person left ticked,
-    /// which stays under 6,000 characters, and what it left out to.
+    /// which is the bare template when the facts would take it past 6,000
+    /// characters.
     pub async fn report_issue(
         &self,
         facts: &Facts,
         files: &[PathBuf],
         request: OpenIssue,
-    ) -> (String, OpenedIssue) {
+    ) -> String {
         let (known, versions) = (self.known(), self.connections.versions());
         let (facts, files) = (facts.clone(), files.to_vec());
-        twigo_panic::joined(
-            tokio::task::spawn_blocking(move || {
-                let mut stated = stated(&facts, &files, &versions, &known.homes);
-                stated.retain(|fact| request.facts.contains(&fact.id));
-                issue::link(&stated)
-            })
-            .await,
-        )
+        twigo_panic::blocking(move || {
+            let mut stated = stated(&facts, &files, &versions, &known.homes);
+            stated.retain(|fact| request.facts.contains(&fact.id));
+            issue::link(&stated)
+        })
+        .await
     }
 
     fn known(&self) -> Known {

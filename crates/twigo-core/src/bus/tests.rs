@@ -1740,43 +1740,7 @@ async fn a_plan_whose_run_panics_ends_failed_with_its_line_and_is_not_kept() {
 }
 
 #[tokio::test]
-async fn a_failed_command_s_ended_line_holds_its_code_and_none_of_the_server_s_words() {
-    let dir = tempfile::tempdir().unwrap();
-    let core = running(dir.path()).await;
-    let runs = Runs::default();
-    let mut planned = planned(&core, Risk::Lasting, &runs);
-    planned.run = Run::Sends(Box::new(|_: Progress| {
-        Box::pin(async {
-            Err(IpcError::new(
-                ErrorCode::ServerInvalid,
-                r#"Invalid value: "hunter2": must be a number"#,
-            ))
-        })
-    }));
-    let ticket = core.bus.ticket("main");
-    let access = core.policy.access("kind-a");
-    let plan = core.bus.keep(ticket, planned, &access).unwrap();
-    let (_told, send) = events();
-    let request = Execute {
-        plan: plan.id,
-        typed: None,
-    };
-    core.command_execute("main", request, send).await.unwrap();
-    until("the run's end is logged", || {
-        dir.path().join("audit.jsonl").exists() && audit(dir.path()).len() == 2
-    })
-    .await;
-
-    let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
-    let lines = audit(dir.path());
-    assert_eq!(lines[1]["outcome"], "failed");
-    assert_eq!(lines[1]["codes"], json!(["server.invalid"]));
-    assert!(lines[1].get("message").is_none());
-    assert!(!text.contains("hunter2"), "{text}");
-}
-
-#[tokio::test]
-async fn a_plan_that_ends_in_error_leaves_one_event_with_its_code_and_command_and_none_of_the_server_s_words()
+async fn a_failed_command_leaves_its_code_and_none_of_the_server_s_words_in_the_audit_line_and_the_log()
  {
     let logged = twigo_log::capture();
     let dir = tempfile::tempdir().unwrap();
@@ -1817,6 +1781,13 @@ async fn a_plan_that_ends_in_error_leaves_one_event_with_its_code_and_command_an
     assert_eq!(event["fields"]["command"], "delete");
     assert_eq!(event["fields"]["outcome"], "failed");
     assert!(!event.to_string().contains("hunter2"), "{event}");
+
+    let text = std::fs::read_to_string(dir.path().join("audit.jsonl")).unwrap();
+    let lines = audit(dir.path());
+    assert_eq!(lines[1]["outcome"], "failed");
+    assert_eq!(lines[1]["codes"], json!(["server.invalid"]));
+    assert!(lines[1].get("message").is_none());
+    assert!(!text.contains("hunter2"), "{text}");
 }
 
 #[tokio::test]

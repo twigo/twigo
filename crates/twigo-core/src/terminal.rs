@@ -154,7 +154,7 @@ impl Terminals {
     /// Makes every offer anew, as the user's files have changed.
     pub(crate) async fn refresh_offers(&self) {
         let offers = Arc::clone(&self.offers);
-        twigo_panic::joined(tokio::task::spawn_blocking(move || offers.refresh()).await);
+        twigo_panic::blocking(move || offers.refresh()).await;
     }
 }
 
@@ -175,13 +175,6 @@ pub(crate) fn kind(policy: &Policy, context: &str) -> TerminalKind {
     } else {
         TerminalKind::Kubeconfig
     }
-}
-
-fn written(path: &Path, error: std::io::Error) -> IpcError {
-    IpcError::new(
-        ErrorCode::FileUnwritten,
-        format!("could not write {}: {error}", path.display()),
-    )
 }
 
 impl Core {
@@ -227,7 +220,8 @@ impl Core {
         });
         let made = self.terminals.made.fetch_add(1, Ordering::Relaxed);
         let root = &self.terminals.root;
-        let directory = Directory::create(root, made).map_err(|e| written(root, e))?;
+        let directory =
+            Directory::create(root, made).map_err(|e| crate::errors::unwritten(root, e))?;
         let (proxy, file, kubeconfig) = match kind {
             TerminalKind::Proxy { .. } => {
                 let process = self
@@ -239,7 +233,9 @@ impl Core {
             }
             TerminalKind::Kubeconfig => {
                 let entry = &found.entries.kubeconfig().contexts[0];
-                let file = directory.kubeconfig(entry).map_err(|e| written(root, e))?;
+                let file = directory
+                    .kubeconfig(entry)
+                    .map_err(|e| crate::errors::unwritten(root, e))?;
                 let kubeconfig = std::env::join_paths(
                     std::iter::once(file.as_path())
                         .chain(sources.files().iter().map(PathBuf::as_path)),
@@ -268,7 +264,7 @@ impl Core {
                     let path = directory.path();
                     directory
                         .write(name, contents)
-                        .map_err(|e| written(path, e))?;
+                        .map_err(|e| crate::errors::unwritten(path, e))?;
                 }
                 (startup.args, startup.env)
             }
@@ -403,9 +399,8 @@ impl Core {
             offers.withdraw(answering);
             return Ok(());
         }
-        let (moved, answering) = twigo_panic::joined(
-            tokio::task::spawn_blocking(move || (answering.move_entries(), answering)).await,
-        );
+        let (moved, answering) =
+            twigo_panic::blocking(move || (answering.move_entries(), answering)).await;
         offers.moved(answering, moved)
     }
 
