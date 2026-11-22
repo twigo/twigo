@@ -200,7 +200,10 @@ export function spacesProvider(workbench: Workbench): QuickAccessProvider {
         ...[open, ...files.values(), ...failed].flatMap((section) =>
           filtered(section, filter),
         ),
-        ...(skipped.length > 0 ? [skippedRow(skipped.length)] : []),
+        ...filtered(
+          skipped.length > 0 ? [skippedRow(skipped.length)] : [],
+          filter,
+        ),
       ];
     },
     async accept(item) {
@@ -260,6 +263,7 @@ function skippedRow(count: number): QuickPickItem {
         ? "1 kubeconfig file was skipped"
         : `${String(count)} kubeconfig files were skipped`,
     icon: TriangleAlert,
+    acceptLabel: "Show",
   };
 }
 

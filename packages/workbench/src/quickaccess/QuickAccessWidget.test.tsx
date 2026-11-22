@@ -291,6 +291,24 @@ test("a row that cannot be chosen is read and ignored: Enter and a click leave q
   expect(accept).toHaveBeenCalledTimes(1);
 });
 
+test("a row that says what Enter does says it in the footer in place of its provider's word", async () => {
+  const workbench = await testWorkbench();
+  const { registered } = provider(
+    "!",
+    [
+      { id: "a", label: "alpha" },
+      { id: "b", label: "beta", acceptLabel: "Show" },
+    ],
+    { acceptLabel: "Switch" },
+  );
+  workbench.quickAccess.register(registered);
+  await opened(workbench, "!");
+  expect(footer()).toContain("Switch");
+  press("ArrowDown");
+  expect(footer()).toContain("Show");
+  expect(footer()).not.toContain("Switch");
+});
+
 test("the row under the cursor scrolls into view as the cursor moves", async () => {
   const workbench = await testWorkbench();
   workbench.quickAccess.register(

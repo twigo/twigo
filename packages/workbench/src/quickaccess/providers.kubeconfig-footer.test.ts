@@ -42,6 +42,16 @@ test("kubeconfig:footer keeps the failed files out of the groups and ends the pi
   ]);
 });
 
+test("kubeconfig:footer: the line follows the filter, so a filter that matches no context leaves nothing, and it says what Enter does", async () => {
+  const { found, provider } = await picker("kubeconfigFailures");
+  const NOWHERE = { lookup: () => undefined };
+  expect(await provider.items("zzzz", NOWHERE)).toEqual([]);
+  expect(found[found.length - 1]?.acceptLabel).toBe("Show");
+  expect(
+    (await provider.items("skipped", NOWHERE)).map(({ id }) => id),
+  ).toEqual(["kubeconfig:skipped"]);
+});
+
 test("kubeconfig:footer: a catalog that lost no file has no such line", async () => {
   const { found } = await picker("live");
   expect(found.some(({ id }) => id === "kubeconfig:skipped")).toBe(false);
