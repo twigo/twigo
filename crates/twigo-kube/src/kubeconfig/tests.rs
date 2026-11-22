@@ -265,7 +265,12 @@ fn files_whose_changes_go_unseen_fail_by_a_code_of_their_own() {
     let list =
         std::env::join_paths([home.join(".kube/config"), PathBuf::from("/etc/kube")]).unwrap();
     let sources = Sources::kubectl(Some(&list), Some(home));
-    let catalog = Catalog::default().unwatched(&sources, &"too many open files");
+    let unseen: Vec<_> = sources
+        .files()
+        .iter()
+        .map(|file| (file.clone(), "too many open files".to_owned()))
+        .collect();
+    let catalog = Catalog::default().unwatched(&sources, &unseen);
     let failed: Vec<(&str, ErrorCode)> = catalog
         .failures
         .iter()

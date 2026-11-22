@@ -264,7 +264,14 @@ impl Catalog {
         };
         match Watch::start(sources.clone(), publish.clone(), wrote, on_panic) {
             Ok(watch) => *followed = Some(watch),
-            Err(error) => publish(sources.load().unwatched(&sources, &error)),
+            Err(error) => {
+                let unseen: Vec<_> = sources
+                    .files()
+                    .iter()
+                    .map(|file| (file.clone(), error.to_string()))
+                    .collect();
+                publish(sources.load().unwatched(&sources, &unseen));
+            }
         }
     }
 

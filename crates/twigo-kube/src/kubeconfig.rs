@@ -211,15 +211,15 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    /// The catalog with a failure for each of `sources`' files, which
-    /// `error` kept from being watched.
-    pub fn unwatched(mut self, sources: &Sources, error: &dyn std::fmt::Display) -> Self {
-        for file in sources.files() {
+    /// The catalog with a failure for each of `files`, whose changes go
+    /// unseen for the reason it names.
+    pub fn unwatched(mut self, sources: &Sources, files: &[(PathBuf, String)]) -> Self {
+        for (file, why) in files {
             self.failures.push(CatalogFailure {
                 source: sources.named(file),
                 error: IpcError::new(
                     ErrorCode::KubeconfigUnwatched,
-                    format!("Changes to the file go unseen: {error}"),
+                    format!("Changes to the file go unseen: {why}"),
                 ),
             });
         }
