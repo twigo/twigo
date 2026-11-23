@@ -481,13 +481,13 @@ fn rewritten(
             let theirs = versus.theirs.get(&name(secret, versus.namespace))?;
             Some((theirs, versus.side))
         });
-        let ours = holds(secret).keys;
+        let ours = theirs.map(|_| holds(secret).keys);
         mask_secret_with(
             secret,
             |entry| {
                 let (theirs, side) = theirs?;
                 let other = theirs.keys.get(entry.key)?;
-                (ours.get(entry.key) != Some(other)).then_some(side)
+                (ours.as_ref()?.get(entry.key) != Some(other)).then_some(side)
             },
             |field, value| {
                 let (theirs, side) = theirs?;
