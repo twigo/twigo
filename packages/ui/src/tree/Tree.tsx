@@ -32,12 +32,11 @@ const passive = (row: TreeRow | undefined): boolean =>
   row?.heading === true || row?.block === true;
 
 /**
- * A tree of 22 px rows, or 24 px where `tall`, for rows that hold a button
- * (ARCHITECTURE 4.9), as wide as the tree so a click
- * anywhere along one lands, with hover and selection drawn as plates inset
- * 6 px from its edges: a click on a folding row folds it, on a leaf opens
- * it, a double click keeps what it opened. The list commands move through it
- * while it has the focus.
+ * A tree of 22 px rows, or 24 px where `tall`, for rows that hold a button,
+ * each as wide as the tree so a click anywhere along it lands, with hover and
+ * selection drawn as plates inset 6 px from its edges (ARCHITECTURE 4.9): a
+ * click on a folding row folds it, on a leaf opens it, a double click keeps
+ * what it opened. The list commands move through it while it has the focus.
  */
 export function Tree({
   label,
