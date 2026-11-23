@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { CircleAlert } from "lucide-react";
 import {
   HELM_RELEASES,
+  REFUSED,
   type HelmPart,
   type ObjectRef,
   type Overview as Document,
@@ -43,8 +44,10 @@ import { Prose } from "../object/values";
 import { Vitals } from "../object/Vitals";
 import type { ListServices } from "../services";
 import type { ReleaseInput } from "../uri";
+import { ViewStatus } from "../ViewStatus";
 import { HistoryList } from "./HistoryList";
-import { HELM_REVISION, HELM_TAB } from "./keys";
+import { printsCommand } from "./commands";
+import { HELM_NO_COMMAND, HELM_REVISION, HELM_TAB } from "./keys";
 import {
   hiddenCount,
   manifestOf,
@@ -89,6 +92,34 @@ const OWN: Readonly<Record<string, ReleaseTab>> = {
   "helm.notes": "notes",
 };
 
+/** The core's Overview with Helm's description a field of the Diagnostics section, where the page's filter finds it and the section keeps the Reveal. */
+function withDescription(overview: Document, description: string): Document {
+  if (description === "") return overview;
+  return {
+    ...overview,
+    sections: overview.sections.map((section) =>
+      section.id === "helm.diagnostics"
+        ? {
+            ...section,
+            blocks: [
+              ...section.blocks,
+              {
+                type: "fields",
+                fields: [
+                  {
+                    label: "Description",
+                    value: { type: "text", text: description },
+                    default: false,
+                  },
+                ],
+              },
+            ],
+          }
+        : section,
+    ),
+  };
+}
+
 /** The core's Overview with Notes, which the page adds after the findings where the chart has any. */
 function withNotes(overview: Document, notes: string): Document {
   if (notes === "") return overview;
@@ -122,18 +153,31 @@ function withNotes(overview: Document, notes: string): Document {
   };
 }
 
-/** What the Overview shows: the split variant keeps the notes, the hooks and the objects in views of their own. */
-function overviewShown(
+/**
+ * What a view of the page draws of the Overview, which the page's filter
+ * reads: the split variant keeps the notes, the hooks and the objects in
+ * views of their own, each section of which is open there.
+ */
+function pageOverview(
   overview: Document,
+  view: ReleaseTab,
   split: boolean,
   notes: string,
+  description: string,
 ): Document {
+  const described = withDescription(overview, description);
   return split
     ? {
-        ...overview,
-        sections: overview.sections.filter(({ id }) => OWN[id] === undefined),
+        ...described,
+        sections: described.sections
+          .filter(({ id }) => (OWN[id] ?? "overview") === view)
+          .map((section) =>
+            view === "overview"
+              ? section
+              : { ...section, fold: "open" as const },
+          ),
       }
-    : withNotes(overview, notes);
+    : withNotes(described, notes);
 }
 
 function foundTone(overview: Document | undefined) {
@@ -143,7 +187,7 @@ function foundTone(overview: Document | undefined) {
   return tone ? TONE[tone] : undefined;
 }
 
-export interface ReleasePageProps {
+interface ReleasePageProps {
   /** What the page's state is kept by: the editor's URI, or the list's for its inspector. */
   readonly uri: string;
   readonly release: ReleaseInput;
@@ -152,6 +196,8 @@ export interface ReleasePageProps {
   readonly controls: (run: (command: string) => void) => ReactNode;
   /** Opens a revision in an editor of its own. */
   readonly onOpenRevision: (revision: number) => void;
+  /** Opens the release anew, where Twigo stopped it or could not open it. */
+  readonly onReopen: () => void;
 }
 
 /**
@@ -167,6 +213,7 @@ export function ReleasePage({
   services,
   controls,
   onOpenRevision,
+  onReopen,
 }: ReleasePageProps) {
   const workbench = useWorkbench();
   const { backend, keys, menus } = workbench;
@@ -177,7 +224,13 @@ export function ReleasePage({
   const { tabs: layout } = variants();
   const asked = layout === "page" ? "page" : states.tab(uri);
   const tab: ReleaseTab = asked === "page" ? "overview" : asked;
-  const wanted = (view: ReleaseTab) => layout === "page" || tab === view;
+  const view =
+    layout === "page"
+      ? "page"
+      : tab === "values" && states.plate(uri) === "defaults"
+        ? "defaults"
+        : tab;
+  const wanted = (shown: ReleaseTab) => layout === "page" || tab === shown;
   const { snapshot, id } = useRelease(
     backend,
     { space: release.space, namespace: release.namespace, name: release.name },
@@ -191,8 +244,14 @@ export function ReleasePage({
       },
     },
   );
-  const revision = snapshot.revision;
-  const shown = states.shown(uri, revision);
+  const { revision, epoch } = snapshot;
+  const shown = states.shown(uri, epoch);
+  useEffect(
+    () => () => {
+      states.leave(uri, epoch);
+    },
+    [states, uri, epoch],
+  );
   const request = useMemo(
     () =>
       id &&
@@ -219,11 +278,13 @@ export function ReleasePage({
   const show = (part: HelmPart) => {
     if (revision === undefined || reveal === undefined) return;
     void reveal({ at: revision, part }).then((answer) => {
-      if (answer) states.reveal(uri, revision, { part, ...answer });
+      if (answer && latest.current.epoch === epoch) {
+        states.reveal(uri, epoch, { part, ...answer });
+      }
     });
   };
   const hide = (parts: readonly HelmPart[]) => {
-    states.hide(uri, revision, parts.map(partKey));
+    states.hide(uri, epoch, parts.map(partKey));
   };
   const onGlyph = (glyph: Glyph) => {
     if (glyph.revealed) hide([glyph.part]);
@@ -238,16 +299,25 @@ export function ReleasePage({
   });
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [text, setText] = useState<TextState>();
-  const notesShown =
-    shown.get(partKey({ kind: "notes" }))?.value ?? snapshot.notes?.text ?? "";
-  // What the Overview shows, which the page's filter reads: the split variant keeps the notes, the hooks and the objects in views of their own.
+  const notes = shown.get(partKey({ kind: "notes" }));
+  const description = shown.get(partKey({ kind: "description" }));
+  const notesText = notes?.value ?? snapshot.notes?.text ?? "";
+  const descriptionText =
+    description?.value ?? snapshot.description?.text ?? "";
   const loaded = snapshot.overview;
   const shownOverview =
-    loaded && overviewShown(loaded, layout === "split", notesShown);
+    loaded &&
+    pageOverview(
+      loaded,
+      "overview",
+      layout === "split",
+      notesText,
+      descriptionText,
+    );
   const filterable = layout !== "page" && tab === "overview";
   const filtered = useFiltered(services.pages, uri) && filterable;
   const under = text?.glyphs.find((each) => each.line === text.line);
-  const latest = useRef({ text, under, show, hide });
+  const latest = useRef({ text, under, show, hide, epoch });
   const subject = JSON.stringify({
     space: release.space,
     gvr: HELM_RELEASES,
@@ -264,7 +334,8 @@ export function ReleasePage({
     scope.set("resource.group", HELM_RELEASES.group);
     scope.set("resource.kind", "HelmRelease");
     scope.set("resource.namespaced", true);
-    scope.set(HELM_TAB, layout === "page" ? "page" : tab);
+    scope.set(HELM_TAB, view);
+    scope.set(HELM_NO_COMMAND, !printsCommand(view));
     scope.set(HELM_REVISION, revision === undefined ? "" : String(revision));
     scope.set("helm.page", uri);
     scope.set("helm.canReveal", under !== undefined && !under.revealed);
@@ -284,8 +355,7 @@ export function ReleasePage({
     keys,
     element,
     subject,
-    layout,
-    tab,
+    view,
     revision,
     uri,
     under,
@@ -294,7 +364,7 @@ export function ReleasePage({
     filtered,
   ]);
   useEffect(() => {
-    latest.current = { text, under, show, hide };
+    latest.current = { text, under, show, hide, epoch };
   });
   useEffect(
     () =>
@@ -325,8 +395,6 @@ export function ReleasePage({
     if (next) workbench.editors.open(next);
   };
   const lookup = keys.lookup(element);
-  const notes = shown.get(partKey({ kind: "notes" }));
-  const description = shown.get(partKey({ kind: "description" }));
   const body = (view: ReleaseTab) => (
     <Body
       view={view}
@@ -334,9 +402,9 @@ export function ReleasePage({
       release={release}
       snapshot={snapshot}
       shown={shown}
-      notes={notes?.value ?? snapshot.notes?.text ?? ""}
+      notes={notesText}
       notesHidden={snapshot.notes?.hidden === true && !notes}
-      description={description?.value ?? snapshot.description?.text ?? ""}
+      description={descriptionText}
       descriptionHidden={snapshot.description?.hidden === true && !description}
       revealed={{
         notes: notes !== undefined,
@@ -449,7 +517,14 @@ export function ReleasePage({
           <Vitals cells={strip} verdict={verdict} />
         )}
         <div className="min-h-0 flex-1 overflow-auto [--label-column:112px]">
-          {!exists ? (
+          {REFUSED.has(snapshot.status.state) ? (
+            <ViewStatus
+              status={snapshot.status}
+              what="the release"
+              onRetry={onReopen}
+              releases={{ where: release.namespace }}
+            />
+          ) : !exists ? (
             <EmptyState icon={CircleAlert} title="This release is gone">
               Helm no longer keeps any revision of {release.name} in{" "}
               {release.namespace}.
@@ -608,6 +683,7 @@ function Body({
         <div className="h-full min-h-48">
           <HistoryList
             uri={uri}
+            epoch={snapshot.epoch}
             lines={snapshot.history}
             latest={snapshot.latest}
             states={states}
@@ -646,24 +722,13 @@ function Body({
       </div>
     );
   }
-  const document = split
-    ? {
-        ...overview,
-        sections: overview.sections
-          .filter(({ id }) => (OWN[id] === view) === (view !== "overview"))
-          .map((section) =>
-            view === "overview"
-              ? section
-              : { ...section, fold: "open" as const },
-          ),
-      }
-    : withNotes(overview, notes);
+  const document = pageOverview(overview, view, split, notes, description);
   const slots = {
     "helm.diagnostics": (
-      <DescriptionBody
-        text={description}
+      <RevealControl
         hidden={descriptionHidden}
         revealed={revealed.description}
+        what="what Helm wrote"
         onReveal={() => {
           onReveal({ kind: "description" });
         }}
@@ -783,17 +848,6 @@ function NotesBody(props: {
   return <Scrubbed {...props} what="the notes" />;
 }
 
-function DescriptionBody(props: {
-  text: string;
-  hidden: boolean;
-  revealed: boolean;
-  onReveal: () => void;
-  onHide: () => void;
-}) {
-  if (props.text === "") return null;
-  return <Scrubbed {...props} what="what Helm wrote" />;
-}
-
 /** A bar over a text: what is hidden in it, and the ways to show or hide it. */
 function Bar({ children }: { children: ReactNode }) {
   return (
@@ -846,7 +900,10 @@ function ValuesView({
     [text, defaults, own],
   );
   const hidden = hiddenCount(text);
-  const whole: HelmPart = { kind: "values", defaults, path: [] };
+  const whole = useMemo<HelmPart>(
+    () => ({ kind: "values", defaults, path: [] }),
+    [defaults],
+  );
   const [line, setLine] = useState(1);
   useEffect(() => {
     onText({
@@ -859,7 +916,7 @@ function ValuesView({
     return () => {
       onText(undefined);
     };
-  }, [onText, glyphs, line, hidden, own, defaults]);
+  }, [onText, glyphs, line, hidden, own, whole]);
   return (
     <div className="flex h-full min-h-48 flex-col">
       <TabBar

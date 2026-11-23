@@ -6,9 +6,11 @@ import { HELM_RELEASES } from "@twigo/protocol";
  * ([`common/status.go`](https://github.com/helm/helm/blob/v4.3.2/pkg/release/common/status.go#L25-L41)):
  * what a list and a history draw of each. `deployed` is the healthy word, which
  * recedes; `superseded` and `uninstalled` say a revision is not the one that
- * runs, in the quiet role; `failed` fails; the `pending-*` statuses and
- * `uninstalling` wait, with a pulsing dot; `unknown`, and a word Helm does not
- * know, is a warning.
+ * runs, in the quiet role; `failed` fails, and so does `unreadable`, which is
+ * not Helm's but the core's for a row whose latest revision it cannot read,
+ * so that the list counts, filters and groups it as failing; the `pending-*`
+ * statuses and `uninstalling` wait, with a pulsing dot; `unknown`, and a word
+ * Helm does not know, is a warning.
  */
 const WORDS: Readonly<
   Record<string, { tone?: "warn" | "error"; quiet?: true }>
@@ -17,6 +19,7 @@ const WORDS: Readonly<
   superseded: { quiet: true },
   uninstalled: { quiet: true },
   failed: { tone: "error" },
+  unreadable: { tone: "error" },
   unknown: { tone: "warn" },
   uninstalling: { tone: "warn" },
   "pending-install": { tone: "warn" },

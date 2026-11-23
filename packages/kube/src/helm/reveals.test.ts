@@ -111,6 +111,17 @@ describe("a manifest", () => {
     expect(hiddenCount(text)).toBe(1);
   });
 
+  test("a key that is not UTF-8 is written as its base64, with a comment that says so", () => {
+    const binary: Shown = {
+      part: { kind: "secret", document: 0, items: [], key: "token" },
+      value: "AAEC/w==",
+      binary: true,
+    };
+    const { text } = manifestOf(recorded, shown(binary));
+    expect(text).toContain('  token: "AAEC/w==" # base64');
+    expect(text).not.toContain("token: <");
+  });
+
   test("an unread document revealed takes its place, and the eyes below it move with it", () => {
     const manifest: ReleaseManifest = {
       text: [
@@ -144,6 +155,9 @@ describe("a manifest", () => {
     };
     const before = manifestOf(manifest, shown());
     expect(before.glyphs.map(({ line }) => line)).toEqual([2, 9]);
+    expect(before.glyphs[0]?.label).toBe(
+      "Reveal document 0 of the manifest (a/unread.yaml)",
+    );
     const after = manifestOf(manifest, shown(document));
     expect(after.text).toContain("kind: ConfigMap\ndata:\n  a: b");
     expect(after.text).not.toContain("could not read");
@@ -153,6 +167,9 @@ describe("a manifest", () => {
       [10, false],
     ]);
     expect(after.text.split("\n")[9]).toContain("token: <5 bytes>");
+    expect(after.glyphs[0]?.label).toBe(
+      "Hide document 0 of the manifest (a/unread.yaml)",
+    );
   });
 });
 

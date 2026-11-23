@@ -67,7 +67,13 @@ import {
   PINNED_ANSWERS,
   type EditScenario,
 } from "./edits";
-import { compare, HELM_KIND, listQueryOf, MockRelease } from "./helm";
+import {
+  compare,
+  HELM_KIND,
+  listQueryOf,
+  MockRelease,
+  type ReleaseBinding,
+} from "./helm";
 import { KINDS, wireRow, type MockKind, type MockRow } from "./kinds";
 import { CLUSTER_STREAMS } from "../logs";
 import { MockLogs } from "./logs";
@@ -82,7 +88,7 @@ import {
   type MetricsScenario,
 } from "./metrics";
 import { MockObject } from "./objects";
-import { MockParts, type PartsView } from "./parts";
+import { MockParts, pinOf, type PartsView } from "./parts";
 import { printedColumns } from "./printed";
 import {
   isShellScenario,
@@ -871,6 +877,31 @@ export function createMockBackend(
     }, RATE_TICK_MS);
   };
 
+  /**
+   * What the scenario does to an open release: its namespace's Secrets are in
+   * the state the list of releases reads them in, which a refused namespace
+   * of `rbacNamespaces` is, and `objectPanicked` ends the editor on an
+   * internal error after what it showed.
+   */
+  const releaseBinding = (namespace: string): ReleaseBinding => {
+    const refused: ViewState = {
+      state: "forbidden",
+      verb: "list",
+      resource: "secrets",
+    };
+    const status =
+      pinOf(scenario, "secrets")?.({ kind: "namespace", name: namespace }, 0, 1)
+        ?.state.state === "forbidden" || lists === "forbidden"
+        ? refused
+        : lists === "live"
+          ? undefined
+          : PINNED[lists];
+    return {
+      ...(status && { status }),
+      ...(scenario === "objectPanicked" && { ends: CAUSED.listPanicked }),
+    };
+  };
+
   /** A list of `kind`, whose refusals name `refused`: Secrets, which a release is read from. */
   const openList = (
     query: ListQuery,
@@ -979,7 +1010,12 @@ export function createMockBackend(
       }
       const id = nextId++;
       releases.set(id, {
-        release: new MockRelease(ref, { revision, parts }, onMessage),
+        release: new MockRelease(
+          ref,
+          { revision, parts },
+          onMessage,
+          releaseBinding(ref.namespace),
+        ),
         context,
       });
       return id;

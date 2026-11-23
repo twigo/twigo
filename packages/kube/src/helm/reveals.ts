@@ -207,8 +207,9 @@ function itemRange(
 /**
  * A manifest with what was revealed put in place, and the eyes of its lines.
  * A Secret's key is the line `key: <N bytes>` in the document the core gives
- * a line to; a document that could not be read is the lines from its own to
- * the next `---`, which a Reveal of it replaces by the document whole.
+ * a line to, which a value that is not UTF-8 replaces with its base64 and a
+ * comment saying so; a document that could not be read is the lines from its
+ * own to the next `---`, which a Reveal of it replaces by the document whole.
  */
 export function manifestOf(
   manifest: ReleaseManifest,
@@ -260,7 +261,7 @@ export function manifestOf(
       kind: "document",
       line,
       part: { kind: "document", document },
-      name: source ?? `document ${String(document + 1)}`,
+      name: `document ${String(document)} of the manifest${source ? ` (${source})` : ""}`,
     });
   }
   edits.sort((a, b) => b.line - a.line);
@@ -282,7 +283,10 @@ export function manifestOf(
     let delta = 0;
     if (edit.kind === "key") {
       const row = lines[at] ?? "";
-      lines[at] = row.replace(MASK, scalar(value.value));
+      lines[at] = row.replace(
+        MASK,
+        `${scalar(value.value)}${value.binary ? " # base64" : ""}`,
+      );
     } else {
       const replaced = end(at + 1) - at;
       const text = value.value.replace(/\n$/, "").split("\n");

@@ -16,7 +16,7 @@ import { OBJECT_SUBJECT } from "../object/pageStates";
 import { LIST_URI, objectOf } from "../selection";
 import type { ListServices } from "../services";
 import { diffUri, helmUri, listUri, parseListUri } from "../uri";
-import { HELM_REVISION, HELM_TAB } from "./keys";
+import { HELM_NO_COMMAND, HELM_REVISION, HELM_TAB } from "./keys";
 
 /** Where a command of a release applies, as a when-expression. */
 const HELM = "resource.group == helm.sh";
@@ -41,24 +41,38 @@ const PAIR = v.object({ ...RELEASE.entries, from: v.number(), to: v.number() });
 type Release = v.InferOutput<typeof RELEASE>;
 
 /**
- * What `helm` prints for the view a person is looking at, with the context and
- * namespace of the release (ARCHITECTURE 4.3): `helm status` for the overview
- * and what its sections list, `get values`, `get manifest`, `history`, and
- * `get all` for the page that holds them all.
+ * The verb of the command that prints each view of a release. The chart's
+ * defaults, the hooks' table and the objects' table have none: `get values`
+ * prints the person's values only, `get hooks` the hooks' manifests, and no
+ * command lists a manifest's objects.
+ */
+const VERBS: Readonly<Record<string, string>> = {
+  overview: "status",
+  values: "get values",
+  manifest: "get manifest",
+  notes: "get notes",
+  history: "history",
+  page: "get all",
+};
+
+export function printsCommand(view: string): boolean {
+  return view in VERBS;
+}
+
+/**
+ * The command that prints the view a person is looking at, with the context
+ * and namespace of the release (ARCHITECTURE 4.3): `helm status` for the
+ * overview, `get values`, `get manifest`, `get notes`, `history`, and `get
+ * all` for the page that holds them all; none for a view no command prints.
  */
 export function helmCommand(
   release: Release,
   context: string,
-  tab: string,
+  view: string,
   revision: number | undefined,
-): string {
-  const verbs: Readonly<Record<string, string>> = {
-    values: "get values",
-    manifest: "get manifest",
-    history: "history",
-    page: "get all",
-  };
-  const verb = verbs[tab] ?? "status";
+): string | undefined {
+  const verb = VERBS[view];
+  if (verb === undefined) return undefined;
   const at =
     revision !== undefined && verb !== "history"
       ? ` --revision ${String(revision)}`
@@ -184,17 +198,19 @@ export function registerHelm(
       const release = releaseOf(lookup, args);
       const context = release && contextOf(release.space);
       if (!release || context === undefined) return;
-      const tab = lookup(HELM_TAB);
-      await copy(
-        helmCommand(
-          release,
-          context,
-          typeof tab === "string" ? tab : "overview",
-          revisionOf(lookup),
-        ),
+      const view = lookup(HELM_TAB);
+      const command = helmCommand(
+        release,
+        context,
+        typeof view === "string" ? view : "overview",
+        revisionOf(lookup),
       );
+      if (command !== undefined) await copy(command);
     },
-    { when: HELM, enablement: `resource.selected && ${HELM}` },
+    {
+      when: HELM,
+      enablement: `resource.selected && ${HELM} && !${HELM_NO_COMMAND}`,
+    },
   );
   place(
     "helm.release.compareWithPrevious",

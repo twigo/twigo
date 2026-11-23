@@ -18,9 +18,12 @@ import type {
   RevisionLine,
   Scrubbed,
   SetReleaseView,
+  ViewState,
 } from "../generated";
 import { HELM_RELEASES } from "../helm";
+import { SHOWS_ROWS } from "../viewState";
 import type { Cluster } from "./cluster";
+import { ENDS_MS } from "./edits";
 import HELM from "./helm.json";
 import REVEALED from "./helm-revealed.json";
 import type { MockKind, MockRow } from "./kinds";
@@ -112,7 +115,7 @@ function rowOf(
   const cells: Cell[] = [
     name,
     latest.revision,
-    latest.status,
+    latest.problem === null ? latest.status : "unreadable",
     latest.chart,
     latest.appVersion,
     null,
@@ -219,21 +222,17 @@ function pathText(path: readonly (string | number)[]): string {
   );
 }
 
-/** Whether the masked values hold a string or a number at the path, which Helm's template reads as one leaf. */
-function isLeaf(masked: string, path: readonly (string | number)[]): boolean {
-  let at: unknown = JSON.parse(masked);
-  for (const step of path) {
-    if (typeof at !== "object" || at === null) return false;
-    at = (at as Record<string | number, unknown>)[step];
-  }
-  return typeof at === "string" && /^<\d+ bytes(, changed)?>$/.test(at);
+/** Whether Go's template prints a revealed leaf as Twigo shows it: a string or a boolean, since Helm reads a number as a float and prints null as `<no value>`. */
+function printsAsGoDoes(value: string): boolean {
+  return value.startsWith('"') || value === "true" || value === "false";
 }
 
 /**
- * What a Reveal's plan says, as `crates/twigo-core/src/actions` words it
- * (`Reveal auth.password of release db (revision 4) in payments from kind-a?`),
- * with a command line only where `helm` prints exactly that part: the person's
- * whole values, and one leaf of them.
+ * What a Reveal's plan says, as `crates/twigo-core/src/actions/reveal.rs`
+ * words it (`Reveal auth.password of release db (revision 4) in payments from
+ * kind-a?`), with a command line only where `helm` prints exactly that part:
+ * the person's whole values, and a string or a boolean leaf of them. `value`
+ * is what the Reveal will answer.
  */
 export function revealWords(
   context: string,
@@ -241,68 +240,62 @@ export function revealWords(
   revision: number,
   part: HelmPart,
   shown: Revision | undefined,
+  value: string,
 ): { question: string; doing: string; commandLine: string | null } {
-  const where = `release ${name} (revision ${String(revision)}) in ${namespace} from ${context}`;
-  const helm = `helm get all ${name} -n ${namespace} --kube-context ${context} --revision ${String(revision)}`;
-  switch (part.kind) {
-    case "values": {
-      const of = part.defaults ? "the chart's default values" : "the values";
-      const what =
-        part.path.length === 0
-          ? `all ${part.defaults ? "of the chart's default values" : "user-supplied values"}`
-          : pathText(part.path);
-      const user = part.defaults ? undefined : shown?.values?.user;
-      const commandLine =
-        user === undefined
-          ? null
-          : part.path.length === 0
-            ? `helm get values ${name} -n ${namespace} --kube-context ${context} --revision ${String(revision)} -o json`
-            : isLeaf(user, part.path)
-              ? `${helm} --template '{{index .Release.Config ${part.path
-                  .map((step) => JSON.stringify(step))
-                  .join(" ")}}}'`
-              : null;
-      return {
-        question: `Reveal ${what}${part.path.length === 0 ? "" : ` of ${of}`} of ${where}?`,
-        doing: `Revealing ${what}`,
-        commandLine,
-      };
+  const get = (verb: string, rest: string) =>
+    `helm get ${verb} ${name} -n ${namespace} --kube-context ${context} --revision ${String(revision)} ${rest}`;
+  const what = ((): string => {
+    switch (part.kind) {
+      case "values":
+        return part.path.length === 0
+          ? part.defaults
+            ? "the chart's defaults"
+            : "the values"
+          : part.defaults
+            ? `the default ${pathText(part.path)}`
+            : pathText(part.path);
+      case "secret": {
+        const secret = shown?.manifest?.secrets.find(
+          (each) =>
+            each.document === part.document &&
+            each.items.join(",") === part.items.join(","),
+        );
+        return `${part.key} of secret ${secret?.name ?? ""} in the manifest`;
+      }
+      case "document":
+        return `document ${String(part.document)} of the manifest`;
+      case "notes":
+        return "the notes";
+      case "description":
+        return "the description";
     }
-    case "secret": {
-      const secret = shown?.manifest?.secrets.find(
-        (each) =>
-          each.document === part.document &&
-          each.items.join(",") === part.items.join(","),
-      );
-      return {
-        question: `Reveal ${part.key} of Secret ${secret?.name ?? "of the manifest"} in the manifest of ${where}?`,
-        doing: `Revealing ${part.key}`,
-        commandLine: null,
-      };
-    }
-    case "document": {
-      const document = shown?.manifest?.unread.find(
-        (each) => each.document === part.document,
-      );
-      return {
-        question: `Reveal the document ${document?.source ?? String(part.document + 1)} of the manifest of ${where}?`,
-        doing: "Revealing a document",
-        commandLine: null,
-      };
-    }
-    case "notes":
-      return {
-        question: `Reveal the notes of ${where}?`,
-        doing: "Revealing the notes",
-        commandLine: null,
-      };
-    case "description":
-      return {
-        question: `Reveal the description of ${where}?`,
-        doing: "Revealing the description",
-        commandLine: null,
-      };
-  }
+  })();
+  const commandLine =
+    part.kind !== "values" || part.defaults
+      ? null
+      : part.path.length === 0
+        ? get("values", "-o json")
+        : printsAsGoDoes(value)
+          ? get(
+              "all",
+              `--template '{{index .Release.Config ${part.path
+                .map((step) => JSON.stringify(step))
+                .join(" ")}}}'`,
+            )
+          : null;
+  return {
+    question: `Reveal ${what} of release ${name} (revision ${String(revision)}) in ${namespace} from ${context}?`,
+    doing: `Revealing ${what}`,
+    commandLine,
+  };
+}
+
+/** What a scenario does to an open release, whatever the cluster says. */
+export interface ReleaseBinding {
+  /** The state its namespace's Secrets are in: a refusal or a wait sends no part, as the core's first batch does. */
+  readonly status?: ViewState;
+  /** How the editor ends after `ENDS_MS`: the status says why, and what it showed stays. */
+  readonly ends?: ViewState;
 }
 
 /**
@@ -313,23 +306,34 @@ export function revealWords(
 export class MockRelease {
   readonly #release: Recorded | undefined;
   readonly #onMessage: (batch: ReleaseBatch) => void;
+  readonly #status: ViewState;
   #asked: number | null;
   #parts: ReleaseParts;
   #seq = 0;
   #closed = false;
+  #ended = false;
+  #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     readonly ref: ReleaseRef,
     { revision, parts }: Pick<OpenRelease, "revision" | "parts">,
     onMessage: (batch: ReleaseBatch) => void,
+    binding: ReleaseBinding = {},
   ) {
     this.#release = recordedRelease(ref);
     this.#asked = revision;
     this.#parts = parts;
     this.#onMessage = onMessage;
+    this.#status = binding.status ?? { state: "ready" };
     setTimeout(() => {
       this.#send(parts);
     }, 0);
+    const { ends } = binding;
+    if (ends) {
+      this.#timer = setTimeout(() => {
+        this.#end(ends);
+      }, ENDS_MS);
+    }
   }
 
   /** The revision the parts are of: the one asked for, else the latest. */
@@ -384,11 +388,49 @@ export class MockRelease {
 
   close(): void {
     this.#closed = true;
+    clearTimeout(this.#timer);
+  }
+
+  /** Ends the editor as the core's last batch does: it changes nothing but the state, and no part comes again. */
+  #end(ends: ViewState): void {
+    if (this.#closed) return;
+    this.#ended = true;
+    this.#onMessage({
+      seq: ++this.#seq,
+      status: ends,
+      exists: this.#release !== undefined,
+      revision: this.shown,
+      latest: this.#release?.latest.revision ?? null,
+      problem: null,
+      overview: null,
+      notes: null,
+      description: null,
+      values: null,
+      manifest: null,
+      history: null,
+    });
   }
 
   #send(changed: ReleaseParts): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#ended) return;
     const release = this.#release;
+    if (!SHOWS_ROWS.has(this.#status.state)) {
+      this.#onMessage({
+        seq: ++this.#seq,
+        status: this.#status,
+        exists: false,
+        revision: null,
+        latest: null,
+        problem: null,
+        overview: null,
+        notes: null,
+        description: null,
+        values: null,
+        manifest: null,
+        history: null,
+      });
+      return;
+    }
     const shown = this.shown;
     const revision = this.revision(shown);
     const problem =
@@ -398,7 +440,7 @@ export class MockRelease {
     const readable = revision?.problem === null ? revision : undefined;
     this.#onMessage({
       seq: ++this.#seq,
-      status: { state: "ready" },
+      status: this.#status,
       exists: release !== undefined,
       revision: shown,
       latest: release?.latest.revision ?? null,
