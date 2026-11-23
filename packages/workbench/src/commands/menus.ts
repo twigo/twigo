@@ -14,7 +14,6 @@ export type MenuId =
   | "resource/details"
   | "resource/marked"
   | "helm/marked"
-  | "helm/release"
   | "helm/revision"
   | "helm/revisions"
   | "helm/text"

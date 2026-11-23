@@ -11,7 +11,6 @@ import {
   useChanges,
   useListRegistration,
   useWorkbench,
-  variants,
 } from "@twigo/workbench";
 import { byHealth, statusColumn, worstHealth } from "../columns";
 import { useResources } from "../discovery";
@@ -136,37 +135,34 @@ function ResourceTree({
     }),
   ];
 
-  // @todo: drop this read once the owner has chosen where Helm goes (helm:explorer, helm:sidebar, helm:view), keeping the choice's branch
-  if (variants().helm === "explorer") {
-    const releases = listUri({ space, gvr: HELM_RELEASES });
-    const opened = open.includes(HELM_SECTION);
-    rows.push(
-      {
-        id: HELM_SECTION,
-        depth: 0,
-        label: "Helm",
-        icon: ShipWheel,
-        open: opened,
-      },
-      ...(opened
-        ? [
-            {
-              id: releases,
-              parent: HELM_SECTION,
-              depth: 1,
-              label: "Releases",
-              trailing: (
-                <Total
-                  status={statuses.get(releases)}
-                  gvr={HELM_RELEASES}
-                  whole
-                />
-              ),
-            },
-          ]
-        : []),
-    );
-  }
+  const releases = listUri({ space, gvr: HELM_RELEASES });
+  const opened = open.includes(HELM_SECTION);
+  rows.push(
+    {
+      id: HELM_SECTION,
+      depth: 0,
+      label: "Helm",
+      icon: ShipWheel,
+      open: opened,
+    },
+    ...(opened
+      ? [
+          {
+            id: releases,
+            parent: HELM_SECTION,
+            depth: 1,
+            label: "Releases",
+            trailing: (
+              <Total
+                status={statuses.get(releases)}
+                gvr={HELM_RELEASES}
+                whole
+              />
+            ),
+          },
+        ]
+      : []),
+  );
 
   return (
     <Tree

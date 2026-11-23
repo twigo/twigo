@@ -252,14 +252,6 @@ export function registerHelm(
     },
   );
 
-  menus.append("helm/release", {
-    command: "helm.release.open",
-    group: "navigation",
-  });
-  for (const command of ["k8s.resource.copyName", "helm.release.copyCommand"]) {
-    menus.append("helm/release", { command, group: "2_copy" });
-  }
-
   /** Reveal and Hide on the page a person is looking at, the eye's verbs: in the palette, and where they apply to the whole text, in the More menu and the bar over the text. */
   const eye = (
     id: string,
