@@ -71,7 +71,6 @@ test("the list draws each release as a row of Helm's columns, and says why one c
   expect(document.body.textContent).not.toContain("helm.truncated");
 });
 
-/** The core's list while a request for these releases' newest Secret fails: Status the label's, Problem the request's code. */
 function failingRequests(...names: readonly string[]): Backend {
   const mock = createMockBackend("ready");
   let columns: readonly Column[] = [];
