@@ -6,6 +6,7 @@ import {
   REFUSED,
   type HelmPart,
   type ObjectRef,
+  type PlanRequest,
   type Overview as Document,
   type ReleaseSnapshot,
   type Section,
@@ -228,12 +229,7 @@ export function ReleasePage({
       }: {
         at: number;
         part: HelmPart;
-      }): Promise<{
-        action: "revealHelm";
-        release: number;
-        revision: number;
-        part: HelmPart;
-      }> => ({
+      }): Promise<PlanRequest> => ({
         action: "revealHelm",
         release: await id(),
         revision: at,
