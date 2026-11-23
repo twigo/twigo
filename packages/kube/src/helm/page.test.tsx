@@ -93,7 +93,6 @@ test("a value revealed in the inspector is of the release it showed: another rel
   expect(aside().textContent).not.toContain("epsilon-password-r2");
 });
 
-/** The mock, but an open release answers as the core does for the batches `send` is given. */
 function core(): {
   backend: Backend;
   send: (batch: Partial<ReleaseBatch>) => void;

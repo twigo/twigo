@@ -46,7 +46,6 @@ export function HistoryList({
   onOpen,
 }: {
   uri: string;
-  /** What the marks belong to (`ReleaseSnapshot.epoch`). */
   epoch: number;
   lines: readonly RevisionLine[];
   latest: number | undefined;

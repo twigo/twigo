@@ -55,7 +55,6 @@ const VERBS: Readonly<Record<string, string>> = {
   page: "get all",
 };
 
-/** Whether a command prints what `view` shows. */
 export function printsCommand(view: string): boolean {
   return view in VERBS;
 }
