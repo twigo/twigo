@@ -2218,6 +2218,76 @@ mod tests {
     }
 
     #[test]
+    fn both_sides_hide_a_helm_release_where_the_opened_live_edited_or_answered_object_holds_one() {
+        const RELEASE: &str = "H4sIAAAAAAAC/release+of+app";
+        let config_map = |owner: Option<&str>, release: bool| {
+            let mut object = json!({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": "sh.helm.release.v1.app.v1",
+                    "labels": { "name": "app" },
+                    "annotations": {
+                        "kubectl.kubernetes.io/last-applied-configuration":
+                            format!(r#"{{"data":{{"release":"{RELEASE}"}}}}"#),
+                    },
+                },
+                "data": { "note": "kept" },
+            });
+            if let Some(owner) = owner {
+                object["metadata"]["labels"]["owner"] = json!(owner);
+            }
+            if release {
+                object["data"]["release"] = json!(RELEASE);
+            }
+            object
+        };
+        for (case, live, result, opened_or_edited, hidden) in [
+            (
+                "an edit that drops owner: helm and the release",
+                config_map(Some("helm"), true),
+                config_map(None, false),
+                false,
+                true,
+            ),
+            (
+                "an edit that gives the object owner: helm",
+                config_map(Some("someone"), true),
+                config_map(Some("helm"), true),
+                false,
+                true,
+            ),
+            (
+                "an object opened or edited as a release",
+                config_map(None, true),
+                config_map(None, true),
+                true,
+                true,
+            ),
+            (
+                "an object that holds no release",
+                config_map(None, true),
+                config_map(None, true),
+                false,
+                false,
+            ),
+        ] {
+            let (live, result) = sides(live, result, opened_or_edited);
+            for side in [&live, &result] {
+                assert_eq!(side.to_string().contains(RELEASE), !hidden, "{case}");
+                assert_eq!(side["data"]["note"], "kept", "{case}");
+            }
+            if hidden {
+                assert_eq!(
+                    live["data"]["release"],
+                    format!("<{} bytes>", RELEASE.len()),
+                    "{case}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn the_mask_of_a_helm_release_is_refused_where_it_would_be_written_and_no_other_value_is() {
         let config_map = |labels: Value, data: Value| {
             json!({
