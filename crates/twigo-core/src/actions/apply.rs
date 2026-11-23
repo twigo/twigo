@@ -7,9 +7,10 @@
 //! it applied before, so nothing built from it leaves Rust unmasked: both
 //! sides of the diff go through [`for_view`], warnings and error text are
 //! scrubbed of every value it knows, what the dry-run's answer adds
-//! included, whole tokens only, a plan names no value, and a Secret's
-//! `kubectl` line carries no body, so it stops being runnable at `-f -`,
-//! where the configuration would go on stdin.
+//! included, whole tokens only, a plan names no value, and the `kubectl`
+//! line of a Secret, or of a ConfigMap that holds a Helm release, carries
+//! no body, so it stops being runnable at `-f -`, where the configuration
+//! would go on stdin.
 //!
 //! A merge patch cannot address a list element, so a removal inside a list
 //! sends the outermost list on its path whole, as it stands after the
@@ -59,7 +60,9 @@ use twigo_kube::discovery::Discovery;
 use twigo_kube::errors;
 use twigo_kube::openapi::Document;
 use twigo_policy::friction::Risk;
-use twigo_policy::redact::{entries, for_view, is_mask, scrub, scrubbed, secret_values};
+use twigo_policy::redact::{
+    entries, for_view, holds_helm_release, is_mask, scrub, scrubbed, secret_values,
+};
 use twigo_policy::{Actor, Attributes};
 
 use super::dependents::{Deleted, dependents};
@@ -724,7 +727,9 @@ pub(crate) async fn preview(
                 edited: &edited,
                 live: live.as_ref(),
                 ignored,
-                secret,
+                bodiless: secret
+                    || holds_helm_release(&edited)
+                    || live.as_ref().is_some_and(holds_helm_release),
                 comparable_to: live
                     .as_ref()
                     .filter(|_| status_subresource)
@@ -821,7 +826,9 @@ struct Try<'a> {
     edited: &'a Value,
     live: Option<&'a Value>,
     ignored: Vec<String>,
-    secret: bool,
+    /// What it sends holds a Secret's values or a Helm release, which its
+    /// kubectl line leaves out.
+    bodiless: bool,
     comparable_to: Option<Value>,
     lock: Option<String>,
     keep: Keep<'a>,
@@ -842,7 +849,7 @@ async fn dry_run(
         target,
         edited,
         live,
-        secret,
+        bodiless,
         lock,
         ..
     } = attempt;
@@ -920,7 +927,7 @@ async fn dry_run(
         force,
         patch_for_line.as_ref(),
         &kind_name,
-        *secret,
+        *bodiless,
     )?;
     let mut writes = Vec::new();
     if config.is_some() {
@@ -1135,15 +1142,15 @@ fn recreation(
     })
 }
 
-/// The kubectl line of an apply and its merge patch; a Secret's stops at
-/// `-f -`, where its body would go on stdin.
+/// The kubectl line of an apply and its merge patch; a bodiless one stops
+/// at `-f -`, where its body would go on stdin.
 fn apply_line(
     target: &Target,
     config: Option<&Value>,
     force: bool,
     patch: Option<&Value>,
     kind_name: &str,
-    secret: bool,
+    bodiless: bool,
 ) -> Result<String, IpcError> {
     let mut lines = Vec::new();
     if let Some(config) = config {
@@ -1154,7 +1161,7 @@ fn apply_line(
         }
         words.extend(["-f", "-"]);
         let line = target.kubectl(&words)?;
-        lines.push(if secret {
+        lines.push(if bodiless {
             line
         } else {
             format!(
@@ -1164,24 +1171,30 @@ fn apply_line(
         });
     }
     if let Some(patch) = patch {
-        lines.push(patch_line(target, patch, kind_name, FIELD_MANAGER, secret)?);
+        lines.push(patch_line(
+            target,
+            patch,
+            kind_name,
+            FIELD_MANAGER,
+            bodiless,
+        )?);
     }
     Ok(lines.join(" && "))
 }
 
-/// The `kubectl patch` line of a merge patch, as it is sent; a Secret's
-/// names no body, where a value would be.
+/// The `kubectl patch` line of a merge patch, as it is sent; a bodiless
+/// one names no body, where a value would be.
 fn patch_line(
     target: &Target,
     patch: &Value,
     kind_name: &str,
     manager: &str,
-    secret: bool,
+    bodiless: bool,
 ) -> Result<String, IpcError> {
     let manager = format!("--field-manager={manager}");
     let body = patch.to_string();
     let mut words = vec!["patch", kind_name, &target.name, "--type=merge", &manager];
-    if !secret {
+    if !bodiless {
         words.extend(["-p", &body]);
     }
     target.kubectl(&words)
@@ -1213,7 +1226,7 @@ fn answer_patch(
         target,
         edited,
         live,
-        secret,
+        bodiless,
         lock,
         ..
     } = attempt;
@@ -1229,7 +1242,7 @@ fn answer_patch(
         &locked(&patch, lock.as_deref()),
         &target.resource.name(),
         EDIT_FIELD_MANAGER,
-        *secret,
+        *bodiless,
     )?;
     let warnings: Vec<String> = told.iter().map(|text| scrub(text, &secrets)).collect();
     let live_view = side(live.cloned().unwrap_or(Value::Null));
@@ -2335,7 +2348,7 @@ mod tests {
             edited: &edited,
             live: None,
             ignored: Vec::new(),
-            secret: false,
+            bodiless: false,
             comparable_to: None,
             lock: Some("1".to_owned()),
             keep: &keep,
